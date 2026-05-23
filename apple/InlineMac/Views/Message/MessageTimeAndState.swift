@@ -5,18 +5,39 @@ import Logger
 import SwiftUI
 
 class MessageTimeAndState: NSView {
+  enum ContentAlignment: Equatable {
+    case left
+    case center
+    case right
+
+    var layerAlignment: CATextLayerAlignmentMode {
+      switch self {
+      case .left:
+        return .left
+      case .center:
+        return .center
+      case .right:
+        return .right
+      }
+    }
+  }
+
   private var fullMessage: FullMessage
   private var currentState: MessageSendingStatus = .sent
   private var tooltipText: String = ""
   private var trackingArea: NSTrackingArea?
 
   private var isOverlay: Bool
+  private var usesOutgoingBubbleStyle: Bool
+  private var contentAlignment: ContentAlignment
 
   private var textColor: NSColor {
     if isOverlay {
       .white.withAlphaComponent(0.8)
+    } else if usesOutgoingBubbleStyle {
+      .white.withAlphaComponent(0.7)
     } else {
-      fullMessage.message.out == true ? .white.withAlphaComponent(0.7) : .tertiaryLabelColor
+      .tertiaryLabelColor
     }
   }
 
@@ -40,6 +61,7 @@ class MessageTimeAndState: NSView {
     let scaleFactor: CGFloat
     let isOutgoing: Bool
     let isOverlay: Bool
+    let usesOutgoingBubbleStyle: Bool
     let isDarkMode: Bool
   }
 
@@ -54,7 +76,7 @@ class MessageTimeAndState: NSView {
     layer.contentsScale = effectiveScaleFactor
     layer.font = Self.font
     layer.fontSize = 10
-    layer.alignmentMode = .right
+    layer.alignmentMode = contentAlignment.layerAlignment
     layer.truncationMode = .none
     layer.isWrapped = false
     return layer
@@ -100,6 +122,7 @@ class MessageTimeAndState: NSView {
       scaleFactor: scale,
       isOutgoing: fullMessage.message.out ?? false,
       isOverlay: isOverlay,
+      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle,
       isDarkMode: NSApp.effectiveAppearance.isDarkMode
     )
 
@@ -173,9 +196,16 @@ class MessageTimeAndState: NSView {
 
   // MARK: - Initialization
 
-  init(fullMessage: FullMessage, overlay: Bool) {
+  init(
+    fullMessage: FullMessage,
+    overlay: Bool,
+    usesOutgoingBubbleStyle: Bool = false,
+    contentAlignment: ContentAlignment = .center
+  ) {
     self.fullMessage = fullMessage
     isOverlay = overlay
+    self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
+    self.contentAlignment = contentAlignment
     super.init(frame: .zero)
     configureLayerSetup()
     updateContent()
@@ -249,7 +279,14 @@ class MessageTimeAndState: NSView {
     let maxTimeWidth = Self.timeWidth
     let symbolWidth = Self.symbolWidth
     let totalWidth = maxTimeWidth + (hasSymbol ? symbolWidth : 0.0)
-    let padding = (maxTimeWidth - timeWidth) / 2
+    let timeX: CGFloat = switch contentAlignment {
+    case .left:
+      0
+    case .center:
+      (maxTimeWidth - timeWidth) / 2
+    case .right:
+      maxTimeWidth - timeWidth
+    }
     let paddingV = 2.0
 
     if isOverlay {
@@ -264,7 +301,7 @@ class MessageTimeAndState: NSView {
     }
 
     timeLayer.frame = CGRect(
-      x: padding,
+      x: max(0, timeX),
       y: (bounds.height - Self.timeHeight) / 2 - paddingV,
       width: timeWidth,
       height: Self.timeHeight
@@ -272,7 +309,7 @@ class MessageTimeAndState: NSView {
 
     if hasSymbol {
       statusLayer.frame = CGRect(
-        x: padding + timeWidth + 2,
+        x: max(0, timeX) + timeWidth + 2,
         y: (bounds.height - symbolWidth + 2 + 1) / 2,
         width: symbolWidth - 2,
         height: symbolWidth - 2
@@ -285,14 +322,25 @@ class MessageTimeAndState: NSView {
 
   // MARK: - Content Updates
 
-  public func updateMessage(_ fullMessage: FullMessage, overlay: Bool) {
+  func updateMessage(
+    _ fullMessage: FullMessage,
+    overlay: Bool,
+    usesOutgoingBubbleStyle: Bool = false,
+    contentAlignment: ContentAlignment? = nil
+  ) {
     let oldStatus = self.fullMessage.message.status
     let oldDate = self.fullMessage.message.date
     let oldOut = self.fullMessage.message.out
     let oldIsOverlay = isOverlay
+    let oldUsesOutgoingBubbleStyle = self.usesOutgoingBubbleStyle
+    let oldContentAlignment = self.contentAlignment
 
     self.fullMessage = fullMessage
     isOverlay = overlay
+    self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
+    if let contentAlignment {
+      self.contentAlignment = contentAlignment
+    }
 
     if fullMessage.message.date != oldDate || fullMessage.message.out != oldOut {
       updateTimeContent()
@@ -307,9 +355,20 @@ class MessageTimeAndState: NSView {
       updateColorStyles()
     }
 
+    if oldUsesOutgoingBubbleStyle != usesOutgoingBubbleStyle {
+      updateTimeContent()
+      updateColorStyles()
+    }
+
     if oldIsOverlay != isOverlay {
+      updateTimeContent()
+      updateColorStyles()
       CATransaction.setDisableActions(true)
       backgroundLayer.isHidden = !isOverlay
+    }
+
+    if oldContentAlignment != self.contentAlignment {
+      timeLayer.alignmentMode = self.contentAlignment.layerAlignment
     }
 
     needsLayout = true

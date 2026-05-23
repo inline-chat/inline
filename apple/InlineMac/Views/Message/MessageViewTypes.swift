@@ -21,6 +21,7 @@ enum MessageInteractionMode: String, Codable, Hashable {
 
 struct MessageViewInputProps: Equatable, Codable, Hashable {
   var firstInGroup: Bool
+  var startsAfterDaySeparator: Bool = false
   var isLastMessage: Bool
   var isFirstMessage: Bool
   var isDM: Bool
@@ -31,12 +32,13 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
 
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")\(interactionMode == .threadAnchor ? "TA" : "NM")"
+    "\(firstInGroup ? "FG" : "")\(renderStyle == .minimal && startsAfterDaySeparator ? "DS" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")\(interactionMode == .threadAnchor ? "TA" : "NM")"
   }
 }
 
 struct MessageViewProps: Equatable, Codable, Hashable {
   var firstInGroup: Bool
+  var startsAfterDaySeparator: Bool = false
   var isLastMessage: Bool
   var isFirstMessage: Bool
   var isRtl: Bool
@@ -49,6 +51,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
 
   func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
     firstInGroup == rhs.firstInGroup &&
+      (renderStyle == .bubble || startsAfterDaySeparator == rhs.startsAfterDaySeparator) &&
       isLastMessage == rhs.isLastMessage &&
       isFirstMessage == rhs.isFirstMessage &&
       isRtl == rhs.isRtl &&

@@ -6,6 +6,7 @@ import Logger
 class ExternalTaskAttachmentView: NSView, AttachmentView {
   let fullAttachment: FullAttachment
   let message: Message
+  private let usesOutgoingBubbleStyle: Bool
 
   // Required by AttachmentView protocol
   var attachment: Attachment {
@@ -61,7 +62,7 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
   private var userAvatarView: UserAvatarView?
 
   private lazy var taskSquareView = {
-    let view = TaskSquareView(isOutgoing: message.outgoing)
+    let view = TaskSquareView(isOutgoing: usesOutgoingBubbleStyle)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -80,9 +81,10 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
 
   // MARK: - Initialization
 
-  init(fullAttachment: FullAttachment, message: Message) {
+  init(fullAttachment: FullAttachment, message: Message, usesOutgoingBubbleStyle: Bool) {
     self.fullAttachment = fullAttachment
     self.message = message
+    self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
 
     super.init(frame: .zero)
 
@@ -150,7 +152,7 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
       return
     }
 
-    taskSquareView.configure(isOutgoing: message.outgoing)
+    taskSquareView.configure(isOutgoing: usesOutgoingBubbleStyle)
 
     // Configure User Avatar and insert if we have a task creator
     if let taskCreator = fullAttachment.userInfo {
@@ -181,15 +183,15 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
   // MARK: - Computed Properties
 
   private var backgroundColor: NSColor {
-    message.outgoing ? .white.withAlphaComponent(0.1) : .labelColor.withAlphaComponent(0.09)
+    usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.1) : .labelColor.withAlphaComponent(0.09)
   }
 
   private var textColor: NSColor {
-    message.outgoing ? .white : .labelColor
+    usesOutgoingBubbleStyle ? .white : .labelColor
   }
 
   private var secondaryTextColor: NSColor {
-    message.outgoing ? .white.withAlphaComponent(0.8) : .secondaryLabelColor
+    usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.8) : .secondaryLabelColor
   }
 
   private var task: ExternalTask? {
