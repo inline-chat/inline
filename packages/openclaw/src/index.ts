@@ -1,64 +1,37 @@
-import type { AnyAgentTool, OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import { inlineChannelPlugin } from "./inline/channel.js"
-import { createInlineMessageTools } from "./inline/message-tools.js"
-import { createInlineMembersTool } from "./inline/members-tool.js"
-import { sanitizeInlineOutgoingText } from "./inline/message-formatting.js"
-import { sanitizeInlineVisibleText } from "./inline/outbound-sanitize.js"
-import { createInlineProfileTool } from "./inline/profile-tool.js"
-import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
-import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
-import { emptyPluginConfigSchema } from "./openclaw-compat.js"
-import { setInlineRuntime } from "./runtime.js"
+import {
+  defineBundledChannelEntry,
+  loadBundledEntryExportSync,
+  type OpenClawPluginApi,
+} from "openclaw/plugin-sdk/channel-entry-contract"
 
-const plugin: {
-  id: string
-  name: string
-  description: string
-  // Keep this intentionally loose to avoid leaking OpenClaw internal type paths
-  // into our emitted .d.ts (TS2742).
-  configSchema: unknown
-  register: (api: OpenClawPluginApi) => void
-} = {
-  id: "inline",
-  name: "Inline",
-  description: "Inline Chat channel plugin (realtime RPC)",
-  configSchema: emptyPluginConfigSchema(),
-  register(api: OpenClawPluginApi) {
-    setInlineRuntime(api.runtime)
-    api.registerChannel({ plugin: inlineChannelPlugin })
-    api.registerTool((ctx) => createInlineMembersTool(ctx) as AnyAgentTool, {
-      names: ["inline_members"],
-    })
-    api.registerTool((ctx) => createInlineProfileTool(ctx) as AnyAgentTool, {
-      names: ["inline_update_profile"],
-    })
-    api.registerTool((ctx) => createInlineBotCommandsTool(ctx) as AnyAgentTool, {
-      names: ["inline_bot_commands"],
-    })
-    api.registerTool((ctx) => createInlineMessageTools(ctx) as AnyAgentTool[], {
-      names: ["inline_nudge", "inline_forward"],
-    })
-    api.on("message_sending", (event, ctx) => {
-      if (ctx.channelId !== "inline") return
-      const visible = sanitizeInlineVisibleText(event.content)
-      if (visible.shouldSkip) {
-        return {
-          content: "",
-          cancel: true,
-          cancelReason: "suppressed_internal_context",
-        }
-      }
-      const content = sanitizeInlineOutgoingText(visible.text)
-      if (content === event.content) return
-      return { content }
-    })
-    api.on("gateway_start", async () => {
-      await syncInlineNativeCommands({
-        cfg: api.config,
-        logger: api.logger,
-      })
-    })
-  },
+function registerInlinePluginFull(api: OpenClawPluginApi): void {
+  const register = loadBundledEntryExportSync<(api: OpenClawPluginApi) => void>(import.meta.url, {
+    specifier: "./runtime-register-api.js",
+    exportName: "registerInlinePluginFull",
+  })
+  register(api)
 }
 
-export default plugin
+export default defineBundledChannelEntry({
+  id: "inline",
+  name: "Inline",
+  description: "Inline channel plugin for OpenClaw bots.",
+  importMetaUrl: import.meta.url,
+  plugin: {
+    specifier: "./channel-plugin-api.js",
+    exportName: "inlineChannelPlugin",
+  },
+  secrets: {
+    specifier: "./secret-contract-api.js",
+    exportName: "channelSecrets",
+  },
+  runtime: {
+    specifier: "./runtime-setter-api.js",
+    exportName: "setInlineRuntime",
+  },
+  accountInspect: {
+    specifier: "./account-inspect-api.js",
+    exportName: "inspectInlineReadOnlyAccount",
+  },
+  registerFull: registerInlinePluginFull,
+})

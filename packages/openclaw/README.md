@@ -12,12 +12,12 @@ Supports:
 - Inline DMs (`ChatType=direct`)
 - Inline chats as conversations (`ChatType=group`)
 - Message replies: OpenClaw `replyToId` is mapped to Inline `replyToMsgId` (message id).
-- Optional native reply threads: enable `channels.inline.capabilities.replyThreads: true` to expose Inline reply-thread chats as OpenClaw threads.
-- Native media upload/send for images, videos, and documents from `mediaUrl` payloads.
+- Optional Inline reply threads: enable `channels.inline.capabilities.replyThreads: true` to expose Inline reply-thread chats as OpenClaw threads.
+- Inline media upload/send for images, videos, and documents from `mediaUrl` payloads.
 - Emoji reactions via message tool actions (`react`, `reactions`).
 - Reaction events on bot-authored messages are surfaced back to the agent as inbound context.
 
-By default, native reply threads stay off to preserve the old compatibility behavior. When disabled:
+By default, Inline reply threads stay off to preserve the old compatibility behavior. When disabled:
 
 - `replyToId` remains an Inline message reply only.
 - `thread-reply` keeps the legacy compatibility path.
@@ -31,7 +31,7 @@ When enabled:
 
 ## Install
 
-Requires OpenClaw `2026.4.26` or newer.
+Requires OpenClaw `2026.5.18` or newer.
 
 From npm (once published):
 
@@ -44,14 +44,21 @@ If the plugin is already installed, update in place:
 ```sh
 openclaw config set plugins.installs.inline.spec '"@inline-openclaw/inline@latest"'
 openclaw plugins update inline
+openclaw gateway restart
+openclaw plugins list
+openclaw channels status
+openclaw message send --channel inline --target chat:123 --message "Inline smoke test" --dry-run
 ```
+
+After updating, verify that `openclaw plugins list` shows `inline`, `openclaw channels status` reports Inline configured/running, and `openclaw plugins inspect inline --json` reports the expected package version.
 
 From a local checkout (dev):
 
 ```sh
 cd /path/to/inline/packages/openclaw
 bun run build
-openclaw plugins install --link /path/to/inline/packages/openclaw
+npm pack --ignore-scripts --pack-destination /tmp
+openclaw plugins install --force npm-pack:/tmp/inline-openclaw-inline-<version>.tgz
 ```
 
 ## Configure
@@ -77,9 +84,31 @@ channels:
     token: "<INLINE_BOT_TOKEN>"
 ```
 
+You can also leave `token` unset and provide `INLINE_TOKEN` in the gateway environment.
+`INLINE_BOT_TOKEN` is accepted as a compatibility alias.
+
 `baseUrl` defaults to `https://api.inline.chat`.
 `dmPolicy` defaults to `pairing` (recommended starting point).
+`defaultTo` is optional and gives outbound sends a fallback target when no explicit target is supplied.
 `requireMention` defaults to `false` for groups (set `true` to require explicit mentions).
+
+### Who can talk to the bot?
+
+Use these settings together:
+
+| Area | Setting | Meaning |
+| --- | --- | --- |
+| DMs | `dmPolicy: "pairing"` | Users can request access; allowlisted users are accepted. This is the default. |
+| DMs | `dmPolicy: "allowlist"` + `allowFrom` | Only listed Inline user ids can DM the bot. |
+| DMs | `dmPolicy: "open"` + `allowFrom: ["*"]` | Any Inline user can DM the bot. Use only for public/demo bots. |
+| DMs | `dmPolicy: "disabled"` | DM messages are ignored. |
+| Groups | `groupPolicy: "allowlist"` + `groups` | Only listed group chat ids can reach the bot. Setup defaults `groups["*"].requireMention` to `true` for broad mention-only access. |
+| Groups | `groupPolicy: "open"` | Any group chat can reach the bot. Pair with `requireMention: true` unless the bot should answer ambient messages. |
+| Groups | `groupPolicy: "disabled"` | Group messages are ignored. |
+| Group senders | `groupAllowFrom` or `groups.<chat>.allowFrom` | Optional sender allowlist inside allowed groups. Per-group entries override the account-wide list for that group. Leave empty to allow any sender in an allowed group. |
+
+Accepted Inline user ids: `123`, `user:123`, `inline:123`, or `inline:user:123`.
+Accepted group ids: `123`, `chat:123`, `inline:123`, or `*`.
 
 Example:
 
@@ -89,18 +118,26 @@ channels:
     enabled: true
     baseUrl: "https://api.inline.chat"
     token: "<INLINE_BOT_TOKEN>"
+    defaultTo: "chat:123" # optional fallback for outbound sends without --target
 
     # DMs:
-    dmPolicy: "pairing" # pairing|open|disabled
+    dmPolicy: "pairing" # pairing|allowlist|open|disabled
     allowFrom:
       - "inline:123" # or "user:123" or just "123"
+
+    # Native exec/plugin approvals:
+    execApprovals:
+      enabled: "auto" # auto|true|false
+      approvers:
+        - "user:123" # Inline user ids only; chat ids are not approvers
+      target: "dm" # dm|channel|both
 
     # Group threads/chats:
     groupPolicy: "allowlist" # allowlist|open|disabled
     groupAllowFrom:
       - "inline:123" # or "user:123" or just "123"
     capabilities:
-      replyThreads: false # optional, default false; enable native Inline reply-thread support
+      replyThreads: false # optional, default false; enable Inline reply-thread support
     requireMention: true # optional: default is false
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
 
@@ -122,6 +159,8 @@ channels:
     groups:
       "88":
         requireMention: false
+        allowFrom:
+          - "42"
         tools:
           allow: ["message", "web.search"]
         toolsBySender:
@@ -139,6 +178,7 @@ channels:
     accounts:
       work:
         token: "<INLINE_BOT_TOKEN>"
+        defaultTo: "user:123"
         capabilities:
           replyThreads: true
 ```
@@ -146,15 +186,24 @@ channels:
 Reply behavior summary:
 
 - `replyToId` is always an Inline message id.
-- Native reply threads are separate and use OpenClaw `threadId`.
+- Inline reply threads are separate and use OpenClaw `threadId`.
 - Keep `replyThreads` off if you only want classic message replies.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
+
+## Native Exec Approvals
+
+Inline supports the same native approval flow as bundled chat providers. Configure `channels.inline.execApprovals.approvers` with Inline user ids, or leave it unset and use numeric IDs in `commands.ownerAllowFrom`. Accepted approver ids are `123`, `user:123`, `inline:123`, or `inline:user:123`; `chat:<id>` entries are ignored because group chats are not approvers.
+
+`execApprovals.target` defaults to `dm`. Use `channel` or `both` only for trusted chats because approval messages include command details. Inline approval buttons send `/approve ...` callbacks, and OpenClaw clears the buttons after resolution or expiry.
 
 ## Outbound Target Semantics
 
 For `message send`/plugin outbound sends:
 
+- Use `openclaw message send --channel inline --target chat:<id> --message "..."`.
+- If `channels.inline.defaultTo` is set, OpenClaw uses it when no explicit target is supplied. Named accounts can override it with `channels.inline.accounts.<account>.defaultTo`.
+- Some OpenClaw 2026.5.18 CLI help text lists only built-in channel ids, but installed plugin channel ids such as `inline` are accepted.
 - `chat:<id>` targets a chat id.
 - `user:<id>` targets a user id (DM peer).
 - `inline:user:<id>` and `inline:chat:<id>` are accepted and normalized.
@@ -182,7 +231,7 @@ Direct DM sends can also target `user:<id>`.
 - Pins: `pin`, `unpin`, `list-pins`
 - Space permissions: `permissions`
 
-Native thread semantics are behind `channels.inline.capabilities.replyThreads`:
+Inline reply-thread semantics are behind `channels.inline.capabilities.replyThreads`:
 
 - disabled: `thread-reply` behaves like the old compatibility reply path
 - enabled: `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id
@@ -193,6 +242,9 @@ You can gate action groups from config:
 ```yaml
 channels:
   inline:
+    reactionNotifications: own # off | own | all | allowlist
+    reactionAllowlist:
+      - "inline:123"
     actions:
       send: true
       reply: true
@@ -207,6 +259,8 @@ channels:
       permissions: true
 ```
 
+Named accounts can override the same `reactionNotifications` mode and `reactionAllowlist`.
+
 ## Extra Agent Tools
 
 The plugin also registers a dedicated `inline_members` tool for space-member discovery outside the `message` action surface.
@@ -215,20 +269,20 @@ The plugin also registers a dedicated `inline_members` tool for space-member dis
 - Optional filters: `query`, `userId`, `limit`, `accountId`
 - Returned members include explicit DM targets like `user:123`
 
-The plugin also registers `inline_bot_commands` for bot slash command management (v1):
+The plugin also registers `inline_bot_commands` for Inline bot command management (v1):
 
 - `action: "get"` -> calls `getMyCommands`
-- `action: "set"` -> calls `setMyCommands` with Telegram-style `commands[]`
+- `action: "set"` -> calls `setMyCommands` with Inline Bot API `commands[]`
 - `action: "delete"` -> calls `deleteMyCommands`
 - Limits follow Inline Bot API: max `100` commands, `command` max `32`, `description` max `256`, charset `^[a-z0-9_]+$`
 
-Native command sync (Telegram-style startup behavior):
+Bot command sync:
 
-- On `gateway_start`, the plugin clears + re-registers default native commands for each enabled/configured Inline account.
-- Default commands now mirror OpenClaw native defaults (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
-- When available in `openclaw/plugin-sdk`, the plugin uses the same command + skill sources as native providers (Telegram/Slack/Discord), including plugin command specs.
-- Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`.
-- Disable native skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.
+- On `gateway_start`, the plugin registers default bot commands for each enabled/configured Inline account.
+- Default commands include the same user-facing command set as bundled chat providers (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
+- The plugin uses OpenClaw's command, skill command, and plugin command registries when available.
+- Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`. Disabled startup sync clears existing Inline bot commands for the affected account.
+- Disable skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.
 
 Multi-account:
 
@@ -249,7 +303,7 @@ channels:
 - `plugin not found: inline` / `plugins.entries.inline: plugin not found: inline`
   - Ensure the plugin is installed and discovered (`openclaw plugins list`).
 - `doctor --fix` suggests Inline changes even though channel is healthy
-  - Plugin entry id should be `inline`.
+  - Keep the plugin entry id as `inline`, then re-run `openclaw plugins list` and `openclaw channels status`.
 - `Inline: SETUP / no token`
-  - Ensure `channels.inline.token` is set and plugin is updated (`openclaw plugins update inline`).
+  - Ensure `channels.inline.token`, `INLINE_TOKEN`, or `INLINE_BOT_TOKEN` is set and plugin is updated (`openclaw plugins update inline`).
   - If using `dmPolicy: "open"`, ensure `allowFrom: ["*"]`.

@@ -59,3 +59,6 @@ channels:
     enabled: true
     token: "<INLINE_BOT_TOKEN>"
 ```
+
+Alternatively, set `INLINE_TOKEN` in the OpenClaw gateway environment.
+`INLINE_BOT_TOKEN` is also accepted as a compatibility alias.

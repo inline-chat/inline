@@ -2,19 +2,67 @@ import { describe, expect, it, vi } from "vitest"
 import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk"
 
 describe("plugin entry", () => {
-  it("registers the channel, Inline message hook, and wires runtime", async () => {
+  it("exposes a native-style bundled runtime entry with split loaders", async () => {
     vi.resetModules()
-    const syncInlineNativeCommands = vi.fn(async () => ({ attempted: 1, synced: 1, failed: 0 }))
-    vi.doMock("./inline/bot-commands-sync.js", () => ({
-      syncInlineNativeCommands,
-    }))
-    const pluginMod = await import("./index.ts")
+    const { default: entry } = await import("./index.ts")
+
+    expect(entry.kind).toBe("bundled-channel-entry")
+    expect(entry.id).toBe("inline")
+    expect(entry.features).toEqual({ accountInspect: true })
+    expect(entry.loadChannelPlugin().id).toBe("inline")
+    expect(entry.loadChannelSecrets?.()?.secretTargetRegistryEntries.map((item) => item.id)).toEqual([
+      "channels.inline.accounts.*.token",
+      "channels.inline.token",
+    ])
+
+    const inspect = entry.loadChannelAccountInspector?.()
+    expect(
+      inspect?.({
+        channels: {
+          inline: {
+            token: "test-token",
+          },
+        },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        accountId: "default",
+        configured: true,
+        tokenSource: "config",
+        tokenStatus: "available",
+      }),
+    )
+  }, 30_000)
+
+  it("keeps the setup entry split with secret metadata", async () => {
+    vi.resetModules()
+    const { default: setupEntry } = await import("./setup-entry")
+
+    expect(setupEntry.kind).toBe("bundled-channel-setup-entry")
+    const setupPlugin = setupEntry.loadSetupPlugin()
+    const setupSecrets = setupEntry.loadSetupSecrets?.()
+
+    expect(setupPlugin.id).toBe("inline")
+    expect(setupPlugin.secrets?.secretTargetRegistryEntries.map((entry) => entry.id)).toEqual([
+      "channels.inline.accounts.*.token",
+      "channels.inline.token",
+    ])
+    expect(setupSecrets?.secretTargetRegistryEntries.map((entry) => entry.id)).toEqual([
+      "channels.inline.accounts.*.token",
+      "channels.inline.token",
+    ])
+  })
+
+  it("registers the channel, full-runtime hooks, and wires runtime", async () => {
+    vi.resetModules()
+    const { default: entry } = await import("./index.ts")
 
     const runtime = { version: "test" } as unknown as PluginRuntime
     let registered = false
     const registeredToolNames: string[] = []
     const hooks = new Map<string, Function>()
     const api = {
+      registrationMode: "full",
       runtime,
       config: {
         channels: {
@@ -40,9 +88,10 @@ describe("plugin entry", () => {
       },
     } as unknown as OpenClawPluginApi
 
-    pluginMod.default.register(api)
+    entry.register(api)
 
     expect(registered).toBe(true)
+    expect(entry.setChannelRuntime).toBeTypeOf("function")
     expect(registeredToolNames).toEqual([
       "inline_members",
       "inline_update_profile",
@@ -86,11 +135,5 @@ describe("plugin entry", () => {
     const gatewayStart = hooks.get("gateway_start")
     expect(gatewayStart).toBeTypeOf("function")
     await gatewayStart?.({ port: 24282 }, { port: 24282 })
-    expect(syncInlineNativeCommands).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cfg: api.config,
-        logger: api.logger,
-      }),
-    )
   })
 })

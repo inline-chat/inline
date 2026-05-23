@@ -30,8 +30,8 @@ export type CreateInlineTypingCallbacksParams = {
 export type InlineChannelReplyPipeline = {
   onModelSelected?: (ctx: unknown) => void
   responsePrefix?: string
-  enableSlackInteractiveReplies?: boolean
   responsePrefixContextProvider?: () => unknown
+  transformReplyPayload?: (payload: Record<string, unknown>) => Record<string, unknown> | null
   typingCallbacks?: InlineTypingCallbacks
 }
 

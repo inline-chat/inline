@@ -1,7 +1,7 @@
 {
   "id": "inline",
   "name": "Inline",
-  "description": "Inline channel plugin (realtime RPC bot token; DMs + chats).",
+  "description": "Use OpenClaw from Inline DMs and chats with an Inline bot token.",
   "channels": ["inline"],
   "contracts": {
     "tools": [
@@ -13,7 +13,7 @@
     ]
   },
   "channelEnvVars": {
-    "inline": ["INLINE_TOKEN"]
+    "inline": ["INLINE_TOKEN", "INLINE_BOT_TOKEN"]
   },
   "configSchema": {
     "type": "object",
@@ -26,11 +26,26 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "additionalProperties": true,
+        "$defs": {
+          "secretRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string", "enum": ["env", "file", "exec"] },
+              "provider": { "type": "string" },
+              "id": { "type": "string" }
+            },
+            "required": ["source", "provider", "id"]
+          },
+          "secretInput": {
+            "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/secretRef" }]
+          }
+        },
         "properties": {
           "name": { "type": "string" },
           "enabled": { "type": "boolean" },
           "baseUrl": { "type": "string" },
-          "token": { "type": "string" },
+          "token": { "$ref": "#/$defs/secretInput" },
           "tokenFile": { "type": "string" },
           "capabilities": {
             "type": "object",
@@ -46,12 +61,15 @@
           },
           "allowFrom": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+          },
+          "defaultTo": {
+            "anyOf": [{ "type": "string" }, { "type": "number" }]
           },
           "systemPrompt": { "type": "string" },
           "groupAllowFrom": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
           },
           "groupPolicy": {
             "default": "allowlist",
@@ -66,6 +84,7 @@
               "additionalProperties": false,
               "properties": {
                 "requireMention": { "type": "boolean" },
+                "allowFrom": { "$ref": "#/properties/groupAllowFrom" },
                 "systemPrompt": { "type": "string" },
                 "tools": {
                   "type": "object",
@@ -98,6 +117,11 @@
           "dmHistoryLimit": { "type": "integer", "minimum": 0 },
           "parseMarkdown": { "type": "boolean" },
           "mediaMaxMb": { "type": "number", "exclusiveMinimum": 0 },
+          "reactionNotifications": { "type": "string", "enum": ["off", "own", "all", "allowlist"] },
+          "reactionAllowlist": {
+            "type": "array",
+            "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+          },
           "actions": {
             "type": "object",
             "additionalProperties": false,
@@ -214,19 +238,72 @@
               }
             }
           },
+          "execApprovals": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "anyOf": [{ "type": "boolean" }, { "type": "string", "const": "auto" }]
+              },
+              "approvers": {
+                "type": "array",
+                "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+              },
+              "agentFilter": { "type": "array", "items": { "type": "string" } },
+              "sessionFilter": { "type": "array", "items": { "type": "string" } },
+              "target": { "type": "string", "enum": ["dm", "channel", "both"] }
+            }
+          },
           "accounts": {
             "type": "object",
             "propertyNames": { "type": "string" },
-            "additionalProperties": true
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "name": { "$ref": "#/properties/name" },
+                "enabled": { "$ref": "#/properties/enabled" },
+                "baseUrl": { "$ref": "#/properties/baseUrl" },
+                "token": { "$ref": "#/properties/token" },
+                "tokenFile": { "$ref": "#/properties/tokenFile" },
+                "capabilities": { "$ref": "#/properties/capabilities" },
+                "dmPolicy": { "$ref": "#/properties/dmPolicy" },
+                "allowFrom": { "$ref": "#/properties/allowFrom" },
+                "defaultTo": { "$ref": "#/properties/defaultTo" },
+                "systemPrompt": { "$ref": "#/properties/systemPrompt" },
+                "groupAllowFrom": { "$ref": "#/properties/groupAllowFrom" },
+                "groupPolicy": { "$ref": "#/properties/groupPolicy" },
+                "groups": { "$ref": "#/properties/groups" },
+                "requireMention": { "$ref": "#/properties/requireMention" },
+                "replyToBotWithoutMention": { "$ref": "#/properties/replyToBotWithoutMention" },
+                "historyLimit": { "$ref": "#/properties/historyLimit" },
+                "dmHistoryLimit": { "$ref": "#/properties/dmHistoryLimit" },
+                "parseMarkdown": { "$ref": "#/properties/parseMarkdown" },
+                "mediaMaxMb": { "$ref": "#/properties/mediaMaxMb" },
+                "reactionNotifications": { "$ref": "#/properties/reactionNotifications" },
+                "reactionAllowlist": { "$ref": "#/properties/reactionAllowlist" },
+                "actions": { "$ref": "#/properties/actions" },
+                "textChunkLimit": { "$ref": "#/properties/textChunkLimit" },
+                "chunkMode": { "$ref": "#/properties/chunkMode" },
+                "streaming": { "$ref": "#/properties/streaming" },
+                "streamMode": { "$ref": "#/properties/streamMode" },
+                "draftChunk": { "$ref": "#/properties/draftChunk" },
+                "blockStreaming": { "$ref": "#/properties/blockStreaming" },
+                "streamViaEditMessage": { "$ref": "#/properties/streamViaEditMessage" },
+                "blockStreamingCoalesce": { "$ref": "#/properties/blockStreamingCoalesce" },
+                "commands": { "$ref": "#/properties/commands" },
+                "execApprovals": { "$ref": "#/properties/execApprovals" }
+              }
+            }
           }
         }
       },
       "label": "Inline",
-      "description": "OpenClaw channel provider for Inline DMs and chats.",
+      "description": "Use OpenClaw from Inline DMs and chats with an Inline bot token.",
       "uiHints": {
         "": {
           "label": "Inline",
-          "help": "Inline channel provider configuration for realtime bot tokens, direct messages, group chats, and Inline-specific reply behavior."
+          "help": "Inline channel configuration for bot tokens, direct messages, group chats, and Inline-specific reply behavior."
         },
         "baseUrl": {
           "label": "Inline API Base URL",
@@ -234,7 +311,7 @@
         },
         "token": {
           "label": "Inline Bot Token",
-          "help": "Inline bot token. Use tokenFile or INLINE_TOKEN if you prefer not to store the token in config."
+          "help": "Inline bot token. Use tokenFile, INLINE_TOKEN, or INLINE_BOT_TOKEN if you prefer not to store the token in config."
         },
         "tokenFile": {
           "label": "Inline Bot Token File",
@@ -248,13 +325,17 @@
           "label": "Inline DM Allowlist",
           "help": "Inline user IDs allowed to direct-message the bot. Use * only with dmPolicy=open."
         },
+        "defaultTo": {
+          "label": "Inline Default Target",
+          "help": "Default Inline chat target used by outbound message sends when no explicit target is provided."
+        },
         "groupPolicy": {
           "label": "Inline Group Policy",
           "help": "Controls group chat access: allowlist, open, or disabled."
         },
         "groupAllowFrom": {
           "label": "Inline Group Sender Allowlist",
-          "help": "Inline user IDs allowed to trigger the bot in groups when groupPolicy=allowlist."
+          "help": "Inline user IDs allowed to trigger the bot inside allowed groups. Leave empty to allow any sender in an allowed group."
         },
         "requireMention": {
           "label": "Inline Require Mention",
@@ -266,23 +347,59 @@
         },
         "capabilities.replyThreads": {
           "label": "Inline Reply Threads",
-          "help": "Expose Inline reply-thread chats as OpenClaw native threads."
+          "help": "Expose Inline reply-thread chats through OpenClaw's thread API."
         },
         "groups": {
           "label": "Inline Group Overrides",
-          "help": "Per-group settings keyed by Inline chat ID, including mention and tool policy overrides."
+          "help": "Per-group settings keyed by Inline chat ID, including sender allowlist, mention, and tool policy overrides."
+        },
+        "accounts": {
+          "label": "Inline Accounts",
+          "help": "Named Inline bot accounts. Account entries accept the same token, access, group, reply-thread, command, and streaming fields as channels.inline."
         },
         "actions": {
           "label": "Inline Message Actions",
           "help": "Enable or disable Inline message-tool action groups such as send, reactions, read, edit, participants, pins, and permissions."
         },
+        "reactionNotifications": {
+          "label": "Inline Reaction Notifications",
+          "help": "Controls passive reaction notifications queued into the agent session: \"off\", \"own\" for bot-authored messages, \"all\" for any authorized message, or \"allowlist\" for reactionAllowlist senders."
+        },
+        "reactionAllowlist": {
+          "label": "Inline Reaction Sender Allowlist",
+          "help": "Inline user IDs allowed to queue passive reaction notifications when reactionNotifications is \"allowlist\". Supports the same ID/access-group entries as allowFrom."
+        },
         "commands.native": {
-          "label": "Inline Native Commands",
-          "help": "Controls startup sync for OpenClaw native slash commands."
+          "label": "Inline Bot Command Sync",
+          "help": "Controls startup sync for Inline bot commands."
         },
         "commands.nativeSkills": {
-          "label": "Inline Native Skill Commands",
-          "help": "Controls whether native skill slash commands are included in startup command sync."
+          "label": "Inline Skill Command Sync",
+          "help": "Controls whether skill bot commands are included in startup command sync."
+        },
+        "execApprovals": {
+          "label": "Inline Exec Approvals",
+          "help": "Inline-native exec approval routing and approver authorization. When unset, OpenClaw auto-enables DM-first native approvals if approvers can be resolved for this bot account."
+        },
+        "execApprovals.enabled": {
+          "label": "Inline Exec Approvals Enabled",
+          "help": "Controls Inline native exec approvals for this account: unset or \"auto\" enables DM-first native approvals when approvers can be resolved, true forces native approvals on, and false disables them."
+        },
+        "execApprovals.approvers": {
+          "label": "Inline Exec Approval Approvers",
+          "help": "Inline user IDs allowed to approve exec requests for this bot account. Use numeric Inline user IDs or user targets such as 123, user:123, or inline:user:123. If unset, OpenClaw falls back to numeric owner IDs inferred from commands.ownerAllowFrom when possible."
+        },
+        "execApprovals.agentFilter": {
+          "label": "Inline Exec Approval Agent Filter",
+          "help": "Optional allowlist of agent IDs eligible for Inline exec approvals, for example [\"main\", \"ops-agent\"]. Use this to keep approval prompts scoped to the agents you actually operate from Inline."
+        },
+        "execApprovals.sessionFilter": {
+          "label": "Inline Exec Approval Session Filter",
+          "help": "Optional session-key filters matched as substring or regex-style patterns before Inline approval routing is used. Use narrow patterns so Inline approvals only appear for intended sessions."
+        },
+        "execApprovals.target": {
+          "label": "Inline Exec Approval Target",
+          "help": "Controls where Inline approval prompts are sent: \"dm\" sends to approver DMs (default), \"channel\" sends to the originating Inline chat/reply thread, and \"both\" sends to both. Channel delivery exposes the command text to the chat, so only use it in trusted groups."
         },
         "streaming": {
           "label": "Inline Streaming Mode",
@@ -294,11 +411,11 @@
         },
         "streaming.preview.toolProgress": {
           "label": "Inline Draft Tool Progress",
-          "help": "Accepted for config compatibility with native channels. Inline does not render tool-progress text into chat-visible edit previews."
+          "help": "Accepted for shared OpenClaw streaming config compatibility. Inline does not render tool-progress text into chat-visible edit previews."
         },
         "streaming.progress.toolProgress": {
           "label": "Inline Progress Tool Lines",
-          "help": "Accepted for config compatibility with native channels. Inline keeps progress/tool details out of chat-visible messages."
+          "help": "Accepted for shared OpenClaw streaming config compatibility. Inline keeps progress/tool details out of chat-visible messages."
         },
         "streaming.block.enabled": {
           "label": "Inline Block Streaming",
