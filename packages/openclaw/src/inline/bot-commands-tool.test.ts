@@ -114,7 +114,7 @@ describe("inline/bot-commands-tool", () => {
     expect(String(thirdCall?.[0])).toBe("https://api.inline.chat/bot/deleteMyCommands")
   })
 
-  it("normalizes leading slash command names for set", async () => {
+  it("normalizes command names with a leading delimiter for set", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true, result: {} }), {
         status: 200,
@@ -146,6 +146,37 @@ describe("inline/bot-commands-tool", () => {
     expect(JSON.parse(String(firstCall[1]?.body))).toEqual({
       commands: [{ command: "weather", description: "Get weather" }],
     })
+  })
+
+  it("describes commands as Inline bot commands in the tool schema", async () => {
+    const { createInlineBotCommandsTool } = await import("./bot-commands-tool")
+    const tool = createInlineBotCommandsTool({
+      config: {
+        channels: {
+          inline: {
+            token: "inline-bot-token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+    })
+
+    const parameters = tool?.parameters as {
+      properties?: {
+        commands?: {
+          items?: {
+            properties?: {
+              command?: {
+                description?: string
+              }
+            }
+          }
+        }
+      }
+    }
+    const description = parameters.properties?.commands?.items?.properties?.command?.description ?? ""
+    expect(description).toContain("Inline bot command")
+    expect(description.toLowerCase()).not.toContain("slash command")
   })
 
   it("rejects copied OpenClaw runtime text in command descriptions", async () => {

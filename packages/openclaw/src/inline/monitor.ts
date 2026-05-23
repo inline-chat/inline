@@ -4,10 +4,22 @@ import {
   buildCommandTextFromArgs,
   findCommandByNativeName,
   formatCommandArgMenuTitle,
+  listNativeCommandSpecsForConfig,
   parseCommandArgs,
   resolveCommandArgMenu,
 } from "openclaw/plugin-sdk/native-command-registry"
-import { resolveStoredModelOverride } from "openclaw/plugin-sdk/command-auth-native"
+import { CHANNEL_APPROVAL_NATIVE_RUNTIME_CONTEXT_CAPABILITY } from "openclaw/plugin-sdk/approval-handler-adapter-runtime"
+import { registerChannelRuntimeContext } from "openclaw/plugin-sdk/channel-runtime-context"
+import {
+  resolveCommandAuthorization,
+  resolveStoredModelOverride,
+} from "openclaw/plugin-sdk/command-auth-native"
+import { expandAllowFromWithAccessGroups } from "openclaw/plugin-sdk/security-runtime"
+import { buildCommandsMessagePaginated } from "openclaw/plugin-sdk/command-status"
+import {
+  createConnectedChannelStatusPatch,
+  createTransportActivityStatusPatch,
+} from "openclaw/plugin-sdk/gateway-runtime"
 import {
   createChannelInboundDebouncer,
   shouldDebounceTextInbound,
@@ -26,6 +38,8 @@ import {
   updateSessionStore,
 } from "openclaw/plugin-sdk/config-runtime"
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
+import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
+import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
 import { isReasoningReplyPayload } from "openclaw/plugin-sdk/reply-payload"
 import {
   findCodeRegions,
@@ -41,16 +55,34 @@ import {
   recordPendingHistoryEntryIfEnabled,
 } from "../sdk-runtime-compat.js"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract"
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
 import { InlineSdkClient, JsonFileStateStore, Method, type Message, type MessageActions } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { resolveInlineMessageActionsParam } from "./actions.js"
-import { INLINE_FORMATTING_NOTE, buildInlineSystemPrompt } from "./message-formatting.js"
-import { resolveInlineGroupRequireMention } from "./policy.js"
+import { isInlineExecApprovalHandlerConfigured } from "./exec-approvals.js"
+import { buildInlineSystemPrompt, sanitizeInlineOutgoingText } from "./message-formatting.js"
+import {
+  resolveInlineGroupAllowFrom,
+  resolveInlineGroupAccessPolicy,
+  resolveInlineGroupRequireMention,
+  resolveInlineGroupSystemPrompt,
+} from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
-import { sanitizeInlineVisibleLabel, sanitizeInlineVisibleText } from "./outbound-sanitize.js"
+import {
+  sanitizeInlineActionCallbackData,
+  sanitizeInlineActionLabel,
+  sanitizeInlineVisibleText,
+} from "./outbound-sanitize.js"
+import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
+import {
+  buildInlineCommandsListChannelData,
+  buildInlineModelProviderButtons,
+  parseInlineCommandsPageCallback,
+  type InlineReplyMarkupButton,
+} from "./command-ui.js"
 import {
   isInlineReplyThreadsEnabled,
   loadInlineReplyThreadAnchorMessage,
@@ -62,24 +94,47 @@ import {
   resolveControlCommandGate,
   resolveMentionGatingWithBypass,
 } from "../openclaw-compat.js"
+import {
+  shouldSyncInlineNativeCommandsForAccount,
+  shouldSyncInlineNativeSkillsForAccount,
+} from "./bot-commands-sync.js"
 
 const CHANNEL_ID = "inline" as const
+const INLINE_NATIVE_COMMAND_PROVIDER = CHANNEL_ID
+const INLINE_NATIVE_COMMAND_CALLBACK_PREFIX = "icmd:"
+const INLINE_REQUEST_ERROR_FALLBACK =
+  "OpenClaw could not process that request. Please try again."
+const INLINE_DEBOUNCE_ERROR_FALLBACK =
+  "OpenClaw could not process those messages. Please try again."
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
   done: Promise<void>
 }
 
+type InlineMentionSource =
+  | "explicit_bot"
+  | "subteam"
+  | "mention_pattern"
+  | "implicit_thread"
+  | "command_bypass"
+  | "none"
+
 type StatusSink = (patch: {
+  connected?: boolean
+  lastConnectedAt?: number | null
+  lastEventAt?: number | null
+  lastTransportActivityAt?: number | null
   lastInboundAt?: number
   lastOutboundAt?: number
-  lastError?: string
+  lastError?: string | null
   diagnostics?: unknown
 }) => void
 
 type CachedChatInfo = {
   kind: "direct" | "group"
   title: string | null
+  peerUserId?: bigint | null
 }
 
 type SenderProfile = {
@@ -148,17 +203,17 @@ type InlineParsedInboundEvent = {
   chatId: bigint
   msg: Message
   rawBodyOverride?: string | null
-  reactionEvent?: {
-    action: "added" | "removed"
-    emoji: string
-    targetMessageId: bigint
-  } | null
   callbackActionEvent?: {
     interactionId: bigint
     actionId: string
     targetMessageId: bigint
     data: Uint8Array
   } | null
+}
+
+type InlineSystemEventContext = {
+  channelLabel: string
+  sessionKey: string
 }
 
 function summarizeSdkMeta(meta: unknown): string {
@@ -215,7 +270,11 @@ const REASONING_TAG_PREFIXES = [
 const THINKING_TAG_RE = /<\s*(\/?)\s*(?:think(?:ing)?|thought|antthinking)\b[^<>]*>/gi
 
 function normalizeAllowEntry(raw: string): string {
-  return raw.trim().replace(/^inline:/i, "").replace(/^user:/i, "")
+  const withoutChannel = raw.trim().replace(/^inline:/i, "").trim()
+  if (/^chat:/i.test(withoutChannel)) {
+    return withoutChannel
+  }
+  return withoutChannel.replace(/^user:/i, "").trim()
 }
 
 function resolveInlinePayloadMediaUrls(payload: InlineReplyPayload): string[] {
@@ -236,7 +295,7 @@ type InlineReasoningSplit = {
   answerText?: string
 }
 
-function formatInlineReasoningMessageLikeTelegram(text: string): string {
+function formatInlineReasoningMessage(text: string): string {
   const trimmed = text.trim()
   if (!trimmed) return ""
   const italicLines = trimmed
@@ -269,7 +328,7 @@ function extractInlineThinkingFromTaggedStreamOutsideCode(text: string): string 
   return result.trim()
 }
 
-function splitInlineReasoningTextLikeTelegram(text?: string, isReasoning?: boolean): InlineReasoningSplit {
+function splitInlineReasoningText(text?: string, isReasoning?: boolean): InlineReasoningSplit {
   if (typeof text !== "string") return {}
 
   const trimmed = text.trim()
@@ -288,7 +347,7 @@ function splitInlineReasoningTextLikeTelegram(text?: string, isReasoning?: boole
 
   if (isReasoning === true) {
     return {
-      reasoningText: formatInlineReasoningMessageLikeTelegram(
+      reasoningText: formatInlineReasoningMessage(
         taggedReasoning || strippedAnswer || text,
       ),
     }
@@ -297,7 +356,7 @@ function splitInlineReasoningTextLikeTelegram(text?: string, isReasoning?: boole
     return { answerText: text }
   }
   const reasoningText = taggedReasoning
-    ? formatInlineReasoningMessageLikeTelegram(taggedReasoning)
+    ? formatInlineReasoningMessage(taggedReasoning)
     : undefined
   return {
     ...(reasoningText ? { reasoningText } : {}),
@@ -323,7 +382,7 @@ function resolveInlineChatVisibleReplyPayload<T extends InlineReplyPayload>(payl
     return mediaUrls.length > 0 ? { ...payload, text: undefined } : null
   }
 
-  const split = splitInlineReasoningTextLikeTelegram(internal.text, payload.isReasoning)
+  const split = splitInlineReasoningText(internal.text, payload.isReasoning)
   if (split.answerText !== undefined) {
     if (split.answerText === payload.text) {
       return payload
@@ -346,9 +405,92 @@ function normalizeAllowlist(entries: Array<string | number> | undefined): string
     .filter(Boolean)
 }
 
+function sanitizeInlineDeliveryText(text: string): string {
+  return sanitizeInlineOutgoingText(text)
+}
+
 function allowlistMatch(params: { allowFrom: string[]; senderId: string }): boolean {
   if (params.allowFrom.some((entry) => entry === "*")) return true
   return params.allowFrom.some((entry) => entry === params.senderId)
+}
+
+async function resolveInlineAllowlist(params: {
+  cfg: OpenClawConfig
+  accountId: string
+  entries: Array<string | number> | undefined
+  senderId: string
+}): Promise<string[]> {
+  const raw = (params.entries ?? []).map(String)
+  const expanded = await expandAllowFromWithAccessGroups({
+    cfg: params.cfg,
+    allowFrom: raw,
+    channel: CHANNEL_ID,
+    accountId: params.accountId,
+    senderId: params.senderId,
+    isSenderAllowed: (candidateSenderId, allowFrom) =>
+      allowlistMatch({
+        allowFrom: normalizeAllowlist(allowFrom),
+        senderId: candidateSenderId,
+      }),
+  })
+  return normalizeAllowlist(expanded)
+}
+
+async function resolveInlineGroupSenderAllowlist(params: {
+  cfg: OpenClawConfig
+  account: ResolvedInlineAccount
+  groupId: string
+  senderId: string | null
+}): Promise<{
+  raw: string[]
+  expanded: string[]
+}> {
+  const entries = resolveInlineGroupAllowFrom({
+    cfg: params.cfg,
+    accountId: params.account.accountId,
+    groupId: params.groupId,
+    accountAllowFrom: params.account.config.groupAllowFrom,
+  })
+  const raw = normalizeAllowlist(entries)
+  if (params.senderId == null) {
+    return {
+      raw,
+      expanded: raw.includes("*") ? ["*"] : [],
+    }
+  }
+  return {
+    raw,
+    expanded: await resolveInlineAllowlist({
+      cfg: params.cfg,
+      accountId: params.account.accountId,
+      entries,
+      senderId: params.senderId,
+    }),
+  }
+}
+
+function resolveInlineCommandAuthorized(params: {
+  cfg: OpenClawConfig
+  accountId: string
+  isGroup: boolean
+  chatId: string
+  senderId: string
+  commandAuthorized: boolean
+}): boolean {
+  return resolveCommandAuthorization({
+    ctx: {
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+      OriginatingChannel: CHANNEL_ID,
+      AccountId: params.accountId,
+      ChatType: params.isGroup ? "group" : "direct",
+      From: params.isGroup ? `inline:chat:${params.chatId}` : `inline:${params.senderId}`,
+      To: `inline:${params.chatId}`,
+      SenderId: params.senderId,
+    },
+    cfg: params.cfg,
+    commandAuthorized: params.commandAuthorized,
+  }).isAuthorizedSender
 }
 
 async function resolveChatInfo(
@@ -360,12 +502,69 @@ async function resolveChatInfo(
   if (existing) return existing
 
   const result = await client.getChat({ chatId })
-  const peerKind = result.peer?.type.oneofKind
-  const kind: CachedChatInfo["kind"] = peerKind === "user" ? "direct" : "group"
+  const peerType = result.peer?.type
+  const kind: CachedChatInfo["kind"] = peerType?.oneofKind === "user" ? "direct" : "group"
+  const peerUserId = peerType?.oneofKind === "user" ? peerType.user.userId : null
   const title = result.title?.trim() || null
-  const info: CachedChatInfo = { kind, title }
+  const info: CachedChatInfo = {
+    kind,
+    title,
+    ...(peerUserId != null ? { peerUserId } : {}),
+  }
   cache.set(chatId, info)
   return info
+}
+
+function formatInlineSystemEventChannelLabel(params: {
+  chatInfo: CachedChatInfo
+  effectiveChatId: bigint
+}): string {
+  const title = params.chatInfo.title?.trim()
+  if (params.chatInfo.kind === "direct") {
+    return title ? `direct chat with ${title}` : `direct chat ${String(params.effectiveChatId)}`
+  }
+  if (!title) return `chat ${String(params.effectiveChatId)}`
+  return title.startsWith("#") ? title : `#${title}`
+}
+
+function describeInlineMessageLifecycleSystemEvent(params: {
+  action: "edited" | "deleted"
+  messageCount: number
+  channelLabel: string
+}): string {
+  const subject = params.messageCount === 1 ? "message" : "messages"
+  return `Inline ${subject} ${params.action} in ${params.channelLabel}.`
+}
+
+function buildInlineMessageLifecycleContextKey(params: {
+  action: "edited" | "deleted"
+  chatId: bigint
+  messageIds: bigint[]
+}): string {
+  const ids = params.messageIds.map(String).sort().join(",")
+  return `inline:message:${params.action}:${String(params.chatId)}:${ids}`
+}
+
+function describeInlineReactionSystemEvent(params: {
+  action: "added" | "removed"
+  emoji: string
+  senderLabel: string
+  channelLabel: string
+  messageId: bigint
+}): string {
+  const emoji = params.emoji.trim() || "emoji"
+  return `Inline reaction ${params.action}: ${emoji} by ${params.senderLabel} in ${params.channelLabel} msg ${String(params.messageId)}`
+}
+
+function buildInlineReactionContextKey(params: {
+  action: "added" | "removed"
+  chatId: bigint
+  messageId: bigint
+  senderId: bigint
+  emoji: string
+}): string {
+  const emoji = params.emoji.trim() || "emoji"
+  return `inline:reaction:${params.action}:${String(params.chatId)}:${String(params.messageId)}:${String(params.senderId)}:${emoji}`
 }
 
 function normalizeInlineUsername(raw: string | undefined): string | undefined {
@@ -387,6 +586,114 @@ function normalizeInlineCommandBody(raw: string, botUsername: string | undefined
   return normalized
 }
 
+function findInlineNativeCommandFromBody(commandBody: string): NonNullable<ReturnType<typeof findCommandByNativeName>> | null {
+  const match = commandBody.trim().match(/^\/([^\s]+)(?:\s+[\s\S]*)?$/)
+  if (!match?.[1]) return null
+  return findCommandByNativeName(match[1], INLINE_NATIVE_COMMAND_PROVIDER) ?? null
+}
+
+function resolveInlineCommandNameFromBody(commandBody: string): string | null {
+  const match = commandBody.trim().match(/^\/([^\s]+)(?:\s+[\s\S]*)?$/)
+  const raw = match?.[1]?.trim().toLowerCase()
+  return raw || null
+}
+
+function buildInlineNativeCommandCallbackData(commandText: string): string {
+  return `${INLINE_NATIVE_COMMAND_CALLBACK_PREFIX}${commandText}`
+}
+
+function parseInlineNativeCommandCallbackData(raw: string | undefined): string | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith(INLINE_NATIVE_COMMAND_CALLBACK_PREFIX)) return null
+  const commandText = trimmed.slice(INLINE_NATIVE_COMMAND_CALLBACK_PREFIX.length).trim()
+  return commandText.startsWith("/") ? commandText : null
+}
+
+function isInlineNativeCommandBody(params: {
+  cfg: OpenClawConfig
+  account: ResolvedInlineAccount
+  commandBody: string
+  agentId: string
+}): boolean {
+  if (!shouldSyncInlineNativeCommandsForAccount({ cfg: params.cfg, account: params.account })) {
+    return false
+  }
+  const commandName = resolveInlineCommandNameFromBody(params.commandBody)
+  if (!commandName) return false
+
+  const skillCommands = shouldSyncInlineNativeSkillsForAccount({
+    cfg: params.cfg,
+    account: params.account,
+  })
+    ? listSkillCommandsForAgents({
+        cfg: params.cfg,
+        agentIds: [params.agentId],
+      })
+    : []
+  const commandSpecs = listNativeCommandSpecsForConfig(params.cfg, {
+    skillCommands,
+    provider: INLINE_NATIVE_COMMAND_PROVIDER,
+  })
+  for (const spec of commandSpecs) {
+    if (spec.name.trim().toLowerCase() === commandName) return true
+  }
+  for (const spec of getPluginCommandSpecs("inline", { config: params.cfg })) {
+    if (spec.name.trim().toLowerCase() === commandName) return true
+  }
+  return false
+}
+
+function escapeInlineRegExp(raw: string): string {
+  return raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function stripInlineBotMention(raw: string, botUsername: string | undefined): string {
+  const username = normalizeInlineUsername(botUsername)
+  if (!username) return raw
+  const mention = new RegExp(`(^|\\s)@${escapeInlineRegExp(username)}(?=$|[\\s,.:;!?])(?:[\\s,.:;!?]+)?`, "gi")
+  return raw.replace(mention, "$1").replace(/[ \t]{2,}/g, " ").trim()
+}
+
+function stripInlineBotMentionEntityText(text: string | null, botUsername: string | undefined): string | null {
+  const username = normalizeInlineUsername(botUsername)?.toLowerCase()
+  if (!text || !username) return text
+  const token = `@${username}`
+  const parts = text
+    .split(" | ")
+    .filter((part) => {
+      const normalized = part.trim().toLowerCase()
+      return normalized !== `username mention "${token}"` && !normalized.startsWith(`mention "${token}"`)
+    })
+  const next = parts.join(" | ").trim()
+  return next || null
+}
+
+function collectInlineMentionedUserIds(
+  content: ReturnType<typeof summarizeInlineMessageContent> | null,
+): string[] {
+  const ids = new Set<string>()
+  for (const entity of content?.entities ?? []) {
+    if (entity.type !== "mention" || !entity.userId) continue
+    ids.add(entity.userId)
+  }
+  return [...ids]
+}
+
+function resolveInlineMentionSource(params: {
+  nativeMentioned: boolean
+  patternMentioned: boolean
+  implicitMention: boolean
+  shouldBypassMention: boolean
+  wasMentioned: boolean
+}): InlineMentionSource {
+  if (params.nativeMentioned) return "explicit_bot"
+  if (params.shouldBypassMention) return "command_bypass"
+  if (params.patternMentioned || params.wasMentioned) return "mention_pattern"
+  if (params.implicitMention) return "implicit_thread"
+  return "none"
+}
+
 function callbackDataToBase64(data: Uint8Array): string {
   return Buffer.from(data).toString("base64")
 }
@@ -398,11 +705,6 @@ function callbackDataToUtf8(data: Uint8Array): string | undefined {
   } catch {
     return undefined
   }
-}
-
-type InlineReplyMarkupButton = {
-  text: string
-  callback_data: string
 }
 
 type InlineModelPickerCallback =
@@ -612,7 +914,7 @@ function resolveInlineNativeCommandMenu(params: {
   const match = normalized.match(/^\/([^\s]+)(?:\s+([\s\S]+))?$/)
   if (!match?.[1]) return null
 
-  const command = findCommandByNativeName(match[1], "telegram")
+  const command = findInlineNativeCommandFromBody(normalized)
   if (!command) return null
 
   const args = parseCommandArgs(command, match[2])
@@ -656,9 +958,11 @@ function resolveInlineNativeCommandMenu(params: {
     rows.push(
       slice.map((choice) => ({
         text: choice.label,
-        callback_data: buildCommandTextFromArgs(command, {
-          values: { [menu.arg.name]: choice.value },
-        }),
+        callback_data: buildInlineNativeCommandCallbackData(
+          buildCommandTextFromArgs(command, {
+            values: { [menu.arg.name]: choice.value },
+          }),
+        ),
       })),
     )
   }
@@ -687,7 +991,7 @@ function parseInlineModelPickerCallback(raw: string): InlineModelPickerCallback 
   if (trimmed === "mdl_prov") return { type: "providers" }
   if (trimmed === "mdl_back") return { type: "back" }
 
-  const listMatch = trimmed.match(/^mdl_list_([a-z0-9_-]+)_(\d+)$/i)
+  const listMatch = trimmed.match(/^mdl_list_([a-z0-9_.-]+)_(\d+)$/i)
   if (listMatch?.[1] && listMatch[2]) {
     const provider = listMatch[1].trim()
     const page = Number.parseInt(listMatch[2], 10)
@@ -745,27 +1049,15 @@ function resolveInlineModelPickerSelection(params: {
   }
 }
 
-function buildInlineModelProviderButtons(providers: Array<{ id: string; count: number }>): InlineReplyMarkupButton[][] {
-  const rows: InlineReplyMarkupButton[][] = []
-  for (let index = 0; index < providers.length; index += 2) {
-    const slice = providers.slice(index, index + 2)
-    rows.push(
-      slice.map((provider) => ({
-        text: `${provider.id} (${provider.count})`,
-        callback_data: `mdl_list_${provider.id}_1`,
-      })),
-    )
-  }
-  return rows
-}
-
 function normalizeInlineActionCallbackData(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ""
+  const nativeCommandText = parseInlineNativeCommandCallbackData(trimmed)
+  if (nativeCommandText) return nativeCommandText
   return mapInlineModelPickerCallbackToCommand(trimmed) ?? trimmed
 }
 
-function normalizeInlineTelegramButtonCallbackData(raw: string): string {
+function normalizeCompatibleButtonCallbackData(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ""
   if (parseInlineModelPickerCallback(trimmed)) return trimmed
@@ -784,12 +1076,15 @@ function normalizeReplyMarkupButtonsWith(
     const row: InlineReplyMarkupButton[] = []
     for (const candidateButton of candidateRow) {
       if (!isRecord(candidateButton)) continue
-      const text = sanitizeInlineVisibleLabel(
+      const text = sanitizeInlineActionLabel(
         typeof candidateButton.text === "string" ? candidateButton.text : "",
       )
       const callbackDataRaw =
         typeof candidateButton.callback_data === "string" ? candidateButton.callback_data.trim() : ""
-      const callbackData = options?.mapCallbackData ? options.mapCallbackData(callbackDataRaw) : callbackDataRaw
+      const mappedCallbackData = options?.mapCallbackData
+        ? options.mapCallbackData(callbackDataRaw)
+        : callbackDataRaw
+      const callbackData = sanitizeInlineActionCallbackData(mappedCallbackData)
       if (!text || !callbackData) continue
       row.push({ text, callback_data: callbackData })
       if (row.length >= INLINE_ACTION_MAX_PER_ROW) break
@@ -815,9 +1110,10 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
     rawButtons = inlineData.buttons
     hasExplicitButtons = true
   } else if (telegramData && Object.prototype.hasOwnProperty.call(telegramData, "buttons")) {
+    // Backwards compatibility for replies emitted before Inline had its own command surface.
     rawButtons = telegramData.buttons
     hasExplicitButtons = true
-    mapCallbackData = normalizeInlineTelegramButtonCallbackData
+    mapCallbackData = normalizeCompatibleButtonCallbackData
   } else if (Object.prototype.hasOwnProperty.call(payload, "buttons")) {
     rawButtons = payload.buttons
     hasExplicitButtons = true
@@ -881,11 +1177,6 @@ function resolveCallbackCommandBodyFromActionData(params: {
   return normalizeInlineCommandBody(normalized, params.botUsername)
 }
 
-function shouldUseTelegramSurfaceForModelCommands(commandBody: string): boolean {
-  const normalized = commandBody.trim().toLowerCase()
-  return normalized === "/model" || normalized.startsWith("/model ") || normalized === "/models" || normalized.startsWith("/models ")
-}
-
 function buildInlineSenderName(params: {
   firstName: string | undefined
   lastName: string | undefined
@@ -899,7 +1190,10 @@ function resolveInlineSystemPrompt(params: {
   groupId?: string
 }): string {
   const groupPrompt = params.groupId
-    ? params.account.config.groups?.[params.groupId]?.systemPrompt?.trim()
+    ? resolveInlineGroupSystemPrompt({
+        groups: params.account.config.groups,
+        groupId: params.groupId,
+      })
     : undefined
   return [buildInlineSystemPrompt(params.account.config.systemPrompt), groupPrompt]
     .filter((entry): entry is string => Boolean(entry))
@@ -1332,6 +1626,10 @@ function buildInlineBodyForAgentPrompt(params: {
   senderName?: string | null
   senderUsername?: string | null
   wasMentioned: boolean
+  explicitlyMentionedBot?: boolean
+  mentionedUserIds?: readonly string[]
+  implicitMentionKinds?: readonly string[]
+  mentionSource?: InlineMentionSource
   replyToId?: string | null
   replyToSenderId?: string | null
   replyToWasBot?: boolean
@@ -1355,6 +1653,15 @@ function buildInlineBodyForAgentPrompt(params: {
     sender_name: normalizeInlineAgentMetadataValue(params.senderName ?? undefined),
     sender_username: normalizeInlineAgentMetadataValue(params.senderUsername ?? undefined),
     was_mentioned: params.wasMentioned,
+    explicitly_mentioned_bot:
+      params.explicitlyMentionedBot === undefined
+        ? undefined
+        : normalizeInlineAgentMetadataValue(params.explicitlyMentionedBot),
+    mentioned_user_ids: params.mentionedUserIds?.length ? [...params.mentionedUserIds] : undefined,
+    implicit_mention_kinds: params.implicitMentionKinds?.length
+      ? [...params.implicitMentionKinds]
+      : undefined,
+    mention_source: normalizeInlineAgentMetadataValue(params.mentionSource ?? undefined),
     reply_to_id: normalizeInlineAgentMetadataValue(params.replyToId ?? undefined),
     reply_to_sender_id: normalizeInlineAgentMetadataValue(params.replyToSenderId ?? undefined),
     reply_to_was_bot:
@@ -1676,6 +1983,7 @@ export async function monitorInlineProvider(params: {
   cfg: OpenClawConfig
   account: ResolvedInlineAccount
   runtime: RuntimeEnv
+  channelRuntime?: ChannelRuntimeSurface
   abortSignal: AbortSignal
   log?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void; debug?: (msg: string) => void }
   statusSink?: StatusSink
@@ -1693,7 +2001,7 @@ export async function monitorInlineProvider(params: {
   await mkdir(path.dirname(statePath), { recursive: true })
 
   let client: InlineSdkClient | null = null
-  const pushDiagnostics = (patch?: { lastError?: string; lastInboundAt?: number; lastOutboundAt?: number }) => {
+  const pushDiagnostics = (patch?: Parameters<StatusSink>[0]) => {
     statusSink?.({
       ...patch,
       ...(client ? { diagnostics: client.getDiagnostics() } : {}),
@@ -1733,7 +2041,25 @@ export async function monitorInlineProvider(params: {
   const meId = meResult.getMe.user.id
   const botUsername = normalizeInlineUsername(meResult.getMe.user.username)?.toLowerCase()
   log?.info(`[${account.accountId}] inline connected (me=${String(meId)})`)
-  pushDiagnostics()
+  const connectedAt = Date.now()
+  pushDiagnostics({
+    ...createConnectedChannelStatusPatch(connectedAt),
+    ...createTransportActivityStatusPatch(connectedAt),
+    lastError: null,
+  })
+  if (isInlineExecApprovalHandlerConfigured({ cfg, accountId: account.accountId })) {
+    registerChannelRuntimeContext({
+      channelId: CHANNEL_ID,
+      accountId: account.accountId,
+      capability: CHANNEL_APPROVAL_NATIVE_RUNTIME_CONTEXT_CAPABILITY,
+      context: {
+        client,
+        parseMarkdown: account.config.parseMarkdown ?? true,
+      },
+      ...(params.channelRuntime ? { channelRuntime: params.channelRuntime } : {}),
+      abortSignal,
+    })
+  }
 
   const chatCache = new Map<bigint, CachedChatInfo>()
   const senderProfilesById = new Map<string, SenderProfile>()
@@ -1783,18 +2109,288 @@ export async function monitorInlineProvider(params: {
     await run
   }
 
+  const resolveInlineSystemEventContext = async (params: {
+    chatId: bigint
+    senderId?: bigint | null
+    eventKind: string
+  }): Promise<InlineSystemEventContext | null> => {
+    let chatInfo: CachedChatInfo
+    try {
+      chatInfo = await resolveChatInfo(client, chatCache, params.chatId)
+    } catch (err) {
+      chatInfo = { kind: "group", title: null }
+      statusSink?.({ lastError: `getChat failed: ${String(err)}` })
+    }
+
+    const isGroup = chatInfo.kind !== "direct"
+    const replyThreadsEnabled =
+      account.config.capabilities?.replyThreads === true ||
+      isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+    const replyThreadContext = await resolveInlineInboundReplyThreadContext({
+      replyThreadsEnabled,
+      client,
+      chatId: params.chatId,
+      chatInfo,
+      chatCache,
+    }).catch((err) => {
+      statusSink?.({ lastError: `getChat (system event reply thread) failed: ${String(err)}` })
+      return null
+    })
+    const effectiveChatId = replyThreadContext?.parentChatId ?? params.chatId
+    const effectiveChatInfo =
+      replyThreadContext?.parentChatId != null
+        ? { ...chatInfo, title: replyThreadContext.parentChatTitle ?? chatInfo.title }
+        : chatInfo
+    const senderId = params.senderId != null ? String(params.senderId) : null
+    const dmPolicy = account.config.dmPolicy ?? "pairing"
+    const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
+    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist"
+
+    if (isGroup) {
+      if (groupPolicy === "disabled") {
+        log?.info(
+          `[${account.accountId}] inline: drop ${params.eventKind} chat=${String(params.chatId)} (groupPolicy=disabled)`,
+        )
+        return null
+      }
+
+      const groupSenderAllowlist = await resolveInlineGroupSenderAllowlist({
+        cfg,
+        account,
+        groupId: String(effectiveChatId),
+        senderId,
+      })
+
+      if (groupPolicy === "allowlist") {
+        const groupAccess = resolveInlineGroupAccessPolicy({
+          cfg,
+          accountId: account.accountId,
+          groupId: String(effectiveChatId),
+          hasGroupAllowFrom: groupSenderAllowlist.raw.length > 0,
+          groupPolicy,
+        })
+        if (groupAccess.allowlistEnabled && !groupAccess.allowed) {
+          log?.info(
+            `[${account.accountId}] inline: drop ${params.eventKind} chat=${String(effectiveChatId)} (groupPolicy=allowlist)`,
+          )
+          return null
+        }
+        if (groupSenderAllowlist.raw.length > 0) {
+          if (senderId == null && !groupSenderAllowlist.raw.includes("*")) {
+            log?.info(
+              `[${account.accountId}] inline: drop ${params.eventKind} chat=${String(effectiveChatId)} (sender unknown)`,
+            )
+            return null
+          }
+          const allowed =
+            senderId == null
+              ? groupSenderAllowlist.expanded.includes("*")
+              : allowlistMatch({ allowFrom: groupSenderAllowlist.expanded, senderId })
+          if (!allowed) {
+            log?.info(
+              `[${account.accountId}] inline: drop ${params.eventKind} sender=${senderId ?? "unknown"} (groupPolicy=allowlist)`,
+            )
+            return null
+          }
+        }
+      }
+
+      const route = core.channel.routing.resolveAgentRoute({
+        cfg,
+        channel: CHANNEL_ID,
+        accountId: account.accountId,
+        peer: {
+          kind: "group",
+          id: String(effectiveChatId),
+        },
+      })
+      return {
+        channelLabel: formatInlineSystemEventChannelLabel({
+          chatInfo: effectiveChatInfo,
+          effectiveChatId,
+        }),
+        sessionKey: route.sessionKey,
+      }
+    }
+
+    const peerUserId = senderId ?? (chatInfo.peerUserId != null ? String(chatInfo.peerUserId) : null)
+    if (!peerUserId) {
+      log?.info(
+        `[${account.accountId}] inline: drop ${params.eventKind} chat=${String(params.chatId)} (direct peer unknown)`,
+      )
+      return null
+    }
+    if (dmPolicy === "disabled") {
+      log?.info(`[${account.accountId}] inline: drop ${params.eventKind} sender=${peerUserId} (dmPolicy=disabled)`)
+      return null
+    }
+    if (dmPolicy !== "open") {
+      const configAllowFrom = await resolveInlineAllowlist({
+        cfg,
+        accountId: account.accountId,
+        entries: account.config.allowFrom,
+        senderId: peerUserId,
+      })
+      const storeAllowFrom = await core.channel.pairing
+        .readAllowFromStore({
+          channel: CHANNEL_ID,
+          accountId: account.accountId,
+        })
+        .catch(() => [])
+      const effectiveAllowFrom = [...configAllowFrom, ...normalizeAllowlist(storeAllowFrom)].filter(Boolean)
+      if (!allowlistMatch({ allowFrom: effectiveAllowFrom, senderId: peerUserId })) {
+        log?.info(`[${account.accountId}] inline: drop ${params.eventKind} sender=${peerUserId} (dmPolicy=${dmPolicy})`)
+        return null
+      }
+    }
+
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: CHANNEL_ID,
+      accountId: account.accountId,
+      peer: {
+        kind: "direct",
+        id: peerUserId,
+      },
+    })
+    return {
+      channelLabel: formatInlineSystemEventChannelLabel({
+        chatInfo,
+        effectiveChatId: params.chatId,
+      }),
+      sessionKey: route.sessionKey,
+    }
+  }
+
+  const queueInlineMessageLifecycleSystemEvent = async (params: {
+    action: "edited" | "deleted"
+    chatId: bigint
+    messageIds: bigint[]
+    senderId?: bigint | null
+  }): Promise<void> => {
+    const messageIds = params.messageIds
+    if (!messageIds.length) return
+
+    const inboundAt = Date.now()
+    statusSink?.({
+      lastInboundAt: inboundAt,
+      lastEventAt: inboundAt,
+      ...createTransportActivityStatusPatch(inboundAt),
+    })
+
+    const ingress = await resolveInlineSystemEventContext({
+      chatId: params.chatId,
+      senderId: params.senderId ?? null,
+      eventKind: `message.${params.action}`,
+    })
+    if (!ingress) return
+
+    core.system.enqueueSystemEvent(
+      describeInlineMessageLifecycleSystemEvent({
+        action: params.action,
+        messageCount: messageIds.length,
+        channelLabel: ingress.channelLabel,
+      }),
+      {
+        sessionKey: ingress.sessionKey,
+        contextKey: buildInlineMessageLifecycleContextKey({
+          action: params.action,
+          chatId: params.chatId,
+          messageIds,
+        }),
+      },
+    )
+  }
+
+  const queueInlineReactionSystemEvent = async (params: {
+    action: "added" | "removed"
+    chatId: bigint
+    messageId: bigint
+    senderId: bigint
+    emoji: string
+  }): Promise<void> => {
+    const inboundAt = Date.now()
+    statusSink?.({
+      lastInboundAt: inboundAt,
+      lastEventAt: inboundAt,
+      ...createTransportActivityStatusPatch(inboundAt),
+    })
+
+    const ingress = await resolveInlineSystemEventContext({
+      chatId: params.chatId,
+      senderId: params.senderId,
+      eventKind: "reaction",
+    })
+    if (!ingress) return
+
+    await hydrateChatParticipants(params.chatId)
+    const senderId = String(params.senderId)
+    const senderProfile = senderProfilesById.get(senderId)
+    const chatInfo = chatCache.get(params.chatId)
+    const senderLabel = resolveInlineSenderLabel({
+      senderId,
+      senderName: senderProfile?.name ?? (chatInfo?.kind === "direct" ? chatInfo.title ?? undefined : undefined),
+      senderUsername: senderProfile?.username,
+    })
+
+    core.system.enqueueSystemEvent(
+      describeInlineReactionSystemEvent({
+        action: params.action,
+        emoji: params.emoji,
+        senderLabel,
+        channelLabel: ingress.channelLabel,
+        messageId: params.messageId,
+      }),
+      {
+        sessionKey: ingress.sessionKey,
+        contextKey: buildInlineReactionContextKey(params),
+        forceSenderIsOwnerFalse: true,
+        trusted: false,
+      },
+    )
+  }
+
+  const shouldQueueInlineReactionSystemEvent = async (params: {
+    chatId: bigint
+    messageId: bigint
+    senderId: bigint
+  }): Promise<boolean> => {
+    const mode = account.config.reactionNotifications ?? "own"
+    if (mode === "off") return false
+    if (mode === "all") return true
+    if (mode === "allowlist") {
+      const allowlist = await resolveInlineAllowlist({
+        cfg,
+        accountId: account.accountId,
+        entries: account.config.reactionAllowlist,
+        senderId: String(params.senderId),
+      })
+      return allowlistMatch({ allowFrom: allowlist, senderId: String(params.senderId) })
+    }
+
+    return isReactionTargetBotMessage({
+      client,
+      chatId: params.chatId,
+      messageId: params.messageId,
+      meId,
+      botMessageIdsByChat,
+    }).catch((err) => {
+      statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
+      return false
+    })
+  }
+
   const handleInboundNow = async (input: InlineParsedInboundEvent): Promise<void> => {
     const chatId = input.chatId
     const msg = input.msg
     const rawBodyOverride = input.rawBodyOverride ?? null
-    const reactionEvent = input.reactionEvent ?? null
     const callbackActionEvent = input.callbackActionEvent ?? null
     let rawBody = ""
     let currentContent: ReturnType<typeof summarizeInlineMessageContent> | null = null
     let currentAttachmentText: string | null = null
     let currentEntityText: string | null = null
 
-    if (!reactionEvent && !callbackActionEvent) {
+    if (!callbackActionEvent) {
       if (rawBodyOverride != null) {
         rawBody = rawBodyOverride.trim()
       } else {
@@ -1806,7 +2402,12 @@ export async function monitorInlineProvider(params: {
       if (!rawBody) return
     }
 
-    statusSink?.({ lastInboundAt: Date.now() })
+    const inboundAt = Date.now()
+    statusSink?.({
+      lastInboundAt: inboundAt,
+      lastEventAt: inboundAt,
+      ...createTransportActivityStatusPatch(inboundAt),
+    })
 
     let chatInfo: CachedChatInfo
     try {
@@ -1838,19 +2439,7 @@ export async function monitorInlineProvider(params: {
     const senderProfile = senderProfilesById.get(senderId)
     const senderUsername = senderProfile?.username
     const senderName = senderProfile?.name ?? (!isGroup ? chatInfo.title ?? undefined : undefined)
-    if (reactionEvent) {
-      const actor =
-        senderUsername != null && senderUsername.length > 0
-          ? `@${senderUsername}`
-          : senderName ?? `user:${senderId}`
-      const emoji = reactionEvent.emoji.trim() || "a reaction"
-      const messageId = String(reactionEvent.targetMessageId)
-      if (reactionEvent.action === "added") {
-        rawBody = `${actor} reacted with ${emoji} to your message #${messageId}`
-      } else {
-        rawBody = `${actor} removed ${emoji} from your message #${messageId}`
-      }
-    } else if (callbackActionEvent) {
+    if (callbackActionEvent) {
       const actor =
         senderUsername != null && senderUsername.length > 0
           ? `@${senderUsername}`
@@ -1872,8 +2461,20 @@ export async function monitorInlineProvider(params: {
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
     const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist"
 
-    const configAllowFrom = normalizeAllowlist(account.config.allowFrom)
-    const configGroupAllowFrom = normalizeAllowlist(account.config.groupAllowFrom)
+    const configAllowFrom = await resolveInlineAllowlist({
+      cfg,
+      accountId: account.accountId,
+      entries: account.config.allowFrom,
+      senderId,
+    })
+    const groupSenderAllowlist = isGroup
+      ? await resolveInlineGroupSenderAllowlist({
+          cfg,
+          account,
+          groupId: String(effectiveChatId),
+          senderId,
+        })
+      : { raw: [], expanded: [] }
     const storeAllowFrom = await core.channel.pairing
       .readAllowFromStore({
         channel: CHANNEL_ID,
@@ -1883,10 +2484,9 @@ export async function monitorInlineProvider(params: {
     const storeAllowList = normalizeAllowlist(storeAllowFrom)
 
     const effectiveAllowFrom = [...configAllowFrom, ...storeAllowList].filter(Boolean)
-    const effectiveGroupAllowFrom = [
-      ...(configGroupAllowFrom.length > 0 ? configGroupAllowFrom : configAllowFrom),
-      ...storeAllowList,
-    ].filter(Boolean)
+    const effectiveGroupAllowFrom = groupSenderAllowlist.expanded.filter(Boolean)
+    const effectiveGroupCommandAllowFrom =
+      groupSenderAllowlist.raw.length > 0 ? effectiveGroupAllowFrom : effectiveAllowFrom
     const callbackCommandBody = callbackActionEvent
       ? resolveCallbackCommandBodyFromActionData({
           data: callbackActionEvent.data,
@@ -1906,26 +2506,58 @@ export async function monitorInlineProvider(params: {
     }
     const shouldEditCallbackTargetInPlace = callbackActionEvent != null
     const normalizedCommandBody = callbackCommandBody ?? normalizeInlineCommandBody(rawBody, botUsername)
-
-    const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
+    const route = core.channel.routing.resolveAgentRoute({
       cfg,
-      surface: CHANNEL_ID,
+      channel: CHANNEL_ID,
+      accountId: account.accountId,
+      peer: {
+        kind: isGroup ? "group" : "direct",
+        // DM sessions should be stable per sender. Group sessions should be stable per chat.
+        id: isGroup ? String(effectiveChatId) : senderId,
+      },
     })
-    const useAccessGroups = cfg.commands?.useAccessGroups !== false
-    const allowForCommands = isGroup ? effectiveGroupAllowFrom : effectiveAllowFrom
-    const senderAllowedForCommands = allowlistMatch({ allowFrom: allowForCommands, senderId })
+    const nativeCallbackCommandBody = callbackActionEvent
+      ? parseInlineNativeCommandCallbackData(callbackDataToUtf8(callbackActionEvent.data))
+      : null
     const hasControlCommand = core.channel.text.hasControlCommand(
       callbackCommandBody ?? rawBody,
       cfg,
       botUsername ? { botUsername } : undefined,
     )
+    const commandSource = hasControlCommand
+      ? (nativeCallbackCommandBody != null || !callbackActionEvent) &&
+        isInlineNativeCommandBody({
+          cfg,
+          account,
+          commandBody: normalizedCommandBody,
+          agentId: route.agentId,
+        })
+        ? "native"
+        : "text"
+      : undefined
+    const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
+      cfg,
+      surface: CHANNEL_ID,
+      ...(commandSource ? { commandSource } : {}),
+    })
+    const useAccessGroups = cfg.commands?.useAccessGroups !== false
+    const allowForCommands = isGroup ? effectiveGroupCommandAllowFrom : effectiveAllowFrom
+    const senderAllowedForCommands = allowlistMatch({ allowFrom: allowForCommands, senderId })
     const commandGate = resolveControlCommandGate({
       useAccessGroups,
       authorizers: [{ configured: allowForCommands.length > 0, allowed: senderAllowedForCommands }],
       allowTextCommands,
       hasControlCommand,
     })
-    const commandAuthorized = commandGate.commandAuthorized
+    const commandAuthorized = resolveInlineCommandAuthorized({
+      cfg,
+      accountId: account.accountId,
+      isGroup,
+      chatId: String(effectiveChatId),
+      senderId,
+      commandAuthorized: commandGate.commandAuthorized,
+    })
+    const shouldBlockControlCommand = allowTextCommands && hasControlCommand && !commandAuthorized
 
     if (isGroup) {
       if (groupPolicy === "disabled") {
@@ -1938,8 +2570,22 @@ export async function monitorInlineProvider(params: {
         return
       }
       if (groupPolicy === "allowlist") {
+        const groupAccess = resolveInlineGroupAccessPolicy({
+          cfg,
+          accountId: account.accountId,
+          groupId: String(effectiveChatId),
+          hasGroupAllowFrom: groupSenderAllowlist.raw.length > 0,
+          groupPolicy,
+        })
+        if (groupAccess.allowlistEnabled && !groupAccess.allowed) {
+          log?.info(`[${account.accountId}] inline: drop group chat=${String(effectiveChatId)} (groupPolicy=allowlist)`)
+          await answerCallbackIfNeeded().catch((error) => {
+            runtime.error?.(`inline callback answer failed: ${String(error)}`)
+          })
+          return
+        }
         const allowed = allowlistMatch({ allowFrom: effectiveGroupAllowFrom, senderId })
-        if (!allowed) {
+        if (effectiveGroupAllowFrom.length > 0 && !allowed) {
           log?.info(`[${account.accountId}] inline: drop group sender=${senderId} (groupPolicy=allowlist)`)
           await answerCallbackIfNeeded().catch((error) => {
             runtime.error?.(`inline callback answer failed: ${String(error)}`)
@@ -1992,7 +2638,7 @@ export async function monitorInlineProvider(params: {
       }
     }
 
-    if (isGroup && commandGate.shouldBlock) {
+    if (isGroup && shouldBlockControlCommand) {
       logInboundDrop({
         log: (m) => runtime.log?.(m),
         channel: CHANNEL_ID,
@@ -2004,17 +2650,6 @@ export async function monitorInlineProvider(params: {
       })
       return
     }
-
-    const route = core.channel.routing.resolveAgentRoute({
-      cfg,
-      channel: CHANNEL_ID,
-      accountId: account.accountId,
-      peer: {
-        kind: isGroup ? "group" : "direct",
-        // DM sessions should be stable per sender. Group sessions should be stable per chat.
-        id: isGroup ? String(effectiveChatId) : senderId,
-      },
-    })
 
     const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId)
     const nativeMentioned = typeof msg.mentioned === "boolean" ? msg.mentioned : false
@@ -2071,7 +2706,7 @@ export async function monitorInlineProvider(params: {
           })
         : historyContext
     const implicitMention =
-      ((reactionEvent != null || callbackActionEvent != null) && isGroup) ||
+      (callbackActionEvent != null && isGroup) ||
       (isGroup &&
         (account.config.replyToBotWithoutMention ?? false) &&
         msg.replyToMsgId != null &&
@@ -2095,6 +2730,23 @@ export async function monitorInlineProvider(params: {
       hasControlCommand,
       commandAuthorized,
     })
+    const implicitMentionKinds =
+      isGroup && implicitMention
+        ? [
+            ...(callbackActionEvent != null ? ["message_action"] : []),
+            ...(msg.replyToMsgId != null && effectiveHistoryContext.repliedToBot ? ["reply_to_bot"] : []),
+          ]
+        : []
+    const mentionedUserIds = isGroup ? collectInlineMentionedUserIds(currentContent) : []
+    const mentionSource = isGroup
+      ? resolveInlineMentionSource({
+          nativeMentioned,
+          patternMentioned,
+          implicitMention,
+          shouldBypassMention: mentionGate.shouldBypassMention,
+          wasMentioned: mentionGate.effectiveWasMentioned,
+        })
+      : "none"
     if (isGroup && mentionGate.shouldSkip) {
       runtime.log?.(`inline: drop group chat ${String(chatId)} (no mention)`)
       const pendingBody =
@@ -2121,6 +2773,66 @@ export async function monitorInlineProvider(params: {
     }
 
     const parseMarkdown = account.config.parseMarkdown ?? true
+    const commandsPageCallback = callbackActionEvent
+      ? parseInlineCommandsPageCallback(callbackDataToUtf8(callbackActionEvent.data))
+      : null
+    if (shouldEditCallbackTargetInPlace && callbackActionEvent && commandsPageCallback) {
+      if (commandsPageCallback.page === "noop") return
+
+      const agentId = commandsPageCallback.agentId ?? route.agentId
+      const paginated = buildCommandsMessagePaginated(
+        cfg,
+        listSkillCommandsForAgents({
+          cfg,
+          agentIds: [agentId],
+        }),
+        {
+          page: commandsPageCallback.page,
+          forcePaginatedList: true,
+          surface: CHANNEL_ID,
+        },
+      )
+      const actions = resolveInlineReplyActions({
+        channelData: buildInlineCommandsListChannelData({
+          currentPage: paginated.currentPage,
+          totalPages: paginated.totalPages,
+          agentId,
+        }) ?? { inline: { buttons: [] } },
+      }) ?? { rows: [] }
+      const text = sanitizeInlineDeliveryText(paginated.text)
+
+      try {
+        const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+          oneofKind: "editMessage",
+          editMessage: {
+            messageId: callbackActionEvent.targetMessageId,
+            peerId: buildChatPeer(chatId),
+            text,
+            actions,
+            parseMarkdown,
+          },
+        })
+        if (result.oneofKind !== "editMessage") {
+          throw new Error(
+            `inline commands pagination: expected editMessage result, got ${String(result.oneofKind)}`,
+          )
+        }
+      } catch (error) {
+        runtime.error?.(`inline commands pagination edit failed; falling back to send (${String(error)})`)
+        const sent = await client.sendMessage({
+          chatId,
+          text,
+          actions,
+          parseMarkdown,
+        })
+        if (sent.messageId != null) {
+          rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+        }
+      }
+      statusSink?.({ lastOutboundAt: Date.now() })
+      return
+    }
+
     const nativeCommandMenu = resolveInlineNativeCommandMenu({
       commandBody: normalizedCommandBody,
       cfg,
@@ -2135,6 +2847,7 @@ export async function monitorInlineProvider(params: {
           },
         },
       })
+      const menuText = sanitizeInlineDeliveryText(nativeCommandMenu.title)
       let deliveredNativeMenu = false
       if (shouldEditCallbackTargetInPlace && callbackActionEvent) {
         try {
@@ -2143,25 +2856,25 @@ export async function monitorInlineProvider(params: {
             editMessage: {
               messageId: callbackActionEvent.targetMessageId,
               peerId: buildChatPeer(chatId),
-              text: nativeCommandMenu.title,
+              text: menuText,
               ...(menuActions ? { actions: menuActions } : {}),
               parseMarkdown,
             },
           })
           if (result.oneofKind !== "editMessage") {
             throw new Error(
-              `inline native command menu: expected editMessage result, got ${String(result.oneofKind)}`,
+              `inline command menu: expected editMessage result, got ${String(result.oneofKind)}`,
             )
           }
           deliveredNativeMenu = true
         } catch (error) {
-          runtime.error?.(`inline native command menu edit failed; falling back to send (${String(error)})`)
+          runtime.error?.(`inline command menu edit failed; falling back to send (${String(error)})`)
         }
       }
       if (!deliveredNativeMenu) {
         const sent = await client.sendMessage({
           chatId,
-          text: nativeCommandMenu.title,
+          text: menuText,
           ...(menuActions ? { actions: menuActions } : {}),
         })
         if (sent.messageId != null) {
@@ -2184,6 +2897,7 @@ export async function monitorInlineProvider(params: {
         text: string,
         buttons: InlineReplyMarkupButton[][],
       ): Promise<void> => {
+        const outboundText = sanitizeInlineDeliveryText(text)
         const actions = resolveInlineReplyActions({
           channelData: {
             inline: {
@@ -2197,7 +2911,7 @@ export async function monitorInlineProvider(params: {
             editMessage: {
               messageId: callbackActionEvent.targetMessageId,
               peerId: buildChatPeer(chatId),
-              text,
+              text: outboundText,
               actions,
               parseMarkdown,
             },
@@ -2211,7 +2925,7 @@ export async function monitorInlineProvider(params: {
           runtime.error?.(`inline model picker edit failed; falling back to send (${String(error)})`)
           const sent = await client.sendMessage({
             chatId,
-            text,
+            text: outboundText,
             actions,
             parseMarkdown,
           })
@@ -2291,14 +3005,12 @@ export async function monitorInlineProvider(params: {
       return
     }
 
-    const inboundMedia = reactionEvent
-      ? []
-      : await resolveInlineInboundMedia({
-          core,
-          message: msg,
-          maxBytes: inboundMediaMaxBytes,
-          ...(log ? { log } : {}),
-        })
+    const inboundMedia = await resolveInlineInboundMedia({
+      core,
+      message: msg,
+      maxBytes: inboundMediaMaxBytes,
+      ...(log ? { log } : {}),
+    })
 
     const timestamp = messageTimestamp
     const fromLabel = resolveInlineConversationLabel({
@@ -2311,16 +3023,20 @@ export async function monitorInlineProvider(params: {
     const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId })
     const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg)
     const previousTimestamp = core.channel.session.readSessionUpdatedAt({ storePath, sessionKey: route.sessionKey })
+    const rawBodyForAgent = isGroup && wasMentioned ? stripInlineBotMention(rawBody, botUsername) : rawBody
+    const currentEntityTextForAgent =
+      isGroup && wasMentioned
+        ? stripInlineBotMentionEntityText(currentEntityText, botUsername)
+        : currentEntityText
     const currentBody = buildInlineBodyForAgent({
-      rawBody,
+      rawBody: rawBodyForAgent,
       currentAttachmentText,
-      currentEntityText,
+      currentEntityText: currentEntityTextForAgent,
     })
     const contextBody = [
       effectiveHistoryContext.historyText,
       effectiveHistoryContext.attachmentText,
       effectiveHistoryContext.entityText,
-      INLINE_FORMATTING_NOTE,
     ]
       .filter(Boolean)
       .join("\n\n")
@@ -2336,7 +3052,7 @@ export async function monitorInlineProvider(params: {
       },
       ...(previousTimestamp != null ? { previousTimestamp } : {}),
       envelope: envelopeOptions,
-      body: currentBody || rawBody,
+      body: currentBody || rawBodyForAgent,
     })
     let body = [contextBody, currentEnvelope].filter(Boolean).join("\n\n")
     if (isGroup && groupHistoryKey) {
@@ -2365,9 +3081,7 @@ export async function monitorInlineProvider(params: {
             limit: historyLimit,
           })
         : []
-    const effectiveSurface = shouldUseTelegramSurfaceForModelCommands(normalizedCommandBody)
-      ? "telegram"
-      : CHANNEL_ID
+    const effectiveSurface = CHANNEL_ID
     const systemPrompt = resolveInlineSystemPrompt({
       account,
       ...(isGroup ? { groupId: String(effectiveChatId) } : {}),
@@ -2376,11 +3090,7 @@ export async function monitorInlineProvider(params: {
       msgId: msg.id,
       ...(callbackActionEvent ? { callbackActionEvent } : {}),
     })
-    const eventType = callbackActionEvent
-      ? "message_action"
-      : reactionEvent
-        ? `reaction_${reactionEvent.action}`
-        : "message"
+    const eventType = callbackActionEvent ? "message_action" : "message"
     const bodyForAgent = buildInlineBodyForAgentPrompt({
       body,
       channel: CHANNEL_ID,
@@ -2394,6 +3104,14 @@ export async function monitorInlineProvider(params: {
       senderId,
       senderLabel,
       wasMentioned: mentionGate.effectiveWasMentioned,
+      ...(isGroup
+        ? {
+            explicitlyMentionedBot: nativeMentioned,
+            mentionedUserIds,
+            implicitMentionKinds,
+            mentionSource,
+          }
+        : {}),
       ...(senderName ? { senderName } : {}),
       ...(senderUsername ? { senderUsername } : {}),
       ...(msg.replyToMsgId != null ? { replyToId: String(msg.replyToMsgId) } : {}),
@@ -2432,6 +3150,20 @@ export async function monitorInlineProvider(params: {
       Provider: CHANNEL_ID,
       Surface: effectiveSurface,
       MessageSid: messageSid,
+      ...(commandSource ? { CommandSource: commandSource } : {}),
+      CommandTurn: commandSource
+        ? {
+            kind: commandSource === "native" ? "native" : "text-slash",
+            source: commandSource,
+            authorized: commandAuthorized,
+            body: normalizedCommandBody,
+          }
+        : {
+            kind: "normal",
+            source: "message",
+            authorized: false,
+            body: normalizedCommandBody,
+          },
       ...(replyThreadContext ? { MessageThreadId: String(replyThreadContext.childChatId) } : {}),
       ...(replyThreadContext?.threadLabel ? { ThreadLabel: replyThreadContext.threadLabel } : {}),
       ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
@@ -2450,6 +3182,14 @@ export async function monitorInlineProvider(params: {
       ...buildInlineInboundMediaPayload(inboundMedia),
       Timestamp: timestamp || Date.now(),
       WasMentioned: mentionGate.effectiveWasMentioned,
+      ...(isGroup
+        ? {
+            ExplicitlyMentionedBot: nativeMentioned,
+            ...(mentionedUserIds.length > 0 ? { MentionedUserIds: mentionedUserIds } : {}),
+            ...(implicitMentionKinds.length > 0 ? { ImplicitMentionKinds: implicitMentionKinds } : {}),
+            MentionSource: mentionSource,
+          }
+        : {}),
       CommandAuthorized: commandAuthorized,
       GroupSystemPrompt: systemPrompt,
       OriginatingChannel: CHANNEL_ID,
@@ -2487,18 +3227,18 @@ export async function monitorInlineProvider(params: {
     })
     const onModelSelected = replyPipeline.onModelSelected
     const typingCallbacks = replyPipeline.typingCallbacks
-    const prefixOptions = {
+    const dispatcherPipelineOptions = {
       ...(replyPipeline.responsePrefix !== undefined
         ? { responsePrefix: replyPipeline.responsePrefix }
-        : {}),
-      ...(replyPipeline.enableSlackInteractiveReplies !== undefined
-        ? { enableSlackInteractiveReplies: replyPipeline.enableSlackInteractiveReplies }
         : {}),
       ...(replyPipeline.responsePrefixContextProvider
         ? {
             responsePrefixContextProvider:
               replyPipeline.responsePrefixContextProvider as never,
           }
+        : {}),
+      ...(replyPipeline.transformReplyPayload
+        ? { transformReplyPayload: replyPipeline.transformReplyPayload as never }
         : {}),
     }
 
@@ -2563,9 +3303,11 @@ export async function monitorInlineProvider(params: {
       if (!partialText || partialText === editStreamState.lastPartialText) return
       editStreamState.lastPartialText = partialText
 
-      const nextText = rewriteNumericMentionsToUsernames(
-        extractCompleteParagraphText(partialText),
-        senderProfilesById,
+      const nextText = sanitizeInlineDeliveryText(
+        rewriteNumericMentionsToUsernames(
+          extractCompleteParagraphText(partialText),
+          senderProfilesById,
+        ),
       ).trim()
       if (!nextText || nextText === editStreamState.accumulatedText) return
 
@@ -2662,7 +3404,7 @@ export async function monitorInlineProvider(params: {
           ctx: ctxPayload,
           cfg,
           dispatcherOptions: {
-            ...prefixOptions,
+            ...dispatcherPipelineOptions,
             ...(typingCallbacks ? { typingCallbacks } : {}),
             deliver: async (
               payload: InlineReplyPayload,
@@ -2671,9 +3413,22 @@ export async function monitorInlineProvider(params: {
               const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
               if (!visiblePayload) return
 
-              const rawText = visiblePayload.text ?? ""
+              const payloadRecord = visiblePayload as InlineReplyPayload & {
+                interactive?: unknown
+                presentation?: unknown
+              }
+              const rawText =
+                resolveInlineInteractiveTextFallback({
+                  text: visiblePayload.text,
+                  interactive: payloadRecord.interactive,
+                  presentation: payloadRecord.presentation,
+                }) ??
+                visiblePayload.text ??
+                ""
               const mediaList = resolveInlinePayloadMediaUrls(visiblePayload)
-              const outboundText = rewriteNumericMentionsToUsernames(rawText, senderProfilesById)
+              const outboundText = sanitizeInlineDeliveryText(
+                rewriteNumericMentionsToUsernames(rawText, senderProfilesById),
+              )
               const outboundActions = resolveInlineReplyActions(visiblePayload as Record<string, unknown>)
               const infoKind = typeof info?.kind === "string" ? info.kind : undefined
 
@@ -2701,10 +3456,11 @@ export async function monitorInlineProvider(params: {
                 includeReplyTo: boolean,
                 includeActions: boolean,
               ): Promise<void> => {
-                if (!text.trim()) return
+                const outbound = sanitizeInlineDeliveryText(text)
+                if (!outbound.trim()) return
                 const sent = await client.sendMessage({
                   chatId,
-                  text,
+                  text: outbound,
                   ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
                   ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
                   parseMarkdown,
@@ -2716,7 +3472,7 @@ export async function monitorInlineProvider(params: {
               const updateStreamedMessage = async (text: string, actions?: MessageActions): Promise<boolean> => {
                 await editStreamState.opChain
                 if (editStreamState.messageId == null) return false
-                const nextText = text.trim()
+                const nextText = sanitizeInlineDeliveryText(text).trim()
                 const textForEdit = nextText || editStreamState.accumulatedText
                 if (!textForEdit && actions === undefined) return true
                 const shouldSkipTextUpdate =
@@ -2851,7 +3607,7 @@ export async function monitorInlineProvider(params: {
       if (!delivered && (dispatchError != null || skippedNonSilent || failedNonSilent)) {
         const fallbackText =
           dispatchError != null
-            ? "Something went wrong while processing your request. Please try again."
+            ? INLINE_REQUEST_ERROR_FALLBACK
             : EMPTY_RESPONSE_FALLBACK
         const sent = await client.sendMessage({
           chatId,
@@ -2937,7 +3693,7 @@ export async function monitorInlineProvider(params: {
       void client
         .sendMessage({
           chatId,
-          text: "Something went wrong while processing your message. Please try again.",
+          text: INLINE_DEBOUNCE_ERROR_FALLBACK,
         })
         .then(() => {
           statusSink?.({ lastOutboundAt: Date.now() })
@@ -2967,72 +3723,64 @@ export async function monitorInlineProvider(params: {
           continue
         }
 
+        if (event.kind === "message.edit") {
+          const msg = {
+            ...event.message,
+            chatId: event.chatId,
+          } as Message
+          if (msg.out || msg.fromId === meId) continue
+          await queueInlineMessageLifecycleSystemEvent({
+            action: "edited",
+            chatId: event.chatId,
+            messageIds: [msg.id],
+            senderId: msg.fromId,
+          })
+          continue
+        }
+
+        if (event.kind === "message.delete") {
+          await queueInlineMessageLifecycleSystemEvent({
+            action: "deleted",
+            chatId: event.chatId,
+            messageIds: event.messageIds,
+          })
+          continue
+        }
+
         if (event.kind === "reaction.add") {
           if (event.reaction.userId === meId) continue
-          const onBotMessage = await isReactionTargetBotMessage({
-            client,
+          const shouldQueue = await shouldQueueInlineReactionSystemEvent({
             chatId: event.chatId,
             messageId: event.reaction.messageId,
-            meId,
-            botMessageIdsByChat,
-          }).catch((err) => {
-            statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
-            return false
+            senderId: event.reaction.userId,
           })
-          if (!onBotMessage) continue
+          if (!shouldQueue) continue
 
-          await handleInboundNow({
+          await queueInlineReactionSystemEvent({
+            action: "added",
             chatId: event.chatId,
-            msg: {
-              id: event.reaction.messageId,
-              chatId: event.chatId,
-              date: event.date,
-              fromId: event.reaction.userId,
-              message: "",
-              out: false,
-              mentioned: false,
-              replyToMsgId: event.reaction.messageId,
-            } as Message,
-            reactionEvent: {
-              action: "added",
-              emoji: event.reaction.emoji,
-              targetMessageId: event.reaction.messageId,
-            },
+            messageId: event.reaction.messageId,
+            senderId: event.reaction.userId,
+            emoji: event.reaction.emoji,
           })
           continue
         }
 
         if (event.kind === "reaction.delete") {
           if (event.userId === meId) continue
-          const onBotMessage = await isReactionTargetBotMessage({
-            client,
+          const shouldQueue = await shouldQueueInlineReactionSystemEvent({
             chatId: event.chatId,
             messageId: event.messageId,
-            meId,
-            botMessageIdsByChat,
-          }).catch((err) => {
-            statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
-            return false
+            senderId: event.userId,
           })
-          if (!onBotMessage) continue
+          if (!shouldQueue) continue
 
-          await handleInboundNow({
+          await queueInlineReactionSystemEvent({
+            action: "removed",
             chatId: event.chatId,
-            msg: {
-              id: event.messageId,
-              chatId: event.chatId,
-              date: event.date,
-              fromId: event.userId,
-              message: "",
-              out: false,
-              mentioned: false,
-              replyToMsgId: event.messageId,
-            } as Message,
-            reactionEvent: {
-              action: "removed",
-              emoji: event.emoji,
-              targetMessageId: event.messageId,
-            },
+            messageId: event.messageId,
+            senderId: event.userId,
+            emoji: event.emoji,
           })
           continue
         }
