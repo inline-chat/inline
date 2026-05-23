@@ -28,14 +28,14 @@ const InlineBotCommandsToolParameters = {
     },
     commands: {
       type: "array",
-      description: "Required for `set`. Telegram-style command list to register.",
+      description: "Required for `set`. Inline Bot API command list to register.",
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
           command: {
             type: "string",
-            description: "Slash command name without leading slash (`a-z`, `0-9`, `_`, max 32).",
+            description: "Inline bot command name; a leading `/` is accepted and stripped (`a-z`, `0-9`, `_`, max 32).",
           },
           description: {
             type: "string",
@@ -132,7 +132,7 @@ export function createInlineBotCommandsTool(ctx: {
     name: "inline_bot_commands",
     label: "Inline Bot Commands",
     description:
-      "Manage Inline bot slash commands via Bot API (`getMyCommands`, `setMyCommands`, `deleteMyCommands`).",
+      "Manage Inline bot commands via Bot API (`getMyCommands`, `setMyCommands`, `deleteMyCommands`).",
     parameters: InlineBotCommandsToolParameters,
     execute: async (_toolCallId, rawArgs) => {
       const args = (rawArgs ?? {}) as InlineBotCommandsToolArgs
