@@ -7,6 +7,15 @@ import {
   requireOpenAllowFrom,
 } from "../openclaw-compat.js"
 
+const SecretRefSchema = z
+  .object({
+    source: z.enum(["env", "file", "exec"]),
+    provider: z.string(),
+    id: z.string(),
+  })
+  .strict()
+const SecretInputSchema = z.union([z.string(), SecretRefSchema])
+
 const InlineActionsSchema = z
   .object({
     send: z.boolean().optional(),
@@ -29,11 +38,15 @@ const InlineCapabilitiesSchema = z
   })
   .strict()
 
+const InlineTargetSchema = z.union([z.string(), z.number()])
+const InlineAllowEntrySchema = z.union([z.string(), z.number()])
+
 const InlineGroupSchema = z
   .object({
     requireMention: z.boolean().optional(),
+    allowFrom: z.array(InlineAllowEntrySchema).optional(),
     systemPrompt: z.string().optional(),
-    tools: ToolPolicySchema,
+    tools: ToolPolicySchema.optional(),
     toolsBySender: z.record(z.string(), ToolPolicySchema).optional(),
   })
   .strict()
@@ -45,6 +58,16 @@ const InlineCommandsSchema = z
   })
   .strict()
 
+const InlineExecApprovalsSchema = z
+  .object({
+    enabled: z.union([z.boolean(), z.literal("auto")]).optional(),
+    approvers: z.array(InlineAllowEntrySchema).optional(),
+    agentFilter: z.array(z.string()).optional(),
+    sessionFilter: z.array(z.string()).optional(),
+    target: z.enum(["dm", "channel", "both"]).optional(),
+  })
+  .strict()
+const InlineReactionNotificationsSchema = z.enum(["off", "own", "all", "allowlist"])
 const InlineStreamingModeSchema = z.enum(["off", "partial", "block", "progress"])
 const InlineStreamingCommandTextSchema = z.enum(["raw", "status"])
 const InlineStreamingChunkSchema = z
@@ -134,13 +157,14 @@ export const InlineAccountSchemaBase = z
     name: z.string().optional(),
     enabled: z.boolean().optional(),
     baseUrl: z.string().optional(),
-    token: z.string().optional(),
+    token: SecretInputSchema.optional(),
     tokenFile: z.string().optional(),
     capabilities: InlineCapabilitiesSchema.optional(),
     dmPolicy: DmPolicySchema.optional().default("pairing"),
-    allowFrom: z.array(z.string()).optional(),
+    allowFrom: z.array(InlineAllowEntrySchema).optional(),
+    defaultTo: InlineTargetSchema.optional(),
     systemPrompt: z.string().optional(),
-    groupAllowFrom: z.array(z.string()).optional(),
+    groupAllowFrom: z.array(InlineAllowEntrySchema).optional(),
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     groups: z.record(z.string(), InlineGroupSchema.optional()).optional(),
     requireMention: z.boolean().optional(),
@@ -150,6 +174,8 @@ export const InlineAccountSchemaBase = z
     parseMarkdown: z.boolean().optional(),
     mediaMaxMb: z.number().positive().optional(),
     actions: InlineActionsSchema.optional(),
+    reactionNotifications: InlineReactionNotificationsSchema.optional(),
+    reactionAllowlist: z.array(InlineAllowEntrySchema).optional(),
     textChunkLimit: z.number().int().positive().optional(),
     chunkMode: z.enum(["length", "newline"]).optional(),
     streaming: InlineStreamingSchema.optional(),
@@ -159,6 +185,7 @@ export const InlineAccountSchemaBase = z
     streamViaEditMessage: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     commands: InlineCommandsSchema.optional(),
+    execApprovals: InlineExecApprovalsSchema.optional(),
   })
   .strict()
 

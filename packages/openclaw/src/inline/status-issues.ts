@@ -24,6 +24,7 @@ type InlineDiagnosticsSummary = {
 }
 
 const RECENT_RUNTIME_ISSUE_MS = 30 * 60 * 1000
+const INLINE_CONNECT_GRACE_MS = 120 * 1000
 
 function readInlineProbeSummary(value: unknown): InlineProbeSummary {
   if (!isRecord(value)) {
@@ -95,6 +96,10 @@ function isRecentTimestamp(timestamp: number | undefined): boolean {
   return Date.now() - timestamp <= RECENT_RUNTIME_ISSUE_MS
 }
 
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
 export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): ChannelStatusIssue[] {
   const issues: ChannelStatusIssue[] = []
   for (const entry of accounts) {
@@ -110,13 +115,30 @@ export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): C
       continue
     }
     const configured = entry.configured !== false
+    const lastError = asString(entry.lastError) ?? ""
     if (!configured) {
+      if (/duplicate inline bot token/i.test(lastError)) {
+        issues.push({
+          channel: "inline",
+          accountId,
+          kind: "config",
+          message: lastError,
+          fix: "Use a unique Inline bot token for each configured account, or disable/remove the duplicate account.",
+        })
+        continue
+      }
+      const tokenSource = asString(entry.tokenSource)
+      const tokenConfigured = tokenSource && tokenSource !== "none"
       issues.push({
         channel: "inline",
         accountId,
         kind: "config",
-        message: "Inline account is enabled but missing token/tokenFile.",
-        fix: "Set channels.inline.token (or tokenFile), then restart the gateway.",
+        message: tokenConfigured
+          ? "Inline account token is configured but unavailable."
+          : "Inline account is enabled but missing token/tokenFile.",
+        fix: tokenConfigured
+          ? "Resolve the configured token SecretRef or switch to channels.inline.tokenFile, INLINE_TOKEN, or INLINE_BOT_TOKEN, then restart the gateway."
+          : "Set channels.inline.token, channels.inline.tokenFile, INLINE_TOKEN, or INLINE_BOT_TOKEN, then restart the gateway.",
       })
       continue
     }
@@ -132,7 +154,6 @@ export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): C
       })
     }
 
-    const lastError = asString(entry.lastError)
     if (lastError) {
       issues.push({
         channel: "inline",
@@ -141,6 +162,21 @@ export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): C
         message: `Inline runtime error: ${lastError}`,
         fix: "Verify token/baseUrl and restart the gateway.",
       })
+    }
+
+    if (entry.running === true && entry.connected === false) {
+      const lastStartAt = asFiniteNumber(entry.lastStartAt)
+      const withinStartupGrace =
+        lastStartAt != null && Date.now() - lastStartAt < INLINE_CONNECT_GRACE_MS
+      if (!withinStartupGrace) {
+        issues.push({
+          channel: "inline",
+          accountId,
+          kind: "runtime",
+          message: "Inline realtime monitor is running but not connected.",
+          fix: "Run channel status with probing or restart the gateway. Check Inline token/baseUrl, network reachability, and gateway logs if it persists.",
+        })
+      }
     }
 
     const probe = readInlineProbeSummary(entry.probe)

@@ -207,17 +207,22 @@ function parseCurrentInlineTarget(ctx: Pick<InlineMessageToolContext, "messageCh
   const sessionKey = ctx.sessionKey?.trim()
   if (!sessionKey) return null
 
-  const explicitMatch = sessionKey.match(/^agent:[^:]+:inline:(chat|user):([0-9]+)(?::thread:[^:]+)?$/i)
+  const explicitMatch = sessionKey.match(/^agent:[^:]+:inline:(chat|group|user|direct):([0-9]+)(?::thread:([0-9]+))?$/i)
   if (explicitMatch?.[1] && explicitMatch[2]) {
+    const kind = explicitMatch[1].toLowerCase()
+    const threadId = explicitMatch[3]
+    if ((kind === "chat" || kind === "group") && threadId) {
+      return parseInlineTarget(threadId, "current chat")
+    }
     return parseInlineTarget(
-      explicitMatch[1].toLowerCase() === "user" ? `user:${explicitMatch[2]}` : explicitMatch[2],
+      kind === "user" || kind === "direct" ? `user:${explicitMatch[2]}` : explicitMatch[2],
       "current chat",
     )
   }
 
-  const legacyMatch = sessionKey.match(/^agent:[^:]+:inline:([0-9]+)(?::thread:[^:]+)?$/i)
+  const legacyMatch = sessionKey.match(/^agent:[^:]+:inline:([0-9]+)(?::thread:([0-9]+))?$/i)
   if (legacyMatch?.[1]) {
-    return parseInlineTarget(legacyMatch[1], "current chat")
+    return parseInlineTarget(legacyMatch[2] ?? legacyMatch[1], "current chat")
   }
 
   return null

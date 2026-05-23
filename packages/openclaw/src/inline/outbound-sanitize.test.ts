@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { sanitizeInlineVisibleLabel, sanitizeInlineVisibleText } from "./outbound-sanitize"
+import {
+  INLINE_ACTION_CALLBACK_DATA_MAX_BYTES,
+  INLINE_ACTION_LABEL_MAX_LENGTH,
+  sanitizeInlineActionCallbackData,
+  sanitizeInlineActionLabel,
+  sanitizeInlineVisibleLabel,
+  sanitizeInlineVisibleText,
+} from "./outbound-sanitize"
 
 const RUNTIME_NOTICE =
   "This context is runtime-generated, not user-authored. Keep internal details private."
@@ -35,6 +42,95 @@ describe("inline/outbound-sanitize", () => {
     })
   })
 
+  it("strips nested OpenClaw runtime context blocks and keeps surrounding text", () => {
+    const text = [
+      "Visible intro.",
+      "",
+      "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
+      "outer context",
+      "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
+      "nested context",
+      "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+      "outer tail",
+      "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+      "",
+      "Visible outro.",
+    ].join("\n")
+
+    expect(sanitizeInlineVisibleText(text)).toMatchObject({
+      text: "Visible intro.\n\nVisible outro.",
+      shouldSkip: false,
+      didStrip: true,
+    })
+  })
+
+  it("preserves inline mentions of OpenClaw runtime context markers", () => {
+    const text =
+      "The marker <<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>> is documented here, not a block."
+
+    expect(sanitizeInlineVisibleText(text)).toEqual({
+      text,
+      shouldSkip: false,
+      didStrip: false,
+    })
+  })
+
+  it("strips current OpenClaw runtime event preface and keeps visible text", () => {
+    const text = [
+      "OpenClaw runtime event.",
+      RUNTIME_NOTICE,
+      "",
+      "Visible event summary.",
+    ].join("\n")
+
+    expect(sanitizeInlineVisibleText(text)).toMatchObject({
+      text: "Visible event summary.",
+      shouldSkip: false,
+      didStrip: true,
+    })
+  })
+
+  it("strips legacy OpenClaw runtime context preface and keeps visible text", () => {
+    const text = [
+      "OpenClaw runtime context (internal):",
+      RUNTIME_NOTICE,
+      "",
+      "Visible legacy summary.",
+    ].join("\n")
+
+    expect(sanitizeInlineVisibleText(text)).toMatchObject({
+      text: "Visible legacy summary.",
+      shouldSkip: false,
+      didStrip: true,
+    })
+  })
+
+  it("strips legacy OpenClaw internal task events and keeps surrounding text", () => {
+    const text = [
+      "Visible intro.",
+      "",
+      "OpenClaw runtime context (internal):",
+      RUNTIME_NOTICE,
+      "",
+      "[Internal task completion event]",
+      "source: subagent",
+      "<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>",
+      "private result",
+      "<<<END_UNTRUSTED_CHILD_RESULT>>>",
+      "",
+      "Action:",
+      "summarize",
+      "",
+      "Visible outro.",
+    ].join("\n")
+
+    expect(sanitizeInlineVisibleText(text)).toMatchObject({
+      text: "Visible intro.\n\nVisible outro.",
+      shouldSkip: false,
+      didStrip: true,
+    })
+  })
+
   it("suppresses heartbeat ack payloads", () => {
     expect(sanitizeInlineVisibleText("**HEARTBEAT_OK**")).toMatchObject({
       text: "",
@@ -64,5 +160,20 @@ describe("inline/outbound-sanitize", () => {
   it("drops unsafe button labels", () => {
     expect(sanitizeInlineVisibleLabel(HEARTBEAT_CONTEXT)).toBeNull()
     expect(sanitizeInlineVisibleLabel(" Approve ")).toBe("Approve")
+  })
+
+  it("keeps action button labels within Inline server limits", () => {
+    expect(sanitizeInlineActionLabel(HEARTBEAT_CONTEXT)).toBeNull()
+    expect(sanitizeInlineActionLabel("x".repeat(80))).toBe(
+      `${"x".repeat(INLINE_ACTION_LABEL_MAX_LENGTH - 3)}...`,
+    )
+  })
+
+  it("drops action callback data that exceeds Inline server limits", () => {
+    expect(sanitizeInlineActionCallbackData(" approve ")).toBe("approve")
+    expect(sanitizeInlineActionCallbackData("x".repeat(INLINE_ACTION_CALLBACK_DATA_MAX_BYTES))).toBe(
+      "x".repeat(INLINE_ACTION_CALLBACK_DATA_MAX_BYTES),
+    )
+    expect(sanitizeInlineActionCallbackData("x".repeat(INLINE_ACTION_CALLBACK_DATA_MAX_BYTES + 1))).toBeNull()
   })
 })
