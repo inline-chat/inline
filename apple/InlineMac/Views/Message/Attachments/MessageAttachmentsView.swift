@@ -8,6 +8,7 @@ class MessageAttachmentsView: NSStackView {
 
   /// Message
   let message: Message
+  private let usesOutgoingBubbleStyle: Bool
 
   /// Renderable attachments (order preserved)
   var attachments: [FullAttachment]
@@ -17,8 +18,9 @@ class MessageAttachmentsView: NSStackView {
 
   // MARK: - Lifecycle
 
-  init(attachments: [FullAttachment], message: Message) {
+  init(attachments: [FullAttachment], message: Message, usesOutgoingBubbleStyle: Bool) {
     self.message = message
+    self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
     // Initialize attachments as empty array, we'll add attachments later in configure()
     self.attachments = []
     super.init(frame: .zero)
@@ -76,9 +78,17 @@ class MessageAttachmentsView: NSStackView {
     let attachmentView: AttachmentView
 
     if let _ = attachment.externalTask {
-      attachmentView = ExternalTaskAttachmentView(fullAttachment: attachment, message: message)
+      attachmentView = ExternalTaskAttachmentView(
+        fullAttachment: attachment,
+        message: message,
+        usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+      )
     } else if attachment.isLoomPreview {
-      attachmentView = LoomAttachmentView(fullAttachment: attachment, message: message)
+      attachmentView = LoomAttachmentView(
+        fullAttachment: attachment,
+        message: message,
+        usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+      )
     } else {
       // Unsupported attachment type
       return

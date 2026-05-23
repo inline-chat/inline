@@ -68,7 +68,8 @@ class MessageTableCell: NSView {
        // and translate not changed
        wasTranslated == message.isTranslated,
        // different width and height (ie. window resized)
-       currentContent.props.equalExceptSize(props)
+       currentContent.props.equalExceptSize(props),
+       currentContent.props.layout.hasSameConstraintShape(as: props.layout)
     {
       self.currentContent = (message, props)
       log.trace("updating message size \(currentContent.message.message.id ?? 0)")
@@ -96,9 +97,9 @@ class MessageTableCell: NSView {
        // exclude replies from reuse
        currentContent.message.repliedToMessage?.id == message.repliedToMessage?.id,
        // disable re-use for file message completely for now until we can optimize later
-       // same avatar
-       currentContent.props.firstInGroup == props.firstInGroup,
-       currentContent.props.renderStyle == props.renderStyle
+       // same message-level layout flags and same constraint graph
+       currentContent.props.equalExceptSize(props),
+       currentContent.props.layout.hasSameConstraintShape(as: props.layout)
     // For now, recreate if moving from single line to multi line
     // , currentContent.props.layout.isSingleLine == props.layout.isSingleLine
     // different text

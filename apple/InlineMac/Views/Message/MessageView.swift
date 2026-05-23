@@ -169,6 +169,14 @@ class MessageViewAppKit: NSView {
     outgoing && (emojiMessage || reactionsOutsideBubble)
   }
 
+  private var usesOutgoingBubbleStyle: Bool {
+    usesOutgoingBubbleStyle(for: props)
+  }
+
+  private func usesOutgoingBubbleStyle(for props: MessageViewProps) -> Bool {
+    outgoing && props.layout.hasBubbleColor
+  }
+
   private var textWidth: CGFloat {
     props.layout.text?.size.width ?? 1.0
   }
@@ -178,14 +186,11 @@ class MessageViewAppKit: NSView {
   }
 
   private var textColor: NSColor {
-    Self.textColor(outgoing: outgoing)
+    Self.textColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
   }
 
   private var forwardHeaderTextColor: NSColor {
-    if outgoing, props.layout.hasBubbleColor {
-      return .white
-    }
-    return .controlAccentColor
+    usesOutgoingBubbleStyle ? .white : .controlAccentColor
   }
 
   private var forwardHeaderTitle: String {
@@ -232,20 +237,20 @@ class MessageViewAppKit: NSView {
     return "Forwarded from: \(forwardHeaderTitle)"
   }
 
+  static func textColor(usesOutgoingBubbleStyle: Bool) -> NSColor {
+    usesOutgoingBubbleStyle ? .white : .labelColor
+  }
+
   static func textColor(outgoing: Bool) -> NSColor {
-    if outgoing {
-      NSColor.white
-    } else {
-      NSColor.labelColor
-    }
+    textColor(usesOutgoingBubbleStyle: outgoing)
+  }
+
+  static func linkColor(usesOutgoingBubbleStyle: Bool) -> NSColor {
+    usesOutgoingBubbleStyle ? .white : .linkColor
   }
 
   static func linkColor(outgoing: Bool) -> NSColor {
-    if outgoing {
-      NSColor.white
-    } else {
-      NSColor.linkColor
-    }
+    linkColor(usesOutgoingBubbleStyle: outgoing)
   }
 
   private var emojiMessage: Bool {
@@ -263,11 +268,11 @@ class MessageViewAppKit: NSView {
   }
 
   private var linkColor: NSColor {
-    Self.linkColor(outgoing: outgoing)
+    Self.linkColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
   }
 
   private var mentionColor: NSColor {
-    Self.linkColor(outgoing: outgoing)
+    Self.linkColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
   }
 
   private var senderFont: NSFont {
@@ -295,7 +300,6 @@ class MessageViewAppKit: NSView {
   // Add gesture recognizer property
   private var longPressGesture: NSPressGestureRecognizer?
   private var doubleClickGesture: NSClickGestureRecognizer?
-  private var avatarClickGesture: NSClickGestureRecognizer?
 
   // MARK: Views
 
@@ -348,7 +352,11 @@ class MessageViewAppKit: NSView {
   }()
 
   private lazy var timeAndStateView: MessageTimeAndState = {
-    let view = MessageTimeAndState(fullMessage: fullMessage, overlay: isTimeOverlay)
+    let view = MessageTimeAndState(
+      fullMessage: fullMessage,
+      overlay: isTimeOverlay,
+      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
     return view
@@ -378,7 +386,7 @@ class MessageViewAppKit: NSView {
     let view = DocumentView(
       documentInfo: documentInfo,
       fullMessage: self.fullMessage,
-      white: outgoing
+      white: usesOutgoingBubbleStyle
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -387,7 +395,10 @@ class MessageViewAppKit: NSView {
   private lazy var voiceMessageView: NSHostingView<VoiceMessageBubble>? = {
     guard hasVoiceInDocumentSlot else { return nil }
 
-    let view = NSHostingView(rootView: VoiceMessageBubble(message: fullMessage.message, outgoing: outgoing))
+    let view = NSHostingView(rootView: VoiceMessageBubble(
+      message: fullMessage.message,
+      outgoing: usesOutgoingBubbleStyle
+    ))
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -399,7 +410,11 @@ class MessageViewAppKit: NSView {
   private var messageActionRowsView: MessageActionRowsView?
 
   private func createAttachmentsView() -> MessageAttachmentsView? {
-    let view = MessageAttachmentsView(attachments: fullMessage.attachments, message: message)
+    let view = MessageAttachmentsView(
+      attachments: fullMessage.attachments,
+      message: message,
+      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }
@@ -455,7 +470,7 @@ class MessageViewAppKit: NSView {
     view.configure(
       rows: renderableMessageActionRows,
       loadingActionIds: loadingActionIdsForCurrentMessage(),
-      outgoing: message.message.out == true,
+      outgoing: usesOutgoingBubbleStyle(for: props),
       rowHeight: 28,
       messageFontSize: props.layout.fontSize
     )
@@ -494,7 +509,7 @@ class MessageViewAppKit: NSView {
     messageActionRowsView.configure(
       rows: renderableMessageActionRows,
       loadingActionIds: loadingActionIdsForCurrentMessage(),
-      outgoing: outgoing,
+      outgoing: usesOutgoingBubbleStyle,
       rowHeight: 28,
       messageFontSize: props.layout.fontSize
     )
@@ -574,13 +589,7 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    let textColor: NSColor
-    if message.out == true, props.layout.hasBubbleColor {
-      textColor = .white
-    } else {
-      textColor = .controlAccentColor
-    }
-    forwardHeaderLabel.textColor = textColor
+    forwardHeaderLabel.textColor = forwardHeaderTextColor
     forwardHeaderLabel.stringValue = forwardHeaderText
 
     if forwardHeaderLabel.superview == nil {
@@ -596,7 +605,10 @@ class MessageViewAppKit: NSView {
 
     let desiredView: NSView?
     if hasVoiceInDocumentSlot {
-      voiceMessageView?.rootView = VoiceMessageBubble(message: fullMessage.message, outgoing: outgoing)
+      voiceMessageView?.rootView = VoiceMessageBubble(
+        message: fullMessage.message,
+        outgoing: usesOutgoingBubbleStyle
+      )
       desiredView = voiceMessageView
     } else {
       if let documentInfo = fullMessage.documentInfo {
@@ -625,10 +637,15 @@ class MessageViewAppKit: NSView {
 
   /// Reply
   private var embeddedReplyStyle: EmbeddedMessageView.EmbeddedMessageStyle {
+    embeddedReplyStyle(for: props)
+  }
+
+  private func embeddedReplyStyle(for props: MessageViewProps) -> EmbeddedMessageView.EmbeddedMessageStyle {
     let appearance = EmbeddedReplyStyleResolver.appearance(
       isOutgoing: outgoing,
-      hasPhoto: hasPhoto,
-      hasText: hasVisibleText
+      hasPhoto: props.layout.hasPhoto,
+      hasText: hasVisibleText,
+      hasBubbleColor: props.layout.hasBubbleColor
     )
 
     switch appearance {
@@ -666,15 +683,13 @@ class MessageViewAppKit: NSView {
   }
 
   private func updateReplyThreadSummaryView(for props: MessageViewProps) {
-    replyThreadSummaryView.setStyle(embeddedReplyStyle)
+    replyThreadSummaryView.setStyle(embeddedReplyStyle(for: props))
     guard shouldShowReplyThreadSummary(for: props) else {
-      replyThreadSummaryView.isHidden = true
-      replyThreadSummaryView.setLoading(false)
+      replyThreadSummaryView.clear()
       return
     }
     guard let summary = message.replyThreadSummary else {
-      replyThreadSummaryView.isHidden = true
-      replyThreadSummaryView.setLoading(false)
+      replyThreadSummaryView.clear()
       return
     }
 
@@ -687,8 +702,10 @@ class MessageViewAppKit: NSView {
   }
 
   private func recentReplyThreadAuthors() -> [UserInfo] {
-    message.replyThreadRecentReplierUserIds.compactMap { userId in
-      ObjectCache.shared.getCachedUser(id: userId)
+    message.replyThreadRecentReplierUserIds.map { userId in
+      ObjectCache.shared.getUser(id: userId) ?? UserInfo(
+        user: User(id: userId, email: nil, firstName: nil)
+      )
     }
   }
 
@@ -894,9 +911,12 @@ class MessageViewAppKit: NSView {
 
     if showsName {
       addSubview(nameLabel)
-      let name = from.firstName ?? from.username ?? ""
-      let nameForInitials = UserAvatar.getNameForInitials(user: from)
-      nameLabel.stringValue = outgoing ? "You" : name
+      let sender = outgoing ? (dependencies?.rootData?.currentUserInfo?.user ?? from) : from
+      let name = sender.shortDisplayName
+      let nameForInitials = UserAvatar.getNameForInitials(user: sender)
+      // Previous outgoing label behavior, kept as reference for quick revert.
+      // nameLabel.stringValue = outgoing ? "You" : name
+      nameLabel.stringValue = name
       nameLabel.textColor = NSColor(
         InitialsCircle.ColorPalette
           .color(for: nameForInitials)
@@ -1319,9 +1339,8 @@ class MessageViewAppKit: NSView {
     }
 
     if showsAvatar {
-      avatarClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleAvatarClick(_:)))
-      if let gesture = avatarClickGesture {
-        avatarView.addGestureRecognizer(gesture)
+      avatarView.onClick = { [weak self] in
+        self?.handleAvatarClick()
       }
     }
   }
@@ -1375,7 +1394,7 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  @objc private func handleAvatarClick(_: NSClickGestureRecognizer) {
+  private func handleAvatarClick() {
     guard !isDM else { return }
     guard let user = fullMessage.senderInfo?.user else { return }
 
@@ -2067,6 +2086,22 @@ class MessageViewAppKit: NSView {
       if photoViewTopConstraint.constant != props.layout.photoContentViewTop {
         photoViewTopConstraint.constant = props.layout.photoContentViewTop
       }
+    } else if let photo = props.layout.photo {
+      if photoView.superview == nil {
+        contentView.addSubview(photoView)
+      }
+      photoViewTopConstraint = photoView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: props.layout.photoContentViewTop
+      )
+      photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
+      photoViewWidthConstraint = photoView.widthAnchor.constraint(equalToConstant: photo.size.width)
+      NSLayoutConstraint.activate([
+        photoViewTopConstraint!,
+        photoViewHeightConstraint!,
+        photoViewWidthConstraint!,
+        photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
+      ])
     }
 
     if let video = props.layout.video,
@@ -2088,6 +2123,9 @@ class MessageViewAppKit: NSView {
       }
     } else if let video = props.layout.video {
       // Set up constraints if they didn't exist (e.g. view reused for a different message)
+      if videoView.superview == nil {
+        contentView.addSubview(videoView)
+      }
       videoViewTopConstraint = videoView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
         constant: props.layout.videoContentViewTop
@@ -2332,18 +2370,16 @@ class MessageViewAppKit: NSView {
       let cachedAttributedString = CacheAttrs.shared.get(message: fullMessage, renderStyle: .bubble)
     {
       let attributedString = cachedAttributedString
-      textView.textStorage?.setAttributedString(attributedString)
-
-      if useTextKit2 {
-        textView.textContainer?.size = props.layout.text?.size ?? .zero
-      } else {
-        textView.textContainer?.size = props.layout.text?.size ?? .zero
-        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
-      }
+      textView.setMessageAttributedString(
+        attributedString,
+        isRtl: props.isRtl,
+        layoutSize: props.layout.text?.size ?? .zero,
+        useTextKit2: useTextKit2
+      )
     }
 
-    let codeBlockBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.05)
-    let inlineCodeBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.06)
+    let codeBlockBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.05)
+    let inlineCodeBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.06)
 
     /// Apply entities to text and create an NSAttributedString
     let attributedString = ProcessEntities.toAttributedString(
@@ -2370,16 +2406,13 @@ class MessageViewAppKit: NSView {
     // Store links for tap handling
     detectedLinks = linkMatches.map { (range: $0.range, url: $0.url) }
 
-    textView.textStorage?.setAttributedString(attributedString)
-
     CacheAttrs.shared.set(message: fullMessage, renderStyle: .bubble, value: attributedString)
-
-    if useTextKit2 {
-      textView.textContainer?.size = props.layout.text?.size ?? .zero
-    } else {
-      textView.textContainer?.size = props.layout.text?.size ?? .zero
-      textView.layoutManager?.ensureLayout(for: textView.textContainer!)
-    }
+    textView.setMessageAttributedString(
+      attributedString,
+      isRtl: props.isRtl,
+      layoutSize: props.layout.text?.size ?? .zero,
+      useTextKit2: useTextKit2
+    )
   }
 
   func reflectBoundsChange(fraction _: CGFloat) {}
@@ -3016,7 +3049,7 @@ class MessageViewAppKit: NSView {
     // Update related message for reply view
     if props.layout.hasReply {
       replyView.setRelatedMessage(fullMessage.message)
-      replyView.setStyle(embeddedReplyStyle)
+      replyView.setStyle(embeddedReplyStyle(for: props))
       if let embeddedMessage = fullMessage.repliedToMessage {
         replyView.update(with: embeddedMessage, kind: .replyInMessage)
       }
@@ -3070,7 +3103,11 @@ class MessageViewAppKit: NSView {
     }
 
     // Update time and state
-    timeAndStateView.updateMessage(fullMessage, overlay: isTimeOverlay)
+    timeAndStateView.updateMessage(
+      fullMessage,
+      overlay: isTimeOverlay,
+      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+    )
 
     // Ensure swipe UI is reset if message cannot be replied to
     if !self.fullMessage.canReply || self.isAnchorMessage {
@@ -3322,8 +3359,7 @@ class MessageViewAppKit: NSView {
     shineEffectView?.stopAnimation()
     shineEffectView?.removeFromSuperview()
     shineEffectView = nil
-    replyThreadSummaryView.isHidden = true
-    replyThreadSummaryView.setLoading(false)
+    replyThreadSummaryView.clear()
 
     // Re-setup translation state observation
     setupTranslationStateObservation()

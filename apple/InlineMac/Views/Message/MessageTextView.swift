@@ -76,28 +76,6 @@ class MessageTextView: NSTextView {
       let path = NSBezierPath(roundedRect: blockRect, xRadius: codeBlockStyle.cornerRadius, yRadius: codeBlockStyle.cornerRadius)
       backgroundColor.setFill()
       path.fill()
-
-      let textColor = (textStorage.attribute(.foregroundColor, at: range.location, effectiveRange: nil)
-        as? NSColor) ?? NSColor.labelColor
-      let lineColor = textColor.withAlphaComponent(0.35)
-      let lineRect = NSRect(
-        x: blockRect.minX,
-        y: blockRect.minY,
-        width: codeBlockStyle.lineWidth,
-        height: blockRect.height
-      )
-      let linePath = NSBezierPath(roundedRect: lineRect, xRadius: codeBlockStyle.lineWidth / 2, yRadius: codeBlockStyle.lineWidth / 2)
-      if let context = NSGraphicsContext.current?.cgContext {
-        context.saveGState()
-        context.addPath(path.cgPath)
-        context.clip()
-        lineColor.setFill()
-        linePath.fill()
-        context.restoreGState()
-      } else {
-        lineColor.setFill()
-        linePath.fill()
-      }
     }
   }
 
@@ -260,5 +238,55 @@ class MessageTextView: NSTextView {
     }
 
     return mergedRects
+  }
+}
+
+extension NSTextView {
+  func setMessageAttributedString(
+    _ attributedString: NSAttributedString,
+    isRtl: Bool,
+    layoutSize: CGSize,
+    useTextKit2: Bool
+  ) {
+    let direction: NSWritingDirection = isRtl ? .rightToLeft : .leftToRight
+    let alignment: NSTextAlignment = isRtl ? .right : .left
+    let displayedString = attributedString.messageApplyingParagraphDirection(
+      direction: direction,
+      alignment: alignment
+    )
+
+    textStorage?.setAttributedString(displayedString)
+    self.alignment = alignment
+
+    let fullRange = NSRange(location: 0, length: displayedString.length)
+    if fullRange.length > 0 {
+      setAlignment(alignment, range: fullRange)
+      setBaseWritingDirection(direction, range: fullRange)
+    }
+
+    textContainer?.size = layoutSize
+    if !useTextKit2, let textContainer {
+      layoutManager?.ensureLayout(for: textContainer)
+    }
+  }
+}
+
+private extension NSAttributedString {
+  func messageApplyingParagraphDirection(
+    direction: NSWritingDirection,
+    alignment: NSTextAlignment
+  ) -> NSAttributedString {
+    guard length > 0 else { return self }
+
+    let result = NSMutableAttributedString(attributedString: self)
+    let fullRange = NSRange(location: 0, length: length)
+    result.enumerateAttribute(.paragraphStyle, in: fullRange) { value, range, _ in
+      let style = ((value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle)
+        ?? (NSParagraphStyle.default.mutableCopy() as! NSMutableParagraphStyle)
+      style.baseWritingDirection = direction
+      style.alignment = alignment
+      result.addAttribute(.paragraphStyle, value: style, range: range)
+    }
+    return result
   }
 }

@@ -122,9 +122,9 @@ struct ReactionItem: View {
     }
   }
 
-  static let padding: CGFloat = 6
+  static let padding: CGFloat = ReactionChipMetrics.padding
   static let spacing: CGFloat = 4
-  static let height: CGFloat = 28
+  static let height: CGFloat = ReactionChipMetrics.height
   static let emojiFontSize: CGFloat = 14
   static let textFontSize: CGFloat = 12
   static let avatarSize: CGFloat = 20

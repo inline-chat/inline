@@ -65,6 +65,12 @@ final class NewPhotoView: NSView {
 
   // Corner radius properties
   private let maskLayer = CAShapeLayer()
+  var cornerRadiusReduction: CGFloat = 0 {
+    didSet {
+      updateCornerRadii()
+      updateMasks()
+    }
+  }
   var topLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
   var topRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
   var bottomLeftRadius: CGFloat = 0.0
@@ -161,7 +167,7 @@ final class NewPhotoView: NSView {
     let hasText = fullMessage.message.text?.isEmpty == false
     let hasTopHeader = fullMessage.message.repliedToMessageId != nil
       || fullMessage.message.hasForwardHeader
-    let bubbleRadius = Theme.messageBubbleCornerRadius - 1
+    let bubbleRadius = max(0, Theme.messageBubbleCornerRadius - 1 - cornerRadiusReduction)
     let topRadius = hasTopHeader ? 0 : bubbleRadius
 
     topLeftRadius = topRadius

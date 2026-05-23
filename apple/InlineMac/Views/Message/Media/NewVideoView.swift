@@ -360,6 +360,12 @@ final class NewVideoView: NSView {
   private var isScrolling = false
   private var haveAddedImageView = false
   private let maskLayer = CAShapeLayer()
+  var cornerRadiusReduction: CGFloat = 0 {
+    didSet {
+      updateCornerRadii()
+      updateMasks()
+    }
+  }
   private var topLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
   private var topRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
   private var bottomLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
@@ -693,7 +699,7 @@ final class NewVideoView: NSView {
     let hasText = fullMessage.message.text?.isEmpty == false
     let hasTopHeader = fullMessage.message.repliedToMessageId != nil
       || fullMessage.message.hasForwardHeader
-    let bubbleRadius = Theme.messageBubbleCornerRadius - 1
+    let bubbleRadius = max(0, Theme.messageBubbleCornerRadius - 1 - cornerRadiusReduction)
     let topRadius = hasTopHeader ? 0 : bubbleRadius
 
     topLeftRadius = topRadius

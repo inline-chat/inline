@@ -11,7 +11,6 @@ final class ReplyThreadSummaryView: NSView {
     static let unreadDotSize: CGFloat = 6
     static let cornerRadius: CGFloat = 8
     static let minWidth: CGFloat = 200
-    static let borderWidth: CGFloat = 1
   }
 
   var onTap: (() -> Void)?
@@ -19,9 +18,11 @@ final class ReplyThreadSummaryView: NSView {
   private var style: EmbeddedMessageView.EmbeddedMessageStyle
   private var avatarViews: [UserAvatarView] = []
   private var avatarsWidthConstraint: NSLayoutConstraint?
+  private var avatarsToLabelSpacingConstraint: NSLayoutConstraint?
   private var minWidthConstraint: NSLayoutConstraint?
   private var unreadDotLeadingConstraint: NSLayoutConstraint?
   private var unreadDotWidthConstraint: NSLayoutConstraint?
+  private var spinnerWidthConstraint: NSLayoutConstraint?
   private var loading = false
   private var trackingAreaRef: NSTrackingArea?
   private var hovering = false {
@@ -40,7 +41,7 @@ final class ReplyThreadSummaryView: NSView {
   private lazy var replyCountLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 12, weight: .medium)
+    label.font = .systemFont(ofSize: NSFont.systemFontSize)
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
     label.cell?.usesSingleLineMode = true
@@ -108,6 +109,7 @@ final class ReplyThreadSummaryView: NSView {
     guard self.loading != loading else { return }
     self.loading = loading
     spinnerView.isHidden = !loading
+    spinnerWidthConstraint?.constant = loading ? 12 : 0
     if loading {
       spinnerView.startAnimation(nil)
     } else {
@@ -115,12 +117,25 @@ final class ReplyThreadSummaryView: NSView {
     }
   }
 
+  func clear() {
+    replyCountLabel.stringValue = ""
+    unreadDotView.isHidden = true
+    unreadDotLeadingConstraint?.constant = 0
+    unreadDotWidthConstraint?.constant = 0
+    updateAvatars(authors: [])
+    spinnerWidthConstraint?.constant = 0
+    setLoading(false)
+    hovering = false
+    pressed = false
+    isHidden = true
+  }
+
   private func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
     layer?.masksToBounds = true
     layer?.cornerRadius = Constants.cornerRadius
-    layer?.borderWidth = Constants.borderWidth
+    layer?.borderWidth = 0
 
     addSubview(avatarsContainer)
     addSubview(replyCountLabel)
@@ -129,6 +144,10 @@ final class ReplyThreadSummaryView: NSView {
     addGestureRecognizer(tapGesture)
 
     avatarsWidthConstraint = avatarsContainer.widthAnchor.constraint(equalToConstant: 0)
+    avatarsToLabelSpacingConstraint = replyCountLabel.leadingAnchor.constraint(
+      equalTo: avatarsContainer.trailingAnchor,
+      constant: 0
+    )
     minWidthConstraint = widthAnchor.constraint(greaterThanOrEqualToConstant: Constants.minWidth)
     minWidthConstraint?.priority = .defaultHigh
 
@@ -137,6 +156,7 @@ final class ReplyThreadSummaryView: NSView {
       constant: Constants.contentSpacing
     )
     unreadDotWidthConstraint = unreadDotView.widthAnchor.constraint(equalToConstant: Constants.unreadDotSize)
+    spinnerWidthConstraint = spinnerView.widthAnchor.constraint(equalToConstant: 0)
 
     NSLayoutConstraint.activate([
       minWidthConstraint!,
@@ -146,10 +166,7 @@ final class ReplyThreadSummaryView: NSView {
       avatarsContainer.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
       avatarsWidthConstraint!,
 
-      replyCountLabel.leadingAnchor.constraint(
-        equalTo: avatarsContainer.trailingAnchor,
-        constant: Constants.contentSpacing
-      ),
+      avatarsToLabelSpacingConstraint!,
       replyCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
       unreadDotLeadingConstraint!,
@@ -163,7 +180,7 @@ final class ReplyThreadSummaryView: NSView {
       ),
       spinnerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
       spinnerView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      spinnerView.widthAnchor.constraint(equalToConstant: 12),
+      spinnerWidthConstraint!,
       spinnerView.heightAnchor.constraint(equalToConstant: 12),
 
       replyCountLabel.trailingAnchor.constraint(lessThanOrEqualTo: spinnerView.leadingAnchor, constant: -6),
@@ -201,6 +218,9 @@ final class ReplyThreadSummaryView: NSView {
     }
 
     let visibleCount = visibleAuthors.count
+    avatarsContainer.isHidden = visibleCount == 0
+    avatarsToLabelSpacingConstraint?.constant = visibleCount == 0 ? 0 : Constants.contentSpacing
+
     let avatarsWidth: CGFloat = if visibleCount == 0 {
       0
     } else {
@@ -214,32 +234,28 @@ final class ReplyThreadSummaryView: NSView {
     let hoverAlpha: CGFloat
     let pressedAlpha: CGFloat
     let bgColor: NSColor
-    let borderColor: NSColor
 
     switch style {
     case .colored:
       replyCountLabel.textColor = .labelColor
-      unreadDotView.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-      bgColor = .controlAccentColor
-      baseAlpha = 0.08
-      hoverAlpha = 0.12
-      pressedAlpha = 0.17
-      borderColor = NSColor.separatorColor.withAlphaComponent(0.35)
+      unreadDotView.layer?.backgroundColor = NSColor.secondaryLabelColor.cgColor
+      bgColor = .labelColor
+      baseAlpha = 0.055
+      hoverAlpha = 0.08
+      pressedAlpha = 0.11
       spinnerView.appearance = nil
     case .white:
       replyCountLabel.textColor = NSColor.white.withAlphaComponent(0.96)
-      unreadDotView.layer?.backgroundColor = NSColor.white.cgColor
+      unreadDotView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.8).cgColor
       bgColor = .white
-      baseAlpha = 0.09
+      baseAlpha = 0.1
       hoverAlpha = 0.14
-      pressedAlpha = 0.2
-      borderColor = NSColor.white.withAlphaComponent(0.2)
+      pressedAlpha = 0.18
       spinnerView.appearance = NSAppearance(named: .darkAqua)
     }
 
     let alpha = pressed ? pressedAlpha : (hovering ? hoverAlpha : baseAlpha)
     layer?.backgroundColor = bgColor.withAlphaComponent(alpha).cgColor
-    layer?.borderColor = borderColor.cgColor
   }
 
   override func updateTrackingAreas() {

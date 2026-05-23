@@ -20,6 +20,10 @@ final class ReactionChipButton: NSButton {
     didSet { updateColors() }
   }
 
+  var neutralStyle: Bool = false {
+    didSet { updateColors() }
+  }
+
   var backgroundOverride: (primary: NSColor, secondary: NSColor)? {
     didSet { updateColors() }
   }
@@ -35,6 +39,7 @@ final class ReactionChipButton: NSButton {
   var contextMenuProvider: (() -> NSMenu?)?
 
   private var avatarViews: [UserAvatarView] = []
+  private var isPressed = false
 
   private let emojiLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
@@ -143,9 +148,41 @@ final class ReactionChipButton: NSButton {
     contextMenuProvider?() ?? super.menu(for: event)
   }
 
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    bounds.contains(point) ? self : nil
+  }
+
+  override func highlight(_ flag: Bool) {
+    super.highlight(flag)
+    setPressed(flag)
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil {
+      setPressed(false)
+    } else {
+      layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+    }
+  }
+
   private var weReacted: Bool {
     guard let group, let currentUserId else { return false }
     return group.reactions.contains { $0.reaction.userId == currentUserId }
+  }
+
+  private func setPressed(_ pressed: Bool) {
+    guard isPressed != pressed else { return }
+    isPressed = pressed
+
+    CATransaction.begin()
+    CATransaction.setAnimationDuration(pressed ? 0.06 : 0.10)
+    CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+    layer?.transform = pressed
+      ? CATransform3DMakeScale(0.95, 0.95, 1)
+      : CATransform3DIdentity
+    CATransaction.commit()
+    CATransaction.flush()
   }
 
   private func updateContent() {
@@ -183,6 +220,7 @@ final class ReactionChipButton: NSButton {
         let userInfo = fullReaction.userInfo ?? ObjectCache.shared.getUser(id: fullReaction.reaction.userId)
         let avatarView = UserAvatarView(userInfo: userInfo ?? .deleted, size: ReactionChipMetrics.avatarSize)
         avatarView.translatesAutoresizingMaskIntoConstraints = true
+        avatarView.acceptsMouseInteraction = false
         addSubview(avatarView)
         avatarViews.append(avatarView)
       }
@@ -206,6 +244,10 @@ final class ReactionChipButton: NSButton {
     if let override = backgroundOverride {
       return weReacted ? override.primary : override.secondary
     }
+    if neutralStyle {
+      let base = NSColor.controlAccentColor
+      return base.withAlphaComponent(weReacted ? 0.22 : 0.12)
+    }
     if forceIncomingStyle {
       let base: NSColor = isDarkMode ? .white : .controlAccentColor
       return weReacted ? base.withAlphaComponent(0.9) : base.withAlphaComponent(0.2)
@@ -222,6 +264,9 @@ final class ReactionChipButton: NSButton {
   private var foregroundColor: NSColor {
     if let override = foregroundOverride {
       return override
+    }
+    if neutralStyle {
+      return weReacted ? .labelColor : .controlAccentColor
     }
     if forceIncomingStyle {
       if isDarkMode {

@@ -37,12 +37,37 @@ class MessageSizeCalculator {
   static let extraSafeWidth = 0.0
 
   static let maxMessageWidth: CGFloat = Theme.messageMaxWidth
-  static let minimalMaxMessageWidth: CGFloat = 760
-  static let minimalAvatarSize: CGFloat = 22
-  static let minimalMediaMaxSide: CGFloat = 280
-  static let minimalStickerMaxSide: CGFloat = 120
+  static let minimalMaxMessageWidth: CGFloat = 700
+  static let minimalAvatarSize: CGFloat = 30
+  static let minimalMediaMaxWidth: CGFloat = 400
+  static let minimalMediaMaxHeight: CGFloat = 300
+  static let stickerMaxSide: CGFloat = 120
+  static let minimalStickerMaxSide: CGFloat = stickerMaxSide
   static let minimalDocumentMaxWidth: CGFloat = 420
   static let minimalAttachmentsMaxWidth: CGFloat = 560
+  static let minimalGroupSpacing: CGFloat = 8
+  static let minimalAfterDaySeparatorGroupSpacing: CGFloat = 2
+  static let minimalHoverSideInset: CGFloat = 18
+  static let minimalHoverContentInset: CGFloat = 6
+  static let minimalContentExtraLeadingInset: CGFloat = 8
+  static let minimalInlineTimeSpacing: CGFloat = 6
+  static let minimalFollowUpTimeTopOffset: CGFloat = 1
+  static let minimalInlineTimeVerticalOffset: CGFloat = 1
+  static let minimalTextFontSize: Double = Theme.messageTextFontSize
+  static let minimalMinTextWidth: CGFloat = 36
+  static let minimalTextOnlyMinHeight: CGFloat = 22
+  static let minimalFollowUpMinHeight: CGFloat = 22
+  static let minimalMediaVerticalInset: CGFloat = 4
+  static let minimalNameMediaSpacing: CGFloat = 4
+  static let minimalReactionTopSpacing: CGFloat = 3
+  static let minimalReactionBottomSpacing: CGFloat = 4
+  static let minimalNameAvatarOffset: CGFloat = 2
+  static var minimalContentLeadingInset: CGFloat {
+    minimalHoverSideInset + minimalHoverContentInset + minimalContentExtraLeadingInset
+  }
+  static var minimalNameHeight: CGFloat {
+    max(15, Theme.messageNameLabelHeight - 2)
+  }
   static let messageActionsMinWidth: CGFloat = 180
   static let messageActionButtonMinWidth: CGFloat = 110
   static let messageActionRowSpacing: CGFloat = 4
@@ -104,6 +129,19 @@ class MessageSizeCalculator {
     }
   }
 
+  static func minimalTextFontSize(for emojiInfo: (count: Int, isAllEmojis: Bool)) -> Double {
+    switch emojiInfo {
+    case let (count, true) where count == 1:
+      Theme.messageTextFontSizeSingleEmoji
+    case let (count, true) where count <= 3:
+      Theme.messageTextFontSizeThreeEmojis
+    case (_, true):
+      Theme.messageTextFontSizeManyEmojis
+    default:
+      Self.minimalTextFontSize
+    }
+  }
+
   private func horizontalBubbleInset(for style: RenderStyle) -> CGFloat {
     switch style {
     case .bubble:
@@ -151,6 +189,15 @@ class MessageSizeCalculator {
     getAvailableWidth(tableWidth: width, style: .bubble)
   }
 
+  func getAvailableWidth(tableWidth width: CGFloat, renderStyle: MessageRenderStyle) -> CGFloat {
+    switch renderStyle {
+    case .bubble:
+      return getAvailableWidth(tableWidth: width, style: .bubble)
+    case .minimal:
+      return getAvailableWidth(tableWidth: width, style: .minimal)
+    }
+  }
+
   private func getAvailableWidth(tableWidth width: CGFloat, style: RenderStyle) -> CGFloat {
     let ceiledWidth = ceil(width)
     let avatarWidth: CGFloat = switch style {
@@ -159,16 +206,33 @@ class MessageSizeCalculator {
     case .minimal:
       Self.minimalAvatarSize
     }
-    let paddings = Theme.messageHorizontalStackSpacing + Theme.messageSidePadding * 2
-    let availableWidth: CGFloat = ceiledWidth - paddings - avatarWidth - Self.safeAreaWidth -
-      // if we don't subtract this here, it can result is wrong calculations
-      Self.extraSafeWidth
-
+    let leadingSafeWidth: CGFloat = switch style {
+    case .bubble:
+      Theme.messageSidePadding + Theme.messageHorizontalStackSpacing + avatarWidth
+    case .minimal:
+      Self.minimalContentLeadingInset + Theme.messageHorizontalStackSpacing + avatarWidth
+    }
+    let trailingSafeWidth: CGFloat = switch style {
+    case .bubble:
+      Theme.messageSidePadding + Self.safeAreaWidth
+    case .minimal:
+      Self.minimalHoverSideInset + Self.minimalHoverContentInset
+    }
     let maxWidth: CGFloat = switch style {
     case .bubble:
       Self.maxMessageWidth
     case .minimal:
       Self.minimalMaxMessageWidth
+    }
+
+    let reservedWidth = leadingSafeWidth + trailingSafeWidth + Self.extraSafeWidth
+    let availableWidth: CGFloat
+    if ceiledWidth > reservedWidth {
+      availableWidth = ceiledWidth - reservedWidth
+    } else if style == .minimal {
+      availableWidth = maxWidth
+    } else {
+      availableWidth = ceiledWidth - reservedWidth
     }
 
     // Ensure we don't return negative width
@@ -287,8 +351,27 @@ class MessageSizeCalculator {
     var hasReactions: Bool { reactions != nil }
     var hasAttachments: Bool { attachments != nil }
     var hasActionsRows: Bool { actionsRows != nil }
+    var hasTime: Bool { time != nil }
     var placesTimeAboveReactions: Bool {
       emojiMessage && hasReactions && !reactionsOutsideBubble
+    }
+
+    func hasSameConstraintShape(as other: LayoutPlans) -> Bool {
+      hasText == other.hasText &&
+        hasPhoto == other.hasPhoto &&
+        hasVideo == other.hasVideo &&
+        hasAvatar == other.hasAvatar &&
+        hasName == other.hasName &&
+        hasReply == other.hasReply &&
+        hasReplyThreadSummary == other.hasReplyThreadSummary &&
+        hasForwardHeader == other.hasForwardHeader &&
+        hasDocument == other.hasDocument &&
+        hasReactions == other.hasReactions &&
+        hasAttachments == other.hasAttachments &&
+        hasActionsRows == other.hasActionsRows &&
+        hasTime == other.hasTime &&
+        reactionsOutsideBubble == other.reactionsOutsideBubble &&
+        placesTimeAboveReactions == other.placesTimeAboveReactions
     }
 
     // used as edge inset for content view stack
@@ -701,11 +784,11 @@ class MessageSizeCalculator {
 
       if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
-          width: min(120, width),
-          height: min(120, height),
+          width: width,
+          height: height,
           parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText,
-          maxSide: maxMediaSide
+          maxSide: Self.stickerMaxSide
         )
       } else if message.file?.fileType == .photo || message.photoInfo != nil {
         photoSize = calculatePhotoSize(
@@ -877,7 +960,7 @@ class MessageSizeCalculator {
     var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
     var reactionsOutsideBubble = false
-    let reactionsOutsideBubbleTopInset: CGFloat = 4.0
+    let reactionsOutsideBubbleTopInset: CGFloat = 3.0
     var timePlan: LayoutPlan?
     var attachmentsPlan: LayoutPlan?
     var attachmentItemsPlans: [LayoutPlan] = []
@@ -1077,14 +1160,14 @@ class MessageSizeCalculator {
         .zero
       } else if emojiMessage {
         NSEdgeInsets(
-          top: 4.0,
+          top: 2.0,
           left: 8.0,
           bottom: 6.0,
           right: 8.0
         )
       } else {
         NSEdgeInsets(
-          top: 8.0,
+          top: 5.0,
           left: 8.0,
           bottom: 0.0,
           right: 8.0
@@ -1238,6 +1321,7 @@ class MessageSizeCalculator {
     }
     if let reactionsPlan {
       if !reactionsOutsideBubble {
+        bubbleHeight += reactionsPlan.spacing.top
         bubbleHeight += reactionsPlan.size.height
         bubbleHeight += reactionsPlan.spacing.bottom
         bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
@@ -1396,16 +1480,7 @@ class MessageSizeCalculator {
     let isSingleLine = false
 
     // Font size
-    let fontSize: Double = switch emojiInfo {
-    case let (count, true) where count == 1:
-      Theme.messageTextFontSizeSingleEmoji
-    case let (count, true) where count <= 3:
-      Theme.messageTextFontSizeThreeEmojis
-    case let (count, true):
-      Theme.messageTextFontSizeManyEmojis
-    default:
-      Theme.messageTextFontSize
-    }
+    let fontSize = Self.minimalTextFontSize(for: emojiInfo)
     let font = MessageTextConfiguration.font.withSize(fontSize)
 
     let attributedString: NSAttributedString
@@ -1427,7 +1502,7 @@ class MessageSizeCalculator {
     }
 
     let parentAvailableWidth = getAvailableWidth(tableWidth: width, style: .minimal)
-    var availableWidth = parentAvailableWidth
+    let textAvailableWidth = max(1, parentAvailableWidth)
     var documentWidth: CGFloat?
     var attachmentsWidth: CGFloat?
 
@@ -1456,10 +1531,11 @@ class MessageSizeCalculator {
 
       if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
-          width: min(Self.minimalStickerMaxSide, mediaIntrinsicWidth),
-          height: min(Self.minimalStickerMaxSide, mediaIntrinsicHeight),
+          width: mediaIntrinsicWidth,
+          height: mediaIntrinsicHeight,
           parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText,
+          style: .minimal,
           maxSide: Self.minimalStickerMaxSide
         )
       } else if message.file?.fileType == .photo || message.photoInfo != nil {
@@ -1468,7 +1544,9 @@ class MessageSizeCalculator {
           height: mediaIntrinsicHeight,
           parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText,
-          maxSide: Self.minimalMediaMaxSide
+          style: .minimal,
+          maxSide: Self.minimalMediaMaxWidth,
+          maxHeight: Self.minimalMediaMaxHeight
         )
       } else if message.videoInfo != nil {
         videoSize = calculatePhotoSize(
@@ -1476,7 +1554,9 @@ class MessageSizeCalculator {
           height: mediaIntrinsicHeight,
           parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText,
-          maxSide: Self.minimalMediaMaxSide
+          style: .minimal,
+          maxSide: Self.minimalMediaMaxWidth,
+          maxHeight: Self.minimalMediaMaxHeight
         )
       }
     }
@@ -1494,16 +1574,7 @@ class MessageSizeCalculator {
       attachmentsWidth = min(parentAvailableWidth, Self.minimalAttachmentsMaxWidth)
     }
 
-    if let photoSize {
-      availableWidth = photoSize.width
-    } else if let videoSize {
-      availableWidth = videoSize.width
-    } else if let documentWidth {
-      availableWidth = documentWidth
-    }
-    availableWidth = max(1, availableWidth)
-
-    let cacheKey_ = cacheKey(for: message, width: availableWidth, props: props)
+    let cacheKey_ = cacheKey(for: message, width: textAvailableWidth, props: props)
     if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
     }
@@ -1513,15 +1584,11 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      textSize = calculateSizeForAttributedString(attributedString, width: availableWidth, message: message)
+      textSize = calculateSizeForAttributedString(attributedString, width: textAvailableWidth, message: message)
     }
 
     let measuredTextHeight = textSize?.height ?? 0
     let measuredTextWidth = textSize?.width ?? 0
-
-    if hasDocument, hasText, let currentDocumentWidth = documentWidth {
-      documentWidth = max(currentDocumentWidth, min(parentAvailableWidth, measuredTextWidth))
-    }
 
     var wrapperPlan = LayoutPlan(size: .zero, spacing: .zero)
     var bubblePlan = LayoutPlan(size: .zero, spacing: .zero)
@@ -1542,32 +1609,20 @@ class MessageSizeCalculator {
     var attachmentsPlan: LayoutPlan?
     var attachmentItemsPlans: [LayoutPlan] = []
 
-    let shouldShowSenderName = props.firstInGroup && !props.isDM && (!isOutgoing || message.peerId.isThread)
+    let shouldShowSenderName = props.firstInGroup
     if shouldShowSenderName {
-      let nameHeight = Theme.messageNameLabelHeight
       namePlan = LayoutPlan(
-        size: CGSize(width: 0, height: nameHeight),
-        spacing: .init(top: 0, left: 0, bottom: 0, right: 0)
+        size: CGSize(width: 0, height: Self.minimalNameHeight),
+        spacing: .init(top: 0, left: 0, bottom: 2, right: 0)
       )
     }
 
-    let shouldShowAvatar: Bool
-    if props.isDM {
-      // In DMs only first item in a visual group shows an avatar.
-      shouldShowAvatar = props.firstInGroup
-    } else if message.peerId.isThread {
-      // In threads avatar visibility follows sender-name visibility.
-      shouldShowAvatar = namePlan != nil
-    } else {
-      shouldShowAvatar = true
-    }
-
-    if shouldShowAvatar {
+    if props.firstInGroup {
       avatarPlan = LayoutPlan(
         size: .init(width: Self.minimalAvatarSize, height: Self.minimalAvatarSize),
         spacing: .init(
-          top: 0,
-          left: Theme.messageSidePadding,
+          top: namePlan == nil ? 0 : Self.minimalNameAvatarOffset,
+          left: Self.minimalContentLeadingInset,
           bottom: 0,
           right: Theme.messageHorizontalStackSpacing
         )
@@ -1576,19 +1631,27 @@ class MessageSizeCalculator {
 
     if hasText {
       let textHeight = max(measuredTextHeight, heightForSingleLineText())
-      var textTopSpacing: CGFloat = 0
-      if !hasMedia, !hasReply, !hasForwardHeader {
-        textTopSpacing += 1.0
+      let textWidth: CGFloat = if props.isRtl {
+        textAvailableWidth
+      } else {
+        max(ceil(measuredTextWidth), Self.minimalMinTextWidth)
       }
-
-      var textBottomSpacing: CGFloat = 2.0
-      if hasReactions || hasAttachments {
-        textBottomSpacing += 2.0
+      let isPlainTextOnly = !hasMedia && !hasReply && !hasForwardHeader && !hasDocument && !hasAttachments &&
+        !hasReplyThreadSummary
+      let verticalTextSpacing = isPlainTextOnly ? max(0, Self.minimalTextOnlyMinHeight - ceil(textHeight)) : 0
+      let textTopSpacing = floor(verticalTextSpacing / 2)
+      var textBottomSpacing = ceil(verticalTextSpacing / 2)
+      if !isPlainTextOnly {
+        textBottomSpacing = 2.0
+        if hasReactions || hasAttachments {
+          textBottomSpacing += 2.0
+        }
       }
       textBottomSpacing -= additionalTextHeight
+      textBottomSpacing = max(0, textBottomSpacing)
 
       textPlan = LayoutPlan(
-        size: NSSize(width: ceil(measuredTextWidth), height: ceil(textHeight)),
+        size: NSSize(width: textWidth, height: ceil(textHeight)),
         spacing: NSEdgeInsets(
           top: textTopSpacing,
           left: 0,
@@ -1613,7 +1676,7 @@ class MessageSizeCalculator {
     if hasReply {
       replyPlan = LayoutPlan(size: .zero, spacing: .zero)
       replyPlan!.size.height = Theme.embeddedMessageHeight
-      replyPlan!.size.width = min(260, availableWidth)
+      replyPlan!.size.width = min(260, parentAvailableWidth)
       replyPlan!.spacing = .init(
         top: 4.0,
         left: 0,
@@ -1625,13 +1688,29 @@ class MessageSizeCalculator {
     if let photoSize {
       photoPlan = LayoutPlan(size: .zero, spacing: .zero)
       photoPlan!.size = photoSize
-      photoPlan!.spacing = hasText ? .bottom(Theme.messageTextAndPhotoSpacing) : .zero
+      let mediaTopSpacing = namePlan != nil
+        ? Self.minimalNameMediaSpacing
+        : (hasText ? 0 : Self.minimalMediaVerticalInset)
+      photoPlan!.spacing = NSEdgeInsets(
+        top: mediaTopSpacing,
+        left: 0,
+        bottom: hasText ? Theme.messageTextAndPhotoSpacing : Self.minimalMediaVerticalInset,
+        right: 0
+      )
     }
 
     if let videoSize {
       videoPlan = LayoutPlan(size: .zero, spacing: .zero)
       videoPlan!.size = videoSize
-      videoPlan!.spacing = hasText ? .bottom(Theme.messageTextAndPhotoSpacing) : .zero
+      let mediaTopSpacing = namePlan != nil
+        ? Self.minimalNameMediaSpacing
+        : (hasText ? 0 : Self.minimalMediaVerticalInset)
+      videoPlan!.spacing = NSEdgeInsets(
+        top: mediaTopSpacing,
+        left: 0,
+        bottom: hasText ? Theme.messageTextAndPhotoSpacing : Self.minimalMediaVerticalInset,
+        right: 0
+      )
     }
 
     if hasDocument, let documentWidth {
@@ -1687,12 +1766,17 @@ class MessageSizeCalculator {
     if hasReactions {
       reactionsPlan = LayoutPlan(
         size: .zero,
-        spacing: NSEdgeInsets(top: 6.0, left: 0.0, bottom: 0.0, right: 0.0)
+        spacing: NSEdgeInsets(
+          top: Self.minimalReactionTopSpacing,
+          left: 0.0,
+          bottom: Self.minimalReactionBottomSpacing,
+          right: 0.0
+        )
       )
 
       let reactionsSpacing: CGFloat = 6.0
       let reactionMaxWidth = max(
-        availableWidth,
+        min(parentAvailableWidth, 260),
         max(
           textPlan?.size.width ?? 0,
           max(photoPlan?.size.width ?? 0, max(videoPlan?.size.width ?? 0, documentPlan?.size.width ?? 0))
@@ -1725,40 +1809,53 @@ class MessageSizeCalculator {
       }
     }
 
+    timePlan = LayoutPlan(
+      size: CGSize(
+        width: isOutgoing ?
+          MessageTimeAndState.timeWidth + MessageTimeAndState.symbolWidth :
+          MessageTimeAndState.timeWidth,
+        height: Theme.messageTimeHeight
+      ),
+      spacing: .init(top: 0, left: Self.minimalInlineTimeSpacing, bottom: 0, right: 0)
+    )
+
     var bubbleWidth: CGFloat = 0
     var bubbleHeight: CGFloat = 0
 
     if let textPlan {
+      bubbleHeight += textPlan.spacing.top
       bubbleHeight += textPlan.size.height
       bubbleHeight += textPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, textPlan.size.width + textPlan.spacing.horizontalTotal)
     }
     if let forwardHeaderPlan {
+      bubbleHeight += forwardHeaderPlan.spacing.top
       bubbleHeight += forwardHeaderPlan.size.height
       bubbleHeight += forwardHeaderPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, forwardHeaderPlan.size.width + forwardHeaderPlan.spacing.horizontalTotal)
     }
     if let replyPlan {
+      bubbleHeight += replyPlan.spacing.top
       bubbleHeight += replyPlan.size.height
       bubbleHeight += replyPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, replyPlan.size.width + replyPlan.spacing.horizontalTotal)
     }
     if let photoPlan {
+      bubbleHeight += photoPlan.spacing.top
       bubbleHeight += photoPlan.size.height
       bubbleHeight += photoPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, photoPlan.size.width)
     }
     if let videoPlan {
+      bubbleHeight += videoPlan.spacing.top
       bubbleHeight += videoPlan.size.height
       bubbleHeight += videoPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, videoPlan.size.width)
     }
     if let documentPlan {
+      bubbleHeight += documentPlan.spacing.top
       bubbleHeight += documentPlan.size.height
       bubbleHeight += documentPlan.spacing.bottom
-      if replyPlan != nil {
-        bubbleHeight += documentPlan.spacing.top
-      }
       bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
     }
     if let attachmentsPlan {
@@ -1777,6 +1874,7 @@ class MessageSizeCalculator {
       )
     }
     if let reactionsPlan {
+      bubbleHeight += reactionsPlan.spacing.top
       bubbleHeight += reactionsPlan.size.height
       bubbleHeight += reactionsPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
@@ -1808,7 +1906,7 @@ class MessageSizeCalculator {
     }
     let reservedAvatarSlotWidth =
       (avatarPlan?.size.width ?? Self.minimalAvatarSize) +
-      (avatarPlan?.spacing.horizontalTotal ?? (Theme.messageSidePadding + Theme.messageHorizontalStackSpacing))
+      (avatarPlan?.spacing.horizontalTotal ?? (Self.minimalContentLeadingInset + Theme.messageHorizontalStackSpacing))
     wrapperWidth += reservedAvatarSlotWidth
 
     if let actionsRowsPlan {
@@ -1817,15 +1915,24 @@ class MessageSizeCalculator {
       wrapperHeight += actionsRowsPlan.spacing.bottom
       let reservedAvatarSlotWidth =
         (avatarPlan?.size.width ?? Self.minimalAvatarSize) +
-        (avatarPlan?.spacing.horizontalTotal ?? (Theme.messageSidePadding + Theme.messageHorizontalStackSpacing))
+        (avatarPlan?.spacing.horizontalTotal ?? (Self.minimalContentLeadingInset + Theme.messageHorizontalStackSpacing))
       wrapperWidth = max(wrapperWidth, reservedAvatarSlotWidth + actionsRowsPlan.size.width)
     }
 
+    let minWrapperHeight = if avatarPlan != nil {
+      (avatarPlan?.size.height ?? Self.minimalAvatarSize) + (avatarPlan?.spacing.top ?? 0)
+    } else {
+      Self.minimalFollowUpMinHeight
+    }
     wrapperPlan.size = CGSize(
       width: wrapperWidth,
-      height: max(wrapperHeight, Self.minimalAvatarSize)
+      height: max(wrapperHeight, minWrapperHeight)
     )
-    let groupTopSpacing = namePlan == nil ? 0 : Theme.messageGroupSpacing
+    let groupTopSpacing: CGFloat = if props.firstInGroup && !props.isFirstMessage {
+      props.startsAfterDaySeparator ? Self.minimalAfterDaySeparatorGroupSpacing : Self.minimalGroupSpacing
+    } else {
+      0.0
+    }
     wrapperPlan.spacing = .init(
       top: groupTopSpacing + Theme.messageOuterVerticalPadding,
       left: 0,
@@ -1988,57 +2095,44 @@ class MessageSizeCalculator {
     height: CGFloat,
     parentAvailableWidth: CGFloat,
     hasCaption: Bool,
-    maxSide: CGFloat = 320
+    style: MessageRenderStyle = .bubble,
+    maxSide: CGFloat = 320,
+    maxHeight: CGFloat? = nil
   ) -> CGSize {
-    let maxMediaSize = CGSize(
-      width: min(maxSide, ceil(parentAvailableWidth)),
-      height: min(maxSide, ceil(parentAvailableWidth))
-    )
     let minMediaSize = CGSize(width: 40.0, height: 40.0)
-    let isLandscape = width > height
+    let maxAvailableWidth = max(minMediaSize.width, min(maxSide, ceil(parentAvailableWidth)))
+    let maxAvailableHeight = max(minMediaSize.height, maxHeight ?? maxAvailableWidth)
+    let maxMediaSize = CGSize(
+      width: maxAvailableWidth,
+      height: maxAvailableHeight
+    )
 
     guard width > 0, height > 0 else {
       return minMediaSize
     }
 
     let aspectRatio = CGFloat(width) / CGFloat(height)
-    var mediaWidth: CGFloat
-    var mediaHeight: CGFloat
 
-    if !hasCaption {
-      if width < maxMediaSize.width, height < maxMediaSize.height {
-        mediaWidth = width
-        mediaHeight = height
-      } else {
-        if isLandscape {
-          mediaWidth = maxMediaSize.width
-          mediaHeight = ceil(mediaWidth / aspectRatio)
-        } else {
-          mediaHeight = maxMediaSize.height
-          mediaWidth = ceil(mediaHeight * aspectRatio)
-        }
-      }
-      return CGSize(width: mediaWidth, height: mediaHeight)
+    let usesCaptionSizing = switch style {
+    case .bubble:
+      hasCaption
+    case .minimal:
+      false
     }
-    // Has caption, maintain reasonable size
 
-    // handle small images
-    if width < maxMediaSize.width, height < maxMediaSize.height {
-      mediaWidth = ceil(maxMediaSize.width)
-      mediaHeight = ceil(height)
+    let scale = min(maxMediaSize.width / width, maxMediaSize.height / height)
+    let cappedScale = usesCaptionSizing ? scale : min(1.0, scale)
+    let mediaWidth = ceil(width * cappedScale)
+    let mediaHeight = ceil(mediaWidth / aspectRatio)
+
+    if mediaHeight <= maxMediaSize.height {
       return CGSize(width: mediaWidth, height: mediaHeight)
     }
 
-    // default
-    mediaWidth = maxMediaSize.width
-    mediaHeight = ceil(mediaWidth / aspectRatio)
-
-    if mediaHeight > maxMediaSize.height {
-      mediaHeight = maxMediaSize.height
-      mediaWidth = maxMediaSize.width
-    }
-
-    return CGSize(width: mediaWidth, height: mediaHeight)
+    let heightBoundScale = usesCaptionSizing ? scale : min(1.0, scale)
+    let boundedHeight = ceil(height * heightBoundScale)
+    let boundedWidth = ceil(boundedHeight * aspectRatio)
+    return CGSize(width: boundedWidth, height: boundedHeight)
   }
 }
 

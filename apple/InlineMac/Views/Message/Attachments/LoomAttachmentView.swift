@@ -18,6 +18,7 @@ class LoomAttachmentView: NSView, AttachmentView {
 
   let fullAttachment: FullAttachment
   let message: Message
+  private let usesOutgoingBubbleStyle: Bool
 
   var attachment: Attachment {
     fullAttachment.attachment
@@ -131,9 +132,10 @@ class LoomAttachmentView: NSView, AttachmentView {
 
   // MARK: - Init
 
-  init(fullAttachment: FullAttachment, message: Message) {
+  init(fullAttachment: FullAttachment, message: Message, usesOutgoingBubbleStyle: Bool) {
     self.fullAttachment = fullAttachment
     self.message = message
+    self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
 
     super.init(frame: .zero)
 
@@ -265,19 +267,19 @@ class LoomAttachmentView: NSView, AttachmentView {
   // MARK: - Colors
 
   private var accentColor: NSColor {
-    message.outgoing ? .white.withAlphaComponent(0.8) : .controlAccentColor
+    usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.8) : .controlAccentColor
   }
 
   private var backgroundColor: NSColor {
-    message.outgoing ? .white.withAlphaComponent(0.08) : .labelColor.withAlphaComponent(0.02)
+    usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.08) : .labelColor.withAlphaComponent(0.02)
   }
 
   private var primaryTextColor: NSColor {
-    message.outgoing ? .white : .labelColor
+    usesOutgoingBubbleStyle ? .white : .labelColor
   }
 
   private var tagTextColor: NSColor {
-    message.outgoing ? .white.withAlphaComponent(0.75) : .tertiaryLabelColor
+    usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.75) : .tertiaryLabelColor
   }
 
   private func updateColors() {
