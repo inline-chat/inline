@@ -24,8 +24,14 @@ import { listInlineAccountIds, resolveInlineAccount, resolveInlineToken } from "
 import { isInlineReplyThreadsEnabled } from "./reply-threads.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
+import { sanitizeInlineOutgoingText } from "./message-formatting.js"
 import { normalizeInlineTarget } from "./normalize.js"
-import { sanitizeInlineVisibleLabel, sanitizeInlineVisibleText } from "./outbound-sanitize.js"
+import {
+  sanitizeInlineActionCallbackData,
+  sanitizeInlineActionLabel,
+  sanitizeInlineVisibleText,
+} from "./outbound-sanitize.js"
+import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 import {
   createActionGate,
@@ -121,8 +127,19 @@ function suppressedInternalTextResult() {
   })
 }
 
-function requireVisibleActionText(raw: string | undefined, label: string): string {
+function sanitizeVisibleActionText(raw: string | null | undefined) {
   const visible = sanitizeInlineVisibleText(raw)
+  if (visible.shouldSkip) {
+    return visible
+  }
+  return {
+    ...visible,
+    text: sanitizeInlineOutgoingText(visible.text),
+  }
+}
+
+function requireVisibleActionText(raw: string | undefined, label: string): string {
+  const visible = sanitizeVisibleActionText(raw)
   if (visible.shouldSkip) {
     throw new Error(`inline action: ${label} contains internal runtime text`)
   }
@@ -135,7 +152,7 @@ function requireVisibleActionText(raw: string | undefined, label: string): strin
 
 function optionalVisibleActionText(raw: string | undefined, label: string): string | undefined {
   if (raw === undefined) return undefined
-  const visible = sanitizeInlineVisibleText(raw)
+  const visible = sanitizeVisibleActionText(raw)
   if (visible.shouldSkip) {
     throw new Error(`inline action: ${label} contains internal runtime text`)
   }
@@ -154,11 +171,12 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
     const row: InlineReplyMarkupButton[] = []
     for (const candidateButton of candidateRow) {
       if (!isRecord(candidateButton)) continue
-      const text = sanitizeInlineVisibleLabel(
+      const text = sanitizeInlineActionLabel(
         typeof candidateButton.text === "string" ? candidateButton.text : "",
       )
-      const callbackData =
-        typeof candidateButton.callback_data === "string" ? candidateButton.callback_data.trim() : ""
+      const callbackData = sanitizeInlineActionCallbackData(
+        typeof candidateButton.callback_data === "string" ? candidateButton.callback_data : "",
+      )
       if (!text || !callbackData) continue
       row.push({ text, callback_data: callbackData })
       if (row.length >= INLINE_ACTION_MAX_PER_ROW) break
@@ -178,8 +196,8 @@ function chunkInteractiveButtons(
     const row = buttons
       .slice(i, i + INLINE_ACTION_MAX_PER_ROW)
       .map((button) => {
-        const text = sanitizeInlineVisibleLabel(button.label)
-        const callbackData = button.value?.trim() ?? ""
+        const text = sanitizeInlineActionLabel(button.label)
+        const callbackData = sanitizeInlineActionCallbackData(button.value)
         if (!text || !callbackData) {
           return null
         }
@@ -944,9 +962,13 @@ function listAllActions(): ChannelMessageActionName[] {
   return Array.from(out)
 }
 
-function listEnabledInlineActions(cfg: OpenClawConfig): ChannelMessageActionName[] {
-  const gates = listInlineAccountIds(cfg)
-    .map((accountId) => resolveInlineAccount({ cfg, accountId }))
+function listEnabledInlineActions(
+  cfg: OpenClawConfig,
+  accountId?: string | null,
+): ChannelMessageActionName[] {
+  const accountIds = accountId == null ? listInlineAccountIds(cfg) : [accountId]
+  const gates = accountIds
+    .map((id) => resolveInlineAccount({ cfg, accountId: id }))
     .filter((account) => account.enabled && account.configured)
     .map((account) =>
       createActionGate((account.config.actions ?? {}) as Record<string, boolean | undefined>),
@@ -963,14 +985,52 @@ function listEnabledInlineActions(cfg: OpenClawConfig): ChannelMessageActionName
   return Array.from(actions)
 }
 
-function supportsInlineMessageButtons(actions: readonly ChannelMessageActionName[]): boolean {
+export function supportsInlineMessageButtons(actions: readonly ChannelMessageActionName[]): boolean {
   return actions.some((action) => action === "send" || action === "reply" || action === "thread-reply" || action === "edit")
+}
+
+function resolveInlineActionText(
+  params: Record<string, unknown>,
+  options: { includeCaption?: boolean; required?: boolean } = {},
+): string | undefined {
+  const explicit =
+    readStringParam(params, "message", { allowEmpty: true }) ??
+    readStringParam(params, "text", { allowEmpty: true }) ??
+    (options.includeCaption ? readStringParam(params, "caption", { allowEmpty: true }) : undefined)
+  const fallback = resolveInlineInteractiveTextFallback({
+    text: explicit,
+    interactive: params.interactive,
+    presentation: params.presentation,
+  })
+  const text = fallback ?? explicit
+  if (text !== undefined) {
+    return text
+  }
+  if (options.required) {
+    return readStringParam(params, "text", { required: true, allowEmpty: true })
+  }
+  return undefined
+}
+
+export function supportsInlineMessageButtonsForConfig(
+  cfg: OpenClawConfig,
+  accountId?: string | null,
+): boolean {
+  return supportsInlineMessageButtons(listEnabledInlineActions(cfg, accountId))
+}
+
+export function supportsInlineReactionsForConfig(
+  cfg: OpenClawConfig,
+  accountId?: string | null,
+): boolean {
+  return listEnabledInlineActions(cfg, accountId).includes("react")
 }
 
 function describeInlineMessageTool({
   cfg,
+  accountId,
 }: Parameters<NonNullable<ChannelMessageActionAdapter["describeMessageTool"]>>[0]): ChannelMessageToolDiscovery {
-  const actions = listEnabledInlineActions(cfg)
+  const actions = listEnabledInlineActions(cfg, accountId ?? null)
   if (actions.length === 0) {
     return {
       actions: [],
@@ -1023,9 +1083,10 @@ type LegacyInlineMessageActionAdapter = {
 
 export const inlineMessageActions = {
   describeMessageTool: describeInlineMessageTool,
-  listActions: ({ cfg }: { cfg: OpenClawConfig }) => listEnabledInlineActions(cfg),
-  supportsButtons: ({ cfg }: { cfg: OpenClawConfig }) =>
-    supportsInlineMessageButtons(listEnabledInlineActions(cfg)),
+  listActions: ({ cfg, accountId }: { cfg: OpenClawConfig; accountId?: string | null }) =>
+    listEnabledInlineActions(cfg, accountId ?? null),
+  supportsButtons: ({ cfg, accountId }: { cfg: OpenClawConfig; accountId?: string | null }) =>
+    supportsInlineMessageButtons(listEnabledInlineActions(cfg, accountId ?? null)),
   supportsCards: () => false,
   supportsAction: ({ action }) => SUPPORTED_ACTIONS.includes(action),
   extractToolSend: ({ args }) => {
@@ -1037,7 +1098,16 @@ export const inlineMessageActions = {
     if (!/^(user:)?[0-9]+$/i.test(normalized)) return null
     return { to: normalized }
   },
-  handleAction: async ({ action, params, cfg, accountId, toolContext }) => {
+  handleAction: async ({
+    action,
+    params,
+    cfg,
+    accountId,
+    mediaAccess,
+    mediaLocalRoots,
+    mediaReadFile,
+    toolContext,
+  }) => {
     if (!SUPPORTED_ACTIONS.includes(action)) {
       throw new Error(`Action ${action} is not supported for provider inline.`)
     }
@@ -1069,12 +1139,8 @@ export const inlineMessageActions = {
             throw new Error("inline action: missing message target")
           }
           const mediaSources = resolveInlineOutboundMediaInputs(params)
-          const text =
-            readStringParam(params, "message") ??
-            readStringParam(params, "text") ??
-            readStringParam(params, "caption") ??
-            ""
-          const caption = sanitizeInlineVisibleText(text)
+          const text = resolveInlineActionText(params, { includeCaption: true }) ?? ""
+          const caption = sanitizeVisibleActionText(text)
           const replyToMsgId = parseOptionalInlineId(
             readFlexibleId(params, "messageId") ??
               readFlexibleId(params, "replyTo") ??
@@ -1090,10 +1156,8 @@ export const inlineMessageActions = {
           }
 
           if (mediaSources.length === 0) {
-            const message =
-              readStringParam(params, "message") ??
-              readStringParam(params, "text", { required: true, allowEmpty: true })
-            const visibleMessage = sanitizeInlineVisibleText(message)
+            const message = resolveInlineActionText(params, { required: true })
+            const visibleMessage = sanitizeVisibleActionText(message)
             if (visibleMessage.shouldSkip) {
               return suppressedInternalTextResult()
             }
@@ -1121,6 +1185,9 @@ export const inlineMessageActions = {
               cfg,
               accountId: accountId ?? null,
               mediaUrl,
+              ...(mediaAccess ? { mediaAccess } : {}),
+              ...(mediaLocalRoots ? { mediaLocalRoots } : {}),
+              ...(mediaReadFile ? { mediaReadFile } : {}),
             })
             lastSent = await client.sendMessage({
               ...sendTarget,
@@ -1172,10 +1239,8 @@ export const inlineMessageActions = {
                 readStringParam(params, "replyToId"),
               "messageId",
             )
-            const text =
-              readStringParam(params, "message") ??
-              readStringParam(params, "text", { required: true, allowEmpty: true })
-            const visibleText = sanitizeInlineVisibleText(text)
+            const text = resolveInlineActionText(params, { required: true })
+            const visibleText = sanitizeVisibleActionText(text)
             if (visibleText.shouldSkip) {
               return suppressedInternalTextResult()
             }
@@ -1212,10 +1277,8 @@ export const inlineMessageActions = {
               readStringParam(replyParams, "replyToId", { required: true }),
             "messageId",
           )
-          const text =
-            readStringParam(replyParams, "message") ??
-            readStringParam(replyParams, "text", { required: true, allowEmpty: true })
-          const visibleText = sanitizeInlineVisibleText(text)
+          const text = resolveInlineActionText(replyParams, { required: true })
+          const visibleText = sanitizeVisibleActionText(text)
           if (visibleText.shouldSkip) {
             return suppressedInternalTextResult()
           }
@@ -1472,8 +1535,8 @@ export const inlineMessageActions = {
               readStringParam(params, "messageId", { required: true }),
             "messageId",
           )
-          const text = readStringParam(params, "message", { required: true, allowEmpty: true })
-          const visibleText = sanitizeInlineVisibleText(text)
+          const text = resolveInlineActionText(params, { required: true })
+          const visibleText = sanitizeVisibleActionText(text)
           if (visibleText.shouldSkip) {
             return suppressedInternalTextResult()
           }

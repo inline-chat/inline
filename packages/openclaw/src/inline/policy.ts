@@ -1,12 +1,15 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { normalizeAccountId as normalizePluginAccountId } from "../openclaw-compat.js"
+import { normalizeInlineTarget } from "./normalize.js"
 
 type InlineToolPolicy = Record<string, unknown>
 
 type InlineGroupConfig = {
-  requireMention?: boolean
-  tools?: InlineToolPolicy
-  toolsBySender?: Record<string, InlineToolPolicy | undefined>
+  requireMention?: boolean | undefined
+  allowFrom?: Array<string | number> | undefined
+  systemPrompt?: string | undefined
+  tools?: InlineToolPolicy | undefined
+  toolsBySender?: Record<string, InlineToolPolicy | undefined> | undefined
 }
 
 type InlineGroups = Record<string, InlineGroupConfig | undefined>
@@ -34,14 +37,21 @@ function resolveInlineGroups(cfg: OpenClawConfig, accountId: string | null | und
   return accountEntry?.groups ?? inline.groups
 }
 
+function normalizeGroupId(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed || trimmed === "*") return trimmed
+  const normalized = normalizeInlineTarget(trimmed)
+  return normalized && /^[0-9]+$/.test(normalized) ? normalized : trimmed
+}
+
 function resolveGroupConfig(groups: InlineGroups | undefined, groupId: string | null | undefined): InlineGroupConfig | undefined {
   if (!groups) return undefined
-  const normalizedGroupId = (groupId ?? "").trim()
+  const normalizedGroupId = normalizeGroupId(groupId ?? "")
   if (!normalizedGroupId) return undefined
   const direct = groups[normalizedGroupId]
   if (direct) return direct
   const lowered = normalizedGroupId.toLowerCase()
-  const matchedKey = Object.keys(groups).find((key) => key !== "*" && key.toLowerCase() === lowered)
+  const matchedKey = Object.keys(groups).find((key) => key !== "*" && normalizeGroupId(key).toLowerCase() === lowered)
   return matchedKey ? groups[matchedKey] : undefined
 }
 
@@ -106,6 +116,43 @@ export function resolveInlineGroupRequireMention(params: {
   return params.requireMentionDefault
 }
 
+export function resolveInlineGroupSystemPrompt(params: {
+  groups: InlineGroups | undefined
+  groupId: string | null | undefined
+}): string | undefined {
+  return resolveGroupConfig(params.groups, params.groupId)?.systemPrompt?.trim() || undefined
+}
+
+export function resolveInlineGroupAccessPolicy(params: {
+  cfg: OpenClawConfig
+  accountId: string | null | undefined
+  groupId: string | null | undefined
+  groupPolicy: "disabled" | "allowlist" | "open" | undefined
+  hasGroupAllowFrom: boolean
+}): {
+  allowlistEnabled: boolean
+  allowed: boolean
+  groupConfig: InlineGroupConfig | undefined
+  defaultConfig: InlineGroupConfig | undefined
+} {
+  const groups = resolveInlineGroups(params.cfg, params.accountId)
+  const hasGroups = Boolean(groups && Object.keys(groups).length > 0)
+  const allowlistEnabled = params.groupPolicy === "allowlist" || hasGroups
+  const groupConfig = resolveGroupConfig(groups, params.groupId)
+  const defaultConfig = groups?.["*"]
+  const allowAll = allowlistEnabled && Boolean(groups && Object.hasOwn(groups, "*"))
+  const senderFilterBypass = params.groupPolicy === "allowlist" && !hasGroups && params.hasGroupAllowFrom
+  return {
+    allowlistEnabled,
+    allowed:
+      params.groupPolicy === "disabled"
+        ? false
+        : !allowlistEnabled || allowAll || Boolean(groupConfig) || senderFilterBypass,
+    groupConfig,
+    defaultConfig,
+  }
+}
+
 export function resolveInlineGroupToolPolicy(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
@@ -138,4 +185,18 @@ export function resolveInlineGroupToolPolicy(params: {
   })
   if (defaultSenderPolicy) return defaultSenderPolicy
   return defaultConfig?.tools
+}
+
+export function resolveInlineGroupAllowFrom(params: {
+  cfg: OpenClawConfig
+  accountId: string | null | undefined
+  groupId: string | null | undefined
+  accountAllowFrom: Array<string | number> | undefined
+}): Array<string | number> | undefined {
+  const groups = resolveInlineGroups(params.cfg, params.accountId)
+  const groupConfig = resolveGroupConfig(groups, params.groupId)
+  const defaultConfig = groups?.["*"]
+  if (groupConfig?.allowFrom && groupConfig.allowFrom.length > 0) return groupConfig.allowFrom
+  if (defaultConfig?.allowFrom && defaultConfig.allowFrom.length > 0) return defaultConfig.allowFrom
+  return params.accountAllowFrom
 }

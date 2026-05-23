@@ -117,6 +117,32 @@ describe("inline/actions", () => {
     expect(actions.length).toBeGreaterThan(0)
   })
 
+  it("keeps generated message buttons inside Inline server action limits", async () => {
+    vi.resetModules()
+    const { resolveInlineMessageActionsParam } = await import("./actions")
+    const { INLINE_ACTION_CALLBACK_DATA_MAX_BYTES, INLINE_ACTION_LABEL_MAX_LENGTH } =
+      await import("./outbound-sanitize")
+
+    const actions = resolveInlineMessageActionsParam({
+      buttons: [
+        [
+          { text: "x".repeat(80), callback_data: "approve" },
+          {
+            text: "Oversized",
+            callback_data: "y".repeat(INLINE_ACTION_CALLBACK_DATA_MAX_BYTES + 1),
+          },
+        ],
+      ],
+    })
+
+    expect(actions?.rows).toHaveLength(1)
+    expect(actions?.rows?.[0]?.actions).toHaveLength(1)
+    expect(actions?.rows?.[0]?.actions?.[0]?.text).toHaveLength(INLINE_ACTION_LABEL_MAX_LENGTH)
+    const data = actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    expect(data).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(data)).toBe("approve")
+  })
+
   it("uses the SDK message-tool buttons schema", async () => {
     vi.resetModules()
     const { inlineMessageActions } = await import("./actions")
@@ -167,6 +193,46 @@ describe("inline/actions", () => {
     expect(discovery?.actions).not.toContain("edit")
     expect(discovery?.capabilities).toEqual([])
     expect(discovery?.schema).toEqual([])
+  })
+
+  it("scopes message-tool discovery to the active Inline account", async () => {
+    vi.resetModules()
+    const { inlineMessageActions } = await import("./actions")
+    const cfg = {
+      channels: {
+        inline: {
+          token: "default-token",
+          accounts: {
+            work: {
+              token: "work-token",
+              actions: {
+                send: false,
+                reply: false,
+                edit: false,
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig
+
+    const defaultDiscovery = inlineMessageActions.describeMessageTool?.({
+      cfg,
+      accountId: "default",
+    })
+    const workDiscovery = inlineMessageActions.describeMessageTool?.({
+      cfg,
+      accountId: "work",
+    })
+
+    expect(defaultDiscovery?.actions).toContain("send")
+    expect(defaultDiscovery?.capabilities).toEqual(["presentation"])
+    expect(inlineMessageActions.supportsButtons?.({ cfg, accountId: "default" })).toBe(true)
+    expect(workDiscovery?.actions).not.toContain("send")
+    expect(workDiscovery?.actions).not.toContain("reply")
+    expect(workDiscovery?.actions).not.toContain("edit")
+    expect(workDiscovery?.capabilities).toEqual([])
+    expect(inlineMessageActions.supportsButtons?.({ cfg, accountId: "work" })).toBe(false)
   })
 
   it("extracts explicit user targets for send routing", async () => {
@@ -891,6 +957,66 @@ describe("inline/actions", () => {
       }),
     )
     expect(sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }))
+  })
+
+  it("passes media access through attachment actions", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: 88n }))
+    const uploadInlineMediaFromUrl = vi.fn(async () => ({ kind: "photo", photoId: 901n }))
+    const mediaReadFile = vi.fn(async () => Buffer.from([1, 2, 3]))
+    const mediaAccess = {
+      localRoots: ["/tmp/inline-media"],
+      readFile: mediaReadFile,
+    }
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+      },
+    }))
+    vi.doMock("./media", () => ({
+      uploadInlineMediaFromUrl,
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "sendAttachment",
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      params: {
+        to: "user:99",
+        mediaUrl: "/tmp/inline-media/photo.png",
+        caption: "photo",
+      },
+      mediaAccess,
+    } as any)
+
+    expect(uploadInlineMediaFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaUrl: "/tmp/inline-media/photo.png",
+        mediaAccess,
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        media: { kind: "photo", photoId: 901n },
+      }),
+    )
   })
 
   it("rejects copied OpenClaw runtime text in channel titles", async () => {
@@ -2068,6 +2194,122 @@ describe("inline/actions", () => {
     const data = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
     expect(data).toBeInstanceOf(Uint8Array)
     expect(new TextDecoder().decode(data)).toBe("approve")
+  })
+
+  it("uses shared interactive labels as send fallback text when text is omitted", async () => {
+    vi.resetModules()
+
+    const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        EDIT_MESSAGE: 8,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+        invokeRaw = vi.fn(async () => ({ oneofKind: undefined }))
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "send",
+      cfg,
+      params: {
+        to: "user:99",
+        interactive: {
+          blocks: [
+            {
+              type: "buttons",
+              buttons: [{ label: "Approve", value: "approve", style: "success" }],
+            },
+          ],
+        },
+      },
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "- Approve",
+        actions: expect.objectContaining({
+          rows: [
+            expect.objectContaining({
+              actions: [
+                expect.objectContaining({
+                  text: "Approve",
+                }),
+              ],
+            }),
+          ],
+        }),
+      }),
+    )
+  })
+
+  it("sanitizes Inline-specific visible action text before sending", async () => {
+    vi.resetModules()
+
+    const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        EDIT_MESSAGE: 8,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+        invokeRaw = vi.fn(async () => ({ oneofKind: undefined }))
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "send",
+      cfg,
+      params: {
+        to: "user:99",
+        text: "See `https://example.com/docs`.\n\n/focus - Bind this thread (Discord) or topic/conversation (Telegram) to a session target.",
+      },
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "See https://example.com/docs.\n\n/focus - Bind this Inline conversation to a session target.",
+      }),
+    )
   })
 
   it("skips shared interactive buttons without callback values", async () => {

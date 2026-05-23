@@ -18,14 +18,6 @@ type InlineProfileToolResult = {
 }
 
 type InlineLoadedMedia = Awaited<ReturnType<ReturnType<typeof getInlineRuntime>["media"]["loadWebMedia"]>>
-type LoadWebMediaCompat = (
-  mediaUrl: string,
-  maxBytes?: number,
-  options?: {
-    ssrfPolicy?: unknown
-    localRoots?: string[] | "any"
-  },
-) => Promise<InlineLoadedMedia>
 
 const InlineProfileToolParameters = {
   type: "object",
@@ -98,24 +90,9 @@ function resolvePhotoSource(args: InlineProfileToolArgs): string | undefined {
   return readTrimmedString(args.photoPath) ?? readTrimmedString(args.photoUrl)
 }
 
-function looksLikeLocalMediaSource(mediaUrl: string): boolean {
-  return !/^https?:\/\//i.test(mediaUrl.trim())
-}
-
 async function uploadProfilePhoto(client: InlineSdkClient, rawSource: string): Promise<string> {
   const runtimeMedia = getInlineRuntime().media
-  const loadWebMediaCompat = runtimeMedia.loadWebMedia as unknown as LoadWebMediaCompat
-  let loaded: InlineLoadedMedia
-  try {
-    loaded = await runtimeMedia.loadWebMedia(rawSource)
-  } catch (error) {
-    const message = String(error)
-    const deniedLocalPath = /not under an allowed directory/i.test(message)
-    if (!deniedLocalPath || !looksLikeLocalMediaSource(rawSource)) {
-      throw error
-    }
-    loaded = await loadWebMediaCompat(rawSource, undefined, { localRoots: "any" })
-  }
+  const loaded: InlineLoadedMedia = await runtimeMedia.loadWebMedia(rawSource)
   const contentType =
     loaded.contentType ??
     (await runtimeMedia.detectMime({

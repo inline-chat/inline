@@ -1,13 +1,20 @@
-import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/core"
+import { unlink } from "node:fs/promises"
+import path from "node:path"
+import {
+  buildChannelOutboundSessionRoute,
+  buildThreadAwareOutboundSessionRoute,
+  type ChannelPlugin,
+  type OpenClawConfig,
+} from "openclaw/plugin-sdk/core"
+import { createChannelMessageAdapterFromOutbound } from "openclaw/plugin-sdk/channel-message"
 import {
   presentationToInteractiveReply,
   renderMessagePresentationFallbackText,
 } from "openclaw/plugin-sdk/interactive-runtime"
 import {
-  deleteAccountFromConfigSection,
-  setAccountEnabledInConfigSection,
-} from "openclaw/plugin-sdk/core"
-import { buildDmGroupAccountAllowlistAdapter } from "openclaw/plugin-sdk/allowlist-config-edit"
+  buildDmGroupAccountAllowlistAdapter,
+  createFlatAllowlistOverrideResolver,
+} from "openclaw/plugin-sdk/allowlist-config-edit"
 import { buildTokenChannelStatusSummary } from "openclaw/plugin-sdk/status-helpers"
 import {
   InlineSdkClient,
@@ -17,10 +24,12 @@ import {
   type MessageActions,
   type User,
 } from "@inline-chat/realtime-sdk"
-import { InlineConfigSchema } from "./config-schema.js"
 import {
-  listInlineAccountIds,
+  findInlineTokenOwnerAccountId,
+  formatDuplicateInlineTokenReason,
   resolveDefaultInlineAccountId,
+  inspectInlineAccount,
+  resolveInlineEnvToken,
   resolveInlineAccount,
   resolveInlineToken,
   type ResolvedInlineAccount,
@@ -29,39 +38,77 @@ import { isInlineReplyThreadsEnabled, resolveInlineReplyThreadChatId } from "./r
 import { looksLikeInlineTargetId, normalizeInlineTarget } from "./normalize.js"
 import { monitorInlineProvider } from "./monitor.js"
 import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
-import { sanitizeInlineOutgoingText } from "./message-formatting.js"
+import {
+  buildInlineCommandsListChannelData,
+  buildInlineModelBrowseChannelData,
+  buildInlineModelsAddProviderChannelData,
+  buildInlineModelsListChannelData,
+  buildInlineModelsMenuChannelData,
+  buildInlineModelsProviderChannelData,
+} from "./command-ui.js"
+import { inlineDoctor } from "./doctor.js"
+import {
+  buildInlineInboundFormattingHints,
+  sanitizeInlineOutgoingText,
+} from "./message-formatting.js"
+import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import { resolveInlineGroupRequireMention, resolveInlineGroupToolPolicy } from "./policy.js"
-import { inlineMessageActions, resolveInlineMessageActionsParam } from "./actions.js"
+import {
+  inlineMessageActions,
+  resolveInlineMessageActionsParam,
+  supportsInlineMessageButtonsForConfig,
+  supportsInlineReactionsForConfig,
+} from "./actions.js"
 import { getInlineRuntime } from "../runtime.js"
 import {
-  buildChannelConfigSchema,
   DEFAULT_ACCOUNT_ID,
-  formatPairingApproveHint,
   PAIRING_APPROVED_MESSAGE,
 } from "../openclaw-compat.js"
+import {
+  inlineConfigAdapter,
+  inlineConfigSchema,
+  inlineMeta,
+  normalizeInlineAllowEntry,
+} from "./shared.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { inlineSetupAdapter } from "./setup-core.js"
 import { inlineSetupWizard } from "./setup-surface.js"
+import { inlineSecrets } from "./secret-contract.js"
 import type { InlineProbe } from "./probe.js"
 import { probeInlineAccount } from "./probe.js"
 import { collectInlineStatusIssues } from "./status-issues.js"
+import { inlineSecurityAdapter } from "./security.js"
+import {
+  buildInlineExecApprovalPendingPayload,
+  inlineApprovalCapability,
+} from "./approval-native.js"
 
 const activeMonitors = new Map<string, { stop: () => Promise<void>; done: Promise<void> }>()
 
-const meta = {
-  id: "inline",
-  label: "Inline",
-  selectionLabel: "Inline (native)",
-  docsPath: "/channels/inline",
-  docsLabel: "inline",
-  blurb: "Inline Chat via realtime RPC (bot token).",
-  aliases: ["inline-chat"],
-  order: 30,
-  quickstartAllowFrom: true,
+function resolveInlineStatePath(accountId: string): string {
+  return path.join(getInlineRuntime().state.resolveStateDir(), "channels", "inline", `${accountId}.json`)
 }
 
-function normalizeInlineAllowEntry(raw: string): string {
-  return raw.trim().replace(/^inline:/i, "").replace(/^user:/i, "")
+async function deleteInlineAccountState(accountId: string): Promise<void> {
+  try {
+    await unlink(resolveInlineStatePath(accountId))
+  } catch (error) {
+    if ((error as { code?: string }).code !== "ENOENT") {
+      throw error
+    }
+  }
+}
+
+function resolveInlineStateIdentity(cfg: OpenClawConfig, accountId: string): string {
+  const account = resolveInlineAccount({ cfg, accountId })
+  return JSON.stringify({
+    baseUrl: account.baseUrl,
+    configured: account.configured,
+    token: account.token,
+    tokenFile: account.tokenFile,
+    tokenSource: account.tokenSource,
+    tokenConfigured: account.tokenConfigured,
+  })
 }
 
 function parseInlineId(raw: unknown): bigint | undefined {
@@ -90,6 +137,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
+function hasInlineCredentialValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return Boolean(value.trim())
+  }
+  return Boolean(asRecord(value))
+}
+
 function clearInlineCredentialFields(record: Record<string, unknown>): { changed: boolean; cleared: boolean } {
   let changed = false
   let cleared = false
@@ -98,7 +152,7 @@ function clearInlineCredentialFields(record: Record<string, unknown>): { changed
       continue
     }
     const raw = record[key]
-    if (typeof raw === "string" && raw.trim()) {
+    if (hasInlineCredentialValue(raw)) {
       cleared = true
     }
     delete record[key]
@@ -239,6 +293,62 @@ function parseInlineExplicitTarget(raw: string): { to: string; chatType: "direct
   return { to: `chat:${parsed.normalizedNumeric}`, chatType: "group" }
 }
 
+function resolveInlineOutboundSessionRoute(params: {
+  cfg: OpenClawConfig
+  agentId: string
+  accountId?: string | null
+  target: string
+  resolvedTarget?: { kind: string }
+  replyToId?: string | null
+  threadId?: string | number | null
+  currentSessionKey?: string | null
+}) {
+  let parsed: InlineParsedOutboundTarget
+  try {
+    parsed = parseInlineOutboundTarget({
+      raw: params.target,
+      context: "sendText",
+    })
+  } catch {
+    return null
+  }
+
+  const resolvedKind = params.resolvedTarget?.kind
+  const kind =
+    !parsed.explicitKind && resolvedKind === "user"
+      ? "user"
+      : parsed.kind
+  const chatType: "direct" | "group" = kind === "user" ? "direct" : "group"
+  const peer = {
+    kind: chatType,
+    id: parsed.normalizedNumeric,
+  }
+  const route = buildChannelOutboundSessionRoute({
+    cfg: params.cfg,
+    agentId: params.agentId,
+    channel: "inline",
+    ...(params.accountId !== undefined ? { accountId: params.accountId } : {}),
+    peer,
+    chatType,
+    from: kind === "user" ? `inline:${parsed.normalizedNumeric}` : `inline:chat:${parsed.normalizedNumeric}`,
+    to: kind === "user" ? `user:${parsed.normalizedNumeric}` : `chat:${parsed.normalizedNumeric}`,
+  })
+
+  if (
+    kind === "user" ||
+    !isInlineReplyThreadsEnabled({ cfg: params.cfg, accountId: params.accountId ?? null })
+  ) {
+    return route
+  }
+
+  return buildThreadAwareOutboundSessionRoute({
+    route,
+    ...(params.threadId !== undefined ? { threadId: params.threadId } : {}),
+    ...(params.currentSessionKey !== undefined ? { currentSessionKey: params.currentSessionKey } : {}),
+    precedence: ["threadId", "currentSession"],
+  })
+}
+
 function formatInlineTargetDisplay(params: {
   target: string
   display?: string | undefined
@@ -248,7 +358,12 @@ function formatInlineTargetDisplay(params: {
   if (explicit) {
     return explicit
   }
-  const parsed = parseInlineExplicitTarget(params.target.trim())
+  let parsed: ReturnType<typeof parseInlineExplicitTarget>
+  try {
+    parsed = parseInlineExplicitTarget(params.target.trim())
+  } catch {
+    return params.target.trim()
+  }
   if (!parsed) {
     return params.target.trim()
   }
@@ -270,6 +385,117 @@ function normalizeInlineConversationId(raw: string): string | null {
   } catch {
     return null
   }
+}
+
+function resolveInlineSessionTarget(params: { id: string }): string | undefined {
+  const raw = params.id.trim().replace(/^inline:/i, "").trim()
+  if (!raw) return undefined
+  const target = /^chat:/i.test(raw) ? raw : `chat:${raw}`
+  try {
+    return parseInlineExplicitTarget(target)?.to
+  } catch {
+    return undefined
+  }
+}
+
+function inlineChatIdFromTarget(target: string): string | undefined {
+  const match = target.match(/^chat:(.+)$/i)
+  return match?.[1]?.trim() || undefined
+}
+
+function resolveInlineSessionConversation(params: {
+  rawId: string
+}): {
+  id: string
+  threadId?: string
+  baseConversationId?: string
+  parentConversationCandidates?: string[]
+} | null {
+  const raw = params.rawId.trim()
+  if (!raw) return null
+
+  const threadMarker = ":thread:"
+  const threadIndex = raw.toLowerCase().lastIndexOf(threadMarker)
+  const rawBase = threadIndex >= 0 ? raw.slice(0, threadIndex) : raw
+  const rawThread = threadIndex >= 0 ? raw.slice(threadIndex + threadMarker.length) : undefined
+  const baseTarget = resolveInlineSessionTarget({ id: rawBase })
+  const baseId = baseTarget ? inlineChatIdFromTarget(baseTarget) : undefined
+  const baseConversationId = rawBase ? normalizeInlineConversationId(rawBase) : null
+  if (!baseId || !baseConversationId) {
+    return null
+  }
+
+  const threadTarget = rawThread ? resolveInlineSessionTarget({ id: rawThread }) : undefined
+  const threadId = threadTarget ? inlineChatIdFromTarget(threadTarget) : undefined
+  return {
+    id: baseId,
+    ...(threadId ? { threadId } : {}),
+    baseConversationId,
+    parentConversationCandidates: threadId ? [baseConversationId] : [],
+  }
+}
+
+function resolveInlineInboundConversation(params: {
+  to?: string
+  conversationId?: string
+  threadId?: string | number
+}): { conversationId?: string; parentConversationId?: string } | null {
+  const parent =
+    (params.to ? normalizeInlineConversationId(params.to) : null) ??
+    (params.conversationId ? normalizeInlineConversationId(params.conversationId) : null)
+  const child = params.threadId != null ? normalizeInlineConversationId(String(params.threadId)) : null
+
+  const conversationId = child ?? parent
+  if (!conversationId) {
+    return null
+  }
+
+  return {
+    conversationId,
+    ...(child && parent && parent !== child ? { parentConversationId: parent } : {}),
+  }
+}
+
+function resolveInlineConversationRef(params: {
+  conversationId: string
+  parentConversationId?: string
+  threadId?: string | number | null
+}): { conversationId: string; parentConversationId?: string } | null {
+  const conversation = normalizeInlineConversationId(params.conversationId)
+  const explicitParent = params.parentConversationId
+    ? normalizeInlineConversationId(params.parentConversationId)
+    : null
+  const thread = params.threadId != null ? normalizeInlineConversationId(String(params.threadId)) : null
+  const conversationId = thread ?? conversation
+  if (!conversationId) {
+    return null
+  }
+  const parent = explicitParent ?? (thread && conversation && conversation !== thread ? conversation : null)
+
+  return {
+    conversationId,
+    ...(parent && parent !== conversationId ? { parentConversationId: parent } : {}),
+  }
+}
+
+function resolveInlineDeliveryTarget(params: {
+  conversationId: string
+  parentConversationId?: string
+}): { to?: string; threadId?: string } | null {
+  const child = resolveInlineSessionTarget({ id: params.conversationId })
+  if (!child) return null
+
+  const parent = params.parentConversationId
+    ? resolveInlineSessionTarget({ id: params.parentConversationId })
+    : undefined
+  if (parent && parent !== child) {
+    const threadId = inlineChatIdFromTarget(child)
+    return {
+      to: parent,
+      ...(threadId ? { threadId } : {}),
+    }
+  }
+  return { to: child }
 }
 
 async function listInlineTargetIds(client: InlineSdkClient): Promise<{ chatIds: Set<string>; userIds: Set<string> }> {
@@ -370,6 +596,7 @@ function resolveInlinePayloadActions(payload: Record<string, unknown>): MessageA
   if (Object.hasOwn(inlineData ?? {}, "buttons")) {
     return resolveInlineMessageActionsParam({ buttons: inlineData?.buttons })
   }
+  // Compatibility for older OpenClaw command surfaces that emitted Telegram-shaped buttons.
   if (Object.hasOwn(telegramData ?? {}, "buttons")) {
     return resolveInlineMessageActionsParam({ buttons: telegramData?.buttons })
   }
@@ -510,6 +737,43 @@ async function withInlineClient<T>(params: {
   }
 }
 
+async function sendTypingInline(params: {
+  cfg: OpenClawConfig
+  to: string
+  accountId?: string | null
+  threadId?: string | number | null
+  typing: boolean
+}): Promise<void> {
+  let target: InlineParsedOutboundTarget
+  try {
+    target = parseInlineOutboundTarget({
+      raw: params.to,
+      context: "sendText",
+    })
+  } catch {
+    return
+  }
+  if (target.kind === "user") {
+    return
+  }
+  const chatId = resolveInlineReplyThreadChatId({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+    parentChatId: target.targetId,
+    threadId: params.threadId ?? null,
+  })
+  if (chatId == null) {
+    return
+  }
+  await withInlineClient({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+    fn: async (client) => {
+      await client.sendTyping({ chatId, typing: params.typing })
+    },
+  })
+}
+
 async function notifyPairingApprovedInline(params: {
   cfg: OpenClawConfig
   id: string
@@ -637,6 +901,9 @@ async function sendMediaInline(params: {
   accountId?: string | null
   replyToId?: string | null
   threadId?: string | number | null
+  mediaAccess?: Parameters<typeof uploadInlineMediaFromUrl>[0]["mediaAccess"]
+  mediaLocalRoots?: readonly string[]
+  mediaReadFile?: (filePath: string) => Promise<Buffer>
 }): Promise<{ messageId: string; chatId: string }> {
   const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
   if (!account.configured || !account.baseUrl) {
@@ -678,6 +945,9 @@ async function sendMediaInline(params: {
       cfg: params.cfg,
       accountId: account.accountId,
       mediaUrl: params.mediaUrl,
+      ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
+      ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
+      ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
     })
     const result = await client
       .sendMessage({
@@ -798,9 +1068,229 @@ function resolveInlineUserCandidates(params: {
     .map((user) => ({ id: user.id, name: user.name }))
 }
 
+async function resolveInlineAllowlistNames(params: {
+  cfg: OpenClawConfig
+  accountId?: string | null
+  entries: string[]
+}): Promise<Array<{ input: string; resolved: boolean; name?: string | null }>> {
+  const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
+  if (!account.enabled || !account.configured || !account.baseUrl) {
+    return []
+  }
+
+  const snapshot = await fetchInlineChatsSnapshot({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+  })
+  const usersById = new Map(
+    snapshot.users.map((user) => {
+      const entry = toInlineUserDirectoryEntry(user)
+      return [entry.id, entry] as const
+    }),
+  )
+
+  return params.entries.map((input) => {
+    const id = normalizeInlineAllowEntry(input)
+    if (!/^[0-9]+$/.test(id)) {
+      return { input, resolved: false }
+    }
+    const user = usersById.get(id)
+    if (!user) {
+      return { input, resolved: false }
+    }
+    return {
+      input,
+      resolved: true,
+      name: user.handle ? `${user.name} ${user.handle}` : user.name,
+    }
+  })
+}
+
+const resolveInlineAllowlistGroupOverrides = createFlatAllowlistOverrideResolver({
+  resolveRecord: (account: ResolvedInlineAccount) => account.config.groups,
+  label: (key) => key,
+  resolveEntries: (value) => value?.allowFrom,
+})
+
+const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound"]> = {
+  deliveryMode: "direct",
+  chunker: (text, limit) => getInlineRuntime().channel.text.chunkMarkdownText(text, limit),
+  chunkerMode: "markdown",
+  extractMarkdownImages: true,
+  textChunkLimit: 4000,
+  sanitizeText: ({ text }) => sanitizeInlineOutgoingText(text),
+  shouldSkipPlainTextSanitization: ({ payload }) => Boolean(payload.channelData),
+  shouldTreatDeliveredTextAsVisible: ({ kind }) => kind !== "final",
+  preferFinalAssistantVisibleText: true,
+  presentationCapabilities: {
+    supported: true,
+    buttons: true,
+    selects: true,
+    context: true,
+    divider: false,
+  },
+  renderPresentation: ({ payload, presentation }) => {
+    const text = renderMessagePresentationFallbackText({
+      ...(payload.text !== undefined ? { text: payload.text } : {}),
+      presentation,
+    })
+    const interactive = presentationToInteractiveReply(presentation)
+    return {
+      ...payload,
+      text,
+      ...(interactive ? { interactive } : {}),
+    }
+  },
+  sendPayload: async ({
+    cfg,
+    to,
+    payload,
+    accountId,
+    replyToId,
+    threadId,
+    mediaAccess,
+    mediaLocalRoots,
+    mediaReadFile,
+  }) => {
+    const text =
+      resolveInlineInteractiveTextFallback({
+        text: payload.text ?? undefined,
+        interactive: payload.interactive,
+        presentation: payload.presentation,
+      }) ??
+      payload.text ??
+      ""
+    const payloadReplyToId = typeof payload.replyToId === "string" ? payload.replyToId.trim() : null
+    const effectiveReplyToId = payloadReplyToId || replyToId || null
+    const actions = resolveInlinePayloadActions(payload as Record<string, unknown>)
+    const mediaUrls = payload.mediaUrls?.length
+      ? payload.mediaUrls
+      : payload.mediaUrl
+        ? [payload.mediaUrl]
+        : []
+
+    if (mediaUrls.length === 0) {
+      const result = await sendMessageInline({
+        cfg,
+        to,
+        text,
+        actions,
+        accountId: accountId ?? null,
+        replyToId: effectiveReplyToId,
+        threadId: threadId ?? null,
+      })
+      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+    }
+
+    let finalResult: { messageId: string; chatId: string } | null = null
+    for (let index = 0; index < mediaUrls.length; index += 1) {
+      const mediaUrl = mediaUrls[index]
+      if (!mediaUrl?.trim()) continue
+      const isFirst = index === 0
+      finalResult = await sendMediaInline({
+        cfg,
+        to,
+        text: isFirst ? text : "",
+        mediaUrl,
+        actions: isFirst ? actions : undefined,
+        accountId: accountId ?? null,
+        replyToId: isFirst ? effectiveReplyToId : null,
+        threadId: threadId ?? null,
+        ...(mediaAccess ? { mediaAccess } : {}),
+        ...(mediaLocalRoots ? { mediaLocalRoots } : {}),
+        ...(mediaReadFile ? { mediaReadFile } : {}),
+      })
+    }
+
+    if (!finalResult) {
+      const result = await sendMessageInline({
+        cfg,
+        to,
+        text,
+        actions,
+        accountId: accountId ?? null,
+        replyToId: effectiveReplyToId,
+        threadId: threadId ?? null,
+      })
+      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+    }
+    return { channel: "inline", to, messageId: finalResult.messageId, chatId: finalResult.chatId }
+  },
+  sendText: async ({ cfg, to, text, accountId, replyToId, threadId }) => {
+    // Inline threads are modeled as chats. OpenClaw threadId isn't a message id for Inline.
+    const result = await sendMessageInline({
+      cfg,
+      to,
+      text,
+      accountId: accountId ?? null,
+      replyToId: replyToId ?? null,
+      threadId: threadId ?? null,
+    })
+    return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+  },
+  sendMedia: async ({
+    cfg,
+    to,
+    text,
+    mediaUrl,
+    accountId,
+    replyToId,
+    threadId,
+    mediaAccess,
+    mediaLocalRoots,
+    mediaReadFile,
+  }) => {
+    if (!mediaUrl) {
+      const result = await sendMessageInline({
+        cfg,
+        to,
+        text,
+        accountId: accountId ?? null,
+        replyToId: replyToId ?? null,
+        threadId: threadId ?? null,
+      })
+      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+    }
+
+    // Inline threads are modeled as chats. OpenClaw threadId isn't a message id for Inline.
+    const result = await sendMediaInline({
+      cfg,
+      to,
+      text,
+      mediaUrl,
+      accountId: accountId ?? null,
+      replyToId: replyToId ?? null,
+      threadId: threadId ?? null,
+      ...(mediaAccess ? { mediaAccess } : {}),
+      ...(mediaLocalRoots ? { mediaLocalRoots } : {}),
+      ...(mediaReadFile ? { mediaReadFile } : {}),
+    })
+    return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
+  },
+}
+
+const inlineMessageAdapter = createChannelMessageAdapterFromOutbound<OpenClawConfig>({
+  id: "inline",
+  outbound: inlineOutbound,
+  live: {
+    capabilities: {
+      draftPreview: true,
+      previewFinalization: true,
+      progressUpdates: true,
+    },
+    finalizer: {
+      capabilities: {
+        finalEdit: true,
+        normalFallback: true,
+        discardPending: true,
+      },
+    },
+  },
+})
+
 export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
   id: "inline",
-  meta,
+  meta: inlineMeta,
   capabilities: {
     chatTypes: ["direct", "group"],
     media: true,
@@ -815,50 +1305,35 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
   streaming: {
     blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },
   },
+  commands: {
+    nativeCommandsAutoEnabled: true,
+    nativeSkillsAutoEnabled: true,
+    buildCommandsListChannelData: buildInlineCommandsListChannelData,
+    buildModelsMenuChannelData: buildInlineModelsMenuChannelData,
+    buildModelsProviderChannelData: buildInlineModelsProviderChannelData,
+    buildModelsAddProviderChannelData: buildInlineModelsAddProviderChannelData,
+    buildModelsListChannelData: buildInlineModelsListChannelData,
+    buildModelBrowseChannelData: buildInlineModelBrowseChannelData,
+  },
   reload: { configPrefixes: ["channels.inline"] },
-  configSchema: buildChannelConfigSchema(InlineConfigSchema),
+  lifecycle: {
+    onAccountConfigChanged: async ({ prevCfg, nextCfg, accountId }) => {
+      if (resolveInlineStateIdentity(prevCfg, accountId) === resolveInlineStateIdentity(nextCfg, accountId)) {
+        return
+      }
+      await deleteInlineAccountState(accountId)
+    },
+    onAccountRemoved: async ({ accountId }) => {
+      await deleteInlineAccountState(accountId)
+    },
+  },
+  configSchema: inlineConfigSchema,
   setup: inlineSetupAdapter,
   setupWizard: inlineSetupWizard,
+  doctor: inlineDoctor,
+  secrets: inlineSecrets,
 
-  config: {
-    listAccountIds: (cfg) => listInlineAccountIds(cfg),
-    resolveAccount: (cfg, accountId) => resolveInlineAccount({ cfg, accountId: accountId ?? null }),
-    defaultAccountId: (cfg) => resolveDefaultInlineAccountId(cfg),
-    setAccountEnabled: ({ cfg, accountId, enabled }) =>
-      setAccountEnabledInConfigSection({
-        cfg,
-        sectionKey: "inline",
-        accountId,
-        enabled,
-        allowTopLevel: true,
-      }),
-    deleteAccount: ({ cfg, accountId }) =>
-      deleteAccountFromConfigSection({
-        cfg,
-        sectionKey: "inline",
-        accountId,
-        clearBaseFields: ["token", "tokenFile", "name", "enabled"],
-      }),
-    isConfigured: (account) => account.configured,
-    describeAccount: (account) => ({
-      accountId: account.accountId,
-      name: account.name,
-      enabled: account.enabled,
-      configured: account.configured,
-      baseUrl: account.baseUrl ? "[set]" : "[missing]",
-      tokenSource: account.token ? "config" : account.tokenFile ? "file" : "missing",
-    }),
-    resolveAllowFrom: ({ cfg, accountId }) =>
-      (resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.allowFrom ?? []).map(
-        (entry) =>
-        normalizeInlineAllowEntry(String(entry)),
-      ),
-    formatAllowFrom: ({ allowFrom }) =>
-      allowFrom
-        .map((entry) => String(entry).trim())
-        .filter(Boolean)
-        .map((entry) => normalizeInlineAllowEntry(entry)),
-  },
+  config: inlineConfigAdapter,
 
   pairing: {
     idLabel: "inlineUserId",
@@ -868,53 +1343,24 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     },
   },
 
-  security: {
-    resolveDmPolicy: ({ cfg, accountId, account }) => {
-      const resolvedAccountId = accountId ?? account.accountId ?? DEFAULT_ACCOUNT_ID
-      const useAccountPath = Boolean(cfg.channels?.inline?.accounts?.[resolvedAccountId])
-      const basePath = useAccountPath
-        ? `channels.inline.accounts.${resolvedAccountId}.`
-        : "channels.inline."
-      return {
-        policy: account.config.dmPolicy ?? "pairing",
-        allowFrom: account.config.allowFrom ?? [],
-        policyPath: `${basePath}dmPolicy`,
-        allowFromPath: `${basePath}allowFrom`,
-        approveHint: formatPairingApproveHint("inline"),
-        normalizeEntry: (raw) => normalizeInlineAllowEntry(raw),
-      }
-    },
-    collectWarnings: ({ account, cfg }) => {
-      const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
-      const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist"
-      if (groupPolicy !== "open") {
-        return []
-      }
-      const groupRulesConfigured =
-        Boolean(account.config.groups) && Object.keys(account.config.groups ?? {}).length > 0
-      if (groupRulesConfigured) {
-        return [
-          "- Inline groups: groupPolicy=\"open\" allows any group message to reach the agent (subject to mention policy). Set channels.inline.groupPolicy=\"allowlist\" for stricter routing.",
-        ]
-      }
-      return [
-        "- Inline groups: groupPolicy=\"open\" with no group rules means every group can trigger replies. Consider channels.inline.groupPolicy=\"allowlist\".",
-      ]
-    },
+  security: inlineSecurityAdapter,
+  allowlist: {
+    ...buildDmGroupAccountAllowlistAdapter({
+      channelId: "inline",
+      resolveAccount: ({ cfg, accountId }) => resolveInlineAccount({ cfg, accountId: accountId ?? null }),
+      normalize: ({ values }) =>
+        values
+          .map((entry) => String(entry).trim())
+          .filter(Boolean)
+          .map((entry) => normalizeInlineAllowEntry(entry)),
+      resolveDmAllowFrom: (account) => account.config.allowFrom ?? [],
+      resolveGroupAllowFrom: (account) => account.config.groupAllowFrom ?? [],
+      resolveDmPolicy: (account) => account.config.dmPolicy,
+      resolveGroupPolicy: (account) => account.config.groupPolicy,
+      resolveGroupOverrides: resolveInlineAllowlistGroupOverrides,
+    }),
+    resolveNames: resolveInlineAllowlistNames,
   },
-  allowlist: buildDmGroupAccountAllowlistAdapter({
-    channelId: "inline",
-    resolveAccount: ({ cfg, accountId }) => resolveInlineAccount({ cfg, accountId: accountId ?? null }),
-    normalize: ({ values }) =>
-      values
-        .map((entry) => String(entry).trim())
-        .filter(Boolean)
-        .map((entry) => normalizeInlineAllowEntry(entry)),
-    resolveDmAllowFrom: (account) => account.config.allowFrom ?? [],
-    resolveGroupAllowFrom: (account) => account.config.groupAllowFrom ?? [],
-    resolveDmPolicy: (account) => account.config.dmPolicy,
-    resolveGroupPolicy: (account) => account.config.groupPolicy,
-  }),
   bindings: {
     compileConfiguredBinding: ({ conversationId }) => {
       const normalized = normalizeInlineConversationId(conversationId)
@@ -946,6 +1392,16 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       }
       return null
     },
+  },
+  conversationBindings: {
+    supportsCurrentConversationBinding: true,
+    defaultTopLevelPlacement: "current",
+    resolveConversationRef: ({ conversationId, parentConversationId, threadId }) =>
+      resolveInlineConversationRef({
+        conversationId,
+        ...(parentConversationId !== undefined ? { parentConversationId } : {}),
+        ...(threadId !== undefined ? { threadId } : {}),
+      }),
   },
 
   groups: {
@@ -1002,23 +1458,63 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
   },
 
   agentPrompt: {
+    inboundFormattingHints: () => buildInlineInboundFormattingHints(),
+    reactionGuidance: ({ cfg, accountId }) =>
+      supportsInlineReactionsForConfig(cfg, accountId ?? null)
+        ? { level: "minimal", channelLabel: "Inline" }
+        : undefined,
+    messageToolCapabilities: ({ cfg, accountId }) =>
+      supportsInlineMessageButtonsForConfig(cfg, accountId ?? null) ? ["inlineButtons"] : [],
     messageToolHints: ({ cfg, accountId }) => [
       "- Inline targeting: omit `target` to reply in the current chat.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
       "- Inline discovery: use `channel-list` to discover available chats and users. Use `scope: groups|peers|all` when helpful, and reuse returned `target` values.",
-      "- Inline reactions: pass `messageId` for `react` when you have it; on inbound turns, the current inbound message id can be used as fallback.",
+      ...(supportsInlineMessageButtonsForConfig(cfg, accountId ?? null)
+        ? [
+            "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows for simple callback buttons.",
+          ]
+        : []),
+      ...(supportsInlineReactionsForConfig(cfg, accountId ?? null)
+        ? [
+            "- Inline reactions: pass `messageId` for `react` when you have it; on inbound turns, the current inbound message id can be used as fallback.",
+          ]
+        : []),
       "- Inline history tools: `read` and `search` return media-aware message payloads (`media`, `attachments`, `attachmentUrls`) so image-only history remains discoverable. `search` is chat-scoped; run it per chat.",
       "- Inline special tools: use `inline_nudge` to send a nudge, and `inline_forward` to forward message ids between chats or users.",
       ...(isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
         ? [
             "- Inline reply threads are enabled: use `thread-reply` to send into a real reply thread, with `threadId` set to the reply-thread chat id.",
           ]
-        : []),
+        : [
+            "- Inline reply threads are disabled: `thread-reply` uses the legacy reply path and `thread-create` creates a normal chat, not a dedicated Inline reply-thread chat.",
+          ]),
     ],
   },
 
   messaging: {
+    targetPrefixes: ["inline"],
+    transformReplyPayload: ({ payload }) => {
+      if (typeof payload.text !== "string") {
+        return payload
+      }
+      const text = sanitizeInlineOutgoingText(payload.text)
+      return text === payload.text ? payload : { ...payload, text }
+    },
     normalizeTarget: normalizeInlineTarget,
+    resolveInboundConversation: ({ to, conversationId, threadId }) =>
+      resolveInlineInboundConversation({
+        ...(to !== undefined ? { to } : {}),
+        ...(conversationId !== undefined ? { conversationId } : {}),
+        ...(threadId !== undefined ? { threadId } : {}),
+      }),
+    resolveDeliveryTarget: ({ conversationId, parentConversationId }) =>
+      resolveInlineDeliveryTarget({
+        conversationId,
+        ...(parentConversationId !== undefined ? { parentConversationId } : {}),
+      }),
+    resolveSessionConversation: ({ rawId }) => resolveInlineSessionConversation({ rawId }),
+    resolveSessionTarget: ({ id }) => resolveInlineSessionTarget({ id }),
+    preserveHeartbeatThreadIdForGroupRoute: true,
     parseExplicitTarget: ({ raw }) => {
       try {
         const parsed = parseInlineExplicitTarget(raw)
@@ -1036,6 +1532,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         return undefined
       }
     },
+    resolveOutboundSessionRoute: (params) => resolveInlineOutboundSessionRoute(params),
     formatTargetDisplay: ({ target, display, kind }) =>
       formatInlineTargetDisplay({
         target,
@@ -1045,6 +1542,37 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     targetResolver: {
       looksLikeId: looksLikeInlineTargetId,
       hint: "<chatId | chat:<chatId> | user:<userId>>",
+    },
+  },
+
+  heartbeat: {
+    sendTyping: async ({ cfg, to, accountId, threadId }) => {
+      await sendTypingInline({
+        cfg,
+        to,
+        accountId: accountId ?? null,
+        threadId: threadId ?? null,
+        typing: true,
+      })
+    },
+    clearTyping: async ({ cfg, to, accountId, threadId }) => {
+      await sendTypingInline({
+        cfg,
+        to,
+        accountId: accountId ?? null,
+        threadId: threadId ?? null,
+        typing: false,
+      })
+    },
+  },
+
+  approvalCapability: {
+    ...inlineApprovalCapability,
+    render: {
+      exec: {
+        buildPendingPayload: ({ request, nowMs }) =>
+          buildInlineExecApprovalPendingPayload({ request, nowMs }),
+      },
     },
   },
 
@@ -1184,136 +1712,19 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
   },
 
   actions: inlineMessageActions,
-
-  outbound: {
-    deliveryMode: "direct",
-    chunker: (text, limit) => getInlineRuntime().channel.text.chunkMarkdownText(text, limit),
-    chunkerMode: "markdown",
-    extractMarkdownImages: true,
-    textChunkLimit: 4000,
-    sanitizeText: ({ text }) => sanitizeInlineOutgoingText(text),
-    shouldSkipPlainTextSanitization: ({ payload }) => Boolean(payload.channelData),
-    shouldTreatDeliveredTextAsVisible: ({ kind }) => kind !== "final",
-    preferFinalAssistantVisibleText: true,
-    presentationCapabilities: {
-      supported: true,
-      buttons: true,
-      selects: true,
-      context: true,
-      divider: false,
-    },
-    renderPresentation: ({ payload, presentation }) => {
-      const text = renderMessagePresentationFallbackText({
-        ...(payload.text !== undefined ? { text: payload.text } : {}),
-        presentation,
-      })
-      const interactive = presentationToInteractiveReply(presentation)
-      return {
-        ...payload,
-        text,
-        ...(interactive ? { interactive } : {}),
-      }
-    },
-    sendPayload: async ({ cfg, to, payload, accountId, replyToId }) => {
-      const text = payload.text ?? ""
-      const payloadReplyToId = typeof payload.replyToId === "string" ? payload.replyToId.trim() : null
-      const effectiveReplyToId = payloadReplyToId || replyToId || null
-      const actions = resolveInlinePayloadActions(payload as Record<string, unknown>)
-      const mediaUrls = payload.mediaUrls?.length
-        ? payload.mediaUrls
-        : payload.mediaUrl
-          ? [payload.mediaUrl]
-          : []
-
-      if (mediaUrls.length === 0) {
-        const result = await sendMessageInline({
-          cfg,
-          to,
-          text,
-          actions,
-          accountId: accountId ?? null,
-          replyToId: effectiveReplyToId,
-          threadId: null,
-        })
-        return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
-      }
-
-      let finalResult: { messageId: string; chatId: string } | null = null
-      for (let index = 0; index < mediaUrls.length; index += 1) {
-        const mediaUrl = mediaUrls[index]
-        if (!mediaUrl?.trim()) continue
-        const isFirst = index === 0
-        finalResult = await sendMediaInline({
-          cfg,
-          to,
-          text: isFirst ? text : "",
-          mediaUrl,
-          actions: isFirst ? actions : undefined,
-          accountId: accountId ?? null,
-          replyToId: isFirst ? effectiveReplyToId : null,
-          threadId: null,
-        })
-      }
-
-      if (!finalResult) {
-        const result = await sendMessageInline({
-          cfg,
-          to,
-          text,
-          actions,
-          accountId: accountId ?? null,
-          replyToId: effectiveReplyToId,
-          threadId: null,
-        })
-        return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
-      }
-      return { channel: "inline", to, messageId: finalResult.messageId, chatId: finalResult.chatId }
-    },
-    sendText: async ({ cfg, to, text, accountId, replyToId, threadId }) => {
-      // Inline threads are modeled as chats. OpenClaw threadId isn't a message id for Inline.
-      const result = await sendMessageInline({
-        cfg,
-        to,
-        text,
-        accountId: accountId ?? null,
-        replyToId: replyToId ?? null,
-        threadId: threadId ?? null,
-      })
-      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
-    },
-    sendMedia: async ({ cfg, to, text, mediaUrl, accountId, replyToId, threadId }) => {
-      if (!mediaUrl) {
-        const result = await sendMessageInline({
-          cfg,
-          to,
-          text,
-          accountId: accountId ?? null,
-          replyToId: replyToId ?? null,
-          threadId: threadId ?? null,
-        })
-        return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
-      }
-
-      // Inline threads are modeled as chats. OpenClaw threadId isn't a message id for Inline.
-      const result = await sendMediaInline({
-        cfg,
-        to,
-        text,
-        mediaUrl,
-        accountId: accountId ?? null,
-        replyToId: replyToId ?? null,
-        threadId: threadId ?? null,
-      })
-      return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
-    },
-  },
+  outbound: inlineOutbound,
+  message: inlineMessageAdapter,
 
   status: {
     defaultRuntime: {
       accountId: DEFAULT_ACCOUNT_ID,
       running: false,
+      connected: false,
       lastStartAt: null,
       lastStopAt: null,
+      lastConnectedAt: null,
+      lastEventAt: null,
+      lastTransportActivityAt: null,
       lastError: null,
       lastProbeAt: null,
     },
@@ -1321,18 +1732,40 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     buildChannelSummary: ({ snapshot }) => buildTokenChannelStatusSummary(snapshot),
     probeAccount: async ({ account, timeoutMs }) => await probeInlineAccount(account, timeoutMs),
     formatCapabilitiesProbe: ({ probe }) => formatInlineCapabilitiesProbeLines(probe),
-    buildAccountSnapshot: ({ account, runtime, probe }) => {
+    buildAccountSnapshot: ({ cfg, account, runtime, probe }) => {
+      const inspected = inspectInlineAccount({
+        cfg: cfg as OpenClawConfig,
+        accountId: account.accountId,
+      })
+      const ownerAccountId = findInlineTokenOwnerAccountId({
+        cfg: cfg as OpenClawConfig,
+        accountId: account.accountId,
+      })
+      const duplicateTokenReason = ownerAccountId
+        ? formatDuplicateInlineTokenReason({
+            accountId: account.accountId,
+            ownerAccountId,
+          })
+        : null
       const snapshot = {
         accountId: account.accountId,
         name: account.name,
         enabled: account.enabled,
-        configured: account.configured,
+        configured: inspected.configured && !ownerAccountId,
         baseUrl: account.baseUrl ? "[set]" : "[missing]",
-        tokenSource: account.token ? "config" : account.tokenFile ? "file" : "missing",
+        tokenSource: inspected.tokenSource,
+        reactionNotifications: account.reactionNotifications,
+        ...(account.reactionAllowlist !== undefined
+          ? { reactionAllowlist: account.reactionAllowlist }
+          : {}),
         running: runtime?.running ?? false,
+        connected: runtime?.connected ?? false,
         lastStartAt: runtime?.lastStartAt ?? null,
         lastStopAt: runtime?.lastStopAt ?? null,
-        lastError: runtime?.lastError ?? null,
+        lastConnectedAt: runtime?.lastConnectedAt ?? null,
+        lastEventAt: runtime?.lastEventAt ?? null,
+        lastTransportActivityAt: runtime?.lastTransportActivityAt ?? null,
+        lastError: runtime?.lastError ?? duplicateTokenReason,
         lastInboundAt: runtime?.lastInboundAt ?? null,
         lastOutboundAt: runtime?.lastOutboundAt ?? null,
         lastProbeAt: runtime?.lastProbeAt ?? null,
@@ -1351,6 +1784,18 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
   gateway: {
     startAccount: async (ctx) => {
       const account = ctx.account
+      const ownerAccountId = findInlineTokenOwnerAccountId({
+        cfg: ctx.cfg as OpenClawConfig,
+        accountId: account.accountId,
+      })
+      if (ownerAccountId) {
+        const reason = formatDuplicateInlineTokenReason({
+          accountId: account.accountId,
+          ownerAccountId,
+        })
+        ctx.log?.error?.(`[${account.accountId}] ${reason}`)
+        throw new Error(reason)
+      }
       if (!account.configured || !account.baseUrl) {
         throw new Error(
           `Inline not configured for account "${account.accountId}" (missing baseUrl or token)`,
@@ -1372,7 +1817,11 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         accountId: account.accountId,
         configured: true,
         running: true,
+        connected: false,
         lastStartAt: now,
+        lastConnectedAt: null,
+        lastEventAt: null,
+        lastTransportActivityAt: null,
         lastError: null,
       })
 
@@ -1380,6 +1829,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         cfg: ctx.cfg as OpenClawConfig,
         account,
         runtime: ctx.runtime,
+        ...(ctx.channelRuntime ? { channelRuntime: ctx.channelRuntime } : {}),
         abortSignal: ctx.abortSignal,
         ...(ctx.log ? { log: ctx.log } : {}),
         statusSink: (patch) => {
@@ -1405,6 +1855,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       ctx.setStatus({
         ...ctx.getStatus(),
         running: false,
+        connected: false,
         lastStopAt: Date.now(),
       })
     },
@@ -1421,13 +1872,13 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         }
       }
 
-      const envToken = process.env.INLINE_TOKEN?.trim() ?? ""
+      const envToken = resolveInlineEnvToken() ?? ""
       if (accountId === DEFAULT_ACCOUNT_ID && envToken) {
         return {
           cleared: false,
           loggedOut: false,
           message:
-            "No Inline credentials found in config. INLINE_TOKEN is set in env; unset it and restart gateway to fully log out.",
+            "No Inline credentials found in config. INLINE_TOKEN/INLINE_BOT_TOKEN is set in env; unset it and restart gateway to fully log out.",
         }
       }
 

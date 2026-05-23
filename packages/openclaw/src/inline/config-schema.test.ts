@@ -61,6 +61,19 @@ describe("inline/config-schema", () => {
     ).toBe(true)
   })
 
+  it("accepts SecretRef-shaped token config", () => {
+    const ref = { source: "env", provider: "default", id: "INLINE_TOKEN" }
+
+    expect(InlineConfigSchema.safeParse({ token: ref }).success).toBe(true)
+    expect(
+      InlineConfigSchema.safeParse({
+        accounts: {
+          work: { token: ref },
+        },
+      }).success,
+    ).toBe(true)
+  })
+
   it("runtime schema tolerates future host fields without dropping known Inline config", () => {
     const result = InlineRuntimeConfigSchema.safeParse({
       token: "t",
@@ -133,6 +146,8 @@ describe("inline/config-schema", () => {
     expect(
       InlineConfigSchema.safeParse({
         mediaMaxMb: 10,
+        reactionNotifications: "allowlist",
+        reactionAllowlist: ["51", "accessGroup:operators"],
         actions: {
           send: true,
           read: true,
@@ -176,6 +191,7 @@ describe("inline/config-schema", () => {
         groups: {
           "123": {
             requireMention: false,
+            allowFrom: ["51", "accessGroup:operators"],
             tools: { allow: ["message", "web.search"] },
             toolsBySender: {
               "42": { allow: ["message"] },
@@ -184,6 +200,92 @@ describe("inline/config-schema", () => {
         },
       }).success,
     ).toBe(true)
+  })
+
+  it("accepts native-compatible numeric allowlist entries", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        allowFrom: [51, "52", "accessGroup:operators"],
+        groupAllowFrom: [61, "62"],
+        reactionNotifications: "allowlist",
+        reactionAllowlist: [71, "72", "accessGroup:operators"],
+        accounts: {
+          work: {
+            allowFrom: [81, "82"],
+            groupAllowFrom: [91, "92"],
+            groups: {
+              "chat:100": {
+                allowFrom: [93, "94"],
+              },
+            },
+            reactionNotifications: "allowlist",
+            reactionAllowlist: [101, "102"],
+          },
+        },
+      }).success,
+    ).toBe(true)
+  })
+
+  it("accepts top-level and account-level native exec approval config", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        execApprovals: {
+          enabled: "auto",
+          approvers: [51, "user:52", "inline:user:53"],
+          agentFilter: ["main"],
+          sessionFilter: ["inline:"],
+          target: "both",
+        },
+        accounts: {
+          work: {
+            execApprovals: {
+              enabled: true,
+              approvers: ["54"],
+              target: "dm",
+            },
+          },
+        },
+      }).success,
+    ).toBe(true)
+    expect(
+      InlineConfigSchema.safeParse({
+        execApprovals: { enabled: "yes" },
+      }).success,
+    ).toBe(false)
+    expect(
+      InlineConfigSchema.safeParse({
+        execApprovals: { target: "thread" },
+      }).success,
+    ).toBe(false)
+  })
+
+  it("accepts native-compatible default outbound targets", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        defaultTo: 51,
+        accounts: {
+          work: {
+            defaultTo: "chat:52",
+          },
+        },
+      }).success,
+    ).toBe(true)
+    expect(InlineConfigSchema.safeParse({ defaultTo: false }).success).toBe(false)
+  })
+
+  it("accepts native-compatible reaction notification modes", () => {
+    for (const mode of ["off", "own", "all", "allowlist"]) {
+      expect(InlineConfigSchema.safeParse({ reactionNotifications: mode }).success).toBe(true)
+      expect(
+        InlineConfigSchema.safeParse({
+          accounts: {
+            work: { reactionNotifications: mode, reactionAllowlist: ["51"] },
+          },
+        }).success,
+      ).toBe(true)
+    }
+
+    expect(InlineConfigSchema.safeParse({ reactionNotifications: "mentions" }).success).toBe(false)
   })
 
   it("accepts legacy scalar streaming aliases for older OpenClaw configs", () => {
@@ -201,6 +303,17 @@ describe("inline/config-schema", () => {
             systemPrompt: "Do not wrap bare URLs in backticks.",
             tools: { allow: ["message"] },
           },
+        },
+      }).success,
+    ).toBe(true)
+  })
+
+  it("accepts mention-only group entries written by setup defaults", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        groups: {
+          "*": { requireMention: true },
+          "123": { requireMention: false },
         },
       }).success,
     ).toBe(true)

@@ -14,18 +14,29 @@ const DEFAULT_VIDEO_DURATION = 1
 
 type InlineUploadType = "photo" | "video" | "document"
 type InlineLoadedMedia = Awaited<ReturnType<ReturnType<typeof getInlineRuntime>["media"]["loadWebMedia"]>>
+type InlineMediaReadFile = (filePath: string) => Promise<Buffer>
+type InlineMediaLocalRoots = readonly string[] | "any"
+type InlineMediaAccess = {
+  localRoots?: readonly string[]
+  readFile?: InlineMediaReadFile
+  workspaceDir?: string
+}
+type InlineMediaLoadContext = {
+  mediaAccess?: InlineMediaAccess
+  mediaLocalRoots?: InlineMediaLocalRoots
+  mediaReadFile?: InlineMediaReadFile
+}
+type InlineWebMediaOptions = {
+  maxBytes?: number
+  localRoots?: InlineMediaLocalRoots
+  readFile?: InlineMediaReadFile
+  hostReadCapability?: boolean
+  workspaceDir?: string
+}
 type LoadWebMediaCompat = (
   mediaUrl: string,
-  maxBytes?: number,
-  options?: {
-    ssrfPolicy?: unknown
-    localRoots?: string[] | "any"
-  },
+  maxBytesOrOptions?: number | InlineWebMediaOptions,
 ) => Promise<InlineLoadedMedia>
-
-function looksLikeLocalMediaSource(mediaUrl: string): boolean {
-  return !/^https?:\/\//i.test(mediaUrl.trim())
-}
 
 function normalizeMime(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim().toLowerCase()
@@ -157,6 +168,29 @@ function resolveMediaMaxBytes(params: {
   )
 }
 
+function buildInlineMediaLoadOptions(params: {
+  maxBytes: number
+} & InlineMediaLoadContext): number | InlineWebMediaOptions {
+  const explicitLocalRoots = params.mediaAccess?.localRoots ?? params.mediaLocalRoots
+  const readFile = params.mediaAccess?.readFile ?? params.mediaReadFile
+  const workspaceDir = params.mediaAccess?.workspaceDir
+  const localRoots =
+    explicitLocalRoots === "any" || explicitLocalRoots?.length
+      ? explicitLocalRoots
+      : readFile
+        ? "any"
+        : undefined
+  if (!localRoots && !readFile && !workspaceDir) {
+    return params.maxBytes
+  }
+  return {
+    maxBytes: params.maxBytes,
+    ...(localRoots ? { localRoots } : {}),
+    ...(readFile ? { readFile, hostReadCapability: true } : {}),
+    ...(workspaceDir ? { workspaceDir } : {}),
+  }
+}
+
 function mediaFromUploadResult(params: {
   uploadType: InlineUploadType
   result: {
@@ -182,6 +216,9 @@ export async function uploadInlineMediaFromUrl(params: {
   cfg: OpenClawConfig
   accountId?: string | null
   mediaUrl: string
+  mediaAccess?: InlineMediaAccess
+  mediaLocalRoots?: readonly string[]
+  mediaReadFile?: InlineMediaReadFile
 }): Promise<InlineSdkSendMessageMedia> {
   const maxBytes = resolveMediaMaxBytes({
     cfg: params.cfg,
@@ -194,20 +231,15 @@ export async function uploadInlineMediaFromUrl(params: {
   let uploadType: InlineUploadType | undefined
   let fileName: string | undefined
   try {
-    try {
-      loaded = await runtimeMedia.loadWebMedia(params.mediaUrl, maxBytes)
-    } catch (error) {
-      const message = String(error)
-      const deniedLocalPath = /not under an allowed directory/i.test(message)
-      if (!deniedLocalPath || !looksLikeLocalMediaSource(params.mediaUrl)) {
-        throw error
-      }
-      // Match OpenClaw's message-action-runner pattern:
-      // localRoots: "any" is used only after sandbox path normalization upstream.
-      loaded = await loadWebMediaCompat(params.mediaUrl, maxBytes, {
-        localRoots: "any",
-      })
-    }
+    loaded = await loadWebMediaCompat(
+      params.mediaUrl,
+      buildInlineMediaLoadOptions({
+        maxBytes,
+        ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
+        ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
+        ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
+      }),
+    )
     if (!loaded) {
       throw new Error("inline media upload: media load returned no data")
     }
