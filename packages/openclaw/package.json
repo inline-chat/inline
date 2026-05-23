@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.35",
+  "version": "0.0.38",
   "type": "module",
   "files": [
     "dist",
@@ -16,7 +16,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist src/index.js src/index.js.map && bun build ./src/index.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "rm -rf dist src/index.js src/index.js.map && bun build ./src/index.ts ./src/setup-entry.ts ./src/setup-plugin-api.ts ./src/configured-state.ts ./src/secret-contract-api.ts ./src/channel-plugin-api.ts ./src/inline/approval-handler.runtime.ts ./src/runtime-setter-api.ts ./src/account-inspect-api.ts ./src/runtime-register-api.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
     "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
     "prepack": "bun run build",
     "pretest": "rm -rf coverage",
@@ -25,31 +25,61 @@
     "check": "bun run typecheck && bun run lint && bun run test && bun run build"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "^0.0.11",
-    "zod": "^4.1.5"
+    "@inline-chat/realtime-sdk": "0.0.11",
+    "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.4.26"
+    "openclaw": ">=2026.5.18"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@types/node": "^20.11.30",
+    "@types/node": "20.17.19",
     "@vitest/coverage-v8": "4.0.16",
-    "openclaw": "2026.5.7",
-    "typescript": "^5.8.3",
-    "vitest": "^4.0.16"
+    "openclaw": "2026.5.18",
+    "typescript": "5.8.3",
+    "vitest": "4.0.16"
   },
   "openclaw": {
     "extensions": [
       "./dist/index.js"
     ],
+    "setupEntry": "./dist/setup-entry.js",
     "channel": {
       "id": "inline",
       "label": "Inline",
-      "selectionLabel": "Inline (realtime bot)",
+      "selectionLabel": "Inline (Bot API)",
+      "detailLabel": "Inline Bot",
       "docsPath": "/channels/inline",
       "docsLabel": "inline",
-      "blurb": "Interact with OpenClaw via Inline DMs and chats.",
-      "order": 115,
+      "blurb": "Use OpenClaw from Inline DMs and chats with an Inline bot token.",
+      "systemImage": "bubble.left.and.bubble.right",
+      "markdownCapable": true,
+      "commands": {
+        "nativeCommandsAutoEnabled": true,
+        "nativeSkillsAutoEnabled": true
+      },
+      "configuredState": {
+        "env": {
+          "anyOf": [
+            "INLINE_TOKEN",
+            "INLINE_BOT_TOKEN"
+          ]
+        },
+        "specifier": "./dist/configured-state.js",
+        "exportName": "hasInlineConfiguredState"
+      },
+      "doctorCapabilities": {
+        "dmAllowFromMode": "topOrNested",
+        "groupModel": "hybrid",
+        "groupAllowFromFallbackToAllowFrom": false,
+        "warnOnEmptyGroupSenderAllowlist": true
+      },
+      "order": 30,
+      "quickstartAllowFrom": true,
       "aliases": [
         "inline-chat"
       ]
@@ -58,13 +88,18 @@
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "packages/openclaw",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.4.26"
+      "minHostVersion": ">=2026.5.18"
+    },
+    "compat": {
+      "pluginApi": ">=2026.5.18"
+    },
+    "build": {
+      "openclawVersion": "2026.5.18"
+    },
+    "release": {
+      "publishToClawHub": true,
+      "publishToNpm": true
     }
-  },
-  "moltbot": {
-    "extensions": [
-      "./dist/index.js"
-    ]
   },
   "publishConfig": {
     "access": "public"

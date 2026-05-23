@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { PluginRuntime } from "openclaw/plugin-sdk"
 
 describe("runtime", () => {
+  beforeEach(() => {
+    delete (globalThis as Record<string, unknown>).__inlineOpenClawRuntime
+  })
+
   it("throws before initialization", async () => {
     vi.resetModules()
     const mod = await import("./runtime")
@@ -16,4 +20,3 @@ describe("runtime", () => {
     expect(mod.getInlineRuntime()).toBe(runtime)
   })
 })
-
