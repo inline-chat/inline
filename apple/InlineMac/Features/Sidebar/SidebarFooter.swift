@@ -31,7 +31,9 @@ enum SidebarFooterMetrics {
 
 struct SidebarFooterView: View {
   let isArchiveActive: Bool
+  let showsArchive: Bool
   @Binding var showPreview: Bool
+  @Binding var includeSpaceChatsInHome: Bool
 
   let onToggleArchive: () -> Void
   let onSearch: () -> Void
@@ -47,13 +49,15 @@ struct SidebarFooterView: View {
 
   var body: some View {
     HStack(spacing: 0) {
-      slot {
-        SidebarFooterButton(
-          symbolName: isArchiveActive ? "archivebox.fill" : "archivebox",
-          accessibilityLabel: "Archive",
-          tint: iconTint,
-          action: onToggleArchive
-        )
+      if showsArchive {
+        slot {
+          SidebarFooterButton(
+            symbolName: isArchiveActive ? "archivebox.fill" : "archivebox",
+            accessibilityLabel: "Archive",
+            tint: iconTint,
+            action: onToggleArchive
+          )
+        }
       }
 
       slot {
@@ -76,6 +80,8 @@ struct SidebarFooterView: View {
           } label: {
             Text(showPreview ? "Hide Message Previews" : "Show Message Previews")
           }
+
+          Toggle("Include Space Chats in Home", isOn: $includeSpaceChatsInHome)
         }
       }
 

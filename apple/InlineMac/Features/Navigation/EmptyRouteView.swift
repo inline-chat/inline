@@ -9,7 +9,7 @@ struct EmptyRouteView: View {
       nav.openCommandBar()
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .emptyRouteWindowBackground()
+    .routeContentBackground(.translucentPage)
     .emptyRouteWindowDragArea()
     .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
   }
@@ -54,39 +54,12 @@ private struct EmptyRouteLogoButton: View {
 }
 
 private extension View {
-  func emptyRouteWindowBackground() -> some View {
-    modifier(EmptyRouteWindowBackground())
-  }
-
   func emptyRouteWindowDragArea() -> some View {
     background {
       Color.clear
         .contentShape(Rectangle())
         .gesture(WindowDragGesture())
         .allowsWindowActivationEvents(true)
-    }
-  }
-}
-
-private struct EmptyRouteWindowBackground: ViewModifier {
-  @Environment(\.colorScheme) private var colorScheme
-  @Environment(\.appearsActive) private var appearsActive
-
-  func body(content: Content) -> some View {
-    content
-      .background {
-        ZStack {
-          VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-
-          windowOverlayColor
-            .opacity(appearsActive ? 0.7 : 0)
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
       }
-  }
-
-  private var windowOverlayColor: Color {
-    colorScheme == .dark ? Color.black : Color.white
   }
 }

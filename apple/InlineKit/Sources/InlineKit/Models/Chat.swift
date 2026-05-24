@@ -248,6 +248,30 @@ public extension Chat {
 }
 
 public extension Chat {
+  mutating func saveWithValidLastMsg(_ db: Database) throws {
+    if let existing = try Chat.fetchOne(db, key: id), lastMsgId == nil {
+      lastMsgId = existing.lastMsgId
+    }
+
+    guard let localLastMsgId = lastMsgId else {
+      try save(db)
+      return
+    }
+
+    let hasLastMessage = try Message
+      .filter(Column("chatId") == id)
+      .filter(Column("messageId") == localLastMsgId)
+      .fetchCount(db) > 0
+
+    if hasLastMessage {
+      try save(db)
+      return
+    }
+
+    lastMsgId = nil
+    try save(db)
+  }
+
   static func getByPeerId(db: Database, peerId: Peer) throws -> Chat? {
     switch peerId {
       case let .user(id):
@@ -350,7 +374,30 @@ public extension Chat {
         .filter(Column("id") == chatId)
         .updateAll(db, [
           Column("lastMsgId").set(to: lastMsgId),
-        ])
+      ])
+    }
+  }
+
+  static func updateLastMsgIds(_ db: Database, messages: [Message]) throws {
+    var newestByChatId: [Int64: Message] = [:]
+
+    for message in messages {
+      if let current = newestByChatId[message.chatId],
+         !shouldAdvanceLastMessage(
+           currentLastMsgId: current.messageId,
+           currentLastMsgDate: current.date,
+           newLastMsgId: message.messageId,
+           newDate: message.date
+         )
+      {
+        continue
+      }
+
+      newestByChatId[message.chatId] = message
+    }
+
+    for message in newestByChatId.values {
+      try updateLastMsgId(db, chatId: message.chatId, lastMsgId: message.messageId, date: message.date)
     }
   }
 }

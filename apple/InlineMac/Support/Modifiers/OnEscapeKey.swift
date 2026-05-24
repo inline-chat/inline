@@ -17,9 +17,7 @@ private struct OnEscapeKeyModifier: ViewModifier {
 
 extension View {
   func attachWindowKeyMonitor(_ keyMonitor: KeyMonitor) -> some View {
-    onHostingWindowChange { window in
-      keyMonitor.attach(window: window)
-    }
+    modifier(WindowKeyMonitorAttachment(keyMonitor: keyMonitor))
   }
 
   func onEscapeKey(
@@ -28,6 +26,22 @@ extension View {
     perform action: @escaping () -> Void
   ) -> some View {
     modifier(OnEscapeKeyModifier(id: id, enabled: enabled, action: action))
+  }
+}
+
+private struct WindowKeyMonitorAttachment: ViewModifier {
+  let keyMonitor: KeyMonitor
+
+  @Environment(\.appBridge) private var appBridge
+
+  func body(content: Content) -> some View {
+    content
+      .onAppear {
+        keyMonitor.attach(window: appBridge?.currentWindow())
+      }
+      .onDisappear {
+        keyMonitor.attach(window: nil)
+      }
   }
 }
 

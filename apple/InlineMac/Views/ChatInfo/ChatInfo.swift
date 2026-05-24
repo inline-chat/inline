@@ -49,6 +49,7 @@ struct ChatInfo: View {
   @State private var canEditChatInfo = false
   @State private var isSavingIcon = false
   @State private var iconDraft = ""
+  @State private var didSyncIconDraft = false
   @State private var showVisibilityPicker = false
   @State private var showTranslationOptions = false
   @State private var showAddParticipants = false
@@ -87,11 +88,18 @@ struct ChatInfo: View {
     peerId.isThread
   }
 
+  private var headerIconChat: Chat? {
+    guard var chat = fullChat.chat ?? fullChat.chatItem?.chat else { return nil }
+    chat.emoji = didSyncIconDraft ? Self.normalizedEmoji(iconDraft) : Self.normalizedEmoji(chat.emoji)
+    return chat
+  }
+
   private var chatIconBinding: Binding<String> {
     Binding(
       get: { iconDraft },
       set: { newValue in
         let normalized = Self.normalizedEmoji(newValue) ?? ""
+        didSyncIconDraft = true
         iconDraft = normalized
         updateChatIcon(normalized)
       }
@@ -232,8 +240,21 @@ struct ChatInfo: View {
       .buttonStyle(.plain)
       .contentShape(Circle())
       .help("Open avatar")
-    } else if let chat = fullChat.chatItem?.chat {
-      ChatIcon(peer: .chat(chat), size: 100)
+    } else if let chat = headerIconChat {
+      if peerId.isThread {
+        EmojiTextFieldPicker(
+          emoji: chatIconBinding,
+          targetSize: CGSize(width: 100, height: 100),
+          isDisabled: !canEditChatInfo || isSavingIcon,
+          accessibilityLabel: "Chat icon"
+        ) { _, _, isDisabled in
+          ChatIcon(peer: .chat(chat), size: 100)
+            .opacity(isDisabled ? 0.65 : 1)
+        }
+        .help(canEditChatInfo ? "Change icon" : "")
+      } else {
+        ChatIcon(peer: .chat(chat), size: 100)
+      }
     } else {
       EmptyView()
     }
@@ -261,20 +282,6 @@ struct ChatInfo: View {
               Text("@\(username)")
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
-            }
-
-            Divider()
-          }
-
-          if peerId.isThread {
-            infoRow("Icon") {
-              EmojiTextFieldPicker(
-                emoji: chatIconBinding,
-                size: 30,
-                placeholderSystemImage: "number",
-                isDisabled: !canEditChatInfo || isSavingIcon,
-                accessibilityLabel: "Chat icon"
-              )
             }
 
             Divider()
@@ -581,6 +588,7 @@ struct ChatInfo: View {
 
   private func syncIconDraft() {
     iconDraft = Self.normalizedEmoji(fullChat.chat?.emoji ?? fullChat.chatItem?.chat?.emoji) ?? ""
+    didSyncIconDraft = true
   }
 
   private func updateChatIcon(_ emoji: String) {

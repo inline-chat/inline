@@ -11,6 +11,7 @@ struct SidebarView: View {
   @Environment(\.nav) var nav
   @Environment(\.realtime) private var realtime
   @Environment(\.appearsActive) private var appearsActive
+  @Environment(\.colorScheme) private var colorScheme
   @EnvironmentObject private var realtimeState: RealtimeState
   @EnvironmentObject private var updateInstallState: UpdateInstallState
   @ObservedObject private var settings = AppSettings.shared
@@ -22,6 +23,8 @@ struct SidebarView: View {
   @State private var hideConnectedTask: Task<Void, Never>?
   @State private var pendingSpaceAction: SidebarSpacePendingAction?
   @State private var fetchingDialogSpaceIds = Set<Int64>()
+  @State private var sidebarDrag = SidebarDragViewModel()
+  @State private var ephemeralChat = SidebarEphemeralChatModel()
   @Environment(SidebarViewModel.self) private var viewModel
   private let isCollapsed: Bool
 
@@ -83,6 +86,10 @@ struct SidebarView: View {
   @ViewBuilder
   private var list: some View {
     List {
+      if settings.sidebarAsInbox {
+        allChatsRow
+      }
+
       if isArchiveVisible {
         Section("Archived") {
           chatRows
@@ -92,14 +99,34 @@ struct SidebarView: View {
       }
     }
     .animation(.smoothSnappy, value: visibleItemAnimationKeys)
+    .animation(.smoothSnappy, value: sidebarDrag.animationKey)
     .animation(.smoothSnappy, value: isArchiveVisible)
     .toolbar(removing: .sidebarToggle)
     .onChange(of: nav.currentRoute) { _, route in
       dependencies?.nav3ChatOpenPreloader?.cancelPendingOpenIfNeeded(for: route)
     }
+    .onChange(of: selectedPeer, initial: true) { _, peer in
+      syncEphemeralChat(peer)
+    }
     .onChange(of: nav.selectedSpaceId, initial: true) { _, spaceId in
       syncSource(spaceId: spaceId)
+      refreshEphemeralChatScope(selectedPeer)
       refreshSpaceIfNeeded(spaceId)
+    }
+    .onChange(of: settings.sidebarAsInbox, initial: true) { _, isEnabled in
+      if isEnabled {
+        isArchiveVisible = false
+      }
+      sidebarDrag.cancel()
+      syncSource(spaceId: nav.selectedSpaceId)
+      refreshEphemeralChatScope(selectedPeer)
+    }
+    .onChange(of: settings.includeSpaceChatsInHomeSidebar, initial: true) { _, includeSpaceChats in
+      viewModel.setIncludeSpaceChatsInHome(includeSpaceChats)
+      refreshEphemeralChatScope(selectedPeer)
+    }
+    .onChange(of: visibleItems.map(\.peerId)) { _, _ in
+      reconcileEphemeralChat()
     }
     .onChange(of: viewModel.spaces.map(\.id)) { _, _ in
       validateSelectedSpace()
@@ -123,36 +150,123 @@ struct SidebarView: View {
       isArchiveVisible = false
     }
     .onDisappear {
+      sidebarDrag.cancel()
+      ephemeralChat.cancel()
       hideConnectedTask?.cancel()
       hideConnectedTask = nil
       unregisterSidebarNavigation()
     }
   }
 
+  private var allChatsRow: some View {
+    SidebarInboxActionRow(
+      title: "Chats",
+      systemImage: "text.bubble",
+      selected: nav.currentRoute == .allChats || nav.currentRoute == .archivedChats,
+      titleDimmed: sidebarTitlesDimmed,
+      size: settings.showSidebarMessagePreview ? .large : .compact,
+      trailingCount: viewModel.todayUnreadCount,
+      action: openAllChats
+    )
+    .padding(.bottom, SidebarSeparatorRow.totalHeight)
+    .overlay(alignment: .bottom) {
+      SidebarSeparatorRow()
+    }
+    .listRowInsets(.zero)
+    .listRowSeparator(.hidden)
+    .listRowBackground(Color.clear)
+  }
+
   @ViewBuilder
   private var chatRows: some View {
-    ForEach(visibleItems) { item in
+    if settings.sidebarAsInbox {
+      let pinnedItems = sidebarDrag.displayItems(visiblePinnedItems, lane: .pinned)
+      let normalItems = sidebarDrag.displayItems(visibleNormalSourceItems, lane: .normal)
+
+      if pinnedItems.isEmpty == false {
+        chatRows(for: visiblePinnedItems, lane: .pinned)
+      }
+
+      if normalItems.isEmpty == false {
+        chatRows(for: visibleNormalSourceItems, lane: .normal, showsTopSeparator: pinnedItems.isEmpty == false)
+      }
+    } else {
+      chatRows(for: visibleItems)
+    }
+
+    if settings.sidebarAsInbox {
+      newThreadRow
+    } else if shouldShowEmptyState {
+      emptyStateRow
+    } else if !isArchiveVisible, visibleItems.isEmpty == false {
+      newThreadRow
+    }
+  }
+
+  @ViewBuilder
+  private func chatRows(
+    for items: [SidebarViewModel.Item],
+    lane: SidebarOrderLane? = nil,
+    showsTopSeparator: Bool = false
+  ) -> some View {
+    let displayItems = sidebarDrag.displayItems(items, lane: lane)
+
+    ForEach(Array(displayItems.enumerated()), id: \.element.id) { index, item in
       let isSelected = selectedPeer == item.peerId
+      let isDragging = sidebarDrag.isDragging(item, lane: lane)
+      let isTemporary = isTemporaryItem(item)
+      let showsSeparator = showsTopSeparator && index == displayItems.startIndex
 
       SidebarChatItemView(
         item: item,
         selected: isSelected,
         titleDimmed: sidebarTitlesDimmed,
         size: settings.showSidebarMessagePreview ? .large : .compact,
+        showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
+        opensOnMouseDown: lane == nil,
+        isTemporary: isTemporary,
         onOpen: {
           openChat(item)
+        },
+        onClose: {
+          closeChat(item)
+        },
+        onPersist: {
+          persistTemporaryChat(item)
         }
       )
       .equatable()
+      .simultaneousGesture(TapGesture(count: 2).onEnded {
+        if isTemporary {
+          persistTemporaryChat(item)
+        }
+      })
+      .modifier(SidebarFloatingReorderRowModifier(
+        enabled: lane != nil,
+        isDragging: isDragging,
+        onDragChanged: { value, rowSize in
+          updateSidebarDrag(
+            item: item,
+            lane: lane,
+            items: items,
+            value: value,
+            rowSize: rowSize
+          )
+        },
+        onDragEnded: {
+          endSidebarDrag()
+        }
+      ))
       .listRowInsets(.zero)
       .listRowSeparator(.hidden)
       .listRowBackground(Color.clear)
-    }
-
-    if shouldShowEmptyState {
-      emptyStateRow
-    } else if !isArchiveVisible, visibleItems.isEmpty == false {
-      newThreadRow
+      .padding(.top, showsSeparator ? SidebarSeparatorRow.totalHeight : 0)
+      .overlay(alignment: .top) {
+        if showsSeparator {
+          SidebarSeparatorRow()
+        }
+      }
+      .transition(.opacity.combined(with: .move(edge: .top)))
     }
   }
 
@@ -166,6 +280,7 @@ struct SidebarView: View {
     .listRowInsets(.zero)
     .listRowSeparator(.hidden)
     .listRowBackground(Color.clear)
+    .transition(.opacity.combined(with: .move(edge: .bottom)))
   }
 
   private var newThreadRow: some View {
@@ -321,11 +436,12 @@ struct SidebarView: View {
   @ViewBuilder
   private var bottomBar: some View {
     VStack(spacing: 3) {
-      if let state = sidebarConnectionState {
-        SidebarConnectionStatePill(state: state)
-          .padding(.horizontal, Theme.sidebarItemOuterSpacing + 4)
-          .transition(.opacity)
-      }
+      // Temporarily hide the sidebar connection indicator.
+      // if let state = sidebarConnectionState {
+      //   SidebarConnectionStatePill(state: state)
+      //     .padding(.horizontal, Theme.sidebarItemOuterSpacing + 4)
+      //     .transition(.opacity)
+      // }
 
       if updateInstallState.isReadyToInstall {
         installUpdateButton
@@ -342,8 +458,11 @@ struct SidebarView: View {
   private var footerBar: some View {
     SidebarFooterView(
       isArchiveActive: isArchiveVisible,
+      showsArchive: settings.sidebarAsInbox == false,
       showPreview: $settings.showSidebarMessagePreview,
+      includeSpaceChatsInHome: $settings.includeSpaceChatsInHomeSidebar,
       onToggleArchive: {
+        guard settings.sidebarAsInbox == false else { return }
         isArchiveVisible.toggle()
       },
       onSearch: {
@@ -415,8 +534,37 @@ struct SidebarView: View {
     isArchiveVisible ? viewModel.archivedItems : viewModel.activeItems
   }
 
+  private var visiblePinnedItems: [SidebarViewModel.Item] {
+    visibleItems.filter(\.pinned)
+  }
+
+  private var visibleNormalItems: [SidebarViewModel.Item] {
+    visibleItems.filter { $0.pinned == false }
+  }
+
+  private var visibleNormalSourceItems: [SidebarViewModel.Item] {
+    guard let visibleTemporaryItem else { return visibleNormalItems }
+    return visibleNormalItems + [visibleTemporaryItem]
+  }
+
+  private var visibleTemporaryItem: SidebarViewModel.Item? {
+    guard settings.sidebarAsInbox else { return nil }
+    guard isArchiveVisible == false else { return nil }
+    guard let item = ephemeralChat.item else { return nil }
+    guard visibleItems.contains(where: { $0.peerId == item.peerId }) == false else { return nil }
+    return item
+  }
+
   private var visibleItemAnimationKeys: [String] {
-    visibleItems.map { "\($0.id.kind.rawValue)-\($0.id.rawValue)" }
+    var keys = visibleItems.map { "\($0.id.kind.rawValue)-\($0.id.rawValue)" }
+    if let visibleTemporaryItem {
+      keys.append("temporary-\(visibleTemporaryItem.id.kind.rawValue)-\(visibleTemporaryItem.id.rawValue)")
+    }
+    return keys
+  }
+
+  private var sidebarChatRowHeight: CGFloat {
+    settings.showSidebarMessagePreview ? 44 : 30
   }
 
   private var sidebarTitlesDimmed: Bool {
@@ -444,6 +592,7 @@ struct SidebarView: View {
   }
 
   private var isFetchingVisibleItems: Bool {
+    guard settings.sidebarAsInbox == false else { return false }
     guard !isArchiveVisible else { return false }
 
     if let activeSpaceId {
@@ -479,6 +628,241 @@ struct SidebarView: View {
     }
 
     nav.open(.chat(peer: item.peerId))
+  }
+
+  private func closeChat(_ item: SidebarViewModel.Item) {
+    guard settings.sidebarAsInbox else { return }
+
+    if isTemporaryItem(item) {
+      ephemeralChat.cancel()
+      return
+    }
+
+    guard let dependencies else { return }
+
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: item.peerId, open: false))
+      } catch {
+        Log.shared.error("Failed to close chat in sidebar", error: error)
+      }
+    }
+  }
+
+  private func syncEphemeralChat(_ peer: Peer?) {
+    guard settings.sidebarAsInbox else {
+      ephemeralChat.cancel()
+      return
+    }
+    guard let peer else { return }
+    guard isPeerVisibleInSidebar(peer) == false else { return }
+
+    ephemeralChat.setScope(
+      peer: peer,
+      spaceId: nav.selectedSpaceId,
+      includeSpaceChatsInHome: settings.includeSpaceChatsInHomeSidebar
+    )
+  }
+
+  private func refreshEphemeralChatScope(_ peer: Peer?) {
+    guard settings.sidebarAsInbox else {
+      ephemeralChat.cancel()
+      return
+    }
+
+    if ephemeralChat.isScoped(
+      spaceId: nav.selectedSpaceId,
+      includeSpaceChatsInHome: settings.includeSpaceChatsInHomeSidebar
+    ) == false {
+      ephemeralChat.cancel()
+    }
+
+    syncEphemeralChat(peer)
+  }
+
+  private func reconcileEphemeralChat() {
+    guard settings.sidebarAsInbox else {
+      ephemeralChat.cancel()
+      return
+    }
+    guard let peer = ephemeralChat.peer else { return }
+
+    if isPeerVisibleInSidebar(peer) {
+      ephemeralChat.cancel()
+    }
+  }
+
+  private func isPeerVisibleInSidebar(_ peer: Peer) -> Bool {
+    visibleItems.contains { $0.peerId == peer }
+  }
+
+  private func isTemporaryItem(_ item: SidebarViewModel.Item) -> Bool {
+    visibleTemporaryItem?.peerId == item.peerId
+  }
+
+  private func persistTemporaryChat(_ item: SidebarViewModel.Item) {
+    guard settings.sidebarAsInbox else { return }
+    guard isTemporaryItem(item) else { return }
+    SidebarState.shared.keepInSidebar(item.peerId)
+  }
+
+  private func updateSidebarDrag(
+    item: SidebarViewModel.Item,
+    lane: SidebarOrderLane?,
+    items: [SidebarViewModel.Item],
+    value: DragGesture.Value,
+    rowSize: CGSize
+  ) {
+    guard settings.sidebarAsInbox else { return }
+    guard let lane else { return }
+
+    sidebarDrag.dragChanged(
+      item: item,
+      lane: lane,
+      sourceItems: items,
+      pinnedItems: visiblePinnedItems,
+      normalItems: visibleNormalSourceItems,
+      value: value,
+      rowSize: rowSize,
+      rowHeight: sidebarChatRowHeight,
+      colorScheme: colorScheme,
+      commit: applySidebarOrder
+    )
+  }
+
+  private func endSidebarDrag() {
+    guard let commit = sidebarDrag.dragEnded() else { return }
+
+    applySidebarOrder(commit)
+  }
+
+  private func applySidebarOrder(_ commit: SidebarDragCommit) {
+    applySidebarOrder(
+      commit.targetItems,
+      movedItem: commit.movedItem,
+      newIndex: commit.newIndex,
+      sourceLane: commit.sourceLane,
+      targetLane: commit.targetLane
+    )
+  }
+
+  private func applySidebarOrder(
+    _ reorderedItems: [SidebarViewModel.Item],
+    movedItem: SidebarViewModel.Item,
+    newIndex: Int,
+    sourceLane: SidebarOrderLane,
+    targetLane: SidebarOrderLane
+  ) {
+    guard let dependencies else { return }
+    let movedItemIsTemporary = isTemporaryItem(movedItem)
+    let orderItems = movedItemIsTemporary ? reorderedItems : reorderedItems.filter { isTemporaryItem($0) == false }
+    guard let orderIndex = orderItems.firstIndex(where: { $0.id == movedItem.id }) else { return }
+
+    let previousIndex = orderIndex > orderItems.startIndex ? orderItems.index(before: orderIndex) : nil
+    let nextIndex = orderItems.index(after: orderIndex)
+    let previousItem = previousIndex.map { orderItems[$0] }
+    let nextItem = nextIndex < orderItems.endIndex ? orderItems[nextIndex] : nil
+    let updates = sidebarOrderUpdates(
+      orderItems,
+      movedItem: movedItem,
+      previousItem: previousItem,
+      nextItem: nextItem,
+      lane: targetLane
+    )
+
+    let isCrossLaneMove = sourceLane != targetLane
+    guard !updates.isEmpty || isCrossLaneMove || movedItemIsTemporary else { return }
+    Task(priority: .userInitiated) {
+      do {
+        if movedItemIsTemporary {
+          guard let movedOrder = updates.first(where: { $0.item.id == movedItem.id })?.order else { return }
+          switch targetLane {
+          case .normal:
+            _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
+              peerId: movedItem.peerId,
+              order: movedOrder,
+              pinned: false
+            ))
+          case .pinned:
+            _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
+              peerId: movedItem.peerId,
+              pinnedOrder: movedOrder,
+              pinned: true
+            ))
+          }
+        } else if isCrossLaneMove {
+          let movedOrder = updates.first { $0.item.id == movedItem.id }?.order ?? targetLane.order(for: movedItem)
+          switch targetLane {
+          case .normal:
+            _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
+              peerId: movedItem.peerId,
+              order: movedOrder,
+              pinned: false
+            ))
+          case .pinned:
+            _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
+              peerId: movedItem.peerId,
+              pinnedOrder: movedOrder,
+              pinned: true
+            ))
+          }
+        }
+
+        for update in updates {
+          if (isCrossLaneMove || movedItemIsTemporary), update.item.id == movedItem.id {
+            continue
+          }
+
+          switch targetLane {
+          case .normal:
+            _ = try await dependencies.realtimeV2.send(.updateDialogOrder(peerId: update.item.peerId, order: update.order))
+          case .pinned:
+            _ = try await dependencies.realtimeV2.send(.updateDialogOrder(peerId: update.item.peerId, pinnedOrder: update.order))
+          }
+        }
+      } catch {
+        Log.shared.error("Failed to reorder sidebar chat", error: error)
+      }
+    }
+  }
+
+  private func sidebarOrderUpdates(
+    _ items: [SidebarViewModel.Item],
+    movedItem: SidebarViewModel.Item,
+    previousItem: SidebarViewModel.Item?,
+    nextItem: SidebarViewModel.Item?,
+    lane: SidebarOrderLane
+  ) -> [(item: SidebarViewModel.Item, order: String)] {
+    let previousOrder = lane.order(for: previousItem)
+    let nextOrder = lane.order(for: nextItem)
+    let hasCompleteLaneOrder = items.allSatisfy { lane.order(for: $0) != nil }
+
+    if hasCompleteLaneOrder, canPlaceOrder(between: previousOrder, and: nextOrder) {
+      let order = FractionalIndex.between(previousOrder, nextOrder)
+      if order != lane.order(for: movedItem) {
+        return [(movedItem, order)]
+      }
+      return []
+    }
+
+    return zip(items, FractionalIndex.sequence(count: items.count))
+      .compactMap { item, order in
+        lane.order(for: item) == order ? nil : (item, order)
+      }
+  }
+
+  private func canPlaceOrder(between previousOrder: String?, and nextOrder: String?) -> Bool {
+    switch (previousOrder, nextOrder) {
+    case let (previous?, next?):
+      previous < next
+    case (nil, _?), (_?, nil), (nil, nil):
+      true
+    }
+  }
+
+  private func openAllChats() {
+    guard settings.sidebarAsInbox else { return }
+    nav.open(.allChats)
   }
 
   private func selectHome() {
@@ -602,10 +986,12 @@ struct SidebarView: View {
   }
 
   private func syncSource(spaceId: Int64?) {
+    let mode = settings.sidebarAsInbox ? SidebarViewModel.ContentMode.inbox : .chatList
+
     if let spaceId {
-      viewModel.selectSpace(spaceId)
+      viewModel.selectSpace(spaceId, mode: mode)
     } else {
-      viewModel.selectHome()
+      viewModel.selectHome(mode: mode)
     }
   }
 
@@ -690,6 +1076,142 @@ private enum SidebarTopBarMetrics {
   static let buttonHeight: CGFloat = 30
   static let leadingPadding = Theme.sidebarItemOuterSpacing + 3
   static let trailingAccessoryWidth: CGFloat = 14
+}
+
+private struct SidebarInboxActionRow: View {
+  let title: String
+  let systemImage: String
+  let selected: Bool
+  let titleDimmed: Bool
+  let size: SidebarItemSize
+  let trailingCount: Int
+  let action: () -> Void
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var isHovered = false
+
+  private static let titleFont: Font = .system(size: 13, weight: .regular)
+  private static let innerPaddingHorizontal = 6.0
+  private static let compactIconSize = 22.0
+  private static let largeIconSize = 32.0
+
+  private var rowHeight: CGFloat {
+    switch size {
+    case .compact:
+      30
+    case .large:
+      44
+    }
+  }
+
+  private var iconSize: CGFloat {
+    switch size {
+    case .compact:
+      Self.compactIconSize
+    case .large:
+      Self.largeIconSize
+    }
+  }
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 0) {
+        icon
+          .frame(width: iconSize, height: iconSize)
+          .padding(.trailing, 8)
+
+        Text(title)
+          .font(Self.titleFont)
+          .foregroundStyle(titleDimmed ? Color.secondary : Color.primary)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+        if trailingCount > 0 {
+          Text(String(trailingCount))
+            .font(.system(size: 11, weight: .medium).monospacedDigit())
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.leading, 6)
+        }
+      }
+      .frame(height: rowHeight)
+      .padding(.horizontal, Self.innerPaddingHorizontal)
+      .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
+      .background(background)
+      .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+    }
+    .buttonStyle(.plain)
+    .help(title)
+    .accessibilityLabel(title)
+    .accessibilityAddTraits(.isButton)
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    .onHover { isHovered = $0 }
+  }
+
+  private var icon: some View {
+    Image(systemName: systemImage)
+      .font(.system(size: 13, weight: .medium))
+      .foregroundStyle(.secondary)
+      .frame(width: iconSize, height: iconSize)
+      .background {
+        if size == .large {
+          Circle()
+            .fill(.quinary)
+        }
+      }
+  }
+
+  private var background: some View {
+    RoundedRectangle(cornerRadius: Theme.sidebarItemRadius, style: .continuous)
+      .fill(backgroundColor)
+  }
+
+  private var backgroundColor: Color {
+    if selected {
+      colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
+    } else if isHovered {
+      colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
+    } else {
+      .clear
+    }
+  }
+}
+
+private struct SidebarSeparatorRow: View {
+  static let verticalSpacing: CGFloat = 6
+  static let lineHeight: CGFloat = 1
+  static let totalHeight = verticalSpacing * 2 + lineHeight
+
+  var body: some View {
+    Rectangle()
+      .fill(Color.secondary.opacity(0.16))
+      .frame(height: Self.lineHeight)
+      .frame(height: Self.totalHeight)
+      .padding(.leading, -Theme.sidebarNativeDefaultEdgeInsets + 14)
+      .padding(.trailing, -Theme.sidebarNativeDefaultEdgeInsets + 14)
+  }
+}
+
+private struct SpaceAvatar: View, Equatable {
+  let space: Space
+  var size: CGFloat = 18
+
+  var body: some View {
+    let text = SpaceAvatarContent.text(for: space)
+
+    RoundedRectangle(cornerRadius: size * 0.4, style: .continuous)
+      .fill(.quinary)
+      .frame(width: size, height: size)
+      .overlay {
+        Text(text)
+          .font(.system(size: size * SpaceAvatarContent.fontScale(for: text), weight: .semibold))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.75)
+      }
+      .fixedSize()
+  }
 }
 
 private struct SidebarSpacePendingAction: Identifiable {

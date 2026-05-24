@@ -11,6 +11,12 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var readInboxMaxId: Int64?
   public var readOutboxMaxId: Int64?
   public var archived: Bool?
+  public var open: Bool?
+  public var openedDate: Int64?
+  public var order: String?
+  public var pinnedOrder: String?
+  public var sidebarVisible: Bool?
+  public var chatListHidden: Bool?
 }
 
 public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
@@ -31,6 +37,12 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var chatId: Int64?
   public var unreadMark: Bool?
   public var notificationSettings: DialogNotificationSettings?
+  /// True when this dialog is a stable member of the sidebar inbox.
+  public var open: Bool = false
+  public var openedDate: Date?
+  public var order: String?
+  public var pinnedOrder: String?
+  /// True when this dialog should not be shown as its own chat row in chat lists.
   public var chatListHidden: Bool? = nil
 
   private enum CodingKeys: String, CodingKey {
@@ -47,6 +59,10 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case chatId
     case unreadMark
     case notificationSettings
+    case open
+    case openedDate
+    case order
+    case pinnedOrder
     case chatListHidden
   }
 
@@ -64,6 +80,10 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let chatId = Column(CodingKeys.chatId)
     public static let unreadMark = Column(CodingKeys.unreadMark)
     public static let notificationSettings = Column(CodingKeys.notificationSettings)
+    public static let open = Column(CodingKeys.open)
+    public static let openedDate = Column(CodingKeys.openedDate)
+    public static let order = Column(CodingKeys.order)
+    public static let pinnedOrder = Column(CodingKeys.pinnedOrder)
     public static let chatListHidden = Column(CodingKeys.chatListHidden)
   }
 
@@ -122,7 +142,11 @@ public extension Dialog {
     archived = from.archived
     unreadCount = from.unreadCount
     notificationSettings = nil
-    chatListHidden = nil
+    open = from.open ?? false
+    openedDate = from.openedDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+    order = from.order
+    pinnedOrder = from.pinnedOrder
+    chatListHidden = Self.chatListHidden(from: from.chatListHidden, sidebarVisible: from.sidebarVisible)
   }
 
   // Called when user clicks a user for the first time
@@ -143,6 +167,10 @@ public extension Dialog {
     unreadCount = nil
     chatId = nil
     notificationSettings = nil
+    open = false
+    openedDate = nil
+    order = nil
+    pinnedOrder = nil
     chatListHidden = nil
   }
 
@@ -166,6 +194,10 @@ public extension Dialog {
     unreadCount = nil
     chatId = chat.id
     notificationSettings = nil
+    open = false
+    openedDate = nil
+    order = nil
+    pinnedOrder = nil
     chatListHidden = nil
   }
 
@@ -193,7 +225,17 @@ public extension Dialog {
     draftMessage = nil
     chatId = from.hasChatID ? from.chatID : nil
     notificationSettings = from.hasNotificationSettings ? from.notificationSettings : nil
-    chatListHidden = from.hasChatListHidden ? from.chatListHidden : nil
+    open = from.hasOpen ? from.open : false
+    openedDate = from.hasOpenedDate ? Date(timeIntervalSince1970: TimeInterval(from.openedDate)) : nil
+    order = from.hasOrder ? from.order : nil
+    pinnedOrder = from.hasPinnedOrder ? from.pinnedOrder : nil
+    if from.hasChatListHidden {
+      chatListHidden = from.chatListHidden
+    } else if from.hasSidebarVisible {
+      chatListHidden = from.sidebarVisible ? nil : true
+    } else {
+      chatListHidden = nil
+    }
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
@@ -244,6 +286,10 @@ public extension Dialog {
       chatId: nil,
       unreadMark: nil,
       notificationSettings: nil,
+      open: false,
+      openedDate: nil,
+      order: nil,
+      pinnedOrder: nil,
       chatListHidden: nil
     )
   }
@@ -263,6 +309,10 @@ public extension Dialog {
       chatId: nil,
       unreadMark: nil,
       notificationSettings: nil,
+      open: false,
+      openedDate: nil,
+      order: nil,
+      pinnedOrder: nil,
       chatListHidden: nil
     )
   }
@@ -285,7 +335,21 @@ public extension ApiDialog {
       dialog.draftMessage = existing.draftMessage
       dialog.notificationSettings = existing.notificationSettings
       dialog.unreadMark = existing.unreadMark
-      dialog.chatListHidden = existing.chatListHidden
+      if open == nil {
+        dialog.open = existing.open
+      }
+      if open == false {
+        dialog.openedDate = nil
+        dialog.order = nil
+      } else if openedDate == nil {
+        dialog.openedDate = existing.openedDate
+      }
+      if open != false, order == nil {
+        dialog.order = existing.order
+      }
+      if pinnedOrder == nil {
+        dialog.pinnedOrder = existing.pinnedOrder
+      }
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -309,8 +373,20 @@ public extension InlineProtocol.Dialog {
       if !hasNotificationSettings {
         newDialog.notificationSettings = existing.notificationSettings
       }
-      if !hasChatListHidden {
-        newDialog.chatListHidden = existing.chatListHidden
+      if !hasOpen {
+        newDialog.open = existing.open
+      }
+      if hasOpen, open == false {
+        newDialog.openedDate = nil
+        newDialog.order = nil
+      } else if !hasOpenedDate {
+        newDialog.openedDate = existing.openedDate
+      }
+      if !(hasOpen && open == false), !hasOrder {
+        newDialog.order = existing.order
+      }
+      if !hasPinnedOrder {
+        newDialog.pinnedOrder = existing.pinnedOrder
       }
       try newDialog.save(db, onConflict: .replace)
       return newDialog
@@ -323,8 +399,60 @@ public extension InlineProtocol.Dialog {
 }
 
 public extension Dialog {
+  static func chatListHidden(from chatListHidden: Bool?, sidebarVisible: Bool?) -> Bool? {
+    if let chatListHidden {
+      return chatListHidden
+    }
+
+    guard let sidebarVisible else {
+      return nil
+    }
+
+    return sidebarVisible ? nil : true
+  }
+
+  static let chatListVisibilitySQL =
+    "(\"dialog\".\"chatListHidden\" IS NULL OR \"dialog\".\"chatListHidden\" = 0)"
+  static let sidebarInboxVisibilitySQL = "(\(chatListVisibilitySQL) OR \"dialog\".\"open\" = 1 OR \"dialog\".\"pinned\" = 1)"
+
+  static func nextSidebarOrder(_ db: Database) throws -> String {
+    try nextOrder(
+      db,
+      column: "order",
+      filter: """
+      AND "open" = 1
+      AND ("pinned" IS NULL OR "pinned" = 0)
+      """
+    )
+  }
+
+  static func nextPinnedOrder(_ db: Database) throws -> String {
+    try nextOrder(
+      db,
+      column: "pinnedOrder",
+      filter: """
+      AND "pinned" = 1
+      """
+    )
+  }
+
+  private static func nextOrder(_ db: Database, column: String, filter: String) throws -> String {
+    let request = SQLRequest<String>(
+      sql: """
+      SELECT "\(column)"
+      FROM "dialog"
+      WHERE "\(column)" IS NOT NULL
+      \(filter)
+      ORDER BY "\(column)" DESC
+      LIMIT 1
+      """
+    )
+
+    return FractionalIndex.after(try request.fetchOne(db))
+  }
+
   static func applyingChatListVisibilityFilter<T: DerivableRequest>(_ request: T) -> T {
-    request.filter(Columns.chatListHidden == nil || Columns.chatListHidden == false)
+    request.filter(sql: chatListVisibilitySQL)
   }
 
   static func get(peerId: Peer) -> QueryInterfaceRequest<Dialog> {

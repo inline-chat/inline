@@ -267,17 +267,14 @@ private struct ToolbarWindowDragClickGate: ViewModifier {
 }
 
 private struct ToolbarWindowDoubleClickZoom: ViewModifier {
-  @State private var window: NSWindow?
+  @Environment(\.appBridge) private var appBridge
 
   func body(content: Content) -> some View {
     content
       .contentShape(Rectangle())
       .onTapGesture(count: 2) {
-        window?.performZoom(nil)
+        appBridge?.performWindowZoom()
       }
       .allowsWindowActivationEvents(true)
-      .onHostingWindowChange { newWindow in
-        window = newWindow
-      }
   }
 }

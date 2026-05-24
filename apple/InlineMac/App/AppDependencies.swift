@@ -9,6 +9,7 @@ import os.signpost
 
 @MainActor
 public struct AppDependencies {
+  var appBridge: AppBridge
   let auth = Auth.shared
   let viewModel = MainWindowViewModel()
   var overlay = OverlayManager()
@@ -33,6 +34,10 @@ public struct AppDependencies {
   // Optional
   var rootData: RootData?
   var logOut: (() async -> Void) = {}
+
+  init(appBridge: AppBridge = AppBridge()) {
+    self.appBridge = appBridge
+  }
 }
 
 extension View {
@@ -53,6 +58,7 @@ extension View {
       .appDatabase(deps.database)
       .environment(\.logOut, deps.logOut)
       .environment(\.keyMonitor, deps.keyMonitor)
+      .environment(\.appBridge, deps.appBridge)
       .environment(\.dependencies, deps)
       .environment(deps.nav2)
 
@@ -74,6 +80,12 @@ extension View {
 }
 
 extension AppDependencies {
+  func with(appBridge: AppBridge) -> AppDependencies {
+    var deps = self
+    deps.appBridge = appBridge
+    return deps
+  }
+
   func with(nav3: Nav3?) -> AppDependencies {
     var deps = self
     deps.nav3 = nav3

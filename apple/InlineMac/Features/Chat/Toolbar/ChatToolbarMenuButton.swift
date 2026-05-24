@@ -10,6 +10,7 @@ struct ChatToolbarMenuButton: View {
 
   @Environment(\.realtimeV2) private var realtimeV2
 
+  @ObservedObject private var settings = AppSettings.shared
   @StateObject private var model: ChatToolbarMenuModel
   @State private var showRenameSheet = false
   @State private var showMoveToSpaceSheet = false
@@ -53,6 +54,13 @@ struct ChatToolbarMenuButton: View {
         Button("Keep in Chat List", systemImage: "sidebar.left") {
           keepInChatList()
         }
+      }
+
+      if settings.sidebarAsInbox {
+        Button("Open in Sidebar", systemImage: "sidebar.left") {
+          openInSidebar()
+        }
+        .disabled(model.state.isOpen && model.state.isArchived == false && model.state.isChatListHidden == false)
       }
 
       Button("Load chat history", systemImage: "arrow.down.circle") {
@@ -160,6 +168,18 @@ struct ChatToolbarMenuButton: View {
       } catch {
         await MainActor.run {
           ToastCenter.shared.showError("Failed to keep chat in chat list")
+        }
+      }
+    }
+  }
+
+  private func openInSidebar() {
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+      } catch {
+        await MainActor.run {
+          ToastCenter.shared.showError("Failed to open chat in sidebar")
         }
       }
     }
@@ -355,6 +375,7 @@ private struct ChatToolbarMenuState: Equatable {
   var isPinned = false
   var isArchived = false
   var isChatListHidden = false
+  var isOpen = false
   var canRename = false
   var chatSpaceId: Int64?
   var title = "Chat"
@@ -372,6 +393,7 @@ private struct ChatToolbarMenuState: Equatable {
     isPinned = dialog?.pinned ?? false
     isArchived = dialog?.archived ?? false
     isChatListHidden = dialog?.chatListHidden == true
+    isOpen = dialog?.open == true
     chatSpaceId = chat?.spaceId
     title = chat?.humanReadableTitle ?? "Chat"
     destructiveAction = ChatDestructiveActionResolver.action(

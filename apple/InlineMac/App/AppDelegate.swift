@@ -17,11 +17,12 @@ import UserNotifications
 class AppDelegate: NSObject, NSApplicationDelegate {
   private var didHandleInitialActivation = false
 
+  @MainActor private let appBridge = AppBridge(app: NSApp)
   @MainActor private let dockBadgeService = DockBadgeService()
 
   // Common Dependencies
   @MainActor private(set) lazy var dependencies: AppDependencies = {
-    var deps = AppDependencies()
+    var deps = AppDependencies(appBridge: appBridge)
     deps.logOut = { [weak self] in
       guard let self else { return }
       await self.performLogOut()
@@ -167,6 +168,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       "NSAutoFillHeuristicControllerEnabled": false,
 
       "showSidebarMessagePreview": true,
+      "includeSpaceChatsInHomeSidebar": true,
+      ExperimentalFeatureFlags.sidebarAsInboxKey: false,
     ])
   }
 

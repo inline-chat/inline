@@ -16,10 +16,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   let sceneId: String
 
   private let dependencies: AppDependencies
+  private let appBridge: AppBridge
   private let nav3: Nav3
   private let keyMonitor: KeyMonitor
   private let appliesDefaultFrame: Bool
-  private let windowID = UUID()
+  private let windowID: UUID
   private let log = Log.scoped("MainWindowController")
   private var rootEscapeUnsubscribe: (() -> Void)?
 
@@ -81,7 +82,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     DispatchQueue.main.async { [weak controller, weak window] in
       controller?.showWindow(sender)
       window?.makeKeyAndOrderFront(sender)
-      NSApp.activate(ignoringOtherApps: true)
+      dependencies.appBridge.activate(ignoringOtherApps: true)
     }
 
     return controller
@@ -168,7 +169,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     routeState: String = "",
     appliesDefaultFrame: Bool = true
   ) {
+    let windowID = UUID()
+    self.windowID = windowID
     self.dependencies = dependencies
+    appBridge = dependencies.appBridge.bound(to: windowID)
     self.sceneId = sceneId
     self.appliesDefaultFrame = appliesDefaultFrame
 
@@ -190,6 +194,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     super.init(window: window)
 
+    appBridge.registerWindow(window)
     installRootEscapeHandler()
     nav3.onRouteChange = { [weak self, weak window] in
       self?.applyWindowAppearance()
@@ -208,7 +213,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   override func showWindow(_ sender: Any?) {
     super.showWindow(sender)
     window?.makeKeyAndOrderFront(sender)
-    NSApp.activate(ignoringOtherApps: true)
+    appBridge.activate(ignoringOtherApps: true)
   }
 
   override func newWindowForTab(_ sender: Any?) {
@@ -229,6 +234,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   func windowWillClose(_ notification: Notification) {
     removeRootEscapeHandler()
     keyMonitor.attach(window: nil)
+    appBridge.unregisterWindow()
     Self.controllers.removeAll { $0 === self }
   }
 
@@ -263,18 +269,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   }
 
   private func applyWindowAppearance() {
-    guard let window else { return }
-
-    if nav3.currentRoute == .empty {
-      window.titlebarAppearsTransparent = true
-      window.backgroundColor = .clear
-      window.isOpaque = false
-      return
-    }
-
-    window.titlebarAppearsTransparent = false
-    window.backgroundColor = Theme.windowContentBackgroundColor
-    window.isOpaque = true
+    let appearance = nav3.currentRoute.routeWindowAppearance
+    appBridge.applyWindowBackground(appearance.windowBackground)
+    appBridge.setWindowTitlebarAppearsTransparent(appearance.titlebarAppearsTransparent)
   }
 
   private func installRootEscapeHandler() {
@@ -284,6 +281,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       guard let self else { return }
       guard dependencies.viewModel.topLevelRoute == .main else { return }
       guard nav3.currentRoute != .empty else { return }
+      guard nav3.goBackToAllChatsOriginIfNeeded() == false else { return }
       nav3.open(.empty)
     }
   }
@@ -300,8 +298,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       keyMonitor: keyMonitor,
       windowID: windowID
     )
-    .environment(dependencies: dependencies)
     .attachWindowKeyMonitor(keyMonitor)
+    .environment(dependencies: dependencies.with(appBridge: appBridge))
 
     let hostingController = NSHostingController(rootView: root)
     hostingController.sizingOptions = []

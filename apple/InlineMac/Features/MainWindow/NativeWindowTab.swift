@@ -22,13 +22,12 @@ private struct NativeWindowTabModifier: ViewModifier {
   let updatesIcon: Bool
 
   @State private var controller = NativeWindowTabController()
+  @Environment(\.appBridge) private var appBridge
 
   func body(content: Content) -> some View {
     content
-      .onHostingWindowChange { window in
-        controller.attach(to: window)
-      }
       .onAppear {
+        controller.attach(to: appBridge?.currentWindow())
         controller.update(title: title, icon: icon, updatesTitle: updatesTitle, updatesIcon: updatesIcon)
       }
       .onChange(of: title) { _, _ in

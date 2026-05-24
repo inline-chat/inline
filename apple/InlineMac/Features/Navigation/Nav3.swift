@@ -12,6 +12,8 @@ enum Nav3Route: Hashable, Codable {
   }
 
   case empty
+  case allChats
+  case archivedChats
   case chat(peer: Peer)
   case chatInfo(peer: Peer, query: ChatInfoQuery? = nil)
   case profile(userId: Int64)
@@ -201,6 +203,17 @@ class Nav3 {
     notifyRouteChange()
   }
 
+  func goBackToAllChatsOriginIfNeeded() -> Bool {
+    guard case .chat = currentRoute else { return false }
+    guard canGoBack else { return false }
+
+    let previousRoute = history[historyIndex - 1]
+    guard previousRoute.isAllChatsRoute else { return false }
+
+    goBack()
+    return true
+  }
+
   func goForward() {
     guard canGoForward else { return }
     historyIndex += 1
@@ -283,4 +296,15 @@ class Nav3 {
     return state
   }
 
+}
+
+private extension Nav3Route {
+  var isAllChatsRoute: Bool {
+    switch self {
+    case .allChats, .archivedChats:
+      true
+    default:
+      false
+    }
+  }
 }

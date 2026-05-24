@@ -747,6 +747,33 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("dialog sidebar open") { db in
+      try db.alter(table: "dialog") { t in
+        t.add(column: "open", .boolean).notNull().defaults(to: false)
+        t.add(column: "openedDate", .datetime)
+      }
+    }
+
+    migrator.registerMigration("dialog sidebar order") { db in
+      try db.alter(table: "dialog") { t in
+        t.add(column: "order", .text)
+        t.add(column: "pinnedOrder", .text)
+      }
+    }
+
+    migrator.registerMigration("backfill dialog chat list hidden") { db in
+      try db.execute(sql: """
+        UPDATE dialog
+        SET chatListHidden = 1
+        WHERE chatListHidden IS NULL AND sidebarVisible = 0
+        """)
+      try db.execute(sql: """
+        UPDATE dialog
+        SET chatListHidden = NULL
+        WHERE chatListHidden = 1 AND sidebarVisible = 1
+        """)
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

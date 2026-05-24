@@ -61,6 +61,14 @@ struct MainWindowRootView: View {
       nav3.toggleCommandBar()
     } toggleSidebar: {
       toggleSidebar()
+    } goBack: {
+      nav3.goBack()
+    } goForward: {
+      nav3.goForward()
+    } canGoBack: {
+      nav3.canGoBack
+    } canGoForward: {
+      nav3.canGoForward
     }
     .nativeWindowTab(title: nativeTab.title, icon: nativeTab.iconPeer)
     .onAppear {

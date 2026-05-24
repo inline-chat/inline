@@ -24,10 +24,15 @@ struct NewChatRouteView: View {
   var body: some View {
     if let spaceId {
       CreateChatView(spaceId: spaceId) { chatId in
+        let peer: Peer = .thread(id: chatId)
+
         if let dependencies {
-          dependencies.requestOpenChat(peer: .thread(id: chatId))
+          Task {
+            await dependencies.realtimeV2.sendQueued(.updateDialogOpen(peerId: peer, open: true))
+          }
+          dependencies.requestOpenChat(peer: peer)
         } else {
-          nav.open(.chat(peer: .thread(id: chatId)))
+          nav.open(.chat(peer: peer))
         }
       }
     } else {

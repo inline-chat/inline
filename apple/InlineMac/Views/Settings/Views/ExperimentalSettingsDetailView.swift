@@ -9,6 +9,7 @@ struct ExperimentalSettingsDetailView: View {
       Section("Experimental") {
         Toggle("Enable voice messages", isOn: $appSettings.enableVoiceMessages)
         Toggle("Enable reply thread", isOn: $appSettings.enableReplyThreadMenuItems)
+        Toggle("Sidebar as Inbox", isOn: $appSettings.sidebarAsInbox)
         Picker("Message style", selection: $appSettings.messageRenderStyle) {
           ForEach(MessageRenderStyle.allCases, id: \.self) { style in
             Text(style.title).tag(style)
