@@ -1,3 +1,4 @@
+import InlineKit
 import Observation
 
 @MainActor
@@ -30,6 +31,7 @@ final class ChatToolbarState {
     case translationOptions(Anchor)
     case participantsPopover(Anchor)
     case addParticipants(Anchor)
+    case mentionParticipantPrompt(Anchor, [UserInfo])
 
     var anchor: Anchor {
       switch self {
@@ -38,7 +40,8 @@ final class ChatToolbarState {
            let .translationPrompt(anchor),
            let .translationOptions(anchor),
            let .participantsPopover(anchor),
-           let .addParticipants(anchor):
+           let .addParticipants(anchor),
+           let .mentionParticipantPrompt(anchor, _):
         anchor
       }
     }
@@ -85,6 +88,21 @@ final class ChatToolbarState {
 
   func presentAddParticipants(from anchor: Anchor? = nil) {
     presentation = .addParticipants(anchor ?? self.anchor(for: .participants))
+  }
+
+  func presentMentionParticipantPrompt(users: [UserInfo], from anchor: Anchor? = nil) {
+    guard !users.isEmpty else { return }
+    presentation = .mentionParticipantPrompt(anchor ?? self.anchor(for: .participants), users)
+  }
+
+  func mentionParticipantPromptUsers(for anchor: Anchor) -> [UserInfo]? {
+    guard case let .mentionParticipantPrompt(promptAnchor, users) = presentation,
+          promptAnchor == anchor
+    else {
+      return nil
+    }
+
+    return users
   }
 
   func dismissPresentation() {

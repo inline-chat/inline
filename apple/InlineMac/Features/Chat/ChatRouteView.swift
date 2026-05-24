@@ -50,7 +50,8 @@ struct ChatRouteView: View {
           return ChatViewAppKit(
             peerId: peer,
             preparedPayload: preparedPayload,
-            dependencies: dependencies
+            dependencies: dependencies,
+            toolbarState: chatToolbarState
           )
         },
         dismantle: { controller in
