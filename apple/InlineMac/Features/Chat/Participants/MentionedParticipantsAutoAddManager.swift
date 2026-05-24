@@ -3,19 +3,22 @@ import InlineKit
 import InlineProtocol
 import Logger
 
+private enum MentionedParticipantsAutoAddError: Error {
+  case chatNotFound
+}
+
 @MainActor
 final class MentionedParticipantsAutoAddManager {
   private struct Request: Sendable {
-    let chatId: Int64
-    let chatType: ChatType
-    let isPublic: Bool
-    let isReplyThread: Bool
+    let peer: InlineKit.Peer
+    let chat: InlineKit.Chat?
     let currentUserId: Int64?
     let pendingUserIds: Set<Int64>
     let reservedUserIds: Set<Int64>
   }
 
   private struct Snapshot: Sendable {
+    let chat: InlineKit.Chat
     let messageCount: Int
     let participantIds: Set<Int64>
     let users: [UserInfo]
@@ -32,9 +35,7 @@ final class MentionedParticipantsAutoAddManager {
     self.toolbarState = toolbarState
   }
 
-  func handle(entities: MessageEntities?, chat: InlineKit.Chat?) {
-    guard let chat else { return }
-
+  func handle(entities: MessageEntities?, peer: InlineKit.Peer, chat: InlineKit.Chat?) {
     let mentionedUserIds = Self.mentionedUserIds(from: entities)
     let previousPendingUserIds = pendingUserIds
     let reservedUserIds = mentionedUserIds.subtracting(previousPendingUserIds)
@@ -43,10 +44,8 @@ final class MentionedParticipantsAutoAddManager {
     pendingUserIds.formUnion(reservedUserIds)
 
     let request = Request(
-      chatId: chat.id,
-      chatType: chat.type,
-      isPublic: chat.isPublic == true,
-      isReplyThread: chat.isReplyThread,
+      peer: peer,
+      chat: chat,
       currentUserId: dependencies.auth.currentUserId,
       pendingUserIds: previousPendingUserIds,
       reservedUserIds: reservedUserIds
@@ -57,14 +56,15 @@ final class MentionedParticipantsAutoAddManager {
       do {
         let snapshot = try await Self.snapshot(
           database: database,
-          chatId: request.chatId,
+          peer: request.peer,
+          chat: request.chat,
           userIds: request.reservedUserIds
         )
 
         let context = MentionedParticipantAddContext(
-          chatType: request.chatType,
-          isPublic: request.isPublic,
-          isReplyThread: request.isReplyThread,
+          chatType: snapshot.chat.type,
+          isPublic: snapshot.chat.isPublic == true,
+          isReplyThread: snapshot.chat.isReplyThread,
           currentUserId: request.currentUserId,
           messageCount: snapshot.messageCount,
           participantIds: snapshot.participantIds,
@@ -82,7 +82,7 @@ final class MentionedParticipantsAutoAddManager {
 
           case let .autoAdd(userIds):
             let users = Self.userInfos(for: userIds, from: snapshot.users)
-            await self?.autoAdd(users, chatId: request.chatId, reservedUserIds: request.reservedUserIds)
+            await self?.autoAdd(users, chatId: snapshot.chat.id, reservedUserIds: request.reservedUserIds)
 
           case let .prompt(userIds):
             let users = Self.userInfos(for: userIds, from: snapshot.users)
@@ -169,16 +169,28 @@ final class MentionedParticipantsAutoAddManager {
 
   nonisolated private static func snapshot(
     database: AppDatabase,
-    chatId: Int64,
+    peer: InlineKit.Peer,
+    chat: InlineKit.Chat?,
     userIds: Set<Int64>
   ) async throws -> Snapshot {
     try await database.reader.read { db in
+      let resolvedChat: InlineKit.Chat?
+      if let chat {
+        resolvedChat = chat
+      } else {
+        resolvedChat = try Chat.getByPeerId(db: db, peerId: peer)
+      }
+
+      guard let chat = resolvedChat else {
+        throw MentionedParticipantsAutoAddError.chatNotFound
+      }
+
       let messageCount = try Message
-        .filter(Column("chatId") == chatId)
+        .filter(Column("chatId") == chat.id)
         .fetchCount(db)
 
       let participantIds = Set(try ChatParticipant
-        .filter(ChatParticipant.Columns.chatId == chatId)
+        .filter(ChatParticipant.Columns.chatId == chat.id)
         .fetchAll(db)
         .map(\.userId))
 
@@ -189,6 +201,7 @@ final class MentionedParticipantsAutoAddManager {
         .fetchAll(db)
 
       return Snapshot(
+        chat: chat,
         messageCount: messageCount,
         participantIds: participantIds,
         users: users

@@ -1130,7 +1130,7 @@ class ComposeAppKit: NSView {
 
     // Edit message
     if let editingMessageId {
-      mentionedParticipants.handle(entities: entities, chat: chat)
+      mentionedParticipants.handle(entities: entities, peer: peerId, chat: chat)
 
       // Edit message
       Task.detached(priority: .userInitiated) { // @MainActor in
@@ -1193,7 +1193,7 @@ class ComposeAppKit: NSView {
 
     // Send message
     else if attachmentItemsSnapshot.isEmpty {
-      mentionedParticipants.handle(entities: entities, chat: chat)
+      mentionedParticipants.handle(entities: entities, peer: peerId, chat: chat)
       keepCurrentChatInSidebar()
 
       // Text-only
@@ -1229,7 +1229,7 @@ class ComposeAppKit: NSView {
 
     // With image/file/video
     else {
-      mentionedParticipants.handle(entities: entities, chat: chat)
+      mentionedParticipants.handle(entities: entities, peer: peerId, chat: chat)
       keepCurrentChatInSidebar()
       enqueueAttachments(replyToMessageId: replyToMsgId)
     }
