@@ -26,10 +26,13 @@ enum NewThreadAction {
           spaceId: spaceId,
           participants: [currentUserId]
         )
+        let peer: Peer = .thread(id: chatId)
+
+        await dependencies.realtimeV2.sendQueued(.updateDialogOpen(peerId: peer, open: true))
 
         await MainActor.run {
           ToastCenter.shared.dismiss()
-          dependencies.requestOpenChat(peer: .thread(id: chatId))
+          dependencies.requestOpenChat(peer: peer)
         }
       } catch {
         await MainActor.run {

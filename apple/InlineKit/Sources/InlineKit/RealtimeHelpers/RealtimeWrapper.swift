@@ -250,12 +250,20 @@ public extension Realtime {
 
     Task.detached(priority: .userInitiated) {
       _ = try await self.db.dbWriter.write { db in
+        var savedMessages: [Message] = []
         for message in result.messages {
           do {
-            _ = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
+            let msg = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
+            savedMessages.append(msg)
           } catch {
             self.log.error("Failed to save message", error: error)
           }
+        }
+
+        do {
+          try Chat.updateLastMsgIds(db, messages: savedMessages)
+        } catch {
+          self.log.error("Failed to update chat last message", error: error)
         }
       }
 

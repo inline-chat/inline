@@ -13,14 +13,19 @@ struct SidebarChatItemView: Equatable, View {
   let selected: Bool
   var titleDimmed = false
   var size: SidebarItemSize = .large
+  var showsCloseButton = false
+  var opensOnMouseDown = true
+  var isTemporary = false
   var onOpen: (() -> Void)?
+  var onClose: (() -> Void)?
+  var onPersist: (() -> Void)?
 
   // Env and State
   @Environment(\.nav) private var nav
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.dependencies) private var dependencies
   @State private var isHovered = false
-  @State private var didOpenDuringPress = false
+  @State private var isCloseHovered = false
   @State private var isPressing = false
   @State private var pendingDestructiveAction: ChatDestructiveAction?
 
@@ -92,10 +97,6 @@ struct SidebarChatItemView: Equatable, View {
       return .unread
     }
 
-    if item.pinned {
-      return .pinned
-    }
-
     return nil
   }
 
@@ -108,6 +109,9 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.selected == rhs.selected
       && lhs.titleDimmed == rhs.titleDimmed
       && lhs.size == rhs.size
+      && lhs.showsCloseButton == rhs.showsCloseButton
+      && lhs.opensOnMouseDown == rhs.opensOnMouseDown
+      && lhs.isTemporary == rhs.isTemporary
   }
 
   var body: some View {
@@ -118,13 +122,11 @@ struct SidebarChatItemView: Equatable, View {
 
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 8) {
-          Text(item.title)
-            .font(Self.titleFont)
-            .foregroundStyle(titleColor)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
+          titleView
 
-          if let titleAccessory {
+          if showsCloseControl {
+            closeButton
+          } else if let titleAccessory {
             accessoryView(titleAccessory)
           }
         }
@@ -156,8 +158,18 @@ struct SidebarChatItemView: Equatable, View {
     // Outer paddings
     .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
     .padding(.vertical, Self.outerPaddingVertical)
-    .onHover { isHovered = $0 }
-    .simultaneousGesture(openOnMouseDownGesture)
+    .onHover {
+      isHovered = $0
+      if $0 == false {
+        isCloseHovered = false
+      }
+    }
+    .modifier(SidebarOpenInteractionModifier(
+      opensOnMouseDown: opensOnMouseDown,
+      isCloseHovered: isCloseHovered,
+      isPressing: $isPressing,
+      open: open
+    ))
     .accessibilityElement(children: .combine)
     .accessibilityLabel(item.title)
     .accessibilityAddTraits(.isButton)
@@ -180,34 +192,64 @@ struct SidebarChatItemView: Equatable, View {
 
       Divider()
 
-      Button {
-        togglePin()
-      } label: {
-        Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash.fill" : "pin.fill")
-      }
+      if isTemporary {
+        if showsCloseButton {
+          Button {
+            close()
+          } label: {
+            Label("Close from Sidebar", systemImage: "xmark")
+          }
 
-      Button {
-        toggleReadUnread()
-      } label: {
-        Label(
-          item.unread ? "Mark Read" : "Mark Unread",
-          systemImage: item.unread ? "checkmark.message.fill" : "envelope.badge.fill"
-        )
-      }
+          Divider()
+        }
 
-      Button {
-        toggleArchive()
-      } label: {
-        Label(item.archived ? "Unarchive" : "Archive", systemImage: "archivebox")
-      }
-
-      if let destructiveAction {
-        Divider()
-
-        Button(role: .destructive) {
-          pendingDestructiveAction = destructiveAction
+        Button {
+          persist()
         } label: {
-          Label(destructiveAction.title, systemImage: destructiveAction.systemImage)
+          Label("Keep in Sidebar", systemImage: "sidebar.left")
+        }
+      }
+
+      if isTemporary == false {
+        if showsCloseButton {
+          Button {
+            close()
+          } label: {
+            Label("Close from Sidebar", systemImage: "xmark")
+          }
+
+          Divider()
+        }
+
+        Button {
+          togglePin()
+        } label: {
+          Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash.fill" : "pin.fill")
+        }
+
+        Button {
+          toggleReadUnread()
+        } label: {
+          Label(
+            item.unread ? "Mark Read" : "Mark Unread",
+            systemImage: item.unread ? "checkmark.message.fill" : "envelope.badge.fill"
+          )
+        }
+
+        Button {
+          toggleArchive()
+        } label: {
+          Label(item.archived ? "Unarchive" : "Archive", systemImage: "archivebox")
+        }
+
+        if let destructiveAction {
+          Divider()
+
+          Button(role: .destructive) {
+            pendingDestructiveAction = destructiveAction
+          } label: {
+            Label(destructiveAction.title, systemImage: destructiveAction.systemImage)
+          }
         }
       }
     }
@@ -235,15 +277,38 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   @ViewBuilder
+  private var titleView: some View {
+    let title = Text(item.title)
+      .font(Self.titleFont)
+      .foregroundStyle(titleColor)
+      .lineLimit(1)
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+    if isTemporary {
+      title.italic()
+    } else {
+      title
+    }
+  }
+
+  private var closeButton: some View {
+    Button(action: close) {
+      Image(systemName: "xmark")
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 16, height: 16)
+    }
+    .buttonStyle(SidebarCloseButtonStyle(isHovered: isCloseHovered))
+    .help("Close")
+    .onHover { isCloseHovered = $0 }
+  }
+
+  @ViewBuilder
   private func accessoryView(_ accessory: SidebarChatItemAccessory) -> some View {
     Group {
       switch accessory {
         case .unread:
           unreadDot
-        case .pinned:
-          Image(systemName: "pin.fill")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundStyle(.tertiary)
       }
     }
     .frame(width: Self.trailingAccessoryWidth, alignment: .center)
@@ -294,22 +359,8 @@ struct SidebarChatItemView: Equatable, View {
     titleDimmed ? Color.secondary : Color.primary
   }
 
-  private var openOnMouseDownGesture: some Gesture {
-    DragGesture(minimumDistance: 0)
-      .onChanged { _ in
-        openOnMouseDown()
-      }
-      .onEnded { _ in
-        didOpenDuringPress = false
-        isPressing = false
-      }
-  }
-
-  private func openOnMouseDown() {
-    guard didOpenDuringPress == false else { return }
-    didOpenDuringPress = true
-    isPressing = true
-    open()
+  private var showsCloseControl: Bool {
+    showsCloseButton && isHovered
   }
 
   private func open() {
@@ -324,6 +375,14 @@ struct SidebarChatItemView: Equatable, View {
     }
 
     nav.open(.chat(peer: peerId))
+  }
+
+  private func close() {
+    onClose?()
+  }
+
+  private func persist() {
+    onPersist?()
   }
 
   private func togglePin() {
@@ -403,7 +462,77 @@ struct SidebarChatItemView: Equatable, View {
 
 private enum SidebarChatItemAccessory {
   case unread
-  case pinned
+}
+
+private struct SidebarOpenInteractionModifier: ViewModifier {
+  let opensOnMouseDown: Bool
+  let isCloseHovered: Bool
+  @Binding var isPressing: Bool
+  let open: () -> Void
+
+  @State private var didOpenDuringPress = false
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if opensOnMouseDown {
+      content
+        .simultaneousGesture(openOnMouseDownGesture)
+    } else {
+      content
+        .onTapGesture {
+          guard isCloseHovered == false else { return }
+          open()
+        }
+    }
+  }
+
+  private var openOnMouseDownGesture: some Gesture {
+    DragGesture(minimumDistance: 0)
+      .onChanged { _ in
+        openOnMouseDown()
+      }
+      .onEnded { _ in
+        didOpenDuringPress = false
+        isPressing = false
+      }
+  }
+
+  private func openOnMouseDown() {
+    guard didOpenDuringPress == false else { return }
+    guard isCloseHovered == false else { return }
+    didOpenDuringPress = true
+    isPressing = true
+    open()
+  }
+}
+
+private struct SidebarCloseButtonStyle: ButtonStyle {
+  let isHovered: Bool
+
+  @Environment(\.colorScheme) private var colorScheme
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .contentShape(.rect(cornerRadius: 5))
+      .background(background(isPressed: configuration.isPressed))
+  }
+
+  private func background(isPressed: Bool) -> some View {
+    RoundedRectangle(cornerRadius: 5, style: .continuous)
+      .fill(backgroundColor(isPressed: isPressed))
+  }
+
+  private func backgroundColor(isPressed: Bool) -> Color {
+    if isPressed {
+      return colorScheme == .dark ? .white.opacity(0.16) : .black.opacity(0.13)
+    }
+
+    if isHovered {
+      return colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.08)
+    }
+
+    return .clear
+  }
 }
 
 #Preview {

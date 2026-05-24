@@ -456,6 +456,28 @@ final class AppMenu: NSObject {
 
     viewMenu.addItem(NSMenuItem.separator())
 
+    let backItem = NSMenuItem(
+      title: "Back",
+      action: #selector(goBack(_:)),
+      keyEquivalent: "["
+    )
+    backItem.keyEquivalentModifierMask = [.command]
+    backItem.target = self
+    backItem.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: nil)
+    viewMenu.addItem(backItem)
+
+    let forwardItem = NSMenuItem(
+      title: "Forward",
+      action: #selector(goForward(_:)),
+      keyEquivalent: "]"
+    )
+    forwardItem.keyEquivalentModifierMask = [.command]
+    forwardItem.target = self
+    forwardItem.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+    viewMenu.addItem(forwardItem)
+
+    viewMenu.addItem(NSMenuItem.separator())
+
     // Navigation between chats in sidebar
     let prevChatItem = NSMenuItem(
       title: "Previous Chat",
@@ -592,7 +614,7 @@ final class AppMenu: NSObject {
 
   @objc private func showPreferences(_ sender: Any?) {
     guard let dependencies else { return }
-    SettingsWindowController.show(using: dependencies, sender: sender)
+    dependencies.appBridge.openSettings(dependencies: dependencies, sender: sender)
   }
 
   @MainActor @objc private func newWindow(_ sender: Any?) {
@@ -737,6 +759,38 @@ final class AppMenu: NSObject {
     MainWindowOpenCoordinator.shared.toggleCommandBar()
   }
 
+  // MARK: - Navigation Actions
+
+  @objc private func goBack(_ sender: Any?) {
+    let coordinator = MainWindowOpenCoordinator.shared
+    if coordinator.hasActiveWindow {
+      coordinator.goBack()
+      return
+    }
+
+    if let nav2 = dependencies?.nav2 {
+      nav2.goBack()
+      return
+    }
+
+    dependencies?.nav.goBack()
+  }
+
+  @objc private func goForward(_ sender: Any?) {
+    let coordinator = MainWindowOpenCoordinator.shared
+    if coordinator.hasActiveWindow {
+      coordinator.goForward()
+      return
+    }
+
+    if let nav2 = dependencies?.nav2 {
+      nav2.goForward()
+      return
+    }
+
+    dependencies?.nav.goForward()
+  }
+
   // MARK: - Chat Navigation Actions
 
   @objc private func prevChat(_ sender: Any?) {
@@ -821,6 +875,28 @@ extension AppMenu: NSMenuItemValidation {
       }
       let nav = dependencies.nav
       return nav.selectedTab == .inbox || nav.selectedTab == .archive
+    }
+
+    if menuItem.action == #selector(goBack(_:)) {
+      let coordinator = MainWindowOpenCoordinator.shared
+      if coordinator.hasActiveWindow {
+        return coordinator.canGoBack
+      }
+      if let nav2 = dependencies.nav2 {
+        return nav2.canGoBack
+      }
+      return dependencies.nav.canGoBack
+    }
+
+    if menuItem.action == #selector(goForward(_:)) {
+      let coordinator = MainWindowOpenCoordinator.shared
+      if coordinator.hasActiveWindow {
+        return coordinator.canGoForward
+      }
+      if let nav2 = dependencies.nav2 {
+        return nav2.canGoForward
+      }
+      return dependencies.nav.canGoForward
     }
 
     if menuItem.action == #selector(toggleNativeTabBar(_:)) || menuItem == tabBarMenuItem {

@@ -48,8 +48,8 @@ public struct GetChatTransaction: Transaction2 {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         do {
-          let chat = Chat(from: response.chat)
-          try chat.save(db)
+          var chat = Chat(from: response.chat)
+          try chat.saveWithValidLastMsg(db)
         } catch {
           log.error("Failed to save chat", error: error)
           throw error

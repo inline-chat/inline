@@ -423,7 +423,9 @@ public class DataManager: ObservableObject {
     pinned: Bool? = nil,
     draft: MessageDraft? = nil,
     archived: Bool? = nil,
-    spaceId: Int64? = nil
+    spaceId: Int64? = nil,
+    order: String? = nil,
+    pinnedOrder: String? = nil
   ) async throws {
     if archived == true, case .thread = peerId {
       if try await deleteThreadIfUntitledAndEmpty(peerId: peerId) {
@@ -431,7 +433,9 @@ public class DataManager: ObservableObject {
       }
     }
 
-    try await database.dbWriter.write { db in
+    let requestOrder = try await database.dbWriter.write { db -> (order: String?, pinnedOrder: String?) in
+      var orderForRequest: String?
+      var pinnedOrderForRequest: String?
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
 
       if dialog == nil {
@@ -449,6 +453,41 @@ public class DataManager: ObservableObject {
 
       if let pinned {
         dialog?.pinned = pinned
+        if let order {
+          dialog?.order = order
+          orderForRequest = order
+        }
+        if let pinnedOrder {
+          dialog?.pinnedOrder = pinnedOrder
+          pinnedOrderForRequest = pinnedOrder
+        }
+        if pinned {
+          if dialog?.order == nil {
+            let order = try Dialog.nextSidebarOrder(db)
+            dialog?.order = order
+            orderForRequest = order
+          }
+          if dialog?.pinnedOrder == nil {
+            let pinnedOrder = try Dialog.nextPinnedOrder(db)
+            dialog?.pinnedOrder = pinnedOrder
+            pinnedOrderForRequest = pinnedOrder
+          }
+          dialog?.open = true
+          dialog?.chatListHidden = nil
+        } else if dialog?.open == true, dialog?.order == nil {
+          let order = try Dialog.nextSidebarOrder(db)
+          dialog?.order = order
+          orderForRequest = order
+        }
+      } else {
+        if let order {
+          dialog?.order = order
+          orderForRequest = order
+        }
+        if let pinnedOrder {
+          dialog?.pinnedOrder = pinnedOrder
+          pinnedOrderForRequest = pinnedOrder
+        }
       }
       if let draft {
         // Convert string draft to DraftMessage for storage
@@ -462,12 +501,16 @@ public class DataManager: ObservableObject {
       }
       if let archived {
         dialog?.archived = archived
+        if archived == false {
+          dialog?.chatListHidden = nil
+        }
       }
       if dialog?.spaceId == nil, let spaceId {
         dialog?.spaceId = spaceId
       }
 
       try dialog?.save(db, onConflict: .replace)
+      return (orderForRequest, pinnedOrderForRequest)
     }
 
     let updatedDialog = try await database.reader.read { db in
@@ -477,11 +520,16 @@ public class DataManager: ObservableObject {
       log.error("Failed to update dialog")
     }
     let archivedValue = archived ?? updatedDialog?.archived
-    _ = try await ApiClient.shared.updateDialog(
+    let response = try await ApiClient.shared.updateDialog(
       peerId: peerId,
       pinned: pinned,
-      archived: archivedValue
+      archived: archivedValue,
+      order: requestOrder.order,
+      pinnedOrder: requestOrder.pinnedOrder
     )
+    try await database.dbWriter.write { db in
+      _ = try response.dialog.saveFull(db)
+    }
   }
 
   /// Deletes a thread only when it is untitled and has no messages.

@@ -5,3 +5,7 @@ public extension EnvironmentValues {
   @Entry var keyMonitor: KeyMonitor? = nil
   @Entry var dependencies: AppDependencies? = nil
 }
+
+extension EnvironmentValues {
+  @Entry var appBridge: AppBridge? = nil
+}

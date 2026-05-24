@@ -119,9 +119,8 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
     // self.spaceName = spaceName
   }
 
-  // Add a static method to create the request
-  public static func all() -> QueryInterfaceRequest<HomeChatItem> {
-    var request = Dialog
+  private static func baseRequest() -> QueryInterfaceRequest<Dialog> {
+    Dialog
       .including(
         optional: Dialog.peerUser
           .forKey(CodingKeys.user)
@@ -162,7 +161,11 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
       .including(
         optional: Dialog.space
       )
+  }
 
+  // Add a static method to create the request
+  public static func all() -> QueryInterfaceRequest<HomeChatItem> {
+    var request = baseRequest()
     request = Dialog.applyingChatListVisibilityFilter(request)
 
 //      .including(
@@ -178,6 +181,27 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
 //              )
 //          )
 //      )
+    return request.asRequest(of: HomeChatItem.self)
+  }
+
+  public static func sidebarInbox(spaceId: Int64?) -> QueryInterfaceRequest<HomeChatItem> {
+    var request = baseRequest()
+      .filter(Dialog.Columns.open == true || Dialog.Columns.pinned == true)
+      .filter(sql: Dialog.sidebarInboxVisibilitySQL)
+
+    if let spaceId {
+      request = request.filter(
+        sql: """
+        ("dialog"."spaceId" = ? OR "dialog"."peerUserId" IN (
+          SELECT "member"."userId"
+          FROM "member"
+          WHERE "member"."spaceId" = ?
+        ))
+        """,
+        arguments: StatementArguments([spaceId, spaceId])
+      )
+    }
+
     return request.asRequest(of: HomeChatItem.self)
   }
 }

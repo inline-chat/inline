@@ -56,6 +56,10 @@ struct ChatListItem: Hashable, Identifiable {
     return (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
   }
 
+  var isSpaceScoped: Bool {
+    spaceId != nil || dialog?.spaceId != nil || chat?.spaceId != nil
+  }
+
   var badgeState: BadgeState {
     if hasUnread {
       return .unread
@@ -73,7 +77,7 @@ struct ChatListItem: Hashable, Identifiable {
     user = chatItem.user
     member = nil
     lastMessage = chatItem.lastMessage
-    spaceId = chatItem.space?.id
+    spaceId = chatItem.dialog.spaceId ?? chatItem.chat?.spaceId ?? chatItem.space?.id
     id = Identifier(kind: .thread, rawValue: chatItem.id)
   }
 

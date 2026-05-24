@@ -20,7 +20,11 @@ class NewChatViewController: NSViewController {
 
   private lazy var swiftUIView: some View =
     CreateChatView(spaceId: self.spaceId) { chatId in
-      self.dependencies.requestOpenChat(peer: Peer.thread(id: chatId))
+      let peer = Peer.thread(id: chatId)
+      Task {
+        await self.dependencies.realtimeV2.sendQueued(.updateDialogOpen(peerId: peer, open: true))
+      }
+      self.dependencies.requestOpenChat(peer: peer)
     }
     .environment(dependencies: dependencies)
 

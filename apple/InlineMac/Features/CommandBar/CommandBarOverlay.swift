@@ -35,7 +35,7 @@ struct CommandBar: View {
       viewModel = model
     }
     model.attach(nav3: nav) {
-      SettingsWindowController.show(using: dependencies)
+      dependencies.appBridge.openSettings(dependencies: dependencies)
     }
   }
 }

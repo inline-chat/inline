@@ -23,6 +23,10 @@ final class MainWindowOpenCoordinator {
     let openCommandBar: @MainActor () -> Void
     let toggleCommandBar: @MainActor () -> Void
     let toggleSidebar: @MainActor () -> Void
+    let goBack: @MainActor () -> Void
+    let goForward: @MainActor () -> Void
+    let canGoBack: @MainActor () -> Bool
+    let canGoForward: @MainActor () -> Bool
     var navigateChat: (@MainActor (_ offset: Int) -> Void)?
     var renameThread: (@MainActor () -> Bool)?
   }
@@ -49,7 +53,11 @@ final class MainWindowOpenCoordinator {
     route: @escaping @MainActor (MainWindowDestination) -> Void,
     openCommandBar: @escaping @MainActor () -> Void,
     toggleCommandBar: @escaping @MainActor () -> Void,
-    toggleSidebar: @escaping @MainActor () -> Void
+    toggleSidebar: @escaping @MainActor () -> Void,
+    goBack: @escaping @MainActor () -> Void,
+    goForward: @escaping @MainActor () -> Void,
+    canGoBack: @escaping @MainActor () -> Bool,
+    canGoForward: @escaping @MainActor () -> Bool
   ) {
     guard let window else {
       unregisterWindow(id: id)
@@ -63,6 +71,10 @@ final class MainWindowOpenCoordinator {
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,
       toggleSidebar: toggleSidebar,
+      goBack: goBack,
+      goForward: goForward,
+      canGoBack: canGoBack,
+      canGoForward: canGoForward,
       navigateChat: sidebarNavigation[id],
       renameThread: threadRenaming[id]
     )
@@ -207,6 +219,20 @@ final class MainWindowOpenCoordinator {
   }
 
   @discardableResult
+  func goBack() -> Bool {
+    guard let entry = activeEntry(), entry.canGoBack() else { return false }
+    entry.goBack()
+    return true
+  }
+
+  @discardableResult
+  func goForward() -> Bool {
+    guard let entry = activeEntry(), entry.canGoForward() else { return false }
+    entry.goForward()
+    return true
+  }
+
+  @discardableResult
   func renameThread() -> Bool {
     guard let entry = activeEntry(),
           let renameThread = entry.renameThread
@@ -222,6 +248,18 @@ final class MainWindowOpenCoordinator {
 
   var canNavigateChat: Bool {
     activeEntry()?.navigateChat != nil
+  }
+
+  var hasActiveWindow: Bool {
+    activeEntry() != nil
+  }
+
+  var canGoBack: Bool {
+    activeEntry()?.canGoBack() ?? false
+  }
+
+  var canGoForward: Bool {
+    activeEntry()?.canGoForward() ?? false
   }
 
   func openLaunchWindow(topLevelRoute: TopLevelRoute) {

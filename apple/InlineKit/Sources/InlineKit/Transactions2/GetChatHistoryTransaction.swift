@@ -59,12 +59,20 @@ public struct GetChatHistoryTransaction: Transaction2 {
 
     do {
       _ = try await AppDatabase.shared.dbWriter.write { db in
+        var savedMessages: [Message] = []
         for message in response.messages {
           do {
-            _ = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
+            let msg = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
+            savedMessages.append(msg)
           } catch {
             log.error("Failed to save message", error: error)
           }
+        }
+
+        do {
+          try Chat.updateLastMsgIds(db, messages: savedMessages)
+        } catch {
+          log.error("Failed to update chat last message", error: error)
         }
       }
 

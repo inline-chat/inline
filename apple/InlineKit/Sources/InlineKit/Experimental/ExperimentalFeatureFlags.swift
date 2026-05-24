@@ -3,6 +3,7 @@ import Foundation
 public enum ExperimentalFeatureFlags {
   public static let voiceMessagesKey = "experimental.voiceMessages"
   public static let replyThreadMenuItemsKey = "experimental.replyThreadMenuItems"
+  public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
 
   public static var voiceMessagesEnabled: Bool {
     get { isVoiceMessagesEnabled }
@@ -28,5 +29,18 @@ public enum ExperimentalFeatureFlags {
 
   public static func setReplyThreadMenuItemsEnabled(_ isEnabled: Bool) {
     UserDefaults.standard.set(isEnabled, forKey: replyThreadMenuItemsKey)
+  }
+
+  public static var sidebarAsInboxEnabled: Bool {
+    get { isSidebarAsInboxEnabled }
+    set { setSidebarAsInboxEnabled(newValue) }
+  }
+
+  public static var isSidebarAsInboxEnabled: Bool {
+    UserDefaults.standard.bool(forKey: sidebarAsInboxKey)
+  }
+
+  public static func setSidebarAsInboxEnabled(_ isEnabled: Bool) {
+    UserDefaults.standard.set(isEnabled, forKey: sidebarAsInboxKey)
   }
 }

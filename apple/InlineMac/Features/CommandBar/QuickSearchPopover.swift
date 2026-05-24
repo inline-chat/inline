@@ -437,7 +437,7 @@ final class QuickSearchViewModel: ObservableObject {
           } else {
             dependencies.requestOpenChat(peer: .thread(id: threadInfo.chat.id))
           }
-          unarchiveIfNeeded(peer: .thread(id: threadInfo.chat.id))
+          openInSidebar(peer: .thread(id: threadInfo.chat.id))
         }
       case let .user(user):
         Task { @MainActor in
@@ -446,7 +446,7 @@ final class QuickSearchViewModel: ObservableObject {
           } else {
             dependencies.requestOpenChat(peer: .user(id: user.id))
           }
-          unarchiveIfNeeded(peer: .user(id: user.id))
+          openInSidebar(peer: .user(id: user.id))
         }
       case let .space(space):
         if let nav2 = dependencies.nav2 {
@@ -473,7 +473,7 @@ final class QuickSearchViewModel: ObservableObject {
         } else {
           dependencies.requestOpenChat(peer: .user(id: user.id))
         }
-        unarchiveIfNeeded(peer: .user(id: user.id))
+        openInSidebar(peer: .user(id: user.id))
       } catch {
         Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
         dependencies.overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
@@ -493,16 +493,12 @@ final class QuickSearchViewModel: ObservableObject {
     }
   }
 
-  private func unarchiveIfNeeded(peer: Peer) {
-    Task(priority: .userInitiated) { [database = dependencies.database, data = dependencies.data] in
+  private func openInSidebar(peer: Peer) {
+    Task(priority: .userInitiated) { [realtimeV2 = dependencies.realtimeV2] in
       do {
-        let dialog = try await database.reader.read { db in
-          try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer))
-        }
-        guard dialog?.archived == true else { return }
-        try await data.updateDialog(peerId: peer, archived: false)
+        _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
       } catch {
-        Log.shared.error("Failed to unarchive chat \(peer.toString())", error: error)
+        Log.shared.error("Failed to open chat in sidebar \(peer.toString())", error: error)
       }
     }
   }
@@ -651,7 +647,7 @@ final class QuickSearchViewModel: ObservableObject {
         if let openSettings {
           openSettings()
         } else {
-          SettingsWindowController.show(using: dependencies)
+          dependencies.appBridge.openSettings(dependencies: dependencies)
         }
 #if SPARKLE
       case .checkForUpdates:
