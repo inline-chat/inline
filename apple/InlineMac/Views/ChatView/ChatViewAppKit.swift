@@ -16,6 +16,7 @@ enum ChatViewError: Error {
 class ChatViewAppKit: NSViewController {
   let peerId: Peer
   let dependencies: AppDependencies
+  private let toolbarState: ChatToolbarState?
   private var viewModel: FullChatViewModel
   private let preparedPayload: PreparedChatPayload?
 
@@ -55,10 +56,12 @@ class ChatViewAppKit: NSViewController {
     peerId: Peer,
     chat: Chat? = nil,
     preparedPayload: PreparedChatPayload? = nil,
-    dependencies: AppDependencies
+    dependencies: AppDependencies,
+    toolbarState: ChatToolbarState? = nil
   ) {
     self.peerId = peerId
     self.dependencies = dependencies
+    self.toolbarState = toolbarState
     self.preparedPayload = preparedPayload
     viewModel = FullChatViewModel(
       db: dependencies.database,
@@ -328,6 +331,7 @@ class ChatViewAppKit: NSViewController {
         messageList: messageListVC!,
         chat: chat,
         dependencies: dependencies,
+        toolbarState: toolbarState,
         parentChatView: self,
         dialog: dialog
       )

@@ -18,6 +18,7 @@ class ComposeAppKit: NSView {
   private var chat: InlineKit.Chat?
   private var chatId: Int64? { chat?.id }
   private var dependencies: AppDependencies
+  private let mentionedParticipants: MentionedParticipantsAutoAddManager
 
   // We load draft from the dialog passed from chat view model
   private var dialog: InlineKit.Dialog?
@@ -57,7 +58,6 @@ class ComposeAppKit: NSView {
   private var currentMentionRange: MentionRange?
   private var mentionKeyMonitorEscUnsubscribe: (() -> Void)?
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
-  private var pendingAutoAddParticipants: Set<Int64> = []
   private var didRequestMentionParticipants = false
   private var mentionParticipantsTask: Task<Void, Never>?
 
@@ -69,8 +69,6 @@ class ComposeAppKit: NSView {
   private var currentSlashQuery: String?
   private var commandKeyMonitorEscUnsubscribe: (() -> Void)?
   private var commandMenuConstraints: [NSLayoutConstraint] = []
-
-  private static let mentionAutoAddLimit = 10
 
   // Draft
   private var draftDebounceTask: Task<Void, Never>?
@@ -228,6 +226,7 @@ class ComposeAppKit: NSView {
     messageList: MessageListAppKit,
     chat: InlineKit.Chat?,
     dependencies: AppDependencies,
+    toolbarState: ChatToolbarState? = nil,
     parentChatView: ChatViewAppKit? = nil,
     dialog: InlineKit.Dialog?
   ) {
@@ -235,6 +234,10 @@ class ComposeAppKit: NSView {
     self.messageList = messageList
     self.chat = chat
     self.dependencies = dependencies
+    self.mentionedParticipants = MentionedParticipantsAutoAddManager(
+      dependencies: dependencies,
+      toolbarState: toolbarState
+    )
     self.parentChatView = parentChatView
     self.dialog = dialog
 
@@ -1127,7 +1130,7 @@ class ComposeAppKit: NSView {
 
     // Edit message
     if let editingMessageId {
-      autoAddMentionedUsersIfNeeded(from: entities)
+      mentionedParticipants.handle(entities: entities, chat: chat)
 
       // Edit message
       Task.detached(priority: .userInitiated) { // @MainActor in
@@ -1147,6 +1150,8 @@ class ComposeAppKit: NSView {
         log.error("Forward failed: empty message ids")
         return
       }
+
+      keepCurrentChatInSidebar()
 
       if hasAttachments {
         enqueueAttachments(replyToMessageId: nil)
@@ -1188,7 +1193,8 @@ class ComposeAppKit: NSView {
 
     // Send message
     else if attachmentItemsSnapshot.isEmpty {
-      autoAddMentionedUsersIfNeeded(from: entities)
+      mentionedParticipants.handle(entities: entities, chat: chat)
+      keepCurrentChatInSidebar()
 
       // Text-only
       // Send via V2
@@ -1223,7 +1229,8 @@ class ComposeAppKit: NSView {
 
     // With image/file/video
     else {
-      autoAddMentionedUsersIfNeeded(from: entities)
+      mentionedParticipants.handle(entities: entities, chat: chat)
+      keepCurrentChatInSidebar()
       enqueueAttachments(replyToMessageId: replyToMsgId)
     }
 
@@ -1259,9 +1266,15 @@ class ComposeAppKit: NSView {
     return attributedString.attributedSubstring(from: trimmedRange)
   }
 
+  private func keepCurrentChatInSidebar() {
+    SidebarState.shared.keepInSidebar(peerId)
+  }
+
   func sendSticker(_ image: NSImage) {
     let replyToMsgId = state.replyingToMsgId
     let sendMode: MessageSendMode? = state.sendSilently ? .modeSilent : nil
+
+    keepCurrentChatInSidebar()
 
     Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
@@ -1852,71 +1865,6 @@ extension ComposeAppKit: CommandCompletionMenuDelegate {
 
   func commandMenuDidRequestClose(_ menu: CommandCompletionMenu) {
     hideCommandCompletion()
-  }
-}
-
-private extension ComposeAppKit {
-  @MainActor
-  func autoAddMentionedUsersIfNeeded(from entities: MessageEntities?) {
-    guard let entities else { return }
-    let userIds = Set(
-      entities.entities.compactMap { entity in
-        guard entity.type == .mention else { return nil }
-        return entity.mention.userID
-      }
-    ).filter { $0 != 0 }
-
-    guard !userIds.isEmpty else { return }
-    for userId in userIds {
-      autoAddMentionedUserIfNeeded(userId)
-    }
-  }
-
-  @MainActor
-  func autoAddMentionedUserIfNeeded(_ userId: Int64) {
-    guard let chatId, let chat else { return }
-    guard chat.type == .thread else { return }
-    guard chat.isPublic != true else { return }
-    guard let currentUserId = dependencies.auth.currentUserId, currentUserId != userId else { return }
-    guard pendingAutoAddParticipants.contains(userId) == false else { return }
-
-    pendingAutoAddParticipants.insert(userId)
-
-    Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else { return }
-      defer {
-        Task { @MainActor in
-          self.pendingAutoAddParticipants.remove(userId)
-        }
-      }
-
-      do {
-        let (messageCount, isParticipant) = try await self.dependencies.database.reader.read { db in
-          let messageCount = try Message
-            .filter(Column("chatId") == chatId)
-            .fetchCount(db)
-          let isParticipant = try ChatParticipant
-            .filter(Column("chatId") == chatId)
-            .filter(Column("userId") == userId)
-            .fetchOne(db) != nil
-          return (messageCount, isParticipant)
-        }
-
-        guard messageCount < Self.mentionAutoAddLimit else {
-          return
-        }
-        guard !isParticipant else { return }
-
-        try await Api.realtime.send(
-          .addChatParticipant(
-            chatID: chatId,
-            userID: userId
-          )
-        )
-      } catch {
-        log.error("Failed to auto-add mentioned user", error: error)
-      }
-    }
   }
 }
 

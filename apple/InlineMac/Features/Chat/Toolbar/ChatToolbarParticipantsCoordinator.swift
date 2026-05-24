@@ -115,6 +115,11 @@ struct ChatToolbarParticipantsTitlePresentations: ViewModifier {
           )
         }
       }
+      .modifier(ChatToolbarMentionParticipantPromptPresentation(
+        peer: peer,
+        toolbarState: toolbarState,
+        anchor: .title
+      ))
       .onChange(of: toolbarState.presentation, initial: true) { _, presentation in
         handlePresentation(presentation)
       }
@@ -235,6 +240,11 @@ private struct ChatToolbarParticipantsPresentations: ViewModifier {
           )
         }
       }
+      .modifier(ChatToolbarMentionParticipantPromptPresentation(
+        peer: peer,
+        toolbarState: toolbarState,
+        anchor: anchor
+      ))
       .onChange(of: toolbarState.presentation, initial: true) { _, presentation in
         handlePresentation(presentation)
       }
@@ -270,6 +280,70 @@ private struct ChatToolbarParticipantsPresentations: ViewModifier {
       chat = loadedChat
     } catch {
       Log.shared.error("Failed to load chat for toolbar participants", error: error)
+    }
+  }
+}
+
+private struct ChatToolbarMentionParticipantPromptPresentation: ViewModifier {
+  let peer: Peer
+  let toolbarState: ChatToolbarState
+  let anchor: ChatToolbarState.Anchor
+
+  @State private var isAdding = false
+
+  func body(content: Content) -> some View {
+    content
+      .popover(isPresented: Binding(
+        get: { toolbarState.mentionParticipantPromptUsers(for: anchor) != nil },
+        set: { isPresented in
+          guard !isPresented, toolbarState.mentionParticipantPromptUsers(for: anchor) != nil else { return }
+          toolbarState.dismissPresentation()
+        }
+      ), arrowEdge: .bottom) {
+        if let users = toolbarState.mentionParticipantPromptUsers(for: anchor) {
+          MentionedParticipantsPromptView(
+            users: users,
+            isAdding: isAdding,
+            onAdd: {
+              add(users)
+            }
+          )
+        }
+      }
+  }
+
+  @MainActor
+  private func add(_ users: [UserInfo]) {
+    guard case let .thread(chatId) = peer else { return }
+    guard !isAdding else { return }
+
+    isAdding = true
+
+    Task { @MainActor in
+      defer {
+        isAdding = false
+      }
+
+      var addedUsers: [UserInfo] = []
+
+      for user in users {
+        do {
+          try await Api.realtime.send(.addChatParticipant(
+            chatID: chatId,
+            userID: user.user.id
+          ))
+          addedUsers.append(user)
+        } catch {
+          Log.shared.error("Failed to add mentioned participant from prompt", error: error)
+        }
+      }
+
+      guard !addedUsers.isEmpty else {
+        ToastCenter.shared.showError("Failed to add participants")
+        return
+      }
+
+      toolbarState.dismissPresentation()
     }
   }
 }
