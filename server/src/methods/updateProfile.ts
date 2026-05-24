@@ -1,13 +1,14 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users, type DbNewUser, type DbUser } from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import { TUserInfo, encodeUserInfo } from "@in/server/api-types"
 import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { validateIanaTimezone } from "@in/server/utils/validate"
+import { normalizeUsername } from "@in/server/utils/normalize"
 
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
@@ -26,9 +27,11 @@ const log = new Log("updateProfile")
 
 export const handler = async (input: Input, context: HandlerContext): Promise<Static<typeof Response>> => {
   try {
-    if (input.username) {
+    const username = input.username ? normalizeUsername(input.username) : input.username
+
+    if (username) {
       // check username is available if it's set
-      let isAvailable = await checkUsernameAvailable(input.username, { userId: context.currentUserId })
+      let isAvailable = await checkUsernameAvailable(username, { userId: context.currentUserId })
       if (!isAvailable) {
         throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
       }
@@ -49,11 +52,11 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
       }
     }
     if ("username" in input) {
-      if (input.username && input.username.length < 2) {
+      if (username && username.length < 2) {
         throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
       }
-      if (input.username) {
-        props.username = input.username
+      if (username) {
+        props.username = username
       }
     }
     if ("timeZone" in input) {
