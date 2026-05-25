@@ -153,7 +153,7 @@ actor Transactions {
 
   /// Complete a transaction by the rpc message ID. Called when a response or error is received.
   /// It deletes the transaction from the system.
-  func complete(rpcMsgId: UInt64) -> TransactionWrapper? {
+  func complete(rpcMsgId: UInt64, deletePersisted: Bool = true) -> TransactionWrapper? {
     guard let transactionId = transactionRpcMap[rpcMsgId] else {
       pendingAckMsgIds.remove(rpcMsgId)
       log.trace("Complete called for unknown rpcMsgId \(rpcMsgId) - transaction already completed or discarded")
@@ -174,11 +174,31 @@ actor Transactions {
     transactionRpcMap.removeValue(forKey: rpcMsgId)
     pendingAckMsgIds.remove(rpcMsgId)
 
-    // delete from disk because we no longer need to retry it
-    deleteFromDisk(transactionId: transactionId)
+    if deletePersisted {
+      // delete from disk because we no longer need to retry it
+      deleteFromDisk(transactionId: transactionId)
+    }
 
     // In case we have missed the ACK, we return the transaction from in-flight
     return transactionFromSent ?? transactionFromInFlight
+  }
+
+  /// Requeue a completed transaction after a deterministic RPC error, up to the provided retry cap.
+  func retryAfterRpcError(_ wrapper: TransactionWrapper, maxRetries: Int) -> Bool {
+    guard wrapper.rpcErrorRetryCount < maxRetries else {
+      deleteFromDisk(transactionId: wrapper.id)
+      return false
+    }
+
+    let retried = wrapper.incrementingRpcErrorRetryCount()
+    _queue[retried.id] = retried
+    saveToDisk(transaction: retried)
+
+    Task {
+      await queueStream.send(())
+    }
+
+    return true
   }
 
   /// Requeue a transaction that needs to be retried

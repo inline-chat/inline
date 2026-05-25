@@ -36,6 +36,7 @@ public actor RealtimeV2 {
   private var authAdapter: AuthConnectionAdapter?
   private var lifecycleAdapter: LifecycleConnectionAdapter?
   private var networkAdapter: NetworkConnectionAdapter?
+  private let maxLimitedRpcErrorRetries = 2
 
   // Connection state channel for cross-task consumption and the latest cached state
   private var connectionStateContinuations: [UUID: AsyncStream<RealtimeConnectionState>.Continuation] = [:]
@@ -285,12 +286,23 @@ public actor RealtimeV2 {
   }
 
   private func completeTransaction(msgId: UInt64, error: TransactionError) async {
-    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId) else {
+    let shouldRetry = isLimitedRetryRpcError(error)
+    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId, deletePersisted: !shouldRetry) else {
       return
     }
 
     let transaction = transactionWrapper.transaction
     let transactionId = transactionWrapper.id
+
+    if shouldRetry {
+      let requeued = await transactions.retryAfterRpcError(transactionWrapper, maxRetries: maxLimitedRpcErrorRetries)
+      if requeued {
+        log.warning(
+          "Retrying transaction \(transactionId) after RPC error \(transactionWrapper.rpcErrorRetryCount + 1)/\(maxLimitedRpcErrorRetries): \(error)"
+        )
+        return
+      }
+    }
 
     log.error("Transaction \(transactionId) failed with error", error: error)
 
@@ -572,4 +584,28 @@ public actor RealtimeV2 {
     }
   }
 
+  private func isLimitedRetryRpcError(_ error: TransactionError) -> Bool {
+    guard case let .rpcError(rpcError) = error else { return false }
+
+    switch rpcError.errorCode {
+    case .badRequest,
+         .peerIDInvalid,
+         .messageIDInvalid,
+         .userIDInvalid,
+         .userAlreadyMember,
+         .spaceIDInvalid,
+         .chatIDInvalid,
+         .emailInvalid,
+         .phoneNumberInvalid,
+         .spaceAdminRequired,
+         .spaceOwnerRequired:
+      return true
+    case .unknown,
+         .unauthenticated,
+         .rateLimit,
+         .internalError,
+         .UNRECOGNIZED(_):
+      return false
+    }
+  }
 }

@@ -39,6 +39,7 @@ private extension DefaultTransactionPersistenceHandler {
     let persistedData = StoredTransaction(
       id: wrapper.id,
       date: wrapper.date,
+      rpcErrorRetryCount: wrapper.rpcErrorRetryCount,
       type: TransactionTypeRegistry.typeString(for: wrapper.transaction),
       transactionData: try JSONEncoder().encode(wrapper.transaction)
     )
@@ -57,7 +58,12 @@ private extension DefaultTransactionPersistenceHandler {
       let data = try Data(contentsOf: file)
       let persisted = try JSONDecoder().decode(StoredTransaction.self, from: data)
       let transaction = try decodeTransaction(type: persisted.type, data: persisted.transactionData)
-      return TransactionWrapper(id: persisted.id, date: persisted.date, transaction: transaction)
+      return TransactionWrapper(
+        id: persisted.id,
+        date: persisted.date,
+        transaction: transaction,
+        rpcErrorRetryCount: persisted.rpcErrorRetryCount ?? 0
+      )
     } catch {
       log.error("Failed to load transaction from \(file.lastPathComponent)", error: error)
       deleteFile(file) // Clean up corrupted file
@@ -97,7 +103,7 @@ private extension DefaultTransactionPersistenceHandler {
 private struct StoredTransaction: Codable {
   let id: TransactionId
   let date: Date
+  let rpcErrorRetryCount: Int?
   let type: String
   let transactionData: Data
 }
-
