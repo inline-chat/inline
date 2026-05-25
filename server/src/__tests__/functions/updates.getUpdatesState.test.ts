@@ -3,8 +3,8 @@ import { getUpdatesState } from "@in/server/functions/updates.getUpdatesState"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { db } from "@in/server/db"
-import { chats, spaces } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
+import { chats, members, spaces } from "@in/server/db/schema"
+import { and, eq } from "drizzle-orm"
 
 describe("getUpdatesState", () => {
   setupTestLifecycle()
@@ -116,5 +116,37 @@ describe("getUpdatesState", () => {
 
     const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
     expect(result.date).toBe(encodeDateStrict(spaceUpdateDate))
+  })
+
+  test("skips changed public chats when member no longer has public chat access", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Updates State No Public", [
+      "no-public@example.com",
+    ])
+    const user = users[0]
+    if (!user) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Public But Inaccessible", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await db
+      .update(members)
+      .set({ canAccessPublicChats: false })
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, user.id)))
+      .execute()
+
+    const inputDate = encodeDateStrict(new Date(Date.now() - 60 * 1000))
+    const chatUpdateDate = new Date(Date.now() + 30 * 1000)
+    await db
+      .update(chats)
+      .set({
+        lastUpdateDate: chatUpdateDate,
+        updateSeq: 7,
+      })
+      .where(eq(chats.id, chat.id))
+      .execute()
+
+    const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
+    expect(result.date).toBeGreaterThanOrEqual(inputDate)
+    expect(result.date).not.toBe(encodeDateStrict(chatUpdateDate))
   })
 })

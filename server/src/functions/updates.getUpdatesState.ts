@@ -6,6 +6,8 @@ import type { DbChat } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { decodeDate, encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 type GetUpdatesStateFnResult = {
   date: bigint
@@ -35,6 +37,7 @@ export const getUpdatesState = async (
       lastUpdateAtGreaterThanEqual: userLocalDate,
     },
   })
+  chats = await filterAccessibleChats(chats, context.currentUserId)
 
   // Get spaces that have been updated
   let spaces = await SpaceModel.getSpacesAfterUpdateDate({
@@ -113,3 +116,25 @@ export const getUpdatesState = async (
     date: latestUpdateDateEncoded,
   }
 }
+
+const filterAccessibleChats = async (chats: DbChat[], userId: number): Promise<DbChat[]> => {
+  const accessible: DbChat[] = []
+
+  for (const chat of chats) {
+    try {
+      await AccessGuards.ensureChatAccess(chat, userId)
+      accessible.push(chat)
+    } catch (error) {
+      if (isExpectedAccessError(error)) {
+        continue
+      }
+      throw error
+    }
+  }
+
+  return accessible
+}
+
+const isExpectedAccessError = (error: unknown): boolean =>
+  RealtimeRpcError.is(error, RealtimeRpcError.Code.PEER_ID_INVALID) ||
+  RealtimeRpcError.is(error, RealtimeRpcError.Code.SPACE_ID_INVALID)
