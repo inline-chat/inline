@@ -87,6 +87,8 @@ export const INLINE_ALERTS_CHAT_ID = process.env["INLINE_ALERTS_CHAT_ID"]
 export const ADMIN_PUBLIC_API_ORIGIN = process.env["ADMIN_PUBLIC_API_ORIGIN"]
 export const DEMO_EMAIL = process.env["DEMO_EMAIL"]
 export const DEMO_CODE = process.env["DEMO_CODE"]
+export const DEMO_EMAIL2 = process.env["DEMO_EMAIL2"]
+export const DEMO_CODE2 = process.env["DEMO_CODE2"]
 
 export const LINEAR_CLIENT_ID = process.env["LINEAR_CLIENT_ID"]
 export const LINEAR_CLIENT_SECRET = process.env["LINEAR_CLIENT_SECRET"]
