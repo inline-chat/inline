@@ -62,13 +62,6 @@ struct AllChatsRouteView: View {
       }
 
       ToolbarItem {
-        Button(action: openSearch) {
-          Label("Search", systemImage: "magnifyingglass")
-        }
-        .help("Search")
-      }
-
-      ToolbarItem {
         Button(action: toggleArchiveFilter) {
           Label(filter.archiveButtonTitle, systemImage: filter.archiveButtonSystemImage)
         }
@@ -156,10 +149,6 @@ struct AllChatsRouteView: View {
     }
 
     NewThreadAction.start(dependencies: dependencies, spaceId: nav.selectedSpaceId)
-  }
-
-  private func openSearch() {
-    nav.openCommandBar()
   }
 
   private var rowLayoutMenu: some View {
@@ -878,6 +867,8 @@ private struct ChatListRow: View {
         size: Self.compactIconSize,
         shape: .roundedSquare
       )
+    } else if let peer = item.peer {
+      SidebarChatIcon(peer: peer, size: Self.compactIconSize)
     } else {
       SidebarThreadIcon(
         emoji: nil,
@@ -928,6 +919,7 @@ private struct ChatListRow: View {
     Task(priority: .userInitiated) {
       do {
         guard let dependencies else { return }
+        _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peerId))
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peerId, open: true))
       } catch {
         Log.shared.error("Failed to open chat in sidebar", error: error)

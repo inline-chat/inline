@@ -73,6 +73,14 @@ final class AppBridge {
   }
 
   @MainActor
+  func setWindowMinSize(_ size: NSSize) {
+    guard let window = window() else { return }
+
+    window.minSize = size
+    enforceMinSize(size, for: window)
+  }
+
+  @MainActor
   func setWindowTitlebarAppearsTransparent(_ appearsTransparent: Bool) {
     window()?.titlebarAppearsTransparent = appearsTransparent
   }
@@ -94,6 +102,22 @@ final class AppBridge {
   @MainActor
   private var currentApp: NSApplication {
     state.app ?? NSApp
+  }
+
+  @MainActor
+  private func enforceMinSize(_ size: NSSize, for window: NSWindow) {
+    let frame = window.frame
+    let width = max(frame.width, size.width)
+    let height = max(frame.height, size.height)
+    guard width != frame.width || height != frame.height else { return }
+
+    let rect = NSRect(
+      x: frame.minX,
+      y: frame.maxY - height,
+      width: width,
+      height: height
+    )
+    window.setFrame(rect, display: true)
   }
 }
 

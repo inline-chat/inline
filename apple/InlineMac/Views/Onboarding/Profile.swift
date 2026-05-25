@@ -100,7 +100,11 @@ struct OnboardingProfile: View {
           try User(from: result.user).save(db, onConflict: .ignore)
         }
 
-        mainWindowViewModel.navigate(.main)
+        if onboardingViewModel.existingUser == false {
+          mainWindowViewModel.navigateAfterSignup(firstName: result.user.firstName)
+        } else {
+          mainWindowViewModel.navigate(.main)
+        }
       } catch {
         formState.failed(error: error.localizedDescription)
       }

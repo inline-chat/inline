@@ -34,6 +34,7 @@ struct SidebarFooterView: View {
   let showsArchive: Bool
   @Binding var showPreview: Bool
   @Binding var includeSpaceChatsInHome: Bool
+  @Binding var sidebarAsInbox: Bool
 
   let onToggleArchive: () -> Void
   let onSearch: () -> Void
@@ -82,6 +83,7 @@ struct SidebarFooterView: View {
           }
 
           Toggle("Include Space Chats in Home", isOn: $includeSpaceChatsInHome)
+          Toggle("Sidebar as Inbox", isOn: $sidebarAsInbox)
         }
       }
 

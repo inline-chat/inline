@@ -76,7 +76,7 @@ private struct ThreadIcon: View {
           Text(emoji)
             .font(.system(size: emojiPointSize, weight: .regular))
         } else {
-          Image(systemName: isReplyThread ? "arrowshape.turn.up.left" : "number")
+          Image(systemName: isReplyThread ? "arrowshape.turn.up.left" : "bubble.left.fill")
             .font(.system(size: symbolPointSize, weight: .medium))
             .foregroundColor(Self.symbolForeground)
         }
