@@ -45,6 +45,17 @@ struct NavEntry: Hashable, Codable, Equatable {
   }
 }
 
+extension NavEntry.Route {
+  var selectedPeer: Peer? {
+    switch self {
+      case let .chat(peer), let .chatInfo(peer):
+        peer
+      default:
+        nil
+    }
+  }
+}
+
 enum SidebarTab: String, Hashable {
   case inbox
   case archive
@@ -198,6 +209,17 @@ extension Nav {
     history.append(current)
 
     reflectHistoryChange()
+  }
+
+  @discardableResult
+  @MainActor func removeChat(peer: Peer) -> Bool {
+    let oldHistoryCount = history.count
+    history.removeAll { $0.route.selectedPeer == peer }
+    forwardHistory.removeAll { $0.route.selectedPeer == peer }
+
+    guard history.count != oldHistoryCount else { return false }
+    reflectHistoryChange()
+    return true
   }
 
   @MainActor func handleEsc() {

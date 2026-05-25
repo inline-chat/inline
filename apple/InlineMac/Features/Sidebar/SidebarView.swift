@@ -642,6 +642,12 @@ struct SidebarView: View {
 
     Task(priority: .userInitiated) {
       do {
+        if try await dependencies.data.deleteThreadIfUntitledAndEmpty(peerId: item.peerId) {
+          _ = await MainActor.run {
+            dependencies.removeChatFromNavigation(peer: item.peerId)
+          }
+          return
+        }
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: item.peerId, open: false))
       } catch {
         Log.shared.error("Failed to close chat in sidebar", error: error)

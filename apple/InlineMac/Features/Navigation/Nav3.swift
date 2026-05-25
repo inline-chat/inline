@@ -176,6 +176,31 @@ class Nav3 {
     notifyRouteChange()
   }
 
+  @discardableResult
+  func removeChat(peer: Peer) -> Bool {
+    let indexedRoutes = history.enumerated().filter { _, route in
+      route.selectedPeer != peer
+    }
+    guard indexedRoutes.count != history.count else { return false }
+
+    let oldIndex = historyIndex
+    let wasCurrent = currentRoute.selectedPeer == peer
+    let nextIndex: Int?
+
+    if wasCurrent {
+      nextIndex = indexedRoutes.lastIndex { oldIndex > $0.offset }
+        ?? indexedRoutes.firstIndex { $0.offset > oldIndex }
+    } else {
+      nextIndex = indexedRoutes.firstIndex { $0.offset == oldIndex }
+        ?? indexedRoutes.lastIndex { oldIndex > $0.offset }
+    }
+
+    history = indexedRoutes.map(\.element)
+    historyIndex = nextIndex ?? -1
+    notifyRouteChange()
+    return true
+  }
+
   func reset() {
     guard currentRoute != .empty || selectedSpaceId != nil || cmdKVisible else { return }
     history = []

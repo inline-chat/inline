@@ -19,6 +19,17 @@ enum Nav2Route: Equatable, Hashable, Codable {
   case spaceIntegrations(spaceId: Int64)
 }
 
+extension Nav2Route {
+  var selectedPeer: Peer? {
+    switch self {
+      case let .chat(peer), let .chatInfo(peer):
+        peer
+      default:
+        nil
+    }
+  }
+}
+
 enum TabId: Hashable, Codable {
   case home
   case space(id: Int64, name: String)
@@ -275,6 +286,41 @@ struct Nav2Entry: Codable {
     }
 
     saveStateLowPriority()
+  }
+
+  @discardableResult
+  func removeChat(peer: Peer) -> Bool {
+    let wasCurrent = currentRoute.selectedPeer == peer
+    var didRemove = false
+
+    if pendingChatPeer == peer {
+      clearPendingChatOpenState()
+      didRemove = true
+    }
+
+    preparedChatPayloads.removeValue(forKey: peer)
+
+    let oldHistoryCount = history.count
+    history.removeAll { $0.route.selectedPeer == peer }
+    forwardHistory.removeAll { $0.route.selectedPeer == peer }
+    didRemove = didRemove || history.count != oldHistoryCount
+
+    for (tab, route) in lastRoutes where route.selectedPeer == peer {
+      lastRoutes[tab] = .empty
+    }
+
+    guard didRemove else { return false }
+
+    if wasCurrent {
+      if let last = history.last {
+        updateActiveTab(to: last)
+      } else {
+        _ = recordNavigation(route: .empty, tab: activeTab, isImplicit: true, replaceImplicit: false)
+      }
+    }
+
+    saveStateLowPriority()
+    return true
   }
 
   func setActiveTab(index: Int) {
