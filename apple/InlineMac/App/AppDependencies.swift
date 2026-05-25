@@ -158,6 +158,18 @@ extension AppDependencies {
     nav.open(.chat(peer: peer))
   }
 
+  @discardableResult
+  func removeChatFromNavigation(peer: Peer) -> Bool {
+    var didRemove = nav.removeChat(peer: peer)
+    if nav2?.removeChat(peer: peer) == true {
+      didRemove = true
+    }
+    if nav3?.removeChat(peer: peer) == true {
+      didRemove = true
+    }
+    return didRemove
+  }
+
   var pendingChatPeer: Peer? {
     nav2?.pendingChatPeer ?? nav3ChatOpenPreloader?.pendingPeer
   }

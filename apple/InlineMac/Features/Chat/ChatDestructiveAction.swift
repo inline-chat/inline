@@ -119,7 +119,9 @@ enum ChatDestructiveActionRunner {
 
         await MainActor.run {
           ToastCenter.shared.dismiss()
-          navigateOut()
+          if dependencies?.removeChatFromNavigation(peer: peer) != true {
+            navigateOut()
+          }
           ToastCenter.shared.showSuccess(action.successTitle)
         }
       } catch {
