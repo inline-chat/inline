@@ -1058,6 +1058,10 @@ private actor SendTestSyncStorage: SyncStorage {
     bucketStates[key] = state
   }
 
+  func removeBucketState(for key: BucketKey) async {
+    bucketStates.removeValue(forKey: key)
+  }
+
   func setBucketStates(states: [BucketKey: BucketState]) async {
     for (key, state) in states {
       bucketStates[key] = state

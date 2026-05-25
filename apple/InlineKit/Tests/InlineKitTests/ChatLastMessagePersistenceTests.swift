@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineProtocol
 import Testing
 
 @testable import InlineKit
@@ -41,6 +42,29 @@ struct ChatLastMessagePersistenceTests {
       chatId: chatId
     )
     try message.saveMessage(db)
+  }
+
+  private func makeThreadPeer() -> InlineProtocol.Peer {
+    .with { $0.chat.chatID = chatId }
+  }
+
+  private func makeThreadChat(lastMsgId: Int64?) -> InlineProtocol.Chat {
+    var chat = InlineProtocol.Chat()
+    chat.id = chatId
+    chat.title = "Thread"
+    chat.date = 1
+    chat.peerID = makeThreadPeer()
+    if let lastMsgId {
+      chat.lastMsgID = lastMsgId
+    }
+    return chat
+  }
+
+  private func makeThreadDialog() -> InlineProtocol.Dialog {
+    var dialog = InlineProtocol.Dialog()
+    dialog.peer = makeThreadPeer()
+    dialog.chatID = chatId
+    return dialog
   }
 
   @Test("saves chat when referenced last message is missing")
@@ -120,6 +144,69 @@ struct ChatLastMessagePersistenceTests {
       let saved = try #require(try Chat.fetchOne(db, id: chatId))
       #expect(saved.lastMsgId == 7)
       #expect(saved.title == "Renamed")
+    }
+  }
+
+  @Test("chatOpen update does not persist a missing last message reference")
+  func chatOpenUpdateIgnoresMissingLastMessage() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      var update = InlineProtocol.UpdateChatOpen()
+      update.chat = makeThreadChat(lastMsgId: 42)
+      update.dialog = makeThreadDialog()
+
+      try update.apply(db)
+    }
+
+    try dbQueue.read { db in
+      let savedChat = try #require(try Chat.fetchOne(db, id: chatId))
+      let savedDialog = try #require(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db))
+
+      #expect(savedChat.lastMsgId == nil)
+      #expect(savedDialog.chatId == chatId)
+    }
+  }
+
+  @Test("newChat update does not persist a missing last message reference")
+  func newChatUpdateIgnoresMissingLastMessage() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      var update = InlineProtocol.UpdateNewChat()
+      update.chat = makeThreadChat(lastMsgId: 42)
+
+      try update.apply(db)
+    }
+
+    try dbQueue.read { db in
+      let savedChat = try #require(try Chat.fetchOne(db, id: chatId))
+      let savedDialog = try #require(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db))
+
+      #expect(savedChat.lastMsgId == nil)
+      #expect(savedDialog.chatId == chatId)
+    }
+  }
+
+  @Test("chatMoved update does not persist a missing last message reference")
+  func chatMovedUpdateIgnoresMissingLastMessage() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      var update = InlineProtocol.UpdateChatMoved()
+      update.chat = makeThreadChat(lastMsgId: 42)
+      update.oldSpaceID = 1
+      update.newSpaceID = 2
+
+      try update.apply(db)
+    }
+
+    try dbQueue.read { db in
+      let savedChat = try #require(try Chat.fetchOne(db, id: chatId))
+      let savedDialog = try #require(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db))
+
+      #expect(savedChat.lastMsgId == nil)
+      #expect(savedDialog.chatId == chatId)
     }
   }
 }

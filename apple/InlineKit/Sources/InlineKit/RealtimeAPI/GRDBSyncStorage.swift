@@ -101,6 +101,21 @@ public struct GRDBSyncStorage: SyncStorage {
     }
   }
 
+  public func removeBucketState(for key: BucketKey) async {
+    do {
+      try await db.dbWriter.write { db in
+        _ = try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == key.getBucket()
+              && DbBucketState.Columns.entityId == key.getEntityId()
+          )
+          .deleteAll(db)
+      }
+    } catch {
+      AppDatabase.log.error("Failed to remove bucket state for \(key): \(error)")
+    }
+  }
+
   public func setBucketStates(states: [BucketKey: BucketState]) async {
     do {
       try await db.dbWriter.write { db in

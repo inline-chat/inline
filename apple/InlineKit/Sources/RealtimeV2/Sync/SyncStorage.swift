@@ -75,6 +75,7 @@ public protocol SyncStorage: Sendable {
 
   func getBucketState(for key: BucketKey) async -> BucketState
   func setBucketState(for key: BucketKey, state: BucketState) async
+  func removeBucketState(for key: BucketKey) async
 
   /// Uses a single transaction
   func setBucketStates(states: [BucketKey: BucketState]) async

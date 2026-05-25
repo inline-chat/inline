@@ -605,7 +605,7 @@ extension InlineProtocol.UpdateEditMessage {
 
 extension InlineProtocol.UpdateNewChat {
   func apply(_ db: Database) throws {
-    let chat = Chat(from: chat)
+    var chat = Chat(from: chat)
 
     if hasUser {
       Log.shared.debug("saving user \(user)")
@@ -619,7 +619,7 @@ extension InlineProtocol.UpdateNewChat {
 
     Log.shared.debug("saving chat \(chat)")
     do {
-      try chat.save(db)
+      try chat.saveWithValidLastMsg(db)
     } catch {
       Log.shared.error("Failed to save chat", error: error)
     }
@@ -909,8 +909,8 @@ extension InlineProtocol.UpdateChatInfo {
 extension InlineProtocol.UpdateChatMoved {
   func apply(_ db: Database) throws {
     do {
-      let updatedChat = Chat(from: chat)
-      try updatedChat.save(db)
+      var updatedChat = Chat(from: chat)
+      try updatedChat.saveWithValidLastMsg(db)
 
       let peer: Peer = .thread(id: updatedChat.id)
       if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer)) {
@@ -1010,8 +1010,8 @@ extension InlineProtocol.UpdateChatOpen {
         _ = try User.save(db, user: user)
       }
 
-      let updatedChat = Chat(from: chat)
-      try updatedChat.save(db)
+      var updatedChat = Chat(from: chat)
+      try updatedChat.saveWithValidLastMsg(db)
       _ = try dialog.saveFull(db)
     } catch {
       Log.shared.error("Failed to apply chat open update", error: error)
