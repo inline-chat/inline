@@ -860,6 +860,42 @@ final class SyncTests {
     #expect(bucketState.date == 100)
   }
 
+  @Test("non-retryable bucket error clears bucket state")
+  func testNonRetryableBucketErrorClearsBucketState() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 100, seq: 5))
+
+    let client = FakeProtocolClient(
+      responses: [],
+      methodErrors: [
+        .getUpdates: [
+          ProtocolSessionError.rpcError(
+            errorCode: "PEER_ID_INVALID",
+            message: "Peer ID is invalid",
+            code: 400
+          ),
+        ],
+      ]
+    )
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let signal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 6)
+    await sync.process(updates: [signal])
+
+    let didFetch = await waitForCondition(timeout: .milliseconds(500)) {
+      await client.getCallCount() == 1
+    }
+    #expect(didFetch)
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 0)
+    #expect(bucketState.date == 0)
+  }
+
   @Test("realtime apply failure does not advance bucket state")
   func testRealtimeApplyFailureDoesNotAdvanceBucketState() async throws {
     let storage = InMemorySyncStorage()
@@ -1384,6 +1420,7 @@ final actor FakeProtocolClient: ProtocolClientType {
 
   private var responses: [InlineProtocol.RpcResult.OneOf_Result?]
   private var methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]?
+  private var methodErrors: [InlineProtocol.Method: [Error]]
   private var callCount = 0
   private var methods: [InlineProtocol.Method] = []
 
@@ -1396,7 +1433,8 @@ final actor FakeProtocolClient: ProtocolClientType {
     responses: [InlineProtocol.RpcResult.OneOf_Result?],
     gateFirstCall: Bool = false,
     gateCallNumbers: Set<Int> = [],
-    methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]? = nil
+    methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]? = nil,
+    methodErrors: [InlineProtocol.Method: [Error]] = [:]
   ) {
     self.responses = responses
     var gates = gateCallNumbers
@@ -1405,6 +1443,7 @@ final actor FakeProtocolClient: ProtocolClientType {
     }
     gatedCalls = gates
     self.methodResponses = methodResponses
+    self.methodErrors = methodErrors
   }
 
   func startTransport() async {}
@@ -1432,6 +1471,13 @@ final actor FakeProtocolClient: ProtocolClientType {
       await withCheckedContinuation { continuation in
         callGates[callNumber] = continuation
       }
+    }
+
+    if let errorsForMethod = methodErrors[method], !errorsForMethod.isEmpty {
+      var updated = errorsForMethod
+      let error = updated.removeFirst()
+      methodErrors[method] = updated
+      throw error
     }
 
     if let responsesForMethod = methodResponses?[method], !responsesForMethod.isEmpty {
@@ -1534,6 +1580,10 @@ actor InMemorySyncStorage: SyncStorage {
 
   func setBucketState(for key: BucketKey, state: BucketState) async {
     bucketStates[key] = state
+  }
+
+  func removeBucketState(for key: BucketKey) async {
+    bucketStates.removeValue(forKey: key)
   }
 
   func setBucketStates(states: [BucketKey: BucketState]) async {

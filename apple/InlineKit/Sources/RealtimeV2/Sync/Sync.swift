@@ -222,6 +222,12 @@ actor Sync {
     await syncStorage.setBucketState(for: key, state: BucketState(date: date, seq: seq))
   }
 
+  func discardBucketState(for key: BucketKey) async {
+    log.debug("discarding sync bucket state for \(key)")
+    buckets.removeValue(forKey: key)
+    await syncStorage.removeBucketState(for: key)
+  }
+
   /// Apply updates from bucket actor
   func applyUpdatesFromBucket(_ updates: [InlineProtocol.Update]) async -> UpdateApplyResult {
     await applyUpdates.apply(updates: updates, source: .syncCatchup)
@@ -1099,6 +1105,7 @@ actor BucketActor {
     } catch {
       if isNonRetryableBucketError(error) {
         log.warning("non-retryable getUpdates error for bucket \(key): \(error)")
+        await sync.discardBucketState(for: key)
         return true
       }
       log.error("failed to fetch updates for bucket \(key): \(error)")
