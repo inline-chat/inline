@@ -35,14 +35,14 @@ extension EmojiPanelPicker {
 
 final class EmojiPanelPickerView: NSView, NSTextViewDelegate {
   var onEmojiSelected: (String) -> Void
-  private let textView: NSTextView
+  private let textView: EmojiPanelReceiverTextView
   private let scrollView: NSScrollView
   private var isHandlingChange = false
   private weak var paletteWindow: NSWindow?
 
   init(onEmojiSelected: @escaping (String) -> Void) {
     self.onEmojiSelected = onEmojiSelected
-    textView = NSTextView(frame: .zero)
+    textView = EmojiPanelReceiverTextView(frame: .zero)
     scrollView = NSScrollView(frame: .zero)
     super.init(frame: .zero)
     setupView()
@@ -88,6 +88,7 @@ final class EmojiPanelPickerView: NSView, NSTextViewDelegate {
 
   func showEmojiPanel() {
     focusWindowIfNeeded()
+    textView.allowsFirstResponder = true
     _ = window?.makeFirstResponder(textView)
     let showSelector = Selector(("showEmojiAndSymbols:"))
     if NSApplication.shared.sendAction(showSelector, to: nil, from: textView) == false {
@@ -118,7 +119,12 @@ final class EmojiPanelPickerView: NSView, NSTextViewDelegate {
     isHandlingChange = true
     onEmojiSelected(firstEmoji)
     textView.textStorage?.setAttributedString(NSAttributedString(string: ""))
+    textView.allowsFirstResponder = false
     isHandlingChange = false
+  }
+
+  func textDidEndEditing(_ notification: Notification) {
+    textView.allowsFirstResponder = false
   }
 
   private func repositionCharacterPalette() {
@@ -186,5 +192,18 @@ final class EmojiPanelPickerView: NSView, NSTextViewDelegate {
       character.unicodeScalars.contains { !$0.isASCII }
     }
     return String(filtered)
+  }
+}
+
+private final class EmojiPanelReceiverTextView: NSTextView {
+  var allowsFirstResponder = false
+
+  override var acceptsFirstResponder: Bool {
+    allowsFirstResponder
+  }
+
+  override func becomeFirstResponder() -> Bool {
+    guard allowsFirstResponder else { return false }
+    return super.becomeFirstResponder()
   }
 }

@@ -2,9 +2,11 @@ import AppKit
 import Logger
 import SwiftUI
 
-class SettingsWindowController: NSWindowController {
+@MainActor
+class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private let log = Log.scoped("SettingsWindowController")
   private let dependencies: AppDependencies
+  private let appBridge: AppBridge
   private static var shared: SettingsWindowController?
 
   static func show(using dependencies: AppDependencies, sender: Any? = nil) {
@@ -15,7 +17,10 @@ class SettingsWindowController: NSWindowController {
   }
 
   init(dependencies: AppDependencies) {
-    self.dependencies = dependencies
+    let windowID = UUID()
+    let appBridge = dependencies.appBridge.bound(to: windowID)
+    self.appBridge = appBridge
+    self.dependencies = dependencies.with(appBridge: appBridge)
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: CGSize(width: 800, height: 600)),
       styleMask: [
@@ -30,6 +35,7 @@ class SettingsWindowController: NSWindowController {
     )
 
     super.init(window: window)
+    appBridge.registerWindow(window)
     configureWindow()
   }
 
@@ -48,6 +54,7 @@ class SettingsWindowController: NSWindowController {
     window.setFrameAutosaveName("SettingsWindow")
     window.minSize = NSSize(width: 600, height: 400)
     window.center()
+    window.delegate = self
 
     // Set up SwiftUI content with dependencies
     let contentView = SettingsRootView()
@@ -61,6 +68,11 @@ class SettingsWindowController: NSWindowController {
   override func showWindow(_ sender: Any?) {
     super.showWindow(sender)
     window?.makeKeyAndOrderFront(nil)
-    NSApp.activate(ignoringOtherApps: true)
+    appBridge.activate(ignoringOtherApps: true)
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    appBridge.unregisterWindow()
+    Self.shared = nil
   }
 }

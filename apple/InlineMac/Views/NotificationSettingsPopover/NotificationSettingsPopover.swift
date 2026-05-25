@@ -319,6 +319,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
+      .focusEffectDisabled(true)
       .frame(maxWidth: .infinity, alignment: .leading)
 
       if let customizeAction {
@@ -334,6 +335,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled(true)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
