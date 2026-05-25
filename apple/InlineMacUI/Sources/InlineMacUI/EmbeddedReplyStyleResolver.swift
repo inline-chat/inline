@@ -7,9 +7,10 @@ public enum EmbeddedReplyStyleResolver {
   public static func appearance(
     isOutgoing: Bool,
     hasPhoto: Bool,
-    hasText: Bool
+    hasText: Bool,
+    hasBubbleColor: Bool = true
   ) -> EmbeddedReplyStyleAppearance {
-    if isOutgoing, !(hasPhoto && !hasText) {
+    if isOutgoing, hasBubbleColor, !(hasPhoto && !hasText) {
       return .white
     }
 
