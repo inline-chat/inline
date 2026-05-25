@@ -223,7 +223,7 @@ struct SidebarView: View {
         titleDimmed: sidebarTitlesDimmed,
         size: settings.showSidebarMessagePreview ? .large : .compact,
         showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
-        opensOnMouseDown: lane == nil,
+        opensOnMouseDown: true,
         isTemporary: isTemporary,
         onOpen: {
           openChat(item)
