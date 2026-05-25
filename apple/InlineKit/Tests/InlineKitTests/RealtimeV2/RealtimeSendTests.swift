@@ -313,6 +313,62 @@ final class RealtimeSendTests {
     withExtendedLifetime(realtime) {}
   }
 
+  @Test("limited RPC errors retry two times before failing")
+  func testLimitedRpcErrorsRetryTwoTimesBeforeFailing() async throws {
+    await LimitedRpcRetryRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let transport = LimitedRpcErrorTransport()
+    let storage = SendTestSyncStorage()
+    let apply = SendTestApplyUpdates()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: apply,
+      syncStorage: storage
+    )
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run {
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
+      }
+    }
+    #expect(connected)
+
+    let id = UUID()
+    do {
+      try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask {
+          _ = try await realtime.send(LimitedRpcRetryTransaction(id: id))
+          return ()
+        }
+        group.addTask {
+          try await Task.sleep(for: .seconds(3))
+          throw SendTestTimeoutError.timedOut
+        }
+        _ = try await group.next()
+        group.cancelAll()
+      }
+      Issue.record("Expected limited RPC error transaction to fail after retries")
+    } catch let error as TransactionError {
+      if case let .rpcError(rpcError) = error {
+        #expect(rpcError.errorCode == .peerIDInvalid)
+      } else {
+        Issue.record("Unexpected TransactionError: \(error)")
+      }
+    } catch SendTestTimeoutError.timedOut {
+      Issue.record("Timed out waiting for limited RPC error retries")
+    } catch {
+      Issue.record("Unexpected error: \(error)")
+    }
+
+    #expect(await transport.rpcDispatchCount() == 3)
+    #expect(await LimitedRpcRetryRecorder.shared.didFail(id))
+
+    withExtendedLifetime(realtime) {}
+  }
+
   @Test("protocol session emits connectionError event")
   func testProtocolSessionEmitsConnectionErrorEvent() async throws {
     let auth = Auth.mocked(authenticated: true)
@@ -630,6 +686,7 @@ private actor OptimisticOrderingTransport: Transport {
 private let sendOrderingMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_991)
 private let blockedSendMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_992)
 private let failingCreatorMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_993)
+private let limitedRpcRetryMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_994)
 
 private struct BlockedSendTransaction: Transaction, Codable {
   struct Context: Sendable, Codable {
@@ -855,6 +912,105 @@ private actor DependencyFailureTransport: Transport {
 
   func didDispatchBlockedMethod() -> Bool {
     blockedMethodDispatched
+  }
+}
+
+private actor LimitedRpcRetryRecorder {
+  static let shared = LimitedRpcRetryRecorder()
+
+  private var failed: Set<UUID> = []
+
+  func reset() {
+    failed.removeAll()
+  }
+
+  func markFailed(_ id: UUID) {
+    failed.insert(id)
+  }
+
+  func didFail(_ id: UUID) -> Bool {
+    failed.contains(id)
+  }
+}
+
+private struct LimitedRpcRetryTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let id: UUID
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = limitedRpcRetryMethod
+  var type: TransactionKindType = .query()
+  var context: Context
+
+  init(id: UUID) {
+    context = Context(id: id)
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    nil
+  }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
+
+  func failed(error: TransactionError) async {
+    await LimitedRpcRetryRecorder.shared.markFailed(context.id)
+  }
+}
+
+private actor LimitedRpcErrorTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private var started = false
+  private var dispatchCount = 0
+  private let channel = AsyncChannel<TransportEvent>()
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+      case .connectionInit:
+        var open = ServerProtocolMessage()
+        open.id = message.id
+        open.body = .connectionOpen(.init())
+        await channel.send(.message(open))
+
+      case let .rpcCall(rpcCall):
+        guard rpcCall.method == limitedRpcRetryMethod else { return }
+
+        dispatchCount += 1
+        var rpcError = InlineProtocol.RpcError()
+        rpcError.reqMsgID = message.id
+        rpcError.errorCode = .peerIDInvalid
+        rpcError.message = "peer invalid"
+        rpcError.code = 400
+
+        var response = ServerProtocolMessage()
+        response.id = message.id
+        response.body = .rpcError(rpcError)
+        await channel.send(.message(response))
+
+      default:
+        break
+    }
+  }
+
+  func rpcDispatchCount() -> Int {
+    dispatchCount
   }
 }
 
