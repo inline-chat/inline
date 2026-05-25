@@ -186,7 +186,6 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
 
   public static func sidebarInbox(spaceId: Int64?) -> QueryInterfaceRequest<HomeChatItem> {
     var request = baseRequest()
-      .filter(Dialog.Columns.open == true || Dialog.Columns.pinned == true)
       .filter(sql: Dialog.sidebarInboxVisibilitySQL)
 
     if let spaceId {

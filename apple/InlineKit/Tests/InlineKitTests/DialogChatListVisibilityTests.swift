@@ -32,7 +32,7 @@ struct DialogChatListVisibilityTests {
     }
   }
 
-  @Test("sidebar inbox hides hidden open dialogs but keeps pinned dialogs")
+  @Test("sidebar inbox hides hidden open and pinned dialogs")
   func sidebarInboxFiltersHiddenOpenDialogsAndKeepsPinned() throws {
     let dbQueue = try makeInMemoryDB()
 
@@ -47,7 +47,7 @@ struct DialogChatListVisibilityTests {
         .compactMap(\.chat?.id)
         .sorted()
 
-      #expect(chatIds == [11, 13])
+      #expect(chatIds == [11])
     }
   }
 

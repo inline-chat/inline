@@ -419,7 +419,8 @@ public extension Dialog {
 
   static let chatListVisibilitySQL =
     "(\"dialog\".\"chatListHidden\" IS NULL OR \"dialog\".\"chatListHidden\" = 0)"
-  static let sidebarInboxVisibilitySQL = "(\(chatListVisibilitySQL) OR \"dialog\".\"open\" = 1 OR \"dialog\".\"pinned\" = 1)"
+  static let sidebarInboxVisibilitySQL =
+    "(\(chatListVisibilitySQL) AND (\"dialog\".\"open\" = 1 OR \"dialog\".\"pinned\" = 1))"
 
   static func nextSidebarOrder(_ db: Database) throws -> String {
     try nextOrder(
