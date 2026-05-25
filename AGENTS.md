@@ -54,6 +54,7 @@
 - Prefer simple neutral names for variables and types; avoid encoding setup/state history into names like `configuredDB` when `db` or `database` is enough.
 - When commiting file(s) with multiple changes/fixes, add a concise bullet list of specific items in the commit description; if fixing regressions or tricky bugs in non-conventional ways, add a very short explaination in commit description. Keep it under ~300 characters.
 - Do not remove comments explaining code or left by authors of code.
+- Preserve intentional comments, including inline documentation, bug-fix references, explanations for commented-out code, reasons for tricky code, and future TODO/FIXME notes. Only remove comments when they are clearly stale or incorrect and the change requires it.
 
 ## Style Guide
 - Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required. Don't use weird abbreviations like `idxes`; `msg`, `id`, `ctx` and alike are fine.
@@ -116,6 +117,8 @@
 - Don't use .receive(on: DispatchQueue.main) for GRDB observations unless we don't need results for render
 - Do not use EnvironmentObject/ObservableObject as much as possible
 - Message views must be very lightweight render only structures and not include heavy sync works, immediate db calls, heavy setups, etc. Anything not related to painting first frame must be deferred to a later time eg. fetching additional data for a menu.
+- Do not add material backgrounds or colored background for section headers, toolbars, inset bars, etc.
+- Prefer .frame(maxWidth: .infinity, alignment: .leading) over putting Spacer() between elements to push one to the other side.
 
 ## Backend
 
