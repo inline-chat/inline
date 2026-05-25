@@ -357,6 +357,7 @@ final class NewVideoView: NSView {
   private var currentImageKey: String?
   private var isThumbnailLoading = false
   private var fullMessage: FullMessage
+  private let roundsAllCorners: Bool
   private var isScrolling = false
   private var haveAddedImageView = false
   private let maskLayer = CAShapeLayer()
@@ -410,8 +411,9 @@ final class NewVideoView: NSView {
     return label
   }()
 
-  init(_ fullMessage: FullMessage, scrollState: MessageListScrollState) {
+  init(_ fullMessage: FullMessage, scrollState: MessageListScrollState, roundsAllCorners: Bool = false) {
     self.fullMessage = fullMessage
+    self.roundsAllCorners = roundsAllCorners
     isScrolling = scrollState.isScrolling
     super.init(frame: .zero)
     updateCornerRadii()
@@ -700,6 +702,15 @@ final class NewVideoView: NSView {
     let hasTopHeader = fullMessage.message.repliedToMessageId != nil
       || fullMessage.message.hasForwardHeader
     let bubbleRadius = max(0, Theme.messageBubbleCornerRadius - 1 - cornerRadiusReduction)
+
+    if roundsAllCorners {
+      topLeftRadius = bubbleRadius
+      topRightRadius = bubbleRadius
+      bottomLeftRadius = bubbleRadius
+      bottomRightRadius = bubbleRadius
+      return
+    }
+
     let topRadius = hasTopHeader ? 0 : bubbleRadius
 
     topLeftRadius = topRadius

@@ -45,9 +45,11 @@ final class NewPhotoView: NSView {
   }()
 
   private var fullMessage: FullMessage
+  private let roundsAllCorners: Bool
 
-  init(_ fullMessage: FullMessage, scrollState: MessageListScrollState) {
+  init(_ fullMessage: FullMessage, scrollState: MessageListScrollState, roundsAllCorners: Bool = false) {
     self.fullMessage = fullMessage
+    self.roundsAllCorners = roundsAllCorners
     isScrolling = scrollState.isScrolling
     if fullMessage.message.isSticker == true {
       backgroundView.backgroundColor = .clear
@@ -168,6 +170,15 @@ final class NewPhotoView: NSView {
     let hasTopHeader = fullMessage.message.repliedToMessageId != nil
       || fullMessage.message.hasForwardHeader
     let bubbleRadius = max(0, Theme.messageBubbleCornerRadius - 1 - cornerRadiusReduction)
+
+    if roundsAllCorners {
+      topLeftRadius = bubbleRadius
+      topRightRadius = bubbleRadius
+      bottomLeftRadius = bubbleRadius
+      bottomRightRadius = bubbleRadius
+      return
+    }
+
     let topRadius = hasTopHeader ? 0 : bubbleRadius
 
     topLeftRadius = topRadius

@@ -360,14 +360,14 @@ class MinimalMessageViewAppKit: NSView {
   }()
 
   private lazy var photoView: NewPhotoView = {
-    let view = NewPhotoView(fullMessage, scrollState: scrollState)
+    let view = NewPhotoView(fullMessage, scrollState: scrollState, roundsAllCorners: true)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.cornerRadiusReduction = 3
     return view
   }()
 
   private lazy var videoView: NewVideoView = {
-    let view = NewVideoView(fullMessage, scrollState: scrollState)
+    let view = NewVideoView(fullMessage, scrollState: scrollState, roundsAllCorners: true)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.cornerRadiusReduction = 3
     return view
