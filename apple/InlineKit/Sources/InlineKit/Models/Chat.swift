@@ -123,7 +123,7 @@ public extension Chat {
     {
       return trimmed
     }
-    return type == .thread ? "Untitled" : nil
+    return type == .thread ? "New thread" : nil
   }
 
   var peerId: InlineProtocol.Peer {
