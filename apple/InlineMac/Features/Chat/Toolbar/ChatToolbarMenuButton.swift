@@ -176,7 +176,9 @@ struct ChatToolbarMenuButton: View {
   private func openInSidebar() {
     Task(priority: .userInitiated) {
       do {
-        _ = try await realtimeV2.send(.showInChatList(peerId: peer))
+        if peer.isThread, model.state.isChatListHidden {
+          _ = try await realtimeV2.send(.showInChatList(peerId: peer))
+        }
         _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
       } catch {
         await MainActor.run {

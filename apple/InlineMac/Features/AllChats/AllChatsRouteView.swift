@@ -919,7 +919,9 @@ private struct ChatListRow: View {
     Task(priority: .userInitiated) {
       do {
         guard let dependencies else { return }
-        _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peerId))
+        if peerId.isThread, item.chatListHidden {
+          _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peerId))
+        }
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peerId, open: true))
       } catch {
         Log.shared.error("Failed to open chat in sidebar", error: error)

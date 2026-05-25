@@ -9,7 +9,9 @@ final class SidebarState {
     Task { @MainActor in
       guard AppSettings.shared.sidebarAsInbox else { return }
 
-      await Api.realtime.sendQueued(.showInChatList(peerId: peer))
+      if peer.isThread {
+        await Api.realtime.sendQueued(.showInChatList(peerId: peer))
+      }
       await Api.realtime.sendQueued(.updateDialogOpen(peerId: peer, open: true))
     }
   }
