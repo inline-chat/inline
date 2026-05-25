@@ -350,6 +350,9 @@ public extension ApiDialog {
       if pinnedOrder == nil {
         dialog.pinnedOrder = existing.pinnedOrder
       }
+      if chatListHidden == nil, sidebarVisible == nil {
+        dialog.chatListHidden = existing.chatListHidden
+      }
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -387,6 +390,9 @@ public extension InlineProtocol.Dialog {
       }
       if !hasPinnedOrder {
         newDialog.pinnedOrder = existing.pinnedOrder
+      }
+      if !hasChatListHidden, !hasSidebarVisible {
+        newDialog.chatListHidden = existing.chatListHidden
       }
       try newDialog.save(db, onConflict: .replace)
       return newDialog
