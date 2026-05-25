@@ -8,6 +8,8 @@ struct SidebarFloatingReorderRowModifier: ViewModifier {
 
   @State private var rowSize: CGSize = .zero
 
+  private let dragThreshold: CGFloat = 4
+
   @ViewBuilder
   func body(content: Content) -> some View {
     if enabled {
@@ -31,7 +33,7 @@ struct SidebarFloatingReorderRowModifier: ViewModifier {
   }
 
   private var dragGesture: some Gesture {
-    DragGesture(minimumDistance: 1)
+    DragGesture(minimumDistance: dragThreshold)
       .onChanged { value in
         onDragChanged(value, rowSize)
       }
