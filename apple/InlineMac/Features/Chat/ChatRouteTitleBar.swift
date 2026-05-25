@@ -42,7 +42,9 @@ struct ChatRouteTitleBar: View {
       VStack(alignment: .leading, spacing: 0) {
         titleView
 
-        if let subtitle = model.status.text {
+        if let parentThread = model.parentThread {
+          parentThreadPill(parentThread)
+        } else if let subtitle = model.status.text {
           Text(subtitle)
             .font(.system(size: 11))
             .foregroundStyle(model.status.isTyping ? Color.accentColor : Color.secondary)
@@ -94,7 +96,7 @@ struct ChatRouteTitleBar: View {
   private var avatar: some View {
     Button(action: handleAvatarClick) {
       if let iconPeer = model.iconPeer {
-        ChatIcon(peer: iconPeer, size: Theme.chatToolbarIconSize)
+        SidebarChatIcon(peer: iconPeer, size: Theme.chatToolbarIconSize)
       } else {
         Circle()
           .fill(Color.primary.opacity(0.08))
@@ -175,6 +177,12 @@ struct ChatRouteTitleBar: View {
     }
   }
 
+  private func parentThreadPill(_ parentThread: ChatRouteToolbarTitleModel.ParentThread) -> some View {
+    ParentThreadPill(title: parentThread.title) {
+      openParentThread(parentThread)
+    }
+  }
+
   private func handleAvatarClick() {
     guard !suppressClick else { return }
     openChatInfo()
@@ -183,6 +191,15 @@ struct ChatRouteTitleBar: View {
   private func handleTitleClick() {
     guard !suppressClick else { return }
     beginEditingTitle()
+  }
+
+  private func openParentThread(_ parentThread: ChatRouteToolbarTitleModel.ParentThread) {
+    guard !suppressClick else { return }
+    if let dependencies {
+      dependencies.requestOpenChat(peer: parentThread.peer)
+    } else {
+      nav.open(.chat(peer: parentThread.peer))
+    }
   }
 
   private func openChatInfo() {
@@ -224,6 +241,40 @@ struct ChatRouteTitleBar: View {
       isTitleFocused = true
       NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
     }
+  }
+}
+
+private struct ParentThreadPill: View {
+  let title: String
+  let action: () -> Void
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var isHovered = false
+
+  var body: some View {
+    Button(action: action) {
+      Text(title)
+        .font(.system(size: 11))
+        .lineLimit(1)
+        .foregroundStyle(Color.secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(
+          RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(backgroundColor)
+        )
+        .offset(x: -5)
+    }
+    .buttonStyle(.plain)
+    .help("Open Parent Chat")
+    .accessibilityLabel("Open Parent Chat")
+    .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+    .onHover { isHovered = $0 }
+  }
+
+  private var backgroundColor: Color {
+    guard isHovered else { return .clear }
+    return colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.05)
   }
 }
 
