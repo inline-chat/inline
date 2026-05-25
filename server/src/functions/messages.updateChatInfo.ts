@@ -109,7 +109,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
 
     if (input.requireAccess === true) {
       await AccessGuards.ensureChatAccess(chat, input.currentUserId)
-      if (chat.publicThread !== true) {
+      if (chat.publicThread !== true && chat.parentChatId == null) {
         const participant = await tx
           .select({ id: chatParticipants.id })
           .from(chatParticipants)
