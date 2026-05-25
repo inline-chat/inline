@@ -93,6 +93,26 @@ describe("thread title generation", () => {
         currentUserId: 1,
       }),
     ).toBe("can you write the launch checklist for tomorrow morning")
+
+    expect(
+      getThreadTitleSourceText({
+        chat: emptyThread,
+        message: textMessage,
+        text: "ship launch plan",
+        entities: undefined,
+        currentUserId: 1,
+      }),
+    ).toBe("ship launch plan")
+
+    expect(
+      getThreadTitleSourceText({
+        chat: emptyThread,
+        message: textMessage,
+        text: "ship plan",
+        entities: undefined,
+        currentUserId: 1,
+      }),
+    ).toBeUndefined()
   })
 
   test("sets a generated title only while the thread is untitled", async () => {

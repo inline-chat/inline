@@ -9,8 +9,8 @@ import { Log } from "@in/server/utils/log"
 
 const log = new Log("modules.threadTitles")
 
-const MIN_SOURCE_CHARS = 24
-const MIN_SOURCE_WORDS = 4
+const MIN_SOURCE_CHARS = 12
+const MIN_SOURCE_WORDS = 3
 const MAX_SOURCE_CHARS = 1600
 const MAX_TITLE_CHARS = 70
 const MODEL: ChatModel = "gpt-5.4-mini" as ChatModel
