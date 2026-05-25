@@ -75,7 +75,7 @@ struct OnboardingProfile: View {
   }
 
   @ViewBuilder var usernameField: some View {
-    let view = GrayTextField("Username", text: $username)
+    let view = GrayTextField("@username", text: $username)
       .frame(width: 260)
 
     if #available(macOS 14.0, *) {
