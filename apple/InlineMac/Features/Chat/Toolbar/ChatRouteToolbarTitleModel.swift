@@ -32,11 +32,26 @@ final class ChatRouteToolbarTitleModel {
     }
   }
 
+  struct ParentThread: Equatable {
+    let peer: Peer
+    let title: String
+  }
+
+  private struct Snapshot {
+    let chat: Chat?
+    let userInfo: UserInfo?
+    let parentChat: Chat?
+    let parentUserInfo: UserInfo?
+    let parentPeerUserId: Int64?
+    let anchorText: String?
+  }
+
   let peer: Peer
 
   var title: String
   var windowTitle: String
   var iconPeer: ChatIcon.PeerType?
+  var parentThread: ParentThread?
   var status: Status = .none
   var canRename = false
   var isEditingTitle = false
@@ -47,6 +62,10 @@ final class ChatRouteToolbarTitleModel {
   @ObservationIgnored private let db: AppDatabase
   @ObservationIgnored private let log = Log.scoped("ChatRouteToolbarTitle")
   @ObservationIgnored private var loadedChat: Chat?
+  @ObservationIgnored private var loadedParentChat: Chat?
+  @ObservationIgnored private var loadedParentUserInfo: UserInfo?
+  @ObservationIgnored private var loadedParentPeerUserId: Int64?
+  @ObservationIgnored private var loadedAnchorText: String?
   @ObservationIgnored private var loadedSpace: Space?
   @ObservationIgnored private var loadedUserInfo: UserInfo?
   @ObservationIgnored private var contextSpaceId: Int64?
@@ -73,6 +92,7 @@ final class ChatRouteToolbarTitleModel {
     windowTitle = initialTitle
     titleDraft = initialTitle
 
+    loadInitialSnapshot()
     observe()
     sync()
     loadSnapshot()
@@ -208,6 +228,7 @@ final class ChatRouteToolbarTitleModel {
       emojiDraft = resolvedEmoji() ?? ""
     }
     iconPeer = resolvedIconPeer()
+    parentThread = resolvedParentThread()
     updateParentChatSubscription()
     updateSpaceSubscription()
     refreshWindowTitle()
@@ -233,7 +254,7 @@ final class ChatRouteToolbarTitleModel {
     }
 
     if let chat = resolvedChat() {
-      return chat.humanReadableTitle ?? "Untitled"
+      return ReplyThreadTitleFallback.title(for: chat, anchorText: loadedAnchorText)
     }
 
     return peer.isThread ? "Chat" : "Direct Message"
@@ -292,12 +313,7 @@ final class ChatRouteToolbarTitleModel {
       return .typing(typingText)
     }
 
-    if let chat = resolvedChat() {
-      if chat.isReplyThread, let parentChatId = chat.parentChatId {
-        let parentTitle = ObjectCache.shared.getChat(id: parentChatId)?.humanReadableTitle ?? "Thread"
-        return .text(parentTitle)
-      }
-
+    if resolvedChat() != nil {
       return .none
     }
 
@@ -331,6 +347,46 @@ final class ChatRouteToolbarTitleModel {
     return loadedChat
   }
 
+  private func resolvedParentThread() -> ParentThread? {
+    guard let chat = resolvedChat(), chat.isReplyThread, let parentChatId = chat.parentChatId else { return nil }
+    let parent = ObjectCache.shared.getChat(id: parentChatId) ?? loadedParentChat
+    let peer = parentPeer(for: parent, parentChatId: parentChatId)
+    let title = parent.map(parentTitle) ?? "Thread"
+    return ParentThread(peer: peer, title: title)
+  }
+
+  private func parentTitle(for chat: Chat) -> String {
+    if chat.type == .privateChat {
+      if let userInfo = parentUserInfo(for: chat) {
+        return userInfo.user.isCurrentUser() ? "Saved Messages" : userInfo.user.displayName
+      }
+      return "Direct Message"
+    }
+
+    return ReplyThreadTitleFallback.title(for: chat, anchorText: nil)
+  }
+
+  private func parentPeer(for chat: Chat?, parentChatId: Int64) -> Peer {
+    guard chat?.type == .privateChat else {
+      return .thread(id: parentChatId)
+    }
+
+    if let userId = loadedParentPeerUserId ?? loadedParentUserInfo?.id ?? chat?.peerUserId {
+      return .user(id: userId)
+    }
+
+    return .thread(id: parentChatId)
+  }
+
+  private func parentUserInfo(for chat: Chat) -> UserInfo? {
+    if let loadedParentUserInfo {
+      return loadedParentUserInfo
+    }
+
+    guard let userId = loadedParentPeerUserId ?? chat.peerUserId else { return nil }
+    return ObjectCache.shared.getUser(id: userId)
+  }
+
   private func resolvedLocalTime(for user: User? = nil) -> String? {
     let user = user ?? resolvedUserInfo()?.user
     guard let user else { return nil }
@@ -356,7 +412,7 @@ final class ChatRouteToolbarTitleModel {
     parentChatCancellable = ObjectCache.shared.getChatPublisher(id: parentChatId)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
-        self?.refreshStatus()
+        self?.parentThread = self?.resolvedParentThread()
       }
   }
 
@@ -398,8 +454,7 @@ final class ChatRouteToolbarTitleModel {
           try Self.fetchSnapshot(peer: peer, db: db)
         }
         guard !Task.isCancelled else { return }
-        loadedChat = snapshot.chat
-        loadedUserInfo = snapshot.userInfo
+        apply(snapshot)
         sync()
       } catch {
         log.error("Failed to load toolbar title snapshot", error: error)
@@ -407,16 +462,75 @@ final class ChatRouteToolbarTitleModel {
     }
   }
 
-  nonisolated private static func fetchSnapshot(peer: Peer, db: Database) throws -> (chat: Chat?, userInfo: UserInfo?) {
+  private func loadInitialSnapshot() {
+    guard let snapshot = try? db.reader.read({ db in
+      try Self.fetchSnapshot(peer: peer, db: db)
+    }) else { return }
+
+    apply(snapshot)
+  }
+
+  private func apply(_ snapshot: Snapshot) {
+    loadedChat = snapshot.chat
+    loadedParentChat = snapshot.parentChat
+    loadedParentUserInfo = snapshot.parentUserInfo
+    loadedParentPeerUserId = snapshot.parentPeerUserId
+    loadedAnchorText = snapshot.anchorText
+    loadedUserInfo = snapshot.userInfo
+  }
+
+  nonisolated private static func fetchSnapshot(
+    peer: Peer,
+    db: Database
+  ) throws -> Snapshot {
     switch peer {
     case let .thread(chatId):
-      return (try Chat.fetchOne(db, id: chatId), nil)
+      let chat = try Chat.fetchOne(db, id: chatId)
+      let parentChat: Chat?
+      if let parentChatId = chat?.parentChatId {
+        parentChat = try Chat.fetchOne(db, id: parentChatId)
+      } else {
+        parentChat = nil
+      }
+      let parentDialog = try parentChat.flatMap { parentChat in
+        try Dialog
+          .filter(Column("chatId") == parentChat.id)
+          .fetchOne(db)
+      }
+      let parentPeerUserId = parentDialog?.peerUserId ?? parentChat?.peerUserId
+      let parentUserInfo = try parentPeerUserId.flatMap { userId in
+        try User
+          .userInfoQuery()
+          .filter(Column("id") == userId)
+          .fetchOne(db)
+      }
+      let anchorText: String?
+      if let chat {
+        anchorText = try ReplyThreadTitleFallback.anchorText(for: chat, db: db)
+      } else {
+        anchorText = nil
+      }
+      return Snapshot(
+        chat: chat,
+        userInfo: nil,
+        parentChat: parentChat,
+        parentUserInfo: parentUserInfo,
+        parentPeerUserId: parentPeerUserId,
+        anchorText: anchorText
+      )
     case .user:
       let item = try Dialog
         .spaceChatItemQueryForUser()
         .filter(id: Dialog.getDialogId(peerId: peer))
         .fetchOne(db)
-      return (item?.chat, item?.userInfo)
+      return Snapshot(
+        chat: item?.chat,
+        userInfo: item?.userInfo,
+        parentChat: nil,
+        parentUserInfo: nil,
+        parentPeerUserId: nil,
+        anchorText: nil
+      )
     }
   }
 
