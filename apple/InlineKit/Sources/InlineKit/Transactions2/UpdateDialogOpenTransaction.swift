@@ -93,7 +93,11 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
         return Dialog(optimisticForUserId: id)
       case let .thread(id):
         guard let chat = try Chat.fetchOne(db, id: id) else { return nil }
-        return Dialog(optimisticForChat: chat)
+        var dialog = Dialog(optimisticForChat: chat)
+        if chat.isReplyThread {
+          dialog.chatListHidden = true
+        }
+        return dialog
     }
   }
 
@@ -110,7 +114,6 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       }
       dialog.open = true
       dialog.archived = false
-      dialog.chatListHidden = nil
     } else {
       dialog.open = false
       dialog.openedDate = nil

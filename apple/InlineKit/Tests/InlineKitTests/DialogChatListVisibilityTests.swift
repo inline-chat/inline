@@ -97,7 +97,7 @@ struct DialogChatListVisibilityTests {
       #expect(saved.open == true)
       #expect(saved.order == "m")
       #expect(saved.archived == false)
-      #expect(saved.chatListHidden == nil)
+      #expect(saved.chatListHidden == true)
     }
   }
 
