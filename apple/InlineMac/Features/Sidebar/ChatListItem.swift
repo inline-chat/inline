@@ -27,6 +27,7 @@ struct ChatListItem: Hashable, Identifiable {
   let member: Member?
   let lastMessage: EmbeddedMessage?
   let spaceId: Int64?
+  let titleOverride: String?
 
   var id: Identifier
 
@@ -47,6 +48,7 @@ struct ChatListItem: Hashable, Identifiable {
     user?.user.firstName ??
       user?.user.lastName ??
       user?.user.username ??
+      titleOverride ??
       chat?.humanReadableTitle ??
       "Chat"
   }
@@ -70,7 +72,7 @@ struct ChatListItem: Hashable, Identifiable {
     return .none
   }
 
-  init(chatItem: HomeChatItem) {
+  init(chatItem: HomeChatItem, titleOverride: String? = nil) {
     kind = .thread
     dialog = chatItem.dialog
     chat = chatItem.chat
@@ -78,6 +80,7 @@ struct ChatListItem: Hashable, Identifiable {
     member = nil
     lastMessage = chatItem.lastMessage
     spaceId = chatItem.dialog.spaceId ?? chatItem.chat?.spaceId ?? chatItem.space?.id
+    self.titleOverride = titleOverride
     id = Identifier(kind: .thread, rawValue: chatItem.id)
   }
 
@@ -89,10 +92,11 @@ struct ChatListItem: Hashable, Identifiable {
     self.member = member
     lastMessage = nil
     spaceId = member.spaceId
+    titleOverride = nil
     id = Identifier(kind: .contact, rawValue: member.id)
   }
 
-  init(spaceContactItem: SpaceChatItem) {
+  init(spaceContactItem: SpaceChatItem, titleOverride: String? = nil) {
     kind = .contact
     dialog = spaceContactItem.dialog
     chat = spaceContactItem.chat
@@ -111,10 +115,11 @@ struct ChatListItem: Hashable, Identifiable {
       lastMessage = nil
     }
     spaceId = spaceContactItem.dialog.spaceId
+    self.titleOverride = titleOverride
     id = Identifier(kind: .contact, rawValue: spaceContactItem.id)
   }
 
-  init(spaceChatItem: SpaceChatItem) {
+  init(spaceChatItem: SpaceChatItem, titleOverride: String? = nil) {
     kind = .thread
     dialog = spaceChatItem.dialog
     chat = spaceChatItem.chat
@@ -133,6 +138,7 @@ struct ChatListItem: Hashable, Identifiable {
       lastMessage = nil
     }
     spaceId = spaceChatItem.dialog.spaceId
+    self.titleOverride = titleOverride
     id = Identifier(kind: .thread, rawValue: spaceChatItem.id)
   }
 }

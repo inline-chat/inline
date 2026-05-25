@@ -333,7 +333,8 @@ final class AllChatsViewModel: ObservableObject {
 
     chatsCancellable = ValueObservation
       .tracking { db in
-        try HomeChatItem.all().fetchAll(db)
+        let chats = try HomeChatItem.all().fetchAll(db)
+        return try Self.makeItems(chats, db: db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -346,9 +347,9 @@ final class AllChatsViewModel: ObservableObject {
             log.error("All chats observation failed: \(error.localizedDescription)")
           }
         },
-        receiveValue: { [weak self] chats in
+        receiveValue: { [weak self] items in
           guard let self else { return }
-          apply(chats)
+          apply(items)
         }
       )
   }
@@ -370,10 +371,8 @@ final class AllChatsViewModel: ObservableObject {
       )
   }
 
-  private func apply(_ chats: [HomeChatItem]) {
-    items = HomeViewModel
-      .filterEmptyChats(chats)
-      .compactMap(AllChatsItem.init(chat:))
+  private func apply(_ items: [AllChatsItem]) {
+    self.items = items
       .sorted { lhs, rhs in
         if lhs.lastActivityDate == rhs.lastActivityDate {
           return lhs.id > rhs.id
@@ -383,6 +382,15 @@ final class AllChatsViewModel: ObservableObject {
 
     errorText = nil
     isLoading = false
+  }
+
+  private nonisolated static func makeItems(_ chats: [HomeChatItem], db: Database) throws -> [AllChatsItem] {
+    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
+    return HomeViewModel
+      .filterEmptyChats(chats)
+      .compactMap { chat in
+        AllChatsItem(chat: chat, titleOverride: chat.chat.flatMap { titles[$0.id] })
+      }
   }
 
   fileprivate func sections(for filter: AllChatsFilter, spaceId: Int64?) -> [AllChatsSection] {
@@ -443,14 +451,14 @@ struct AllChatsItem: Identifiable, Equatable {
   let spaceId: Int64?
   let spaceName: String?
 
-  init?(chat: HomeChatItem) {
+  init?(chat: HomeChatItem, titleOverride: String? = nil) {
     guard chat.chat != nil || chat.user != nil else { return nil }
 
     let preview = Self.preview(for: chat)
     id = chat.id
     peerId = chat.peerId
     chatId = chat.chat?.id ?? 0
-    title = Self.title(for: chat)
+    title = titleOverride ?? Self.title(for: chat)
     subtitle = preview.text
     lastActivityDate = chat.lastMessage?.message.date
       ?? chat.chat?.date

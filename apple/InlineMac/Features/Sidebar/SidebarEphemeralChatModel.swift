@@ -69,8 +69,15 @@ final class SidebarEphemeralChatModel {
 
     cancellable = ValueObservation
       .tracking { db in
-        try Self.request(scope: scope)
+        let chat = try Self.request(scope: scope)
           .fetchOne(db)
+        let title: String?
+        if let itemChat = chat?.chat {
+          title = try ReplyThreadTitleFallback.title(for: itemChat, db: db)
+        } else {
+          title = nil
+        }
+        return chat.map { ChatListItem(chatItem: $0, titleOverride: title) }
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -80,7 +87,7 @@ final class SidebarEphemeralChatModel {
           }
         },
         receiveValue: { [weak self] chat in
-          self?.item = chat.flatMap { SidebarViewModel.Item(listItem: ChatListItem(chatItem: $0)) }
+          self?.item = chat.flatMap { SidebarViewModel.Item(listItem: $0) }
         }
       )
   }
