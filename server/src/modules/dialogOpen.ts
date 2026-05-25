@@ -4,7 +4,10 @@ import { dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/serve
 import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 
-type ChatForDialogOpen = Pick<DbChat, "id" | "spaceId" | "type" | "minUserId" | "maxUserId">
+type ChatForDialogOpen = Pick<
+  DbChat,
+  "id" | "spaceId" | "type" | "minUserId" | "maxUserId" | "parentChatId" | "parentMessageId"
+>
 type DialogForOpenDefault = Pick<DbDialog, "open">
 type DialogForOpenFields = Pick<DbDialog, "open" | "order">
 
@@ -79,6 +82,7 @@ export async function setDialogOpenForUsers(input: {
   userIds: number[]
   open: boolean
   order?: string | null
+  showInChatList?: boolean
 }): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
   const userIds = uniqueUserIds(input.userIds)
   if (userIds.length === 0) {
@@ -95,10 +99,14 @@ export async function setDialogOpenForUsers(input: {
     const changedUserIds = new Set<number>()
 
     if (input.open) {
-      const dialogsToOpen = existingDialogs.filter(
-        (dialog) =>
-          dialog.open !== true || !dialog.order || dialog.archived === true || dialog.chatListHidden === true,
-      )
+      const showInChatList = input.showInChatList !== false
+      const dialogsToOpen = existingDialogs.filter((dialog) => {
+        if (dialog.open !== true || !dialog.order || dialog.archived === true) {
+          return true
+        }
+
+        return showInChatList && dialog.chatListHidden === true
+      })
       const missingUserIds = userIds.filter((userId) => !existingUserIds.has(userId))
 
       for (const dialog of dialogsToOpen) {
@@ -112,7 +120,7 @@ export async function setDialogOpenForUsers(input: {
           .set({
             ...dialogOpenFieldsForOpen(dialog, order),
             archived: false,
-            chatListHidden: null,
+            ...(showInChatList ? { chatListHidden: null } : {}),
           })
           .where(and(eq(dialogs.chatId, input.chat.id), eq(dialogs.userId, dialog.userId)))
         changedUserIds.add(dialog.userId)
@@ -129,7 +137,7 @@ export async function setDialogOpenForUsers(input: {
             spaceId: input.chat.spaceId ?? null,
             ...dialogOpenFieldsForOpen(undefined, await orderForUser(tx, userId, userIds.length, input.order)),
             archived: false,
-            chatListHidden: null,
+            ...chatListVisibilityFieldsForOpen(input.chat, showInChatList),
           })
         }
 
@@ -217,4 +225,19 @@ function peerUserIdFor(chat: ChatForDialogOpen, userId: number): number | null {
   }
 
   return chat.minUserId === userId ? chat.maxUserId : chat.minUserId
+}
+
+function chatListVisibilityFieldsForOpen(
+  chat: ChatForDialogOpen,
+  showInChatList: boolean,
+): Partial<Pick<DbNewDialog, "chatListHidden">> {
+  if (showInChatList) {
+    return { chatListHidden: null }
+  }
+
+  if (chat.parentChatId != null || chat.parentMessageId != null) {
+    return { chatListHidden: true }
+  }
+
+  return {}
 }

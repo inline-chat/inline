@@ -35,6 +35,7 @@ export async function updateDialogOpen(input: Input, context: FunctionContext): 
     userIds: [context.currentUserId],
     open: input.open,
     order: input.order,
+    showInChatList: false,
   })
 
   const dialog = dialogs.find((candidate) => candidate.userId === context.currentUserId)

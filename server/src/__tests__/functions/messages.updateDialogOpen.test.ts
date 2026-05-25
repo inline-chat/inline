@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { and, desc, eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import type { InputPeer } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { UpdatesModel } from "@in/server/db/models/updates"
-import { dialogs, updates, UpdateBucket } from "@in/server/db/schema"
+import { chats, dialogs, messages, updates, UpdateBucket } from "@in/server/db/schema"
 import { updateDialogOpen } from "@in/server/functions/messages.updateDialogOpen"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -17,7 +16,14 @@ describe("messages.updateDialogOpen", () => {
     },
   })
 
-  test("opens, unarchives, and unhides an existing dialog", async () => {
+  const peerThread = (chatId: number): InputPeer => ({
+    type: {
+      oneofKind: "chat",
+      chat: { chatId: BigInt(chatId) },
+    },
+  })
+
+  test("opens and unarchives an existing dialog without unhiding it", async () => {
     const userA = await testUtils.createUser("dialog-open-a@example.com")
     const userB = await testUtils.createUser("dialog-open-b@example.com")
     const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
@@ -43,7 +49,7 @@ describe("messages.updateDialogOpen", () => {
 
     expect(result.dialog.open).toBe(true)
     expect(result.dialog.archived).toBe(false)
-    expect(result.dialog.chatListHidden).toBeUndefined()
+    expect(result.dialog.chatListHidden).toBe(true)
     expect(result.dialog.order).toBe("m")
 
     const [dialog] = await db
@@ -54,22 +60,15 @@ describe("messages.updateDialogOpen", () => {
 
     expect(dialog?.open).toBe(true)
     expect(dialog?.archived).toBe(false)
-    expect(dialog?.chatListHidden).toBeNull()
+    expect(dialog?.chatListHidden).toBe(true)
     expect(dialog?.order).toBe("m")
 
-    const [latestUpdate] = await db
-      .select()
+    const userUpdates = await db
+      .select({ id: updates.id })
       .from(updates)
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, userA.id)))
-      .orderBy(desc(updates.seq))
-      .limit(1)
 
-    const decoded = latestUpdate ? UpdatesModel.decrypt(latestUpdate) : undefined
-    expect(decoded?.payload.update.oneofKind).toBe("userChatOpen")
-    if (decoded?.payload.update.oneofKind === "userChatOpen") {
-      expect(decoded.payload.update.userChatOpen.dialog?.open).toBe(true)
-      expect(decoded.payload.update.userChatOpen.dialog?.archived).toBe(false)
-    }
+    expect(userUpdates).toHaveLength(0)
   })
 
   test("preserves order when an already-open dialog is reopened", async () => {
@@ -105,7 +104,7 @@ describe("messages.updateDialogOpen", () => {
 
     expect(dialog?.open).toBe(true)
     expect(dialog?.archived).toBe(false)
-    expect(dialog?.chatListHidden).toBeNull()
+    expect(dialog?.chatListHidden).toBe(true)
     expect(dialog?.order).toBe(order)
   })
 
@@ -161,6 +160,61 @@ describe("messages.updateDialogOpen", () => {
     expect(dialog?.peerUserId).toBe(userB.id)
     expect(dialog?.archived).toBe(false)
     expect(dialog?.chatListHidden).toBeNull()
+  })
+
+  test("creates missing reply-thread dialogs hidden when opening", async () => {
+    const userA = await testUtils.createUser("dialog-open-reply-thread-a@example.com")
+    const userB = await testUtils.createUser("dialog-open-reply-thread-b@example.com")
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, userA.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, userA.id)
+    await testUtils.addParticipant(parentChat.id, userB.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: userB.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: null,
+        publicThread: false,
+        createdBy: userA.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) {
+      throw new Error("Child chat not created")
+    }
+
+    await updateDialogOpen(
+      {
+        peerId: peerThread(childChat.id),
+        open: true,
+        order: "m",
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+
+    const [dialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, userA.id)))
+      .limit(1)
+
+    expect(dialog?.open).toBe(true)
+    expect(dialog?.order).toBe("m")
+    expect(dialog?.chatListHidden).toBe(true)
   })
 
   test("closes open dialogs and clears openedDate and order", async () => {
