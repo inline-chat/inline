@@ -185,8 +185,8 @@ struct DialogChatListVisibilityTests {
     }
   }
 
-  @Test("protocol dialog omission clears stale hidden state")
-  func protocolDialogOmissionClearsHiddenState() throws {
+  @Test("protocol dialog omission preserves hidden state")
+  func protocolDialogOmissionPreservesHiddenState() throws {
     let dbQueue = try makeInMemoryDB()
 
     try dbQueue.write { db in
@@ -199,7 +199,7 @@ struct DialogChatListVisibilityTests {
       _ = try dialog.saveFull(db)
 
       let saved = try #require(try Dialog.get(peerId: .thread(id: 21)).fetchOne(db))
-      #expect(saved.chatListHidden == nil)
+      #expect(saved.chatListHidden == true)
     }
   }
 
