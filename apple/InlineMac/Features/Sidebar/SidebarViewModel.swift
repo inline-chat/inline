@@ -99,11 +99,12 @@ final class SidebarViewModel {
   init(
     db: AppDatabase,
     startsObserving: Bool = true,
-    selectedSpaceId: Int64? = nil
+    selectedSpaceId: Int64? = nil,
+    mode: ContentMode = .chatList
   ) {
     self.db = db
     if startsObserving {
-      start(selectedSpaceId: selectedSpaceId, mode: .chatList)
+      start(selectedSpaceId: selectedSpaceId, mode: mode)
     }
   }
 
@@ -189,9 +190,10 @@ final class SidebarViewModel {
 
     threadsCancellable = ValueObservation
       .tracking { db in
-        try HomeChatItem
+        let chats = try HomeChatItem
           .sidebarInbox(spaceId: spaceId)
           .fetchAll(db)
+        return try Self.chatListItems(chats, db: db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -202,7 +204,7 @@ final class SidebarViewModel {
         },
         receiveValue: { [weak self] chats in
           guard let self else { return }
-          threadItems = chats.map(ChatListItem.init(chatItem:))
+          threadItems = chats
           contactItems = []
           refreshItems()
         }
@@ -243,7 +245,8 @@ final class SidebarViewModel {
 
     threadsCancellable = ValueObservation
       .tracking { db in
-        try HomeChatItem.all().fetchAll(db)
+        let chats = try HomeChatItem.all().fetchAll(db)
+        return try Self.chatListItems(chats, db: db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -260,8 +263,7 @@ final class SidebarViewModel {
         },
         receiveValue: { [weak self] chats in
           guard let self else { return }
-          let filtered = HomeViewModel.filterEmptyChats(chats)
-          threadItems = filtered.map(ChatListItem.init(chatItem:))
+          threadItems = chats
           contactItems = []
           refreshItems()
         }
@@ -275,9 +277,10 @@ final class SidebarViewModel {
 
     threadsCancellable = ValueObservation
       .tracking { db in
-        try Dialog
+        let chats = try Dialog
           .sidebarSpaceChatItemQuery(spaceId: spaceId)
           .fetchAll(db)
+        return try Self.chatListItems(chats, db: db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -288,7 +291,7 @@ final class SidebarViewModel {
         },
         receiveValue: { [weak self] chats in
           guard let self else { return }
-          threadItems = chats.map(ChatListItem.init(spaceChatItem:))
+          threadItems = chats
           refreshItems()
         }
       )
@@ -301,7 +304,7 @@ final class SidebarViewModel {
 
     contactsCancellable = ValueObservation
       .tracking { db in
-        try Dialog.applyingChatListVisibilityFilter(
+        let contacts = try Dialog.applyingChatListVisibilityFilter(
           Dialog.spaceChatItemQueryForUser()
         )
           .filter(
@@ -309,6 +312,7 @@ final class SidebarViewModel {
             arguments: StatementArguments([spaceId])
           )
           .fetchAll(db)
+        return try Self.chatListItems(contacts, db: db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -319,10 +323,32 @@ final class SidebarViewModel {
         },
         receiveValue: { [weak self] contacts in
           guard let self else { return }
-          contactItems = contacts.map(ChatListItem.init(spaceContactItem:))
+          contactItems = contacts
           refreshItems()
         }
       )
+  }
+
+  private nonisolated static func chatListItems(_ chats: [HomeChatItem], db: Database) throws -> [ChatListItem] {
+    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
+    return HomeViewModel
+      .filterEmptyChats(chats)
+      .map { chat in
+        ChatListItem(chatItem: chat, titleOverride: chat.chat.flatMap { titles[$0.id] })
+      }
+  }
+
+  private nonisolated static func chatListItems(_ items: [SpaceChatItem], db: Database) throws -> [ChatListItem] {
+    let chats = items.compactMap(\.chat)
+    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
+
+    return items.map { item in
+      let titleOverride = item.chat.flatMap { titles[$0.id] }
+      if item.userInfo != nil {
+        return ChatListItem(spaceContactItem: item, titleOverride: titleOverride)
+      }
+      return ChatListItem(spaceChatItem: item, titleOverride: titleOverride)
+    }
   }
 
   private func observeSpaces() {
