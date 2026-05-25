@@ -37,7 +37,7 @@ struct OnboardingWelcome: View {
 
       Spacer()
 
-      InlineButton(size: .large, style: .primary, shiny: true) {
+      InlineButton(size: .large, style: .primary, shiny: isVisible) {
         onboardingViewModel.navigate(to: .getStarted)
       } label: {
         Text("Get Started").padding(.horizontal, 40)
@@ -54,7 +54,9 @@ struct OnboardingWelcome: View {
     .padding()
     .frame(minHeight: 400)
     .onAppear {
-      isVisible = true
+      DispatchQueue.main.async {
+        isVisible = true
+      }
     }
   }
 
