@@ -625,9 +625,12 @@ extension InlineProtocol.UpdateNewChat {
     }
 
     do {
-      let dialog = Dialog(optimisticForChat: chat)
+      var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: chat.peerId.toPeer()))
+        ?? Dialog(optimisticForChat: chat)
+      dialog.chatId = chat.id
+      dialog.spaceId = chat.spaceId
       Log.shared.debug("saving dialog \(dialog)")
-      try dialog.save(db)
+      try dialog.save(db, onConflict: .replace)
     } catch {
       Log.shared.error("Failed to save dialog", error: error)
     }

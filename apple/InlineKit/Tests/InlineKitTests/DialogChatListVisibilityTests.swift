@@ -128,6 +128,38 @@ struct DialogChatListVisibilityTests {
     }
   }
 
+  @Test("new chat update preserves local open state")
+  func newChatUpdatePreservesLocalOpenState() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, chatId: 18, chatListHidden: nil, open: true)
+      try db.execute(
+        sql: """
+        UPDATE dialog
+        SET "order" = ?
+        WHERE id = ?
+        """,
+        arguments: ["m", Dialog.getDialogId(peerId: .thread(id: 18))]
+      )
+
+      var chat = InlineProtocol.Chat()
+      chat.id = 18
+      chat.title = "Thread 18"
+      chat.peerID = makeChatPeer(chatId: 18)
+      chat.date = 1_700_000_000
+
+      var update = InlineProtocol.UpdateNewChat()
+      update.chat = chat
+      try update.apply(db)
+
+      let saved = try #require(try Dialog.get(peerId: .thread(id: 18)).fetchOne(db))
+      #expect(saved.open == true)
+      #expect(saved.order == "m")
+      #expect(saved.chatListHidden == nil)
+    }
+  }
+
   @Test("protocol close clears stale sidebar order")
   func protocolCloseClearsStaleSidebarOrder() throws {
     let dbQueue = try makeInMemoryDB()

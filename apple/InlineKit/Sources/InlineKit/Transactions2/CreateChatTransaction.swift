@@ -111,8 +111,7 @@ public struct CreateChatTransaction: Transaction2 {
         }
 
         do {
-          let dialog = Dialog(from: response.dialog)
-          try dialog.save(db)
+          try response.dialog.saveFull(db)
         } catch {
           log.error("Failed to save dialog", error: error)
         }
