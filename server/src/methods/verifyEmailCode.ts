@@ -12,7 +12,7 @@ import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
 import { type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { sendBotEvent } from "@in/server/modules/bot-events"
-import { DEMO_CODE, DEMO_EMAIL } from "@in/server/env"
+import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
 import { maskEmail } from "@in/server/utils/privacy"
 import { verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
@@ -141,6 +141,11 @@ const verifyCode = async (email: string, code: string, challengeToken?: string):
     return true
   }
 
+  if (email && code && email === DEMO_EMAIL2 && code === DEMO_CODE2) {
+    sendTelegramEventForDemoAccount2()
+    return true
+  }
+
   const verified = await verifyEmailLoginChallenge({ email, code, challengeToken })
   if (!verified) {
     throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
@@ -188,4 +193,8 @@ function sendTelegramEvent(email: string) {
 
 function sendTelegramEventForDemoAccount() {
   sendBotEvent(`🤐 Someone logged in with demo account`)
+}
+
+function sendTelegramEventForDemoAccount2() {
+  sendBotEvent(`🤐 The special one logged in with the demo account 🎊`)
 }
