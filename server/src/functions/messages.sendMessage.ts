@@ -52,9 +52,12 @@ import { processOutgoingText } from "@in/server/modules/message/processOutgoingT
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
   emitChatListOpenUpdates,
+  getReplyThreadAnchorSenderId,
   isReplyThread,
+  isLinkedSubthread,
   persistMessageRepliesUpdate,
   pushMessageRepliesUpdate,
+  showAndOpenLinkedSubthreadDialogs,
 } from "@in/server/modules/subthreads"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 import { maybeScheduleThreadTitleGeneration } from "@in/server/modules/threadTitles"
@@ -293,11 +296,17 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     updateGroup,
   })
   if (sidebarOpenUserIds.length > 0) {
-    const { changedDialogs } = await setDialogOpenForUsers({
-      chat,
-      userIds: sidebarOpenUserIds,
-      open: true,
-    })
+    const { changedDialogs } = isLinkedSubthread(chat)
+      ? await showAndOpenLinkedSubthreadDialogs({
+          chat,
+          userIds: sidebarOpenUserIds,
+        })
+      : await setDialogOpenForUsers({
+          chat,
+          userIds: sidebarOpenUserIds,
+          open: true,
+        })
+
     await emitChatListOpenUpdates({
       chat,
       dialogs: changedDialogs,
@@ -444,6 +453,11 @@ const getSidebarOpenUserIds = async ({
     } catch {
       // Keep send semantics unchanged if reply target is missing or inaccessible.
     }
+  }
+
+  const replyThreadAnchorSenderId = await getReplyThreadAnchorSenderId(chat)
+  if (replyThreadAnchorSenderId !== undefined && eligibleUserIds.has(replyThreadAnchorSenderId)) {
+    openUserIds.add(replyThreadAnchorSenderId)
   }
 
   return Array.from(openUserIds)
@@ -797,13 +811,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   // In linked reply threads (anchored by parentMessageId), each child message is
   // semantically a reply to the anchor message. We treat the anchor author as a
   // reply/mention target so Mentions/ImportantOnly users don't miss thread activity.
-  const replyThreadAnchorSenderId =
-    chat.parentChatId != null && chat.parentMessageId != null
-      ? await MessageModel.getSenderIdForMessage({
-          chatId: chat.parentChatId,
-          messageId: chat.parentMessageId,
-        })
-      : undefined
+  const replyThreadAnchorSenderId = await getReplyThreadAnchorSenderId(chat)
   const replyMentionUserIds = new Set<number>(
     [repliedToSenderId, replyThreadAnchorSenderId].filter(
       (userId): userId is number => userId != null && Number.isSafeInteger(userId) && userId > 0,

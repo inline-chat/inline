@@ -14,7 +14,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { MessageReplies, Update } from "@inline-chat/protocol/core"
 import { and, eq, inArray, sql } from "drizzle-orm"
-import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
+import { dialogOpenDefaultsForChat, setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 
 export const isLinkedSubthread = (chat: Pick<DbChat, "parentChatId">): boolean => chat.parentChatId != null
 
@@ -42,6 +42,19 @@ export function buildDefaultReplyThreadTitle(anchorMessage: DbFullMessage | unde
   }
 
   return "Re: Message"
+}
+
+export async function getReplyThreadAnchorSenderId(
+  chat: Pick<DbChat, "parentChatId" | "parentMessageId">,
+): Promise<number | undefined> {
+  if (chat.parentChatId == null || chat.parentMessageId == null) {
+    return undefined
+  }
+
+  return MessageModel.getSenderIdForMessage({
+    chatId: chat.parentChatId,
+    messageId: chat.parentMessageId,
+  })
 }
 
 export async function getDialogForUser(chatId: number, userId: number): Promise<DbDialog | undefined> {
@@ -153,6 +166,38 @@ export async function promoteLinkedSubthreadDialogsToChatList(input: {
   return {
     dialogs: Array.from(dialogsByUserId.values()),
     activatedDialogs: [...promotedDialogs, ...createdDialogs],
+  }
+}
+
+export async function showAndOpenLinkedSubthreadDialogs(input: {
+  chat: Pick<DbChat, "id" | "spaceId" | "type" | "minUserId" | "maxUserId" | "parentChatId" | "parentMessageId">
+  userIds: number[]
+}): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
+  const { dialogs: openedDialogs, changedDialogs: openChangedDialogs } = await setDialogOpenForUsers({
+    chat: input.chat,
+    userIds: input.userIds,
+    open: true,
+    showInChatList: false,
+  })
+
+  const { activatedDialogs } = await promoteLinkedSubthreadDialogsToChatList({
+    chat: input.chat,
+    userIds: input.userIds,
+  })
+
+  const dialogsByUserId = new Map(openedDialogs.map((dialog) => [dialog.userId, dialog]))
+  activatedDialogs.forEach((dialog) => dialogsByUserId.set(dialog.userId, dialog))
+
+  const changedUserIds = new Set([
+    ...activatedDialogs.map((dialog) => dialog.userId),
+    ...openChangedDialogs.map((dialog) => dialog.userId),
+  ])
+
+  return {
+    dialogs: Array.from(dialogsByUserId.values()),
+    changedDialogs: Array.from(changedUserIds)
+      .map((userId) => dialogsByUserId.get(userId))
+      .filter((dialog): dialog is DbDialog => dialog != null),
   }
 }
 
