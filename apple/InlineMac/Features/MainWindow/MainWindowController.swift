@@ -6,6 +6,8 @@ import SwiftUI
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {
   private static let defaultContentSize = MainWindowSceneOptions.defaultContentSize
+  static let minSizeWithSidebar = MainWindowSceneOptions.minSizeWithSidebar
+  static let minSizeWithoutSidebar = MainWindowSceneOptions.minSizeWithoutSidebar
   private static var controllers: [MainWindowController] = []
 
   static var all: [MainWindowController] {
@@ -248,6 +250,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     window.titleVisibility = .hidden
     window.toolbarStyle = .unified
     window.tabbingMode = .preferred
+    window.minSize = Self.minSizeWithSidebar
     DispatchQueue.main.async { [weak window] in
       guard window?.tabbingMode == .preferred else { return }
       window?.tabbingMode = .automatic
@@ -314,4 +317,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
 private enum MainWindowSceneOptions {
   static let defaultContentSize = NSSize(width: 860, height: 640)
+  static let minSizeWithSidebar = NSSize(width: 600, height: 400)
+  static let minSizeWithoutSidebar = NSSize(width: 300, height: 300)
 }

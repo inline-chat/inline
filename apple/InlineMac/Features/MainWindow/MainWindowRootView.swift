@@ -39,10 +39,12 @@ struct MainWindowRootView: View {
     self.nav3 = nav3
     self.keyMonitor = keyMonitor
     self.windowID = windowID
+    let sidebarMode: SidebarViewModel.ContentMode = AppSettings.shared.sidebarAsInbox ? .inbox : .chatList
     _sidebarViewModel = State(initialValue: SidebarViewModel(
       db: AppDatabase.shared,
       startsObserving: initialTopLevelRoute == .main,
-      selectedSpaceId: nav3.selectedSpaceId
+      selectedSpaceId: nav3.selectedSpaceId,
+      mode: sidebarMode
     ))
     _topLevelRoute = State(initialValue: initialTopLevelRoute)
   }
@@ -89,6 +91,9 @@ struct MainWindowRootView: View {
       removeNativeTabShortcuts()
       MainWindowOpenCoordinator.shared.unregisterWindow(id: windowID)
     }
+    .sheet(isPresented: $viewModel.showsAlphaWelcome) {
+      AlphaWelcomeSheet(firstName: viewModel.alphaWelcomeFirstName)
+    }
   }
 
   private func installNativeTabShortcuts() {
@@ -133,7 +138,7 @@ struct MainWindowRootView: View {
 
   private func syncTopLevelRoute(_ route: TopLevelRoute) {
     if route == .main {
-      sidebarViewModel.start(selectedSpaceId: nav3.selectedSpaceId)
+      sidebarViewModel.start(selectedSpaceId: nav3.selectedSpaceId, mode: sidebarMode)
       if let dependencies {
         dependencies.session.fetchInitialDataIfNeeded(dependencies: dependencies)
       }
@@ -155,6 +160,10 @@ struct MainWindowRootView: View {
       default:
         columnVisibility = .detailOnly
     }
+  }
+
+  private var sidebarMode: SidebarViewModel.ContentMode {
+    AppSettings.shared.sidebarAsInbox ? .inbox : .chatList
   }
 }
 
@@ -274,6 +283,12 @@ private struct MainWindowRoot: View {
     }
     .toastOverlayHost(dependencies?.overlay)
     .modifier(ForwardMessagesPresentation(dependencies: dependencies))
+    .onAppear {
+      updateWindowMinSize()
+    }
+    .onChange(of: isSidebarCollapsed) { _, _ in
+      updateWindowMinSize()
+    }
   }
 
   private var isSidebarCollapsed: Bool {
@@ -281,6 +296,13 @@ private struct MainWindowRoot: View {
       return true
     }
     return false
+  }
+
+  private func updateWindowMinSize() {
+    let size = isSidebarCollapsed
+      ? MainWindowController.minSizeWithoutSidebar
+      : MainWindowController.minSizeWithSidebar
+    dependencies?.appBridge.setWindowMinSize(size)
   }
 }
 

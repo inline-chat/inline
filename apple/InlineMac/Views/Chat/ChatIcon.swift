@@ -62,7 +62,7 @@ struct ChatIcon: View {
         InitialsCircle(
           name: thread.title ?? "",
           size: size,
-          symbol: thread.isReplyThread ? "arrowshape.turn.up.left" : "number",
+          symbol: thread.isReplyThread ? "arrowshape.turn.up.left" : "bubble.left.fill",
           symbolWeight: .medium,
           emoji: thread.emoji,
           backgroundOpacity: backgroundOpacity

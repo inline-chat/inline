@@ -98,6 +98,7 @@ struct SidebarView: View {
         chatRows
       }
     }
+    .contentMargins(.top, 0, for: .scrollContent)
     .animation(.smoothSnappy, value: visibleItemAnimationKeys)
     .animation(.smoothSnappy, value: sidebarDrag.animationKey)
     .animation(.smoothSnappy, value: isArchiveVisible)
@@ -461,6 +462,7 @@ struct SidebarView: View {
       showsArchive: settings.sidebarAsInbox == false,
       showPreview: $settings.showSidebarMessagePreview,
       includeSpaceChatsInHome: $settings.includeSpaceChatsInHomeSidebar,
+      sidebarAsInbox: $settings.sidebarAsInbox,
       onToggleArchive: {
         guard settings.sidebarAsInbox == false else { return }
         isArchiveVisible.toggle()

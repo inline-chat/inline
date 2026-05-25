@@ -22,6 +22,8 @@ enum TopLevelRoute {
 
 class MainWindowViewModel: ObservableObject {
   @Published var topLevelRoute: TopLevelRoute
+  @Published var showsAlphaWelcome = false
+  @Published var alphaWelcomeFirstName: String?
 
   private var cancellables: Set<AnyCancellable> = []
   private var transitionTask: Task<Void, Never>?
@@ -45,6 +47,16 @@ class MainWindowViewModel: ObservableObject {
     transitionTask?.cancel()
     transitionTask = nil
     topLevelRoute = route
+  }
+
+  func navigateAfterSignup(firstName: String?) {
+    if let trimmed = firstName?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+      alphaWelcomeFirstName = trimmed
+    } else {
+      alphaWelcomeFirstName = nil
+    }
+    showsAlphaWelcome = true
+    navigate(.main)
   }
 
   private func handle(status: AuthStatus) {
