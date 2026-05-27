@@ -519,7 +519,7 @@ html[data-theme="dark"] body {
 
 html[data-theme="light"],
 html[data-theme="light"] body {
-  background: #f2f2f2;
+  background: #fff;
 }
 
 html[data-theme="dark"] .docs-page {
