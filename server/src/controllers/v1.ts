@@ -7,6 +7,11 @@ import {
   Response as SendEmailCodeResponse,
 } from "@in/server/methods/sendEmailCode"
 import {
+  handler as checkInviteCodeHandler,
+  Input as CheckInviteCodeInput,
+  Response as CheckInviteCodeResponse,
+} from "@in/server/methods/checkInviteCode"
+import {
   handler as createSpaceHandler,
   Input as CreateSpaceInput,
   Response as CreateSpaceResponse,
@@ -223,21 +228,30 @@ import {
   Input as DeleteNotionTaskInput,
   Response as DeleteNotionTaskResponse,
 } from "@in/server/methods/notion/deleteNotionTask"
+import {
+  handler as getInviteCodesHandler,
+  Input as GetInviteCodesInput,
+  Response as GetInviteCodesResponse,
+} from "@in/server/methods/getInviteCodes"
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
     return ((
-      app
+      (app as any)
       .use(setup)
       .use(makeUnauthApiRoute("/sendSmsCode", SendSmsCodeInput, SendSmsCodeResponse, sendSmsCodeHandler))
       .use(makeUnauthApiRoute("/verifySmsCode", VerifySmsCodeInput, VerifySmsCodeResponse, verifySmsCodeHandler))
       .use(makeUnauthApiRoute("/sendEmailCode", SendEmailCodeInput, SendEmailCodeResponse, sendEmailCodeHandler))
+      .use(
+        makeUnauthApiRoute("/checkInviteCode", CheckInviteCodeInput, CheckInviteCodeResponse, checkInviteCodeHandler),
+      )
       .use(
         makeUnauthApiRoute("/verifyEmailCode", VerifyEmailCodeInput, VerifyEmailCodeResponse, verifyEmailCodeHandler),
       )
       .use(makeApiRoute("/createSpace", CreateSpaceInput, CreateSpaceResponse, createSpaceHandler))
       .use(makeApiRoute("/updateProfile", UpdateProfileInput, UpdateProfileResponse, updateProfileHandler))
       .use(makeApiRoute("/getMe", GetMeInput, GetMeResponse, getMeHandler))
+      .use(makeApiRoute("/getInviteCodes", GetInviteCodesInput, GetInviteCodesResponse, getInviteCodesHandler))
       .use(makeApiRoute("/getSpaces", GetSpacesInput, GetSpacesResponse, getSpacesHandler))
       .use(makeApiRoute("/getSpace", GetSpaceInput, GetSpaceResponse, getSpaceHandler))
       .use(makeApiRoute("/checkUsername", CheckUsernameInput, CheckUsernameResponse, checkUsernameHandler))

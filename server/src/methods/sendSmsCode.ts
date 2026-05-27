@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { prelude } from "@in/server/libs/prelude"
 import parsePhoneNumber from "libphonenumber-js"
+import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -17,6 +18,7 @@ export const Input = Type.Object({
 
 export const Response = Type.Object({
   existingUser: Type.Boolean(),
+  needsInviteCode: Type.Boolean(),
   phoneNumber: Type.String(),
   formattedPhoneNumber: Type.String(),
 })
@@ -44,17 +46,11 @@ export const handler = async (
 
     Log.shared.debug("sending sms code to", { phoneNumber: formattedPhoneNumber })
 
-    let existingUser = await db._query.users.findFirst({
-      where: eq(users.phoneNumber, formattedPhoneNumber),
-      columns: {
-        pendingSetup: true,
-        id: true,
-        phoneNumber: true,
-      },
-    })
+    let existingUser = (await db.select().from(users).where(eq(users.phoneNumber, formattedPhoneNumber)).limit(1))[0]
 
     return {
       existingUser: existingUser ? existingUser.pendingSetup !== true : false,
+      needsInviteCode: await isInviteCodeRequired(existingUser),
       // pass back valid formatting for number
       phoneNumber: formattedPhoneNumber,
       // human readable phone number

@@ -39,6 +39,8 @@ struct Onboarding: View {
           OnboardingEnterEmail().transition(routeTransition)
         case .enterCode:
           OnboardingEnterCode().transition(routeTransition)
+        case .inviteCode:
+          OnboardingInviteCode().transition(routeTransition)
         case .profile:
           OnboardingProfile().transition(routeTransition)
         case .none:
@@ -106,6 +108,7 @@ enum OnboardingRoute {
   case enterPhone
   case enterEmail
   case enterCode
+  case inviteCode
   case profile
 }
 
@@ -118,6 +121,7 @@ class OnboardingViewModel: ObservableObject {
   @Published var email: String = ""
   @Published var emailChallengeToken: String? = nil
   @Published var phoneNumber: String = ""
+  @Published var inviteCode: String = ""
 
   // nil = server provided no data, true = login, false = sign up
   @Published var existingUser: Bool? = nil

@@ -6,6 +6,7 @@ import SwiftUI
 
 struct PhoneNumberCode: View {
   var phoneNumber: String
+  var inviteCode: String?
   var placeHolder: String = NSLocalizedString("xxxxxx", comment: "Code input placeholder")
   let characterLimit = 6
 
@@ -26,8 +27,9 @@ struct PhoneNumberCode: View {
   @Environment(\.auth) private var auth
   @Environment(\.realtime) private var realtime
 
-  init(phoneNumber: String) {
+  init(phoneNumber: String, inviteCode: String? = nil) {
     self.phoneNumber = phoneNumber
+    self.inviteCode = inviteCode
   }
 
   private func buttonColor() -> Color {
@@ -91,7 +93,7 @@ extension PhoneNumberCode {
     Task {
       do {
         formState.startLoading()
-        let result = try await api.verifySmsCode(code: code, phoneNumber: phoneNumber)
+        let result = try await api.verifySmsCode(code: code, phoneNumber: phoneNumber, inviteCode: inviteCode)
 
         await auth.saveCredentials(token: result.token, userId: result.userId)
 

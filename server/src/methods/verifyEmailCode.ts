@@ -1,6 +1,3 @@
-import { db } from "@in/server/db"
-import { eq } from "drizzle-orm"
-import { users } from "@in/server/db/schema"
 import { isValidEmail, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { InlineError } from "@in/server/types/errors"
 import { normalizeEmail } from "@in/server/utils/normalize"
@@ -16,11 +13,13 @@ import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
 import { maskEmail } from "@in/server/utils/privacy"
 import { verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { getOrCreateUserByEmailForSignup } from "@in/server/modules/auth/signupInvites"
 
 export const Input = Type.Object({
   email: Type.String(),
   code: Type.String(),
   challengeToken: Type.Optional(Type.String()),
+  inviteCode: Type.Optional(Type.String()),
   deviceId: Type.Optional(Type.String()),
 
   // optional
@@ -89,7 +88,7 @@ export const handler = async (
   let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? undefined : undefined
 
   // create or fetch user by email
-  let user = await getUserByEmail(email)
+  let { user, created } = await getOrCreateUserByEmailForSignup(email, input.inviteCode)
 
   if (!user) {
     throw new InlineError(InlineError.ApiError.INTERNAL)
@@ -130,6 +129,10 @@ export const handler = async (
     },
   })
 
+  if (created) {
+    sendTelegramEvent(email)
+  }
+
   return { userId: userId, token: token, user: encodeUserInfo(user) }
 }
 
@@ -152,39 +155,6 @@ const verifyCode = async (email: string, code: string, challengeToken?: string):
   }
 
   return true
-}
-
-const getUserByEmail = async (email: string) => {
-  let user = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0]
-
-  if (!user) {
-    // create user
-    let user = (
-      await db
-        .insert(users)
-        .values({
-          email,
-          emailVerified: true,
-
-          // For now. ideally it should switch when user sets name
-          pendingSetup: false,
-        })
-        .returning()
-    )[0]
-
-    sendTelegramEvent(email)
-
-    return user
-  } else {
-    try {
-      // update pending setup to false
-      await db.update(users).set({ pendingSetup: false }).where(eq(users.email, email))
-    } catch (error) {
-      Log.shared.error("Failed to update pending setup to false", error)
-    }
-  }
-
-  return user
 }
 
 function sendTelegramEvent(email: string) {

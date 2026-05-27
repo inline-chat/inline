@@ -10,6 +10,7 @@ import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { sendEmail } from "@in/server/utils/email"
 import { issueEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
+import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -17,6 +18,7 @@ export const Input = Type.Object({
 
 export const Response = Type.Object({
   existingUser: Type.Boolean(),
+  needsInviteCode: Type.Boolean(),
   challengeToken: Type.Optional(Type.String()),
 })
 
@@ -32,15 +34,17 @@ export const handler = async (
     let email = normalizeEmail(input.email)
 
     let existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1)
-    let existingUser = existingUsers[0] ? existingUsers[0].pendingSetup !== true : false
-    let firstName = existingUsers[0]?.firstName ?? undefined
+    let user = existingUsers[0]
+    let existingUser = user ? user.pendingSetup !== true : false
+    let needsInviteCode = await isInviteCodeRequired(user)
+    let firstName = user?.firstName ?? undefined
 
     // store challenge-scoped code
     const { code, challengeToken } = await issueEmailLoginChallenge({ email })
 
     await sendEmailCode(email, code, firstName, existingUser)
 
-    return { existingUser, challengeToken }
+    return { existingUser, needsInviteCode, challengeToken }
   } catch (error) {
     Log.shared.error("Failed to send email code", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)

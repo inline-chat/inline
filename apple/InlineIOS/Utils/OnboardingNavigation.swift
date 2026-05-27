@@ -3,21 +3,25 @@ import SwiftUI
 enum OnboardingStep: Identifiable, Hashable {
   case welcome
   case email(prevEmail: String? = nil)
-  case code(email: String, challengeToken: String? = nil)
+  case code(email: String, challengeToken: String? = nil, inviteCode: String? = nil)
+  case inviteCodeForEmail(email: String, challengeToken: String? = nil)
+  case inviteCodeForPhone(phoneNumber: String)
   case profile
   case main
   case phoneNumber(prevPhoneNumber: String? = nil)
-  case phoneNumberCode(phoneNumber: String)
+  case phoneNumberCode(phoneNumber: String, inviteCode: String? = nil)
 
   var id: String {
     switch self {
       case .welcome: "welcome"
       case let .email(prevEmail): "email-\(prevEmail ?? "")"
-      case let .code(email, challengeToken): "code-\(email)-\(challengeToken ?? "")"
+      case let .code(email, challengeToken, inviteCode): "code-\(email)-\(challengeToken ?? "")-\(inviteCode ?? "")"
+      case let .inviteCodeForEmail(email, challengeToken): "inviteCodeForEmail-\(email)-\(challengeToken ?? "")"
+      case let .inviteCodeForPhone(phoneNumber): "inviteCodeForPhone-\(phoneNumber)"
       case .profile: "profile"
       case .main: "main"
       case let .phoneNumber(prevPhoneNumber): "phoneNumber-\(prevPhoneNumber ?? "")"
-      case let .phoneNumberCode(phoneNumber): "phoneNumberCode-\(phoneNumber)"
+      case let .phoneNumberCode(phoneNumber, inviteCode): "phoneNumberCode-\(phoneNumber)-\(inviteCode ?? "")"
     }
   }
 }

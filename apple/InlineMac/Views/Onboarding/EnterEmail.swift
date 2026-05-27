@@ -76,7 +76,7 @@ struct OnboardingEnterEmail: View {
 
         onboardingViewModel.existingUser = data.existingUser
         onboardingViewModel.emailChallengeToken = data.challengeToken
-        onboardingViewModel.navigate(to: .enterCode)
+        onboardingViewModel.navigate(to: data.needsInviteCode == true ? .inviteCode : .enterCode)
       } catch {
         formState.failed(error: "Failed: \(error.localizedDescription)")
         Log.shared.error("Failed to send code", error: error)

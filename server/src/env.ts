@@ -10,6 +10,10 @@ export const API_BASE_URL = isProd ? "https://api.inline.chat" : `http://localho
 
 export const EMAIL_PROVIDER: "SES" | "RESEND" = process.env["EMAIL_PROVIDER"] === "SES" ? "SES" : "RESEND"
 export const SEND_EMAIL = process.env["SEND_EMAIL"]
+export const isInviteCodesRequired = () => {
+  const value = process.env["INVITE_CODES_REQUIRED"]?.trim().toLowerCase()
+  return value !== "false" && value !== "0"
+}
 
 const rawDatabaseUrl = process.env["DATABASE_URL"]
 const rawTestDatabaseUrl = process.env["TEST_DATABASE_URL"]

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { app } from "../index"
 import { db } from "@in/server/db"
-import { loginCodes, sessions, users } from "@in/server/db/schema"
+import { inviteCodes, loginCodes, members, sessions, spaces, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { hashLoginCode, hashToken } from "@in/server/utils/auth"
 import { setupTestLifecycle } from "./setup"
@@ -11,6 +11,11 @@ describe("API Endpoints", () => {
   setupTestLifecycle()
 
   const testServer = app
+
+  const createInviteCode = async (code: string) => {
+    await db.insert(inviteCodes).values({ code })
+    return code
+  }
 
   describe("Health Check", () => {
     it("should return 200 for health check", async () => {
@@ -39,6 +44,7 @@ describe("API Endpoints", () => {
         ok: true,
         result: {
           existingUser: false,
+          needsInviteCode: true,
         },
       })
       expect(responseJson.result.challengeToken).toEqual(expect.any(String))
@@ -94,6 +100,7 @@ describe("API Endpoints", () => {
       const email = "challenge-token@example.com"
       const code = "123456"
       const challengeToken = "lc_challenge_token_1"
+      const inviteCode = await createInviteCode("CHALNG01")
 
       await db.insert(loginCodes).values({
         email,
@@ -112,6 +119,7 @@ describe("API Endpoints", () => {
           email,
           code,
           challengeToken,
+          inviteCode,
         }),
       })
 
@@ -122,6 +130,7 @@ describe("API Endpoints", () => {
     it("should enter login code and get a token (legacy flow without challenge token)", async () => {
       // Create a login code
       const code = "123456"
+      const inviteCode = await createInviteCode("LEGACY01")
       await db.insert(loginCodes).values({
         email: "test@example.com",
         code: null,
@@ -138,6 +147,7 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email: "test@example.com",
           code: code,
+          inviteCode,
         }),
       })
 
@@ -155,6 +165,7 @@ describe("API Endpoints", () => {
 
     it("legacy verify can match any active challenge for an email", async () => {
       const email = "legacy-fallback@example.com"
+      const inviteCode = await createInviteCode("LEGACY02")
       await db.insert(loginCodes).values({
         email,
         code: null,
@@ -178,11 +189,306 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email,
           code: "111111",
+          inviteCode,
         }),
       })
 
       const response = await testServer.handle(request)
       expect(response.status).toBe(200)
+    })
+
+    it("checks an invite code before signup", async () => {
+      await createInviteCode("CHECK001")
+
+      const request = new Request("http://localhost/v1/checkInviteCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "198.51.100.10",
+        },
+        body: JSON.stringify({
+          inviteCode: "check001",
+        }),
+      })
+
+      const response = await testServer.handle(request)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        result: {
+          valid: true,
+        },
+      })
+    })
+
+    it("rate limits invite code checks in memory", async () => {
+      let lastJson: any
+
+      for (let i = 0; i < 6; i += 1) {
+        const request = new Request("http://localhost/v1/checkInviteCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-forwarded-for": "198.51.100.11",
+          },
+          body: JSON.stringify({
+            inviteCode: "RATELIM1",
+          }),
+        })
+
+        const response = await testServer.handle(request)
+        lastJson = await response.json()
+      }
+
+      expect(lastJson).toMatchObject({
+        ok: false,
+        error: "FLOOD",
+      })
+    })
+
+    it("requires invite code for a new email signup", async () => {
+      const email = "invite-required@example.com"
+      const code = "123456"
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const request = new Request("http://localhost/v1/verifyEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          code,
+        }),
+      })
+
+      const response = await testServer.handle(request)
+      expect(response.status).toBe(500)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "INVITE_CODE_REQUIRED",
+        errorCode: 400,
+        description: "Enter an invite code to sign up.",
+      })
+    })
+
+    it("returns a clear error for malformed invite codes", async () => {
+      const email = "invite-malformed@example.com"
+      const code = "123456"
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const request = new Request("http://localhost/v1/verifyEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          code,
+          inviteCode: "bad",
+        }),
+      })
+
+      const response = await testServer.handle(request)
+      expect(response.status).toBe(500)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "INVITE_CODE_INVALID",
+        errorCode: 400,
+        description: "Invite code must be 8 letters or numbers.",
+      })
+    })
+
+    it("returns a clear error for unknown invite codes", async () => {
+      const email = "invite-unknown@example.com"
+      const code = "123456"
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const request = new Request("http://localhost/v1/verifyEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          code,
+          inviteCode: "MISSNG01",
+        }),
+      })
+
+      const response = await testServer.handle(request)
+      expect(response.status).toBe(500)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "INVITE_CODE_NOT_FOUND",
+        errorCode: 400,
+        description: "We couldn't find that invite code.",
+      })
+    })
+
+    it("returns a clear error for used invite codes", async () => {
+      const email = "invite-taken@example.com"
+      const code = "123456"
+      const [redeemer] = await db.insert(users).values({ email: "invite-code-redeemer@example.com" }).returning()
+      await db.insert(inviteCodes).values({
+        code: "TAKEN001",
+        redeemedByUserId: redeemer?.id,
+        redeemedAt: new Date(),
+      })
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const request = new Request("http://localhost/v1/verifyEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          code,
+          inviteCode: "taken001",
+        }),
+      })
+
+      const response = await testServer.handle(request)
+      expect(response.status).toBe(500)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "INVITE_CODE_TAKEN",
+        errorCode: 400,
+        description: "This invite code has already been used.",
+      })
+    })
+
+    it("can disable invite code requirement from the server", async () => {
+      const email = "invite-disabled@example.com"
+      const code = "123456"
+      const previous = process.env["INVITE_CODES_REQUIRED"]
+      process.env["INVITE_CODES_REQUIRED"] = "false"
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      try {
+        const sendRequest = new Request("http://localhost/v1/sendEmailCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email }),
+        })
+        const sendResponse = await testServer.handle(sendRequest)
+        expect(sendResponse.status).toBe(200)
+        expect(await sendResponse.json()).toMatchObject({
+          ok: true,
+          result: {
+            existingUser: false,
+            needsInviteCode: false,
+          },
+        })
+
+        const request = new Request("http://localhost/v1/verifyEmailCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            code,
+          }),
+        })
+
+        const response = await testServer.handle(request)
+        expect(response.status).toBe(200)
+        const created = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0]
+        expect(created?.emailVerified).toBe(true)
+        expect(created?.pendingSetup).toBe(false)
+      } finally {
+        if (previous === undefined) {
+          delete process.env["INVITE_CODES_REQUIRED"]
+        } else {
+          process.env["INVITE_CODES_REQUIRED"] = previous
+        }
+      }
+    })
+
+    it("does not require invite code for a pending space invite", async () => {
+      const email = "space-invited@example.com"
+      const code = "123456"
+      const [inviter] = await db.insert(users).values({ email: "space-inviter@example.com" }).returning()
+      const [space] = await db.insert(spaces).values({ name: "Invite Test", creatorId: inviter?.id }).returning()
+      const [invitee] = await db
+        .insert(users)
+        .values({ email, pendingSetup: true, emailVerified: false })
+        .returning()
+
+      if (!space || !invitee) {
+        throw new Error("Failed to seed invited user")
+      }
+
+      await db.insert(members).values({ userId: invitee.id, spaceId: space.id, invitedBy: inviter?.id })
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const sendRequest = new Request("http://localhost/v1/sendEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      })
+      const sendResponse = await testServer.handle(sendRequest)
+      expect(sendResponse.status).toBe(200)
+      expect(await sendResponse.json()).toMatchObject({
+        ok: true,
+        result: {
+          existingUser: false,
+          needsInviteCode: false,
+        },
+      })
+
+      const request = new Request("http://localhost/v1/verifyEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          code,
+        }),
+      })
+
+      const response = await testServer.handle(request)
+      expect(response.status).toBe(200)
+      const updated = (await db.select().from(users).where(eq(users.id, invitee.id)).limit(1))[0]
+      expect(updated?.pendingSetup).toBe(false)
+      expect(updated?.emailVerified).toBe(true)
     })
 
     it("returns EMAIL_CODE_INVALID for incorrect email code", async () => {
@@ -216,6 +522,7 @@ describe("API Endpoints", () => {
 
     it("should preserve deviceId when saving push token", async () => {
       const code = "654321"
+      const inviteCode = await createInviteCode("DEVICE01")
       await db.insert(loginCodes).values({
         email: "device@test.com",
         code: null,
@@ -231,6 +538,7 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email: "device@test.com",
           code,
+          inviteCode,
           deviceId: "device-test-1",
         }),
       })

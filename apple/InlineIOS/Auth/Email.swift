@@ -120,7 +120,12 @@ struct Email: View {
       do {
         let response = try await api.sendCode(email: email)
         formState.reset()
-        nav.push(.code(email: email, challengeToken: response.challengeToken))
+        nav.existingUser = response.existingUser
+        if response.needsInviteCode == true {
+          nav.push(.inviteCodeForEmail(email: email, challengeToken: response.challengeToken))
+        } else {
+          nav.push(.code(email: email, challengeToken: response.challengeToken))
+        }
       } catch let error as APIError {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isEmail: true)
         formState.reset()
