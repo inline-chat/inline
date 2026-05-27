@@ -61,6 +61,15 @@ struct OnboardingEnterCode: View {
           focusedField = .codeField
         }
 
+      if let error = formState.error {
+        Text(error)
+          .font(.callout)
+          .foregroundColor(.red)
+          .multilineTextAlignment(.center)
+          .frame(width: 260)
+          .padding(.bottom, 8)
+      }
+
       InlineButton {
         submit()
       } label: {
@@ -98,12 +107,14 @@ struct OnboardingEnterCode: View {
           try await ApiClient.shared.verifyCode(
             code: code,
             email: onboardingViewModel.email,
-            challengeToken: onboardingViewModel.emailChallengeToken
+            challengeToken: onboardingViewModel.emailChallengeToken,
+            inviteCode: onboardingViewModel.inviteCode
           )
         } else if !onboardingViewModel.phoneNumber.isEmpty {
           try await ApiClient.shared.verifySmsCode(
             code: code,
-            phoneNumber: onboardingViewModel.phoneNumber
+            phoneNumber: onboardingViewModel.phoneNumber,
+            inviteCode: onboardingViewModel.inviteCode
           )
         } else {
           throw APIError.error(error: "INVALID_REQUEST", errorCode: 401, description: "Email and phone empty")
@@ -141,7 +152,7 @@ struct OnboardingEnterCode: View {
           }
         }
       } catch {
-        formState.failed(error: "Failed: \(error.localizedDescription)")
+        formState.failed(error: error.localizedDescription)
         Log.shared.error("Failed to send code", error: error)
       }
     }

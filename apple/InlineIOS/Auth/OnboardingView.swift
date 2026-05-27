@@ -11,8 +11,12 @@ struct OnboardingView: View {
           switch step {
             case let .email(prevEmail):
               Email(prevEmail: prevEmail)
-            case let .code(email, challengeToken):
-              Code(email: email, challengeToken: challengeToken)
+            case let .code(email, challengeToken, inviteCode):
+              Code(email: email, challengeToken: challengeToken, inviteCode: inviteCode)
+            case let .inviteCodeForEmail(email, challengeToken):
+              InviteCode(destination: .email(email: email, challengeToken: challengeToken))
+            case let .inviteCodeForPhone(phoneNumber):
+              InviteCode(destination: .phone(phoneNumber: phoneNumber))
             case .profile:
               Profile()
             case .welcome:
@@ -21,8 +25,8 @@ struct OnboardingView: View {
               HomeView()
             case let .phoneNumber(prevPhoneNumber):
               PhoneNumber(prevPhoneNumber: prevPhoneNumber)
-            case let .phoneNumberCode(phoneNumber):
-              PhoneNumberCode(phoneNumber: phoneNumber)
+            case let .phoneNumberCode(phoneNumber, inviteCode):
+              PhoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode)
           }
         }
     }

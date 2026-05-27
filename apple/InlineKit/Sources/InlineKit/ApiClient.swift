@@ -43,6 +43,7 @@ public enum APIError: Error, LocalizedError {
 public enum Path: String {
   case verifyCode = "verifyEmailCode"
   case sendCode = "sendEmailCode"
+  case checkInviteCode
   case createSpace
   case updateProfile
   case getSpaces
@@ -353,13 +354,30 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func verifyCode(code: String, email: String, challengeToken: String? = nil) async throws -> VerifyCode {
+  public func checkInviteCode(_ inviteCode: String) async throws -> CheckInviteCode {
+    try await postRequest(
+      .checkInviteCode,
+      body: ["inviteCode": inviteCode],
+      includeToken: false
+    )
+  }
+
+  public func verifyCode(
+    code: String,
+    email: String,
+    challengeToken: String? = nil,
+    inviteCode: String? = nil
+  ) async throws -> VerifyCode {
     var queryItems: [URLQueryItem] = [
       URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
     ]
 
     if let challengeToken, !challengeToken.isEmpty {
       queryItems.append(URLQueryItem(name: "challengeToken", value: challengeToken))
+    }
+
+    if let inviteCode, !inviteCode.isEmpty {
+      queryItems.append(URLQueryItem(name: "inviteCode", value: inviteCode))
     }
 
     if let sessionInfo = await SessionInfo.get() {
@@ -380,11 +398,15 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func verifySmsCode(code: String, phoneNumber: String) async throws -> VerifyCode {
+  public func verifySmsCode(code: String, phoneNumber: String, inviteCode: String? = nil) async throws -> VerifyCode {
     var body: [String: Any] = [
       "code": code,
       "phoneNumber": phoneNumber,
     ]
+
+    if let inviteCode, !inviteCode.isEmpty {
+      body["inviteCode"] = inviteCode
+    }
 
     if let sessionInfo = await SessionInfo.get() {
       body["clientType"] = sessionInfo.clientType
@@ -1146,7 +1168,12 @@ public struct VerifyCode: Codable, Sendable {
 
 public struct SendCode: Codable, Sendable {
   public let existingUser: Bool?
+  public let needsInviteCode: Bool?
   public let challengeToken: String?
+}
+
+public struct CheckInviteCode: Codable, Sendable {
+  public let valid: Bool
 }
 
 public struct CreateSpace: Codable, Sendable {
@@ -1363,6 +1390,7 @@ public struct LinearAuthUrl: Codable, Sendable {
 
 public struct SendSmsCode: Codable, Sendable {
   public let existingUser: Bool?
+  public let needsInviteCode: Bool?
   public let phoneNumber: String
   public let formattedPhoneNumber: String
 }

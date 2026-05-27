@@ -14,6 +14,7 @@ import {
   waitlist,
   spaces,
   members,
+  inviteCodes,
 } from "@in/server/db/schema"
 import { isValidEmail } from "@in/server/utils/validate"
 import { normalizeEmail } from "@in/server/utils/normalize"
@@ -36,6 +37,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import { issueEmailLoginChallenge, verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { getDesktopPushSuppressionMetrics } from "@in/server/modules/notifications/desktopPushSuppression"
 import { revokeSession } from "@in/server/modules/sessions/revokeSession"
+import { InviteCodesModel } from "@in/server/db/models/inviteCodes"
 
 const ADMIN_COOKIE_NAME = "inline_admin_session" as const
 const ADMIN_IDLE_MS = 1000 * 60 * 60 * 24
@@ -1110,6 +1112,184 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
     {
       params: t.Object({
         id: t.String(),
+      }),
+      cookie: adminCookieSchema,
+    },
+  )
+  .get(
+    "/invites",
+    async ({ query, cookie, request, server, set }) => {
+      const session = await requireAdminSession(cookie as AdminCookieStore, request, server, set)
+      if (!session) {
+        return { ok: false, error: "unauthorized" }
+      }
+
+      if (!requireSetupComplete(session, set)) {
+        return { ok: false, error: "setup_required" }
+      }
+
+      const search = query.query?.trim()
+      const filters = []
+
+      if (search) {
+        const pattern = `%${search}%`
+        filters.push(or(sql`${inviteCodes.code} ILIKE ${pattern}`, sql`${inviteCodes.note} ILIKE ${pattern}`))
+      }
+
+      if (query.status === "redeemed") {
+        filters.push(sql`${inviteCodes.redeemedAt} IS NOT NULL`)
+      } else if (query.status === "unredeemed") {
+        filters.push(isNull(inviteCodes.redeemedAt))
+      }
+
+      const ownerUserId = query.ownerUserId ? Number(query.ownerUserId) : null
+      if (ownerUserId) {
+        filters.push(eq(inviteCodes.ownerUserId, ownerUserId))
+      }
+
+      const redeemedByUserId = query.redeemedByUserId ? Number(query.redeemedByUserId) : null
+      if (redeemedByUserId) {
+        filters.push(eq(inviteCodes.redeemedByUserId, redeemedByUserId))
+      }
+
+      const whereClause = filters.length > 0 ? and(...filters) : undefined
+      const baseSelect = db
+        .select({
+          id: inviteCodes.id,
+          code: inviteCodes.code,
+          ownerUserId: inviteCodes.ownerUserId,
+          redeemedByUserId: inviteCodes.redeemedByUserId,
+          createdByUserId: inviteCodes.createdByUserId,
+          note: inviteCodes.note,
+          createdAt: inviteCodes.date,
+          redeemedAt: inviteCodes.redeemedAt,
+        })
+        .from(inviteCodes)
+
+      const rows = whereClause
+        ? await baseSelect.where(whereClause).orderBy(desc(inviteCodes.date)).limit(200)
+        : await baseSelect.orderBy(desc(inviteCodes.date)).limit(200)
+
+      return {
+        ok: true,
+        invites: rows.map((row) => ({
+          ...row,
+          redeemed: row.redeemedAt != null,
+          createdAt: row.createdAt.toISOString(),
+          redeemedAt: row.redeemedAt ? row.redeemedAt.toISOString() : null,
+        })),
+      }
+    },
+    {
+      query: t.Object({
+        query: t.Optional(t.String()),
+        status: t.Optional(t.Union([t.Literal("redeemed"), t.Literal("unredeemed")])),
+        ownerUserId: t.Optional(t.String()),
+        redeemedByUserId: t.Optional(t.String()),
+      }),
+      cookie: adminCookieSchema,
+    },
+  )
+  .post(
+    "/invites/generate",
+    async ({ body, cookie, request, server, set }) => {
+      const session = await requireAdminSession(cookie as AdminCookieStore, request, server, set)
+      if (!session) {
+        return { ok: false, error: "unauthorized" }
+      }
+
+      if (!requireSetupComplete(session, set)) {
+        return { ok: false, error: "setup_required" }
+      }
+
+      if (!requireStepUp(session, set)) {
+        return { ok: false, error: "step_up_required" }
+      }
+
+      if (!Number.isSafeInteger(body.count) || body.count < 1 || body.count > 500) {
+        set.status = 400
+        return { ok: false, error: "invalid_count" }
+      }
+
+      const rows = await InviteCodesModel.create({
+        count: body.count,
+        createdByUserId: session.userId,
+        note: body.note,
+      })
+
+      await notifyAdminAction({
+        actionTaken: `Generated ${rows.length} invite codes`,
+        actorEmail: session.email,
+        ip: getRequestIp(request, server),
+        userAgent: request.headers.get("user-agent") ?? "",
+      })
+
+      return { ok: true, codes: rows.map((row) => row.code) }
+    },
+    {
+      body: t.Object({
+        count: t.Number(),
+        note: t.Optional(t.String()),
+      }),
+      cookie: adminCookieSchema,
+    },
+  )
+  .post(
+    "/users/:id/invites",
+    async ({ params, body, cookie, request, server, set }) => {
+      const session = await requireAdminSession(cookie as AdminCookieStore, request, server, set)
+      if (!session) {
+        return { ok: false, error: "unauthorized" }
+      }
+
+      if (!requireSetupComplete(session, set)) {
+        return { ok: false, error: "setup_required" }
+      }
+
+      if (!requireStepUp(session, set)) {
+        return { ok: false, error: "step_up_required" }
+      }
+
+      const userId = Number(params.id)
+      if (!Number.isSafeInteger(userId) || userId <= 0) {
+        set.status = 400
+        return { ok: false, error: "invalid_user" }
+      }
+
+      if (!Number.isSafeInteger(body.count) || body.count < 1 || body.count > 100) {
+        set.status = 400
+        return { ok: false, error: "invalid_count" }
+      }
+
+      const user = (await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1))[0]
+      if (!user) {
+        set.status = 404
+        return { ok: false, error: "not_found" }
+      }
+
+      const rows = await InviteCodesModel.create({
+        count: body.count,
+        ownerUserId: userId,
+        createdByUserId: session.userId,
+        note: body.note,
+      })
+
+      await notifyAdminAction({
+        actionTaken: `Granted ${rows.length} invite codes to user ${userId}`,
+        actorEmail: session.email,
+        ip: getRequestIp(request, server),
+        userAgent: request.headers.get("user-agent") ?? "",
+      })
+
+      return { ok: true, codes: rows.map((row) => row.code) }
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+      }),
+      body: t.Object({
+        count: t.Number(),
+        note: t.Optional(t.String()),
       }),
       cookie: adminCookieSchema,
     },

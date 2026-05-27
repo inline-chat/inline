@@ -71,7 +71,7 @@ struct OnboardingEnterPhone: View {
         )
 
         onboardingViewModel.existingUser = data.existingUser
-        onboardingViewModel.navigate(to: .enterCode)
+        onboardingViewModel.navigate(to: data.needsInviteCode == true ? .inviteCode : .enterCode)
       } catch {
         formState.failed(error: "Failed: \(error.localizedDescription)")
         Log.shared.error("Failed to send sms code", error: error)

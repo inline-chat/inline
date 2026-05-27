@@ -16,10 +16,12 @@ import { prelude } from "@in/server/libs/prelude"
 import { sendBotEvent } from "@in/server/modules/bot-events"
 import { maskPhoneNumber } from "@in/server/utils/privacy"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { getOrCreateUserByPhoneForSignup } from "@in/server/modules/auth/signupInvites"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
   code: Type.String(),
+  inviteCode: Type.Optional(Type.String()),
   deviceId: Type.Optional(Type.String()),
 
   // optional
@@ -92,8 +94,8 @@ export const handler = async (
       : undefined
     let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? undefined : undefined
 
-    // create or fetch user by email
-    let user = await getUserByPhoneNumber(formattedPhoneNumber)
+    // create or fetch user by phone
+    let { user, created } = await getOrCreateUserByPhoneForSignup(formattedPhoneNumber, input.inviteCode)
 
     if (!user) {
       Log.shared.error("Failed to verify sms code", { phoneNumber })
@@ -134,46 +136,19 @@ export const handler = async (
       },
     })
 
+    if (created) {
+      sendTelegramEvent(formattedPhoneNumber)
+    }
+
     return { userId: userId, token: token, user: encodeUserInfo(user) }
   } catch (error) {
+    if (error instanceof InlineError) {
+      throw error
+    }
+
     Log.shared.error("Failed to verify sms code", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
-}
-
-/// helpers
-
-const getUserByPhoneNumber = async (phoneNumber: string) => {
-  let user = (await db.select().from(users).where(eq(users.phoneNumber, phoneNumber)).limit(1))[0]
-
-  if (!user) {
-    // create user
-    let user = (
-      await db
-        .insert(users)
-        .values({
-          phoneNumber,
-          phoneVerified: true,
-
-          // For now. ideally it should switch when user sets name
-          pendingSetup: false,
-        })
-        .returning()
-    )[0]
-
-    sendTelegramEvent(phoneNumber)
-
-    return user
-  } else {
-    // update pending setup to false
-    try {
-      await db.update(users).set({ pendingSetup: false }).where(eq(users.phoneNumber, phoneNumber))
-    } catch (error) {
-      Log.shared.error("Failed to update pending setup to false", error)
-    }
-  }
-
-  return user
 }
 
 function sendTelegramEvent(phoneNumber: string) {

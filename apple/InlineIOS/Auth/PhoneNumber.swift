@@ -117,7 +117,12 @@ struct PhoneNumber: View {
 
         print("result is \(result)")
         formState.reset()
-        nav.push(.phoneNumberCode(phoneNumber: fullPhoneNumber))
+        nav.existingUser = result.existingUser
+        if result.needsInviteCode == true {
+          nav.push(.inviteCodeForPhone(phoneNumber: fullPhoneNumber))
+        } else {
+          nav.push(.phoneNumberCode(phoneNumber: fullPhoneNumber))
+        }
       } catch let error as APIError {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isPhoneNumber: true)
         formState.reset()
