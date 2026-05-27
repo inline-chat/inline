@@ -50,6 +50,13 @@ struct ComposeInteractionStateTests {
     #expect(urlString == "https://inline.chat/docs?tab=api")
   }
 
+  @Test("link paste moves the cursor after the linked selection")
+  func linkPasteMovesCursorAfterLinkedSelection() async throws {
+    let selection = ComposeLinkPaste.selectionAfterApplyingLink(to: NSRange(location: 17, length: 2))
+
+    #expect(selection == NSRange(location: 19, length: 0))
+  }
+
   @Test("link paste normalizes a bare domain")
   func linkPasteNormalizesBareDomain() async throws {
     let urlString = ComposeLinkPaste.normalizedURLString(from: "inline.chat/docs")

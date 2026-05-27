@@ -295,7 +295,7 @@ class ComposeNSTextView: NSTextView {
     textStorage.addAttributes(linkAttributes(urlString: urlString), range: safeRange)
     textStorage.endEditing()
 
-    setSelectedRange(safeRange)
+    setSelectedRange(ComposeLinkPaste.selectionAfterApplyingLink(to: safeRange))
     resetTypingAttributesToDefault()
     notifyDelegateAboutFormattingChange()
   }

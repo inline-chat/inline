@@ -156,7 +156,7 @@ class ComposeTextView: UITextView {
     textStorage.addAttributes(linkAttributes(urlString: urlString), range: safeRange)
     textStorage.endEditing()
 
-    selectedRange = safeRange
+    selectedRange = ComposeLinkPaste.selectionAfterApplyingLink(to: safeRange)
     textDidChange()
     delegate?.textViewDidChange?(self)
   }

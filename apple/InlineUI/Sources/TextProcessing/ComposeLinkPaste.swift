@@ -1,6 +1,10 @@
 import Foundation
 
 public enum ComposeLinkPaste {
+  public static func selectionAfterApplyingLink(to range: NSRange) -> NSRange {
+    NSRange(location: range.location + range.length, length: 0)
+  }
+
   public static func normalizedURLString(from text: String) -> String? {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
