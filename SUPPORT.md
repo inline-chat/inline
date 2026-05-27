@@ -10,14 +10,16 @@ But right now, as our savings are running low, we need your support to keep deve
 
 This is the minimum amount required to continue the current pace of dev without slowing down significantly:
 
-- One $200/mo Codex Pro subscription 
+- One $200/mo Codex Pro subscription
 
-### Faster dev
+### Optional
+
+#### Faster dev
 
 - One M5 MacBook Pro (to replace one of our M1 MacBooks)
 - Another Codex Pro subscription
 
-### Expanded dev 
+#### Expanded dev
 
 - Another main development device
 - Testing devices for Android or Windows/Linux
