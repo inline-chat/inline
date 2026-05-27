@@ -60,7 +60,7 @@ export async function updateDialogOpen(input: Input, context: FunctionContext): 
   }
 
   if (peerUser) {
-    output.user = Encoders.user({ user: peerUser, min: false })
+    output.user = Encoders.user({ user: peerUser, min: true })
   }
 
   return output

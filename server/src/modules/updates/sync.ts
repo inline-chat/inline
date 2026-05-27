@@ -1,4 +1,4 @@
-import type { Message, Peer, Update } from "@inline-chat/protocol/core"
+import type { Message, Peer, Update, User } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
@@ -275,7 +275,9 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
             oneofKind: "newChat",
             newChat: {
               chat: Encoders.chat(chatRecord, { encodingForUserId: userId }),
-              user: otherUser ? Encoders.user({ user: otherUser.user, photoFile: otherUser.photoFile }) : undefined,
+              user: otherUser
+                ? Encoders.user({ user: otherUser.user, photoFile: otherUser.photoFile, min: true })
+                : undefined,
             },
           },
         })
@@ -338,11 +340,11 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
   return { updates: inflatedUpdates }
 }
 
-function inflateSpaceUpdates(dbUpdates: DbUpdate[]): Update[] {
+function inflateSpaceUpdates(dbUpdates: DbUpdate[], options?: { sanitizeUsers?: boolean }): Update[] {
   return dbUpdates
     .map((dbUpdate) => {
       const decrypted = UpdatesModel.decrypt(dbUpdate)
-      return convertSpaceUpdate(decrypted)
+      return convertSpaceUpdate(decrypted, options)
     })
     .filter((update): update is Update => Boolean(update))
 }
@@ -356,7 +358,7 @@ function inflateUserUpdates(dbUpdates: DbUpdate[]): Update[] {
     .filter((update): update is Update => Boolean(update))
 }
 
-function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
+function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?: boolean }): Update | null {
   const seq = update.seq
   const date = encodeDateStrict(update.date)
   const payload = update.payload.update
@@ -389,6 +391,7 @@ function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
   }
 
   if (payload.oneofKind === "spaceMemberAdd") {
+    const user = options?.sanitizeUsers ? sanitizeUser(payload.spaceMemberAdd.user) : payload.spaceMemberAdd.user
     return {
       seq,
       date,
@@ -396,7 +399,7 @@ function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
         oneofKind: "spaceMemberAdd",
         spaceMemberAdd: {
           member: payload.spaceMemberAdd.member,
-          user: payload.spaceMemberAdd.user,
+          user,
         },
       },
     }
@@ -404,6 +407,22 @@ function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
 
   log.warn("Unhandled space update", { type: payload.oneofKind })
   return null
+}
+
+function sanitizeUser(user: User | undefined): User | undefined {
+  if (!user) {
+    return undefined
+  }
+
+  return {
+    id: user.id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    username: user.username,
+    min: true,
+    bot: user.bot,
+    profilePhoto: user.profilePhoto,
+  }
 }
 
 function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update | null {

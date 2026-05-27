@@ -1,23 +1,18 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import { chats, members, spaces, users } from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
+import { members } from "@in/server/db/schema"
+import { InlineError } from "@in/server/types/errors"
 import { type Static, Type } from "@sinclair/typebox"
 import {
-  encodeChatInfo,
   encodeMemberInfo,
   encodeMinUserInfo,
-  encodeSpaceInfo,
-  encodeUserInfo,
-  TChatInfo,
   TMemberInfo,
   TMinUserInfo,
-  TSpaceInfo,
-  TUserInfo,
 } from "@in/server/api-types"
 import { TInputId } from "@in/server/types/methods"
 import { UsersModel } from "@in/server/db/models/users"
+import { Authorize } from "@in/server/utils/authorize"
+import { SpaceModel } from "@in/server/db/models/spaces"
 
 export const Input = Type.Object({
   spaceId: TInputId,
@@ -47,6 +42,15 @@ export const handler = async (
   // Validate
   if (isNaN(spaceId)) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const [space] = await Promise.all([
+    SpaceModel.getSpaceById(spaceId),
+    Authorize.spaceMember(spaceId, currentUserId),
+  ])
+
+  if (!space || space.deleted !== null) {
+    throw new InlineError(InlineError.ApiError.SPACE_INVALID)
   }
 
   const members_ = await db._query.members.findMany({

@@ -6,6 +6,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { GetSpaceMembersInput, GetSpaceMembersResult } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 
 export const getSpaceMembers = async (
   input: GetSpaceMembersInput,
@@ -16,6 +17,9 @@ export const getSpaceMembers = async (
     throw RealtimeRpcError.BadRequest()
   }
 
+  const privacy = await getSpacePrivacyContext(spaceId, context.currentUserId)
+  const min = privacy.isPublicSpace && !privacy.canManageMembers
+
   const members_ = await db._query.members.findMany({
     where: eq(members.spaceId, spaceId),
   })
@@ -25,8 +29,6 @@ export const getSpaceMembers = async (
 
   return {
     members: members_.map((member) => Encoders.member(member)),
-
-    // TODO: min should be true when space is public or user is guest or something we need to take care of this later.
-    users: usersWithPhotos.map((u) => Encoders.user({ user: u.user, min: false })),
+    users: usersWithPhotos.map((u) => Encoders.user({ user: u.user, photoFile: u.photoFile, min })),
   }
 }

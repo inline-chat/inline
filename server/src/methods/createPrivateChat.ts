@@ -2,10 +2,8 @@ import { db } from "@in/server/db"
 import {
   chats,
   dialogs,
-  users,
   type DbChat,
   type DbDialog,
-  type DbUser,
   type DbUserWithProfile,
 } from "@in/server/db/schema"
 import {
@@ -13,20 +11,16 @@ import {
   encodeDialogInfo,
   TChatInfo,
   TDialogInfo,
-  TUserInfo,
-  encodeUserInfo,
   encodeMinUserInfo,
   TMinUserInfo,
 } from "@in/server/api-types"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import { and, eq, inArray, not, or } from "drizzle-orm"
-import { TInputId } from "../types/methods"
-import { User, type Update } from "@inline-chat/protocol/core"
-import { Updates } from "@in/server/modules/updates/updates"
+import { and, eq, or } from "drizzle-orm"
+import type { Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UsersModel } from "@in/server/db/models/users"
@@ -218,7 +212,7 @@ const pushUpdate = async (input: {
         chat: Encoders.chat(chat, { encodingForUserId }),
         user: Encoders.user({
           user,
-          //min: true,
+          min: true,
           photoFile: user.photoFile ?? undefined,
         }),
       },

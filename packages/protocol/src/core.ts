@@ -1111,6 +1111,12 @@ export interface Space {
      * @generated from protobuf field: int64 date = 4;
      */
     date: bigint;
+    /**
+     * Whether this is a public community space with stricter member privacy.
+     *
+     * @generated from protobuf field: optional bool is_public = 5;
+     */
+    isPublic?: boolean;
 }
 /**
  * Add reaction input
@@ -8284,7 +8290,8 @@ class Space$Type extends MessageType<Space> {
             { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "creator", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "is_public", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Space>): Space {
@@ -8314,6 +8321,9 @@ class Space$Type extends MessageType<Space> {
                 case /* int64 date */ 4:
                     message.date = reader.int64().toBigInt();
                     break;
+                case /* optional bool is_public */ 5:
+                    message.isPublic = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8338,6 +8348,9 @@ class Space$Type extends MessageType<Space> {
         /* int64 date = 4; */
         if (message.date !== 0n)
             writer.tag(4, WireType.Varint).int64(message.date);
+        /* optional bool is_public = 5; */
+        if (message.isPublic !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.isPublic);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

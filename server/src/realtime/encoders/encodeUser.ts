@@ -32,7 +32,7 @@ export const encodeUser = ({
           online: user.online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,
           lastOnline: { date: user.lastOnline ? encodeDate(user.lastOnline) : undefined },
         },
-    timeZone: user.timeZone ?? undefined,
+    timeZone: min ? undefined : user.timeZone ?? undefined,
     bot: user.bot === true ? true : undefined,
     profilePhoto: cdnUrl
       ? {

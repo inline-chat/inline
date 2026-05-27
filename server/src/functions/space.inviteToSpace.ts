@@ -24,6 +24,7 @@ import { spaces } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
 
 const log = new Log("space.inviteToSpace")
 
@@ -114,6 +115,7 @@ export const inviteToSpace = async (
   pushUpdateForInvitedUser({ space, member, inviteUserId: inviteInfo.user.id, persisted: joinUpdate })
   pushUpdatesForSpace({
     spaceId,
+    space,
     member,
     user: inviteInfo.user,
     currentUserId: context.currentUserId,
@@ -291,12 +293,14 @@ const pushUpdateForInvitedUser = async ({
 
 const pushUpdatesForSpace = async ({
   spaceId,
+  space,
   member,
   user,
   currentUserId,
   persisted,
 }: {
   spaceId: number
+  space: DbSpace
   member: DbMember
   user: DbUser
   currentUserId: number
@@ -309,7 +313,7 @@ const pushUpdatesForSpace = async ({
       oneofKind: "spaceMemberAdd",
       spaceMemberAdd: {
         member: Encoders.member(member),
-        user: Encoders.user({ user, min: false }),
+        user: space.isPublic ? encodePublicUser({ user }) : Encoders.user({ user, min: false }),
       },
     },
   }
@@ -331,25 +335,25 @@ const persistSpaceMemberAddUpdate = async ({
   member: DbMember
   user: DbUser
 }): Promise<UpdateSeqAndDate> => {
-  const spaceServerUpdatePayload: ServerUpdate["update"] = {
-    oneofKind: "spaceMemberAdd",
-    spaceMemberAdd: {
-      member: Encoders.member(member),
-      user: Encoders.user({ user, min: false }),
-    },
-  }
-
   const persisted = await db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
-    const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
+    const [lockedSpace] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
 
-    if (!space) {
+    if (!lockedSpace) {
       throw RealtimeRpcError.SpaceIdInvalid()
+    }
+
+    const spaceServerUpdatePayload: ServerUpdate["update"] = {
+      oneofKind: "spaceMemberAdd",
+      spaceMemberAdd: {
+        member: Encoders.member(member),
+        user: lockedSpace.isPublic ? encodePublicUser({ user }) : Encoders.user({ user, min: false }),
+      },
     }
 
     const update = await UpdatesModel.insertUpdate(tx, {
       update: spaceServerUpdatePayload,
       bucket: UpdateBucket.Space,
-      entity: space,
+      entity: lockedSpace,
     })
 
     await tx
