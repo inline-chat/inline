@@ -46,6 +46,7 @@ const defaultApiBaseUrl = "https://api.inline.chat"
 const defaultVideoWidth = 1280
 const defaultVideoHeight = 720
 const defaultVideoDuration = 1
+const defaultCatchUpPageLimit = 200
 const defaultCatchUpTotalLimit = 1_000
 const defaultColdStartCatchUpWindow = defaultCatchUpTotalLimit
 
@@ -757,6 +758,7 @@ export class InlineSdkClient {
           }),
           startSeq: BigInt(cursor),
           totalLimit: defaultCatchUpTotalLimit,
+          limit: defaultCatchUpPageLimit,
         }),
       })
 
@@ -874,6 +876,7 @@ export class InlineSdkClient {
           startSeq: BigInt(cursor),
           seqEnd: BigInt(endSeq),
           totalLimit: defaultCatchUpTotalLimit,
+          limit: defaultCatchUpPageLimit,
         }),
       })
 
