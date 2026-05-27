@@ -1,37 +1,24 @@
 import * as stylex from "@stylexjs/stylex"
-import { useState } from "react"
 import { PageContainer } from "./Page"
-import { SUPPORT_EMAIL, emailValue, useHydratedEmail } from "~/lib/email"
+import { SUPPORT_EMAIL, emailValue } from "~/lib/email"
+
+const AVAILABILITY = "Available for macOS and iOS in alpha • Web coming soon • Open-source."
+const COPYRIGHT = "© 2026 Inline Chat"
 
 export const PageFooter = () => {
-  const [isCopied, setIsCopied] = useState(false)
-  const email = useHydratedEmail(SUPPORT_EMAIL)
+  const email = emailValue(SUPPORT_EMAIL)
 
   return (
     <footer {...stylex.props(styles.footer)}>
       <PageContainer>
         <div {...stylex.props(styles.footerContent)}>
-          <div {...stylex.props(styles.brandContainer)}>
-            <div {...stylex.props(styles.brand)}>inline</div>
-            <div {...stylex.props(styles.description)}>
-              Inline is a messaging app for teams and communities that focuses on speed and ease of use.
-            </div>
-          </div>
+          <div>{AVAILABILITY}</div>
           <div {...stylex.props(styles.links)}>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(emailValue(SUPPORT_EMAIL))
-                setIsCopied(true)
-                setTimeout(() => {
-                  setIsCopied(false)
-                }, 1000)
-              }}
-              {...stylex.props(styles.emailLink)}
-            >
-              {isCopied ? "copied to clipboard" : email.label}
-            </button>
             <a href="/waitlist" {...stylex.props(styles.link)}>
               Join Waitlist
+            </a>
+            <a href="/download" {...stylex.props(styles.link)}>
+              Downloads
             </a>
             <a href="/docs" {...stylex.props(styles.link)}>
               Docs
@@ -42,16 +29,20 @@ export const PageFooter = () => {
             <a href="https://github.com/inline-chat" {...stylex.props(styles.link)}>
               GitHub
             </a>
+            <a href="https://github.com/inline-chat/inline/blob/main/SUPPORT.md" {...stylex.props(styles.link)}>
+              Sponsor
+            </a>
             <a href="https://x.com/inline_chat" {...stylex.props(styles.link)}>
-              X (Twitter)
+              X
             </a>
             <a href="https://status.inline.chat" {...stylex.props(styles.link)}>
               Status
             </a>
-            <a href="/legal/privacy" {...stylex.props(styles.link)}>
-              Privacy
+            <a href={`mailto:${email}`} target="_blank" rel="noopener noreferrer" {...stylex.props(styles.link)}>
+              {email}
             </a>
           </div>
+          <div {...stylex.props(styles.copyRight)}>{COPYRIGHT}</div>
         </div>
       </PageContainer>
     </footer>
@@ -61,37 +52,31 @@ export const PageFooter = () => {
 const styles = stylex.create({
   footer: {
     width: "100%",
-    borderTop: "1px solid rgba(0, 0, 0, 0.1)",
   },
   footerContent: {
     // maxWidth: "1200px",
     // margin: "0 auto",
-    paddingBottom: 24,
+    paddingBottom: 60,
     paddingTop: 24,
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  brandContainer: {
-    display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
-    flexShrink: 1,
-    flexGrow: 1,
-  },
-  brand: {
-    fontFamily: '"Red Hat Display", sans-serif',
-    fontSize: "18px",
-    fontWeight: "700",
-    opacity: {
-      default: "0.9",
-      ":hover": "1",
+    justifyContent: "center",
+    alignItems: "center",
+    textAlign: "center",
+    color: {
+      default: "rgba(44, 54, 66, 0.8)",
+      "@media (prefers-color-scheme: dark)": "rgba(255,255,255,0.8)",
     },
+    fontFamily: '"Reddit Mono", monospace',
+    fontSize: 14,
   },
   links: {
     display: "flex",
     alignItems: "center",
-    gap: "24px",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    gap: "8px",
+    marginTop: 8,
   },
   link: {
     fontWeight: "400",
@@ -101,27 +86,11 @@ const styles = stylex.create({
     },
     fontSize: "14px",
     textDecoration: "none",
-    transition: "color 0.15s ease-out",
+    padding: "4px 8px",
+    transition: "color 0.12s ease-out",
   },
-  emailLink: {
-    fontWeight: "400",
-    opacity: {
-      default: "0.4",
-      ":hover": "1",
-    },
-    fontSize: "14px",
-    textDecoration: "none",
-    transition: "color 0.15s ease-out",
-    cursor: "pointer",
-    background: "none",
-    border: "none",
-    padding: 0,
-    color: "inherit",
-  },
-  description: {
-    fontSize: "14px",
-    opacity: "0.6",
-    marginTop: "4px",
-    maxWidth: "400px",
+  copyRight: {
+    marginTop: 8,
+    opacity: 0.5,
   },
 })

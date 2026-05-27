@@ -4,7 +4,7 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { SUPPORT_EMAIL, useHydratedEmail } from "~/lib/email"
+import { SUPPORT_EMAIL, emailValue } from "~/lib/email"
 
 //import "./styles/style.css"
 
@@ -68,14 +68,15 @@ const COPY = {
     },
   ],
   footer: {
-    availability: "Coming soon in early access for macOS, iOS, and the web. Open-source.",
+    availability: "Available for macOS and iOS in alpha • Web coming soon • Open-source.",
     links: {
-      twitter: "Follow updates on X (Twitter)",
+      twitter: "X",
       github: "GitHub",
+      sponsor: "Sponsor",
       status: "Status",
+      download: "Downloads",
       docs: "Docs",
       legal: "Legal",
-      privacy: "Privacy",
     },
     copyright: "© 2026 Inline Chat",
   },
@@ -89,7 +90,7 @@ const cardRadius = 22
 const firstContentRowHeight = 445
 const buttonHeight = 44
 export function Landing() {
-  const footerEmail = useHydratedEmail(SUPPORT_EMAIL)
+  const footerEmail = emailValue(SUPPORT_EMAIL)
   const [focused, setFocused] = useState(false)
   const [email, setEmail] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -508,12 +509,27 @@ export function Landing() {
           </div>
           <div>
             <a
+              href="https://github.com/inline-chat/inline/blob/main/SUPPORT.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              {...stylex.props(styles.footerLink)}
+            >
+              {COPY.footer.links.sponsor}
+            </a>
+          </div>
+          <div>
+            <a
               href="https://status.inline.chat"
               target="_blank"
               rel="noopener noreferrer"
               {...stylex.props(styles.footerLink)}
             >
               {COPY.footer.links.status}
+            </a>
+          </div>
+          <div>
+            <a href="/download" {...stylex.props(styles.footerLink)}>
+              {COPY.footer.links.download}
             </a>
           </div>
           <div>
@@ -526,18 +542,13 @@ export function Landing() {
               {COPY.footer.links.legal}
             </a>
           </div>
-          <div>
-            <a href="/legal/privacy" {...stylex.props(styles.footerLink)}>
-              {COPY.footer.links.privacy}
-            </a>
-          </div>
           <a
-            href={footerEmail.href}
+            href={`mailto:${footerEmail}`}
             target="_blank"
             rel="noopener noreferrer"
             {...stylex.props(styles.footerLink)}
           >
-            {footerEmail.label}
+            {footerEmail}
           </a>
         </div>
 
