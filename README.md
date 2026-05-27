@@ -81,6 +81,16 @@ We think of friend groups and communities as first-class citizens. At this point
 - Inline is not ready for production use yet.
 - We'll soon give access to early testers who can help us test the app as we're building it. Reach out if you want to be an alpha tester.
 
+## Support the project
+
+Inline is built by a team of two working full time on this project since September 2024, mostly using our savings (I sold my car :)). We love building Inline in public as open source, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
+
+But right now, as our savings are running low, we need your support to keep development moving as fast as before. If your team is eager for a high-quality Slack alternative, this is your chance to help ensure we succeed on that mission.
+
+We're looking for donations and sponsorships to cover two Codex Pro (or Claude) subscriptions at $200/month each.
+
+[See how to donate](SUPPORT.md).
+
 ## How to run this yourself
 
 ### Running the macOS/iOS apps
@@ -116,7 +126,7 @@ We currently have a closed alpha with a few teams. Our native macOS and iOS apps
 
 ### Is it paid?
 
-The app will eventually be free for individuals, communities, etc., with a paid plan for teams. However, at this time we're focused on paid teams to build a sustainable business and to work closely with early users to build what they need.
+The app is open source and free to use right now. We aim to charge teams, commercial users, and enterprise customers for a Pro plan while using that revenue to sustain development and keep Inline free for regular users.
 
 ### How can you possibly build this? Many people have failed!
 
