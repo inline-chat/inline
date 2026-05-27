@@ -1,6 +1,6 @@
 # Support Inline's development
 
-Inline is built by a team of two working full time on this project since September 2024, mostly using our savings (I sold my car :)). We love building Inline in public as open source, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
+Inline is built by a team of two focused solely on this project since September 2024, mostly using our savings (I sold my car :)). We love building Inline in public as open source, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
 
 But right now, as our savings are running low, we need your support to keep development moving as fast as before. If your team is eager for a high-quality Slack alternative, this is your chance to help ensure we succeed on that mission.
 
@@ -22,7 +22,7 @@ This is the minimum amount required to continue the current pace of dev without 
 #### Expanded dev
 
 - Another main development device
-- Testing devices for Android or Windows/Linux
+- Testing devices for Android, Windows/Linux, iPad, etc.
 
 ## How to donate
 
