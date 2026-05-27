@@ -425,6 +425,9 @@ message Space {
 
   // Date of creation
   int64 date = 4;
+
+  // Whether this is a public community space with stricter member privacy.
+  optional bool is_public = 5;
 }
 
 // Add reaction input

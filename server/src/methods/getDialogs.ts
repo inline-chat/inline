@@ -1,14 +1,14 @@
 import { db } from "@in/server/db"
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { and, eq, inArray, isNull, or } from "drizzle-orm"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import {
   encodeChatInfo,
   encodeDialogInfo,
   encodeFullUserInfo,
+  encodeMinUserInfo,
   encodeMessageInfo,
-  encodeUserInfo,
   TChatInfo,
   TDialogInfo,
   TMessageInfo,
@@ -44,10 +44,6 @@ const MAX_LIMIT = 200
 // --- Helper Functions ---
 function dedupeById<T extends { id: number }>(arr: T[]): T[] {
   return arr.filter((item, index, self) => index === self.findIndex((t) => t.id === item.id))
-}
-
-function pushIfExists<T>(arr: T[], item: T | undefined | null) {
-  if (item) arr.push(item)
 }
 
 function pushMessageAndUser(
@@ -103,11 +99,23 @@ export const handler = async (
 
   // Check if user has permission to access public chats in this space
   let memberPermission: schema.DbMember | undefined
+  let spaceRecord: schema.DbSpace | undefined
   if (spaceId) {
-    memberPermission = await db._query.members.findFirst({
-      where: and(eq(schema.members.userId, currentUserId), eq(schema.members.spaceId, spaceId)),
-    })
+    ;[memberPermission, spaceRecord] = await Promise.all([
+      db._query.members.findFirst({
+        where: and(eq(schema.members.userId, currentUserId), eq(schema.members.spaceId, spaceId)),
+      }),
+      db._query.spaces.findFirst({
+        where: and(eq(schema.spaces.id, spaceId), isNull(schema.spaces.deleted)),
+      }),
+    ])
+
+    if (!memberPermission || !spaceRecord) {
+      throw new InlineError(InlineError.ApiError.USER_NOT_PARTICIPANT)
+    }
   }
+  const canViewFullSpaceUserInfo =
+    !spaceRecord?.isPublic || memberPermission?.role === "admin" || memberPermission?.role === "owner"
 
   // Buckets for results
   let dialogs: schema.DbDialog[] = []
@@ -246,28 +254,32 @@ export const handler = async (
         },
       },
     })
-    // 2c. Private Dialogs with Space Members
-    const privateDialogs = await db._query.dialogs.findMany({
-      where: and(
-        eq(schema.dialogs.userId, currentUserId),
-        // spaceid = nil
-        isNull(schema.dialogs.spaceId),
-        inArray(
-          schema.dialogs.peerUserId,
-          space?.members.map((m: schema.DbMember & { user: schema.DbUserWithPhoto }) => m.user.id) ?? [],
-        ),
-      ),
-      with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
-      limit: MAX_LIMIT,
-    })
-    privateDialogs.forEach((d) => {
-      dialogs.push(d)
-      pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
-      if (d.chat) chats.push(d.chat)
-    })
+    if (!space) {
+      throw new InlineError(InlineError.ApiError.SPACE_INVALID)
+    }
 
-    // Create private chats and dialogs for members that don't have them
-    if (space?.members) {
+    if (canViewFullSpaceUserInfo) {
+      // 2c. Private Dialogs with Space Members
+      const privateDialogs = await db._query.dialogs.findMany({
+        where: and(
+          eq(schema.dialogs.userId, currentUserId),
+          // spaceid = nil
+          isNull(schema.dialogs.spaceId),
+          inArray(
+            schema.dialogs.peerUserId,
+            space?.members.map((m: schema.DbMember & { user: schema.DbUserWithPhoto }) => m.user.id) ?? [],
+          ),
+        ),
+        with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
+        limit: MAX_LIMIT,
+      })
+      privateDialogs.forEach((d) => {
+        dialogs.push(d)
+        pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
+        if (d.chat) chats.push(d.chat)
+      })
+
+      // Create private chats and dialogs for members that don't have them
       const memberIds = space.members.map((m) => m.user.id)
       const existingPrivateChats = await db._query.chats.findMany({
         where: and(
@@ -339,8 +351,8 @@ export const handler = async (
       }
     }
 
-    // Add all space members as users
-    space?.members.forEach((m) => users.push(m.user))
+    // Add all space members as users. Public regular members receive min user info below.
+    space.members.forEach((m) => users.push(m.user))
   }
 
   // --- 3. Ensure Dialogs Exist for All Chats ---
@@ -400,7 +412,7 @@ export const handler = async (
     dialogs: dialogsEncoded,
     chats: chats.map((d) => encodeChatInfo(d, { currentUserId })),
     messages: messages,
-    users: users.map(encodeFullUserInfo),
+    users: canViewFullSpaceUserInfo ? users.map(encodeFullUserInfo) : users.map((user) => encodeMinUserInfo(user)),
   }
 
   return finalResult

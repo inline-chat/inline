@@ -3,11 +3,16 @@ import { getUpdates } from "@in/server/functions/updates.getUpdates"
 import { testUtils, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import { updates, UpdateBucket } from "../../db/schema/updates"
-import { DialogNotificationSettings_Mode, GetUpdatesResult_ResultType, InputPeer } from "@inline-chat/protocol/core"
+import {
+  DialogNotificationSettings_Mode,
+  GetUpdatesResult_ResultType,
+  InputPeer,
+  Member_Role,
+} from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
-import { dialogs } from "@in/server/db/schema"
+import { dialogs, members, spaces } from "@in/server/db/schema"
 import { handler as readMessages } from "@in/server/methods/readMessages"
 import { and, desc, eq } from "drizzle-orm"
 
@@ -147,6 +152,67 @@ describe("getUpdates", () => {
     expect(result.final).toBe(false)
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
     expect(result.updates.length).toBe(2)
+  })
+
+  test("sanitizes public space member add updates for regular members", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Public Update Space", [
+      "regular-public-updates@example.com",
+      "new-public-updates@example.com",
+    ])
+    const [regularUser, newUser] = users
+    await db.update(spaces).set({ isPublic: true }).where(eq(spaces.id, space.id))
+    const [newMember] = await db
+      .select()
+      .from(members)
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, newUser.id)))
+      .limit(1)
+    if (!newMember) throw new Error("missing member")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Space,
+      entityId: space.id,
+      seq: 1,
+      payload: {
+        oneofKind: "spaceMemberAdd",
+        spaceMemberAdd: {
+          member: {
+            id: BigInt(newMember.id),
+            spaceId: BigInt(space.id),
+            userId: BigInt(newUser.id),
+            role: Member_Role.MEMBER,
+            date: 1n,
+            canAccessPublicChats: true,
+          },
+          user: {
+            id: BigInt(newUser.id),
+            firstName: "New",
+            email: "new-public-updates@example.com",
+            phoneNumber: "+15555550100",
+            timeZone: "UTC",
+          },
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "space", space: { spaceId: BigInt(space.id) } } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 10,
+      },
+      { currentUserId: regularUser.id } as any,
+    )
+
+    const update = result.updates[0]?.update
+    expect(update?.oneofKind).toBe("spaceMemberAdd")
+    if (update?.oneofKind !== "spaceMemberAdd") throw new Error("missing member add update")
+    expect(update.spaceMemberAdd.user?.id).toBe(BigInt(newUser.id))
+    expect(update.spaceMemberAdd.user?.email).toBeUndefined()
+    expect(update.spaceMemberAdd.user?.phoneNumber).toBeUndefined()
+    expect(update.spaceMemberAdd.user?.timeZone).toBeUndefined()
+    expect(update.spaceMemberAdd.user?.min).toBe(true)
   })
 
   test("caps totalLimit to MAX_TOTAL_LIMIT", async () => {

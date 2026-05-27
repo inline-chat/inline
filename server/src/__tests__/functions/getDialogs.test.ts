@@ -549,4 +549,30 @@ describe("getDialogs", () => {
 
     expect(hasThread3).toBe(false)
   })
+
+  test("exposes public space member roster as min users and does not create member DMs for regular members", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Public Privacy Space", [
+      "privacy-a@example.com",
+      "privacy-b@example.com",
+    ])
+    const [userA, userB] = users
+    await db.update(schema.spaces).set({ isPublic: true }).where(eq(schema.spaces.id, space.id))
+
+    const result = await getDialogsHandler({ spaceId: space.id }, makeHandlerContext(userA.id))
+
+    const otherUser = result.users.find((user) => user.id === userB.id)
+    expect(otherUser).toBeDefined()
+    expect(otherUser?.email).toBeUndefined()
+    expect(otherUser?.phoneNumber).toBeUndefined()
+    expect(result.users.some((user) => user.email === "privacy-b@example.com")).toBe(false)
+
+    const dm = await db.query.chats.findFirst({
+      where: {
+        type: "private",
+        minUserId: Math.min(userA.id, userB.id),
+        maxUserId: Math.max(userA.id, userB.id),
+      },
+    })
+    expect(dm).toBeUndefined()
+  })
 })

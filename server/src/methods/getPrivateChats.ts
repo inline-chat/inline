@@ -1,17 +1,13 @@
 import { db } from "@in/server/db"
-import { and, eq, inArray, not, or } from "drizzle-orm"
-import { chats, dialogs, files, messages, spaces, users, type DbChat } from "@in/server/db/schema"
-import { InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
+import { and, eq, inArray, or } from "drizzle-orm"
+import { chats, dialogs, files, messages, users, type DbChat } from "@in/server/db/schema"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import { Authorize } from "@in/server/utils/authorize"
 import {
   encodeChatInfo,
   encodeDialogInfo,
-  encodeFullUserInfo,
   encodeMessageInfo,
-  encodeUserInfo,
+  encodeMinUserInfo,
   TChatInfo,
   TDialogInfo,
   TMessageInfo,
@@ -170,7 +166,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
       })
     })
 
-  const peerUsersEncoded = peerUsers.map((u) => encodeFullUserInfo(u))
+  const peerUsersEncoded = peerUsers.map((u) => encodeMinUserInfo(u, { photoFile: u.photo ?? undefined }))
   const messagesEncoded = result
     .map((c) =>
       c.message

@@ -11,6 +11,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 
 const MAX_TOTAL_LIMIT = 1000
 
@@ -22,6 +23,7 @@ type BucketDescriptor =
   | {
       scope: "space"
       spaceId: number
+      sanitizeUsers: boolean
       box: UpdateBoxInput
     }
   | {
@@ -78,11 +80,9 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     limit: pageLimit,
   })
 
-  let sliceSeq = seqStart
   let sliceDate = latestDate
   if (dbUpdates.length > 0) {
     const lastRecord = dbUpdates[dbUpdates.length - 1]!
-    sliceSeq = lastRecord.seq
     sliceDate = lastRecord.date
   }
 
@@ -112,7 +112,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     }
 
     case "space": {
-      updates = Sync.inflateSpaceUpdates(dbUpdates)
+      updates = Sync.inflateSpaceUpdates(dbUpdates, { sanitizeUsers: descriptor.sanitizeUsers })
       break
     }
 
@@ -191,11 +191,12 @@ const resolveBucket = async (
         throw RealtimeRpcError.SpaceIdInvalid()
       }
 
-      await AccessGuards.ensureSpaceMember(spaceId, context.currentUserId)
+      const privacy = await getSpacePrivacyContext(spaceId, context.currentUserId)
 
       return {
         scope: "space",
         spaceId,
+        sanitizeUsers: privacy.isPublicSpace && !privacy.canManageMembers,
         box: {
           type: DbUpdateBucket.Space,
           spaceId,

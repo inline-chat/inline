@@ -1,4 +1,4 @@
-import { Member_Role, Space } from "@inline-chat/protocol/core"
+import { Space } from "@inline-chat/protocol/core"
 import type { DbSpace } from "@in/server/db/schema"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
@@ -9,5 +9,6 @@ export function encodeSpace(space: DbSpace, { encodingForUserId }: { encodingFor
     name: space.name,
     creator: encodingForUserId === space.creatorId,
     date: encodeDateStrict(space.date),
+    isPublic: space.isPublic,
   }
 }

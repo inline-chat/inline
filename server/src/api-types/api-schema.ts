@@ -84,12 +84,14 @@ export const TSpaceInfo = Type.Object({
 
   /** Is the current user the creator of the space */
   creator: Type.Boolean(),
+  isPublic: Type.Boolean(),
 })
 export type TSpaceInfo = StaticEncode<typeof TSpaceInfo>
 export const encodeSpaceInfo = (space: DbSpace, context: UserContext): TSpaceInfo => {
   return Value.Encode(TSpaceInfo, {
     ...space,
     creator: space.creatorId === context.currentUserId,
+    isPublic: space.isPublic === true,
   })
 }
 
@@ -168,8 +170,6 @@ export const encodeMinUserInfo = (
     firstName: user.firstName,
     lastName: user.lastName,
     username: user.username,
-    online: user.online,
-    lastOnline: user.lastOnline,
     date: user.date,
     ...(photo ? { photo } : {}),
   }

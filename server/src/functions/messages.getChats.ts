@@ -462,7 +462,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
   const encodedChats = chatsList.map((chat) => Encoders.chat(chat, { encodingForUserId: currentUserId }))
   const encodedSpaces = spacesList.map((space) => Encoders.space(space, { encodingForUserId: currentUserId }))
   const encodedUsers = Array.from(usersById.values()).map((user) =>
-    Encoders.user({ user, photoFile: user.photoFile ?? undefined }),
+    Encoders.user({ user, photoFile: user.photoFile ?? undefined, min: true }),
   )
 
   return {
