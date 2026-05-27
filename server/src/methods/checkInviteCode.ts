@@ -2,7 +2,7 @@ import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import { InlineError } from "@in/server/types/errors"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
-import { InviteCodesModel, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
+import { InviteCodesModel, isDevInviteCode, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 
 export const Input = Type.Object({
@@ -30,6 +30,10 @@ export const handler = async (
 
   if (!isValidInviteCode(code)) {
     throw new InlineError(InlineError.ApiError.INVITE_CODE_INVALID)
+  }
+
+  if (isDevInviteCode(code)) {
+    return { valid: true }
   }
 
   const row = await InviteCodesModel.getByCode({ code })

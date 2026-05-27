@@ -6,10 +6,15 @@ import { inviteCodes, type DbInviteCode } from "@in/server/db/schema"
 const inviteAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 const inviteCodeLength = 8
 const maxCreateAttempts = 20
+const devInviteCode = "AAAAAAAA"
 
 export const normalizeInviteCode = (code: string) => code.trim().toUpperCase()
 
 export const isValidInviteCode = (code: string) => /^[A-Z0-9]{8}$/.test(normalizeInviteCode(code))
+
+export const isDevInviteCode = (code: string) => {
+  return process.env.NODE_ENV === "development" && normalizeInviteCode(code) === devInviteCode
+}
 
 export class InviteCodesModel {
   static generateCode(): string {

@@ -221,6 +221,111 @@ describe("API Endpoints", () => {
       })
     })
 
+    it("allows the dev invite code without a database row in development", async () => {
+      const previousEnv = process.env.NODE_ENV
+      process.env.NODE_ENV = "development"
+
+      try {
+        const request = new Request("http://localhost/v1/checkInviteCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-forwarded-for": "198.51.100.12",
+          },
+          body: JSON.stringify({
+            inviteCode: "aaaaaaaa",
+          }),
+        })
+
+        const response = await testServer.handle(request)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({
+          ok: true,
+          result: {
+            valid: true,
+          },
+        })
+      } finally {
+        if (previousEnv === undefined) {
+          Reflect.deleteProperty(process.env, "NODE_ENV")
+        } else {
+          process.env.NODE_ENV = previousEnv
+        }
+      }
+    })
+
+    it("does not allow the dev invite code bypass in production", async () => {
+      const previousEnv = process.env.NODE_ENV
+      process.env.NODE_ENV = "production"
+
+      try {
+        const request = new Request("http://localhost/v1/checkInviteCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-forwarded-for": "198.51.100.13",
+          },
+          body: JSON.stringify({
+            inviteCode: "AAAAAAAA",
+          }),
+        })
+
+        const response = await testServer.handle(request)
+        expect(response.status).toBe(500)
+        expect(await response.json()).toMatchObject({
+          ok: false,
+          error: "INVITE_CODE_NOT_FOUND",
+        })
+      } finally {
+        if (previousEnv === undefined) {
+          Reflect.deleteProperty(process.env, "NODE_ENV")
+        } else {
+          process.env.NODE_ENV = previousEnv
+        }
+      }
+    })
+
+    it("redeems the dev invite code without a database row in development", async () => {
+      const previousEnv = process.env.NODE_ENV
+      process.env.NODE_ENV = "development"
+      const email = "dev-invite-code@example.com"
+      const code = "123456"
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      try {
+        const request = new Request("http://localhost/v1/verifyEmailCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            code,
+            inviteCode: "AAAAAAAA",
+          }),
+        })
+
+        const response = await testServer.handle(request)
+        expect(response.status).toBe(200)
+        const created = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0]
+        expect(created?.emailVerified).toBe(true)
+        expect(created?.pendingSetup).toBe(false)
+        const bypassCode = (await db.select().from(inviteCodes).where(eq(inviteCodes.code, "AAAAAAAA")).limit(1))[0]
+        expect(bypassCode).toBeUndefined()
+      } finally {
+        if (previousEnv === undefined) {
+          Reflect.deleteProperty(process.env, "NODE_ENV")
+        } else {
+          process.env.NODE_ENV = previousEnv
+        }
+      }
+    })
+
     it("rate limits invite code checks in memory", async () => {
       let lastJson: any
 
