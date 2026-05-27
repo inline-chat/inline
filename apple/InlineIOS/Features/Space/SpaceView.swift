@@ -138,7 +138,7 @@ struct SpaceView: View {
           Label("Settings", systemImage: "gearshape")
         }
       } label: {
-        Image(systemName: "line.3.horizontal.decrease")
+        Image(systemName: "ellipsis")
           .foregroundStyle(.primary)
       }
     }
