@@ -150,6 +150,10 @@ extension Profile {
         mainViewRouter.setRoute(route: .main)
         formState.reset()
         nav.push(.main)
+      } catch let error as APIError {
+        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
+        formState.reset()
+        isInputValid = false
       } catch {
         Log.shared.error("Failed to create user", error: error)
         errorMsg = "Failed to create account. Please try again."

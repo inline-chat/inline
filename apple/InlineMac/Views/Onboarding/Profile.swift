@@ -47,6 +47,15 @@ struct OnboardingProfile: View {
         }
       // todo .onChange start checking
 
+      if let error = formState.error {
+        Text(error)
+          .font(.callout)
+          .foregroundColor(.red)
+          .multilineTextAlignment(.center)
+          .frame(width: 260)
+          .padding(.bottom, 8)
+      }
+
       InlineButton {
         submit()
       } label: {
@@ -87,6 +96,8 @@ struct OnboardingProfile: View {
   }
 
   func submit() {
+    formState.startLoading()
+
     Task {
       // todo
       let (firstName, lastName) = parseNameComponents(fullName: name)
@@ -105,6 +116,7 @@ struct OnboardingProfile: View {
         } else {
           mainWindowViewModel.navigate(.main)
         }
+        formState.reset()
       } catch {
         formState.failed(error: error.localizedDescription)
       }
