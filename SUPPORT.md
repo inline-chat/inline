@@ -1,13 +1,26 @@
-# Support Inline
+# Support Inline's development
 
 Inline is built by a team of two working full time on this project since September 2024, mostly using our savings (I sold my car :)). We love building Inline in public as open source, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
 
 But right now, as our savings are running low, we need your support to keep development moving as fast as before. If your team is eager for a high-quality Slack alternative, this is your chance to help ensure we succeed on that mission.
 
-## Where support goes
+## Funding priorities
 
-- Two Codex Pro subscriptions ($200/mo each)
-- Equipment for development (we're on M1 MacBooks right now)
+### Essential
+
+This is the minimum amount required to continue the current pace of dev without slowing down significantly:
+
+- One $200/mo Codex Pro subscription 
+
+### Faster dev
+
+- One M5 MacBook Pro (to replace one of our M1 MacBooks)
+- Another Codex Pro subscription
+
+### Expanded dev 
+
+- Another main development device
+- Testing devices for Android or Windows/Linux
 
 ## How to donate
 

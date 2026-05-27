@@ -87,9 +87,7 @@ Inline is built by a team of two working full time on this project since Septemb
 
 But right now, as our savings are running low, we need your support to keep development moving as fast as before. If your team is eager for a high-quality Slack alternative, this is your chance to help ensure we succeed on that mission.
 
-We're looking for donations and sponsorships to cover two Codex Pro (or Claude) subscriptions at $200/month each.
-
-[See how to donate](SUPPORT.md).
+[See what support funds and how to donate](SUPPORT.md).
 
 ## How to run this yourself
 
