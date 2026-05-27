@@ -78,6 +78,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     return { user: encodeUserInfo(user[0]) }
   } catch (error) {
     log.error("Failed to set profile", error)
+    if (error instanceof InlineError) {
+      throw error
+    }
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
