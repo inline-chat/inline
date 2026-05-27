@@ -12,7 +12,6 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 
-const MAX_UPDATES_PER_REQUEST = 50
 const MAX_TOTAL_LIMIT = 1000
 
 type BucketDescriptor =
@@ -65,6 +64,8 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   const requestedLimit =
     input.totalLimit !== undefined && input.totalLimit > 0 ? Number(input.totalLimit) : MAX_TOTAL_LIMIT
   const totalLimit = Math.min(requestedLimit, MAX_TOTAL_LIMIT)
+  const requestedPageLimit = input.limit !== undefined && input.limit > 0 ? Number(input.limit) : totalLimit
+  const pageLimit = Math.min(requestedPageLimit, totalLimit)
 
   const {
     updates: dbUpdates,
@@ -74,7 +75,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     bucket: descriptor.box,
     seqStart,
     seqEnd,
-    limit: MAX_UPDATES_PER_REQUEST,
+    limit: pageLimit,
   })
 
   let sliceSeq = seqStart

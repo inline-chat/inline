@@ -495,6 +495,7 @@ describe("Sync core flow", () => {
         startSeq: 0n,
         seqEnd: 0n,
         totalLimit: 10,
+        limit: 0,
       },
       testUtils.functionContext({ userId: user.id }),
     )
@@ -530,6 +531,7 @@ describe("Sync core flow", () => {
         startSeq: 0n,
         seqEnd: 0n,
         totalLimit: 2,
+        limit: 0,
       },
       testUtils.functionContext({ userId: user.id }),
     )

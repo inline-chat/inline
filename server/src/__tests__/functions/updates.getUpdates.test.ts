@@ -74,7 +74,8 @@ describe("getUpdates", () => {
       },
       startSeq: 0n,
       seqEnd: 0n,
-      totalLimit: 1
+      totalLimit: 1,
+      limit: 0,
     }, { currentUserId: user.id } as any)
 
     // 4. Verify result
@@ -105,13 +106,47 @@ describe("getUpdates", () => {
       bucket: { type: { oneofKind: "user", user: {} } },
       startSeq: 0n,
       seqEnd: 3n,
-      totalLimit: 1000
+      totalLimit: 1000,
+      limit: 0,
     }, { currentUserId: user.id } as any)
 
     expect(Number(result.seq)).toBe(3)
     expect(result.final).toBe(true)
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
     expect(result.updates.length).toBe(3)
+  })
+
+  test("uses request limit as page size", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Page Limit", ["page-limit@example.com"])
+    const user = users[0]
+    if (!user) throw new Error("User creation failed")
+
+    for (let seq = 1; seq <= 5; seq += 1) {
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: user.id,
+        seq,
+        payload: {
+          oneofKind: "userChatParticipantDelete",
+          userChatParticipantDelete: {
+            chatId: BigInt(seq),
+          },
+        },
+      })
+    }
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 1000,
+      limit: 2,
+    }, { currentUserId: user.id } as any)
+
+    expect(Number(result.seq)).toBe(2)
+    expect(result.final).toBe(false)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.updates.length).toBe(2)
   })
 
   test("caps totalLimit to MAX_TOTAL_LIMIT", async () => {
@@ -131,7 +166,8 @@ describe("getUpdates", () => {
       bucket: { type: { oneofKind: "user", user: {} } },
       startSeq: 0n,
       seqEnd: 0n,
-      totalLimit: 5000
+      totalLimit: 5000,
+      limit: 0,
     }, { currentUserId: user.id } as any)
 
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
@@ -175,6 +211,7 @@ describe("getUpdates", () => {
         startSeq: 0n,
         seqEnd: 0n,
         totalLimit: 1000,
+        limit: 0,
       },
       { currentUserId: user.id } as any,
     )
@@ -213,6 +250,7 @@ describe("getUpdates", () => {
         startSeq: 0n,
         seqEnd: 0n,
         totalLimit: 1000,
+        limit: 0,
       },
       { currentUserId: user.id } as any,
     )
@@ -257,6 +295,7 @@ describe("getUpdates", () => {
         startSeq: 0n,
         seqEnd: 0n,
         totalLimit: 1000,
+        limit: 0,
       },
       { currentUserId: user.id } as any,
     )
@@ -303,6 +342,7 @@ describe("getUpdates", () => {
         startSeq: 0n,
         seqEnd: 0n,
         totalLimit: 1000,
+        limit: 0,
       },
       { currentUserId: user.id } as any,
     )
@@ -351,6 +391,7 @@ describe("getUpdates", () => {
         startSeq: BigInt(beforeSeq),
         seqEnd: 0n,
         totalLimit: 1000,
+        limit: 0,
       },
       { currentUserId: user.id } as any,
     )

@@ -902,6 +902,9 @@ message GetUpdatesInput {
 
   // optional inclusive upper bound for slicing
   int64 seq_end = 4;
+
+  // max number of updates to return in this response
+  int32 limit = 5;
 }
 
 message GetUpdatesResult {

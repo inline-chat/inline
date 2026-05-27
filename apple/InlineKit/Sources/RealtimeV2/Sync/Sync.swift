@@ -609,6 +609,7 @@ actor FetchLimiter {
 actor BucketActor {
   private var log = Log.scoped("RealtimeV2.Sync.BucketActor")
 
+  private static let updatesPageLimit: Int32 = 200
   private static let maxTotalUpdates: Int64 = 1000
   private static let getUpdatesTimeout: Duration = .seconds(30)
 
@@ -923,6 +924,7 @@ actor BucketActor {
           } else {
             $0.totalLimit = Int32(Self.maxTotalUpdates)
           }
+          $0.limit = Self.updatesPageLimit
           if let requestSeqEnd {
             $0.seqEnd = requestSeqEnd
           }
