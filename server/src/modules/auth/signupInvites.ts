@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { members, users, type DbUser } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
-import { InviteCodesModel, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
+import { InviteCodesModel, isDevInviteCode, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
 import { isInviteCodesRequired as isInviteCodesRequiredConfig } from "@in/server/env"
 
 type Database = any
@@ -151,6 +151,10 @@ const getInviteCode = (inviteCode?: string): string => {
 }
 
 const redeemInviteCode = async (database: Database, inviteCode: string, userId: number) => {
+  if (isDevInviteCode(inviteCode)) {
+    return
+  }
+
   const redeemed = await InviteCodesModel.redeem({
     code: normalizeInviteCode(inviteCode),
     userId,
