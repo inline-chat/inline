@@ -11,6 +11,7 @@ import { uploadVideo } from "@in/server/modules/files/uploadVideo"
 import { uploadVoice } from "@in/server/modules/files/uploadVoice"
 import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import { getIp } from "@in/server/utils/ip"
 
 const log = new Log("methods/uploadFile")
 
@@ -174,11 +175,7 @@ const response = TMakeApiResponse(Response)
 export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).post(
   "/uploadFile",
   async ({ body: input, store, server, request }) => {
-    const ip =
-      request.headers.get("x-forwarded-for") ??
-      request.headers.get("cf-connecting-ip") ??
-      request.headers.get("x-real-ip") ??
-      server?.requestIP(request)?.address
+    const ip = getIp(request, server)
 
     try {
       const context = {

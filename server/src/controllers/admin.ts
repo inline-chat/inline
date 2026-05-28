@@ -38,6 +38,7 @@ import { issueEmailLoginChallenge, verifyEmailLoginChallenge } from "@in/server/
 import { getDesktopPushSuppressionMetrics } from "@in/server/modules/notifications/desktopPushSuppression"
 import { revokeSession } from "@in/server/modules/sessions/revokeSession"
 import { InviteCodesModel } from "@in/server/db/models/inviteCodes"
+import { getIp } from "@in/server/utils/ip"
 
 const ADMIN_COOKIE_NAME = "inline_admin_session" as const
 const ADMIN_IDLE_MS = 1000 * 60 * 60 * 24
@@ -1430,14 +1431,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
     },
   )
 
-const getRequestIp = (request: Request, server: BunServer | undefined) => {
-  return (
-    request.headers.get("x-forwarded-for") ??
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-real-ip") ??
-    server?.requestIP(request)?.address
-  )
-}
+const getRequestIp = (request: Request, server: BunServer | undefined) => getIp(request, server)
 
 const isAllowedAdminOrigin = (request: Request) => {
   const origin = request.headers.get("origin")

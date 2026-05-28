@@ -15,6 +15,7 @@ import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { ensureCanManageChatParticipants } from "@in/server/modules/authorization/spaceThreadGuards"
 
 export async function removeChatParticipant(
   input: {
@@ -35,9 +36,7 @@ export async function removeChatParticipant(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
       }
 
-      if (chat.spaceId == null && chat.createdBy !== context.currentUserId) {
-        throw RealtimeRpcError.PeerIdInvalid()
-      }
+      await ensureCanManageChatParticipants(chat, context.currentUserId)
 
       const user = await tx.select().from(users).where(eq(users.id, input.userId)).limit(1)
       if (!user || user.length === 0) {

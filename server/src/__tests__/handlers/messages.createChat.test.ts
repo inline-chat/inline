@@ -26,6 +26,20 @@ describe("messages.createChat", () => {
     currentUserId: defaultTestContext.userId,
   }
 
+  const addSpaceMembers = async (
+    spaceId: number,
+    rows: { userId: number; role?: "owner" | "admin" | "member"; canAccessPublicChats?: boolean }[],
+  ) => {
+    await db.insert(schema.members).values(
+      rows.map((row) => ({
+        spaceId,
+        userId: row.userId,
+        role: row.role ?? "member",
+        canAccessPublicChats: row.canAccessPublicChats ?? true,
+      })),
+    )
+  }
+
   test("should create public chat without participants", async () => {
     // Create a space first
     const space = await testUtils.createSpace()
@@ -34,6 +48,7 @@ describe("messages.createChat", () => {
     // Create a user for the test
     const user = await testUtils.createUser()
     if (!user) throw new Error("Failed to create user")
+    await addSpaceMembers(space.id, [{ userId: user.id }])
 
     const input: CreateChatInput = {
       title: "Public Chat",
@@ -79,6 +94,7 @@ describe("messages.createChat", () => {
 
     const otherUser = await testUtils.createUser("other@example.com")
     if (!otherUser) throw new Error("Failed to create other user")
+    await addSpaceMembers(space.id, [{ userId: currentUser.id }, { userId: otherUser.id }])
 
     const input: CreateChatInput = {
       title: "Private Chat",
@@ -226,6 +242,7 @@ describe("messages.createChat", () => {
 
     const user = await testUtils.createUser("dup-space-owner@example.com")
     if (!user) throw new Error("Failed to create user")
+    await addSpaceMembers(space.id, [{ userId: user.id }])
 
     await createChat(
       {
@@ -252,6 +269,50 @@ describe("messages.createChat", () => {
         },
       ),
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects space thread creation by a non-member", async () => {
+    const space = await testUtils.createSpace()
+    const outsider = await testUtils.createUser("space-thread-outsider@example.com")
+    if (!space || !outsider) throw new Error("Failed to create test data")
+
+    await expect(
+      createChat(
+        {
+          title: "Outsider Thread",
+          spaceId: BigInt(space.id),
+          isPublic: true,
+        },
+        {
+          ...mockFunctionContext,
+          currentUserId: outsider.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.SPACE_ID_INVALID })
+  })
+
+  test("rejects private space thread participants outside the space", async () => {
+    const space = await testUtils.createSpace()
+    const currentUser = await testUtils.createUser("space-private-owner@example.com")
+    const outsider = await testUtils.createUser("space-private-outsider@example.com")
+    if (!space || !currentUser || !outsider) throw new Error("Failed to create test data")
+
+    await addSpaceMembers(space.id, [{ userId: currentUser.id }])
+
+    await expect(
+      createChat(
+        {
+          title: "Private Space Thread",
+          spaceId: BigInt(space.id),
+          isPublic: false,
+          participants: [{ userId: BigInt(outsider.id) }],
+        },
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.USER_ID_INVALID })
   })
 
   test("uses the exact reserved chat id when createChat claims a reservation", async () => {

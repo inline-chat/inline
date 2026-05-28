@@ -7,6 +7,7 @@ import { Optional, type Static, Type } from "@sinclair/typebox"
 import { encodeMessageInfo, TInputPeerInfo, TMessageInfo } from "@in/server/api-types"
 import { getChatIdFromPeer } from "./sendMessage"
 import { normalizeId, TInputId } from "@in/server/types/methods"
+import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -44,6 +45,8 @@ export const handler = async (input: Input, context: Context): Promise<Response>
   if (isNaN(chatId)) {
     throw new InlineError(InlineError.ApiError.PEER_INVALID)
   }
+
+  await getAuthorizedChat(chatId, context.currentUserId)
 
   const result = await db
     .select({

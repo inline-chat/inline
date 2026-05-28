@@ -131,17 +131,16 @@ function setCookieHeader(name: string, value: string, options?: { maxAgeSeconds?
 }
 
 function resolveClientIp(req: Request): string {
+  const cfConnectingIp = req.headers.get("cf-connecting-ip")
+  if (cfConnectingIp?.trim()) return normalizeRateLimitKeyPart(cfConnectingIp)
+  const realIp = req.headers.get("x-real-ip")
+  if (realIp?.trim()) return normalizeRateLimitKeyPart(realIp)
+
   const forwarded = req.headers.get("x-forwarded-for")
   if (forwarded) {
     const first = forwarded.split(",", 1)[0]?.trim()
     if (first) return normalizeRateLimitKeyPart(first)
   }
-
-  const realIp = req.headers.get("x-real-ip")
-  if (realIp?.trim()) return normalizeRateLimitKeyPart(realIp)
-
-  const cfConnectingIp = req.headers.get("cf-connecting-ip")
-  if (cfConnectingIp?.trim()) return normalizeRateLimitKeyPart(cfConnectingIp)
 
   return "unknown"
 }

@@ -1,11 +1,22 @@
 import type { Server } from "bun"
 
-export const getIp = async (request: Request, server: Server<unknown> | null) => {
+export const getIp = (request: Request, server?: Server<unknown> | null): string | undefined => {
   return (
-    request.headers.get("x-forwarded-for") ??
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-real-ip") ??
-    request.headers.get("x-forwarded") ??
+    headerValue(request, "cf-connecting-ip") ??
+    headerValue(request, "x-real-ip") ??
+    firstForwardedFor(request) ??
+    headerValue(request, "x-forwarded") ??
     server?.requestIP(request)?.address
   )
+}
+
+const headerValue = (request: Request, name: string): string | undefined => {
+  const value = request.headers.get(name)?.trim()
+  return value || undefined
+}
+
+const firstForwardedFor = (request: Request): string | undefined => {
+  const forwardedFor = request.headers.get("x-forwarded-for")
+  const first = forwardedFor?.split(",", 1)[0]?.trim()
+  return first || undefined
 }
