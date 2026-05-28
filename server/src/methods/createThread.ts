@@ -1,13 +1,15 @@
 import { db } from "@in/server/db"
 import { chats } from "@in/server/db/schema"
 import { encodeChatInfo, TChatInfo } from "@in/server/api-types"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { eq, sql } from "drizzle-orm"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { TInputId } from "@in/server/types/methods"
+import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 export const Input = Type.Object({
   title: Type.String(),
@@ -28,6 +30,20 @@ export const handler = async (
     if (isNaN(spaceId)) {
       throw new InlineError(InlineError.ApiError.SPACE_INVALID)
     }
+
+    try {
+      await ensureCanCreateSpaceThread({
+        spaceId,
+        userId: context.currentUserId,
+        isPublic: true,
+      })
+    } catch (error) {
+      if (error instanceof RealtimeRpcError) {
+        throw new InlineError(InlineError.ApiError.SPACE_INVALID)
+      }
+      throw error
+    }
+
     var maxThreadNumber: number = await db
       // MAX function returns the maximum value in a set of values
       .select({ maxThreadNumber: sql<number>`MAX(${chats.threadNumber})` })
@@ -57,6 +73,9 @@ export const handler = async (
 
     return { chat: encodeChatInfo(chat[0], { currentUserId: context.currentUserId }) }
   } catch (error) {
+    if (error instanceof InlineError) {
+      throw error
+    }
     Log.shared.error("Failed to create thread", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }

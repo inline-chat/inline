@@ -6,8 +6,10 @@ import type { Static } from "elysia"
 import { encodeMemberInfo, TMemberInfo } from "../api-types"
 import { InlineError } from "../types/errors"
 import { TInputId } from "../types/methods"
-import { members, spaces } from "../db/schema"
+import { members, users } from "../db/schema"
 import { eq } from "drizzle-orm"
+import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 export const Input = Type.Object({
   spaceId: TInputId,
@@ -18,15 +20,35 @@ export const Response = Type.Object({
   member: TMemberInfo,
 })
 
-export const handler = async (input: Static<typeof Input>, _: HandlerContext): Promise<Static<typeof Response>> => {
+export const handler = async (input: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
   try {
     const spaceId = Number(input.spaceId)
     if (isNaN(spaceId)) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
+      throw new InlineError(InlineError.ApiError.SPACE_INVALID)
     }
     const userId = Number(input.userId)
     if (isNaN(userId)) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
+      throw new InlineError(InlineError.ApiError.USER_INVALID)
+    }
+
+    try {
+      const privacy = await getSpacePrivacyContext(spaceId, context.currentUserId)
+      if (!privacy.canManageMembers) {
+        throw new InlineError(InlineError.ApiError.SPACE_ADMIN_REQUIRED)
+      }
+    } catch (error) {
+      if (error instanceof InlineError) {
+        throw error
+      }
+      if (error instanceof RealtimeRpcError) {
+        throw new InlineError(InlineError.ApiError.SPACE_INVALID)
+      }
+      throw error
+    }
+
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1)
+    if (!user) {
+      throw new InlineError(InlineError.ApiError.USER_INVALID)
     }
 
     const [member] = await db
@@ -47,6 +69,9 @@ export const handler = async (input: Static<typeof Input>, _: HandlerContext): P
       member: encodeMemberInfo(member),
     }
   } catch (error) {
+    if (error instanceof InlineError) {
+      throw error
+    }
     Log.shared.error("Failed to add member", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }

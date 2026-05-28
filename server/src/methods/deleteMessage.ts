@@ -10,6 +10,8 @@ import { getUpdateGroup } from "../modules/updates"
 import type { Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
+import { getChatIdFromPeer } from "@in/server/methods/sendMessage"
 
 export const Input = Type.Object({
   messageId: TInputId,
@@ -47,7 +49,12 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     ? { userId: Number(input.peerUserId) }
     : { threadId: Number(input.peerThreadId) }
 
-  await deleteMessage(messageId, chatId)
+  const peerChatId = await getChatIdFromPeer(peerId, context)
+  if (peerChatId !== chatId) {
+    throw new InlineError(InlineError.ApiError.PEER_INVALID)
+  }
+
+  await deleteMessage(messageId, chatId, context.currentUserId)
   await deleteMessageUpdate({
     messageId,
     peerId,
@@ -55,12 +62,9 @@ export const handler = async (input: Input, context: Context): Promise<Response>
   })
 }
 
-const deleteMessage = async (messageId: number, chatId: number) => {
+const deleteMessage = async (messageId: number, chatId: number, currentUserId: number) => {
   try {
-    let [chat] = await db.select().from(chats).where(eq(chats.id, chatId))
-    if (!chat) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
+    let chat = await getAuthorizedChat(chatId, currentUserId)
 
     let [message] = await db
       .select()

@@ -7,6 +7,7 @@ import { type TUndefined, type TObject, type TDecodeType, Type } from "@sinclair
 import { TOptional, TPeerInfo } from "@in/server/api-types"
 import { normalizeId, TInputId } from "@in/server/types/methods"
 import { measureTime } from "@in/server/utils/helpers/measure"
+import { getIp } from "@in/server/utils/ip"
 
 export const TMakeApiResponse = <T extends TSchema>(type: T) => {
   const success = t.Object({ ok: t.Literal(true), result: type })
@@ -22,9 +23,10 @@ export const TMakeApiResponse = <T extends TSchema>(type: T) => {
 
 export const handleError = new Elysia({ name: "api-error-handler" })
   .error("INLINE_ERROR", InlineError)
-  .onError({ as: "scoped" }, ({ code, error, path }) => {
+  .onError({ as: "scoped" }, ({ code, error, path, set }) => {
     recordApiError()
     if (code === "NOT_FOUND") {
+      set.status = 404
       Log.shared.error("API ERROR NOT FOUND", error)
       return {
         ok: false,
@@ -33,6 +35,7 @@ export const handleError = new Elysia({ name: "api-error-handler" })
         description: "Method not found",
       }
     } else if (error instanceof InlineError) {
+      set.status = error.code
       Log.shared.error("API ERROR", error)
       return {
         ok: false,
@@ -41,6 +44,7 @@ export const handleError = new Elysia({ name: "api-error-handler" })
         description: error.description,
       }
     } else if (code === "VALIDATION") {
+      set.status = 400
       Log.shared.error("VALIDATION ERROR", error)
       return {
         ok: false,
@@ -49,6 +53,7 @@ export const handleError = new Elysia({ name: "api-error-handler" })
         description: "Validation error",
       }
     } else {
+      set.status = 500
       Log.shared.error(`Top level error ${code} in ${path}`, error)
       return {
         ok: false,
@@ -81,11 +86,7 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
     async ({ query: input, store, server, request }) => {
       const measure = measureTime("GET " + path)
       measure.start()
-      const ip =
-        request.headers.get("x-forwarded-for") ??
-        request.headers.get("cf-connecting-ip") ??
-        request.headers.get("x-real-ip") ??
-        server?.requestIP(request)?.address
+      const ip = getIp(request, server)
       const context = { currentUserId: store.currentUserId, currentSessionId: store.currentSessionId, ip }
 
       let result = await method(input, context)
@@ -103,11 +104,7 @@ export const makeApiRoute = <Path extends string, ISchema extends TObject, OSche
     async ({ body: input, store, server, request }) => {
       const measure = measureTime("POST " + path)
       measure.start()
-      const ip =
-        request.headers.get("x-forwarded-for") ??
-        request.headers.get("cf-connecting-ip") ??
-        request.headers.get("x-real-ip") ??
-        server?.requestIP(request)?.address
+      const ip = getIp(request, server)
       const context = {
         currentUserId: store.currentUserId,
         currentSessionId: store.currentSessionId,
@@ -139,11 +136,7 @@ export const makeUploadApiRoute = <Path extends string, ISchema extends TObject,
     async ({ body: input, store, server, request }) => {
       const measure = measureTime("POST " + path)
       measure.start()
-      const ip =
-        request.headers.get("x-forwarded-for") ??
-        request.headers.get("cf-connecting-ip") ??
-        request.headers.get("x-real-ip") ??
-        server?.requestIP(request)?.address
+      const ip = getIp(request, server)
       const context = {
         currentUserId: store.currentUserId,
         currentSessionId: store.currentSessionId,
@@ -175,11 +168,7 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
     async ({ query: input, server, request }) => {
       const measure = measureTime("POST " + path)
       measure.start()
-      const ip =
-        request.headers.get("x-forwarded-for") ??
-        request.headers.get("cf-connecting-ip") ??
-        request.headers.get("x-real-ip") ??
-        server?.requestIP(request)?.address
+      const ip = getIp(request, server)
       const context = { ip }
       let result = await method(input, context)
       measure.end()
@@ -196,11 +185,7 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
     async ({ body: input, server, request }) => {
       const measure = measureTime("POST " + path)
       measure.start()
-      const ip =
-        request.headers.get("x-forwarded-for") ??
-        request.headers.get("cf-connecting-ip") ??
-        request.headers.get("x-real-ip") ??
-        server?.requestIP(request)?.address
+      const ip = getIp(request, server)
       const context = { ip }
       let result = await method(input, context)
       measure.end()

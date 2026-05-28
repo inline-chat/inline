@@ -11,6 +11,10 @@ import type { UpdateGroup } from "../modules/updates"
 import { getUpdateGroup } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import {
+  ensureCanManageChatParticipants,
+  ensureUserCanParticipateInChat,
+} from "@in/server/modules/authorization/spaceThreadGuards"
 
 export async function addChatParticipant(
   input: {
@@ -31,9 +35,8 @@ export async function addChatParticipant(
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
     }
 
-    if (chat[0]?.spaceId == null && chat[0]?.createdBy !== context.currentUserId) {
-      throw RealtimeRpcError.PeerIdInvalid()
-    }
+    await ensureCanManageChatParticipants(chat[0], context.currentUserId)
+    await ensureUserCanParticipateInChat(chat[0], input.userId)
 
     // Check if user exists
     const user = await db.select().from(users).where(eq(users.id, input.userId)).limit(1)

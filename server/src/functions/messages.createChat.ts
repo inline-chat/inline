@@ -22,6 +22,7 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
+import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"
 
 export async function createChat(
   input: {
@@ -92,6 +93,20 @@ export async function createChat(
     if (!currentUserIncluded) {
       input.participants.push({ userId: BigInt(context.currentUserId) })
     }
+  }
+
+  if (hasSpaceId) {
+    const participantUserIds = input.participants?.map((p) => Number(p.userId)) ?? []
+    if (participantUserIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+      throw RealtimeRpcError.UserIdInvalid()
+    }
+
+    await ensureCanCreateSpaceThread({
+      spaceId: resolvedSpaceId,
+      userId: context.currentUserId,
+      isPublic,
+      participantUserIds,
+    })
   }
 
   const trimmedTitle = input.title?.trim()

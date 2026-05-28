@@ -65,7 +65,6 @@ export const app = new Elysia()
   .use(health)
   .use(root)
   .use(oauth)
-  .use(apiV1)
   .use(botApi)
   .use(realtime)
   .use(waitlist)
@@ -73,6 +72,7 @@ export const app = new Elysia()
   .use(integrationsRouter)
   .use(media)
   .use(admin)
+  .use(apiV1)
 
   .use(
     swagger({

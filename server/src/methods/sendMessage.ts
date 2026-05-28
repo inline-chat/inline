@@ -41,6 +41,7 @@ import { MessageEntities, Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
+import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -99,6 +100,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
   // Get or validate chat ID from peer info
   const chatId = await getChatIdFromPeer(peerId, context)
+  await getAuthorizedChat(chatId, context.currentUserId)
 
   const outgoingText = input.text
     ? await processOutgoingText({

@@ -5,6 +5,7 @@ import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema/users"
 import { eq } from "drizzle-orm"
+import { getIp } from "@in/server/utils/ip"
 
 export type BotHandlerContext = {
   currentUserId: number
@@ -17,15 +18,6 @@ const requireBotUser = async (userId: number) => {
   if (!row[0]?.bot) {
     throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
   }
-}
-
-const getIp = (request: Request, server: any): string | undefined => {
-  return (
-    request.headers.get("x-forwarded-for") ??
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-real-ip") ??
-    server?.requestIP(request)?.address
-  )
 }
 
 const normalizePathToken = (token: string): string | null => {

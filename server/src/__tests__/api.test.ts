@@ -23,6 +23,98 @@ describe("API Endpoints", () => {
       expect(response.status).toBe(200)
       expect(await response.text()).toContain("running")
     })
+
+    it("sets hardening headers", async () => {
+      const response = await testServer.handle(
+        new Request("http://localhost/", {
+          headers: {
+            origin: "https://inline.chat",
+          },
+        }),
+      )
+
+      expect(response.headers.get("access-control-allow-origin")).toContain("https://inline.chat")
+      expect(response.headers.get("x-content-type-options")).toContain("nosniff")
+      expect(response.headers.get("cross-origin-opener-policy")).toContain("same-origin")
+      expect(response.headers.get("x-request-id")).toBeTruthy()
+    })
+  })
+
+  describe("Controller routing", () => {
+    it("keeps public JSON POST routes reachable", async () => {
+      const waitlistResponse = await testServer.handle(
+        new Request("http://localhost/waitlist/subscribe", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            origin: "https://inline.chat",
+          },
+          body: JSON.stringify({
+            email: "waitlist-route@example.com",
+            timeZone: "UTC",
+          }),
+        }),
+      )
+
+      expect(waitlistResponse.status).toBe(200)
+      expect(await waitlistResponse.json()).toMatchObject({ ok: true })
+
+      const thereResponse = await testServer.handle(
+        new Request("http://localhost/api/there/signup", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            origin: "https://inline.chat",
+          },
+          body: JSON.stringify({
+            email: "there-route@example.com",
+            timeZone: "UTC",
+          }),
+        }),
+      )
+
+      expect(thereResponse.status).toBe(200)
+      expect(await thereResponse.json()).toMatchObject({ ok: true })
+    })
+
+    it("keeps admin auth JSON POST route reachable", async () => {
+      const response = await testServer.handle(
+        new Request("http://localhost/admin/auth/send-email-code", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            origin: "https://admin.inline.chat",
+          },
+          body: JSON.stringify({
+            email: "missing-admin@example.com",
+          }),
+        }),
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ ok: true })
+    })
+  })
+
+  describe("Error handling", () => {
+    it("returns the API error HTTP status", async () => {
+      const response = await testServer.handle(
+        new Request("http://localhost/v1/getMe", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        }),
+      )
+
+      expect(response.status).toBe(401)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "UNAUTHORIZED",
+        errorCode: 401,
+      })
+    })
   })
 
   describe("Authentication", () => {
@@ -127,7 +219,7 @@ describe("API Endpoints", () => {
       expect(response.status).toBe(200)
     })
 
-    it("should enter login code and get a token (legacy flow without challenge token)", async () => {
+    it("rejects email login verification without a challenge token", async () => {
       // Create a login code
       const code = "123456"
       const inviteCode = await createInviteCode("LEGACY01")
@@ -135,6 +227,7 @@ describe("API Endpoints", () => {
         email: "test@example.com",
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_no_token",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -152,18 +245,18 @@ describe("API Endpoints", () => {
       })
 
       const response = await testServer.handle(request)
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(400)
       const json = await response.json()
-      expect(json.ok).toBe(true)
-      expect(json.result.token).toBeDefined()
+      expect(json).toMatchObject({
+        ok: false,
+        error: "EMAIL_CODE_INVALID",
+      })
 
-      // Verify user creation
       const user = await db.select().from(users).where(eq(users.email, "test@example.com"))
-      expect(user.length).toBe(1)
-      expect(user[0]?.email).toBe("test@example.com")
+      expect(user.length).toBe(0)
     })
 
-    it("legacy verify can match any active challenge for an email", async () => {
+    it("does not match other active challenges without the challenge token", async () => {
       const email = "legacy-fallback@example.com"
       const inviteCode = await createInviteCode("LEGACY02")
       await db.insert(loginCodes).values({
@@ -194,7 +287,11 @@ describe("API Endpoints", () => {
       })
 
       const response = await testServer.handle(request)
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "EMAIL_CODE_INVALID",
+      })
     })
 
     it("checks an invite code before signup", async () => {
@@ -271,7 +368,7 @@ describe("API Endpoints", () => {
         })
 
         const response = await testServer.handle(request)
-        expect(response.status).toBe(500)
+        expect(response.status).toBe(400)
         expect(await response.json()).toMatchObject({
           ok: false,
           error: "INVITE_CODE_NOT_FOUND",
@@ -294,6 +391,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_dev_invite_code",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -306,6 +404,7 @@ describe("API Endpoints", () => {
           body: JSON.stringify({
             email,
             code,
+            challengeToken: "lc_dev_invite_code",
             inviteCode: "AAAAAAAA",
           }),
         })
@@ -358,6 +457,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_invite_required",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -369,11 +469,12 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email,
           code,
+          challengeToken: "lc_invite_required",
         }),
       })
 
       const response = await testServer.handle(request)
-      expect(response.status).toBe(500)
+      expect(response.status).toBe(400)
       expect(await response.json()).toMatchObject({
         ok: false,
         error: "INVITE_CODE_REQUIRED",
@@ -389,6 +490,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_invite_malformed",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -400,12 +502,13 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email,
           code,
+          challengeToken: "lc_invite_malformed",
           inviteCode: "bad",
         }),
       })
 
       const response = await testServer.handle(request)
-      expect(response.status).toBe(500)
+      expect(response.status).toBe(400)
       expect(await response.json()).toMatchObject({
         ok: false,
         error: "INVITE_CODE_INVALID",
@@ -421,6 +524,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_invite_unknown",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -432,12 +536,13 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email,
           code,
+          challengeToken: "lc_invite_unknown",
           inviteCode: "MISSNG01",
         }),
       })
 
       const response = await testServer.handle(request)
-      expect(response.status).toBe(500)
+      expect(response.status).toBe(400)
       expect(await response.json()).toMatchObject({
         ok: false,
         error: "INVITE_CODE_NOT_FOUND",
@@ -459,6 +564,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_invite_taken",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -470,12 +576,13 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email,
           code,
+          challengeToken: "lc_invite_taken",
           inviteCode: "taken001",
         }),
       })
 
       const response = await testServer.handle(request)
-      expect(response.status).toBe(500)
+      expect(response.status).toBe(400)
       expect(await response.json()).toMatchObject({
         ok: false,
         error: "INVITE_CODE_TAKEN",
@@ -493,6 +600,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_invite_disabled",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -522,6 +630,7 @@ describe("API Endpoints", () => {
           body: JSON.stringify({
             email,
             code,
+            challengeToken: "lc_invite_disabled",
           }),
         })
 
@@ -558,6 +667,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_space_invite",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -586,6 +696,7 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email,
           code,
+          challengeToken: "lc_space_invite",
         }),
       })
 
@@ -602,6 +713,7 @@ describe("API Endpoints", () => {
         email,
         code: null,
         codeHash: await hashLoginCode("123456"),
+        challengeId: "lc_invalid_code",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -613,11 +725,12 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email,
           code: "000000",
+          challengeToken: "lc_invalid_code",
         }),
       })
 
       const response = await testServer.handle(request)
-      expect(response.status).toBe(500)
+      expect(response.status).toBe(400)
       expect(await response.json()).toMatchObject({
         ok: false,
         error: "EMAIL_CODE_INVALID",
@@ -632,6 +745,7 @@ describe("API Endpoints", () => {
         email: "device@test.com",
         code: null,
         codeHash: await hashLoginCode(code),
+        challengeId: "lc_device",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
 
@@ -643,6 +757,7 @@ describe("API Endpoints", () => {
         body: JSON.stringify({
           email: "device@test.com",
           code,
+          challengeToken: "lc_device",
           inviteCode,
           deviceId: "device-test-1",
         }),

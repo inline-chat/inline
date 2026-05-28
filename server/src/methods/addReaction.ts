@@ -7,6 +7,7 @@ import { encodeReactionInfo, TReactionInfo } from "../api-types"
 import { reactions } from "../db/schema/reactions"
 import { InlineError } from "../types/errors"
 import { TInputId } from "../types/methods"
+import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 
 export const Input = Type.Object({
   messageId: TInputId,
@@ -32,6 +33,8 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.BAD_REQUEST)
     }
 
+    await getAuthorizedChat(chatId, context.currentUserId)
+
     const [reaction] = await db
       .insert(reactions)
       .values({
@@ -51,6 +54,9 @@ export const handler = async (
       reaction: encodeReactionInfo(reaction),
     }
   } catch (error) {
+    if (error instanceof InlineError) {
+      throw error
+    }
     Log.shared.error("Failed to add reaction", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }

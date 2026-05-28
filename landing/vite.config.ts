@@ -8,6 +8,33 @@ import { nitro } from "nitro/vite"
 
 const host = process.env.TAURI_DEV_HOST
 const immutableAssetMaxAge = 60 * 60 * 24 * 365
+const securityHeaders = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'self'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self' 'unsafe-inline'",
+    "connect-src 'self' https://api.inline.chat wss://api.inline.chat https://public-assets.inline.chat",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    "form-action 'self'",
+    "upgrade-insecure-requests",
+  ].join("; "),
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "Origin-Agent-Cluster": "?1",
+  "Referrer-Policy": "no-referrer",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "X-Content-Type-Options": "nosniff",
+  "X-DNS-Prefetch-Control": "off",
+  "X-Download-Options": "noopen",
+  "X-Frame-Options": "SAMEORIGIN",
+  "X-Permitted-Cross-Domain-Policies": "none",
+}
 
 const plugins = [
   tailwindcss(),
@@ -59,6 +86,11 @@ const config = defineConfig({
   // @ts-ignore
   nitro: {
     preset: "bun",
+    routeRules: {
+      "/**": {
+        headers: securityHeaders,
+      },
+    },
     publicAssets: [
       {
         dir: "node_modules/.nitro/vite/services/ssr/assets",
