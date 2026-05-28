@@ -38,8 +38,7 @@ public struct ParticipantAvatarStack: View {
 
       if self.overflowCount > 0 {
         Text("+\(self.overflowCount, format: .number.notation(.compactName))")
-          .font(.system(size: 6))
-          .fontDesign(.rounded)
+          .font(.system(size: 6, design: .rounded).weight(.semibold).width(.compressed))
           .foregroundStyle(.white)
           .frame(width: self.avatarSize, height: self.avatarSize)
           .background(.accent.gradient, in: .circle)
