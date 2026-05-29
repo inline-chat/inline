@@ -1,15 +1,6 @@
 import InlineKit
-import SwiftUI
-import UserNotifications
 import Logger
-
-extension EnvironmentValues {
-  @Entry var requestNotifications: () async -> Void = {}
-}
-
-extension Notification.Name {
-  static let requestNotificationPermission = Notification.Name("requestNotificationPermission")
-}
+import UserNotifications
 
 class NotificationsManager: NSObject {
   var log = Log.scoped("Notifications")
@@ -19,22 +10,12 @@ class NotificationsManager: NSObject {
   override init() {
     center = UNUserNotificationCenter.current()
     super.init()
-    startListening()
   }
 
   // Call in app delegate
   func setup() {
     center.delegate = self
     log.debug("Notifications manager setup completed.")
-  }
-  
-  func startListening() {
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(requestNotificationsSel),
-      name: .requestNotificationPermission,
-      object: nil
-    )
   }
 
   var onNotificationReceivedAction: ((_ response: UNNotificationResponse) -> Void)?
@@ -70,67 +51,5 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
     log.debug("Received notification: \(response.notification.request.content.userInfo)")
     onNotificationReceivedAction.map { $0(response) }
     completionHandler() // Is this correct?
-  }
-}
-
-// Functions
-extension NotificationsManager {
-  func requestNotifications() async {
-    do {
-      let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
-
-      log.debug("Requested notifications permissions")
-
-      if granted {
-        await registerForRemoteNotifications()
-      }
-    } catch {
-      // Handle the error here.
-      log.error("Failed to request notifications permissions", error: error)
-    }
-  }
-  
-  @objc func requestNotificationsSel() {
-    Task {
-      await requestNotifications()
-    }
-  }
-
-//  func getNotificationSettings() async {
-//    let settings = await center.notificationSettings()
-//
-//    guard settings.authorizationStatus == .authorized else {
-//      log.debug("Notifications are not authorized")
-//      return
-//    }
-//
-//    log.debug("Notifications are authorized")
-//
-//    return settings
-//  }
-
-  func registerForRemoteNotifications() async {
-    DispatchQueue.main.async {
-      #if os(iOS)
-      UIApplication.shared.registerForRemoteNotifications()
-      #elseif os(macOS)
-      NSApplication.shared.registerForRemoteNotifications()
-      #endif
-      self.log.debug("registerForRemoteNotifications called")
-    }
-  }
-
-  func didRegisterForRemoteNotifications(deviceToken: Data) {
-    log.debug("Registered for remote notifications: \(deviceToken)")
-
-    let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-
-    Task {
-      let _ = await Api.realtime.sendQueued(
-        .updatePushNotificationDetails(applePushToken: deviceToken)
-      )
-
-      log.debug("Saved push notification token")
-    }
   }
 }

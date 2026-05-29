@@ -4,6 +4,7 @@ import SwiftUI
 
 struct DebugSettingsDetailView: View {
   @State private var showSyncStats = false
+  @State private var showPermissions = false
   @State private var confirmDeleteDatabase = false
   @State private var isDeletingDatabase = false
   @State private var databaseErrorMessage = ""
@@ -17,6 +18,11 @@ struct DebugSettingsDetailView: View {
       Section("Sync") {
         Button("Sync Engine Stats") {
           showSyncStats = true
+        }
+      }
+      Section("Permissions") {
+        Button("Open Permissions") {
+          showPermissions = true
         }
       }
 #if DEBUG || DEBUG_BUILD
@@ -40,6 +46,9 @@ struct DebugSettingsDetailView: View {
     .scrollContentBackground(.hidden)
     .sheet(isPresented: $showSyncStats) {
       SyncEngineStatsDetailView()
+    }
+    .sheet(isPresented: $showPermissions) {
+      PermissionsDebugSheet()
     }
 #if DEBUG || DEBUG_BUILD
     .confirmationDialog(
