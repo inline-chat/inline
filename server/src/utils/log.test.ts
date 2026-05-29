@@ -2,15 +2,16 @@ import { describe, expect, it } from "bun:test"
 import { redactString, redactValue } from "./log"
 
 describe("log redaction", () => {
-  it("redacts bearer and bot path tokens in strings", () => {
+  it("redacts bearer and path tokens in strings", () => {
     const rawToken = "123:INabcdefghijklmnopqrstuvwxyz"
     const encodedToken = "123%3AINabcdefghijklmnopqrstuvwxyz"
-    const input = `Authorization: Bearer ${rawToken} path=/bot${rawToken}/sendMessage encoded=/bot${encodedToken}/getMe`
+    const input = `Authorization: Bearer ${rawToken} path=/bot${rawToken}/sendMessage encoded=/bot${encodedToken}/getMe get=/${rawToken}/getMe getEncoded=/${encodedToken}/getMe`
 
     const output = redactString(input)
 
     expect(output).toContain("Bearer <redacted>")
     expect(output).toContain("bot<redacted>")
+    expect(output).toContain("/<redacted>/getMe")
     expect(output).not.toContain(rawToken)
     expect(output).not.toContain(encodedToken)
   })

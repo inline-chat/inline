@@ -10,10 +10,14 @@ const REDACTED: Redacted = "<redacted>"
 
 const BOT_TOKEN_SEGMENT_RE = /\bbot[^\/\s]*(?::|%3A|%3a)[^\/\s]+\b/g // matches "bot<userId>:IN...." (raw or url-encoded ':')
 const BEARER_RE = /\bBearer\s+[^\s]+/gi
+const AUTH_TOKEN_SEGMENT_RE = /(^|\/)\d+(?::|%3A|%3a)[^\/\s]+/g
 
 export const redactString = (value: string): string => {
   // Avoid leaking tokens in path (e.g. /bot<token>/sendMessage) or in auth headers.
-  return value.replace(BEARER_RE, `Bearer ${REDACTED}`).replace(BOT_TOKEN_SEGMENT_RE, `bot${REDACTED}`)
+  return value
+    .replace(BEARER_RE, `Bearer ${REDACTED}`)
+    .replace(BOT_TOKEN_SEGMENT_RE, `bot${REDACTED}`)
+    .replace(AUTH_TOKEN_SEGMENT_RE, `$1${REDACTED}`)
 }
 
 const shouldRedactKey = (key: string): boolean => {
