@@ -3623,18 +3623,16 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
 
-      if AppSettings.shared.enableReplyThreadMenuItems {
-        let replyInThreadItem = NSMenuItem(
-          title: "Reply in Thread",
-          action: #selector(replyInThread),
-          keyEquivalent: ""
-        )
-        replyInThreadItem.image = NSImage(
-          systemSymbolName: "arrowshape.turn.up.left.circle",
-          accessibilityDescription: "Reply in Thread"
-        )
-        menu.addItem(replyInThreadItem)
-      }
+      let replyInThreadItem = NSMenuItem(
+        title: "Reply in Thread",
+        action: #selector(replyInThread),
+        keyEquivalent: ""
+      )
+      replyInThreadItem.image = NSImage(
+        systemSymbolName: "arrowshape.turn.up.left.circle",
+        accessibilityDescription: "Reply in Thread"
+      )
+      menu.addItem(replyInThreadItem)
 
       let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
       forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")

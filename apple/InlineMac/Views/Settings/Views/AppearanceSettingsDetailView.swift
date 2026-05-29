@@ -13,6 +13,19 @@ struct AppearanceSettingsDetailView: View {
         }
         .pickerStyle(.segmented)
       }
+
+      Section("Messages") {
+        Picker("Message style", selection: $appSettings.messageRenderStyle) {
+          ForEach(MessageRenderStyle.allCases, id: \.self) { style in
+            Text(style.title).tag(style)
+          }
+        }
+        .pickerStyle(.segmented)
+
+        Text("Message style applies to newly opened chats.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
     }
     .formStyle(.grouped)
     .scrollContentBackground(.hidden)

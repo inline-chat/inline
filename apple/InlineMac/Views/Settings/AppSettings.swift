@@ -172,12 +172,6 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var enableReplyThreadMenuItems: Bool {
-    didSet {
-      UserDefaults.standard.set(enableReplyThreadMenuItems, forKey: ExperimentalFeatureFlags.replyThreadMenuItemsKey)
-    }
-  }
-
   @Published var sidebarAsInbox: Bool {
     didSet {
       UserDefaults.standard.set(sidebarAsInbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
@@ -232,7 +226,6 @@ final class AppSettings: ObservableObject {
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     enableVoiceMessages = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.voiceMessagesKey)
-    enableReplyThreadMenuItems = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.replyThreadMenuItemsKey)
     sidebarAsInbox = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
     if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
        !storedChannel.isEmpty,
