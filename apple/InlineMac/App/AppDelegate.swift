@@ -520,22 +520,6 @@ extension AppDelegate {
     UNUserNotificationCenter.current().delegate = notifications
   }
 
-  func application(
-    _: NSApplication,
-    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-  ) {
-    log.debug("Registered for remote notifications: \(deviceToken)")
-
-    notifications.didRegisterForRemoteNotifications(deviceToken: deviceToken)
-  }
-
-  func application(
-    _: NSApplication,
-    didFailToRegisterForRemoteNotificationsWithError error: Error
-  ) {
-    log.error("Failed to register for remote notifications \(error)")
-  }
-
   func handleNotification(_ response: UNNotificationResponse) {
     log.debug("Received notification: \(response)")
 

@@ -17,10 +17,6 @@ public actor MacNotifications: Sendable {
   private let log = Log.scoped("MacNotifications")
   private let avatarBuilder = AvatarAttachmentBuilder(avatarDiameter: 44)
 
-  func requestPermission() async throws -> Bool {
-    try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-  }
-
   public func setSoundEnabled(_ enabled: Bool) {
     soundEnabled = enabled
   }

@@ -138,6 +138,7 @@ struct MainWindowRootView: View {
 
   private func syncTopLevelRoute(_ route: TopLevelRoute) {
     if route == .main {
+      MacPermissions.ensureNotificationAuthorizationIfNeeded()
       sidebarViewModel.start(selectedSpaceId: nav3.selectedSpaceId, mode: sidebarMode)
       if let dependencies {
         dependencies.session.fetchInitialDataIfNeeded(dependencies: dependencies)
