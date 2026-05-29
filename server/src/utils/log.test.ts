@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { redactString, redactValue } from "./log"
+import { beforeSendLog, redactString, redactValue } from "./log"
 
 describe("log redaction", () => {
   it("redacts bearer and path tokens in strings", () => {
@@ -51,6 +51,8 @@ describe("log redaction", () => {
     const input = {
       authorization: `Bearer ${token}`,
       token,
+      email: "user@example.com",
+      phoneNumber: "+15555550123",
       nested: {
         request: `/bot${token}/getMe`,
       },
@@ -59,12 +61,40 @@ describe("log redaction", () => {
     const redacted = redactValue(input) as {
       authorization: string
       token: string
+      email: string
+      phoneNumber: string
       nested: { request: string }
     }
 
     expect(redacted.authorization).toBe("<redacted>")
     expect(redacted.token).toBe("<redacted>")
+    expect(redacted.email).toBe("<redacted>")
+    expect(redacted.phoneNumber).toBe("<redacted>")
     expect(redacted.nested.request).toContain("bot<redacted>")
     expect(redacted.nested.request).not.toContain(token)
+  })
+
+  it("scrubs sensitive Sentry log attributes", () => {
+    const log = beforeSendLog({
+      level: "warn",
+      message: "Failed /123:INabcdefghijklmnopqrstuvwxyz/getMe",
+      attributes: {
+        "logger.scope": "test",
+        "user.id": "123",
+        "user.email": "user@example.com",
+        "user.name": "Inline User",
+        token: "123:INabcdefghijklmnopqrstuvwxyz",
+        phoneNumber: "+15555550123",
+      },
+    })
+
+    expect(log).not.toBeNull()
+    expect(log?.message).toBe("Failed /<redacted>/getMe")
+    expect(log?.attributes?.["logger.scope"]).toBe("test")
+    expect(log?.attributes?.["user.id"]).toBe("123")
+    expect(log?.attributes?.["user.email"]).toBeUndefined()
+    expect(log?.attributes?.["user.name"]).toBeUndefined()
+    expect(log?.attributes?.token).toBe("<redacted>")
+    expect(log?.attributes?.phoneNumber).toBe("<redacted>")
   })
 })
