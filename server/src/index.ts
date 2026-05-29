@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/bun"
 import { API_BASE_URL, NODE_ENV, PORT, SENTRY_DSN } from "@in/server/env"
 import { gitCommitHash, gitCommitSha, version } from "@in/server/buildEnv"
 import { buildServerSentryDist, buildServerSentryRelease } from "@in/server/utils/sentryRelease"
+import { beforeSendLog } from "@in/server/utils/log"
 
 const sentryRelease = buildServerSentryRelease(version, gitCommitSha)
 const sentryDist = buildServerSentryDist(gitCommitSha)
@@ -15,6 +16,7 @@ Sentry.init({
   tracesSampleRate: 1.0,
   enabled: NODE_ENV !== "development",
   enableLogs: true,
+  beforeSendLog,
 })
 
 // Main app
