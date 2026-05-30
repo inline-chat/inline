@@ -1,4 +1,5 @@
 import {
+  DialogNotificationSettings_Mode,
   InputPeer,
   MessageActions,
   MessageAttachment,
@@ -110,6 +111,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     log.error("sendMessage blocked: chat access denied", { chatId: chat.id, currentUserId, inputPeer, error })
     throw error
   }
+  await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
   const chatId = chat.id
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
   // FIXME: create a helper function to get the layer
@@ -312,6 +314,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       dialogs: changedDialogs,
     })
   }
+  scheduleExplicitAllNotificationSidebarOpen({
+    chat,
+    currentUserId,
+    updateGroup,
+    excludeUserIds: sidebarOpenUserIds,
+  })
   const { updates: unarchiveUpdates } = await unarchiveIfNeeded({
     chat,
     updateGroup,
@@ -393,6 +401,22 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   return { updates: selfUpdates }
 }
 
+async function ensurePrivatePeerCanReceiveMessages(chat: DbChat, currentUserId: number): Promise<void> {
+  if (chat.type !== "private" || chat.minUserId == null || chat.maxUserId == null) {
+    return
+  }
+
+  const peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+  if (peerUserId === currentUserId) {
+    return
+  }
+
+  const peerUser = await UsersModel.getUserById(peerUserId)
+  if (!peerUser || UsersModel.isDeleted(peerUser)) {
+    throw RealtimeRpcError.PeerIdInvalid()
+  }
+}
+
 const getMentionedUserIds = (entities: MessageEntities | undefined): number[] => {
   if (!entities) {
     return []
@@ -461,6 +485,95 @@ const getSidebarOpenUserIds = async ({
   }
 
   return Array.from(openUserIds)
+}
+
+const scheduleExplicitAllNotificationSidebarOpen = ({
+  chat,
+  currentUserId,
+  updateGroup,
+  excludeUserIds,
+}: {
+  chat: DbChat
+  currentUserId: number
+  updateGroup: UpdateGroup
+  excludeUserIds: number[]
+}) => {
+  void openExplicitAllNotificationDialogs({
+    chat,
+    currentUserId,
+    updateGroup,
+    excludeUserIds,
+  }).catch((error) => {
+    log.error("Failed to open explicit all-notification dialogs", {
+      error,
+      chatId: chat.id,
+    })
+  })
+}
+
+const openExplicitAllNotificationDialogs = async ({
+  chat,
+  currentUserId,
+  updateGroup,
+  excludeUserIds,
+}: {
+  chat: DbChat
+  currentUserId: number
+  updateGroup: UpdateGroup
+  excludeUserIds: number[]
+}) => {
+  const excludedUserIds = new Set(excludeUserIds)
+  const userIds = updateGroup.userIds.filter((userId) => userId !== currentUserId && !excludedUserIds.has(userId))
+  const allNotificationUserIds = await getExplicitAllNotificationUserIds({
+    chatId: chat.id,
+    userIds,
+  })
+
+  if (allNotificationUserIds.length === 0) {
+    return
+  }
+
+  const { changedDialogs } = isLinkedSubthread(chat)
+    ? await showAndOpenLinkedSubthreadDialogs({
+        chat,
+        userIds: allNotificationUserIds,
+      })
+    : await setDialogOpenForUsers({
+        chat,
+        userIds: allNotificationUserIds,
+        open: true,
+      })
+
+  await emitChatListOpenUpdates({
+    chat,
+    dialogs: changedDialogs,
+  })
+}
+
+const getExplicitAllNotificationUserIds = async ({
+  chatId,
+  userIds,
+}: {
+  chatId: number
+  userIds: number[]
+}): Promise<number[]> => {
+  if (userIds.length === 0) {
+    return []
+  }
+
+  const rows = await db
+    .select({
+      userId: dialogs.userId,
+      notificationSettings: dialogs.notificationSettings,
+    })
+    .from(dialogs)
+    .where(and(eq(dialogs.chatId, chatId), inArray(dialogs.userId, userIds)))
+
+  return rows
+    .filter(
+      (row) => decodeDialogNotificationSettings(row.notificationSettings)?.mode === DialogNotificationSettings_Mode.ALL,
+    )
+    .map((row) => row.userId)
 }
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]

@@ -2,9 +2,8 @@
 
 import { eq, inArray, and, not, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
-import { dialogs, users, files, type DbUser, type DbFile, type DbUserWithProfile } from "@in/server/db/schema"
+import { users, userNotDeleted, type DbUser, type DbFile, type DbUserWithProfile } from "@in/server/db/schema"
 import parsePhoneNumber from "libphonenumber-js"
-import { RpcError } from "@inline-chat/protocol/core"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { isValidEmail } from "@in/server/utils/validate"
 import { Log } from "@in/server/utils/log"
@@ -12,6 +11,33 @@ import { Log } from "@in/server/utils/log"
 const log = new Log("UsersModel")
 
 export class UsersModel {
+  static isDeleted(user: Pick<DbUser, "deleted"> | undefined | null): boolean {
+    return user?.deleted === true
+  }
+
+  static async getActiveUserIds(userIds: number[]): Promise<number[]> {
+    const uniqueUserIds = [...new Set(userIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
+    if (uniqueUserIds.length === 0) {
+      return []
+    }
+
+    const rows = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(inArray(users.id, uniqueUserIds), userNotDeleted()))
+
+    const activeUserIds = new Set(rows.map((row) => row.id))
+    return uniqueUserIds.filter((id) => activeUserIds.has(id))
+  }
+
+  static async getActiveUserById(id: number): Promise<DbUser | undefined> {
+    const user = await db._query.users.findFirst({
+      where: and(eq(users.id, id), userNotDeleted()),
+    })
+
+    return user
+  }
+
   /**
    * Get a user by id
    *
@@ -210,6 +236,7 @@ export class UsersModel {
       where: and(
         sql`${users.username} ilike ${"%" + query + "%"}`,
         excludeUserId ? not(eq(users.id, excludeUserId)) : undefined,
+        userNotDeleted(),
       ),
       limit,
       with: {

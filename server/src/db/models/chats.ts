@@ -1,14 +1,12 @@
 import { db } from "@in/server/db"
 import { eq, and, desc } from "drizzle-orm"
-import { type ExtractTablesWithRelations } from "drizzle-orm/_relations"
 import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { UsersModel } from "@in/server/db/models/users"
 import { InlineError } from "@in/server/types/errors"
 import { TPeerInfo } from "@in/server/api-types"
 import { ModelError } from "@in/server/db/models/_errors"
 import type { InputPeer } from "@inline-chat/protocol/core"
 import { Log } from "@in/server/utils/log"
-import type { PgTransaction } from "drizzle-orm/pg-core"
-import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js"
 import { dialogOpenDefaultsForChat, nextDialogOrder } from "@in/server/modules/dialogOpen"
 
 const log = new Log("chats")
@@ -34,6 +32,12 @@ async function createUserChatAndDialog(input: {
   peerUserId: number
   currentUserId: number
 }): Promise<{ chat: DbChat; dialog: DbDialog; createdChat: boolean }> {
+  const activeUserIds = await UsersModel.getActiveUserIds([input.peerUserId, input.currentUserId])
+  const requiredUserCount = new Set([input.peerUserId, input.currentUserId]).size
+  if (activeUserIds.length !== requiredUserCount) {
+    throw ModelError.ChatInvalid
+  }
+
   let minUserId = Math.min(input.peerUserId, input.currentUserId)
   let maxUserId = Math.max(input.peerUserId, input.currentUserId)
 

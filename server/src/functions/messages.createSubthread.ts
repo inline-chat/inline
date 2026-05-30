@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { chats, chatParticipants, users, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { chats, chatParticipants, userNotDeleted, users, type DbChat, type DbDialog } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
@@ -18,7 +18,7 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { Chat, Dialog, Message } from "@inline-chat/protocol/core"
-import { eq, inArray } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 
 type Input = {
   parentChatId: bigint
@@ -240,7 +240,7 @@ async function ensureUsersExist(userIds: number[]): Promise<void> {
   const existingUsers = await db
     .select({ id: users.id })
     .from(users)
-    .where(inArray(users.id, userIds))
+    .where(and(inArray(users.id, userIds), userNotDeleted()))
 
   if (existingUsers.length !== userIds.length) {
     throw RealtimeRpcError.UserIdInvalid()

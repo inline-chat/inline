@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
@@ -71,21 +72,21 @@ export async function ensureLinkedSubthreadDialogs(input: {
   userIds: number[]
   chatListHidden?: boolean
 }): Promise<{ dialogs: DbDialog[]; createdDialogs: DbDialog[] }> {
-  const uniqueUserIds = Array.from(
-    new Set(input.userIds.filter((userId) => Number.isSafeInteger(userId) && userId > 0)),
+  const activeUserIds = await UsersModel.getActiveUserIds(
+    Array.from(new Set(input.userIds.filter((userId) => Number.isSafeInteger(userId) && userId > 0))),
   )
 
-  if (uniqueUserIds.length === 0) {
+  if (activeUserIds.length === 0) {
     return { dialogs: [], createdDialogs: [] }
   }
 
   const existingDialogs = await db
     .select()
     .from(dialogs)
-    .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, uniqueUserIds)))
+    .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, activeUserIds)))
 
   const existingUserIds = new Set(existingDialogs.map((dialog) => dialog.userId))
-  const missingUserIds = uniqueUserIds.filter((userId) => !existingUserIds.has(userId))
+  const missingUserIds = activeUserIds.filter((userId) => !existingUserIds.has(userId))
 
   let createdDialogs: DbDialog[] = []
   if (missingUserIds.length > 0) {
@@ -114,24 +115,24 @@ export async function promoteLinkedSubthreadDialogsToChatList(input: {
   chat: Pick<DbChat, "id" | "spaceId" | "type">
   userIds: number[]
 }): Promise<{ dialogs: DbDialog[]; activatedDialogs: DbDialog[] }> {
-  const uniqueUserIds = Array.from(
-    new Set(input.userIds.filter((userId) => Number.isSafeInteger(userId) && userId > 0)),
+  const activeUserIds = await UsersModel.getActiveUserIds(
+    Array.from(new Set(input.userIds.filter((userId) => Number.isSafeInteger(userId) && userId > 0))),
   )
 
-  if (uniqueUserIds.length === 0) {
+  if (activeUserIds.length === 0) {
     return { dialogs: [], activatedDialogs: [] }
   }
 
   const existingDialogs = await db
     .select()
     .from(dialogs)
-    .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, uniqueUserIds)))
+    .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, activeUserIds)))
 
   const hiddenDialogUserIds = existingDialogs
     .filter((dialog) => dialog.chatListHidden)
     .map((dialog) => dialog.userId)
   const existingUserIds = new Set(existingDialogs.map((dialog) => dialog.userId))
-  const missingUserIds = uniqueUserIds.filter((userId) => !existingUserIds.has(userId))
+  const missingUserIds = activeUserIds.filter((userId) => !existingUserIds.has(userId))
 
   let promotedDialogs: DbDialog[] = []
   if (hiddenDialogUserIds.length > 0) {
@@ -318,7 +319,7 @@ export async function getDirectParticipantUserIds(chatId: number): Promise<numbe
     .from(chatParticipants)
     .where(eq(chatParticipants.chatId, chatId))
 
-  return participants.map((participant) => participant.userId)
+  return UsersModel.getActiveUserIds(participants.map((participant) => participant.userId))
 }
 
 export async function getTopLevelAccessUserIds(chat: DbChat): Promise<number[]> {
@@ -328,10 +329,10 @@ export async function getTopLevelAccessUserIds(chat: DbChat): Promise<number[]> 
     }
 
     if (chat.minUserId === chat.maxUserId) {
-      return [chat.minUserId]
+      return UsersModel.getActiveUserIds([chat.minUserId])
     }
 
-    return [chat.minUserId, chat.maxUserId]
+    return UsersModel.getActiveUserIds([chat.minUserId, chat.maxUserId])
   }
 
   if (chat.spaceId == null) {
@@ -344,7 +345,7 @@ export async function getTopLevelAccessUserIds(chat: DbChat): Promise<number[]> 
       .from(members)
       .where(and(eq(members.spaceId, chat.spaceId), eq(members.canAccessPublicChats, true)))
 
-    return publicMembers.map((member) => member.userId)
+    return UsersModel.getActiveUserIds(publicMembers.map((member) => member.userId))
   }
 
   return getDirectParticipantUserIds(chat.id)

@@ -7,9 +7,6 @@ import { and, eq } from "drizzle-orm"
 import type { TPeerInfo } from "@in/server/api-types"
 import type { InputPeer } from "@inline-chat/protocol/core"
 
-function makeInputPeerUser(userId: number): InputPeer {
-  return { type: { oneofKind: "user", user: { userId: BigInt(userId) } } }
-}
 function makeInputPeerChat(chatId: number): InputPeer {
   return { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } }
 }
@@ -18,7 +15,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
   setupTestLifecycle()
 
   test("returns correct userIds for private chat (DM)", async () => {
-    const { space, users } = await testUtils.createSpaceWithMembers("DM Test Space", ["a@ex.com", "b@ex.com"])
+    const { users } = await testUtils.createSpaceWithMembers("DM Test Space", ["a@ex.com", "b@ex.com"])
     const [userA, userB] = users
     // Create DM chat
     const chat = await testUtils.createPrivateChat(userA, userB)
@@ -29,6 +26,19 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const group = await getUpdateGroup(peer, context)
     expect(group.type).toBe("dmUsers")
     expect((group as any).userIds.sort()).toEqual([userA.id, userB.id].sort())
+  })
+
+  test("excludes deleted peer users from private chat updates", async () => {
+    const userA = await testUtils.createUser("deleted-dm-a@ex.com")
+    const userB = await testUtils.createUser("deleted-dm-b@ex.com")
+    const chat = await testUtils.createPrivateChat(userA, userB)
+    if (!chat) throw new Error("Chat not created")
+
+    await db.update(schema.users).set({ deleted: true }).where(eq(schema.users.id, userB.id))
+
+    const group = await getUpdateGroup({ userId: userB.id }, { currentUserId: userA.id })
+    expect(group.type).toBe("dmUsers")
+    expect((group as any).userIds).toEqual([userA.id])
   })
 
   test("returns correct userIds for saved message (self chat)", async () => {
@@ -65,6 +75,21 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const group = await getUpdateGroup(peer, context)
     expect(group.type).toBe("threadUsers")
     expect((group as any).userIds.sort()).toEqual([users[0].id, users[1].id].sort())
+  })
+
+  test("excludes deleted space members from public thread updates", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Deleted Public Thread Space", [
+      "deleted-public-a@ex.com",
+      "deleted-public-b@ex.com",
+    ])
+    const chat = await testUtils.createChat(space.id, "Deleted Public Thread", "thread")
+    if (!chat) throw new Error("Chat not created")
+    await db.update(schema.chats).set({ publicThread: true }).where(eq(schema.chats.id, chat.id))
+    await db.update(schema.users).set({ deleted: true }).where(eq(schema.users.id, users[1]!.id))
+
+    const group = await getUpdateGroup({ threadId: chat.id }, { currentUserId: users[0]!.id })
+    expect(group.type).toBe("threadUsers")
+    expect((group as any).userIds).toEqual([users[0]!.id])
   })
 
   test("returns only participants for private thread", async () => {

@@ -101,6 +101,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   // Get or validate chat ID from peer info
   const chatId = await getChatIdFromPeer(peerId, context)
   await getAuthorizedChat(chatId, context.currentUserId)
+  await ensurePrivatePeerCanReceiveMessages(chatId, context.currentUserId)
 
   const outgoingText = input.text
     ? await processOutgoingText({
@@ -232,6 +233,23 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   }
 
   return { message: encodedMessage, updates: [updateMessageId] }
+}
+
+async function ensurePrivatePeerCanReceiveMessages(chatId: number, currentUserId: number): Promise<void> {
+  const [chat] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1)
+  if (!chat || chat.type !== "private" || chat.minUserId == null || chat.maxUserId == null) {
+    return
+  }
+
+  const peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+  if (peerUserId === currentUserId) {
+    return
+  }
+
+  const [peerUser] = await db.select({ deleted: users.deleted }).from(users).where(eq(users.id, peerUserId)).limit(1)
+  if (!peerUser || peerUser.deleted === true) {
+    throw new InlineError(InlineError.ApiError.PEER_INVALID)
+  }
 }
 
 export const getChatIdFromPeer = async (

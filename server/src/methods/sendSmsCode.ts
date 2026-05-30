@@ -1,10 +1,8 @@
-import { isValidPhoneNumber } from "@in/server/utils/validate"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
-import { twilio } from "@in/server/libs/twilio"
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
@@ -42,11 +40,14 @@ export const handler = async (
     let formattedPhoneNumber = phoneNumber.number
 
     // send sms code
-    let response = await prelude.sendCode(formattedPhoneNumber)
+    await prelude.sendCode(formattedPhoneNumber)
 
     Log.shared.debug("sending sms code to", { phoneNumber: formattedPhoneNumber })
 
     let existingUser = (await db.select().from(users).where(eq(users.phoneNumber, formattedPhoneNumber)).limit(1))[0]
+    if (existingUser?.deleted === true) {
+      throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
+    }
 
     return {
       existingUser: existingUser ? existingUser.pendingSetup !== true : false,
@@ -57,6 +58,9 @@ export const handler = async (
       formattedPhoneNumber: phoneNumber.formatInternational(),
     }
   } catch (error) {
+    if (error instanceof InlineError) {
+      throw error
+    }
     Log.shared.error("Failed to send sms code", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }

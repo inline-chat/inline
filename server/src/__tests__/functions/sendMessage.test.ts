@@ -1,5 +1,12 @@
 import { describe, test, expect, beforeAll, mock } from "bun:test"
-import { InputPeer, Message, MessageEntity_Type, SendMessageResult } from "@inline-chat/protocol/core"
+import {
+  DialogNotificationSettings,
+  DialogNotificationSettings_Mode,
+  InputPeer,
+  Message,
+  MessageEntity_Type,
+  SendMessageResult,
+} from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
@@ -14,6 +21,7 @@ import { getMessages } from "@in/server/functions/messages.getMessages"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 // Test state
 let currentUser: DbUser
@@ -25,10 +33,10 @@ let userIndex = 0
 const runId = Date.now()
 const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
 
-async function waitForTrue(check: () => boolean, timeoutMs = 1_000, intervalMs = 20): Promise<void> {
+async function waitForTrue(check: () => boolean | Promise<boolean>, timeoutMs = 1_000, intervalMs = 20): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    if (check()) return
+    if (await check()) return
     await Bun.sleep(intervalMs)
   }
   throw new Error("Timed out waiting for async condition")
@@ -305,6 +313,46 @@ describe("sendMessage", () => {
     expect(mentionEntity.entity.mention.userId).toBe(BigInt(mentionedUser.id))
   })
 
+  test("does not parse deleted users as @username mentions", async () => {
+    const mentionedUser = await testUtils.createUser(nextEmail("deleted-mentioned-user"))
+    await db
+      .update(users)
+      .set({ username: "deletedmention", deleted: true })
+      .where(eq(users.id, mentionedUser.id))
+      .execute()
+
+    const result = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "hello @deletedmention",
+      },
+      context,
+    )
+
+    const message = extractMessage(result)
+    expect(message).toBeTruthy()
+    expect(message!.entities?.entities ?? []).toHaveLength(0)
+  })
+
+  test("rejects sending to an existing DM whose peer user is deleted", async () => {
+    const sender = await testUtils.createUser(nextEmail("deleted-dm-sender"))
+    const peer = await testUtils.createUser(nextEmail("deleted-dm-peer"))
+    const chat = await testUtils.createPrivateChat(sender, peer)
+    if (!chat) throw new Error("Chat not created")
+
+    await db.update(users).set({ deleted: true }).where(eq(users.id, peer.id)).execute()
+
+    await expect(
+      sendMessage(
+        {
+          peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+          message: "hello",
+        },
+        testUtils.functionContext({ userId: sender.id, sessionId: 1 }),
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
+  })
+
   test("does not duplicate mention node when client already provides mention entity", async () => {
     const mentionedUser = await testUtils.createUser(nextEmail("provided-mentioned-user"))
     await db.update(users).set({ username: "providedmention" }).where(eq(users.id, mentionedUser.id)).execute()
@@ -578,6 +626,57 @@ describe("sendMessage", () => {
       .some((update) => update.payload.update.oneofKind === "userChatOpen")
 
     expect(hasChatOpenUpdate).toBe(true)
+  })
+
+  test("opens explicit all-notification dialogs for any new thread message", async () => {
+    const owner = await testUtils.createUser(nextEmail("thread-all-owner"))
+    const recipient = await testUtils.createUser(nextEmail("thread-all-recipient"))
+
+    const chat = await testUtils.createChat(null, "All Notifications Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Thread chat not created")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, recipient.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: recipient.id,
+      open: false,
+      chatListHidden: true,
+      notificationSettings: Buffer.from(
+        DialogNotificationSettings.toBinary({
+          mode: DialogNotificationSettings_Mode.ALL,
+        }),
+      ),
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        message: "plain message",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    let [recipientDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, recipient.id)))
+      .limit(1)
+    await waitForTrue(async () => {
+      const [row] = await db
+        .select()
+        .from(dialogs)
+        .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, recipient.id)))
+        .limit(1)
+      recipientDialog = row
+      return recipientDialog?.open === true
+    })
+
+    expect(recipientDialog?.chatListHidden).toBeNull()
+    expect(recipientDialog?.open).toBe(true)
+    expect(recipientDialog?.order).toBeTruthy()
   })
 
   test("opens reply-thread anchor authors' dialogs for the sidebar inbox", async () => {

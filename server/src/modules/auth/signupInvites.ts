@@ -35,6 +35,10 @@ export const getOrCreateUserByEmailForSignup = async (
     const codesRequired = await areInviteCodesRequired()
     const user = (await tx.select().from(users).where(eq(users.email, email)).limit(1))[0]
 
+    if (user?.deleted === true) {
+      throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
+    }
+
     if (!user) {
       const code = codesRequired ? getInviteCode(inviteCode) : undefined
 
@@ -87,6 +91,10 @@ export const getOrCreateUserByPhoneForSignup = async (
   return await db.transaction(async (tx) => {
     const codesRequired = await areInviteCodesRequired()
     const user = (await tx.select().from(users).where(eq(users.phoneNumber, phoneNumber)).limit(1))[0]
+
+    if (user?.deleted === true) {
+      throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
+    }
 
     if (!user) {
       const code = codesRequired ? getInviteCode(inviteCode) : undefined

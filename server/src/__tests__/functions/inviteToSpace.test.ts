@@ -64,4 +64,25 @@ describe("inviteToSpace", () => {
     const context = makeFunctionContext(member.id)
     await expect(inviteToSpace(input, context)).rejects.toThrow()
   })
+
+  test("rejects inviting a deleted user by id", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Deleted Invite Space", ["deleted-inviter@ex.com"])
+    const inviter = users[0]
+    await db
+      .update(schema.members)
+      .set({ role: "admin" })
+      .where(and(eq(schema.members.userId, inviter.id), eq(schema.members.spaceId, space.id)))
+      .execute()
+
+    const deletedUser = await testUtils.createUser("deleted-invitee@ex.com")
+    await db.update(schema.users).set({ deleted: true }).where(eq(schema.users.id, deletedUser.id)).execute()
+
+    const input: InviteToSpaceInput = {
+      spaceId: BigInt(space.id),
+      role: { role: { oneofKind: "member", member: { canAccessPublicChats: true } } },
+      via: { oneofKind: "userId", userId: BigInt(deletedUser.id) },
+    }
+
+    await expect(inviteToSpace(input, makeFunctionContext(inviter.id))).rejects.toThrow()
+  })
 })

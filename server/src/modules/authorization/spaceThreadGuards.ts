@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { members, type DbChat, type DbMember } from "@in/server/db/schema"
+import { members, userNotDeleted, users, type DbChat, type DbMember } from "@in/server/db/schema"
 import { getSpacePrivacyContext, type SpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { and, eq, inArray } from "drizzle-orm"
@@ -41,11 +41,13 @@ export async function ensureUserCanParticipateInChat(chat: DbChat, userId: numbe
     return
   }
 
-  const [member] = await db
-    .select()
+  const [row] = await db
+    .select({ member: members })
     .from(members)
-    .where(and(eq(members.spaceId, chat.spaceId), eq(members.userId, userId)))
+    .innerJoin(users, eq(members.userId, users.id))
+    .where(and(eq(members.spaceId, chat.spaceId), eq(members.userId, userId), userNotDeleted()))
     .limit(1)
+  const member = row?.member
 
   if (!member) {
     throw RealtimeRpcError.UserIdInvalid()
@@ -65,7 +67,8 @@ export async function ensureSpaceMembers(spaceId: number, userIds: number[]): Pr
   const validMembers = await db
     .select({ userId: members.userId })
     .from(members)
-    .where(and(eq(members.spaceId, spaceId), inArray(members.userId, uniqueUserIds)))
+    .innerJoin(users, eq(members.userId, users.id))
+    .where(and(eq(members.spaceId, spaceId), inArray(members.userId, uniqueUserIds), userNotDeleted()))
 
   if (validMembers.length !== uniqueUserIds.length) {
     throw RealtimeRpcError.UserIdInvalid()

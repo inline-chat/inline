@@ -2,7 +2,6 @@ import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
-import type { HandlerContext } from "@in/server/controllers/helpers"
 import { Chat, Dialog } from "@inline-chat/protocol/core"
 import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -15,9 +14,9 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { UpdateGroup } from "@in/server/modules/updates"
 import type { DbChat, DbDialog } from "@in/server/db/schema"
-import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { UsersModel } from "@in/server/db/models/users"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -95,12 +94,19 @@ export async function createChat(
     }
   }
 
-  if (hasSpaceId) {
-    const participantUserIds = input.participants?.map((p) => Number(p.userId)) ?? []
-    if (participantUserIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+  const participantUserIds = input.participants?.map((p) => Number(p.userId)) ?? []
+  if (participantUserIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+    throw RealtimeRpcError.UserIdInvalid()
+  }
+
+  if (!hasSpaceId && isPublic === false) {
+    const activeUserIds = await UsersModel.getActiveUserIds(participantUserIds)
+    if (activeUserIds.length !== new Set(participantUserIds).size) {
       throw RealtimeRpcError.UserIdInvalid()
     }
+  }
 
+  if (hasSpaceId) {
     await ensureCanCreateSpaceThread({
       spaceId: resolvedSpaceId,
       userId: context.currentUserId,

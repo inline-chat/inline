@@ -135,24 +135,24 @@ type InviteInfo = {
 // ------------------------------------------------------------
 
 async function inviteViaUserId(
-  spaceId: number,
+  _spaceId: number,
   userId: number,
-  input: InviteToSpaceInput,
-  context: FunctionContext,
+  _input: InviteToSpaceInput,
+  _context: FunctionContext,
 ): Promise<InviteInfo> {
   // Validate user
   const user = await UsersModel.getUserById(userId)
-  if (!user) {
+  if (!user || UsersModel.isDeleted(user)) {
     throw RealtimeRpcError.UserIdInvalid()
   }
   return { user }
 }
 
 async function inviteViaEmail(
-  spaceId: number,
+  _spaceId: number,
   email: string,
-  input: InviteToSpaceInput,
-  context: FunctionContext,
+  _input: InviteToSpaceInput,
+  _context: FunctionContext,
 ): Promise<InviteInfo> {
   // Validate email
   if (!isValidEmail(email)) {
@@ -164,6 +164,10 @@ async function inviteViaEmail(
   // Check if already a user
   let user = await UsersModel.getUserByEmail(normalizedEmail)
 
+  if (UsersModel.isDeleted(user)) {
+    throw RealtimeRpcError.UserIdInvalid()
+  }
+
   if (!user) {
     // If no user, create one
     user = await UsersModel.createUserWhenInvited({ email: normalizedEmail })
@@ -173,13 +177,17 @@ async function inviteViaEmail(
 }
 
 async function inviteViaPhoneNumber(
-  spaceId: number,
+  _spaceId: number,
   phoneNumber: string,
-  input: InviteToSpaceInput,
-  context: FunctionContext,
+  _input: InviteToSpaceInput,
+  _context: FunctionContext,
 ): Promise<InviteInfo> {
   // Check if already a user
   let user = await UsersModel.getUserByPhoneNumber(phoneNumber)
+
+  if (UsersModel.isDeleted(user)) {
+    throw RealtimeRpcError.UserIdInvalid()
+  }
 
   if (!user) {
     // If no user, create one

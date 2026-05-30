@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import { UsersModel } from "@in/server/db/models/users"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 
 export type CachedChatInfo = {
@@ -57,9 +58,9 @@ export async function getCachedChatInfo(chatId: number): Promise<CachedChatInfo 
     let spaceInfo = await getCachedSpaceInfo(chat.spaceId)
     participantUserIds = spaceInfo?.memberUserIds ?? []
   } else if (chat.type === "thread" && !chat.publicThread) {
-    participantUserIds = chat.participants.map((p) => p.userId)
+    participantUserIds = await UsersModel.getActiveUserIds(chat.participants.map((p) => p.userId))
   } else if (chat.minUserId && chat.maxUserId) {
-    participantUserIds = [chat.minUserId, chat.maxUserId]
+    participantUserIds = await UsersModel.getActiveUserIds([chat.minUserId, chat.maxUserId])
   }
 
   const chatInfo: CachedChatInfo = {

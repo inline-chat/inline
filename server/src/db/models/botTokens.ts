@@ -78,4 +78,8 @@ export const BotTokensModel = {
       return null
     }
   },
+
+  async deleteByBotUserId(botUserId: number): Promise<void> {
+    await db.delete(botTokens).where(eq(botTokens.botUserId, botUserId))
+  },
 }

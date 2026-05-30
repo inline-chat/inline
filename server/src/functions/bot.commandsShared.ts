@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
-import { users, type DbUser } from "@in/server/db/schema/users"
-import { and, eq, isNull, or } from "drizzle-orm"
+import { userNotDeleted, users, type DbUser } from "@in/server/db/schema/users"
+import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { BotCommand } from "@inline-chat/protocol/core"
 
@@ -15,7 +15,7 @@ export async function getOwnedBotOrThrow(botUserId: number, currentUserId: numbe
   const [bot] = await db
     .select()
     .from(users)
-    .where(and(eq(users.id, botUserId), eq(users.bot, true), or(isNull(users.deleted), eq(users.deleted, false))))
+    .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
   if (!bot || bot.botCreatorId !== currentUserId) {

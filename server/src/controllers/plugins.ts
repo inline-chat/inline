@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia"
 import { InlineError } from "@in/server/types/errors"
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import { sessions } from "@in/server/db/schema"
+import { sessions, users } from "@in/server/db/schema"
 import { hashToken, normalizeToken } from "@in/server/utils/auth"
 import { ConnectionError_Reason } from "@inline-chat/protocol/core"
 
@@ -73,12 +73,20 @@ export const authenticateGet = new Elysia({ name: "authenticate-get" })
 export const getUserIdFromToken = async (token: string): Promise<{ userId: number; sessionId: number }> => {
   let supposedUserId = token.split(":")[0]
   let tokenHash = hashToken(token)
-  let session = await db._query.sessions.findFirst({
-    where: eq(sessions.tokenHash, tokenHash),
-  })
+  const [row] = await db
+    .select({ session: sessions, userDeleted: users.deleted })
+    .from(sessions)
+    .leftJoin(users, eq(sessions.userId, users.id))
+    .where(eq(sessions.tokenHash, tokenHash))
+    .limit(1)
+  const session = row?.session
 
   if (!session || !supposedUserId) {
     throw new AuthTokenError(InlineError.ApiError.UNAUTHORIZED, ConnectionError_Reason.INVALID_AUTH)
+  }
+
+  if (row.userDeleted === true) {
+    throw new AuthTokenError(InlineError.ApiError.USER_DEACTIVATED, ConnectionError_Reason.UNAUTHORIZED)
   }
 
   if (session.revoked) {

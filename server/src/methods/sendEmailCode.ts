@@ -35,6 +35,9 @@ export const handler = async (
 
     let existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1)
     let user = existingUsers[0]
+    if (user?.deleted === true) {
+      throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
+    }
     let existingUser = user ? user.pendingSetup !== true : false
     let needsInviteCode = await isInviteCodeRequired(user)
     let firstName = user?.firstName ?? undefined
@@ -46,6 +49,9 @@ export const handler = async (
 
     return { existingUser, needsInviteCode, challengeToken }
   } catch (error) {
+    if (error instanceof InlineError) {
+      throw error
+    }
     Log.shared.error("Failed to send email code", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }

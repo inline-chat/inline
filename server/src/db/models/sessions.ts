@@ -2,6 +2,7 @@
 
 import { and, eq, inArray, isNull } from "drizzle-orm"
 import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
+import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
 import { Log } from "@in/server/utils/log"
@@ -368,11 +369,12 @@ export class SessionsModel {
 
     try {
       const rows = await db
-        .select()
+        .select({ session: sessions })
         .from(sessions)
-        .where(and(eq(sessions.userId, userId), isNull(sessions.revoked), eq(sessions.clientType, "ios")))
+        .innerJoin(users, eq(sessions.userId, users.id))
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revoked), eq(sessions.clientType, "ios"), userNotDeleted()))
 
-      return rows.map((session) => this.decryptSessionData(session)).filter(this.isIOSPushSession)
+      return rows.map((row) => this.decryptSessionData(row.session)).filter(this.isIOSPushSession)
     } catch (error) {
       throw new Error(
         `Failed to get active iOS push sessions: ${error instanceof Error ? error.message : "Unknown error"}`,

@@ -1,4 +1,4 @@
-import { SQL, sql } from "drizzle-orm"
+import { eq, isNull, or, SQL, sql } from "drizzle-orm"
 import {
   integer,
   pgTable,
@@ -7,7 +7,6 @@ import {
   boolean,
   timestamp,
   type AnyPgColumn,
-  jsonb,
 } from "drizzle-orm/pg-core"
 import { pgSequence } from "drizzle-orm/pg-core"
 import { files, type DbFile } from "./files"
@@ -74,6 +73,10 @@ export const usersRelations = relations(users, ({ one }) => ({
     references: [files.id],
   }),
 }))
+
+export function userNotDeleted(): SQL {
+  return or(isNull(users.deleted), eq(users.deleted, false)) as SQL
+}
 
 export type DbUser = typeof users.$inferSelect
 export type DbUserWithPhoto = DbUser & { photo?: (DbFile & { thumbs?: DbFile[] | null }) | null }

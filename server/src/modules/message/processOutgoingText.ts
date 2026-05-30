@@ -1,8 +1,8 @@
 import { MessageEntities, MessageEntity_Type, type MessageEntity } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { lower, users } from "@in/server/db/schema"
+import { lower, userNotDeleted, users } from "@in/server/db/schema"
 import { processMessageText } from "@in/server/modules/message/processText"
-import { inArray } from "drizzle-orm"
+import { and, inArray } from "drizzle-orm"
 
 type ProcessOutgoingTextInput = {
   text: string
@@ -129,7 +129,7 @@ const parseMissingMentionEntitiesByUsername = async ({
       username: users.username,
     })
     .from(users)
-    .where(inArray(lower(users.username), normalizedUsernames))
+    .where(and(inArray(lower(users.username), normalizedUsernames), userNotDeleted()))
 
   if (matchedUsers.length === 0) {
     return entities

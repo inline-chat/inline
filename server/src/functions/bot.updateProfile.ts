@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema/users"
+import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { files } from "@in/server/db/schema/files"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -21,7 +21,7 @@ export const updateBotProfile = async (
   const [bot] = await db
     .select()
     .from(users)
-    .where(and(eq(users.id, botUserId), eq(users.bot, true)))
+    .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
   const currentUserId = context.currentUserId

@@ -3,9 +3,9 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { db } from "@in/server/db"
-import { chatParticipants, members, users } from "@in/server/db/schema"
+import { chatParticipants, members, userNotDeleted, users } from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { GetPeerBotCommandsInput, GetPeerBotCommandsResult } from "@inline-chat/protocol/core"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -16,7 +16,7 @@ async function getRelevantBotUserIdsForChat(chatId: number): Promise<number[]> {
     .select({ userId: chatParticipants.userId })
     .from(chatParticipants)
     .innerJoin(users, eq(chatParticipants.userId, users.id))
-    .where(and(eq(chatParticipants.chatId, chatId), eq(users.bot, true), or(isNull(users.deleted), eq(users.deleted, false))))
+    .where(and(eq(chatParticipants.chatId, chatId), eq(users.bot, true), userNotDeleted()))
     .orderBy(asc(chatParticipants.userId))
 
   return rows.map((row) => row.userId)
@@ -32,7 +32,7 @@ async function getRelevantBotUserIdsForPublicSpace(spaceId: number): Promise<num
         eq(members.spaceId, spaceId),
         eq(members.canAccessPublicChats, true),
         eq(users.bot, true),
-        or(isNull(users.deleted), eq(users.deleted, false)),
+        userNotDeleted(),
       ),
     )
     .orderBy(asc(members.userId))

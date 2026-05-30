@@ -6,8 +6,8 @@ import type { Static } from "elysia"
 import { encodeMemberInfo, TMemberInfo } from "../api-types"
 import { InlineError } from "../types/errors"
 import { TInputId } from "../types/methods"
-import { members, users } from "../db/schema"
-import { eq } from "drizzle-orm"
+import { members, userNotDeleted, users } from "../db/schema"
+import { and, eq } from "drizzle-orm"
 import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 
@@ -46,7 +46,11 @@ export const handler = async (input: Static<typeof Input>, context: HandlerConte
       throw error
     }
 
-    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1)
+    const [user] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, userId), userNotDeleted()))
+      .limit(1)
     if (!user) {
       throw new InlineError(InlineError.ApiError.USER_INVALID)
     }

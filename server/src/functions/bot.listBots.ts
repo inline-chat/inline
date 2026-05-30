@@ -1,8 +1,8 @@
 import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema/users"
+import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { files } from "@in/server/db/schema/files"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { and, asc, eq, isNull, or } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { ListBotsInput, ListBotsResult } from "@inline-chat/protocol/core"
 
@@ -15,7 +15,7 @@ export const listBots = async (_input: ListBotsInput, context: FunctionContext):
       and(
         eq(users.bot, true),
         eq(users.botCreatorId, context.currentUserId),
-        or(isNull(users.deleted), eq(users.deleted, false)),
+        userNotDeleted(),
       ),
     )
     .orderBy(asc(users.id))
