@@ -1148,12 +1148,14 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           ChatType: "direct",
+          InboundEventKind: "user_request",
           ReplyToId: "9",
           From: "inline:42",
           To: "inline:7",
         }),
       )
       expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]).not.toHaveProperty("MessageThreadId")
+      expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]).not.toHaveProperty("WasMentioned")
       expect(harness.calls.recordInboundSession).toHaveBeenCalledWith(
         expect.objectContaining({
           updateLastRoute: expect.objectContaining({
@@ -1254,7 +1256,8 @@ describe("inline/monitor", () => {
           GroupSubject: "Deploy Room",
           MessageThreadId: "7100",
           ThreadLabel: "Re: deploy plan",
-          Body: expect.stringContaining("Parent thread anchor"),
+          Body: "can you handle this reply thread?",
+          BodyForAgent: "can you handle this reply thread?",
           InboundHistory: expect.arrayContaining([
             expect.objectContaining({ body: "Parent thread anchor" }),
             expect.objectContaining({ body: "thread follow-up context" }),
@@ -1404,8 +1407,13 @@ describe("inline/monitor", () => {
           MessageActionInteractionId: "22",
           MessageActionId: "pick",
           MessageActionDataBase64: "eyJrIjoxfQ==",
+          Body: 'Alice pressed "pick" on message #1001',
+          BodyForAgent: 'Alice pressed "pick" on message #1001',
         }),
       )
+      const ctx = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
+      expect(ctx?.Body).not.toContain("data_base64")
+      expect(ctx?.BodyForAgent).not.toContain("{")
     })
 
     expect(harness.calls.answerMessageAction.mock.invocationCallOrder[0]).toBeLessThan(
@@ -2501,11 +2509,9 @@ describe("inline/monitor", () => {
           SenderId: "42",
           SenderName: "Alice",
           SenderUsername: "alice",
-          BodyForAgent: expect.stringContaining('"sender_id": "42"'),
+          Body: "hello",
+          BodyForAgent: "hello",
         }),
-      )
-      expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]?.BodyForAgent).toContain(
-        '"sender_label": "Alice (@alice) id:42"',
       )
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2562,18 +2568,15 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           ChatType: "group",
+          InboundEventKind: "user_request",
           GroupSubject: "Project Room",
           From: "inline:chat:88",
           To: "inline:88",
           SenderId: "51",
+          Body: "hello from group",
+          BodyForAgent: "hello from group",
           BodyForCommands: "hello from group",
         }),
-      )
-      expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]?.BodyForAgent).toContain(
-        '"chat_type": "group"',
-      )
-      expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]?.BodyForAgent).toContain(
-        '"sender_id": "51"',
       )
       const recordArgs = harness.calls.recordInboundSession.mock.calls[0]?.[0]
       expect(recordArgs?.updateLastRoute).toBeUndefined()
@@ -2582,6 +2585,63 @@ describe("inline/monitor", () => {
           chatId: 88n,
           text: "group reply",
           parseMarkdown: false,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("marks unmentioned group messages as room events when configured", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 2002n,
+            date: 1_700_000_002n,
+            fromId: 51n,
+            message: "ambient group update",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "noted",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          groupChat: {
+            unmentionedInbound: "room_event",
+            mentionPatterns: [],
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: false,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ChatType: "group",
+          InboundEventKind: "room_event",
+          WasMentioned: false,
+          Body: "ambient group update",
+          BodyForAgent: "ambient group update",
         }),
       )
     })
@@ -4251,6 +4311,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
+          InboundEventKind: "user_request",
           WasMentioned: true,
         }),
       )
@@ -4330,8 +4391,8 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("#60020 user:51: context before mention"),
-          BodyForAgent: expect.stringContaining("@inlinebot can you summarize?"),
+          Body: "@inlinebot can you summarize?",
+          BodyForAgent: expect.stringContaining("can you summarize?"),
           InboundHistory: [
             expect.objectContaining({
               sender: "user:51",
@@ -4416,12 +4477,9 @@ describe("inline/monitor", () => {
         }),
       )
       expect(ctx.Body).toContain("can you summarize?")
-      expect(ctx.Body).not.toContain("@inlinebot")
+      expect(ctx.Body).toContain("@inlinebot")
       expect(ctx.BodyForAgent).toContain("can you summarize?")
       expect(ctx.BodyForAgent).not.toContain("@inlinebot")
-      expect(ctx.BodyForAgent).toContain('"explicitly_mentioned_bot": true')
-      expect(ctx.BodyForAgent).toContain('"mention_source": "explicit_bot"')
-      expect(ctx.BodyForAgent).toContain('"mentioned_user_ids": [')
     })
 
     await handle.stop()
@@ -4493,8 +4551,8 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("#60028 user:52: we changed the deployment config"),
-          BodyForAgent: expect.stringContaining("@inlinebot can you catch up?"),
+          Body: "@inlinebot can you catch up?",
+          BodyForAgent: expect.stringContaining("can you catch up?"),
           InboundHistory: [
             expect.objectContaining({
               sender: "user:52",
@@ -4563,7 +4621,8 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          BodyForAgent: expect.stringContaining("@inlinebot are you here?"),
+          Body: "@inlinebot are you here?",
+          BodyForAgent: expect.stringContaining("are you here?"),
           InboundHistory: [],
         }),
       )
@@ -4628,8 +4687,8 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("we deployed to staging and saw an error"),
-          BodyForAgent: expect.stringContaining("@inlinebot can you summarize what happened?"),
+          Body: "@inlinebot can you summarize what happened?",
+          BodyForAgent: expect.stringContaining("can you summarize what happened?"),
           InboundHistory: [
             expect.objectContaining({
               sender: "user:51",
@@ -4709,7 +4768,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining(`image attachment: ${longMediaUrl}`),
+          Body: "@inlinebot summarize skipped media",
           InboundHistory: [
             expect.objectContaining({
               sender: "user:51",
@@ -5397,7 +5456,10 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("Recent thread messages (oldest -> newest):"),
+          Body: "follow up",
+          InboundHistory: [
+            expect.objectContaining({ body: "earlier bot message" }),
+          ],
         }),
       )
     })
@@ -5497,25 +5559,41 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("#7300 user:52: link preview (Design mock): https://example.com/design"),
+          Body: "<media:image>",
+          InboundHistory: [
+            expect.objectContaining({
+              body: "link preview (Design mock): https://example.com/design",
+            }),
+          ],
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("Recent media/attachments:\n#7300 user:52: link preview (Design mock): https://example.com/design"),
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "recent_media_attachments",
+              payload: {
+                summary: "Recent media/attachments: #7300 user:52: link preview (Design mock): https://example.com/design",
+              },
+            }),
+          ]),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringMatching(
-            /<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/current-photo\.jpg/,
-          ),
+          BodyForAgent: "<media:image>",
           MediaPath: "/tmp/current-photo.jpg",
           MediaType: "image/jpeg",
           MediaUrl: "/tmp/current-photo.jpg",
           MediaPaths: ["/tmp/current-photo.jpg"],
           MediaUrls: ["/tmp/current-photo.jpg"],
           MediaTypes: ["image/jpeg"],
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "current_media_attachments",
+              payload: { summary: "image attachment: https://cdn.inline.chat/current-photo.jpg" },
+            }),
+          ]),
         }),
       )
     })
@@ -5582,20 +5660,24 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining(
-            `Recent thread messages (oldest -> newest):\n#7300 user:52: image attachment: ${longMediaUrl}`,
-          ),
+          Body: "please review this update",
+          BodyForAgent: "please review this update",
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining(
-            `Recent media/attachments:\n#7300 user:52: image attachment: ${longMediaUrl}`,
-          ),
           InboundHistory: expect.arrayContaining([
             expect.objectContaining({
               sender: "user:52",
               body: `image attachment: ${longMediaUrl}`,
+            }),
+          ]),
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "recent_media_attachments",
+              payload: {
+                summary: `Recent media/attachments: #7300 user:52: image attachment: ${longMediaUrl}`,
+              },
             }),
           ]),
         }),
@@ -5676,9 +5758,8 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringMatching(
-            /<media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(spec\.pdf\): https:\/\/cdn\.inline\.chat\/spec\.pdf/,
-          ),
+          Body: "<media:document>",
+          BodyForAgent: "<media:document>",
           RawBody: "<media:document>",
           CommandBody: "<media:document>",
           MediaPath: "/tmp/spec.pdf",
@@ -5687,6 +5768,12 @@ describe("inline/monitor", () => {
           MediaPaths: ["/tmp/spec.pdf"],
           MediaUrls: ["/tmp/spec.pdf"],
           MediaTypes: ["application/pdf"],
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "current_media_attachments",
+              payload: { summary: "document attachment (spec.pdf): https://cdn.inline.chat/spec.pdf" },
+            }),
+          ]),
         }),
       )
     })
@@ -5753,11 +5840,16 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringMatching(
-            /<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/flattened-photo\.jpg/,
-          ),
+          Body: "<media:image>",
+          BodyForAgent: "<media:image>",
           RawBody: "<media:image>",
           CommandBody: "<media:image>",
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "current_media_attachments",
+              payload: { summary: "image attachment: https://cdn.inline.chat/flattened-photo.jpg" },
+            }),
+          ]),
         }),
       )
     })
@@ -5821,9 +5913,14 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringMatching(
-            /<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/broken-photo\.jpg/,
-          ),
+          Body: "<media:image>",
+          BodyForAgent: "<media:image>",
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "current_media_attachments",
+              payload: { summary: "image attachment: https://cdn.inline.chat/broken-photo.jpg" },
+            }),
+          ]),
         }),
       )
     })
@@ -5902,9 +5999,14 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           RawBody: "<media:document>",
-          Body: expect.stringMatching(
-            /<media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(huge-spec\.pdf\): https:\/\/cdn\.inline\.chat\/huge-spec\.pdf/,
-          ),
+          Body: "<media:document>",
+          BodyForAgent: "<media:document>",
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "current_media_attachments",
+              payload: { summary: "document attachment (huge-spec.pdf): https://cdn.inline.chat/huge-spec.pdf" },
+            }),
+          ]),
         }),
       )
     })
@@ -5993,21 +6095,31 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining(
-            'Recent message entities:\n#7300 user:52: text link "portal" -> https://example.com/history-portal',
-          ),
+          Body: "See Alice docs",
+          BodyForAgent: "See Alice docs",
+          InboundHistory: expect.arrayContaining([
+            expect.objectContaining({ body: "Review portal" }),
+          ]),
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "recent_message_entities",
+              payload: {
+                summary:
+                  'Recent message entities: #7300 user:52: text link "portal" -> https://example.com/history-portal',
+              },
+            }),
+            expect.objectContaining({
+              type: "current_message_entities",
+              payload: {
+                summary: 'mention "Alice" -> user:99 | text link "docs" -> https://example.com/current-docs',
+              },
+            }),
+          ]),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           GroupSystemPrompt: "",
-        }),
-      )
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          Body: expect.stringContaining(
-            'Current message entities:\nmention "Alice" -> user:99 | text link "docs" -> https://example.com/current-docs',
-          ),
         }),
       )
     })
