@@ -388,6 +388,32 @@ function resolveReactionMessageId(params: {
   return undefined
 }
 
+function resolveThreadParentMessageId(params: {
+  args: Record<string, unknown>
+  toolContext?: { currentMessageId?: string | number | null | undefined }
+}): string | undefined {
+  const explicit =
+    readFlexibleId(params.args, "parentMessageId") ??
+    readFlexibleId(params.args, "messageId") ??
+    readFlexibleId(params.args, "replyTo") ??
+    readFlexibleId(params.args, "replyToId") ??
+    readStringParam(params.args, "parentMessageId") ??
+    readStringParam(params.args, "messageId") ??
+    readStringParam(params.args, "replyTo") ??
+    readStringParam(params.args, "replyToId")
+  if (explicit) return explicit
+
+  const fromContext = params.toolContext?.currentMessageId
+  if (typeof fromContext === "number" && Number.isFinite(fromContext)) {
+    return String(Math.trunc(fromContext))
+  }
+  if (typeof fromContext === "string") {
+    const trimmed = fromContext.trim()
+    return trimmed || undefined
+  }
+  return undefined
+}
+
 function parseOptionalInlineId(raw: unknown, label: string): bigint | undefined {
   if (raw == null) return undefined
   return parseInlineId(raw, label)
@@ -1734,14 +1760,12 @@ export const inlineMessageActions = {
           if (replyThreadsEnabled) {
             const parentChatId = resolveChatIdFromParams(params)
             const parentMessageId = parseOptionalInlineId(
-              readFlexibleId(params, "parentMessageId") ??
-                readFlexibleId(params, "messageId") ??
-                readFlexibleId(params, "replyTo") ??
-                readFlexibleId(params, "replyToId") ??
-                readStringParam(params, "parentMessageId") ??
-                readStringParam(params, "messageId") ??
-                readStringParam(params, "replyTo") ??
-                readStringParam(params, "replyToId"),
+              resolveThreadParentMessageId({
+                args: params,
+                ...(toolContext != null
+                  ? { toolContext: { currentMessageId: toolContext.currentMessageId } }
+                  : {}),
+              }),
               "parentMessageId",
             )
 
