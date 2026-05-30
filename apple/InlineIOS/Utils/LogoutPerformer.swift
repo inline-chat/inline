@@ -32,6 +32,16 @@ enum LogoutPerformer {
     }
 
     Analytics.logout()
+
+    await MainActor.run {
+      TabsManager.shared.reset()
+      TabsManager.shared.clearActiveSpaceId()
+      ChatState.shared.reset()
+      navigation.reset()
+      onboardingNavigation.reset()
+      router.reset()
+    }
+
     await Auth.shared.logOut()
 
     do {
@@ -43,13 +53,7 @@ enum LogoutPerformer {
     Transactions.shared.clearAll()
 
     await MainActor.run {
-      TabsManager.shared.reset()
-      TabsManager.shared.clearActiveSpaceId()
-      ChatState.shared.reset()
-      navigation.reset()
       mainRouter.setRoute(route: .onboarding)
-      onboardingNavigation.reset()
-      router.reset()
     }
   }
 

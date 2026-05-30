@@ -119,8 +119,8 @@ extension PhoneNumberCode {
         if result.user.firstName == nil || result.user.firstName?.isEmpty == true || result.user.pendingSetup == true {
           nav.push(.profile)
         } else {
+          nav.reset()
           mainViewRouter.setRoute(route: .main)
-          nav.push(.main)
         }
 
       } catch let error as APIError {
