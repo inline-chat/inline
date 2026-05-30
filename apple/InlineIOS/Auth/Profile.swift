@@ -147,9 +147,9 @@ extension Profile {
         try await database.dbWriter.write { db in
           try User(from: result.user).save(db)
         }
+        nav.reset()
         mainViewRouter.setRoute(route: .main)
         formState.reset()
-        nav.push(.main)
       } catch let error as APIError {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
         formState.reset()

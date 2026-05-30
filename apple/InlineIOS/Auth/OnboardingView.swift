@@ -22,7 +22,7 @@ struct OnboardingView: View {
             case .welcome:
               Welcome()
             case .main:
-              HomeView()
+              EmptyView()
             case let .phoneNumber(prevPhoneNumber):
               PhoneNumber(prevPhoneNumber: prevPhoneNumber)
             case let .phoneNumberCode(phoneNumber, inviteCode):
