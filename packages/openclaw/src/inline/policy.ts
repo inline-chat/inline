@@ -9,6 +9,8 @@ type InlineGroupConfig = {
   requireMention?: boolean | undefined
   replyThreadMode?: InlineReplyThreadMode | undefined
   replyThreadAutoCreateMinMessages?: number | undefined
+  replyThreadRequireExplicitMention?: boolean | undefined
+  replyThreadParentHistoryLimit?: number | undefined
   allowFrom?: Array<string | number> | undefined
   systemPrompt?: string | undefined
   tools?: InlineToolPolicy | undefined
@@ -145,6 +147,40 @@ export function resolveInlineGroupReplyThreadAutoCreateMinMessages(params: {
     groupConfig?.replyThreadAutoCreateMinMessages ??
     defaultConfig?.replyThreadAutoCreateMinMessages ??
     params.defaultMinMessages
+  )
+}
+
+export function resolveInlineGroupReplyThreadRequireExplicitMention(params: {
+  cfg: OpenClawConfig
+  accountId: string | null | undefined
+  groupId: string | null | undefined
+  defaultRequireExplicitMention: boolean
+}): boolean {
+  const groups = resolveInlineGroups(params.cfg, params.accountId)
+  const groupConfig = resolveGroupConfig(groups, params.groupId)
+  const defaultConfig = groups?.["*"]
+  if (typeof groupConfig?.replyThreadRequireExplicitMention === "boolean") {
+    return groupConfig.replyThreadRequireExplicitMention
+  }
+  if (typeof defaultConfig?.replyThreadRequireExplicitMention === "boolean") {
+    return defaultConfig.replyThreadRequireExplicitMention
+  }
+  return params.defaultRequireExplicitMention
+}
+
+export function resolveInlineGroupReplyThreadParentHistoryLimit(params: {
+  cfg: OpenClawConfig
+  accountId: string | null | undefined
+  groupId: string | null | undefined
+  defaultLimit: number
+}): number {
+  const groups = resolveInlineGroups(params.cfg, params.accountId)
+  const groupConfig = resolveGroupConfig(groups, params.groupId)
+  const defaultConfig = groups?.["*"]
+  return (
+    groupConfig?.replyThreadParentHistoryLimit ??
+    defaultConfig?.replyThreadParentHistoryLimit ??
+    params.defaultLimit
   )
 }
 

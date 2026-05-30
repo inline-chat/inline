@@ -88,6 +88,34 @@ describe("inline/reply-threads", () => {
     ).toBe(true)
   })
 
+  it("enables reply-thread handling when reply-thread policy is configured", () => {
+    expect(
+      isInlineReplyThreadsEnabled({
+        cfg: {
+          channels: {
+            inline: {
+              replyThreadRequireExplicitMention: false,
+            },
+          },
+        } as OpenClawConfig,
+      }),
+    ).toBe(true)
+
+    expect(
+      isInlineReplyThreadsEnabled({
+        cfg: {
+          channels: {
+            inline: {
+              groups: {
+                "123": { replyThreadParentHistoryLimit: 2 },
+              },
+            },
+          },
+        } as OpenClawConfig,
+      }),
+    ).toBe(true)
+  })
+
   it("uses account-level placement mode when resolving reply-thread handling", () => {
     const cfg = {
       channels: {
