@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import { users, type DbNewUser, type DbUser } from "@in/server/db/schema"
+import { users, type DbNewUser } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
