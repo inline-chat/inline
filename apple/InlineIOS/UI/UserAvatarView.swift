@@ -1,47 +1,26 @@
 import InlineKit
 import InlineUI
-import Logger
-import Nuke
-import NukeUI
+import SwiftUI
 import UIKit
 
 final class UserAvatarView: UIView {
   // MARK: - Properties
 
-  private let imageView: LazyImageView = {
-    let view = LazyImageView()
-    view.contentMode = .scaleAspectFit
-    view.clipsToBounds = true
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
-
-  private let initialsLabel: UILabel = {
-    let label = UILabel()
-    label.textAlignment = .center
-    label.textColor = .white
-    label.font = .systemFont(ofSize: 16, weight: .medium)
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
-  }()
-
-  private let gradientLayer: CAGradientLayer = {
-    let layer = CAGradientLayer()
-    layer.startPoint = CGPoint(x: 0.5, y: 0)
-    layer.endPoint = CGPoint(x: 0.5, y: 1)
-    layer.type = .axial
-    return layer
-  }()
-
   private var size: CGFloat = 32
-  private var nameForInitials: String = ""
   private var widthConstraint: NSLayoutConstraint?
   private var heightConstraint: NSLayoutConstraint?
   private var currentRenderSignature: RenderSignature?
+  private var hostingController: UIHostingController<UserAvatar>?
 
   private struct RenderSignature: Equatable {
     let userId: Int64
+    let firstName: String?
+    let lastName: String?
+    let username: String?
+    let phoneNumber: String?
+    let email: String?
     let avatarIdentity: String?
+    let size: CGFloat
   }
 
   // MARK: - Initialization
@@ -59,28 +38,14 @@ final class UserAvatarView: UIView {
   // MARK: - Setup
 
   private func setupViews() {
-    layer.masksToBounds = true
-    layer.addSublayer(gradientLayer)
-
-    addSubview(imageView)
-    addSubview(initialsLabel)
-
-    NSLayoutConstraint.activate([
-      imageView.topAnchor.constraint(equalTo: topAnchor),
-      imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-      initialsLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-      initialsLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
+    backgroundColor = .clear
+    isOpaque = false
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
     UIView.performWithoutAnimation {
-      layer.cornerRadius = bounds.width / 2
-      gradientLayer.frame = bounds
+      layer.cornerRadius = min(bounds.width, bounds.height) / 2
     }
   }
 
@@ -88,20 +53,17 @@ final class UserAvatarView: UIView {
 
   func configure(with userInfo: UserInfo, size: CGFloat = 32) {
     self.size = size
-    let user = userInfo.user
-    let renderSignature = RenderSignature(
-      userId: user.id,
-      avatarIdentity: userInfo.stableAvatarIdentity
-    )
-    
     configureSize()
-    configureInitials(for: user)
-    configureColors()
-    loadImage(for: user, userInfo: userInfo, renderSignature: renderSignature)
+
+    let renderSignature = Self.renderSignature(for: userInfo, size: size)
+    guard currentRenderSignature != renderSignature else { return }
+
+    currentRenderSignature = renderSignature
+    updateAvatar(with: userInfo)
   }
-  
+
   // MARK: - Private Configuration Methods
-  
+
   private func configureSize() {
     if let widthConstraint {
       widthConstraint.constant = size
@@ -117,122 +79,55 @@ final class UserAvatarView: UIView {
       heightConstraint?.isActive = true
     }
   }
-  
-  private func configureInitials(for user: User) {
-    nameForInitials = AvatarColorUtility.formatNameForHashing(
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email
+
+  private func updateAvatar(with userInfo: UserInfo) {
+    let rootView = UserAvatar(
+      userInfo: userInfo,
+      size: size,
+      ignoresSafeArea: true
     )
-    
-    initialsLabel.text = nameForInitials.first?.uppercased() ?? ""
-  }
-  
-  private func configureColors() {
-    let baseColor = AvatarColorUtility.uiColorFor(name: nameForInitials)
-    let isDarkMode = traitCollection.userInterfaceStyle == .dark
-    let adjustedColor = isDarkMode ? baseColor.adjustLuminosity(by: -0.1) : baseColor
 
-    gradientLayer.colors = [
-      adjustedColor.adjustLuminosity(by: 0.2).cgColor,
-      adjustedColor.cgColor,
-    ]
-  }
-  
-  private func loadImage(for user: User, userInfo: UserInfo, renderSignature: RenderSignature) {
-    let localUrl = user.getLocalURL()
-    let remoteUrl = user.getRemoteURL()
-
-    if localUrl != nil || remoteUrl != nil {
-      loadProfileImage(
-        localUrl: localUrl,
-        remoteUrl: remoteUrl,
-        userInfo: userInfo,
-        renderSignature: renderSignature
-      )
-    } else {
-      currentRenderSignature = renderSignature
-      showInitials()
-    }
-  }
-
-  // MARK: - Image Loading
-  
-  private func loadProfileImage(
-    localUrl: URL?,
-    remoteUrl: URL?,
-    userInfo: UserInfo,
-    renderSignature: RenderSignature
-  ) {
-    guard let imageUrl = localUrl ?? remoteUrl else {
-      currentRenderSignature = renderSignature
-      showInitials()
+    if let hostingController {
+      hostingController.rootView = rootView
       return
     }
 
-    if currentRenderSignature == renderSignature, imageView.imageView.image != nil {
-      hideInitials()
-      return
-    }
+    let controller = UIHostingController(rootView: rootView)
+    controller.view.translatesAutoresizingMaskIntoConstraints = false
+    controller.view.backgroundColor = .clear
+    controller.view.isUserInteractionEnabled = false
 
-    currentRenderSignature = renderSignature
-    hideInitials()
-    configureImageRequest(for: imageUrl)
-    setupImageHandlers()
-    cacheImageIfNeeded(localUrl: localUrl, remoteUrl: remoteUrl, userId: userInfo.user.id)
-  }
-  
-  private func configureImageRequest(for url: URL) {
-    imageView.request = ImageRequest(
-      url: url,
-      processors: [.resize(width: 96)],
-      priority: .high
-    )
-  }
-  
-  private func setupImageHandlers() {
-    imageView.onSuccess = { [weak self] _ in
-      DispatchQueue.main.async {
-        self?.hideInitials()
-      }
-    }
-
-    imageView.onFailure = { [weak self] _ in
-      DispatchQueue.main.async {
-        self?.showInitials()
-      }
-    }
-  }
-  
-  private func cacheImageIfNeeded(localUrl: URL?, remoteUrl: URL?, userId: Int64) {
-    guard localUrl == nil, let remoteUrl = remoteUrl else { return }
-    
-    Task.detached(priority: .userInitiated) { [weak self] in
-      guard self != nil else { return }
-      do {
-        let image = try await ImagePipeline.shared.image(for: remoteUrl)
-        try await User.cacheImage(userId: userId, image: image)
-      } catch {
-        Log.shared.error("Failed to cache profile image", error: error)
-      }
-    }
-  }
-  
-  private func hideInitials() {
-    UIView.performWithoutAnimation {
-      initialsLabel.isHidden = true
-    }
-  }
-
-  private func showInitials() {
-    UIView.performWithoutAnimation {
-      initialsLabel.isHidden = false
-      imageView.request = nil
-    }
+    addSubview(controller.view)
+    NSLayoutConstraint.activate([
+      controller.view.topAnchor.constraint(equalTo: topAnchor),
+      controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+      controller.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+      controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+    hostingController = controller
   }
 
   func currentImage() -> UIImage? {
-    imageView.imageView.image
+    guard bounds.width > 0, bounds.height > 0 else { return nil }
+
+    let renderer = UIGraphicsImageRenderer(bounds: bounds)
+    return renderer.image { context in
+      layer.render(in: context.cgContext)
+    }
+  }
+
+  private static func renderSignature(for userInfo: UserInfo, size: CGFloat) -> RenderSignature {
+    let user = userInfo.user
+    return RenderSignature(
+      userId: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      phoneNumber: user.phoneNumber,
+      email: user.email,
+      avatarIdentity: userInfo.stableAvatarIdentity,
+      size: size
+    )
   }
 }
 
