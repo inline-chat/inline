@@ -1306,7 +1306,7 @@ struct SessionInfo: Codable, Sendable {
   let timezone: String?
 
   @MainActor static func get() -> SessionInfo? {
-    let timezone = TimeZone.current.identifier
+    let timezone = TimeZone.autoupdatingCurrent.identifier
     let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     // let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 

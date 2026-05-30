@@ -660,7 +660,7 @@ public class DataManager: ObservableObject {
 
   public func updateTimezone() async throws {
     log.trace("updateTimezone")
-    let timeZone = TimeZone.current.identifier
+    let timeZone = TimeZone.autoupdatingCurrent.identifier
 
     do {
       // Update on server

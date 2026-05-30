@@ -67,6 +67,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupGlobalFocusHotkey()
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
+    TimezoneManager.shared.start()
 #if SPARKLE
     Task { @MainActor in
       ensureUpdateController()
@@ -83,17 +84,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       forEventClass: AEEventClass(kInternetEventClass),
       andEventID: AEEventID(kAEGetURL)
     )
-
-    // Send timezone to server
-
-    Task {
-      // delay for 2 seconds
-      try? await Task.sleep(nanoseconds: 2_000_000_000)
-
-      if Auth.shared.getIsLoggedIn() == true {
-        try? await DataManager.shared.updateTimezone()
-      }
-    }
   }
 
   @MainActor
