@@ -1,11 +1,14 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { normalizeAccountId as normalizePluginAccountId } from "../openclaw-compat.js"
+import type { InlineReplyThreadMode } from "./config-schema.js"
 import { normalizeInlineTarget } from "./normalize.js"
 
 type InlineToolPolicy = Record<string, unknown>
 
 type InlineGroupConfig = {
   requireMention?: boolean | undefined
+  replyThreadMode?: InlineReplyThreadMode | undefined
+  replyThreadAutoCreateMinMessages?: number | undefined
   allowFrom?: Array<string | number> | undefined
   systemPrompt?: string | undefined
   tools?: InlineToolPolicy | undefined
@@ -13,6 +16,7 @@ type InlineGroupConfig = {
 }
 
 type InlineGroups = Record<string, InlineGroupConfig | undefined>
+export type { InlineReplyThreadMode }
 
 function normalizeAccountId(raw: string | null | undefined): string {
   return normalizePluginAccountId(raw)
@@ -114,6 +118,34 @@ export function resolveInlineGroupRequireMention(params: {
   if (typeof groupConfig?.requireMention === "boolean") return groupConfig.requireMention
   if (typeof defaultConfig?.requireMention === "boolean") return defaultConfig.requireMention
   return params.requireMentionDefault
+}
+
+export function resolveInlineGroupReplyThreadMode(params: {
+  cfg: OpenClawConfig
+  accountId: string | null | undefined
+  groupId: string | null | undefined
+  defaultMode: InlineReplyThreadMode
+}): InlineReplyThreadMode {
+  const groups = resolveInlineGroups(params.cfg, params.accountId)
+  const groupConfig = resolveGroupConfig(groups, params.groupId)
+  const defaultConfig = groups?.["*"]
+  return groupConfig?.replyThreadMode ?? defaultConfig?.replyThreadMode ?? params.defaultMode
+}
+
+export function resolveInlineGroupReplyThreadAutoCreateMinMessages(params: {
+  cfg: OpenClawConfig
+  accountId: string | null | undefined
+  groupId: string | null | undefined
+  defaultMinMessages: number
+}): number {
+  const groups = resolveInlineGroups(params.cfg, params.accountId)
+  const groupConfig = resolveGroupConfig(groups, params.groupId)
+  const defaultConfig = groups?.["*"]
+  return (
+    groupConfig?.replyThreadAutoCreateMinMessages ??
+    defaultConfig?.replyThreadAutoCreateMinMessages ??
+    params.defaultMinMessages
+  )
 }
 
 export function resolveInlineGroupSystemPrompt(params: {

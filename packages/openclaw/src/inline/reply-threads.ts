@@ -23,11 +23,40 @@ const GET_MESSAGES_METHOD =
     ? ((Method as Record<string, unknown>).GET_MESSAGES as Method)
     : (38 as Method)
 
+const CREATE_SUBTHREAD_METHOD =
+  typeof (Method as Record<string, unknown>).CREATE_SUBTHREAD === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).CREATE_SUBTHREAD) &&
+  ((Method as Record<string, unknown>).CREATE_SUBTHREAD as number) > 0
+    ? ((Method as Record<string, unknown>).CREATE_SUBTHREAD as Method)
+    : (42 as Method)
+
 export type InlineReplyThreadMetadata = {
   childChatId: bigint
   parentChatId: bigint
   parentMessageId: bigint | null
   title: string | null
+}
+
+export type InlineCreatedReplyThread = {
+  childChatId: bigint
+  parentChatId: bigint
+  parentMessageId: bigint
+  title: string | null
+  anchorMessage: Message | null
+}
+
+function isPlacementMode(raw: unknown): boolean {
+  return raw === "thread" || raw === "main"
+}
+
+function hasReplyThreadPlacementConfig(config: { replyThreadMode?: unknown; groups?: unknown }): boolean {
+  if (isPlacementMode(config.replyThreadMode)) return true
+  if (!config.groups || typeof config.groups !== "object" || Array.isArray(config.groups)) return false
+
+  return Object.values(config.groups).some((group) => {
+    if (!group || typeof group !== "object" || Array.isArray(group)) return false
+    return isPlacementMode((group as { replyThreadMode?: unknown }).replyThreadMode)
+  })
 }
 
 function buildChatPeer(chatId: bigint): {
@@ -54,7 +83,9 @@ export function getInlineReplyThreadsCapabilityConfig(params: {
   })
 
   return {
-    replyThreads: account.config.capabilities?.replyThreads === true,
+    replyThreads:
+      account.config.capabilities?.replyThreads === true ||
+      hasReplyThreadPlacementConfig(account.config),
   }
 }
 
@@ -169,4 +200,36 @@ export async function loadInlineReplyThreadAnchorMessage(params: {
   }
 
   return (historyResult.getChatHistory.messages ?? []).find((item) => item.id === params.parentMessageId) ?? null
+}
+
+export async function createInlineReplyThreadForMessage(params: {
+  client: InlineSdkClient
+  parentChatId: bigint
+  parentMessageId: bigint
+}): Promise<InlineCreatedReplyThread | null> {
+  const result = await params.client.invokeRaw(CREATE_SUBTHREAD_METHOD, {
+    oneofKind: "createSubthread",
+    createSubthread: {
+      parentChatId: params.parentChatId,
+      parentMessageId: params.parentMessageId,
+      participants: [],
+    },
+  })
+
+  if (result.oneofKind !== "createSubthread") {
+    return null
+  }
+
+  const chat = result.createSubthread.chat
+  if (!chat?.id) {
+    return null
+  }
+
+  return {
+    childChatId: chat.id,
+    parentChatId: chat.parentChatId ?? params.parentChatId,
+    parentMessageId: chat.parentMessageId ?? params.parentMessageId,
+    title: chat.title?.trim() || null,
+    anchorMessage: result.createSubthread.anchorMessage ?? null,
+  }
 }

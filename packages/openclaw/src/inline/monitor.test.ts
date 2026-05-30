@@ -142,6 +142,7 @@ type MonitorSetup = {
   chats: Record<string, {
     kind: "direct" | "group"
     title?: string
+    lastMsgId?: bigint
     peerUserId?: bigint
     parentChatId?: bigint
     parentMessageId?: bigint
@@ -203,6 +204,7 @@ type MonitorSetup = {
   skipInfos?: Array<{ reason?: string }>
   dispatchErrorInfos?: Array<{ kind?: string }>
   sendMessageDelayMs?: number
+  createSubthreadError?: string
 }
 
 function buildAccount(overrides?: {
@@ -213,10 +215,14 @@ function buildAccount(overrides?: {
   systemPrompt?: string
   groups?: Record<string, {
     requireMention?: boolean
+    replyThreadMode?: "auto" | "thread" | "main"
+    replyThreadAutoCreateMinMessages?: number
     systemPrompt?: string
     tools?: { allow?: string[]; deny?: string[] }
     toolsBySender?: Record<string, { allow?: string[]; deny?: string[] }>
   }>
+  replyThreadMode?: "auto" | "thread" | "main"
+  replyThreadAutoCreateMinMessages?: number
   requireMention?: boolean
   replyToBotWithoutMention?: boolean
   historyLimit?: number
@@ -253,6 +259,8 @@ function buildAccount(overrides?: {
       systemPrompt: overrides?.systemPrompt,
       groups: overrides?.groups,
       requireMention: overrides?.requireMention ?? true,
+      replyThreadMode: overrides?.replyThreadMode,
+      replyThreadAutoCreateMinMessages: overrides?.replyThreadAutoCreateMinMessages,
       replyToBotWithoutMention: overrides?.replyToBotWithoutMention,
       historyLimit: overrides?.historyLimit,
       dmHistoryLimit: overrides?.dmHistoryLimit,
@@ -442,6 +450,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
         messageIds?: bigint[]
       }
+      createSubthread?: {
+        parentChatId?: bigint
+        parentMessageId?: bigint
+      }
     },
   ) => {
     if (method === 1 && input?.oneofKind === "getMe") {
@@ -477,10 +489,28 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     if (method === 25 && input?.oneofKind === "getChat") {
       const chatId = String(input.getChat?.peerId?.type?.chat?.chatId ?? "")
       const info = setup.chats[chatId]
-      if (!info || info.kind === "direct") {
+      if (!info) {
         return {
           oneofKind: "getChat",
           getChat: {},
+        }
+      }
+      if (info.kind === "direct") {
+        return {
+          oneofKind: "getChat",
+          getChat: {
+            chat: {
+              id: BigInt(chatId),
+              title: info.title ?? `chat-${chatId}`,
+              peerId: {
+                type: {
+                  oneofKind: "user",
+                  user: { userId: info.peerUserId ?? 42n },
+                },
+              },
+              ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
+            },
+          },
         }
       }
       return {
@@ -489,6 +519,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           chat: {
             id: BigInt(chatId),
             title: info.title ?? `chat-${chatId}`,
+            ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
             ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
             ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
           },
@@ -506,6 +537,26 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           messages: messageIds
             .map((id) => byId.get(String(id)))
             .filter((message): message is NonNullable<typeof message> => Boolean(message)),
+        },
+      }
+    }
+    if (method === 42 && input?.oneofKind === "createSubthread") {
+      if (setup.createSubthreadError) {
+        throw new Error(setup.createSubthreadError)
+      }
+      const parentChatId = input.createSubthread?.parentChatId ?? 0n
+      const parentMessageId = input.createSubthread?.parentMessageId ?? 0n
+      const childChatId = BigInt(`${String(parentChatId)}${String(parentMessageId)}`)
+      return {
+        oneofKind: "createSubthread",
+        createSubthread: {
+          chat: {
+            id: childChatId,
+            parentChatId,
+            parentMessageId,
+          },
+          dialog: { chatId: childChatId },
+          anchorMessage: setup.historyByChat?.[String(parentChatId)]?.find((message) => message.id === parentMessageId),
         },
       }
     }
@@ -608,6 +659,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         GET_CHAT: 25,
         GET_CHAT_PARTICIPANTS: 13,
         EDIT_MESSAGE: 8,
+        CREATE_SUBTHREAD: 42,
         GET_MESSAGES: 38,
         INVOKE_MESSAGE_ACTION: 48,
         ANSWER_MESSAGE_ACTION: 49,
@@ -623,12 +675,14 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             return {
               chatId,
               title: info.title ?? "Direct",
+              ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
               peer: { type: { oneofKind: "user", user: { userId: info.peerUserId ?? 42n } } },
             }
           }
           return {
             chatId,
             title: info.title ?? "Group",
+            ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
             peer: { type: { oneofKind: "chat", chat: { chatId } } },
             ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
             ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
@@ -1275,6 +1329,415 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           chatId: 7100n,
           text: "thread reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("creates and replies in a child reply thread when the parent chat is configured for threaded replies", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 2002n,
+            date: 1_700_000_002n,
+            fromId: 51n,
+            message: "@inlinebot can you look at this?",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 2002n,
+            date: 1_700_000_002n,
+            fromId: 51n,
+            message: "@inlinebot can you look at this?",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "threaded reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "88": { replyThreadMode: "thread" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          oneofKind: "createSubthread",
+          createSubthread: expect.objectContaining({
+            parentChatId: 88n,
+            parentMessageId: 2002n,
+          }),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          To: "inline:88",
+          OriginatingTo: "inline:88",
+          MessageThreadId: "882002",
+          ThreadLabel: "Re: @inlinebot can you look at this?",
+          Body: "@inlinebot can you look at this?",
+          BodyForAgent: "can you look at this?",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 882002n,
+          text: "threaded reply",
+        }),
+      )
+      expect(harness.calls.sendMessage.mock.calls[0]?.[0]).not.toHaveProperty("replyToMsgId")
+    })
+
+    await handle.stop()
+  })
+
+  it("keeps small ordinary chats in-place instead of creating a child reply thread", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 89n,
+          message: {
+            id: 12n,
+            date: 1_700_000_012n,
+            fromId: 51n,
+            message: "@inlinebot answer here",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "89": { kind: "group", title: "Short Project Thread", lastMsgId: 12n },
+      },
+      dispatchReplyPayload: {
+        text: "same chat reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "89": { replyThreadMode: "thread" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 89n,
+          text: "same chat reply",
+        }),
+      )
+    })
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ oneofKind: "createSubthread" }),
+    )
+    expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        MessageThreadId: expect.any(String),
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("can override the parent-size gate to thread small ordinary chats", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 90n,
+          message: {
+            id: 8n,
+            date: 1_700_000_013n,
+            fromId: 51n,
+            message: "@inlinebot start a thread anyway",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "90": { kind: "group", title: "Short Thread Override", lastMsgId: 8n },
+      },
+      dispatchReplyPayload: {
+        text: "child reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "90": {
+                replyThreadMode: "thread",
+                replyThreadAutoCreateMinMessages: 0,
+              },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          oneofKind: "createSubthread",
+          createSubthread: expect.objectContaining({
+            parentChatId: 90n,
+            parentMessageId: 8n,
+          }),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 908n,
+          text: "child reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not fall back to the parent chat when configured thread creation fails", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      createSubthreadError: "boom",
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 2003n,
+            date: 1_700_000_003n,
+            fromId: 51n,
+            message: "@inlinebot thread this",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "should not send",
+      },
+    })
+
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "88": { replyThreadMode: "thread" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("inline create reply thread failed"))
+    })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("keeps parent-chat replies in the parent chat when that group overrides threaded defaults with main mode", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 2004n,
+            date: 1_700_000_004n,
+            fromId: 51n,
+            message: "@inlinebot answer here",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "main parent reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "88": { replyThreadMode: "main" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreadMode: "thread" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "main parent reply",
+        }),
+      )
+    })
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ oneofKind: "createSubthread" }),
+    )
+    expect(harness.calls.sendMessage.mock.calls[0]?.[0]).not.toHaveProperty("replyToMsgId")
+
+    await handle.stop()
+  })
+
+  it("keeps explicit reply-thread inbound messages in the thread even when the parent chat is main mode", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7100n,
+          message: {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "please answer in main",
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: deploy plan",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      historyByChat: {
+        "7000": [{ id: 5000n, date: 1_700_000_002n, fromId: 41n, message: "Parent thread anchor" }],
+        "7100": [{ id: 61002n, date: 1_700_000_010n, fromId: 42n, message: "please answer in main" }],
+      },
+      dispatchReplyPayload: {
+        text: "main reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "7000": { replyThreadMode: "main" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          To: "inline:7000",
+          OriginatingTo: "inline:7000",
+          GroupSubject: "Deploy Room",
+          Body: "please answer in main",
+          BodyForAgent: "please answer in main",
+        }),
+      )
+      const ctx = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
+      expect(ctx).toEqual(
+        expect.objectContaining({
+          ParentSessionKey: "agent:main:inline:group:7000",
+          MessageThreadId: "7100",
+          ThreadLabel: "Re: deploy plan",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7100n,
+          text: "main reply",
         }),
       )
     })

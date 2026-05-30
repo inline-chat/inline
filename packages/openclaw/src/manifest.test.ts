@@ -76,6 +76,12 @@ describe("plugin manifest", () => {
     expect(accounts?.additionalProperties?.properties?.capabilities?.$ref).toBe(
       "#/properties/capabilities",
     )
+    expect(accounts?.additionalProperties?.properties?.replyThreadMode?.$ref).toBe(
+      "#/properties/replyThreadMode",
+    )
+    expect(accounts?.additionalProperties?.properties?.replyThreadAutoCreateMinMessages?.$ref).toBe(
+      "#/properties/replyThreadAutoCreateMinMessages",
+    )
     expect(accounts?.additionalProperties?.properties?.dmPolicy?.$ref).toBe(
       "#/properties/dmPolicy",
     )
@@ -117,6 +123,14 @@ describe("plugin manifest", () => {
     expect(schema?.properties?.defaultTo).toEqual({
       anyOf: [{ type: "string" }, { type: "number" }],
     })
+    expect(schema?.properties?.replyThreadMode).toEqual({
+      type: "string",
+      enum: ["auto", "thread", "main"],
+    })
+    expect(schema?.properties?.replyThreadAutoCreateMinMessages).toEqual({
+      type: "integer",
+      minimum: 0,
+    })
     expect(schema?.properties?.groupAllowFrom).toEqual({
       type: "array",
       items: { anyOf: [{ type: "string" }, { type: "number" }] },
@@ -154,6 +168,8 @@ describe("plugin manifest", () => {
           work: {
             token: { source: "env", provider: "default", id: "INLINE_TOKEN" },
             capabilities: { replyThreads: true },
+            replyThreadMode: "thread",
+            replyThreadAutoCreateMinMessages: 50,
             streaming: {
               mode: "progress",
               futureModeOption: "host-owned",
@@ -165,6 +181,8 @@ describe("plugin manifest", () => {
             groups: {
               "chat:44": {
                 allowFrom: [43],
+                replyThreadMode: "main",
+                replyThreadAutoCreateMinMessages: 0,
               },
             },
             reactionAllowlist: [51],

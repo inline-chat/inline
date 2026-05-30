@@ -2530,7 +2530,7 @@ describe("inline/actions", () => {
     const close = vi.fn(async () => {})
     const getMe = vi.fn(async () => ({ userId: 500n, firstName: "Inline", username: "inline-bot" }))
     const invokeRaw = vi.fn(async (method: number) => {
-      if (method !== 43) {
+      if (method !== 42) {
         throw new Error(`unexpected method ${String(method)}`)
       }
       return {
@@ -2545,7 +2545,7 @@ describe("inline/actions", () => {
 
     vi.doMock("@inline-chat/realtime-sdk", () => ({
       Method: {
-        CREATE_SUBTHREAD: 43,
+        CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -2580,7 +2580,7 @@ describe("inline/actions", () => {
     } as any)
 
     expect(invokeRaw).toHaveBeenCalledWith(
-      43,
+      42,
       expect.objectContaining({
         oneofKind: "createSubthread",
         createSubthread: expect.objectContaining({

@@ -37,6 +37,8 @@ const InlineCapabilitiesSchema = z
     replyThreads: z.boolean().optional(),
   })
   .strict()
+export const InlineReplyThreadModeSchema = z.enum(["auto", "thread", "main"])
+export type InlineReplyThreadMode = z.infer<typeof InlineReplyThreadModeSchema>
 
 const InlineTargetSchema = z.union([z.string(), z.number()])
 const InlineAllowEntrySchema = z.union([z.string(), z.number()])
@@ -44,6 +46,8 @@ const InlineAllowEntrySchema = z.union([z.string(), z.number()])
 const InlineGroupSchema = z
   .object({
     requireMention: z.boolean().optional(),
+    replyThreadMode: InlineReplyThreadModeSchema.optional(),
+    replyThreadAutoCreateMinMessages: z.number().int().min(0).optional(),
     allowFrom: z.array(InlineAllowEntrySchema).optional(),
     systemPrompt: z.string().optional(),
     tools: ToolPolicySchema.optional(),
@@ -168,6 +172,8 @@ export const InlineAccountSchemaBase = z
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     groups: z.record(z.string(), InlineGroupSchema.optional()).optional(),
     requireMention: z.boolean().optional(),
+    replyThreadMode: InlineReplyThreadModeSchema.optional(),
+    replyThreadAutoCreateMinMessages: z.number().int().min(0).optional(),
     replyToBotWithoutMention: z.boolean().optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),

@@ -26,6 +26,41 @@ describe("inline/config-schema", () => {
     ).toBe(true)
   })
 
+  it("accepts reply thread mode defaults and group overrides", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        capabilities: { replyThreads: true },
+        replyThreadMode: "auto",
+        replyThreadAutoCreateMinMessages: 50,
+        groups: {
+          "*": { replyThreadMode: "thread", replyThreadAutoCreateMinMessages: 20 },
+          "123": { replyThreadMode: "main", replyThreadAutoCreateMinMessages: 0 },
+        },
+        accounts: {
+          work: {
+            capabilities: { replyThreads: true },
+            replyThreadMode: "main",
+            replyThreadAutoCreateMinMessages: 100,
+            groups: {
+              "456": { replyThreadMode: "thread", replyThreadAutoCreateMinMessages: 10 },
+            },
+          },
+        },
+      }).success,
+    ).toBe(true)
+
+    expect(InlineConfigSchema.safeParse({ replyThreadMode: "parent" }).success).toBe(false)
+    expect(
+      InlineConfigSchema.safeParse({
+        groups: {
+          "123": { replyThreadMode: "reply" },
+        },
+      }).success,
+    ).toBe(false)
+    expect(InlineConfigSchema.safeParse({ replyThreadAutoCreateMinMessages: -1 }).success).toBe(false)
+    expect(InlineConfigSchema.safeParse({ replyThreadAutoCreateMinMessages: 1.5 }).success).toBe(false)
+  })
+
   it("accepts dmPolicy=open only when allowFrom includes *", () => {
     expect(
       InlineConfigSchema.safeParse({ dmPolicy: "open", allowFrom: ["*"] }).success,

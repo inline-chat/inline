@@ -67,7 +67,10 @@ import {
   resolveInlineGroupAllowFrom,
   resolveInlineGroupAccessPolicy,
   resolveInlineGroupRequireMention,
+  resolveInlineGroupReplyThreadAutoCreateMinMessages,
+  resolveInlineGroupReplyThreadMode,
   resolveInlineGroupSystemPrompt,
+  type InlineReplyThreadMode,
 } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
@@ -85,6 +88,7 @@ import {
   type InlineReplyMarkupButton,
 } from "./command-ui.js"
 import {
+  createInlineReplyThreadForMessage,
   isInlineReplyThreadsEnabled,
   loadInlineReplyThreadAnchorMessage,
   loadInlineReplyThreadMetadata,
@@ -107,6 +111,7 @@ const INLINE_REQUEST_ERROR_FALLBACK =
   "OpenClaw could not process that request. Please try again."
 const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
+const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
@@ -135,6 +140,7 @@ type StatusSink = (patch: {
 type CachedChatInfo = {
   kind: "direct" | "group"
   title: string | null
+  lastMsgId?: bigint | null
   peerUserId?: bigint | null
 }
 
@@ -186,6 +192,7 @@ type InlineReplyThreadContext = {
   childChatId: bigint
   parentChatId: bigint
   parentChatTitle: string | null
+  parentMessageId: bigint | null
   threadLabel: string | null
   anchorMessage: Message | null
 }
@@ -253,6 +260,7 @@ type InlineHistoryEntryPayload = {
 
 const DEFAULT_DM_HISTORY_LIMIT = 6
 const HISTORY_LINE_MAX_CHARS = 280
+const REPLY_THREAD_LABEL_MAX_CHARS = 72
 const URL_LIKE_PATTERN = /https?:\/\/\S+/i
 const BOT_MESSAGE_CACHE_LIMIT = 500
 const REACTION_TARGET_LOOKUP_LIMIT = 8
@@ -519,6 +527,7 @@ async function resolveChatInfo(
   const info: CachedChatInfo = {
     kind,
     title,
+    lastMsgId: result.lastMsgId ?? null,
     ...(peerUserId != null ? { peerUserId } : {}),
   }
   cache.set(chatId, info)
@@ -1367,6 +1376,22 @@ function normalizeHistoryText(raw: string | undefined): string {
   return `${compact.slice(0, HISTORY_LINE_MAX_CHARS - 1)}…`
 }
 
+function buildInlineReplyThreadLabel(params: {
+  title: string | null | undefined
+  anchorMessage: Message | null | undefined
+}): string | null {
+  const title = params.title?.trim()
+  if (title) return title
+
+  if (!params.anchorMessage) return "Re: Message"
+  const anchorText = buildInlineInboundBodyText(summarizeInlineMessageContent(params.anchorMessage))
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!anchorText) return "Re: Message"
+
+  return `Re: ${anchorText.slice(0, REPLY_THREAD_LABEL_MAX_CHARS)}`
+}
+
 function drainCompleteParagraphs(buffer: string): { paragraphs: string[]; rest: string } {
   const paragraphs: string[] = []
   let rest = buffer
@@ -1797,9 +1822,27 @@ async function resolveInlineInboundReplyThreadContext(params: {
     childChatId: metadata.childChatId,
     parentChatId: metadata.parentChatId,
     parentChatTitle: parentChatInfo.title ?? null,
-    threadLabel: metadata.title ?? params.chatInfo.title ?? null,
+    parentMessageId: metadata.parentMessageId,
+    threadLabel: buildInlineReplyThreadLabel({
+      title: metadata.title ?? params.chatInfo.title ?? null,
+      anchorMessage,
+    }),
     anchorMessage,
   }
+}
+
+function normalizeInlineReplyThreadMode(raw: unknown): InlineReplyThreadMode {
+  return raw === "thread" || raw === "main" ? raw : "auto"
+}
+
+function shouldAutoCreateInlineReplyThread(params: {
+  chatInfo: CachedChatInfo
+  messageId: bigint
+  minMessages: number
+}): boolean {
+  if (params.minMessages <= 0) return true
+  const latestMessageId = params.chatInfo.lastMsgId ?? params.messageId
+  return latestMessageId >= BigInt(params.minMessages)
 }
 
 async function buildHistoryContext(params: {
@@ -2366,6 +2409,26 @@ export async function monitorInlineProvider(params: {
     })
     const effectiveChatId = replyThreadContext?.parentChatId ?? chatId
     const effectiveGroupTitle = replyThreadContext?.parentChatTitle ?? chatInfo.title ?? null
+    const replyThreadMode =
+      isGroup && replyThreadsEnabled
+        ? resolveInlineGroupReplyThreadMode({
+            cfg,
+            accountId: account.accountId,
+            groupId: String(effectiveChatId),
+            defaultMode: normalizeInlineReplyThreadMode(account.config.replyThreadMode),
+          })
+        : "auto"
+    const replyThreadAutoCreateMinMessages =
+      isGroup && replyThreadsEnabled
+        ? resolveInlineGroupReplyThreadAutoCreateMinMessages({
+            cfg,
+            accountId: account.accountId,
+            groupId: String(effectiveChatId),
+            defaultMinMessages:
+              account.config.replyThreadAutoCreateMinMessages ??
+              DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES,
+          })
+        : DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES
     const senderId = String(msg.fromId)
     await hydrateChatParticipants(chatId)
     const senderProfile = senderProfilesById.get(senderId)
@@ -2580,9 +2643,10 @@ export async function monitorInlineProvider(params: {
       : false
     const wasMentioned = nativeMentioned || patternMentioned
     const messageTimestamp = Number(msg.date) * 1000
-    const groupHistoryKey = isGroup
-      ? replyThreadContext
-        ? `${route.sessionKey}:thread:${String(replyThreadContext.childChatId)}`
+    const pendingReplyThreadContext = replyThreadContext
+    const pendingGroupHistoryKey = isGroup
+      ? pendingReplyThreadContext
+        ? `${route.sessionKey}:thread:${String(pendingReplyThreadContext.childChatId)}`
         : route.sessionKey
       : null
     const senderLabel = resolveInlineSenderLabel({
@@ -2676,10 +2740,10 @@ export async function monitorInlineProvider(params: {
         normalizeHistoryText(rawBody)
       recordPendingHistoryEntryIfEnabled({
         historyMap: groupPendingHistories,
-        historyKey: groupHistoryKey ?? "",
+        historyKey: pendingGroupHistoryKey ?? "",
         limit: historyLimit,
         entry:
-          groupHistoryKey && pendingBody
+          pendingGroupHistoryKey && pendingBody
             ? {
                 sender: pendingHistorySender,
                 body: pendingBody,
@@ -2927,6 +2991,58 @@ export async function monitorInlineProvider(params: {
       return
     }
 
+    let deliveryReplyThreadContext = replyThreadContext
+    const shouldCreateDeliveryThread =
+      isGroup &&
+      replyThreadsEnabled &&
+      replyThreadMode === "thread" &&
+      !deliveryReplyThreadContext &&
+      shouldAutoCreateInlineReplyThread({
+        chatInfo,
+        messageId: msg.id,
+        minMessages: replyThreadAutoCreateMinMessages,
+      }) &&
+      !shouldEditCallbackTargetInPlace
+
+    if (shouldCreateDeliveryThread) {
+      const createdThread = await createInlineReplyThreadForMessage({
+        client,
+        parentChatId: effectiveChatId,
+        parentMessageId: msg.id,
+      }).catch((error) => {
+        statusSink?.({ lastError: `createSubthread failed: ${String(error)}` })
+        runtime.error?.(`inline create reply thread failed: ${String(error)}`)
+        return null
+      })
+
+      if (createdThread) {
+        deliveryReplyThreadContext = {
+          childChatId: createdThread.childChatId,
+          parentChatId: createdThread.parentChatId,
+          parentChatTitle: effectiveGroupTitle,
+          parentMessageId: createdThread.parentMessageId,
+          threadLabel: buildInlineReplyThreadLabel({
+            title: createdThread.title,
+            anchorMessage: createdThread.anchorMessage,
+          }),
+          anchorMessage: createdThread.anchorMessage,
+        }
+      }
+    }
+    if (shouldCreateDeliveryThread && !deliveryReplyThreadContext) {
+      await answerCallbackIfNeeded().catch((error) => {
+        runtime.error?.(`inline callback answer failed: ${String(error)}`)
+      })
+      return
+    }
+
+    const deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
+    const groupHistoryKey = isGroup
+      ? deliveryReplyThreadContext
+        ? `${route.sessionKey}:thread:${String(deliveryReplyThreadContext.childChatId)}`
+        : route.sessionKey
+      : null
+
     const inboundMedia = await resolveInlineInboundMedia({
       core,
       message: msg,
@@ -2997,7 +3113,7 @@ export async function monitorInlineProvider(params: {
       From: isGroup ? `inline:chat:${String(effectiveChatId)}` : `inline:${senderId}`,
       To: `inline:${String(effectiveChatId)}`,
       SessionKey: route.sessionKey,
-      ...(replyThreadContext ? { ParentSessionKey: route.sessionKey } : {}),
+      ...(deliveryReplyThreadContext ? { ParentSessionKey: route.sessionKey } : {}),
       AccountId: route.accountId,
       ChatType: isGroup ? "group" : "direct",
       ConversationLabel: fromLabel,
@@ -3022,8 +3138,8 @@ export async function monitorInlineProvider(params: {
             authorized: false,
             body: normalizedCommandBody,
           },
-      ...(replyThreadContext ? { MessageThreadId: String(replyThreadContext.childChatId) } : {}),
-      ...(replyThreadContext?.threadLabel ? { ThreadLabel: replyThreadContext.threadLabel } : {}),
+      ...(deliveryReplyThreadContext ? { MessageThreadId: String(deliveryReplyThreadContext.childChatId) } : {}),
+      ...(deliveryReplyThreadContext?.threadLabel ? { ThreadLabel: deliveryReplyThreadContext.threadLabel } : {}),
       ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
       ...(effectiveHistoryContext.replyToSenderId != null ? { ReplyToSenderId: effectiveHistoryContext.replyToSenderId } : {}),
       ...(msg.replyToMsgId != null ? { ReplyToWasBot: effectiveHistoryContext.repliedToBot } : {}),
@@ -3080,8 +3196,8 @@ export async function monitorInlineProvider(params: {
       channel: CHANNEL_ID,
       accountId: account.accountId,
       typing: {
-        start: () => client.sendTyping({ chatId, typing: true }),
-        stop: () => client.sendTyping({ chatId, typing: false }),
+        start: () => client.sendTyping({ chatId: deliveryChatId, typing: true }),
+        stop: () => client.sendTyping({ chatId: deliveryChatId, typing: false }),
         onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
         onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
       },
@@ -3119,7 +3235,9 @@ export async function monitorInlineProvider(params: {
     const streamViaEditMessage =
       (inlineStreamingMode === "partial" || inlineStreamingMode === "progress") &&
       !shouldEditCallbackTargetInPlace
-    const defaultReplyToMsgId = isGroup && msg.replyToMsgId != null ? msg.id : undefined
+    const canReplyToSourceMessage = deliveryChatId === chatId
+    const defaultReplyToMsgId =
+      canReplyToSourceMessage && isGroup && msg.replyToMsgId != null ? msg.id : undefined
     const inlineBlockStreamingEnabled = resolveInlineBlockStreamingEnabled(account.config)
     const disableBlockStreaming =
       streamViaEditMessage
@@ -3179,7 +3297,7 @@ export async function monitorInlineProvider(params: {
         try {
           if (editStreamState.messageId == null) {
             const sent = await client.sendMessage({
-              chatId,
+              chatId: deliveryChatId,
               text: nextText,
               ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
               parseMarkdown,
@@ -3188,13 +3306,13 @@ export async function monitorInlineProvider(params: {
               throw new Error("inline edit stream: sendMessage returned no messageId")
             }
             editStreamState.messageId = sent.messageId
-            rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+            rememberBotMessageId(botMessageIdsByChat, deliveryChatId, sent.messageId)
           } else {
             const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
               oneofKind: "editMessage",
               editMessage: {
                 messageId: editStreamState.messageId,
-                peerId: buildChatPeer(chatId),
+                peerId: buildChatPeer(deliveryChatId),
                 text: nextText,
                 parseMarkdown,
               },
@@ -3296,19 +3414,19 @@ export async function monitorInlineProvider(params: {
               let replyToMsgId: bigint | undefined
               if (visiblePayload.replyToId != null) {
                 try {
-                  replyToMsgId = BigInt(visiblePayload.replyToId)
+                  replyToMsgId = canReplyToSourceMessage ? BigInt(visiblePayload.replyToId) : undefined
                 } catch {
                   // ignore
                 }
               }
               // Keep reply chains threaded when inbound is a reply in group chats.
-              if (replyToMsgId == null && isGroup && msg.replyToMsgId != null) {
+              if (replyToMsgId == null && canReplyToSourceMessage && isGroup && msg.replyToMsgId != null) {
                 replyToMsgId = msg.id
               }
 
               const rememberSent = (messageId: bigint | null) => {
                 if (messageId != null) {
-                  rememberBotMessageId(botMessageIdsByChat, chatId, messageId)
+                  rememberBotMessageId(botMessageIdsByChat, deliveryChatId, messageId)
                 }
               }
 
@@ -3320,7 +3438,7 @@ export async function monitorInlineProvider(params: {
                 const outbound = sanitizeInlineDeliveryText(text)
                 if (!outbound.trim()) return
                 const sent = await client.sendMessage({
-                  chatId,
+                  chatId: deliveryChatId,
                   text: outbound,
                   ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
                   ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
@@ -3344,7 +3462,7 @@ export async function monitorInlineProvider(params: {
                   oneofKind: "editMessage",
                   editMessage: {
                     messageId: editStreamState.messageId,
-                    peerId: buildChatPeer(chatId),
+                    peerId: buildChatPeer(deliveryChatId),
                     text: textForEdit,
                     parseMarkdown,
                     ...(actions !== undefined ? { actions } : {}),
@@ -3423,7 +3541,7 @@ export async function monitorInlineProvider(params: {
                     mediaUrl,
                   })
                   const sent = await client.sendMessage({
-                    chatId,
+                    chatId: deliveryChatId,
                     ...(caption ? { text: caption } : {}),
                     media,
                     ...(isFirst && replyToMsgId != null ? { replyToMsgId } : {}),
@@ -3471,13 +3589,13 @@ export async function monitorInlineProvider(params: {
             ? INLINE_REQUEST_ERROR_FALLBACK
             : EMPTY_RESPONSE_FALLBACK
         const sent = await client.sendMessage({
-          chatId,
+          chatId: deliveryChatId,
           text: fallbackText,
           ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
           parseMarkdown,
         })
         if (sent.messageId != null) {
-          rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+          rememberBotMessageId(botMessageIdsByChat, deliveryChatId, sent.messageId)
         }
         statusSink?.({ lastOutboundAt: Date.now() })
       }
