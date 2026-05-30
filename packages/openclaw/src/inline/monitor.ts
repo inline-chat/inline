@@ -2677,7 +2677,7 @@ export async function monitorInlineProvider(params: {
         replyToSenderId: null,
       }
     })
-    const effectiveHistoryContext =
+    let effectiveHistoryContext =
       replyThreadContext?.anchorMessage != null
         ? prependInlineReplyThreadAnchor({
             historyContext,
@@ -3029,6 +3029,22 @@ export async function monitorInlineProvider(params: {
         runtime.error?.(`inline callback answer failed: ${String(error)}`)
       })
       return
+    }
+    if (!replyThreadContext && deliveryReplyThreadContext?.anchorMessage != null) {
+      effectiveHistoryContext = prependInlineReplyThreadAnchor({
+        historyContext: {
+          historyText: null,
+          attachmentText: null,
+          entityText: null,
+          inboundHistory: [],
+          repliedToBot: effectiveHistoryContext.repliedToBot,
+          replyToSenderId: effectiveHistoryContext.replyToSenderId,
+        },
+        anchorMessage: deliveryReplyThreadContext.anchorMessage,
+        parentChatId: deliveryReplyThreadContext.parentChatId,
+        senderProfilesById,
+        meId,
+      })
     }
 
     const deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
