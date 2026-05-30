@@ -6,6 +6,12 @@ import styleCssUrl from "../landing/styles/style.css?url"
 
 const TESTFLIGHT_URL = "https://testflight.apple.com/join/FkC3f7fz"
 
+const DOC_LINKS = [
+  { title: "MCP", label: "Setup", href: "/docs/mcp#quick-setup" },
+  { title: "OpenClaw", label: "Install", href: "/docs/openclaw#install" },
+  { title: "CLI", label: "Install", href: "/docs/cli#install" },
+]
+
 export const Route = createFileRoute("/download")({
   component: Download,
   head: () => ({
@@ -76,6 +82,20 @@ function Download() {
             <br />
             Alpha • Currently invite-only
           </p>
+        </section>
+
+        <section {...stylex.props(styles.docsLinks)} aria-label="Additional setup docs">
+          {DOC_LINKS.map((item) => (
+            <div key={item.title} {...stylex.props(styles.docsLinkItem)}>
+              <span {...stylex.props(styles.docsLinkTitle)}>{item.title}</span>
+              <a href={item.href} {...stylex.props(styles.docsLink)}>
+                {item.label}
+                <span {...stylex.props(styles.docsLinkArrow)} aria-hidden="true">
+                  →
+                </span>
+              </a>
+            </div>
+          ))}
         </section>
       </main>
       <PageFooter />
@@ -225,7 +245,7 @@ const styles = stylex.create({
     gap: 10,
     width: 331,
     maxWidth: "100%",
-    marginBottom: 50,
+    marginBottom: 34,
   },
   primaryButton: {
     height: 40,
@@ -287,5 +307,66 @@ const styles = stylex.create({
     fontSize: 13,
     lineHeight: "19px",
     color: "inherit",
+  },
+  docsLinks: {
+    width: "100%",
+    maxWidth: 372,
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    marginTop: {
+      default: 76,
+      "@media (max-width: 560px)": 60,
+    },
+    marginBottom: {
+      default: 4,
+      "@media (max-width: 560px)": 0,
+    },
+  },
+  docsLinkItem: {
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    padding: "0 14px",
+    textAlign: "center",
+    borderLeftWidth: {
+      default: 1,
+      ":first-child": 0,
+    },
+    borderLeftStyle: "solid",
+    borderLeftColor: {
+      default: "rgba(0, 0, 0, 0.14)",
+      "@media (prefers-color-scheme: dark)": "rgba(255, 255, 255, 0.16)",
+    },
+  },
+  docsLinkTitle: {
+    fontFamily: '"Days One", "DaysOne-Regular", system-ui, sans-serif',
+    fontSize: 15,
+    lineHeight: "19px",
+    fontWeight: 400,
+  },
+  docsLink: {
+    color: "inherit",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 3,
+    fontFamily: '"Reddit Mono", monospace',
+    fontSize: 14,
+    lineHeight: "18px",
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+    opacity: {
+      default: 0.8,
+      ":hover": 1,
+    },
+    transition: "opacity 0.12s ease-out",
+  },
+  docsLinkArrow: {
+    fontFamily: '"Reddit Mono", monospace',
+    fontSize: 12,
+    lineHeight: "18px",
+    opacity: 0.6,
   },
 })
