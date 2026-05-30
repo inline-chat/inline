@@ -124,7 +124,7 @@ async function getChatWithAccess(inputPeer: InputPeer, currentUserId: number): P
         }
 
         const user = await UsersModel.getUserById(peerUserId)
-        if (!user) {
+        if (!user || UsersModel.isDeleted(user)) {
           throw RealtimeRpcError.UserIdInvalid()
         }
 

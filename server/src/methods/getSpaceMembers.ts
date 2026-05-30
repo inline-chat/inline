@@ -57,11 +57,13 @@ export const handler = async (
     where: eq(members.spaceId, spaceId),
   })
 
-  const userIds = members_.map((m) => m.userId)
-  const usersWithPhotos = await UsersModel.getUsersWithPhotos(userIds)
+  const activeUserIds = await UsersModel.getActiveUserIds(members_.map((m) => m.userId))
+  const activeUserIdSet = new Set(activeUserIds)
+  const activeMembers = members_.filter((member) => activeUserIdSet.has(member.userId))
+  const usersWithPhotos = await UsersModel.getUsersWithPhotos(activeUserIds)
 
   return {
     users: usersWithPhotos.map((u) => encodeMinUserInfo(u.user, { photoFile: u.photoFile ?? undefined })),
-    members: members_.map((member) => encodeMemberInfo(member)),
+    members: activeMembers.map((member) => encodeMemberInfo(member)),
   }
 }

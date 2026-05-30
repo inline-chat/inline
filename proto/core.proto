@@ -758,6 +758,7 @@ enum Method {
   REVOKE_SESSION = 50;
   UPDATE_DIALOG_OPEN = 51;
   UPDATE_DIALOG_ORDER = 52;
+  DELETE_BOT = 54;
 }
 
 message RpcCall {
@@ -815,6 +816,7 @@ message RpcCall {
     RevokeSessionInput revokeSession = 51;
     UpdateDialogOpenInput updateDialogOpen = 52;
     UpdateDialogOrderInput updateDialogOrder = 53;
+    DeleteBotInput deleteBot = 55;
   }
 }
 
@@ -874,6 +876,7 @@ message RpcResult {
     RevokeSessionResult revokeSession = 51;
     UpdateDialogOpenResult updateDialogOpen = 52;
     UpdateDialogOrderResult updateDialogOrder = 53;
+    DeleteBotResult deleteBot = 55;
   }
 }
 
@@ -1072,6 +1075,10 @@ message CreateBotResult {
 message ListBotsInput {}
 
 message ListBotsResult { repeated User bots = 1; }
+
+message DeleteBotInput { int64 bot_user_id = 1; }
+
+message DeleteBotResult { int64 bot_user_id = 1; }
 
 message RevokeSessionInput { int64 session_id = 1; }
 

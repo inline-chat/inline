@@ -3,8 +3,8 @@ import { InlineError } from "@in/server/types/errors"
 import { normalizeToken } from "@in/server/utils/auth"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema/users"
-import { eq } from "drizzle-orm"
+import { userNotDeleted, users } from "@in/server/db/schema/users"
+import { and, eq } from "drizzle-orm"
 import { getIp } from "@in/server/utils/ip"
 
 export type BotHandlerContext = {
@@ -14,7 +14,11 @@ export type BotHandlerContext = {
 }
 
 const requireBotUser = async (userId: number) => {
-  const row = await db.select({ bot: users.bot }).from(users).where(eq(users.id, userId)).limit(1)
+  const row = await db
+    .select({ bot: users.bot })
+    .from(users)
+    .where(and(eq(users.id, userId), userNotDeleted()))
+    .limit(1)
   if (!row[0]?.bot) {
     throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
   }

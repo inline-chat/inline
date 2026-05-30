@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema/users"
+import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { generateToken, hashToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -9,7 +9,7 @@ import { normalizeUsername } from "@in/server/utils/normalize"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
-import { and, eq, isNull, or, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 import { type CreateBotInput, type CreateBotResult } from "@inline-chat/protocol/core"
@@ -42,7 +42,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
       and(
         eq(users.bot, true),
         eq(users.botCreatorId, context.currentUserId),
-        or(isNull(users.deleted), eq(users.deleted, false)),
+        userNotDeleted(),
       ),
     )
   const existingBots = existingBotsResult[0]?.count ?? 0

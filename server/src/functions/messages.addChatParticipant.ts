@@ -6,7 +6,7 @@ import { ChatParticipant, Update } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
-import { users } from "@in/server/db/schema/users"
+import { userNotDeleted, users } from "@in/server/db/schema/users"
 import type { UpdateGroup } from "../modules/updates"
 import { getUpdateGroup } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
@@ -39,7 +39,11 @@ export async function addChatParticipant(
     await ensureUserCanParticipateInChat(chat[0], input.userId)
 
     // Check if user exists
-    const user = await db.select().from(users).where(eq(users.id, input.userId)).limit(1)
+    const user = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, input.userId), userNotDeleted()))
+      .limit(1)
     if (!user || user.length === 0) {
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${input.userId} not found`, 404)
     }

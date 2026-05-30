@@ -59,7 +59,7 @@ async function getMessagesWithChatCreation(
         }
 
         const user = await UsersModel.getUserById(peerUserId)
-        if (!user) {
+        if (!user || UsersModel.isDeleted(user)) {
           throw RealtimeRpcError.UserIdInvalid()
         }
 

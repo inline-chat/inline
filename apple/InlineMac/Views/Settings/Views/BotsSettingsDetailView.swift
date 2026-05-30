@@ -16,6 +16,7 @@ struct BotsSettingsDetailView: View {
 
   @State private var botToEdit: BotEditItem?
   @State private var rotateConfirmBotId: Int64?
+  @State private var deleteConfirmBot: BotDeleteItem?
 
   var body: some View {
     Form {
@@ -95,6 +96,12 @@ struct BotsSettingsDetailView: View {
             .foregroundStyle(.red)
         }
 
+        if let deleteError = viewModel.deleteError {
+          Text(deleteError)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+
         if viewModel.bots.isEmpty, !viewModel.isLoading {
           Text("No bots yet.")
             .foregroundStyle(.secondary)
@@ -105,6 +112,7 @@ struct BotsSettingsDetailView: View {
               token: viewModel.revealedTokens[bot.id],
               isRevealing: viewModel.revealingBots.contains(bot.id),
               isRotating: viewModel.rotatingBots.contains(bot.id),
+              isDeleting: viewModel.deletingBots.contains(bot.id),
               onReveal: {
                 Task { await viewModel.revealToken(for: bot.id, realtimeV2: realtimeV2) }
               },
@@ -113,6 +121,9 @@ struct BotsSettingsDetailView: View {
               },
               onRotateRequested: {
                 rotateConfirmBotId = bot.id
+              },
+              onDeleteRequested: {
+                deleteConfirmBot = BotDeleteItem(bot: bot)
               },
               onEditProfile: {
                 botToEdit = BotEditItem(bot: bot)
@@ -159,6 +170,29 @@ struct BotsSettingsDetailView: View {
       }
     } message: {
       Text("This will revoke the existing token. Any integrations using the old token will stop working until updated.")
+    }
+    .confirmationDialog(
+      "Delete Bot",
+      isPresented: .init(
+        get: { deleteConfirmBot != nil },
+        set: { if !$0 { deleteConfirmBot = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Delete Bot", role: .destructive) {
+        guard let bot = deleteConfirmBot else { return }
+        deleteConfirmBot = nil
+        Task {
+          await viewModel.deleteBot(for: bot.id, realtimeV2: realtimeV2)
+        }
+      }
+      Button("Cancel", role: .cancel) {
+        deleteConfirmBot = nil
+      }
+    } message: {
+      if let bot = deleteConfirmBot {
+        Text("This will delete \(bot.displayName), revoke its token, and hide it from your bot list. Existing messages stay in history.")
+      }
     }
   }
 
@@ -211,6 +245,16 @@ private struct BotEditItem: Identifiable {
   var id: Int64 { bot.id }
 }
 
+private struct BotDeleteItem: Identifiable {
+  let id: Int64
+  let displayName: String
+
+  init(bot: InlineProtocol.User) {
+    id = bot.id
+    displayName = User(from: bot).displayName
+  }
+}
+
 private enum Field: Hashable {
   case name
   case username
@@ -229,6 +273,8 @@ final class BotsSettingsViewModel: ObservableObject {
   @Published var revealError: String?
   @Published var rotatingBots: Set<Int64> = []
   @Published var rotateError: String?
+  @Published var deletingBots: Set<Int64> = []
+  @Published var deleteError: String?
 
   let maxBots = 5
 
@@ -244,6 +290,7 @@ final class BotsSettingsViewModel: ObservableObject {
     guard currentUserId != nil else {
       bots = []
       revealedTokens = [:]
+      deletingBots = []
       hasLoaded = false
       lastLoadedUserId = nil
       return
@@ -266,6 +313,7 @@ final class BotsSettingsViewModel: ObservableObject {
       bots = response.bots
       let validIds = Set(bots.map(\.id))
       revealedTokens = revealedTokens.filter { validIds.contains($0.key) }
+      deletingBots = deletingBots.filter { validIds.contains($0) }
       hasLoaded = true
     } catch {
       log.error("Failed to load bots", error: error)
@@ -283,6 +331,7 @@ final class BotsSettingsViewModel: ObservableObject {
     loadError = nil
     revealError = nil
     rotateError = nil
+    deleteError = nil
     lastCreatedToken = nil
 
     do {
@@ -316,6 +365,7 @@ final class BotsSettingsViewModel: ObservableObject {
     revealingBots.insert(botId)
     revealError = nil
     rotateError = nil
+    deleteError = nil
 
     do {
       let result = try await realtimeV2.send(.revealBotToken(botUserId: botId))
@@ -338,6 +388,7 @@ final class BotsSettingsViewModel: ObservableObject {
     rotatingBots.insert(botId)
     rotateError = nil
     revealError = nil
+    deleteError = nil
 
     do {
       let result = try await realtimeV2.send(.rotateBotToken(botUserId: botId))
@@ -352,6 +403,32 @@ final class BotsSettingsViewModel: ObservableObject {
     }
 
     rotatingBots.remove(botId)
+  }
+
+  func deleteBot(for botId: Int64, realtimeV2: RealtimeV2) async {
+    guard deletingBots.contains(botId) == false else { return }
+
+    deletingBots.insert(botId)
+    deleteError = nil
+    revealError = nil
+    rotateError = nil
+    defer {
+      deletingBots.remove(botId)
+    }
+
+    do {
+      let result = try await realtimeV2.send(.deleteBot(botUserId: botId))
+      guard case .deleteBot = result else {
+        throw TransactionExecutionError.invalid
+      }
+
+      bots.removeAll { $0.id == botId }
+      revealedTokens[botId] = nil
+      lastCreatedToken = nil
+    } catch {
+      log.error("Failed to delete bot", error: error)
+      deleteError = "Failed to delete bot."
+    }
   }
 
   func hideToken(for botId: Int64) {
@@ -377,9 +454,11 @@ private struct BotRow: View {
   let token: String?
   let isRevealing: Bool
   let isRotating: Bool
+  let isDeleting: Bool
   let onReveal: () -> Void
   let onHide: () -> Void
   let onRotateRequested: () -> Void
+  let onDeleteRequested: () -> Void
   let onEditProfile: () -> Void
   let onCopy: (String) -> Void
 
@@ -436,6 +515,13 @@ private struct BotRow: View {
       Button("Edit Profile...") {
         onEditProfile()
       }
+
+      Divider()
+
+      Button(isDeleting ? "Deleting..." : "Delete Bot...") {
+        onDeleteRequested()
+      }
+      .disabled(isDeleting)
     } label: {
       Image(systemName: "ellipsis.circle")
         .foregroundStyle(.secondary)

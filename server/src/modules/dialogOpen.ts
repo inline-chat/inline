@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import { UsersModel } from "@in/server/db/models/users"
 import type { Transaction } from "@in/server/db/types"
 import { dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
@@ -84,7 +85,7 @@ export async function setDialogOpenForUsers(input: {
   order?: string | null
   showInChatList?: boolean
 }): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
-  const userIds = uniqueUserIds(input.userIds)
+  const userIds = await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))
   if (userIds.length === 0) {
     return { dialogs: [], changedDialogs: [] }
   }

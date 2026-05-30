@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import { UsersModel } from "@in/server/db/models/users"
 
 export type CachedSpaceInfo = {
   id: number
@@ -41,7 +42,7 @@ export async function getCachedSpaceInfo(spaceId: number): Promise<CachedSpaceIn
     return
   }
 
-  let memberUserIds = space.members.map((m) => m.userId)
+  let memberUserIds = await UsersModel.getActiveUserIds(space.members.map((m) => m.userId))
 
   const spaceInfo: CachedSpaceInfo = {
     id: space.id,

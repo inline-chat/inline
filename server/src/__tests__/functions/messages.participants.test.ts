@@ -77,6 +77,22 @@ describe("home thread participant management", () => {
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
   })
 
+  test("rejects adding deleted users to a home thread", async () => {
+    const creator = await testUtils.createUser("home-add-deleted-creator@example.com")
+    const target = await testUtils.createUser("home-add-deleted-target@example.com")
+    if (!creator || !target) throw new Error("Users not created")
+
+    const chat = await testUtils.createChat(null, "Home Deleted Target", "thread", false, creator.id)
+    if (!chat) throw new Error("Chat not created")
+
+    await testUtils.addParticipant(chat.id, creator.id)
+    await db.update(schema.users).set({ deleted: true }).where(eq(schema.users.id, target.id))
+
+    await expect(
+      addChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(creator.id)),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
   test("only creator can remove participants from home thread", async () => {
     const creator = await testUtils.createUser("home-remove-creator@example.com")
     const participant = await testUtils.createUser("home-remove-participant@example.com")

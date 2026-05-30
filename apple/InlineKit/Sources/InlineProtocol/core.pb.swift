@@ -110,6 +110,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case revokeSession // = 50
   case updateDialogOpen // = 51
   case updateDialogOrder // = 52
+  case deleteBot // = 54
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -171,6 +172,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 50: self = .revokeSession
     case 51: self = .updateDialogOpen
     case 52: self = .updateDialogOrder
+    case 54: self = .deleteBot
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -230,6 +232,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .revokeSession: return 50
     case .updateDialogOpen: return 51
     case .updateDialogOrder: return 52
+    case .deleteBot: return 54
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -289,6 +292,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .revokeSession,
     .updateDialogOpen,
     .updateDialogOrder,
+    .deleteBot,
   ]
 
 }
@@ -3319,6 +3323,15 @@ public struct RpcCall: Sendable {
     set {input = .updateDialogOrder(newValue)}
   }
 
+
+  public var deleteBot: DeleteBotInput {
+    get {
+      if case .deleteBot(let v)? = input {return v}
+      return DeleteBotInput()
+    }
+    set {input = .deleteBot(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -3374,6 +3387,7 @@ public struct RpcCall: Sendable {
     case revokeSession(RevokeSessionInput)
     case updateDialogOpen(UpdateDialogOpenInput)
     case updateDialogOrder(UpdateDialogOrderInput)
+    case deleteBot(DeleteBotInput)
 
   }
 
@@ -3811,6 +3825,15 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .updateDialogOrder(newValue)}
   }
 
+
+  public var deleteBot: DeleteBotResult {
+    get {
+      if case .deleteBot(let v)? = _storage._result {return v}
+      return DeleteBotResult()
+    }
+    set {_uniqueStorage()._result = .deleteBot(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -3866,6 +3889,7 @@ public struct RpcResult: @unchecked Sendable {
     case revokeSession(RevokeSessionResult)
     case updateDialogOpen(UpdateDialogOpenResult)
     case updateDialogOrder(UpdateDialogOrderResult)
+    case deleteBot(DeleteBotResult)
 
   }
 
@@ -4605,6 +4629,30 @@ public struct ListBotsResult: Sendable {
   // methods supported on all messages.
 
   public var bots: [User] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct DeleteBotInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct DeleteBotResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -6941,6 +6989,7 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .messageActionAnswered(newValue)}
   }
 
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -8562,6 +8611,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     50: .same(proto: "REVOKE_SESSION"),
     51: .same(proto: "UPDATE_DIALOG_OPEN"),
     52: .same(proto: "UPDATE_DIALOG_ORDER"),
+    54: .same(proto: "DELETE_BOT"),
   ]
 }
 
@@ -12161,6 +12211,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     51: .same(proto: "revokeSession"),
     52: .same(proto: "updateDialogOpen"),
     53: .same(proto: "updateDialogOrder"),
+    55: .same(proto: "deleteBot"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -12846,6 +12897,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updateDialogOrder(v)
         }
       }()
+      case 55: try {
+        var v: DeleteBotInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .deleteBot(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .deleteBot(v)
+        }
+      }()
       default: break
       }
     }
@@ -13068,6 +13132,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updateDialogOrder(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 53)
     }()
+    case .deleteBot?: try {
+      guard case .deleteBot(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 55)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -13137,6 +13205,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     51: .same(proto: "revokeSession"),
     52: .same(proto: "updateDialogOpen"),
     53: .same(proto: "updateDialogOrder"),
+    55: .same(proto: "deleteBot"),
   ]
 
   fileprivate class _StorageClass {
@@ -13853,6 +13922,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .updateDialogOrder(v)
           }
         }()
+        case 55: try {
+          var v: DeleteBotResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteBot(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteBot(v)
+          }
+        }()
         default: break
         }
       }
@@ -14076,6 +14158,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .updateDialogOrder?: try {
         guard case .updateDialogOrder(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 53)
+      }()
+      case .deleteBot?: try {
+        guard case .deleteBot(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 55)
       }()
       case nil: break
       }
@@ -15479,6 +15565,70 @@ extension ListBotsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
 
   public static func ==(lhs: ListBotsResult, rhs: ListBotsResult) -> Bool {
     if lhs.bots != rhs.bots {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension DeleteBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DeleteBotInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "bot_user_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DeleteBotInput, rhs: DeleteBotInput) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension DeleteBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DeleteBotResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "bot_user_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DeleteBotResult, rhs: DeleteBotResult) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

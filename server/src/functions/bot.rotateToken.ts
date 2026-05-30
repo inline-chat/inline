@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { botTokens } from "@in/server/db/schema/botTokens"
-import { users } from "@in/server/db/schema/users"
+import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -22,7 +22,7 @@ export const rotateBotToken = async (
   const [bot] = await db
     .select()
     .from(users)
-    .where(and(eq(users.id, botUserId), eq(users.bot, true)))
+    .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
   if (!bot || bot.botCreatorId !== context.currentUserId) {
@@ -58,4 +58,3 @@ export const rotateBotToken = async (
 
   return { token }
 }
-

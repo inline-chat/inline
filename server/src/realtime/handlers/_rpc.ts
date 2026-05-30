@@ -26,6 +26,7 @@ import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
 import { listBotsHandler } from "./listBots"
+import { deleteBotHandler } from "./deleteBot"
 import { getBotCommandsHandler } from "./getBotCommands"
 import { setBotCommandsHandler } from "./setBotCommands"
 import { getPeerBotCommandsHandler } from "./getPeerBotCommands"
@@ -278,6 +279,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await listBotsHandler(call.input.listBots, handlerContext)
       return { oneofKind: "listBots", listBots: result }
+    }
+
+    case Method.DELETE_BOT: {
+      if (call.input.oneofKind !== "deleteBot") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await deleteBotHandler(call.input.deleteBot, handlerContext)
+      return { oneofKind: "deleteBot", deleteBot: result }
     }
 
     case Method.REVEAL_BOT_TOKEN: {

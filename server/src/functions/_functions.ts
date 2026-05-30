@@ -24,6 +24,7 @@ import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
 import { listBots } from "./bot.listBots"
+import { deleteBot } from "./bot.deleteBot"
 import { getBotCommands } from "./bot.getCommands"
 import { setBotCommands } from "./bot.setCommands"
 import { getPeerBotCommands } from "./bot.getPeerCommands"
@@ -88,6 +89,7 @@ export const Functions = {
   bot: {
     createBot: createBot,
     listBots: listBots,
+    deleteBot: deleteBot,
     getCommands: getBotCommands,
     setCommands: setBotCommands,
     getPeerCommands: getPeerBotCommands,

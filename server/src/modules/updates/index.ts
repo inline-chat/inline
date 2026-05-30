@@ -1,8 +1,9 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import { dialogs, members } from "@in/server/db/schema"
+import { members } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { ChatModel, getChatFromPeer } from "@in/server/db/models/chats"
+import { UsersModel } from "@in/server/db/models/users"
 import { getEffectiveAccessUserIds } from "@in/server/modules/subthreads"
 
 export type UpdateGroup =
@@ -27,10 +28,10 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
     invariant(chat.minUserId && chat.maxUserId, "Private chat must have minUserId and maxUserId")
     if (chat.minUserId === chat.maxUserId) {
       // Saved message
-      return { type: "dmUsers", userIds: [chat.minUserId] }
+      return { type: "dmUsers", userIds: await UsersModel.getActiveUserIds([chat.minUserId]) }
     }
     // DMs
-    return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
+    return { type: "dmUsers", userIds: await UsersModel.getActiveUserIds([chat.minUserId, chat.maxUserId]) }
   } else if (chat.type === "thread") {
     const userIds = await getEffectiveAccessUserIds(chat)
     return chat.spaceId != null
@@ -54,10 +55,10 @@ export const getUpdateGroupFromInputPeer = async (
     invariant(chat.minUserId && chat.maxUserId, "Private chat must have minUserId and maxUserId")
     if (chat.minUserId === chat.maxUserId) {
       // Saved message
-      return { type: "dmUsers", userIds: [chat.minUserId] }
+      return { type: "dmUsers", userIds: await UsersModel.getActiveUserIds([chat.minUserId]) }
     }
     // DMs
-    return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
+    return { type: "dmUsers", userIds: await UsersModel.getActiveUserIds([chat.minUserId, chat.maxUserId]) }
   } else if (chat.type === "thread") {
     const userIds = await getEffectiveAccessUserIds(chat)
     return chat.spaceId != null
@@ -70,8 +71,8 @@ export const getUpdateGroupFromInputPeer = async (
 
 export const getUpdateGroupForSpace = async (
   spaceId: number,
-  context: { currentUserId: number },
+  _context: { currentUserId: number },
 ): Promise<UpdateGroup> => {
   const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, spaceId))
-  return { type: "spaceUsers", spaceId, userIds: users.map((user) => user.userId) }
+  return { type: "spaceUsers", spaceId, userIds: await UsersModel.getActiveUserIds(users.map((user) => user.userId)) }
 }

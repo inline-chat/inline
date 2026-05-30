@@ -257,6 +257,9 @@ export const handler = async (
     if (!space) {
       throw new InlineError(InlineError.ApiError.SPACE_INVALID)
     }
+    const activeSpaceMembers = space.members.filter(
+      (member: schema.DbMember & { user: schema.DbUserWithPhoto }) => member.user.deleted !== true,
+    )
 
     if (canViewFullSpaceUserInfo) {
       // 2c. Private Dialogs with Space Members
@@ -267,7 +270,7 @@ export const handler = async (
           isNull(schema.dialogs.spaceId),
           inArray(
             schema.dialogs.peerUserId,
-            space?.members.map((m: schema.DbMember & { user: schema.DbUserWithPhoto }) => m.user.id) ?? [],
+            activeSpaceMembers.map((m: schema.DbMember & { user: schema.DbUserWithPhoto }) => m.user.id) ?? [],
           ),
         ),
         with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
@@ -280,7 +283,7 @@ export const handler = async (
       })
 
       // Create private chats and dialogs for members that don't have them
-      const memberIds = space.members.map((m) => m.user.id)
+      const memberIds = activeSpaceMembers.map((m) => m.user.id)
       const existingPrivateChats = await db._query.chats.findMany({
         where: and(
           eq(schema.chats.type, "private"),
@@ -295,7 +298,7 @@ export const handler = async (
         existingPrivateChats.map((c) => (c.minUserId === currentUserId ? c.maxUserId : c.minUserId)),
       )
 
-      const membersWithoutChats = space.members
+      const membersWithoutChats = activeSpaceMembers
         .filter((m) => m.user.id !== currentUserId)
         .filter((m) => !existingChatMemberIds.has(m.user.id))
 
@@ -352,7 +355,7 @@ export const handler = async (
     }
 
     // Add all space members as users. Public regular members receive min user info below.
-    space.members.forEach((m) => users.push(m.user))
+    activeSpaceMembers.forEach((m) => users.push(m.user))
   }
 
   // --- 3. Ensure Dialogs Exist for All Chats ---

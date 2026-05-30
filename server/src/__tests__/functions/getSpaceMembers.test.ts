@@ -59,6 +59,22 @@ describe("getSpaceMembers", () => {
     expect(otherUser?.min).toBe(true)
   })
 
+  test("hides deleted users from space member lists", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Deleted Member Space", [
+      "deleted-member-a@ex.com",
+      "deleted-member-b@ex.com",
+    ])
+    await db.update(schema.users).set({ deleted: true }).where(eq(schema.users.id, users[1]!.id))
+
+    const result = await getSpaceMembers({ spaceId: BigInt(space.id) }, makeFunctionContext(users[0]!.id))
+    expect(result.members.map((member) => member.userId)).toEqual([BigInt(users[0]!.id)])
+    expect(result.users.map((user) => user.id)).toEqual([BigInt(users[0]!.id)])
+
+    const legacy = await getSpaceMembersLegacy({ spaceId: space.id }, { currentUserId: users[0]!.id })
+    expect(legacy.members.map((member) => member.userId)).toEqual([users[0]!.id])
+    expect(legacy.users.map((user) => user.id)).toEqual([users[0]!.id])
+  })
+
   test("legacy getSpaceMembers returns public members without personal user info", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Public Legacy Space", [
       "public-legacy-a@ex.com",

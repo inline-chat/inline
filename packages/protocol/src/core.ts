@@ -2099,6 +2099,12 @@ export interface RpcCall {
          */
         updateDialogOrder: UpdateDialogOrderInput;
     } | {
+        oneofKind: "deleteBot";
+        /**
+         * @generated from protobuf field: DeleteBotInput deleteBot = 55;
+         */
+        deleteBot: DeleteBotInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2425,6 +2431,12 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateDialogOrderResult updateDialogOrder = 53;
          */
         updateDialogOrder: UpdateDialogOrderResult;
+    } | {
+        oneofKind: "deleteBot";
+        /**
+         * @generated from protobuf field: DeleteBotResult deleteBot = 55;
+         */
+        deleteBot: DeleteBotResult;
     } | {
         oneofKind: undefined;
     };
@@ -2901,6 +2913,24 @@ export interface ListBotsResult {
      * @generated from protobuf field: repeated User bots = 1;
      */
     bots: User[];
+}
+/**
+ * @generated from protobuf message DeleteBotInput
+ */
+export interface DeleteBotInput {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+}
+/**
+ * @generated from protobuf message DeleteBotResult
+ */
+export interface DeleteBotResult {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
 }
 /**
  * @generated from protobuf message RevokeSessionInput
@@ -5614,7 +5644,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_DIALOG_ORDER = 52;
      */
-    UPDATE_DIALOG_ORDER = 52
+    UPDATE_DIALOG_ORDER = 52,
+    /**
+     * @generated from protobuf enum value: DELETE_BOT = 54;
+     */
+    DELETE_BOT = 54
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -9771,7 +9805,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 50, name: "answerMessageAction", kind: "message", oneof: "input", T: () => AnswerMessageActionInput },
             { no: 51, name: "revokeSession", kind: "message", oneof: "input", T: () => RevokeSessionInput },
             { no: 52, name: "updateDialogOpen", kind: "message", oneof: "input", T: () => UpdateDialogOpenInput },
-            { no: 53, name: "updateDialogOrder", kind: "message", oneof: "input", T: () => UpdateDialogOrderInput }
+            { no: 53, name: "updateDialogOrder", kind: "message", oneof: "input", T: () => UpdateDialogOrderInput },
+            { no: 55, name: "deleteBot", kind: "message", oneof: "input", T: () => DeleteBotInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -10102,6 +10137,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateDialogOrder: UpdateDialogOrderInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogOrder)
                     };
                     break;
+                case /* DeleteBotInput deleteBot */ 55:
+                    message.input = {
+                        oneofKind: "deleteBot",
+                        deleteBot: DeleteBotInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteBot)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10273,6 +10314,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateDialogOrderInput updateDialogOrder = 53; */
         if (message.input.oneofKind === "updateDialogOrder")
             UpdateDialogOrderInput.internalBinaryWrite(message.input.updateDialogOrder, writer.tag(53, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteBotInput deleteBot = 55; */
+        if (message.input.oneofKind === "deleteBot")
+            DeleteBotInput.internalBinaryWrite(message.input.deleteBot, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10339,7 +10383,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 50, name: "answerMessageAction", kind: "message", oneof: "result", T: () => AnswerMessageActionResult },
             { no: 51, name: "revokeSession", kind: "message", oneof: "result", T: () => RevokeSessionResult },
             { no: 52, name: "updateDialogOpen", kind: "message", oneof: "result", T: () => UpdateDialogOpenResult },
-            { no: 53, name: "updateDialogOrder", kind: "message", oneof: "result", T: () => UpdateDialogOrderResult }
+            { no: 53, name: "updateDialogOrder", kind: "message", oneof: "result", T: () => UpdateDialogOrderResult },
+            { no: 55, name: "deleteBot", kind: "message", oneof: "result", T: () => DeleteBotResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -10670,6 +10715,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateDialogOrder: UpdateDialogOrderResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogOrder)
                     };
                     break;
+                case /* DeleteBotResult deleteBot */ 55:
+                    message.result = {
+                        oneofKind: "deleteBot",
+                        deleteBot: DeleteBotResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteBot)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10841,6 +10892,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateDialogOrderResult updateDialogOrder = 53; */
         if (message.result.oneofKind === "updateDialogOrder")
             UpdateDialogOrderResult.internalBinaryWrite(message.result.updateDialogOrder, writer.tag(53, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteBotResult deleteBot = 55; */
+        if (message.result.oneofKind === "deleteBot")
+            DeleteBotResult.internalBinaryWrite(message.result.deleteBot, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12350,6 +12404,100 @@ class ListBotsResult$Type extends MessageType<ListBotsResult> {
  * @generated MessageType for protobuf message ListBotsResult
  */
 export const ListBotsResult = new ListBotsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteBotInput$Type extends MessageType<DeleteBotInput> {
+    constructor() {
+        super("DeleteBotInput", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteBotInput>): DeleteBotInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<DeleteBotInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteBotInput): DeleteBotInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteBotInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteBotInput
+ */
+export const DeleteBotInput = new DeleteBotInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteBotResult$Type extends MessageType<DeleteBotResult> {
+    constructor() {
+        super("DeleteBotResult", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteBotResult>): DeleteBotResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<DeleteBotResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteBotResult): DeleteBotResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteBotResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteBotResult
+ */
+export const DeleteBotResult = new DeleteBotResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class RevokeSessionInput$Type extends MessageType<RevokeSessionInput> {
     constructor() {
