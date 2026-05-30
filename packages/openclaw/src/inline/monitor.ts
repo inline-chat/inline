@@ -21,7 +21,9 @@ import {
   createTransportActivityStatusPatch,
 } from "openclaw/plugin-sdk/gateway-runtime"
 import {
+  classifyChannelInboundEvent,
   createChannelInboundDebouncer,
+  resolveUnmentionedGroupInboundPolicy,
   shouldDebounceTextInbound,
 } from "openclaw/plugin-sdk/channel-inbound"
 import {
@@ -49,7 +51,6 @@ import {
 } from "openclaw/plugin-sdk/text-runtime"
 import {
   DEFAULT_GROUP_HISTORY_LIMIT,
-  buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
   createChannelReplyPipelineCompat,
   recordPendingHistoryEntryIfEnabled,
@@ -170,6 +171,15 @@ type InlinePendingHistoryEntry = {
   body: string
   timestamp?: number
   messageId?: string
+}
+
+type InlineUntrustedStructuredContextEntry = {
+  label: string
+  source: typeof CHANNEL_ID
+  type: string
+  payload: {
+    summary: string
+  }
 }
 
 type InlineReplyThreadContext = {
@@ -1584,109 +1594,31 @@ function prependInlineReplyThreadAnchor(params: {
   }
 }
 
-function buildInlineBodyForAgent(params: {
-  rawBody: string
+function buildInlineUntrustedStructuredContext(params: {
   currentAttachmentText: string | null
   currentEntityText: string | null
-}): string {
-  return (
-    [
-      params.rawBody,
-      params.currentAttachmentText && params.currentAttachmentText !== params.rawBody
-        ? `Current media/attachments:\n${params.currentAttachmentText}`
-        : null,
-      params.currentEntityText ? `Current message entities:\n${params.currentEntityText}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n\n") || params.rawBody
-  )
-}
-
-function normalizeInlineAgentMetadataValue(value: string | boolean | null | undefined): string | boolean | undefined {
-  if (typeof value === "boolean") return value
-  const normalized = value
-    ?.replace(/\r\n|\r|\n/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-  return normalized || undefined
-}
-
-function buildInlineBodyForAgentPrompt(params: {
-  body: string
-  channel: string
-  surface: string
-  chatType: "direct" | "group"
-  chatId: string
-  chatRef: string
-  conversationLabel: string
-  messageId: string
-  eventType: string
-  senderId: string
-  senderLabel: string
-  senderName?: string | null
-  senderUsername?: string | null
-  wasMentioned: boolean
-  explicitlyMentionedBot?: boolean
-  mentionedUserIds?: readonly string[]
-  implicitMentionKinds?: readonly string[]
-  mentionSource?: InlineMentionSource
-  replyToId?: string | null
-  replyToSenderId?: string | null
-  replyToWasBot?: boolean
-  threadId?: string | null
-  threadLabel?: string | null
-  messageActionInteractionId?: string | null
-  messageActionId?: string | null
-}): string {
-  const metadata = {
-    schema: "inline.current_message.v1",
-    channel: normalizeInlineAgentMetadataValue(params.channel),
-    surface: normalizeInlineAgentMetadataValue(params.surface),
-    chat_type: normalizeInlineAgentMetadataValue(params.chatType),
-    chat_id: normalizeInlineAgentMetadataValue(params.chatId),
-    chat_ref: normalizeInlineAgentMetadataValue(params.chatRef),
-    conversation_label: normalizeInlineAgentMetadataValue(params.conversationLabel),
-    message_id: normalizeInlineAgentMetadataValue(params.messageId),
-    event_type: normalizeInlineAgentMetadataValue(params.eventType),
-    sender_id: normalizeInlineAgentMetadataValue(params.senderId),
-    sender_label: normalizeInlineAgentMetadataValue(params.senderLabel),
-    sender_name: normalizeInlineAgentMetadataValue(params.senderName ?? undefined),
-    sender_username: normalizeInlineAgentMetadataValue(params.senderUsername ?? undefined),
-    was_mentioned: params.wasMentioned,
-    explicitly_mentioned_bot:
-      params.explicitlyMentionedBot === undefined
-        ? undefined
-        : normalizeInlineAgentMetadataValue(params.explicitlyMentionedBot),
-    mentioned_user_ids: params.mentionedUserIds?.length ? [...params.mentionedUserIds] : undefined,
-    implicit_mention_kinds: params.implicitMentionKinds?.length
-      ? [...params.implicitMentionKinds]
-      : undefined,
-    mention_source: normalizeInlineAgentMetadataValue(params.mentionSource ?? undefined),
-    reply_to_id: normalizeInlineAgentMetadataValue(params.replyToId ?? undefined),
-    reply_to_sender_id: normalizeInlineAgentMetadataValue(params.replyToSenderId ?? undefined),
-    reply_to_was_bot:
-      params.replyToWasBot === undefined
-        ? undefined
-        : normalizeInlineAgentMetadataValue(params.replyToWasBot),
-    thread_id: normalizeInlineAgentMetadataValue(params.threadId ?? undefined),
-    thread_label: normalizeInlineAgentMetadataValue(params.threadLabel ?? undefined),
-    message_action_interaction_id: normalizeInlineAgentMetadataValue(
-      params.messageActionInteractionId ?? undefined,
-    ),
-    message_action_id: normalizeInlineAgentMetadataValue(params.messageActionId ?? undefined),
+  currentBody: string
+  historyAttachmentText: string | null
+  historyEntityText: string | null
+}): InlineUntrustedStructuredContextEntry[] {
+  const entries: InlineUntrustedStructuredContextEntry[] = []
+  const append = (label: string, type: string, summary: string | null) => {
+    if (!summary) return
+    const normalized = normalizeHistoryText(summary)
+    if (!normalized || normalized === params.currentBody) return
+    entries.push({
+      label,
+      source: CHANNEL_ID,
+      type,
+      payload: { summary: normalized },
+    })
   }
-  const payload = Object.fromEntries(
-    Object.entries(metadata).filter(([, value]) => value !== undefined),
-  )
-  return [
-    "Inline current message metadata (generated by the Inline channel adapter):",
-    "```json",
-    JSON.stringify(payload, null, 2),
-    "```",
-    params.body,
-  ]
-    .filter(Boolean)
-    .join("\n\n")
+
+  append("Current Inline media/attachments", "current_media_attachments", params.currentAttachmentText)
+  append("Current Inline message entities", "current_message_entities", params.currentEntityText)
+  append("Recent Inline media/attachments", "recent_media_attachments", params.historyAttachmentText)
+  append("Recent Inline message entities", "recent_message_entities", params.historyEntityText)
+  return entries
 }
 
 function resolveInlineMediaMaxBytes(params: {
@@ -2444,17 +2376,7 @@ export async function monitorInlineProvider(params: {
         senderUsername != null && senderUsername.length > 0
           ? `@${senderUsername}`
           : senderName ?? `user:${senderId}`
-      const payload = {
-        type: "inline_message_action_callback",
-        interaction_id: String(callbackActionEvent.interactionId),
-        actor_user_id: senderId,
-        chat_id: String(chatId),
-        message_id: String(callbackActionEvent.targetMessageId),
-        action_id: callbackActionEvent.actionId,
-        data_base64: callbackDataToBase64(callbackActionEvent.data),
-        data_utf8: callbackDataToUtf8(callbackActionEvent.data) ?? null,
-      }
-      rawBody = `${actor} pressed a button on message #${String(callbackActionEvent.targetMessageId)}\n${JSON.stringify(payload)}`
+      rawBody = `${actor} pressed "${callbackActionEvent.actionId}" on message #${String(callbackActionEvent.targetMessageId)}`
     }
 
     const dmPolicy = account.config.dmPolicy ?? "pairing"
@@ -3021,58 +2943,14 @@ export async function monitorInlineProvider(params: {
     })
 
     const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId })
-    const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg)
-    const previousTimestamp = core.channel.session.readSessionUpdatedAt({ storePath, sessionKey: route.sessionKey })
-    const rawBodyForAgent = isGroup && wasMentioned ? stripInlineBotMention(rawBody, botUsername) : rawBody
+    const rawBodyForAgent = isGroup && mentionGate.effectiveWasMentioned
+      ? stripInlineBotMention(rawBody, botUsername)
+      : rawBody
     const currentEntityTextForAgent =
-      isGroup && wasMentioned
+      isGroup && mentionGate.effectiveWasMentioned
         ? stripInlineBotMentionEntityText(currentEntityText, botUsername)
         : currentEntityText
-    const currentBody = buildInlineBodyForAgent({
-      rawBody: rawBodyForAgent,
-      currentAttachmentText,
-      currentEntityText: currentEntityTextForAgent,
-    })
-    const contextBody = [
-      effectiveHistoryContext.historyText,
-      effectiveHistoryContext.attachmentText,
-      effectiveHistoryContext.entityText,
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-    const currentEnvelope = core.channel.reply.formatInboundEnvelope({
-      channel: "Inline",
-      from: fromLabel,
-      timestamp,
-      chatType: isGroup ? "group" : "direct",
-      sender: {
-        id: senderId,
-        ...(senderName ? { name: senderName } : {}),
-        ...(senderUsername ? { username: senderUsername } : {}),
-      },
-      ...(previousTimestamp != null ? { previousTimestamp } : {}),
-      envelope: envelopeOptions,
-      body: currentBody || rawBodyForAgent,
-    })
-    let body = [contextBody, currentEnvelope].filter(Boolean).join("\n\n")
-    if (isGroup && groupHistoryKey) {
-      body = buildPendingHistoryContextFromMap({
-        historyMap: groupPendingHistories,
-        historyKey: groupHistoryKey,
-        limit: historyLimit,
-        currentMessage: body,
-        formatEntry: (entry) =>
-          core.channel.reply.formatInboundEnvelope({
-            channel: "Inline",
-            from: fromLabel,
-            chatType: "group",
-            senderLabel: entry.sender,
-            ...(entry.timestamp != null ? { timestamp: entry.timestamp } : {}),
-            envelope: envelopeOptions,
-            body: `${entry.body}${entry.messageId ? ` [id:${entry.messageId} chat:${String(chatId)}]` : ""}`,
-          }),
-      })
-    }
+    const currentBody = rawBodyForAgent || rawBody
     const inboundHistory =
       isGroup && groupHistoryKey
         ? mergeInboundHistoryEntries({
@@ -3080,7 +2958,24 @@ export async function monitorInlineProvider(params: {
             pendingEntries: groupPendingHistories.get(groupHistoryKey) ?? [],
             limit: historyLimit,
           })
-        : []
+        : effectiveHistoryContext.inboundHistory
+    const untrustedStructuredContext = buildInlineUntrustedStructuredContext({
+      currentAttachmentText,
+      currentEntityText: currentEntityTextForAgent,
+      currentBody,
+      historyAttachmentText: effectiveHistoryContext.attachmentText,
+      historyEntityText: effectiveHistoryContext.entityText,
+    })
+    const inboundEventKind = classifyChannelInboundEvent({
+      conversation: { kind: isGroup ? "group" : "direct" },
+      unmentionedGroupPolicy: resolveUnmentionedGroupInboundPolicy({
+        cfg,
+        agentId: route.agentId,
+      }),
+      ...(isGroup ? { wasMentioned: mentionGate.effectiveWasMentioned } : {}),
+      hasControlCommand,
+      ...(commandSource ? { commandSource } : {}),
+    })
     const effectiveSurface = CHANNEL_ID
     const systemPrompt = resolveInlineSystemPrompt({
       account,
@@ -3090,50 +2985,13 @@ export async function monitorInlineProvider(params: {
       msgId: msg.id,
       ...(callbackActionEvent ? { callbackActionEvent } : {}),
     })
-    const eventType = callbackActionEvent ? "message_action" : "message"
-    const bodyForAgent = buildInlineBodyForAgentPrompt({
-      body,
-      channel: CHANNEL_ID,
-      surface: effectiveSurface,
-      chatType: isGroup ? "group" : "direct",
-      chatId: String(effectiveChatId),
-      chatRef: `inline:${String(effectiveChatId)}`,
-      conversationLabel: fromLabel,
-      messageId: messageSid,
-      eventType,
-      senderId,
-      senderLabel,
-      wasMentioned: mentionGate.effectiveWasMentioned,
-      ...(isGroup
-        ? {
-            explicitlyMentionedBot: nativeMentioned,
-            mentionedUserIds,
-            implicitMentionKinds,
-            mentionSource,
-          }
-        : {}),
-      ...(senderName ? { senderName } : {}),
-      ...(senderUsername ? { senderUsername } : {}),
-      ...(msg.replyToMsgId != null ? { replyToId: String(msg.replyToMsgId) } : {}),
-      ...(effectiveHistoryContext.replyToSenderId != null
-        ? { replyToSenderId: effectiveHistoryContext.replyToSenderId }
-        : {}),
-      ...(msg.replyToMsgId != null ? { replyToWasBot: effectiveHistoryContext.repliedToBot } : {}),
-      ...(replyThreadContext ? { threadId: String(replyThreadContext.childChatId) } : {}),
-      ...(replyThreadContext?.threadLabel ? { threadLabel: replyThreadContext.threadLabel } : {}),
-      ...(callbackActionEvent
-        ? {
-            messageActionInteractionId: String(callbackActionEvent.interactionId),
-            messageActionId: callbackActionEvent.actionId,
-          }
-        : {}),
-    })
 
     const ctxPayload = core.channel.reply.finalizeInboundContext({
-      Body: body,
-      BodyForAgent: bodyForAgent,
+      Body: rawBody,
+      InboundEventKind: inboundEventKind,
+      BodyForAgent: currentBody,
       BodyForCommands: normalizedCommandBody,
-      ...(isGroup ? { InboundHistory: inboundHistory } : {}),
+      InboundHistory: inboundHistory,
       RawBody: rawBody,
       CommandBody: normalizedCommandBody,
       From: isGroup ? `inline:chat:${String(effectiveChatId)}` : `inline:${senderId}`,
@@ -3169,6 +3027,9 @@ export async function monitorInlineProvider(params: {
       ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
       ...(effectiveHistoryContext.replyToSenderId != null ? { ReplyToSenderId: effectiveHistoryContext.replyToSenderId } : {}),
       ...(msg.replyToMsgId != null ? { ReplyToWasBot: effectiveHistoryContext.repliedToBot } : {}),
+      ...(untrustedStructuredContext.length > 0
+        ? { UntrustedStructuredContext: untrustedStructuredContext }
+        : {}),
       ...(callbackActionEvent
         ? {
             MessageActionInteractionId: String(callbackActionEvent.interactionId),
@@ -3181,7 +3042,7 @@ export async function monitorInlineProvider(params: {
         : {}),
       ...buildInlineInboundMediaPayload(inboundMedia),
       Timestamp: timestamp || Date.now(),
-      WasMentioned: mentionGate.effectiveWasMentioned,
+      ...(isGroup ? { WasMentioned: mentionGate.effectiveWasMentioned } : {}),
       ...(isGroup
         ? {
             ExplicitlyMentionedBot: nativeMentioned,
