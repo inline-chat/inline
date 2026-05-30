@@ -60,6 +60,7 @@ final class ReactionChipButton: NSButton {
     label.backgroundColor = .clear
     label.font = .systemFont(ofSize: ReactionChipMetrics.textFontSize)
     label.lineBreakMode = .byClipping
+    label.alignment = .center
     return label
   }()
 
@@ -134,11 +135,13 @@ final class ReactionChipButton: NSButton {
     } else {
       countLabel.sizeToFit()
       let countSize = countLabel.intrinsicContentSize
+      let count = group?.reactions.count ?? Int(countLabel.stringValue) ?? 0
+      let countWidth = max(ceil(countSize.width), ReactionChipMetrics.countWidth(for: count))
       let countY = floor((bounds.height - countSize.height) / 2)
       countLabel.frame = CGRect(
         x: x,
         y: countY,
-        width: ceil(countSize.width),
+        width: countWidth,
         height: ceil(countSize.height)
       )
     }
@@ -203,7 +206,7 @@ final class ReactionChipButton: NSButton {
       return ObjectCache.shared.getUser(id: reaction.reaction.userId)?.user.displayName
     }.joined(separator: ", ")
 
-    let shouldShowAvatars = group.reactions.count <= ReactionChipMetrics.maxAvatars
+    let shouldShowAvatars = ReactionChipMetrics.showsAvatars(for: group.reactions.count)
     rebuildContent(shouldShowAvatars: shouldShowAvatars, group: group)
     updateColors()
     needsLayout = true

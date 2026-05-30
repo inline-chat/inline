@@ -123,16 +123,16 @@ struct ReactionItem: View {
   }
 
   static let padding: CGFloat = ReactionChipMetrics.padding
-  static let spacing: CGFloat = 4
+  static let spacing: CGFloat = ReactionChipMetrics.spacing
   static let height: CGFloat = ReactionChipMetrics.height
-  static let emojiFontSize: CGFloat = 14
-  static let textFontSize: CGFloat = 12
-  static let avatarSize: CGFloat = 20
-  static let avatarOverlap: CGFloat = 4
-  static let maxAvatars: Int = 3
+  static let emojiFontSize: CGFloat = ReactionChipMetrics.emojiFontSize
+  static let textFontSize: CGFloat = ReactionChipMetrics.textFontSize
+  static let avatarSize: CGFloat = ReactionChipMetrics.avatarSize
+  static let avatarOverlap: CGFloat = ReactionChipMetrics.avatarOverlap
+  static let maxAvatars: Int = ReactionChipMetrics.maxAvatars
 
   private static func shouldShowAvatars(_ group: GroupedReaction) -> Bool {
-    group.reactions.count <= maxAvatars
+    ReactionChipMetrics.showsAvatars(for: group.reactions.count)
   }
 
   var body: some View {
@@ -203,20 +203,7 @@ struct ReactionItem: View {
   }
 
   public static func size(group: GroupedReaction) -> CGSize {
-    let textWidth = group.emoji.size(withAttributes: [.font: NSFont.systemFont(ofSize: emojiFontSize)]).width
-
-    // Number variant width
-    let countWidth = "\(group.reactions.count)".size(withAttributes: [.font: NSFont.systemFont(ofSize: textFontSize)])
-      .width
-    let widthCount = textWidth + countWidth + spacing + padding * 2
-
-    // Avatar variant width (up to maxAvatars avatars)
-    let avatarCount = min(maxAvatars, group.reactions.count)
-    let avatarsWidth = avatarCount > 0 ? avatarSize + CGFloat(avatarCount - 1) * (avatarSize - avatarOverlap) : 0
-    let widthAvatar = textWidth + spacing + avatarsWidth + padding * 2
-
-    let finalWidth = max(widthCount, widthAvatar)
-    return CGSize(width: ceil(finalWidth), height: Self.height)
+    ReactionChipMetrics.size(group: group)
   }
 
   private func toggleReaction() {
