@@ -205,6 +205,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     configureWindow(window)
     installContent()
     applyWindowAppearance()
+    TimezoneManager.shared.mainWindowDidOpen()
   }
 
   @available(*, unavailable)
