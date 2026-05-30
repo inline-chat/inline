@@ -69,6 +69,8 @@ import {
   resolveInlineGroupRequireMention,
   resolveInlineGroupReplyThreadAutoCreateMinMessages,
   resolveInlineGroupReplyThreadMode,
+  resolveInlineGroupReplyThreadParentHistoryLimit,
+  resolveInlineGroupReplyThreadRequireExplicitMention,
   resolveInlineGroupSystemPrompt,
   type InlineReplyThreadMode,
 } from "./policy.js"
@@ -112,6 +114,7 @@ const INLINE_REQUEST_ERROR_FALLBACK =
 const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
 const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
+const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 0
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
@@ -155,6 +158,7 @@ type HistoryContext = {
   inboundHistory: InlinePendingHistoryEntry[]
   repliedToBot: boolean
   replyToSenderId: string | null
+  hasBotMessage: boolean
 }
 
 type InlineInboundMediaInfo = {
@@ -706,8 +710,9 @@ function resolveInlineMentionSource(params: {
 }): InlineMentionSource {
   if (params.nativeMentioned) return "explicit_bot"
   if (params.shouldBypassMention) return "command_bypass"
-  if (params.patternMentioned || params.wasMentioned) return "mention_pattern"
+  if (params.patternMentioned) return "mention_pattern"
   if (params.implicitMention) return "implicit_thread"
+  if (params.wasMentioned) return "mention_pattern"
   return "none"
 }
 
@@ -1242,6 +1247,10 @@ function hasBotMessageId(cache: Map<string, string[]>, chatId: bigint, messageId
   return (cache.get(key) ?? []).includes(String(messageId))
 }
 
+function hasKnownBotMessageInChat(cache: Map<string, string[]>, chatId: bigint): boolean {
+  return (cache.get(String(chatId)) ?? []).length > 0
+}
+
 function rememberBotMessagesFromList(params: {
   messages: Message[]
   meId: bigint
@@ -1579,6 +1588,25 @@ function prependLabeledHistoryLine(params: {
   return existingBody ? `${prefix}${params.line}\n${existingBody}` : `${prefix}${params.line}`
 }
 
+function stripLabeledHistoryHeading(text: string | null, heading: string): string | null {
+  if (!text) return null
+  const prefix = `${heading}\n`
+  const body = text.startsWith(prefix) ? text.slice(prefix.length) : text
+  return body.trim() || null
+}
+
+function prependLabeledHistoryBlock(params: {
+  existing: string | null
+  heading: string
+  block: string | null
+}): string | null {
+  const block = stripLabeledHistoryHeading(params.block, params.heading)
+  if (!block) return params.existing
+  const prefix = `${params.heading}\n`
+  const existingBody = stripLabeledHistoryHeading(params.existing, params.heading)
+  return existingBody ? `${prefix}${block}\n${existingBody}` : `${prefix}${block}`
+}
+
 function prependInlineReplyThreadAnchor(params: {
   historyContext: HistoryContext
   anchorMessage: Message
@@ -1592,13 +1620,18 @@ function prependInlineReplyThreadAnchor(params: {
     meId: params.meId,
     syntheticMessageId: `anchor:${String(params.parentChatId)}:${String(params.anchorMessage.id)}`,
   })
+  const hasBotMessage = params.historyContext.hasBotMessage || params.anchorMessage.fromId === params.meId
   if (!entry.inboundEntry || !entry.line) {
-    return params.historyContext
+    return {
+      ...params.historyContext,
+      hasBotMessage,
+    }
   }
 
   return {
     ...params.historyContext,
     inboundHistory: [entry.inboundEntry, ...params.historyContext.inboundHistory],
+    hasBotMessage,
     historyText: prependLabeledHistoryLine({
       existing: params.historyContext.historyText,
       heading: "Recent thread messages (oldest -> newest):",
@@ -1613,6 +1646,35 @@ function prependInlineReplyThreadAnchor(params: {
       existing: params.historyContext.entityText,
       heading: "Recent message entities:",
       line: entry.entityLine,
+    }),
+  }
+}
+
+function prependInlineParentHistoryContext(params: {
+  historyContext: HistoryContext
+  parentHistoryContext: HistoryContext
+}): HistoryContext {
+  return {
+    ...params.historyContext,
+    inboundHistory: [
+      ...params.parentHistoryContext.inboundHistory,
+      ...params.historyContext.inboundHistory,
+    ],
+    hasBotMessage: params.historyContext.hasBotMessage || params.parentHistoryContext.hasBotMessage,
+    historyText: prependLabeledHistoryBlock({
+      existing: params.historyContext.historyText,
+      heading: "Recent thread messages (oldest -> newest):",
+      block: params.parentHistoryContext.historyText,
+    }),
+    attachmentText: prependLabeledHistoryBlock({
+      existing: params.historyContext.attachmentText,
+      heading: "Recent media/attachments:",
+      block: params.parentHistoryContext.attachmentText,
+    }),
+    entityText: prependLabeledHistoryBlock({
+      existing: params.historyContext.entityText,
+      heading: "Recent message entities:",
+      block: params.parentHistoryContext.entityText,
     }),
   }
 }
@@ -1706,6 +1768,12 @@ function buildInlineInboundBodyText(content: ReturnType<typeof summarizeInlineMe
     .join("\n")
     .trim()
   return textWithPlaceholder || content.text
+}
+
+function hasDownloadableInlineMedia(content: ReturnType<typeof summarizeInlineMessageContent> | null): boolean {
+  if (!content) return false
+  if (content.media?.url) return true
+  return content.attachments.some((attachment) => attachment.kind === "urlPreview" && Boolean(attachment.previewImageUrl))
 }
 
 function resolveFilePathHint(params: { sourceUrl: string; preferredName?: string | null | undefined }): string | undefined {
@@ -1841,6 +1909,30 @@ function shouldAutoCreateInlineReplyThread(params: {
   return params.messageId >= BigInt(params.minMessages)
 }
 
+async function buildReplyThreadParentHistoryContext(params: {
+  client: InlineSdkClient
+  replyThreadContext: InlineReplyThreadContext
+  parentHistoryLimit: number
+  senderProfilesById: Map<string, SenderProfile>
+  meId: bigint
+  botMessageIdsByChat: Map<string, string[]>
+}): Promise<HistoryContext | null> {
+  if (params.parentHistoryLimit <= 0 || params.replyThreadContext.parentMessageId == null) {
+    return null
+  }
+
+  return buildHistoryContext({
+    client: params.client,
+    chatId: params.replyThreadContext.parentChatId,
+    currentMessageId: params.replyThreadContext.parentMessageId,
+    replyToMsgId: params.replyThreadContext.anchorMessage?.replyToMsgId,
+    senderProfilesById: params.senderProfilesById,
+    meId: params.meId,
+    historyLimit: params.parentHistoryLimit,
+    botMessageIdsByChat: params.botMessageIdsByChat,
+  })
+}
+
 async function buildHistoryContext(params: {
   client: InlineSdkClient
   chatId: bigint
@@ -1856,6 +1948,7 @@ async function buildHistoryContext(params: {
     hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId)
   let repliedToBot = cachedReplyToBot
   let replyToSenderId: string | null = null
+  let hasBotMessage = hasKnownBotMessageInChat(params.botMessageIdsByChat, params.chatId)
   let foundReplyTargetInHistory = false
   const lines: string[] = []
   const attachmentLines: string[] = []
@@ -1873,6 +1966,7 @@ async function buildHistoryContext(params: {
     if (messages) {
       for (const item of messages) {
         if (item.fromId === params.meId) {
+          hasBotMessage = true
           rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
         }
       }
@@ -1921,6 +2015,7 @@ async function buildHistoryContext(params: {
     if (replyTarget) {
       replyToSenderId = String(replyTarget.fromId)
       repliedToBot = replyTarget.fromId === params.meId
+      hasBotMessage = hasBotMessage || repliedToBot
     } else if (!cachedReplyToBot) {
       repliedToBot = false
     }
@@ -1934,6 +2029,7 @@ async function buildHistoryContext(params: {
       inboundHistory,
       repliedToBot,
       replyToSenderId,
+      hasBotMessage,
     }
   }
   return {
@@ -1947,6 +2043,7 @@ async function buildHistoryContext(params: {
     inboundHistory,
     repliedToBot,
     replyToSenderId,
+    hasBotMessage,
   }
 }
 
@@ -2425,6 +2522,26 @@ export async function monitorInlineProvider(params: {
               DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES,
           })
         : DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES
+    const replyThreadRequireExplicitMention =
+      isGroup && replyThreadsEnabled
+        ? resolveInlineGroupReplyThreadRequireExplicitMention({
+            cfg,
+            accountId: account.accountId,
+            groupId: String(effectiveChatId),
+            defaultRequireExplicitMention: account.config.replyThreadRequireExplicitMention ?? false,
+          })
+        : false
+    const replyThreadParentHistoryLimit =
+      isGroup && replyThreadsEnabled
+        ? resolveInlineGroupReplyThreadParentHistoryLimit({
+            cfg,
+            accountId: account.accountId,
+            groupId: String(effectiveChatId),
+            defaultLimit:
+              account.config.replyThreadParentHistoryLimit ??
+              DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT,
+          })
+        : DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT
     const senderId = String(msg.fromId)
     await hydrateChatParticipants(chatId)
     const senderProfile = senderProfilesById.get(senderId)
@@ -2675,6 +2792,7 @@ export async function monitorInlineProvider(params: {
         inboundHistory: [],
         repliedToBot: false,
         replyToSenderId: null,
+        hasBotMessage: false,
       }
     })
     let effectiveHistoryContext =
@@ -2687,12 +2805,20 @@ export async function monitorInlineProvider(params: {
             meId,
           })
         : historyContext
+    const replyThreadImplicitMention =
+      isGroup &&
+      replyThreadContext != null &&
+      !replyThreadRequireExplicitMention &&
+      effectiveHistoryContext.hasBotMessage
+    const replyToBotImplicitMention =
+      isGroup &&
+      (account.config.replyToBotWithoutMention ?? false) &&
+      msg.replyToMsgId != null &&
+      effectiveHistoryContext.repliedToBot
     const implicitMention =
       (callbackActionEvent != null && isGroup) ||
-      (isGroup &&
-        (account.config.replyToBotWithoutMention ?? false) &&
-        msg.replyToMsgId != null &&
-        effectiveHistoryContext.repliedToBot)
+      replyThreadImplicitMention ||
+      replyToBotImplicitMention
 
     const requireMention = isGroup
       ? resolveInlineGroupRequireMention({
@@ -2716,7 +2842,8 @@ export async function monitorInlineProvider(params: {
       isGroup && implicitMention
         ? [
             ...(callbackActionEvent != null ? ["message_action"] : []),
-            ...(msg.replyToMsgId != null && effectiveHistoryContext.repliedToBot ? ["reply_to_bot"] : []),
+            ...(replyThreadImplicitMention ? ["reply_thread"] : []),
+            ...(replyToBotImplicitMention ? ["reply_to_bot"] : []),
           ]
         : []
     const mentionedUserIds = isGroup ? collectInlineMentionedUserIds(currentContent) : []
@@ -3039,12 +3166,32 @@ export async function monitorInlineProvider(params: {
           inboundHistory: [],
           repliedToBot: effectiveHistoryContext.repliedToBot,
           replyToSenderId: effectiveHistoryContext.replyToSenderId,
+          hasBotMessage: effectiveHistoryContext.hasBotMessage,
         },
         anchorMessage: deliveryReplyThreadContext.anchorMessage,
         parentChatId: deliveryReplyThreadContext.parentChatId,
         senderProfilesById,
         meId,
       })
+    }
+    if (deliveryReplyThreadContext) {
+      const parentHistoryContext = await buildReplyThreadParentHistoryContext({
+        client,
+        replyThreadContext: deliveryReplyThreadContext,
+        parentHistoryLimit: replyThreadParentHistoryLimit,
+        senderProfilesById,
+        meId,
+        botMessageIdsByChat,
+      }).catch((err) => {
+        statusSink?.({ lastError: `getChatHistory (reply thread parent) failed: ${String(err)}` })
+        return null
+      })
+      if (parentHistoryContext) {
+        effectiveHistoryContext = prependInlineParentHistoryContext({
+          historyContext: effectiveHistoryContext,
+          parentHistoryContext,
+        })
+      }
     }
 
     const deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
@@ -3060,6 +3207,18 @@ export async function monitorInlineProvider(params: {
       maxBytes: inboundMediaMaxBytes,
       ...(log ? { log } : {}),
     })
+    const inheritedAnchorMedia =
+      deliveryReplyThreadContext?.anchorMessage != null &&
+      currentContent != null &&
+      !hasDownloadableInlineMedia(currentContent)
+        ? await resolveInlineInboundMedia({
+            core,
+            message: deliveryReplyThreadContext.anchorMessage,
+            maxBytes: inboundMediaMaxBytes,
+            ...(log ? { log } : {}),
+          })
+        : []
+    const mediaForAgent = inboundMedia.length > 0 ? inboundMedia : inheritedAnchorMedia
 
     const timestamp = messageTimestamp
     const fromLabel = resolveInlineConversationLabel({
@@ -3167,7 +3326,7 @@ export async function monitorInlineProvider(params: {
               : {}),
           }
         : {}),
-      ...buildInlineInboundMediaPayload(inboundMedia),
+      ...buildInlineInboundMediaPayload(mediaForAgent),
       Timestamp: timestamp || Date.now(),
       ...(isGroup ? { WasMentioned: mentionGate.effectiveWasMentioned } : {}),
       ...(isGroup

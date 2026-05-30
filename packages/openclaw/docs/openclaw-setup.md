@@ -43,6 +43,9 @@ Notes:
 - Inline reply threads are off by default. Enable `channels.inline.capabilities.replyThreads: true` if you want OpenClaw `threadId` to map to real Inline reply-thread chats.
 - `replyToId` is still a message reply id. Enabling `replyThreads` adds Inline reply-thread behavior; it does not replace ordinary message replies.
 - You can override the thread toggle per account with `channels.inline.accounts.<account>.capabilities.replyThreads`.
+- Bot-participated reply threads continue without an explicit mention by default, matching Slack. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
+- Reply-thread context defaults to anchor message plus child-thread history. Set `replyThreadParentHistoryLimit` above `0` only when a chat needs nearby parent-chat context before the anchor.
+- If a reply-thread starter is image/file-only and the child message has no direct media, OpenClaw inherits the anchor media so the agent can inspect the thread starter.
 - Message actions include reply/read/search/edit/reactions/channel and participant management; gate groups via `channels.inline.actions.*`.
 - Passive reaction notifications default to `channels.inline.reactionNotifications: "own"` for bot-authored messages. Set it to `"off"` to suppress queued reaction events, `"all"` to queue reactions on any authorized message, or `"allowlist"` with `reactionAllowlist` for selected reaction senders; named accounts can override the same fields.
 - Media uploads (image/video/document) are enabled by default for `mediaUrl` sends; set `channels.inline.mediaMaxMb` if you need a lower cap.
@@ -65,6 +68,13 @@ channels:
   inline:
     capabilities:
       replyThreads: true
+    replyThreadRequireExplicitMention: false
+    replyThreadParentHistoryLimit: 0
+    groups:
+      "123":
+        replyThreadMode: "thread"
+        replyThreadRequireExplicitMention: true
+        replyThreadParentHistoryLimit: 2
 ```
 
 ## 3) Start Gateway

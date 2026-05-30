@@ -49,13 +49,29 @@ function isPlacementMode(raw: unknown): boolean {
   return raw === "thread" || raw === "main"
 }
 
-function hasReplyThreadPlacementConfig(config: { replyThreadMode?: unknown; groups?: unknown }): boolean {
+function hasReplyThreadConfig(config: {
+  replyThreadMode?: unknown
+  replyThreadRequireExplicitMention?: unknown
+  replyThreadParentHistoryLimit?: unknown
+  groups?: unknown
+}): boolean {
   if (isPlacementMode(config.replyThreadMode)) return true
+  if (typeof config.replyThreadRequireExplicitMention === "boolean") return true
+  if (typeof config.replyThreadParentHistoryLimit === "number") return true
   if (!config.groups || typeof config.groups !== "object" || Array.isArray(config.groups)) return false
 
   return Object.values(config.groups).some((group) => {
     if (!group || typeof group !== "object" || Array.isArray(group)) return false
-    return isPlacementMode((group as { replyThreadMode?: unknown }).replyThreadMode)
+    const groupConfig = group as {
+      replyThreadMode?: unknown
+      replyThreadRequireExplicitMention?: unknown
+      replyThreadParentHistoryLimit?: unknown
+    }
+    return (
+      isPlacementMode(groupConfig.replyThreadMode) ||
+      typeof groupConfig.replyThreadRequireExplicitMention === "boolean" ||
+      typeof groupConfig.replyThreadParentHistoryLimit === "number"
+    )
   })
 }
 
@@ -85,7 +101,7 @@ export function getInlineReplyThreadsCapabilityConfig(params: {
   return {
     replyThreads:
       account.config.capabilities?.replyThreads === true ||
-      hasReplyThreadPlacementConfig(account.config),
+      hasReplyThreadConfig(account.config),
   }
 }
 

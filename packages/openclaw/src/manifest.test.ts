@@ -82,6 +82,12 @@ describe("plugin manifest", () => {
     expect(accounts?.additionalProperties?.properties?.replyThreadAutoCreateMinMessages?.$ref).toBe(
       "#/properties/replyThreadAutoCreateMinMessages",
     )
+    expect(accounts?.additionalProperties?.properties?.replyThreadRequireExplicitMention?.$ref).toBe(
+      "#/properties/replyThreadRequireExplicitMention",
+    )
+    expect(accounts?.additionalProperties?.properties?.replyThreadParentHistoryLimit?.$ref).toBe(
+      "#/properties/replyThreadParentHistoryLimit",
+    )
     expect(accounts?.additionalProperties?.properties?.dmPolicy?.$ref).toBe(
       "#/properties/dmPolicy",
     )
@@ -131,6 +137,13 @@ describe("plugin manifest", () => {
       type: "integer",
       minimum: 0,
     })
+    expect(schema?.properties?.replyThreadRequireExplicitMention).toEqual({
+      type: "boolean",
+    })
+    expect(schema?.properties?.replyThreadParentHistoryLimit).toEqual({
+      type: "integer",
+      minimum: 0,
+    })
     expect(schema?.properties?.groupAllowFrom).toEqual({
       type: "array",
       items: { anyOf: [{ type: "string" }, { type: "number" }] },
@@ -170,6 +183,8 @@ describe("plugin manifest", () => {
             capabilities: { replyThreads: true },
             replyThreadMode: "thread",
             replyThreadAutoCreateMinMessages: 50,
+            replyThreadRequireExplicitMention: false,
+            replyThreadParentHistoryLimit: 0,
             streaming: {
               mode: "progress",
               futureModeOption: "host-owned",
@@ -183,6 +198,8 @@ describe("plugin manifest", () => {
                 allowFrom: [43],
                 replyThreadMode: "main",
                 replyThreadAutoCreateMinMessages: 0,
+                replyThreadRequireExplicitMention: true,
+                replyThreadParentHistoryLimit: 2,
               },
             },
             reactionAllowlist: [51],

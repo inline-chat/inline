@@ -32,17 +32,36 @@ describe("inline/config-schema", () => {
         capabilities: { replyThreads: true },
         replyThreadMode: "auto",
         replyThreadAutoCreateMinMessages: 50,
+        replyThreadRequireExplicitMention: false,
+        replyThreadParentHistoryLimit: 0,
         groups: {
-          "*": { replyThreadMode: "thread", replyThreadAutoCreateMinMessages: 20 },
-          "123": { replyThreadMode: "main", replyThreadAutoCreateMinMessages: 0 },
+          "*": {
+            replyThreadMode: "thread",
+            replyThreadAutoCreateMinMessages: 20,
+            replyThreadRequireExplicitMention: false,
+            replyThreadParentHistoryLimit: 0,
+          },
+          "123": {
+            replyThreadMode: "main",
+            replyThreadAutoCreateMinMessages: 0,
+            replyThreadRequireExplicitMention: true,
+            replyThreadParentHistoryLimit: 2,
+          },
         },
         accounts: {
           work: {
             capabilities: { replyThreads: true },
             replyThreadMode: "main",
             replyThreadAutoCreateMinMessages: 100,
+            replyThreadRequireExplicitMention: true,
+            replyThreadParentHistoryLimit: 3,
             groups: {
-              "456": { replyThreadMode: "thread", replyThreadAutoCreateMinMessages: 10 },
+              "456": {
+                replyThreadMode: "thread",
+                replyThreadAutoCreateMinMessages: 10,
+                replyThreadRequireExplicitMention: false,
+                replyThreadParentHistoryLimit: 1,
+              },
             },
           },
         },
@@ -59,6 +78,8 @@ describe("inline/config-schema", () => {
     ).toBe(false)
     expect(InlineConfigSchema.safeParse({ replyThreadAutoCreateMinMessages: -1 }).success).toBe(false)
     expect(InlineConfigSchema.safeParse({ replyThreadAutoCreateMinMessages: 1.5 }).success).toBe(false)
+    expect(InlineConfigSchema.safeParse({ replyThreadParentHistoryLimit: -1 }).success).toBe(false)
+    expect(InlineConfigSchema.safeParse({ replyThreadParentHistoryLimit: 1.5 }).success).toBe(false)
   })
 
   it("accepts dmPolicy=open only when allowFrom includes *", () => {
@@ -221,11 +242,15 @@ describe("inline/config-schema", () => {
         },
         blockStreamingCoalesce: { minChars: 600, idleMs: 700, maxChars: 2_200 },
         replyToBotWithoutMention: true,
+        replyThreadRequireExplicitMention: false,
+        replyThreadParentHistoryLimit: 0,
         historyLimit: 25,
         dmHistoryLimit: 6,
         groups: {
           "123": {
             requireMention: false,
+            replyThreadRequireExplicitMention: true,
+            replyThreadParentHistoryLimit: 4,
             allowFrom: ["51", "accessGroup:operators"],
             tools: { allow: ["message", "web.search"] },
             toolsBySender: {

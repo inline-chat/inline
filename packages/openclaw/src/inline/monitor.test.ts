@@ -216,12 +216,16 @@ function buildAccount(overrides?: {
     requireMention?: boolean
     replyThreadMode?: "auto" | "thread" | "main"
     replyThreadAutoCreateMinMessages?: number
+    replyThreadRequireExplicitMention?: boolean
+    replyThreadParentHistoryLimit?: number
     systemPrompt?: string
     tools?: { allow?: string[]; deny?: string[] }
     toolsBySender?: Record<string, { allow?: string[]; deny?: string[] }>
   }>
   replyThreadMode?: "auto" | "thread" | "main"
   replyThreadAutoCreateMinMessages?: number
+  replyThreadRequireExplicitMention?: boolean
+  replyThreadParentHistoryLimit?: number
   requireMention?: boolean
   replyToBotWithoutMention?: boolean
   historyLimit?: number
@@ -260,6 +264,8 @@ function buildAccount(overrides?: {
       requireMention: overrides?.requireMention ?? true,
       replyThreadMode: overrides?.replyThreadMode,
       replyThreadAutoCreateMinMessages: overrides?.replyThreadAutoCreateMinMessages,
+      replyThreadRequireExplicitMention: overrides?.replyThreadRequireExplicitMention,
+      replyThreadParentHistoryLimit: overrides?.replyThreadParentHistoryLimit,
       replyToBotWithoutMention: overrides?.replyToBotWithoutMention,
       historyLimit: overrides?.historyLimit,
       dmHistoryLimit: overrides?.dmHistoryLimit,
@@ -1324,6 +1330,351 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           chatId: 7100n,
           text: "thread reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("continues bot-participated reply threads without an explicit mention by default", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7100n,
+          message: {
+            id: 61003n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "follow-up without mention",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: deploy plan",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      historyByChat: {
+        "7000": [{ id: 5000n, date: 1_700_000_002n, fromId: 41n, message: "Parent thread anchor" }],
+        "7100": [
+          {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 777n,
+            message: "earlier bot reply",
+            out: true,
+          },
+          {
+            id: 61003n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "follow-up without mention",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "continuing in thread",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          MessageThreadId: "7100",
+          Body: "follow-up without mention",
+          WasMentioned: true,
+          ExplicitlyMentionedBot: false,
+          MentionSource: "implicit_thread",
+          ImplicitMentionKinds: ["reply_thread"],
+          InboundHistory: expect.arrayContaining([
+            expect.objectContaining({ body: "Parent thread anchor" }),
+            expect.objectContaining({ body: "earlier bot reply" }),
+          ]),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7100n,
+          text: "continuing in thread",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("can require explicit mentions inside reply threads by parent chat policy", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7100n,
+          message: {
+            id: 61003n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "silent follow-up",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: deploy plan",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      historyByChat: {
+        "7000": [{ id: 5000n, date: 1_700_000_002n, fromId: 41n, message: "Parent thread anchor" }],
+        "7100": [
+          {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 777n,
+            message: "earlier bot reply",
+            out: true,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "should not send",
+      },
+    })
+
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "7000": { replyThreadRequireExplicitMention: true },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("no mention"))
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    })
+
+    await handle.stop()
+  })
+
+  it("can include limited parent chat history before a reply-thread anchor when configured", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7100n,
+          message: {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "what did we decide?",
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: deploy plan",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      historyByChat: {
+        "7000": [
+          {
+            id: 4999n,
+            date: 1_700_000_001n,
+            fromId: 51n,
+            message: "parent context worth inheriting",
+          },
+          {
+            id: 5000n,
+            date: 1_700_000_002n,
+            fromId: 41n,
+            message: "Parent thread anchor",
+          },
+        ],
+        "7100": [
+          {
+            id: 61001n,
+            date: 1_700_000_009n,
+            fromId: 777n,
+            message: "thread-local bot context",
+            out: true,
+          },
+          {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "what did we decide?",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "parent-aware reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "7000": { replyThreadParentHistoryLimit: 1 },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const ctx = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
+      expect(ctx.InboundHistory.map((entry: { body: string }) => entry.body)).toEqual([
+        "parent context worth inheriting",
+        "Parent thread anchor",
+        "thread-local bot context",
+      ])
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7100n,
+          text: "parent-aware reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("inherits reply-thread anchor media when the child message has no direct media", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7100n,
+          message: {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "what about this image?",
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: image",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      historyByChat: {
+        "7000": [
+          {
+            id: 5000n,
+            date: 1_700_000_002n,
+            fromId: 41n,
+            message: "",
+            media: {
+              media: {
+                oneofKind: "photo",
+                photo: {
+                  photo: {
+                    id: 901n,
+                    sizes: [{ w: 1200, h: 900, size: 12345, cdnUrl: "https://cdn.inline.chat/anchor-photo.jpg" }],
+                  },
+                },
+              },
+            },
+          } as any,
+        ],
+        "7100": [
+          {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "what about this image?",
+          },
+        ],
+      },
+      mediaByUrl: {
+        "https://cdn.inline.chat/anchor-photo.jpg": {
+          contentType: "image/jpeg",
+          fileName: "anchor-photo.jpg",
+        },
+      },
+      dispatchReplyPayload: {
+        text: "anchor media reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://cdn.inline.chat/anchor-photo.jpg",
+          filePathHint: "anchor-photo.jpg",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "what about this image?",
+          BodyForAgent: "what about this image?",
+          MediaPath: "/tmp/anchor-photo.jpg",
+          MediaType: "image/jpeg",
+          MediaUrl: "/tmp/anchor-photo.jpg",
+          MediaPaths: ["/tmp/anchor-photo.jpg"],
+          MediaUrls: ["/tmp/anchor-photo.jpg"],
+          MediaTypes: ["image/jpeg"],
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "recent_media_attachments",
+              payload: {
+                summary: "Recent media/attachments: #5000 user:41: image attachment: https://cdn.inline.chat/anchor-photo.jpg",
+              },
+            }),
+          ]),
         }),
       )
     })

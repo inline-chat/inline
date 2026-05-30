@@ -26,6 +26,8 @@ By default, Inline reply threads stay off to preserve the old compatibility beha
 When enabled:
 
 - inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`
+- bot-participated reply threads can continue without an explicit bot mention by default, matching Slack-style thread behavior
+- reply-thread context includes the anchor message plus child-thread history by default; parent-chat history is opt-in
 - outbound `thread-reply` sends into the child reply-thread chat
 - `thread-create` creates a real Inline reply thread instead of a plain chat alias
 
@@ -140,6 +142,8 @@ channels:
       replyThreads: false # optional, default false; enable Inline reply-thread support
     requireMention: true # optional: default is false
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
+    replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention
+    replyThreadParentHistoryLimit: 0 # optional, default 0; include parent-chat messages before the anchor only when needed
 
     # Inbound context history (used to build richer thread context for the agent):
     historyLimit: 50      # group chats
@@ -159,6 +163,8 @@ channels:
     groups:
       "88":
         requireMention: false
+        replyThreadRequireExplicitMention: true
+        replyThreadParentHistoryLimit: 2
         allowFrom:
           - "42"
         tools:
@@ -188,6 +194,8 @@ Reply behavior summary:
 - `replyToId` is always an Inline message id.
 - Inline reply threads are separate and use OpenClaw `threadId`.
 - Keep `replyThreads` off if you only want classic message replies.
+- Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
+- Leave `replyThreadParentHistoryLimit: 0` for focused thread sessions; raise it only for chats where anchor-adjacent parent context matters.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
 
@@ -236,6 +244,7 @@ Inline reply-thread semantics are behind `channels.inline.capabilities.replyThre
 - disabled: `thread-reply` behaves like the old compatibility reply path
 - enabled: `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id
 - enabled: `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor
+- enabled: if the current reply-thread message has no direct media, OpenClaw can inherit the anchor message media so image/file-only thread starters remain visible to the agent
 
 You can gate action groups from config:
 
