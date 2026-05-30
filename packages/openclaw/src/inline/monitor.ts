@@ -140,7 +140,6 @@ type StatusSink = (patch: {
 type CachedChatInfo = {
   kind: "direct" | "group"
   title: string | null
-  lastMsgId?: bigint | null
   peerUserId?: bigint | null
 }
 
@@ -527,7 +526,6 @@ async function resolveChatInfo(
   const info: CachedChatInfo = {
     kind,
     title,
-    lastMsgId: result.lastMsgId ?? null,
     ...(peerUserId != null ? { peerUserId } : {}),
   }
   cache.set(chatId, info)
@@ -1836,13 +1834,11 @@ function normalizeInlineReplyThreadMode(raw: unknown): InlineReplyThreadMode {
 }
 
 function shouldAutoCreateInlineReplyThread(params: {
-  chatInfo: CachedChatInfo
   messageId: bigint
   minMessages: number
 }): boolean {
   if (params.minMessages <= 0) return true
-  const latestMessageId = params.chatInfo.lastMsgId ?? params.messageId
-  return latestMessageId >= BigInt(params.minMessages)
+  return params.messageId >= BigInt(params.minMessages)
 }
 
 async function buildHistoryContext(params: {
@@ -2998,7 +2994,6 @@ export async function monitorInlineProvider(params: {
       replyThreadMode === "thread" &&
       !deliveryReplyThreadContext &&
       shouldAutoCreateInlineReplyThread({
-        chatInfo,
         messageId: msg.id,
         minMessages: replyThreadAutoCreateMinMessages,
       }) &&

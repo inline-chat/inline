@@ -361,7 +361,7 @@
         },
         "replyThreadAutoCreateMinMessages": {
           "label": "Inline Reply Thread Parent Size",
-          "help": "Minimum chat-local message position before \"thread\" mode auto-creates a child reply thread from a parent-chat message. Defaults to 50; set to 0 to thread every parent-chat message. Existing reply-thread chats always stay in their current thread."
+          "help": "Minimum inbound chat-local message ID before \"thread\" mode auto-creates a child reply thread from a parent-chat message. Defaults to 50; set to 0 to thread every parent-chat message. Existing reply-thread chats always stay in their current thread."
         },
         "groups": {
           "label": "Inline Group Overrides",
