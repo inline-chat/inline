@@ -59,4 +59,53 @@ describe("inline/reply-threads", () => {
       replyThreads: true,
     })
   })
+
+  it("enables reply-thread handling when placement mode is configured", () => {
+    expect(
+      isInlineReplyThreadsEnabled({
+        cfg: {
+          channels: {
+            inline: {
+              replyThreadMode: "thread",
+            },
+          },
+        } as OpenClawConfig,
+      }),
+    ).toBe(true)
+
+    expect(
+      isInlineReplyThreadsEnabled({
+        cfg: {
+          channels: {
+            inline: {
+              groups: {
+                "123": { replyThreadMode: "main" },
+              },
+            },
+          },
+        } as OpenClawConfig,
+      }),
+    ).toBe(true)
+  })
+
+  it("uses account-level placement mode when resolving reply-thread handling", () => {
+    const cfg = {
+      channels: {
+        inline: {
+          token: "base-token",
+          accounts: {
+            work: {
+              token: "work-token",
+              groups: {
+                "123": { replyThreadMode: "thread" },
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig
+
+    expect(isInlineReplyThreadsEnabled({ cfg, accountId: "work" })).toBe(true)
+    expect(isInlineReplyThreadsEnabled({ cfg, accountId: "missing" })).toBe(false)
+  })
 })

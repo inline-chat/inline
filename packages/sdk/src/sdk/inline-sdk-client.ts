@@ -204,7 +204,7 @@ export class InlineSdkClient {
     return { userId: result.getMe.user.id }
   }
 
-  async getChat(params: { chatId: InlineIdLike }): Promise<{ chatId: bigint; peer?: Peer; title: string }> {
+  async getChat(params: { chatId: InlineIdLike }): Promise<{ chatId: bigint; peer?: Peer; title: string; lastMsgId?: bigint }> {
     const peerId = InputPeer.create({
       type: { oneofKind: "chat", chat: { chatId: asInlineId(params.chatId, "chatId") } },
     })
@@ -216,7 +216,12 @@ export class InlineSdkClient {
 
     const chat = result.getChat.chat
     if (!chat) throw new Error("getChat: missing chat")
-    return { chatId: chat.id, peer: chat.peerId, title: chat.title }
+    return {
+      chatId: chat.id,
+      peer: chat.peerId,
+      title: chat.title,
+      ...(chat.lastMsgId != null ? { lastMsgId: chat.lastMsgId } : {}),
+    }
   }
 
   async getMessages(params: InlineSdkGetMessagesParams): Promise<{ messages: Message[] }> {

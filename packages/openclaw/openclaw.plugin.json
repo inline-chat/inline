@@ -84,6 +84,8 @@
               "additionalProperties": false,
               "properties": {
                 "requireMention": { "type": "boolean" },
+                "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
+                "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
                 "allowFrom": { "$ref": "#/properties/groupAllowFrom" },
                 "systemPrompt": { "type": "string" },
                 "tools": {
@@ -112,6 +114,8 @@
             }
           },
           "requireMention": { "type": "boolean" },
+          "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
+          "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
           "replyToBotWithoutMention": { "type": "boolean" },
           "historyLimit": { "type": "integer", "minimum": 0 },
           "dmHistoryLimit": { "type": "integer", "minimum": 0 },
@@ -275,6 +279,8 @@
                 "groupPolicy": { "$ref": "#/properties/groupPolicy" },
                 "groups": { "$ref": "#/properties/groups" },
                 "requireMention": { "$ref": "#/properties/requireMention" },
+                "replyThreadMode": { "$ref": "#/properties/replyThreadMode" },
+                "replyThreadAutoCreateMinMessages": { "$ref": "#/properties/replyThreadAutoCreateMinMessages" },
                 "replyToBotWithoutMention": { "$ref": "#/properties/replyToBotWithoutMention" },
                 "historyLimit": { "$ref": "#/properties/historyLimit" },
                 "dmHistoryLimit": { "$ref": "#/properties/dmHistoryLimit" },
@@ -349,9 +355,17 @@
           "label": "Inline Reply Threads",
           "help": "Expose Inline reply-thread chats through OpenClaw's thread API."
         },
+        "replyThreadMode": {
+          "label": "Inline Reply Thread Mode",
+          "help": "Controls where Inline group replies start from parent-chat messages: \"auto\" keeps current behavior, \"thread\" replies in a child reply thread, and \"main\" keeps replies in the parent chat. Messages that already arrive in an Inline reply thread stay in that reply thread."
+        },
+        "replyThreadAutoCreateMinMessages": {
+          "label": "Inline Reply Thread Parent Size",
+          "help": "Minimum chat-local message position before \"thread\" mode auto-creates a child reply thread from a parent-chat message. Defaults to 50; set to 0 to thread every parent-chat message. Existing reply-thread chats always stay in their current thread."
+        },
         "groups": {
           "label": "Inline Group Overrides",
-          "help": "Per-group settings keyed by Inline chat ID, including sender allowlist, mention, and tool policy overrides."
+          "help": "Per-group settings keyed by Inline chat ID, including sender allowlist, mention, reply-thread mode, reply-thread parent-size threshold, and tool policy overrides."
         },
         "accounts": {
           "label": "Inline Accounts",

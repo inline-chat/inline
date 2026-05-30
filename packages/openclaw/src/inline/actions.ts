@@ -109,7 +109,7 @@ const CREATE_SUBTHREAD_METHOD =
   Number.isInteger((Method as Record<string, unknown>).CREATE_SUBTHREAD) &&
   ((Method as Record<string, unknown>).CREATE_SUBTHREAD as number) > 0
     ? ((Method as Record<string, unknown>).CREATE_SUBTHREAD as Method)
-    : (43 as Method)
+    : (42 as Method)
 
 const INLINE_ACTION_MAX_ROWS = 8
 const INLINE_ACTION_MAX_PER_ROW = 8

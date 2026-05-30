@@ -25,7 +25,7 @@
     "check": "bun run typecheck && bun run lint && bun run test && bun run build"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "0.0.11",
+    "@inline-chat/realtime-sdk": "0.0.12",
     "zod": "4.4.3"
   },
   "peerDependencies": {
