@@ -142,7 +142,6 @@ type MonitorSetup = {
   chats: Record<string, {
     kind: "direct" | "group"
     title?: string
-    lastMsgId?: bigint
     peerUserId?: bigint
     parentChatId?: bigint
     parentMessageId?: bigint
@@ -508,7 +507,6 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
                   user: { userId: info.peerUserId ?? 42n },
                 },
               },
-              ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
             },
           },
         }
@@ -519,7 +517,6 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           chat: {
             id: BigInt(chatId),
             title: info.title ?? `chat-${chatId}`,
-            ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
             ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
             ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
           },
@@ -675,14 +672,12 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             return {
               chatId,
               title: info.title ?? "Direct",
-              ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
               peer: { type: { oneofKind: "user", user: { userId: info.peerUserId ?? 42n } } },
             }
           }
           return {
             chatId,
             title: info.title ?? "Group",
-            ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
             peer: { type: { oneofKind: "chat", chat: { chatId } } },
             ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
             ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
@@ -1442,7 +1437,7 @@ describe("inline/monitor", () => {
         },
       ],
       chats: {
-        "89": { kind: "group", title: "Short Project Thread", lastMsgId: 12n },
+        "89": { kind: "group", title: "Short Project Thread" },
       },
       dispatchReplyPayload: {
         text: "same chat reply",
@@ -1506,7 +1501,7 @@ describe("inline/monitor", () => {
         },
       ],
       chats: {
-        "90": { kind: "group", title: "Short Thread Override", lastMsgId: 8n },
+        "90": { kind: "group", title: "Short Thread Override" },
       },
       dispatchReplyPayload: {
         text: "child reply",
