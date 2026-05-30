@@ -1356,6 +1356,12 @@ describe("inline/monitor", () => {
       historyByChat: {
         "88": [
           {
+            id: 2001n,
+            date: 1_700_000_001n,
+            fromId: 52n,
+            message: "unrelated parent room context",
+          },
+          {
             id: 2002n,
             date: 1_700_000_002n,
             fromId: 51n,
@@ -1403,6 +1409,18 @@ describe("inline/monitor", () => {
           ThreadLabel: "Re: @inlinebot can you look at this?",
           Body: "@inlinebot can you look at this?",
           BodyForAgent: "can you look at this?",
+          InboundHistory: [
+            expect.objectContaining({
+              body: "@inlinebot can you look at this?",
+            }),
+          ],
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          InboundHistory: expect.not.arrayContaining([
+            expect.objectContaining({ body: "unrelated parent room context" }),
+          ]),
         }),
       )
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
