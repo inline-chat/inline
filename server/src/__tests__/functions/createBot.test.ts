@@ -79,6 +79,18 @@ describe("createBot", () => {
     await expect(createBot(input2, mockFunctionContext)).rejects.toThrow()
   })
 
+  test("should fail with reserved username", async () => {
+    await expect(
+      createBot(
+        {
+          name: "Reserved Bot",
+          username: "inlinebot",
+        },
+        mockFunctionContext,
+      ),
+    ).rejects.toThrow()
+  })
+
   test("should create bot and add to space when addToSpace is provided", async () => {
     // Create a test space first
     const space = await testUtils.createSpace("Test Space")

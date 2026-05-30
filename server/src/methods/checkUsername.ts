@@ -1,10 +1,12 @@
 import { db } from "@in/server/db"
-import { and, eq, not } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { lower, users } from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
+import { isReservedUsername } from "@in/server/modules/users/reservedUsernames"
+import { normalizeUsername } from "@in/server/utils/normalize"
 
 export const Input = Type.Object({
   username: Type.String(),
@@ -29,15 +31,15 @@ export const handler = async (
 
 /// HELPER FUNCTIONS ///
 export const checkUsernameAvailable = async (username: string, context: { userId?: number }) => {
-  const normalizedUsername = username.toLowerCase().trim()
+  const normalizedUsername = normalizeUsername(username).toLowerCase()
   const result = await db._query.users.findFirst({
-    where: and(
-      eq(lower(users.username), normalizedUsername),
-      // If the user ID is provided, we don't want to check against the current user
-      not(eq(users.id, context.userId ?? 0)),
-    ),
-    columns: { username: true },
+    where: eq(lower(users.username), normalizedUsername),
+    columns: { id: true },
   })
 
-  return result === undefined
+  if (result) {
+    return result.id === context.userId
+  }
+
+  return !isReservedUsername(normalizedUsername)
 }

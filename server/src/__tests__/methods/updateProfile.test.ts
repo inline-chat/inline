@@ -39,6 +39,16 @@ describe("updateProfile", () => {
     })
   })
 
+  test("rejects reserved usernames", async () => {
+    const user = await testUtils.createUser("reserved-profile@example.com")
+
+    await expect(handler({ username: "@InlineBot" }, makeContext(user.id))).rejects.toMatchObject({
+      type: InlineError.ApiError.USERNAME_TAKEN[0],
+      code: InlineError.ApiError.USERNAME_TAKEN[1],
+      description: InlineError.ApiError.USERNAME_TAKEN[2],
+    })
+  })
+
   test("surfaces invalid username errors", async () => {
     const user = await testUtils.createUser("invalid-profile@example.com")
 
