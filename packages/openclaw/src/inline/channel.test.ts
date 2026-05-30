@@ -1362,6 +1362,8 @@ describe("inline/channel", () => {
       } as any) ?? []
 
     expect(enabledHints.join("\n").toLowerCase()).toContain("reply thread")
+    expect(enabledHints.join("\n")).toContain("thread-create")
+    expect(enabledHints.join("\n")).toContain("current message")
     expect(enabledHints.join("\n")).toContain("attachmentUrls")
   })
 

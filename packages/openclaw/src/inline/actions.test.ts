@@ -2592,6 +2592,77 @@ describe("inline/actions", () => {
     )
   })
 
+  it("uses current inbound message id for thread-create when no parent id is provided", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const getMe = vi.fn(async () => ({ userId: 500n, firstName: "Inline", username: "inline-bot" }))
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method !== 42) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "createSubthread",
+        createSubthread: {
+          chat: { id: 715n, title: "Follow-up thread", parentChatId: 7n, parentMessageId: 15n },
+          dialog: { chatId: 715n },
+          anchorMessage: { id: 15n, fromId: 42n, message: "anchor" },
+        },
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        CREATE_SUBTHREAD: 42,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        getMe = getMe
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "thread-create",
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+            capabilities: {
+              replyThreads: true,
+            },
+          },
+        },
+      } as OpenClawConfig,
+      params: {
+        to: "7",
+        threadName: "Follow-up thread",
+      },
+      toolContext: {
+        currentMessageId: "15",
+      },
+    } as any)
+
+    expect(invokeRaw).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({
+        oneofKind: "createSubthread",
+        createSubthread: expect.objectContaining({
+          parentChatId: 7n,
+          parentMessageId: 15n,
+          title: "Follow-up thread",
+        }),
+      }),
+    )
+  })
+
   it("rejects disabled actions from config", async () => {
     vi.resetModules()
 
