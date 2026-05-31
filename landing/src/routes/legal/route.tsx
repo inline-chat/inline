@@ -135,6 +135,7 @@ function LegalLayout() {
             </div>
             <div className="docs-footer-links">
               <a href="/docs">Docs</a>
+              <a href="https://github.com/inline-chat/inline/blob/main/SUPPORT.md">Sponsor</a>
               <a href="/docs/security">Security</a>
               <a href="/legal/terms">Terms</a>
               <a href="/legal/privacy">Privacy</a>

@@ -130,6 +130,7 @@ function DocsLayout() {
             </div>
             <div className="docs-footer-links">
               <a href="https://github.com/inline-chat/inline">GitHub</a>
+              <a href="https://github.com/inline-chat/inline/blob/main/SUPPORT.md">Sponsor</a>
               <a href="https://x.com/inline_chat">X</a>
               <a href="https://status.inline.chat">Status</a>
               <a href="/docs/security">Security</a>
