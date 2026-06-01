@@ -509,14 +509,27 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
     do {
       try Task.checkCancellation()
+      if self.peerUser == nil, let userId = peer_.asUserId() {
+        let hasUser = try await db.reader.read { db in
+          try User.fetchOne(db, id: userId) != nil
+        }
+        if !hasUser {
+          try await DataManager.shared.getUser(id: userId)
+        }
+        try Task.checkCancellation()
+
+        if let loadedChatItem = try await queryChatItemFromDatabase() {
+          await MainActor.run {
+            self.chatItem = loadedChatItem
+          }
+          if let chat = loadedChatItem.chat {
+            return chat
+          }
+        }
+      }
+
       // Wait for getChat transaction to complete and save to database
       _ = try await Api.realtime.send(.getChat(peer: peer_))
-      try Task.checkCancellation()
-
-      // Also fetch user info if it's a DM
-      if let userId = peer_.asUserId() {
-        try? await DataManager.shared.getUser(id: userId)
-      }
       try Task.checkCancellation()
 
       if let loadedChatItem = try await queryChatItemFromDatabase() {

@@ -49,6 +49,7 @@ public struct GetChatTransaction: Transaction2 {
       try await AppDatabase.shared.dbWriter.write { db in
         do {
           var chat = Chat(from: response.chat)
+          try clearMissingOptionalReferences(in: &chat, db: db)
           try chat.saveWithValidLastMsg(db)
         } catch {
           log.error("Failed to save chat", error: error)
@@ -66,8 +67,7 @@ public struct GetChatTransaction: Transaction2 {
           do {
             _ = try Message.save(db, protocolMessage: response.anchorMessage, publishChanges: false)
           } catch {
-            log.error("Failed to save anchor message", error: error)
-            throw error
+            log.warning("Skipping anchor message for getChat result because it could not be saved: \(error)")
           }
         }
 
@@ -88,6 +88,23 @@ public struct GetChatTransaction: Transaction2 {
 
   public func failed(error: TransactionError2) async {
     log.error("Failed to get chat", error: error)
+  }
+
+  private func clearMissingOptionalReferences(in chat: inout Chat, db: Database) throws {
+    if let spaceId = chat.spaceId, try Space.fetchOne(db, id: spaceId) == nil {
+      log.warning("Dropping missing space reference while saving getChat result for chat \(chat.id)")
+      chat.spaceId = nil
+    }
+
+    if let createdBy = chat.createdBy, try User.fetchOne(db, id: createdBy) == nil {
+      log.warning("Dropping missing creator reference while saving getChat result for chat \(chat.id)")
+      chat.createdBy = nil
+    }
+
+    if let parentChatId = chat.parentChatId, try Chat.fetchOne(db, id: parentChatId) == nil {
+      log.warning("Dropping missing parent chat reference while saving getChat result for chat \(chat.id)")
+      chat.parentChatId = nil
+    }
   }
 }
 
