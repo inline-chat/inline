@@ -85,10 +85,12 @@ final class MessageActionButtonView: NSView {
   }
 
   private static let horizontalInset: CGFloat = 10
-  private static let pressedScale: CGFloat = 0.95
-
   private final class ActionButton: NSButton {
     var onPressChange: ((Bool) -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+      true
+    }
 
     override func mouseDown(with event: NSEvent) {
       onPressChange?(true)
@@ -147,9 +149,9 @@ final class MessageActionButtonView: NSView {
     button.action = #selector(handleTap)
     button.focusRingType = .none
     button.onPressChange = { [weak self] isPressed in
-      self?.isPressed = isPressed
-      self?.applyAppearance()
+      self?.setPressed(isPressed)
     }
+    PressScaleAnimator.prepare(self)
   }
 
   @available(*, unavailable)
@@ -214,7 +216,7 @@ final class MessageActionButtonView: NSView {
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
     isHovered = false
-    isPressed = false
+    setPressed(false)
     applyAppearance()
   }
 
@@ -257,7 +259,6 @@ final class MessageActionButtonView: NSView {
 
     let hoverOverlay = isHovered ? (isDark ? 0.035 : 0.025) : 0
     let resolvedBackground = backgroundColor.blended(withFraction: hoverOverlay, of: .black) ?? backgroundColor
-    let scale = isPressed ? Self.pressedScale : 1
     let alpha: CGFloat = appearanceStyle.isLoading ? 1 : (isPressed ? 0.88 : 1)
 
     layer?.cornerRadius = max(8, floor(appearanceStyle.rowHeight * 0.36))
@@ -271,11 +272,14 @@ final class MessageActionButtonView: NSView {
       animator().alphaValue = alpha
     }
 
-    CATransaction.begin()
-    CATransaction.setAnimationDuration(0.12)
-    CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
-    layer?.transform = CATransform3DMakeScale(scale, scale, 1)
-    CATransaction.commit()
+    PressScaleAnimator.prepare(self)
+  }
+
+  private func setPressed(_ pressed: Bool) {
+    guard isPressed != pressed else { return }
+    isPressed = pressed
+    PressScaleAnimator.setPressed(pressed, on: self)
+    applyAppearance()
   }
 
   @objc private func handleTap() {

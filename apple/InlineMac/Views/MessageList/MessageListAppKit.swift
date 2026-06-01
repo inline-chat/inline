@@ -1619,6 +1619,7 @@ class MessageListAppKit: NSViewController {
             index: chatRows.messageIndex(forStableMessageId: message.id),
             translated: inputProps.translated,
             interactionMode: interactionMode(for: row),
+            replyThreadTitle: inputProps.replyThreadTitle,
             layout: plan,
           )
 
@@ -1686,7 +1687,8 @@ class MessageListAppKit: NSViewController {
         isRtl: isRTLMessage(message),
         translated: message?.isTranslated ?? false,
         renderStyle: messageRenderStyle,
-        interactionMode: interactionMode(for: row)
+        interactionMode: interactionMode(for: row),
+        replyThreadTitle: replyThreadTitle(for: message)
       )
     }
 
@@ -1700,7 +1702,8 @@ class MessageListAppKit: NSViewController {
         isRtl: false,
         translated: false,
         renderStyle: messageRenderStyle,
-        interactionMode: interactionMode(for: row)
+        interactionMode: interactionMode(for: row),
+        replyThreadTitle: nil
       )
     }
 
@@ -1713,8 +1716,22 @@ class MessageListAppKit: NSViewController {
       isRtl: isRTLMessage(message),
       translated: message.isTranslated,
       renderStyle: messageRenderStyle,
-      interactionMode: interactionMode(for: row)
+      interactionMode: interactionMode(for: row),
+      replyThreadTitle: replyThreadTitle(for: message)
     )
+  }
+
+  private func replyThreadTitle(for message: FullMessage?) -> String? {
+    guard let chatId = message?.message.replyThreadSummary?.chatID, chatId > 0 else { return nil }
+
+    do {
+      return try dependencies.database.reader.read { db in
+        try ReplyThreadTitleFallback.explicitTitle(chatId: chatId, db: db)
+      }
+    } catch {
+      log.error("Failed to read reply thread title", error: error)
+      return nil
+    }
   }
 
   private func calculateSize(
@@ -2086,6 +2103,7 @@ extension MessageListAppKit: NSTableViewDelegate {
       index: messageAndIndex.index,
       translated: inputProps.translated,
       interactionMode: interactionMode(for: row),
+      replyThreadTitle: inputProps.replyThreadTitle,
       layout: layoutPlan
     )
 

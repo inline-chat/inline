@@ -85,6 +85,7 @@ final class ReactionChipButton: NSButton {
 
     wantsLayer = true
     layer?.masksToBounds = true
+    PressScaleAnimator.prepare(self)
 
     isBordered = false
     title = ""
@@ -151,6 +152,10 @@ final class ReactionChipButton: NSButton {
     contextMenuProvider?() ?? super.menu(for: event)
   }
 
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    true
+  }
+
   override func hitTest(_ point: NSPoint) -> NSView? {
     bounds.contains(point) ? self : nil
   }
@@ -166,7 +171,44 @@ final class ReactionChipButton: NSButton {
       setPressed(false)
     } else {
       layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+      PressScaleAnimator.prepare(self)
     }
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    guard event.type == .leftMouseDown else {
+      super.mouseDown(with: event)
+      return
+    }
+
+    setPressed(true)
+    guard let window else {
+      setPressed(false)
+      return
+    }
+
+    while let next = window.nextEvent(
+      matching: [.leftMouseDragged, .leftMouseUp],
+      until: .distantFuture,
+      inMode: .eventTracking,
+      dequeue: true
+    ) {
+      let isInside = bounds.contains(convert(next.locationInWindow, from: nil))
+      switch next.type {
+      case .leftMouseDragged:
+        setPressed(isInside)
+      case .leftMouseUp:
+        setPressed(false)
+        if isInside {
+          sendAction(action, to: target)
+        }
+        return
+      default:
+        break
+      }
+    }
+
+    setPressed(false)
   }
 
   private var weReacted: Bool {
@@ -177,15 +219,7 @@ final class ReactionChipButton: NSButton {
   private func setPressed(_ pressed: Bool) {
     guard isPressed != pressed else { return }
     isPressed = pressed
-
-    CATransaction.begin()
-    CATransaction.setAnimationDuration(pressed ? 0.06 : 0.10)
-    CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
-    layer?.transform = pressed
-      ? CATransform3DMakeScale(0.95, 0.95, 1)
-      : CATransform3DIdentity
-    CATransaction.commit()
-    CATransaction.flush()
+    PressScaleAnimator.setPressed(pressed, on: self)
   }
 
   private func updateContent() {
