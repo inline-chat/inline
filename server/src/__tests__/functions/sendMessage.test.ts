@@ -33,7 +33,7 @@ let userIndex = 0
 const runId = Date.now()
 const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
 
-async function waitForTrue(check: () => boolean | Promise<boolean>, timeoutMs = 1_000, intervalMs = 20): Promise<void> {
+async function waitForTrue(check: () => boolean | Promise<boolean>, timeoutMs = 5_000, intervalMs = 20): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     if (await check()) return

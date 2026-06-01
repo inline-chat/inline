@@ -126,12 +126,14 @@ describe("Admin auth", () => {
 
   it("verifies email code and establishes session", async () => {
     const email = "code-admin@example.com"
+    const challengeToken = "lc_admin_code_session"
     await createSuperadmin(email)
 
     await db.insert(loginCodes).values({
       email,
       code: null,
       codeHash: await hashLoginCode("123456"),
+      challengeId: challengeToken,
       expiresAt: new Date(Date.now() + 1000 * 60 * 10),
       attempts: 0,
     })
@@ -139,7 +141,7 @@ describe("Admin auth", () => {
     const response = await app.handle(
       buildRequest("/admin/auth/verify-email-code", {
         method: "POST",
-        body: { email, code: "123456" },
+        body: { email, code: "123456", challengeToken },
       }),
     )
 
