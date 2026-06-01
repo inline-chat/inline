@@ -122,12 +122,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
   var mentionManager: MentionManager?
   var slashCommandManager: SlashCommandManager?
-  var draftSaveTimer: Timer?
-  var originalDraftEntities: MessageEntities?
+  let draftManager = DraftManager(debounceDelay: 2.0)
 
   let previewViewModel = SwiftUIPhotoPreviewViewModel()
   let multiPhotoPreviewViewModel = SwiftUIPhotoPreviewViewModel()
-  let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
   var isPickerPresented = false
   var activePickerMode: MediaPickerMode = .photos
   var currentPreviewUsesAttachmentPicker = false
