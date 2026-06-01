@@ -166,6 +166,13 @@ extension UIMessageView {
     return stack
   }
 
+  func createReplyThreadSummaryView() -> ReplyThreadSummaryView {
+    let view = ReplyThreadSummaryView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.setContentCompressionResistancePriority(.required, for: .vertical)
+    return view
+  }
+
   func createMessageActionRowStack() -> UIStackView {
     let stack = UIStackView()
     stack.axis = .horizontal
