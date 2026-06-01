@@ -2099,6 +2099,12 @@ export interface RpcCall {
          */
         updateDialogOrder: UpdateDialogOrderInput;
     } | {
+        oneofKind: "clearChatHistory";
+        /**
+         * @generated from protobuf field: ClearChatHistoryInput clearChatHistory = 54;
+         */
+        clearChatHistory: ClearChatHistoryInput;
+    } | {
         oneofKind: "deleteBot";
         /**
          * @generated from protobuf field: DeleteBotInput deleteBot = 55;
@@ -2431,6 +2437,12 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateDialogOrderResult updateDialogOrder = 53;
          */
         updateDialogOrder: UpdateDialogOrderResult;
+    } | {
+        oneofKind: "clearChatHistory";
+        /**
+         * @generated from protobuf field: ClearChatHistoryResult clearChatHistory = 54;
+         */
+        clearChatHistory: ClearChatHistoryResult;
     } | {
         oneofKind: "deleteBot";
         /**
@@ -3602,6 +3614,51 @@ export interface DeleteMessagesResult {
     updates: Update[];
 }
 /**
+ * @generated from protobuf message ClearChatHistoryInput
+ */
+export interface ClearChatHistoryInput {
+    /**
+     * @generated from protobuf oneof: target
+     */
+    target: {
+        oneofKind: "peerId";
+        /**
+         * @generated from protobuf field: InputPeer peer_id = 1;
+         */
+        peerId: InputPeer;
+    } | {
+        oneofKind: "spaceId";
+        /**
+         * @generated from protobuf field: int64 space_id = 4;
+         */
+        spaceId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * 0 deletes all messages. Positive values keep the last N days and delete older messages.
+     *
+     * @generated from protobuf field: int32 keep_last_days = 2;
+     */
+    keepLastDays: number;
+    /**
+     * If true, reply-thread subthreads anchored to deleted messages are deleted too.
+     * If false, those subthreads are left orphaned.
+     *
+     * @generated from protobuf field: bool delete_reply_threads = 3;
+     */
+    deleteReplyThreads: boolean;
+}
+/**
+ * @generated from protobuf message ClearChatHistoryResult
+ */
+export interface ClearChatHistoryResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
  * @generated from protobuf message EditMessageInput
  */
 export interface EditMessageInput {
@@ -4440,6 +4497,12 @@ export interface Update {
          */
         messageActionAnswered: UpdateMessageActionAnswered;
     } | {
+        oneofKind: "clearChatHistory";
+        /**
+         * @generated from protobuf field: UpdateClearChatHistory clear_chat_history = 37;
+         */
+        clearChatHistory: UpdateClearChatHistory;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -4900,6 +4963,60 @@ export interface UpdateDeleteMessages {
      * @generated from protobuf field: Peer peer_id = 2;
      */
     peerId?: Peer;
+}
+/**
+ * @generated from protobuf message UpdateClearChatHistory
+ */
+export interface UpdateClearChatHistory {
+    /**
+     * @generated from protobuf oneof: target
+     */
+    target: {
+        oneofKind: "peerId";
+        /**
+         * @generated from protobuf field: Peer peer_id = 1;
+         */
+        peerId: Peer;
+    } | {
+        oneofKind: "spaceId";
+        /**
+         * @generated from protobuf field: int64 space_id = 4;
+         */
+        spaceId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * If unset, all local messages for the chat should be removed.
+     * If set, remove messages with date older than this Unix timestamp.
+     *
+     * @generated from protobuf field: optional int64 before_date = 2;
+     */
+    beforeDate?: bigint;
+    /**
+     * Mirrors the RPC option for UI/state observers.
+     *
+     * @generated from protobuf field: bool delete_reply_threads = 3;
+     */
+    deleteReplyThreads: boolean;
+    /**
+     * Reply-thread chats deleted as a direct side effect of this clear.
+     *
+     * @generated from protobuf field: repeated int64 deleted_chat_ids = 5;
+     */
+    deletedChatIds: bigint[];
+    /**
+     * Reply-thread chats kept but detached from the deleted parent message.
+     *
+     * @generated from protobuf field: repeated int64 orphaned_chat_ids = 6;
+     */
+    orphanedChatIds: bigint[];
+    /**
+     * Reply-thread chats kept but detached from both parent chat and parent message.
+     *
+     * @generated from protobuf field: repeated int64 detached_chat_ids = 7;
+     */
+    detachedChatIds: bigint[];
 }
 /**
  * Update when a message ID is updated after sending
@@ -5645,6 +5762,10 @@ export enum Method {
      * @generated from protobuf enum value: UPDATE_DIALOG_ORDER = 52;
      */
     UPDATE_DIALOG_ORDER = 52,
+    /**
+     * @generated from protobuf enum value: CLEAR_CHAT_HISTORY = 53;
+     */
+    CLEAR_CHAT_HISTORY = 53,
     /**
      * @generated from protobuf enum value: DELETE_BOT = 54;
      */
@@ -9806,6 +9927,7 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 51, name: "revokeSession", kind: "message", oneof: "input", T: () => RevokeSessionInput },
             { no: 52, name: "updateDialogOpen", kind: "message", oneof: "input", T: () => UpdateDialogOpenInput },
             { no: 53, name: "updateDialogOrder", kind: "message", oneof: "input", T: () => UpdateDialogOrderInput },
+            { no: 54, name: "clearChatHistory", kind: "message", oneof: "input", T: () => ClearChatHistoryInput },
             { no: 55, name: "deleteBot", kind: "message", oneof: "input", T: () => DeleteBotInput }
         ]);
     }
@@ -10137,6 +10259,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateDialogOrder: UpdateDialogOrderInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogOrder)
                     };
                     break;
+                case /* ClearChatHistoryInput clearChatHistory */ 54:
+                    message.input = {
+                        oneofKind: "clearChatHistory",
+                        clearChatHistory: ClearChatHistoryInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).clearChatHistory)
+                    };
+                    break;
                 case /* DeleteBotInput deleteBot */ 55:
                     message.input = {
                         oneofKind: "deleteBot",
@@ -10314,6 +10442,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateDialogOrderInput updateDialogOrder = 53; */
         if (message.input.oneofKind === "updateDialogOrder")
             UpdateDialogOrderInput.internalBinaryWrite(message.input.updateDialogOrder, writer.tag(53, WireType.LengthDelimited).fork(), options).join();
+        /* ClearChatHistoryInput clearChatHistory = 54; */
+        if (message.input.oneofKind === "clearChatHistory")
+            ClearChatHistoryInput.internalBinaryWrite(message.input.clearChatHistory, writer.tag(54, WireType.LengthDelimited).fork(), options).join();
         /* DeleteBotInput deleteBot = 55; */
         if (message.input.oneofKind === "deleteBot")
             DeleteBotInput.internalBinaryWrite(message.input.deleteBot, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
@@ -10384,6 +10515,7 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 51, name: "revokeSession", kind: "message", oneof: "result", T: () => RevokeSessionResult },
             { no: 52, name: "updateDialogOpen", kind: "message", oneof: "result", T: () => UpdateDialogOpenResult },
             { no: 53, name: "updateDialogOrder", kind: "message", oneof: "result", T: () => UpdateDialogOrderResult },
+            { no: 54, name: "clearChatHistory", kind: "message", oneof: "result", T: () => ClearChatHistoryResult },
             { no: 55, name: "deleteBot", kind: "message", oneof: "result", T: () => DeleteBotResult }
         ]);
     }
@@ -10715,6 +10847,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateDialogOrder: UpdateDialogOrderResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogOrder)
                     };
                     break;
+                case /* ClearChatHistoryResult clearChatHistory */ 54:
+                    message.result = {
+                        oneofKind: "clearChatHistory",
+                        clearChatHistory: ClearChatHistoryResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).clearChatHistory)
+                    };
+                    break;
                 case /* DeleteBotResult deleteBot */ 55:
                     message.result = {
                         oneofKind: "deleteBot",
@@ -10892,6 +11030,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateDialogOrderResult updateDialogOrder = 53; */
         if (message.result.oneofKind === "updateDialogOrder")
             UpdateDialogOrderResult.internalBinaryWrite(message.result.updateDialogOrder, writer.tag(53, WireType.LengthDelimited).fork(), options).join();
+        /* ClearChatHistoryResult clearChatHistory = 54; */
+        if (message.result.oneofKind === "clearChatHistory")
+            ClearChatHistoryResult.internalBinaryWrite(message.result.clearChatHistory, writer.tag(54, WireType.LengthDelimited).fork(), options).join();
         /* DeleteBotResult deleteBot = 55; */
         if (message.result.oneofKind === "deleteBot")
             DeleteBotResult.internalBinaryWrite(message.result.deleteBot, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
@@ -14720,6 +14861,129 @@ class DeleteMessagesResult$Type extends MessageType<DeleteMessagesResult> {
  */
 export const DeleteMessagesResult = new DeleteMessagesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ClearChatHistoryInput$Type extends MessageType<ClearChatHistoryInput> {
+    constructor() {
+        super("ClearChatHistoryInput", [
+            { no: 1, name: "peer_id", kind: "message", oneof: "target", T: () => InputPeer },
+            { no: 4, name: "space_id", kind: "scalar", oneof: "target", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "keep_last_days", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "delete_reply_threads", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ClearChatHistoryInput>): ClearChatHistoryInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.target = { oneofKind: undefined };
+        message.keepLastDays = 0;
+        message.deleteReplyThreads = false;
+        if (value !== undefined)
+            reflectionMergePartial<ClearChatHistoryInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ClearChatHistoryInput): ClearChatHistoryInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.target = {
+                        oneofKind: "peerId",
+                        peerId: InputPeer.internalBinaryRead(reader, reader.uint32(), options, (message.target as any).peerId)
+                    };
+                    break;
+                case /* int64 space_id */ 4:
+                    message.target = {
+                        oneofKind: "spaceId",
+                        spaceId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* int32 keep_last_days */ 2:
+                    message.keepLastDays = reader.int32();
+                    break;
+                case /* bool delete_reply_threads */ 3:
+                    message.deleteReplyThreads = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ClearChatHistoryInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.target.oneofKind === "peerId")
+            InputPeer.internalBinaryWrite(message.target.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 space_id = 4; */
+        if (message.target.oneofKind === "spaceId")
+            writer.tag(4, WireType.Varint).int64(message.target.spaceId);
+        /* int32 keep_last_days = 2; */
+        if (message.keepLastDays !== 0)
+            writer.tag(2, WireType.Varint).int32(message.keepLastDays);
+        /* bool delete_reply_threads = 3; */
+        if (message.deleteReplyThreads !== false)
+            writer.tag(3, WireType.Varint).bool(message.deleteReplyThreads);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ClearChatHistoryInput
+ */
+export const ClearChatHistoryInput = new ClearChatHistoryInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ClearChatHistoryResult$Type extends MessageType<ClearChatHistoryResult> {
+    constructor() {
+        super("ClearChatHistoryResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<ClearChatHistoryResult>): ClearChatHistoryResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<ClearChatHistoryResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ClearChatHistoryResult): ClearChatHistoryResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ClearChatHistoryResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ClearChatHistoryResult
+ */
+export const ClearChatHistoryResult = new ClearChatHistoryResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class EditMessageInput$Type extends MessageType<EditMessageInput> {
     constructor() {
         super("EditMessageInput", [
@@ -16643,7 +16907,8 @@ class Update$Type extends MessageType<Update> {
             { no: 33, name: "dialog_notification_settings", kind: "message", oneof: "update", T: () => UpdateDialogNotificationSettings },
             { no: 34, name: "chat_open", kind: "message", oneof: "update", T: () => UpdateChatOpen },
             { no: 35, name: "message_action_invoked", kind: "message", oneof: "update", T: () => UpdateMessageActionInvoked },
-            { no: 36, name: "message_action_answered", kind: "message", oneof: "update", T: () => UpdateMessageActionAnswered }
+            { no: 36, name: "message_action_answered", kind: "message", oneof: "update", T: () => UpdateMessageActionAnswered },
+            { no: 37, name: "clear_chat_history", kind: "message", oneof: "update", T: () => UpdateClearChatHistory }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -16862,6 +17127,12 @@ class Update$Type extends MessageType<Update> {
                         messageActionAnswered: UpdateMessageActionAnswered.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).messageActionAnswered)
                     };
                     break;
+                case /* UpdateClearChatHistory clear_chat_history */ 37:
+                    message.update = {
+                        oneofKind: "clearChatHistory",
+                        clearChatHistory: UpdateClearChatHistory.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).clearChatHistory)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16979,6 +17250,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateMessageActionAnswered message_action_answered = 36; */
         if (message.update.oneofKind === "messageActionAnswered")
             UpdateMessageActionAnswered.internalBinaryWrite(message.update.messageActionAnswered, writer.tag(36, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateClearChatHistory clear_chat_history = 37; */
+        if (message.update.oneofKind === "clearChatHistory")
+            UpdateClearChatHistory.internalBinaryWrite(message.update.clearChatHistory, writer.tag(37, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18375,6 +18649,129 @@ class UpdateDeleteMessages$Type extends MessageType<UpdateDeleteMessages> {
  * @generated MessageType for protobuf message UpdateDeleteMessages
  */
 export const UpdateDeleteMessages = new UpdateDeleteMessages$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateClearChatHistory$Type extends MessageType<UpdateClearChatHistory> {
+    constructor() {
+        super("UpdateClearChatHistory", [
+            { no: 1, name: "peer_id", kind: "message", oneof: "target", T: () => Peer },
+            { no: 4, name: "space_id", kind: "scalar", oneof: "target", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "before_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "delete_reply_threads", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "deleted_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "orphaned_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "detached_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateClearChatHistory>): UpdateClearChatHistory {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.target = { oneofKind: undefined };
+        message.deleteReplyThreads = false;
+        message.deletedChatIds = [];
+        message.orphanedChatIds = [];
+        message.detachedChatIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateClearChatHistory>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateClearChatHistory): UpdateClearChatHistory {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.target = {
+                        oneofKind: "peerId",
+                        peerId: Peer.internalBinaryRead(reader, reader.uint32(), options, (message.target as any).peerId)
+                    };
+                    break;
+                case /* int64 space_id */ 4:
+                    message.target = {
+                        oneofKind: "spaceId",
+                        spaceId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* optional int64 before_date */ 2:
+                    message.beforeDate = reader.int64().toBigInt();
+                    break;
+                case /* bool delete_reply_threads */ 3:
+                    message.deleteReplyThreads = reader.bool();
+                    break;
+                case /* repeated int64 deleted_chat_ids */ 5:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.deletedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.deletedChatIds.push(reader.int64().toBigInt());
+                    break;
+                case /* repeated int64 orphaned_chat_ids */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.orphanedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.orphanedChatIds.push(reader.int64().toBigInt());
+                    break;
+                case /* repeated int64 detached_chat_ids */ 7:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.detachedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.detachedChatIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateClearChatHistory, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.target.oneofKind === "peerId")
+            Peer.internalBinaryWrite(message.target.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 space_id = 4; */
+        if (message.target.oneofKind === "spaceId")
+            writer.tag(4, WireType.Varint).int64(message.target.spaceId);
+        /* optional int64 before_date = 2; */
+        if (message.beforeDate !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.beforeDate);
+        /* bool delete_reply_threads = 3; */
+        if (message.deleteReplyThreads !== false)
+            writer.tag(3, WireType.Varint).bool(message.deleteReplyThreads);
+        /* repeated int64 deleted_chat_ids = 5; */
+        if (message.deletedChatIds.length) {
+            writer.tag(5, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.deletedChatIds.length; i++)
+                writer.int64(message.deletedChatIds[i]);
+            writer.join();
+        }
+        /* repeated int64 orphaned_chat_ids = 6; */
+        if (message.orphanedChatIds.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.orphanedChatIds.length; i++)
+                writer.int64(message.orphanedChatIds[i]);
+            writer.join();
+        }
+        /* repeated int64 detached_chat_ids = 7; */
+        if (message.detachedChatIds.length) {
+            writer.tag(7, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.detachedChatIds.length; i++)
+                writer.int64(message.detachedChatIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateClearChatHistory
+ */
+export const UpdateClearChatHistory = new UpdateClearChatHistory$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateMessageId$Type extends MessageType<UpdateMessageId> {
     constructor() {

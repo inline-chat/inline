@@ -758,6 +758,7 @@ enum Method {
   REVOKE_SESSION = 50;
   UPDATE_DIALOG_OPEN = 51;
   UPDATE_DIALOG_ORDER = 52;
+  CLEAR_CHAT_HISTORY = 53;
   DELETE_BOT = 54;
 }
 
@@ -816,6 +817,7 @@ message RpcCall {
     RevokeSessionInput revokeSession = 51;
     UpdateDialogOpenInput updateDialogOpen = 52;
     UpdateDialogOrderInput updateDialogOrder = 53;
+    ClearChatHistoryInput clearChatHistory = 54;
     DeleteBotInput deleteBot = 55;
   }
 }
@@ -876,6 +878,7 @@ message RpcResult {
     RevokeSessionResult revokeSession = 51;
     UpdateDialogOpenResult updateDialogOpen = 52;
     UpdateDialogOrderResult updateDialogOrder = 53;
+    ClearChatHistoryResult clearChatHistory = 54;
     DeleteBotResult deleteBot = 55;
   }
 }
@@ -1344,6 +1347,23 @@ message DeleteMessagesInput {
 }
 message DeleteMessagesResult { repeated Update updates = 1; }
 
+message ClearChatHistoryInput {
+  // Exactly one target must be set: peer_id for one chat/DM, or space_id for all chats in a space.
+  oneof target {
+    InputPeer peer_id = 1;
+    int64 space_id = 4;
+  }
+
+  // 0 deletes all messages. Positive values keep the last N days and delete older messages.
+  int32 keep_last_days = 2;
+
+  // If true, reply-thread subthreads anchored to deleted messages are deleted too.
+  // If false, those subthreads are left orphaned.
+  bool delete_reply_threads = 3;
+}
+
+message ClearChatHistoryResult { repeated Update updates = 1; }
+
 message EditMessageInput {
   int64 message_id = 1;
   InputPeer peer_id = 2;
@@ -1657,6 +1677,7 @@ message Update {
     UpdateChatOpen chat_open = 34;
     UpdateMessageActionInvoked message_action_invoked = 35;
     UpdateMessageActionAnswered message_action_answered = 36;
+    UpdateClearChatHistory clear_chat_history = 37;
   }
 }
 
@@ -1854,6 +1875,30 @@ message UpdateDeleteMessages {
 
   // Peer ID
   Peer peer_id = 2;
+}
+
+message UpdateClearChatHistory {
+  // Exactly one target is set: a single chat/DM peer, or every chat/thread in a space.
+  oneof target {
+    Peer peer_id = 1;
+    int64 space_id = 4;
+  }
+
+  // If unset, all local messages for the chat should be removed.
+  // If set, remove messages with date older than this Unix timestamp.
+  optional int64 before_date = 2;
+
+  // Mirrors the RPC option for UI/state observers.
+  bool delete_reply_threads = 3;
+
+  // Reply-thread chats deleted as a direct side effect of this clear.
+  repeated int64 deleted_chat_ids = 5;
+
+  // Reply-thread chats kept but detached from the deleted parent message.
+  repeated int64 orphaned_chat_ids = 6;
+
+  // Reply-thread chats kept but detached from both parent chat and parent message.
+  repeated int64 detached_chat_ids = 7;
 }
 
 // Update when a message ID is updated after sending

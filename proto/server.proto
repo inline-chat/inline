@@ -27,6 +27,7 @@ message ServerUpdate {
     ServerSpaceUpdateRemoveMember space_remove_member = 9;
     ServerSpaceUpdateMemberUpdate space_member_update = 12;
     ServerSpaceUpdateMemberAdd space_member_add = 19;
+    ServerSpaceUpdateClearHistory space_clear_history = 28;
 
     // User bucket updates
     ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10;
@@ -39,6 +40,7 @@ message ServerUpdate {
     ServerUserUpdateChatOpen user_chat_open = 24;
     ServerUserUpdateMessageActionInvoked user_message_action_invoked = 25;
     ServerUserUpdateMessageActionAnswered user_message_action_answered = 26;
+    ServerChatUpdateClearHistory clear_chat_history = 27;
   }
 }
 
@@ -62,6 +64,25 @@ message ServerChatUpdateEditMessage {
 message ServerChatUpdateDeleteMessages {
   int64 chat_id = 1;
   repeated int64 msg_ids = 2;
+}
+
+// Update for a chat when history is cleared in bulk.
+message ServerChatUpdateClearHistory {
+  int64 chat_id = 1;
+
+  // If unset, all messages were deleted. If set, messages older than this Unix timestamp were deleted.
+  optional int64 before_date = 2;
+
+  bool delete_reply_threads = 3;
+
+  // Reply-thread chats deleted as a direct side effect of this clear.
+  repeated int64 deleted_chat_ids = 4;
+
+  // Reply-thread chats kept but detached from the deleted parent message.
+  repeated int64 orphaned_chat_ids = 5;
+
+  // Reply-thread chats kept but detached from both parent chat and parent message.
+  repeated int64 detached_chat_ids = 6;
 }
 
 // Update for a chat when it is deleted
@@ -122,6 +143,25 @@ message ServerSpaceUpdateMemberUpdate { Member member = 1; }
 message ServerSpaceUpdateMemberAdd {
   Member member = 1;
   User user = 2;
+}
+
+// Update for a space when history is cleared across every chat/thread in the space.
+message ServerSpaceUpdateClearHistory {
+  int64 space_id = 1;
+
+  // If unset, all messages were deleted. If set, messages older than this Unix timestamp were deleted.
+  optional int64 before_date = 2;
+
+  bool delete_reply_threads = 3;
+
+  // Reply-thread chats deleted as a direct side effect of this clear.
+  repeated int64 deleted_chat_ids = 4;
+
+  // Reply-thread chats kept but detached from the deleted parent message.
+  repeated int64 orphaned_chat_ids = 5;
+
+  // Reply-thread chats kept but detached from both parent chat and parent message.
+  repeated int64 detached_chat_ids = 6;
 }
 
 // ------------------------------------------------------------
