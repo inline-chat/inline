@@ -45,6 +45,20 @@ final class ChatToolbarState {
         anchor
       }
     }
+
+    var isPopover: Bool {
+      switch self {
+      case .notificationSettings,
+           .translationPopover,
+           .translationPrompt,
+           .participantsPopover,
+           .mentionParticipantPrompt:
+        true
+      case .translationOptions,
+           .addParticipants:
+        false
+      }
+    }
   }
 
   private(set) var visibleButtons: Set<ToolbarButton> = []
