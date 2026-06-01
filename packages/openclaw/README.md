@@ -12,24 +12,19 @@ Supports:
 - Inline DMs (`ChatType=direct`)
 - Inline chats as conversations (`ChatType=group`)
 - Message replies: OpenClaw `replyToId` is mapped to Inline `replyToMsgId` (message id).
-- Optional Inline reply threads: enable `channels.inline.capabilities.replyThreads: true` to expose Inline reply-thread chats as OpenClaw threads.
+- Inline reply threads: tools can create and reply in real Inline reply-thread chats.
 - Inline media upload/send for images, videos, and documents from `mediaUrl` payloads.
 - Emoji reactions via message tool actions (`react`, `reactions`).
 - Reaction events on bot-authored messages are surfaced back to the agent as inbound context.
 
-By default, Inline reply threads stay off to preserve the old compatibility behavior. When disabled:
+Reply-thread behavior:
 
-- `replyToId` remains an Inline message reply only.
-- `thread-reply` keeps the legacy compatibility path.
-- `thread-create` keeps the legacy chat-creation alias behavior.
-
-When enabled:
-
-- inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`
-- bot-participated reply threads can continue without an explicit bot mention by default, matching Slack-style thread behavior
-- reply-thread context includes the anchor message plus child-thread history by default; parent-chat history is opt-in
-- outbound `thread-reply` sends into the child reply-thread chat
-- `thread-create` creates a real Inline reply thread instead of a plain chat alias
+- Small/new parent-chat conversations stay in the parent chat by default.
+- `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery once `replyThreadAutoCreateMinMessages` is reached.
+- `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
+- `thread-create` creates a real Inline reply thread. `thread-reply` sends into the child reply-thread chat id returned by `thread-create`.
+- Inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`.
+- Bot-participated reply threads can continue without an explicit bot mention by default, matching Slack-style thread behavior.
 
 ## Install
 
@@ -138,10 +133,10 @@ channels:
     groupPolicy: "allowlist" # allowlist|open|disabled
     groupAllowFrom:
       - "inline:123" # or "user:123" or just "123"
-    capabilities:
-      replyThreads: false # optional, default false; enable Inline reply-thread support
     requireMention: true # optional: default is false
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
+    replyThreadMode: "auto" # auto|thread|main; thread auto-routes long parent-chat replies into one reply thread
+    replyThreadAutoCreateMinMessages: 50 # optional, default 50; avoids creating reply threads for small/new chats
     replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention
     replyThreadParentHistoryLimit: 10 # optional, default 10; set 0 to disable parent-chat context before the anchor
 
@@ -179,21 +174,19 @@ Per-account override:
 ```yaml
 channels:
   inline:
-    capabilities:
-      replyThreads: false
     accounts:
       work:
         token: "<INLINE_BOT_TOKEN>"
         defaultTo: "user:123"
-        capabilities:
-          replyThreads: true
+        replyThreadMode: "main"
 ```
 
 Reply behavior summary:
 
 - `replyToId` is always an Inline message id.
 - Inline reply threads are separate and use OpenClaw `threadId`.
-- Keep `replyThreads` off if you only want classic message replies.
+- Use `replyThreadMode: "main"` if you only want automatic parent-chat replies to stay in the parent chat.
+- Use `replyThreadMode: "thread"` plus `replyThreadAutoCreateMinMessages` when long parent-chat conversations should move into one stable reply thread.
 - Bot-participated reply threads continue without `@bot` by default, including from persisted recent participation state. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
 - `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
 
@@ -239,12 +232,13 @@ Direct DM sends can also target `user:<id>`.
 - Pins: `pin`, `unpin`, `list-pins`
 - Space permissions: `permissions`
 
-Inline reply-thread semantics are behind `channels.inline.capabilities.replyThreads`:
+Inline reply-thread semantics:
 
-- disabled: `thread-reply` behaves like the old compatibility reply path
-- enabled: `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id
-- enabled: `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor
-- enabled: if the current reply-thread message has no direct media, OpenClaw can inherit the anchor message media so image/file-only thread starters remain visible to the agent
+- `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id.
+- `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor.
+- Automatic thread creation falls back to parent-chat delivery if the reply thread cannot be created.
+- Existing route state is reused so long conversations stay in one reply thread instead of creating one thread per message.
+- If the current reply-thread message has no direct media, OpenClaw can inherit the anchor message media so image/file-only thread starters remain visible to the agent.
 
 You can gate action groups from config:
 

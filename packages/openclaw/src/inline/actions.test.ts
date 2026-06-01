@@ -417,6 +417,16 @@ describe("inline/actions", () => {
           },
         }
       }
+      if (method === 42) {
+        return {
+          oneofKind: "createSubthread",
+          createSubthread: {
+            chat: { id: 710n, title: "Alias Thread", parentChatId: 7n, parentMessageId: 10n },
+            dialog: { chatId: 710n },
+            anchorMessage: sampleMessageWithReaction,
+          },
+        }
+      }
       throw new Error(`unexpected method ${String(method)}`)
     })
 
@@ -445,6 +455,7 @@ describe("inline/actions", () => {
         UPDATE_CHAT_INFO: 32,
         MOVE_THREAD: 35,
         GET_MESSAGES: 38,
+        CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -600,7 +611,7 @@ describe("inline/actions", () => {
       channel: "inline",
       action: "thread-create",
       cfg,
-      params: { threadName: "Alias Thread", participant: "@new-user", spaceId: "22" },
+      params: { to: "7", messageId: "10", threadName: "Alias Thread", participant: "@new-user", spaceId: "22" },
     } as any)
 
     await inlineMessageActions.handleAction?.({
@@ -791,10 +802,12 @@ describe("inline/actions", () => {
       }),
     )
     expect(invokeRaw).toHaveBeenCalledWith(
-      9,
+      42,
       expect.objectContaining({
-        oneofKind: "createChat",
-        createChat: expect.objectContaining({
+        oneofKind: "createSubthread",
+        createSubthread: expect.objectContaining({
+          parentChatId: 7n,
+          parentMessageId: 10n,
           title: "Alias Thread",
           participants: [{ userId: 99n }],
         }),
@@ -2430,7 +2443,7 @@ describe("inline/actions", () => {
     )
   })
 
-  it("requires threadId for thread-reply when replyThreads is enabled", async () => {
+  it("requires threadId for thread-reply", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -2458,9 +2471,6 @@ describe("inline/actions", () => {
             inline: {
               token: "token",
               baseUrl: "https://api.inline.chat",
-              capabilities: {
-                replyThreads: true,
-              },
             },
           },
         } as OpenClawConfig,
@@ -2470,10 +2480,10 @@ describe("inline/actions", () => {
           message: "thread reply body",
         },
       } as any),
-    ).rejects.toThrow("inline thread-reply: threadId is required when reply threads are enabled")
+    ).rejects.toThrow("inline thread-reply: threadId is required")
   })
 
-  it("sends thread-reply into the child reply-thread chat when enabled", async () => {
+  it("sends thread-reply into the child reply-thread chat", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -2497,15 +2507,12 @@ describe("inline/actions", () => {
       action: "thread-reply",
       cfg: {
         channels: {
-          inline: {
-            token: "token",
-            baseUrl: "https://api.inline.chat",
-            capabilities: {
-              replyThreads: true,
+            inline: {
+              token: "token",
+              baseUrl: "https://api.inline.chat",
             },
           },
-        },
-      } as OpenClawConfig,
+        } as OpenClawConfig,
       params: {
         to: "7",
         threadId: "77",
@@ -2523,7 +2530,7 @@ describe("inline/actions", () => {
     )
   })
 
-  it("uses createSubthread for thread-create when enabled", async () => {
+  it("uses createSubthread for thread-create", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -2563,15 +2570,12 @@ describe("inline/actions", () => {
       action: "thread-create",
       cfg: {
         channels: {
-          inline: {
-            token: "token",
-            baseUrl: "https://api.inline.chat",
-            capabilities: {
-              replyThreads: true,
+            inline: {
+              token: "token",
+              baseUrl: "https://api.inline.chat",
             },
           },
-        },
-      } as OpenClawConfig,
+        } as OpenClawConfig,
       params: {
         to: "7",
         replyToId: "10",
@@ -2632,15 +2636,12 @@ describe("inline/actions", () => {
       action: "thread-create",
       cfg: {
         channels: {
-          inline: {
-            token: "token",
-            baseUrl: "https://api.inline.chat",
-            capabilities: {
-              replyThreads: true,
+            inline: {
+              token: "token",
+              baseUrl: "https://api.inline.chat",
             },
           },
-        },
-      } as OpenClawConfig,
+        } as OpenClawConfig,
       params: {
         to: "7",
         threadName: "Follow-up thread",

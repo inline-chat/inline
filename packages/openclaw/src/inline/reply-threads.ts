@@ -1,6 +1,5 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient, Method, type Message } from "@inline-chat/realtime-sdk"
-import { resolveInlineAccount } from "./accounts.js"
 
 const GET_CHAT_METHOD =
   typeof (Method as Record<string, unknown>).GET_CHAT === "number" &&
@@ -45,40 +44,6 @@ export type InlineCreatedReplyThread = {
   anchorMessage: Message | null
 }
 
-function isPlacementMode(raw: unknown): boolean {
-  return raw === "thread" || raw === "main"
-}
-
-function hasReplyThreadConfig(config: {
-  replyThreadMode?: unknown
-  replyThreadAutoCreateMinMessages?: unknown
-  replyThreadRequireExplicitMention?: unknown
-  replyThreadParentHistoryLimit?: unknown
-  groups?: unknown
-}): boolean {
-  if (isPlacementMode(config.replyThreadMode)) return true
-  if (typeof config.replyThreadAutoCreateMinMessages === "number") return true
-  if (typeof config.replyThreadRequireExplicitMention === "boolean") return true
-  if (typeof config.replyThreadParentHistoryLimit === "number") return true
-  if (!config.groups || typeof config.groups !== "object" || Array.isArray(config.groups)) return false
-
-  return Object.values(config.groups).some((group) => {
-    if (!group || typeof group !== "object" || Array.isArray(group)) return false
-    const groupConfig = group as {
-      replyThreadMode?: unknown
-      replyThreadAutoCreateMinMessages?: unknown
-      replyThreadRequireExplicitMention?: unknown
-      replyThreadParentHistoryLimit?: unknown
-    }
-    return (
-      isPlacementMode(groupConfig.replyThreadMode) ||
-      typeof groupConfig.replyThreadAutoCreateMinMessages === "number" ||
-      typeof groupConfig.replyThreadRequireExplicitMention === "boolean" ||
-      typeof groupConfig.replyThreadParentHistoryLimit === "number"
-    )
-  })
-}
-
 function buildChatPeer(chatId: bigint): {
   type: {
     oneofKind: "chat"
@@ -97,22 +62,15 @@ export function getInlineReplyThreadsCapabilityConfig(params: {
   cfg: OpenClawConfig
   accountId?: string | null
 }): { replyThreads: boolean } {
-  const account = resolveInlineAccount({
-    cfg: params.cfg,
-    accountId: params.accountId ?? null,
-  })
-
-  return {
-    replyThreads:
-      account.config.capabilities?.replyThreads === true ||
-      hasReplyThreadConfig(account.config),
-  }
+  void params
+  return { replyThreads: true }
 }
 
 export function isInlineReplyThreadsEnabled(params: {
   cfg: OpenClawConfig
   accountId?: string | null
 }): boolean {
+  void params
   return getInlineReplyThreadsCapabilityConfig(params).replyThreads
 }
 
@@ -122,9 +80,8 @@ export function resolveInlineReplyThreadChatId(params: {
   parentChatId: bigint | null
   threadId?: string | number | null
 }): bigint | null {
-  if (!isInlineReplyThreadsEnabled({ cfg: params.cfg, accountId: params.accountId ?? null })) {
-    return params.parentChatId
-  }
+  void params.cfg
+  void params.accountId
   if (params.parentChatId == null) {
     return null
   }

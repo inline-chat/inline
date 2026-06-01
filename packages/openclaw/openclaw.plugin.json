@@ -997,16 +997,16 @@
           "help": "Allow replies to bot-authored messages to bypass group mention requirements."
         },
         "capabilities.replyThreads": {
-          "label": "Inline Reply Threads",
-          "help": "Expose Inline reply-thread chats through OpenClaw's thread API."
+          "label": "Inline Reply Threads (Legacy)",
+          "help": "Legacy compatibility flag. Inline reply-thread tools are available for bot accounts; use replyThreadMode to control automatic routing."
         },
         "replyThreadMode": {
           "label": "Inline Reply Thread Mode",
-          "help": "Controls where Inline group replies start from parent-chat messages: \"auto\" keeps current behavior, \"thread\" replies in a child reply thread, and \"main\" keeps replies in the parent chat. Messages that already arrive in an Inline reply thread stay in that reply thread."
+          "help": "Controls automatic routing for Inline group replies that start from parent-chat messages: \"auto\" keeps small/new conversations in the parent chat, \"thread\" moves long parent-chat replies into a reusable child reply thread, and \"main\" keeps automatic replies in the parent chat. Explicit thread tools remain available."
         },
         "replyThreadAutoCreateMinMessages": {
           "label": "Inline Reply Thread Parent Size",
-          "help": "Minimum inbound chat-local message ID before \"thread\" mode auto-creates a child reply thread from a parent-chat message. Defaults to 50; set to 0 to thread every parent-chat message. Existing reply-thread chats always stay in their current thread."
+          "help": "Minimum inbound chat-local message ID before \"thread\" mode auto-creates or reuses a child reply thread from a parent-chat message. Defaults to 50; set to 0 to allow immediate thread routing. Existing reply-thread chats always stay in their current thread."
         },
         "replyThreadRequireExplicitMention": {
           "label": "Inline Reply Thread Mentions",
