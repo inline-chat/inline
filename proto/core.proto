@@ -355,6 +355,8 @@ message MessageEntity {
     TYPE_CODE = 8;
     TYPE_PRE = 9;
     TYPE_PHONE_NUMBER = 10;
+    TYPE_THREAD = 11;
+    TYPE_THREAD_TITLE = 12;
   }
 
   Type type = 1;
@@ -364,11 +366,18 @@ message MessageEntity {
   message MessageEntityMention { int64 user_id = 1; }
   message MessageEntityTextUrl { string url = 1; }
   message MessageEntityPre { string language = 1; }
+  message MessageEntityThread { int64 chat_id = 1; }
+  message MessageEntityThreadTitle {
+    int64 space_id = 1;
+    string title = 2;
+  }
 
   oneof entity {
     MessageEntityMention mention = 4;
     MessageEntityTextUrl text_url = 5;
     MessageEntityPre pre = 6;
+    MessageEntityThread thread = 7;
+    MessageEntityThreadTitle thread_title = 8;
   }
 }
 

@@ -70,6 +70,16 @@ class ComposeAppKit: NSView {
   private var commandKeyMonitorEscUnsubscribe: (() -> Void)?
   private var commandMenuConstraints: [NSLayoutConstraint] = []
 
+  // Shared autocomplete
+  private let threadLinkDetector = ThreadLinkDetector()
+  private lazy var autocompleteViewModel = ComposeAutocompleteViewModel(
+    db: dependencies.database,
+    spaceId: chat?.spaceId
+  )
+  private var autocompleteMenu: ComposeAutocompleteMenu?
+  private var autocompleteMenuConstraints: [NSLayoutConstraint] = []
+  private var autocompleteKeyMonitorEscUnsubscribe: (() -> Void)?
+
   // Draft
   private let draftManager = DraftManager(debounceDelay: 3.0)
   private var initializedDraft = false
@@ -415,6 +425,16 @@ class ComposeAppKit: NSView {
           isEnabled ? "Send silently enabled" : "Send silently disabled"
         )
       }.store(in: &cancellables)
+
+    Publishers.CombineLatest3(
+      autocompleteViewModel.$items,
+      autocompleteViewModel.$selectedIndex,
+      autocompleteViewModel.$match
+    )
+    .sink { [weak self] items, selectedIndex, match in
+      self?.renderAutocompleteMenu(items: items, selectedIndex: selectedIndex, match: match)
+    }
+    .store(in: &cancellables)
   }
 
   private func updateSilentModeUI(animated: Bool = true, forceLayout: Bool = true) {
@@ -555,6 +575,61 @@ class ComposeAppKit: NSView {
     NSLayoutConstraint.activate(commandMenuConstraints)
   }
 
+  private func ensureAutocompleteMenu() {
+    guard autocompleteMenu == nil else { return }
+    autocompleteMenu = ComposeAutocompleteMenu()
+    autocompleteMenu?.delegate = self
+    autocompleteMenu?.translatesAutoresizingMaskIntoConstraints = false
+  }
+
+  private func addAutocompleteMenuToSuperview() {
+    guard let menu = autocompleteMenu,
+          menu.superview == nil,
+          let parentView = parentChatView?.view
+    else {
+      return
+    }
+
+    parentView.addSubview(menu)
+    NSLayoutConstraint.deactivate(autocompleteMenuConstraints)
+    autocompleteMenuConstraints.removeAll()
+
+    autocompleteMenuConstraints = [
+      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
+      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
+      menu.bottomAnchor.constraint(equalTo: topAnchor),
+    ]
+
+    NSLayoutConstraint.activate(autocompleteMenuConstraints)
+  }
+
+  private func renderAutocompleteMenu(
+    items: [ComposeAutocompleteItem],
+    selectedIndex: Int,
+    match: ComposeAutocompleteMatch?
+  ) {
+    guard match != nil, !items.isEmpty else {
+      autocompleteMenu?.hide()
+      autocompleteKeyMonitorEscUnsubscribe?()
+      autocompleteKeyMonitorEscUnsubscribe = nil
+      return
+    }
+
+    ensureAutocompleteMenu()
+    addAutocompleteMenuToSuperview()
+    autocompleteMenu?.update(items: items, selectedIndex: selectedIndex)
+    autocompleteMenu?.show()
+
+    autocompleteKeyMonitorEscUnsubscribe?()
+    autocompleteKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .escape,
+      key: "compose_autocomplete_\(peerId)",
+      handler: { [weak self] _ in
+        self?.hideAutocomplete()
+      }
+    )
+  }
+
   private func showMentionCompletion(for query: String) {
     log.trace("showMentionCompletion: query='\(query)'")
     ensureMentionCompletion()
@@ -563,6 +638,7 @@ class ComposeAppKit: NSView {
     // Ensure menu is added to view hierarchy
     addMentionMenuToSuperview()
     hideCommandCompletion()
+    hideAutocomplete()
 
     mentionCompletionMenu.filterParticipants(with: query)
     mentionCompletionMenu.show()
@@ -592,6 +668,7 @@ class ComposeAppKit: NSView {
     ensureSlashCommandCompletion()
     addCommandMenuToSuperview()
     hideMentionCompletion()
+    hideAutocomplete()
 
     guard let peerBotCommandsViewModel, let commandCompletionMenu else { return }
     let suggestions = peerBotCommandsViewModel.suggestions(matching: query)
@@ -628,6 +705,13 @@ class ComposeAppKit: NSView {
     commandKeyMonitorEscUnsubscribe = nil
   }
 
+  private func hideAutocomplete() {
+    autocompleteViewModel.hide()
+    autocompleteMenu?.hide()
+    autocompleteKeyMonitorEscUnsubscribe?()
+    autocompleteKeyMonitorEscUnsubscribe = nil
+  }
+
   private func detectMentionAtCursor() {
     let cursorPosition = textEditor.textView.selectedRange().location
     let attributedText = textEditor.attributedString
@@ -656,8 +740,40 @@ class ComposeAppKit: NSView {
     return false
   }
 
+  @discardableResult
+  private func detectThreadAutocompleteAtCursor() -> Bool {
+    guard chat?.spaceId != nil else {
+      hideAutocomplete()
+      return false
+    }
+
+    let cursorPosition = textEditor.textView.selectedRange().location
+    let attributedText = textEditor.attributedString
+
+    if let threadRange = threadLinkDetector.detectThreadLinkAt(cursorPosition: cursorPosition, in: attributedText) {
+      hideMentionCompletion()
+      hideCommandCompletion()
+      autocompleteViewModel.configure(spaceId: chat?.spaceId)
+      autocompleteViewModel.update(
+        match: ComposeAutocompleteMatch(
+          kind: .thread,
+          range: threadRange.range,
+          query: threadRange.query
+        )
+      )
+      return true
+    }
+
+    hideAutocomplete()
+    return false
+  }
+
   private func detectComposeCompletionsAtCursor() {
     if detectSlashCommandAtCursor() {
+      hideAutocomplete()
+      return
+    }
+    if detectThreadAutocompleteAtCursor() {
       return
     }
     detectMentionAtCursor()
@@ -1092,7 +1208,10 @@ class ComposeAppKit: NSView {
 
     // Extract mention entities from attributed text
     // TODO: replace with `fromAttributedString`
-    let (rawText, entities) = ProcessEntities.fromAttributedString(attributedString)
+    let (rawText, entities) = ProcessEntities.fromAttributedString(
+      attributedString,
+      threadLinkSpaceId: chat?.spaceId
+    )
 
     let hasText = !rawText.isEmpty
     let hasAttachments = !attachmentItemsSnapshot.isEmpty
@@ -1479,6 +1598,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
+    if autocompleteMenu?.isVisible == true {
+      autocompleteViewModel.selectPrevious()
+      return true
+    }
+
     if commandCompletionMenu?.isVisible == true {
       commandCompletionMenu?.selectPrevious()
       return true
@@ -1512,6 +1636,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
+    if let autocompleteMenu, autocompleteMenu.isVisible, autocompleteMenu.selectCurrentItem() {
+      return true
+    }
+
     if let commandCompletionMenu, commandCompletionMenu.isVisible, commandCompletionMenu.selectCurrentItem() {
       return true
     }
@@ -1706,6 +1834,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool {
+    if autocompleteMenu?.isVisible == true {
+      autocompleteViewModel.selectNext()
+      return true
+    }
+
     if commandCompletionMenu?.isVisible == true {
       commandCompletionMenu?.selectNext()
       return true
@@ -1721,6 +1854,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressTab(_ textView: NSTextView) -> Bool {
+    if let autocompleteMenu, autocompleteMenu.isVisible, autocompleteMenu.selectCurrentItem() {
+      return true
+    }
+
     if commandCompletionMenu?.isVisible == true {
       commandCompletionMenu?.selectCurrentItem()
       return true
@@ -1736,6 +1873,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool {
+    if autocompleteMenu?.isVisible == true {
+      hideAutocomplete()
+      return true
+    }
+
     if commandCompletionMenu?.isVisible == true {
       hideCommandCompletion()
       return true
@@ -1762,6 +1904,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textViewDidCancelMention(_ textView: NSTextView) {
     hideMentionCompletion()
     hideCommandCompletion()
+    hideAutocomplete()
   }
 
   func textViewDidGainFocus(_ textView: NSTextView) {
@@ -1772,6 +1915,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // Hide mention menu when text view loses focus
     hideMentionCompletion()
     hideCommandCompletion()
+    hideAutocomplete()
   }
 }
 
@@ -1865,6 +2009,34 @@ extension ComposeAppKit: CommandCompletionMenuDelegate {
 
   func commandMenuDidRequestClose(_ menu: CommandCompletionMenu) {
     hideCommandCompletion()
+  }
+}
+
+extension ComposeAppKit: ComposeAutocompleteMenuDelegate {
+  func autocompleteMenu(_ menu: ComposeAutocompleteMenu, didSelect item: ComposeAutocompleteItem) {
+    guard let match = autocompleteViewModel.match else { return }
+
+    switch item.payload {
+      case let .thread(chatId, _, title):
+        let result = threadLinkDetector.replaceThreadLink(
+          in: textEditor.attributedString,
+          range: match.range,
+          with: title,
+          chatId: chatId
+        )
+
+        ignoreNextHeightChange = true
+        textEditor.setAttributedString(result.newAttributedText)
+        textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+        ignoreNextHeightChange = false
+
+        hideAutocomplete()
+        updateHeightIfNeeded(for: textEditor.textView)
+    }
+  }
+
+  func autocompleteMenuDidRequestClose(_ menu: ComposeAutocompleteMenu) {
+    hideAutocomplete()
   }
 }
 

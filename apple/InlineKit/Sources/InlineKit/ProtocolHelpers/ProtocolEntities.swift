@@ -74,6 +74,8 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
     case mention
     case textURL
     case pre
+    case thread
+    case threadTitle
   }
 
   public init(from decoder: Decoder) throws {
@@ -85,11 +87,15 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
       self = .textURL(textURL)
     } else if let pre = try container.decodeIfPresent(MessageEntity.MessageEntityPre.self, forKey: .pre) {
       self = .pre(pre)
+    } else if let thread = try container.decodeIfPresent(MessageEntity.MessageEntityThread.self, forKey: .thread) {
+      self = .thread(thread)
+    } else if let threadTitle = try container.decodeIfPresent(MessageEntity.MessageEntityThreadTitle.self, forKey: .threadTitle) {
+      self = .threadTitle(threadTitle)
     } else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
           codingPath: container.codingPath,
-          debugDescription: "Invalid entity type - must contain either mention or textURL"
+          debugDescription: "Invalid entity type - missing supported entity payload"
         )
       )
     }
@@ -105,6 +111,10 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
         try container.encode(textURL, forKey: .textURL)
       case let .pre(pre):
         try container.encode(pre, forKey: .pre)
+      case let .thread(thread):
+        try container.encode(thread, forKey: .thread)
+      case let .threadTitle(threadTitle):
+        try container.encode(threadTitle, forKey: .threadTitle)
     }
   }
 }
@@ -163,6 +173,48 @@ extension InlineProtocol.MessageEntity.MessageEntityPre: Codable {
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(language, forKey: .language)
+  }
+}
+
+extension InlineProtocol.MessageEntity.MessageEntityThread: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case chatID
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let chatID = try container.decode(Int64.self, forKey: .chatID)
+
+    self.init()
+    self.chatID = chatID
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(chatID, forKey: .chatID)
+  }
+}
+
+extension InlineProtocol.MessageEntity.MessageEntityThreadTitle: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case spaceID
+    case title
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let spaceID = try container.decode(Int64.self, forKey: .spaceID)
+    let title = try container.decode(String.self, forKey: .title)
+
+    self.init()
+    self.spaceID = spaceID
+    self.title = title
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(spaceID, forKey: .spaceID)
+    try container.encode(title, forKey: .title)
   }
 }
 

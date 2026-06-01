@@ -1169,6 +1169,16 @@ class MinimalMessageViewAppKit: NSView {
         return true
       }
 
+      if let threadTarget = attributedString.attribute(.threadLink, at: characterIndex, effectiveRange: nil)
+        as? ThreadLinkTarget
+      {
+        openThreadLink(threadTarget)
+        MessageGestureTrace.debug(
+          "MinimalMessageView.handleTextEntityClick messageId=\(message.messageId) action=openThreadLink range=\(MessageGestureTrace.range(range))"
+        )
+        return true
+      }
+
       if let email = attributedString.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(email, forType: .string)
@@ -1217,6 +1227,30 @@ class MinimalMessageViewAppKit: NSView {
       "MinimalMessageView.textEntityHit messageId=\(message.messageId) point=\(MessageGestureTrace.point(location)) hit=\(String(describing: hit))"
     )
     return hit
+  }
+
+  private func openThreadLink(_ target: ThreadLinkTarget) {
+    if let peer = target.directPeer {
+      openChat(peer: peer)
+      performProgressiveHaptic()
+      return
+    }
+
+    let database = dependencies?.database ?? AppDatabase.shared
+    Task { @MainActor in
+      do {
+        guard let peer = try await ThreadLinkResolver.resolve(target, database: database) else {
+          ToastCenter.shared.showError("Thread not found")
+          return
+        }
+
+        openChat(peer: peer)
+        performProgressiveHaptic()
+      } catch {
+        ToastCenter.shared.showError("Failed to open thread")
+        log.error("Failed to resolve thread link", error: error)
+      }
+    }
   }
 
   private func performProgressiveHaptic() {

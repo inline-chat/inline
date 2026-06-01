@@ -40,6 +40,7 @@ public class ChatContainerView: UIView {
     }
     view.peerId = peerId
     view.chatId = chatId
+    view.spaceId = spaceId
     return view
   }()
 
