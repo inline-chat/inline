@@ -26,7 +26,14 @@ class MessageTextView: NSTextView {
     return super.hitTest(point)
   }
 
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    disableSystemTextChecking()
+  }
+
   override func mouseDown(with event: NSEvent) {
+    disableSystemTextChecking()
+
     // Ensure window is key before handling mouse events
     guard let window else {
       super.mouseDown(with: event)
@@ -40,6 +47,32 @@ class MessageTextView: NSTextView {
     }
 
     super.mouseDown(with: event)
+  }
+
+  private func disableSystemTextChecking() {
+    // Message text is rendered read-only content. AppKit can still run text checking,
+    // inline prediction, or Writing Tools while tracking selection, which has shown
+    // up in hangs inside NSTextCheckingController. Inline handles links/entities itself.
+    isContinuousSpellCheckingEnabled = false
+    isGrammarCheckingEnabled = false
+    isAutomaticSpellingCorrectionEnabled = false
+    isAutomaticQuoteSubstitutionEnabled = false
+    isAutomaticDashSubstitutionEnabled = false
+    isAutomaticTextReplacementEnabled = false
+    isAutomaticLinkDetectionEnabled = false
+    isAutomaticDataDetectionEnabled = false
+    isAutomaticTextCompletionEnabled = false
+    smartInsertDeleteEnabled = false
+    enabledTextCheckingTypes = 0
+
+    if #available(macOS 14.0, *) {
+      inlinePredictionType = .no
+    }
+
+    if #available(macOS 15.0, *) {
+      writingToolsBehavior = .none
+      mathExpressionCompletionType = .no
+    }
   }
 
   override func draw(_ dirtyRect: NSRect) {
