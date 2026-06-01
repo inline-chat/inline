@@ -7,11 +7,8 @@
  */
 
 import { DialogsModel } from "@in/server/db/models/dialogs"
-import { TUpdateUserStatus, type TPeerInfo, type TUpdateComposeAction, type TUpdateInfo } from "@in/server/api-types"
-import { ApiError, InlineError } from "@in/server/types/errors"
+import { type TPeerInfo, type TUpdateComposeAction } from "@in/server/api-types"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { connectionManager } from "@in/server/ws/connections"
-import { Value } from "@sinclair/typebox/value"
 import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"

@@ -38,7 +38,7 @@ public extension UrlPreview {
     let host = URLComponents(string: value)?.host
       ?? URLComponents(string: "https://\(value)")?.host
 
-    return host?.lowercased()
+    return host?.nilIfEmpty?.lowercased()
       .replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression)
   }
 
