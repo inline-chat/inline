@@ -1,8 +1,14 @@
 import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
-import { normalizeInlineTarget } from "./normalize.js"
 import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
+import {
+  parseCurrentInlineTarget,
+  parseInlineId,
+  parseInlineTarget,
+  readStringCandidate,
+  type InlinePeerTarget,
+} from "./tool-targets.js"
 import { jsonResult } from "../openclaw-compat.js"
 
 type InlineMessageToolContext = {
@@ -37,13 +43,6 @@ type InlineForwardToolArgs = {
   messageIds?: string[] | string
   shareForwardHeader?: boolean
   accountId?: string
-}
-
-type InlinePeerTarget = {
-  peerId:
-    | { type: { oneofKind: "chat"; chat: { chatId: bigint } } }
-    | { type: { oneofKind: "user"; user: { userId: bigint } } }
-  normalized: string
 }
 
 const InlineNudgeToolParameters = {
@@ -149,93 +148,6 @@ const InlineForwardToolParameters = {
   },
   required: ["to"],
 } as const
-
-function parseInlineId(raw: unknown, label: string): bigint {
-  if (typeof raw === "bigint") {
-    if (raw < 0n) throw new Error(`inline tool: invalid ${label} "${raw.toString()}"`)
-    return raw
-  }
-  if (typeof raw === "number") {
-    if (!Number.isFinite(raw) || !Number.isInteger(raw) || raw < 0) {
-      throw new Error(`inline tool: invalid ${label} "${String(raw)}"`)
-    }
-    return BigInt(raw)
-  }
-  if (typeof raw === "string") {
-    const trimmed = raw.trim()
-    if (!trimmed) throw new Error(`inline tool: missing ${label}`)
-    if (!/^[0-9]+$/.test(trimmed)) throw new Error(`inline tool: invalid ${label} "${raw}"`)
-    return BigInt(trimmed)
-  }
-  throw new Error(`inline tool: missing ${label}`)
-}
-
-function parseInlineTarget(raw: string, label: string): InlinePeerTarget {
-  const normalized = normalizeInlineTarget(raw) ?? raw.trim()
-  const userMatch = normalized.match(/^user:([0-9]+)$/i)
-  if (userMatch?.[1]) {
-    return {
-      normalized: `user:${userMatch[1]}`,
-      peerId: {
-        type: {
-          oneofKind: "user",
-          user: { userId: BigInt(userMatch[1]) },
-        },
-      },
-    }
-  }
-  if (!/^[0-9]+$/.test(normalized)) {
-    throw new Error(`inline tool: invalid ${label} "${raw}"`)
-  }
-  return {
-    normalized,
-    peerId: {
-      type: {
-        oneofKind: "chat",
-        chat: { chatId: BigInt(normalized) },
-      },
-    },
-  }
-}
-
-function parseCurrentInlineTarget(ctx: Pick<InlineMessageToolContext, "messageChannel" | "sessionKey">):
-  | InlinePeerTarget
-  | null {
-  if ((ctx.messageChannel ?? "").trim().toLowerCase() !== "inline") {
-    return null
-  }
-  const sessionKey = ctx.sessionKey?.trim()
-  if (!sessionKey) return null
-
-  const explicitMatch = sessionKey.match(/^agent:[^:]+:inline:(chat|group|user|direct):([0-9]+)(?::thread:([0-9]+))?$/i)
-  if (explicitMatch?.[1] && explicitMatch[2]) {
-    const kind = explicitMatch[1].toLowerCase()
-    const threadId = explicitMatch[3]
-    if ((kind === "chat" || kind === "group") && threadId) {
-      return parseInlineTarget(threadId, "current chat")
-    }
-    return parseInlineTarget(
-      kind === "user" || kind === "direct" ? `user:${explicitMatch[2]}` : explicitMatch[2],
-      "current chat",
-    )
-  }
-
-  const legacyMatch = sessionKey.match(/^agent:[^:]+:inline:([0-9]+)(?::thread:([0-9]+))?$/i)
-  if (legacyMatch?.[1]) {
-    return parseInlineTarget(legacyMatch[2] ?? legacyMatch[1], "current chat")
-  }
-
-  return null
-}
-
-function readStringCandidate(...values: unknown[]): string | undefined {
-  for (const value of values) {
-    if (typeof value !== "string") continue
-    const trimmed = value.trim()
-    if (trimmed) return trimmed
-  }
-  return undefined
-}
 
 function resolvePeerTarget(params: {
   label: string

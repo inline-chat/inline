@@ -3,6 +3,20 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { buildJsonChannelConfigSchema } from "openclaw/plugin-sdk/core"
 
+function collectRefs(value: unknown, path: string[] = []): string[] {
+  if (!value || typeof value !== "object") {
+    return []
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => collectRefs(entry, [...path, String(index)]))
+  }
+  const record = value as Record<string, unknown>
+  const own = typeof record.$ref === "string" ? [path.join(".") || "<root>"] : []
+  return own.concat(
+    Object.entries(record).flatMap(([key, entry]) => collectRefs(entry, [...path, key])),
+  )
+}
+
 describe("plugin manifest", () => {
   it("openclaw.plugin.json declares the inline plugin + channel", async () => {
     const manifestPath = path.resolve(__dirname, "..", "openclaw.plugin.json")
@@ -17,9 +31,8 @@ describe("plugin manifest", () => {
         inline?: {
           description?: unknown
           schema?: {
-            $defs?: Record<string, unknown>
             additionalProperties?: unknown
-            properties?: Record<string, { $ref?: unknown; additionalProperties?: unknown; properties?: Record<string, unknown> }>
+            properties?: Record<string, { additionalProperties?: unknown; properties?: Record<string, unknown> }>
           }
           uiHints?: {
             ""?: { help?: unknown }
@@ -35,17 +48,20 @@ describe("plugin manifest", () => {
     expect(json.description).toBe("Use OpenClaw from Inline DMs and chats with an Inline bot token.")
     expect(json.channels).toEqual(["inline"])
     expect(json.contracts?.tools).toContain("inline_members")
+    expect(json.contracts?.tools).toContain("inline_parent_context")
     expect(json.channelEnvVars?.inline).toEqual(["INLINE_TOKEN", "INLINE_BOT_TOKEN"])
     const schema = json.channelConfigs?.inline?.schema
     const streaming = schema?.properties?.streaming as
       | {
           anyOf?: Array<{
+            type?: unknown
             additionalProperties?: unknown
             properties?: Record<string, { additionalProperties?: unknown; properties?: Record<string, unknown> }>
           }>
         }
       | undefined
     const streamingObject = streaming?.anyOf?.find((entry) => entry.properties?.mode)
+    const streamingString = streaming?.anyOf?.find((entry) => entry.type === "string")
     const preview = streamingObject?.properties?.preview as
       | { additionalProperties?: unknown; properties?: Record<string, { additionalProperties?: unknown }> }
       | undefined
@@ -67,44 +83,44 @@ describe("plugin manifest", () => {
 
     expect(schema?.properties).toHaveProperty("accounts")
     expect(schema?.properties).toHaveProperty("streaming")
-    expect(schema?.$defs).toHaveProperty("secretInput")
-    expect(schema?.properties?.token?.$ref).toBe("#/$defs/secretInput")
+    expect(collectRefs(schema)).toEqual([])
     expect(schema?.additionalProperties).not.toBe(false)
     expect(accounts?.additionalProperties?.type).toBe("object")
     expect(accounts?.additionalProperties?.additionalProperties).toBe(true)
-    expect(accounts?.additionalProperties?.properties?.token?.$ref).toBe("#/properties/token")
-    expect(accounts?.additionalProperties?.properties?.capabilities?.$ref).toBe(
-      "#/properties/capabilities",
+    expect(accounts?.additionalProperties?.properties?.token).toEqual(schema?.properties?.token)
+    expect(accounts?.additionalProperties?.properties?.capabilities).toEqual(
+      schema?.properties?.capabilities,
     )
-    expect(accounts?.additionalProperties?.properties?.replyThreadMode?.$ref).toBe(
-      "#/properties/replyThreadMode",
+    expect(accounts?.additionalProperties?.properties?.replyThreadMode).toEqual(
+      schema?.properties?.replyThreadMode,
     )
-    expect(accounts?.additionalProperties?.properties?.replyThreadAutoCreateMinMessages?.$ref).toBe(
-      "#/properties/replyThreadAutoCreateMinMessages",
+    expect(accounts?.additionalProperties?.properties?.replyThreadAutoCreateMinMessages).toEqual(
+      schema?.properties?.replyThreadAutoCreateMinMessages,
     )
-    expect(accounts?.additionalProperties?.properties?.replyThreadRequireExplicitMention?.$ref).toBe(
-      "#/properties/replyThreadRequireExplicitMention",
+    expect(accounts?.additionalProperties?.properties?.replyThreadRequireExplicitMention).toEqual(
+      schema?.properties?.replyThreadRequireExplicitMention,
     )
-    expect(accounts?.additionalProperties?.properties?.replyThreadParentHistoryLimit?.$ref).toBe(
-      "#/properties/replyThreadParentHistoryLimit",
+    expect(accounts?.additionalProperties?.properties?.replyThreadParentHistoryLimit).toEqual(
+      schema?.properties?.replyThreadParentHistoryLimit,
     )
-    expect(accounts?.additionalProperties?.properties?.dmPolicy?.$ref).toBe(
-      "#/properties/dmPolicy",
+    expect(accounts?.additionalProperties?.properties?.dmPolicy).toEqual(
+      schema?.properties?.dmPolicy,
     )
-    expect(accounts?.additionalProperties?.properties?.defaultTo?.$ref).toBe(
-      "#/properties/defaultTo",
+    expect(accounts?.additionalProperties?.properties?.defaultTo).toEqual(
+      schema?.properties?.defaultTo,
     )
-    expect(accounts?.additionalProperties?.properties?.streaming?.$ref).toBe(
-      "#/properties/streaming",
+    expect(accounts?.additionalProperties?.properties?.streaming).toEqual(
+      schema?.properties?.streaming,
     )
-    expect(accounts?.additionalProperties?.properties?.reactionNotifications?.$ref).toBe(
-      "#/properties/reactionNotifications",
+    expect(streamingString).toEqual({ type: "string" })
+    expect(accounts?.additionalProperties?.properties?.reactionNotifications).toEqual(
+      schema?.properties?.reactionNotifications,
     )
-    expect(accounts?.additionalProperties?.properties?.reactionAllowlist?.$ref).toBe(
-      "#/properties/reactionAllowlist",
+    expect(accounts?.additionalProperties?.properties?.reactionAllowlist).toEqual(
+      schema?.properties?.reactionAllowlist,
     )
-    expect(accounts?.additionalProperties?.properties?.commands?.$ref).toBe(
-      "#/properties/commands",
+    expect(accounts?.additionalProperties?.properties?.commands).toEqual(
+      schema?.properties?.commands,
     )
     expect(streamingObject?.additionalProperties).not.toBe(false)
     expect(preview?.additionalProperties).not.toBe(false)
@@ -144,6 +160,9 @@ describe("plugin manifest", () => {
       type: "integer",
       minimum: 0,
     })
+    expect(json.channelConfigs?.inline?.uiHints?.replyThreadParentHistoryLimit?.help).toContain(
+      "Defaults to 10",
+    )
     expect(schema?.properties?.groupAllowFrom).toEqual({
       type: "array",
       items: { anyOf: [{ type: "string" }, { type: "number" }] },
@@ -256,7 +275,7 @@ describe("plugin manifest", () => {
     expect(json.peerDependencies?.openclaw).toBe(">=2026.5.18")
     expect(json.peerDependenciesMeta?.openclaw?.optional).toBe(true)
     expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.5.18")
-    expect(json.openclaw?.build?.openclawVersion).toBe("2026.5.18")
+    expect(json.openclaw?.build?.openclawVersion).toBe("2026.5.28")
     expect(json.openclaw?.release?.publishToClawHub).toBe(true)
     expect(json.openclaw?.release?.publishToNpm).toBe(true)
     expect(json.moltbot).toBeUndefined()

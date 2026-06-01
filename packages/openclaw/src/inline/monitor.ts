@@ -54,6 +54,7 @@ import {
   clearHistoryEntriesIfEnabled,
   createChannelReplyPipelineCompat,
   recordPendingHistoryEntryIfEnabled,
+  type InlineTypingCallbacks,
 } from "../sdk-runtime-compat.js"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract"
@@ -96,6 +97,10 @@ import {
   loadInlineReplyThreadMetadata,
 } from "./reply-threads.js"
 import {
+  hasInlineThreadParticipationWithPersistence,
+  recordInlineThreadParticipation,
+} from "./thread-participation.js"
+import {
   logInboundDrop,
   resolveChannelMediaMaxBytes,
   resolveControlCommandGate,
@@ -114,7 +119,7 @@ const INLINE_REQUEST_ERROR_FALLBACK =
 const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
 const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
-const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 0
+const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
@@ -212,6 +217,23 @@ type InlineReplyPayload = {
   replyToId?: string
   channelData?: Record<string, unknown>
   isReasoning?: boolean
+}
+
+function buildInlineTypingDispatcherOptions(typingCallbacks?: InlineTypingCallbacks) {
+  if (!typingCallbacks) {
+    return {}
+  }
+  return {
+    typingCallbacks,
+    onReplyStart: typingCallbacks.onReplyStart,
+    ...(typingCallbacks.onIdle ? { onIdle: typingCallbacks.onIdle } : {}),
+    ...(typingCallbacks.onCleanup ? { onCleanup: typingCallbacks.onCleanup } : {}),
+  }
+}
+
+function buildInlineReplyThreadSessionKey(parentSessionKey: string, threadChatId: bigint): string {
+  const suffix = `:thread:${String(threadChatId)}`
+  return parentSessionKey.endsWith(suffix) ? parentSessionKey : `${parentSessionKey}${suffix}`
 }
 
 type InlineDebounceEntry = {
@@ -1240,6 +1262,24 @@ function rememberBotMessageId(cache: Map<string, string[]>, chatId: bigint, mess
     list.splice(0, list.length - BOT_MESSAGE_CACHE_LIMIT)
   }
   cache.set(key, list)
+}
+
+function rememberInlineBotDelivery(params: {
+  botMessageIdsByChat: Map<string, string[]>
+  chatId: bigint
+  messageId: bigint
+  accountId: string
+  agentId: string
+  replyThreadContext?: InlineReplyThreadContext | null
+}): void {
+  rememberBotMessageId(params.botMessageIdsByChat, params.chatId, params.messageId)
+  if (!params.replyThreadContext || params.chatId !== params.replyThreadContext.childChatId) return
+  recordInlineThreadParticipation(
+    params.accountId,
+    params.replyThreadContext.parentChatId,
+    params.replyThreadContext.childChatId,
+    { agentId: params.agentId },
+  )
 }
 
 function hasBotMessageId(cache: Map<string, string[]>, chatId: bigint, messageId: bigint): boolean {
@@ -2277,7 +2317,9 @@ export async function monitorInlineProvider(params: {
           chatInfo: effectiveChatInfo,
           effectiveChatId,
         }),
-        sessionKey: route.sessionKey,
+        sessionKey: replyThreadContext
+          ? buildInlineReplyThreadSessionKey(route.sessionKey, replyThreadContext.childChatId)
+          : route.sessionKey,
       }
     }
 
@@ -2401,6 +2443,14 @@ export async function monitorInlineProvider(params: {
       senderUsername: senderProfile?.username,
     })
 
+    const eventOptions = {
+      sessionKey: ingress.sessionKey,
+      contextKey: buildInlineReactionContextKey(params),
+      // Older OpenClaw hosts use these compatibility fields to keep
+      // untrusted reaction events from inheriting owner authority.
+      forceSenderIsOwnerFalse: true,
+      trusted: false,
+    }
     core.system.enqueueSystemEvent(
       describeInlineReactionSystemEvent({
         action: params.action,
@@ -2409,12 +2459,7 @@ export async function monitorInlineProvider(params: {
         channelLabel: ingress.channelLabel,
         messageId: params.messageId,
       }),
-      {
-        sessionKey: ingress.sessionKey,
-        contextKey: buildInlineReactionContextKey(params),
-        forceSenderIsOwnerFalse: true,
-        trusted: false,
-      },
+      eventOptions,
     )
   }
 
@@ -2614,6 +2659,25 @@ export async function monitorInlineProvider(params: {
         id: isGroup ? String(effectiveChatId) : senderId,
       },
     })
+    const inboundSessionKey =
+      replyThreadContext && isGroup
+        ? buildInlineReplyThreadSessionKey(route.sessionKey, replyThreadContext.childChatId)
+        : route.sessionKey
+    const rememberSentBotMessage = (params: {
+      chatId: bigint
+      messageId: bigint | null | undefined
+      replyThreadContext?: InlineReplyThreadContext | null
+    }): void => {
+      if (params.messageId == null) return
+      rememberInlineBotDelivery({
+        botMessageIdsByChat,
+        chatId: params.chatId,
+        messageId: params.messageId,
+        accountId: account.accountId,
+        agentId: route.agentId,
+        replyThreadContext: params.replyThreadContext ?? null,
+      })
+    }
     const nativeCallbackCommandBody = callbackActionEvent
       ? parseInlineNativeCommandCallbackData(callbackDataToUtf8(callbackActionEvent.data))
       : null
@@ -2759,7 +2823,7 @@ export async function monitorInlineProvider(params: {
     const pendingReplyThreadContext = replyThreadContext
     const pendingGroupHistoryKey = isGroup
       ? pendingReplyThreadContext
-        ? `${route.sessionKey}:thread:${String(pendingReplyThreadContext.childChatId)}`
+        ? inboundSessionKey
         : route.sessionKey
       : null
     const senderLabel = resolveInlineSenderLabel({
@@ -2805,11 +2869,17 @@ export async function monitorInlineProvider(params: {
             meId,
           })
         : historyContext
-    const replyThreadImplicitMention =
+    const hasReplyThreadParticipation =
       isGroup &&
       replyThreadContext != null &&
       !replyThreadRequireExplicitMention &&
-      effectiveHistoryContext.hasBotMessage
+      (effectiveHistoryContext.hasBotMessage ||
+        await hasInlineThreadParticipationWithPersistence({
+          accountId: account.accountId,
+          parentChatId: replyThreadContext.parentChatId,
+          threadId: replyThreadContext.childChatId,
+        }))
+    const replyThreadImplicitMention = hasReplyThreadParticipation
     const replyToBotImplicitMention =
       isGroup &&
       (account.config.replyToBotWithoutMention ?? false) &&
@@ -2934,9 +3004,7 @@ export async function monitorInlineProvider(params: {
           actions,
           parseMarkdown,
         })
-        if (sent.messageId != null) {
-          rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
-        }
+        rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
       }
       statusSink?.({ lastOutboundAt: Date.now() })
       return
@@ -2946,7 +3014,7 @@ export async function monitorInlineProvider(params: {
       commandBody: normalizedCommandBody,
       cfg,
       agentId: route.agentId,
-      sessionKey: route.sessionKey,
+      sessionKey: inboundSessionKey,
     })
     if (nativeCommandMenu) {
       const menuActions = resolveInlineReplyActions({
@@ -2986,9 +3054,7 @@ export async function monitorInlineProvider(params: {
           text: menuText,
           ...(menuActions ? { actions: menuActions } : {}),
         })
-        if (sent.messageId != null) {
-          rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
-        }
+        rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
       }
       statusSink?.({ lastOutboundAt: Date.now() })
       await answerCallbackIfNeeded().catch((error) => {
@@ -3038,9 +3104,7 @@ export async function monitorInlineProvider(params: {
             actions,
             parseMarkdown,
           })
-          if (sent.messageId != null) {
-            rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
-          }
+          rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
         }
       }
 
@@ -3079,11 +3143,11 @@ export async function monitorInlineProvider(params: {
               selection.provider === resolvedDefault.provider && selection.model === resolvedDefault.model
 
             await updateSessionStore(storePath, (store) => {
-              const entry = store[route.sessionKey] ?? {
-                sessionId: route.sessionKey,
+              const entry = store[inboundSessionKey] ?? {
+                sessionId: inboundSessionKey,
                 updatedAt: Date.now(),
               }
-              store[route.sessionKey] = entry
+              store[inboundSessionKey] = entry
               applyModelOverrideToSessionEntry({
                 entry,
                 selection: {
@@ -3195,9 +3259,13 @@ export async function monitorInlineProvider(params: {
     }
 
     const deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
+    const deliverySessionKey =
+      deliveryReplyThreadContext && isGroup
+        ? buildInlineReplyThreadSessionKey(route.sessionKey, deliveryReplyThreadContext.childChatId)
+        : route.sessionKey
     const groupHistoryKey = isGroup
       ? deliveryReplyThreadContext
-        ? `${route.sessionKey}:thread:${String(deliveryReplyThreadContext.childChatId)}`
+        ? deliverySessionKey
         : route.sessionKey
       : null
 
@@ -3282,7 +3350,7 @@ export async function monitorInlineProvider(params: {
       CommandBody: normalizedCommandBody,
       From: isGroup ? `inline:chat:${String(effectiveChatId)}` : `inline:${senderId}`,
       To: `inline:${String(effectiveChatId)}`,
-      SessionKey: route.sessionKey,
+      SessionKey: deliverySessionKey,
       ...(deliveryReplyThreadContext ? { ParentSessionKey: route.sessionKey } : {}),
       AccountId: route.accountId,
       ChatType: isGroup ? "group" : "direct",
@@ -3345,7 +3413,7 @@ export async function monitorInlineProvider(params: {
 
     await core.channel.session.recordInboundSession({
       storePath,
-      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      sessionKey: ctxPayload.SessionKey ?? deliverySessionKey,
       ctx: ctxPayload,
       ...(!isGroup
         ? {
@@ -3476,7 +3544,11 @@ export async function monitorInlineProvider(params: {
               throw new Error("inline edit stream: sendMessage returned no messageId")
             }
             editStreamState.messageId = sent.messageId
-            rememberBotMessageId(botMessageIdsByChat, deliveryChatId, sent.messageId)
+            rememberSentBotMessage({
+              chatId: deliveryChatId,
+              messageId: sent.messageId,
+              replyThreadContext: deliveryReplyThreadContext,
+            })
           } else {
             const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
               oneofKind: "editMessage",
@@ -3554,7 +3626,7 @@ export async function monitorInlineProvider(params: {
           cfg,
           dispatcherOptions: {
             ...dispatcherPipelineOptions,
-            ...(typingCallbacks ? { typingCallbacks } : {}),
+            ...buildInlineTypingDispatcherOptions(typingCallbacks),
             deliver: async (
               payload: InlineReplyPayload,
               info?: InlineDispatchReplyInfo,
@@ -3594,10 +3666,12 @@ export async function monitorInlineProvider(params: {
                 replyToMsgId = msg.id
               }
 
-              const rememberSent = (messageId: bigint | null) => {
-                if (messageId != null) {
-                  rememberBotMessageId(botMessageIdsByChat, deliveryChatId, messageId)
-                }
+              const rememberSent = (messageId: bigint | null | undefined) => {
+                rememberSentBotMessage({
+                  chatId: deliveryChatId,
+                  messageId,
+                  replyThreadContext: deliveryReplyThreadContext,
+                })
               }
 
               const sendTextFallback = async (
@@ -3764,9 +3838,11 @@ export async function monitorInlineProvider(params: {
           ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
           parseMarkdown,
         })
-        if (sent.messageId != null) {
-          rememberBotMessageId(botMessageIdsByChat, deliveryChatId, sent.messageId)
-        }
+        rememberSentBotMessage({
+          chatId: deliveryChatId,
+          messageId: sent.messageId,
+          replyThreadContext: deliveryReplyThreadContext,
+        })
         statusSink?.({ lastOutboundAt: Date.now() })
       }
     } finally {

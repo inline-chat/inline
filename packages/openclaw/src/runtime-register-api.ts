@@ -1,6 +1,7 @@
 import type { AnyAgentTool, OpenClawPluginApi } from "openclaw/plugin-sdk/channel-entry-contract"
 import { createInlineMessageTools } from "./inline/message-tools.js"
 import { createInlineMembersTool } from "./inline/members-tool.js"
+import { createInlineParentContextTool } from "./inline/parent-context-tool.js"
 import { sanitizeInlineOutgoingText } from "./inline/message-formatting.js"
 import { sanitizeInlineVisibleText } from "./inline/outbound-sanitize.js"
 import { createInlineProfileTool } from "./inline/profile-tool.js"
@@ -19,6 +20,9 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   })
   api.registerTool((ctx) => createInlineMessageTools(ctx) as AnyAgentTool[], {
     names: ["inline_nudge", "inline_forward"],
+  })
+  api.registerTool((ctx) => createInlineParentContextTool(ctx) as AnyAgentTool, {
+    names: ["inline_parent_context"],
   })
   api.on("message_sending", (event, ctx) => {
     if (ctx.channelId !== "inline") return
