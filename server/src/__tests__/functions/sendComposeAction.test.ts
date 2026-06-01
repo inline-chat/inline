@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, mock } from "bun:test"
 import { UpdateComposeAction_ComposeAction } from "@inline-chat/protocol/core"
 import { sendComposeAction } from "@in/server/functions/messages.sendComposeAction"
+import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
 import { setupTestDatabase, testUtils } from "../setup"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 
@@ -140,6 +141,52 @@ describe("sendComposeAction", () => {
 
     expect(mockPushToUser).toHaveBeenCalledWith(user2.id, [expectedUpdate])
     expect(mockPushToUser).toHaveBeenCalledWith(user3.id, [expectedUpdate])
+  })
+
+  test("should send legacy transient typing action to thread participants", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Legacy Compose Space", [
+      nextEmail("legacy-user1"),
+      nextEmail("legacy-user2"),
+      nextEmail("legacy-user3"),
+    ])
+    const [user1, user2, user3] = users
+
+    if (!user1 || !user2 || !user3) throw new Error("Failed to create users")
+
+    const chat = await testUtils.createChat(space.id, "Legacy Thread", "thread")
+
+    if (!chat) throw new Error("Failed to create chat")
+
+    await sendTransientUpdateFor({
+      reason: {
+        composeAction: {
+          update: {
+            userId: user1.id,
+            peerId: { threadId: chat.id },
+            action: "typing",
+          },
+          target: { threadId: chat.id },
+          otherPeerId: { threadId: chat.id },
+        },
+      },
+    })
+
+    const expectedUpdate = {
+      update: {
+        oneofKind: "updateComposeAction",
+        updateComposeAction: {
+          userId: BigInt(user1.id),
+          peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+          action: UpdateComposeAction_ComposeAction.TYPING,
+        },
+      },
+    }
+
+    expect(mockPushToUser).toHaveBeenCalledTimes(2)
+    expect(mockPushToUser).toHaveBeenCalledWith(user2.id, [expectedUpdate])
+    expect(mockPushToUser).toHaveBeenCalledWith(user3.id, [expectedUpdate])
+    const calls = mockPushToUser.mock.calls
+    expect(calls.every((call: any) => call[0] !== user1.id)).toBe(true)
   })
 
   test("should send recording voice action to DM participant", async () => {
