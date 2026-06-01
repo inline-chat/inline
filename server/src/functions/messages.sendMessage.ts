@@ -351,7 +351,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   // send notification
-  sendNotifications({
+  scheduleNotifications({
     updateGroup,
     messageInfo,
     currentUserId,
@@ -914,6 +914,33 @@ type SendPushForMsgInput = {
   sendMode?: MessageSendMode
 }
 
+const pendingNotificationTasks = new Set<Promise<void>>()
+
+export async function flushPendingNotificationTasksForTest(): Promise<void> {
+  if (process.env.NODE_ENV !== "test") {
+    return
+  }
+
+  await Promise.all(Array.from(pendingNotificationTasks))
+}
+
+function scheduleNotifications(input: SendPushForMsgInput) {
+  let task: Promise<void>
+  task = sendNotifications(input)
+    .catch((error) => {
+      log.error("Failed to send message notifications", {
+        error,
+        chatId: input.chat.id,
+        messageId: input.messageInfo.message.messageId,
+      })
+    })
+    .finally(() => {
+      pendingNotificationTasks.delete(task)
+    })
+
+  pendingNotificationTasks.add(task)
+}
+
 /** Send push notifications for this message */
 async function sendNotifications(input: SendPushForMsgInput) {
   if (input.sendMode === MessageSendMode.MODE_SILENT) {
@@ -1026,30 +1053,32 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads
-  for (let userId of updateGroup.userIds) {
-    if (userId === currentUserId) {
-      // Don't send push notifications to yourself.
-      continue
-    }
+  await Promise.all(
+    updateGroup.userIds.map(async (userId) => {
+      if (userId === currentUserId) {
+        // Don't send push notifications to yourself.
+        return
+      }
 
-    sendNotificationToUser({
-      userId,
-      messageInfo,
-      messageText,
-      messageEntities,
-      replyMentionUserIds,
-      chat,
-      evalResult,
-      isNudge,
-      isUrgentNudge,
-      updateGroup,
-      inputPeer,
-      currentUserId,
-      senderNameInfo,
-      senderProfilePhotoUrl,
-      dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
-    })
-  }
+      await sendNotificationToUser({
+        userId,
+        messageInfo,
+        messageText,
+        messageEntities,
+        replyMentionUserIds,
+        chat,
+        evalResult,
+        isNudge,
+        isUrgentNudge,
+        updateGroup,
+        inputPeer,
+        currentUserId,
+        senderNameInfo,
+        senderProfilePhotoUrl,
+        dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
+      })
+    }),
+  )
 }
 
 /** Send push notifications for this message */

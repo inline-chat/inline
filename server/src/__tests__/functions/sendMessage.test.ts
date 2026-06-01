@@ -8,7 +8,7 @@ import {
   SendMessageResult,
 } from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
-import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { flushPendingNotificationTasksForTest, sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
@@ -33,7 +33,7 @@ let userIndex = 0
 const runId = Date.now()
 const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
 
-async function waitForTrue(check: () => boolean | Promise<boolean>, timeoutMs = 5_000, intervalMs = 20): Promise<void> {
+async function waitForTrue(check: () => boolean | Promise<boolean>, timeoutMs = 1_000, intervalMs = 20): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     if (await check()) return
@@ -172,7 +172,9 @@ describe("sendMessage", () => {
         testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
       )
 
-      await waitForTrue(() =>
+      await flushPendingNotificationTasksForTest()
+
+      expect(
         mockSendToUser.mock.calls.some((call: any[]) => {
           const [arg] = call
           return (
@@ -181,7 +183,7 @@ describe("sendMessage", () => {
             arg?.payload?.threadId === `chat_${childChat.id}`
           )
         }),
-      )
+      ).toBe(true)
     } finally {
       Notifications.sendToUser = originalSendToUser
     }
