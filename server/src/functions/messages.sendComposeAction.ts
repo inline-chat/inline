@@ -2,7 +2,6 @@ import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { UpdateComposeAction_ComposeAction } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { Updates } from "@in/server/modules/updates/updates"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
@@ -16,7 +15,7 @@ type Output = {}
 
 export const sendComposeAction = async (input: Input, context: FunctionContext): Promise<Output> => {
   // Get the peer information - this validates the peer exists and user has access
-  const peerId = await ChatModel.getChatFromInputPeer(input.peer, context)
+  await ChatModel.getChatFromInputPeer(input.peer, context)
 
   // Get all users who should receive this update (handles DMs and threads with multiple participants)
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })
