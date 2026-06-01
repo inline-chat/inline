@@ -354,13 +354,18 @@ final class ReplyThreadSummaryView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.debug(
+      "ReplyThreadSummaryView.mouseDown type=\(event.type.rawValue) clicks=\(event.clickCount) point=\(MessageGestureTrace.point(convert(event.locationInWindow, from: nil))) hasTap=\(onTap != nil)"
+    )
     guard onTap != nil, event.type == .leftMouseDown else {
+      MessageGestureTrace.debug("ReplyThreadSummaryView.mouseDown forwardingToSuper")
       super.mouseDown(with: event)
       return
     }
 
     setPressed(true)
     guard let window else {
+      MessageGestureTrace.debug("ReplyThreadSummaryView.mouseDown noWindow")
       setPressed(false)
       return
     }
@@ -374,11 +379,17 @@ final class ReplyThreadSummaryView: NSView {
       let isInside = bounds.contains(convert(next.locationInWindow, from: nil))
       switch next.type {
       case .leftMouseDragged:
+        MessageGestureTrace.trace(
+          "ReplyThreadSummaryView.mouseDragged inside=\(isInside) point=\(MessageGestureTrace.point(convert(next.locationInWindow, from: nil)))"
+        )
         setPressed(isInside)
       case .leftMouseUp:
         setPressed(false)
         if isInside {
+          MessageGestureTrace.debug("ReplyThreadSummaryView.mouseUp action=onTap modifiers=\(next.modifierFlags.rawValue)")
           onTap?(next.modifierFlags)
+        } else {
+          MessageGestureTrace.debug("ReplyThreadSummaryView.mouseUp cancelledOutside")
         }
         return
       default:
@@ -386,6 +397,7 @@ final class ReplyThreadSummaryView: NSView {
       }
     }
 
+    MessageGestureTrace.debug("ReplyThreadSummaryView.mouseDown trackingEndedWithoutMouseUp")
     setPressed(false)
   }
 }

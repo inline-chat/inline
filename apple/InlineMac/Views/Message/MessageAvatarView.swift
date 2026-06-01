@@ -60,7 +60,11 @@ class UserAvatarView: NSView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    acceptsMouseInteraction && bounds.contains(point) ? self : nil
+    let hit = acceptsMouseInteraction && bounds.contains(point) ? self : nil
+    MessageGestureTrace.trace(
+      "MessageAvatarView.hitTest point=\(MessageGestureTrace.point(point)) accepts=\(acceptsMouseInteraction) hit=\(hit != nil)"
+    )
+    return hit
   }
 
   @available(*, unavailable)
@@ -127,17 +131,23 @@ class UserAvatarView: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.debug(
+      "MessageAvatarView.mouseDown type=\(event.type.rawValue) clicks=\(event.clickCount) point=\(MessageGestureTrace.point(convert(event.locationInWindow, from: nil))) accepts=\(acceptsMouseInteraction)"
+    )
     guard acceptsMouseInteraction else {
+      MessageGestureTrace.debug("MessageAvatarView.mouseDown forwardingToSuper reason=disabled")
       super.mouseDown(with: event)
       return
     }
     guard event.type == .leftMouseDown else {
+      MessageGestureTrace.debug("MessageAvatarView.mouseDown forwardingToSuper reason=eventType")
       super.mouseDown(with: event)
       return
     }
 
     setPressed(true)
     guard let window else {
+      MessageGestureTrace.debug("MessageAvatarView.mouseDown noWindow")
       setPressed(false)
       return
     }
@@ -151,11 +161,17 @@ class UserAvatarView: NSView {
       let isInside = bounds.contains(convert(next.locationInWindow, from: nil))
       switch next.type {
       case .leftMouseDragged:
+        MessageGestureTrace.trace(
+          "MessageAvatarView.mouseDragged inside=\(isInside) point=\(MessageGestureTrace.point(convert(next.locationInWindow, from: nil)))"
+        )
         setPressed(isInside)
       case .leftMouseUp:
         setPressed(false)
         if isInside {
+          MessageGestureTrace.debug("MessageAvatarView.mouseUp action=onClick")
           onClick?()
+        } else {
+          MessageGestureTrace.debug("MessageAvatarView.mouseUp cancelledOutside")
         }
         return
       default:
@@ -163,6 +179,7 @@ class UserAvatarView: NSView {
       }
     }
 
+    MessageGestureTrace.debug("MessageAvatarView.mouseDown trackingEndedWithoutMouseUp")
     setPressed(false)
   }
 

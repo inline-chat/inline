@@ -1083,25 +1083,32 @@ final class NewVideoView: NSView {
     let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
     click.delegate = self
     addGestureRecognizer(click)
+    MessageGestureTrace.debug("NewVideoView.setupClickGesture added=click")
   }
 
   @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
+    MessageGestureTrace.debug(
+      "NewVideoView.handleClick state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(gesture.location(in: self)))"
+    )
     gesture.state == .ended ? handleClickAction() : ()
   }
 
   private func handleClickAction() {
     if suppressNextClick {
       suppressNextClick = false
+      MessageGestureTrace.debug("NewVideoView.handleClickAction result=suppressed")
       return
     }
 
     // If the file already exists locally, open immediately.
     if let local = videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
+      MessageGestureTrace.debug("NewVideoView.handleClickAction action=openQuickLook local=\(MessageGestureTrace.url(local))")
       openQuickLook()
       return
     }
 
     // Otherwise kick off a download/upload but don't auto-open when it finishes.
+    MessageGestureTrace.debug("NewVideoView.handleClickAction action=ensureVideoAvailable")
     ensureVideoAvailable { result in
       if case let .failure(error) = result {
         Log.shared.error("Failed to fetch video for preview", error: error)
@@ -1110,13 +1117,18 @@ final class NewVideoView: NSView {
   }
 
   private func openQuickLook() {
-    guard let panel = QLPreviewPanel.shared() else { return }
+    guard let panel = QLPreviewPanel.shared() else {
+      MessageGestureTrace.debug("NewVideoView.openQuickLook result=noPanel")
+      return
+    }
 
     if let local = videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
       if panel.isVisible {
+        MessageGestureTrace.debug("NewVideoView.openQuickLook action=close")
         panel.orderOut(nil)
         isShowingPreview = false
       } else {
+        MessageGestureTrace.debug("NewVideoView.openQuickLook action=open local=\(MessageGestureTrace.url(local))")
         window?.makeFirstResponder(self)
         panel.updateController()
         panel.makeKeyAndOrderFront(nil)
@@ -1127,10 +1139,12 @@ final class NewVideoView: NSView {
     }
 
     // If we don't yet have the file, try to fetch it first
+    MessageGestureTrace.debug("NewVideoView.openQuickLook action=fetchBeforeOpen")
     handleClickAction()
   }
 
   @objc func openQuickLook(_: Any? = nil) {
+    MessageGestureTrace.debug("NewVideoView.openQuickLookSelector")
     handleClickAction()
   }
 
@@ -1188,8 +1202,12 @@ final class NewVideoView: NSView {
   }
 
   private func cancelActiveTransfer() {
-    guard let activeTransfer else { return }
+    guard let activeTransfer else {
+      MessageGestureTrace.debug("NewVideoView.cancelActiveTransfer result=noActiveTransfer")
+      return
+    }
     suppressNextClick = true
+    MessageGestureTrace.debug("NewVideoView.cancelActiveTransfer action=cancel suppressNextClick=true")
 
     switch activeTransfer {
     case let .downloading(videoId):
@@ -1301,8 +1319,14 @@ extension NewVideoView: NSGestureRecognizerDelegate {
     let locationInSelf = convert(event.locationInWindow, from: nil)
     let locationInOverlay = overlayView.convert(locationInSelf, from: self)
     if overlayView.hitTest(locationInOverlay) === overlayView.cancelButton {
+      MessageGestureTrace.debug(
+        "NewVideoView.delegate.shouldAttempt recognizer=\(type(of: gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=cancelButton"
+      )
       return false
     }
+    MessageGestureTrace.debug(
+      "NewVideoView.delegate.shouldAttempt recognizer=\(type(of: gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=true"
+    )
     return true
   }
 }

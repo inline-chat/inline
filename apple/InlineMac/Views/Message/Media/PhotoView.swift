@@ -193,6 +193,7 @@ final class PhotoView: NSView {
   private func setupDragSource() {
     let dragGesture = NSPanGestureRecognizer(target: self, action: #selector(handleDragGesture(_:)))
     addGestureRecognizer(dragGesture)
+    MessageGestureTrace.debug("PhotoView.setupDragSource added=pan")
 
     // ...
     unregisterDraggedTypes()
@@ -205,10 +206,17 @@ final class PhotoView: NSView {
       if currentEvent.type == .leftMouseDragged,
          dragStartPoint == nil
       {
+        MessageGestureTrace.trace(
+          "PhotoView.hitTest point=\(MessageGestureTrace.point(point)) result=nil reason=externalDrag"
+        )
         return nil
       }
     }
-    return super.hitTest(point)
+    let hit = super.hitTest(point)
+    MessageGestureTrace.trace(
+      "PhotoView.hitTest point=\(MessageGestureTrace.point(point)) result=\(String(describing: hit.map { type(of: $0) }))"
+    )
+    return hit
   }
 
   private func imageUrl() -> (isLocal: Bool, url: URL)? {
@@ -232,11 +240,18 @@ final class PhotoView: NSView {
   private let dragThreshold: CGFloat = 10.0
 
   @objc private func handleDragGesture(_ gesture: NSPanGestureRecognizer) {
-    guard let (_, url) = imageUrl() else { return }
+    guard let (_, url) = imageUrl() else {
+      MessageGestureTrace.debug("PhotoView.handleDragGesture state=\(gesture.state.rawValue) result=noURL")
+      return
+    }
+    MessageGestureTrace.trace(
+      "PhotoView.handleDragGesture state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(gesture.location(in: self))) url=\(MessageGestureTrace.url(url))"
+    )
 
     switch gesture.state {
       case .began:
         dragStartPoint = gesture.location(in: self)
+        MessageGestureTrace.debug("PhotoView.handleDragGesture action=begin")
 
       case .changed:
         guard let startPoint = dragStartPoint else { return }
@@ -246,6 +261,7 @@ final class PhotoView: NSView {
         // Only start dragging if we've moved beyond the threshold
         if distance >= dragThreshold {
           dragStartPoint = nil // Reset to prevent multiple drag sessions
+          MessageGestureTrace.debug("PhotoView.handleDragGesture action=beginDragging distance=\(String(format: "%.1f", distance))")
 
           let draggingItem = NSDraggingItem(pasteboardWriter: url as NSURL)
           draggingItem.setDraggingFrame(bounds, contents: imageView.image)
@@ -260,6 +276,7 @@ final class PhotoView: NSView {
       case .ended, .cancelled:
         if dragStartPoint != nil {
           // finished half-way, open preview
+          MessageGestureTrace.debug("PhotoView.handleDragGesture action=openPreviewOnEnd")
           handleClickAction()
         }
         dragStartPoint = nil
@@ -280,6 +297,7 @@ final class PhotoView: NSView {
   private func setupClickGesture() {
     let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
     addGestureRecognizer(clickGesture)
+    MessageGestureTrace.debug("PhotoView.setupClickGesture added=click")
   }
 
   // In your PhotoView class
@@ -299,9 +317,11 @@ final class PhotoView: NSView {
     guard let panel = QLPreviewPanel.shared() else { return }
 
     if panel.isVisible {
+      MessageGestureTrace.debug("PhotoView.handleClickAction action=closeQuickLook")
       panel.orderOut(nil)
     } else {
       // Update the responder chain
+      MessageGestureTrace.debug("PhotoView.handleClickAction action=openQuickLook")
       window?.makeFirstResponder(self)
       panel.updateController()
       panel.makeKeyAndOrderFront(nil)
@@ -309,6 +329,9 @@ final class PhotoView: NSView {
   }
 
   @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
+    MessageGestureTrace.debug(
+      "PhotoView.handleClick state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(gesture.location(in: self)))"
+    )
     handleClickAction()
   }
 }

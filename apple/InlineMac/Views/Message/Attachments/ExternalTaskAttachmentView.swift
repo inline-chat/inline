@@ -140,11 +140,13 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     // Click
     let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
     addGestureRecognizer(clickGesture)
+    MessageGestureTrace.debug("ExternalTaskAttachmentView.setupGestures added=click")
 
     // Right click for context menu
     let rightClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleRightClick))
     rightClickGesture.buttonMask = 2 // Right mouse button
     addGestureRecognizer(rightClickGesture)
+    MessageGestureTrace.debug("ExternalTaskAttachmentView.setupGestures added=rightClick")
   }
 
   private func configure() {
@@ -219,12 +221,20 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
   // MARK: - Actions
 
   @objc private func handleClick() {
-    guard let task, let urlString = task.url, let url = URL(string: urlString) else { return }
+    guard let task, let urlString = task.url, let url = URL(string: urlString) else {
+      MessageGestureTrace.debug("ExternalTaskAttachmentView.handleClick result=noURL")
+      return
+    }
+    MessageGestureTrace.debug("ExternalTaskAttachmentView.handleClick action=openURL url=\(MessageGestureTrace.url(url))")
     NSWorkspace.shared.open(url)
   }
 
   @objc private func handleRightClick() {
-    guard let task, let urlString = task.url, let url = URL(string: urlString) else { return }
+    guard let task, let urlString = task.url, let url = URL(string: urlString) else {
+      MessageGestureTrace.debug("ExternalTaskAttachmentView.handleRightClick result=noURL")
+      return
+    }
+    MessageGestureTrace.debug("ExternalTaskAttachmentView.handleRightClick action=showMenu url=\(MessageGestureTrace.url(url))")
 
     let menu = NSMenu()
 
@@ -249,17 +259,26 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
   }
 
   @objc private func openURL() {
-    guard let task, let urlString = task.url, let url = URL(string: urlString) else { return }
+    guard let task, let urlString = task.url, let url = URL(string: urlString) else {
+      MessageGestureTrace.debug("ExternalTaskAttachmentView.openURL result=noURL")
+      return
+    }
+    MessageGestureTrace.debug("ExternalTaskAttachmentView.openURL url=\(MessageGestureTrace.url(url))")
     NSWorkspace.shared.open(url)
   }
 
   @objc private func copyURL() {
-    guard let task, let urlString = task.url else { return }
+    guard let task, let urlString = task.url else {
+      MessageGestureTrace.debug("ExternalTaskAttachmentView.copyURL result=noURL")
+      return
+    }
+    MessageGestureTrace.debug("ExternalTaskAttachmentView.copyURL")
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(urlString, forType: .string)
   }
 
   @objc private func showDeleteConfirmation() {
+    MessageGestureTrace.debug("ExternalTaskAttachmentView.showDeleteConfirmation")
     let alert = NSAlert()
     alert.messageText = "Delete Task"
     if task?.application == "linear" {

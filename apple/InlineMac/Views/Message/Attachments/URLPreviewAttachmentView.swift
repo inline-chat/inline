@@ -304,19 +304,33 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     clickGesture.delaysPrimaryMouseButtonEvents = false
     clickGesture.delegate = self
     addGestureRecognizer(clickGesture)
+    MessageGestureTrace.debug("URLPreviewAttachmentView.addClickGesture")
   }
 
   @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
+    MessageGestureTrace.debug(
+      "URLPreviewAttachmentView.handleClick state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(gesture.location(in: self))) imageHasTap=\(imageContainer.hasTapAction)"
+    )
     if imageContainer.hasTapAction {
       let location = convert(gesture.location(in: self), to: imageContainer)
-      guard !imageContainer.bounds.contains(location) else { return }
+      guard !imageContainer.bounds.contains(location) else {
+        MessageGestureTrace.debug(
+          "URLPreviewAttachmentView.handleClick blocked=imageTapArea local=\(MessageGestureTrace.point(location))"
+        )
+        return
+      }
     }
 
+    MessageGestureTrace.debug("URLPreviewAttachmentView.handleClick action=openPreviewURL")
     openPreviewURL()
   }
 
   private func openPreviewURL() {
-    guard let previewURL else { return }
+    guard let previewURL else {
+      MessageGestureTrace.debug("URLPreviewAttachmentView.openPreviewURL result=noURL")
+      return
+    }
+    MessageGestureTrace.debug("URLPreviewAttachmentView.openPreviewURL url=\(MessageGestureTrace.url(previewURL))")
     NSWorkspace.shared.open(previewURL)
   }
 
@@ -513,44 +527,68 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
   }
 
   override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.debug(
+      "URLPreviewAttachmentView.mouseDown type=\(event.type.rawValue) clicks=\(event.clickCount) point=\(MessageGestureTrace.point(convert(event.locationInWindow, from: nil))) modifiers=\(event.modifierFlags.rawValue)"
+    )
     if event.modifierFlags.contains(.control), showContextMenu(with: event) {
+      MessageGestureTrace.debug("URLPreviewAttachmentView.mouseDown action=contextMenu")
       return
     }
 
+    MessageGestureTrace.trace("URLPreviewAttachmentView.mouseDown forwardingToSuper")
     super.mouseDown(with: event)
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    guard !isHidden, bounds.contains(point) else { return nil }
+    guard !isHidden, bounds.contains(point) else {
+      MessageGestureTrace.trace(
+        "URLPreviewAttachmentView.hitTest point=\(MessageGestureTrace.point(point)) result=nil hidden=\(isHidden)"
+      )
+      return nil
+    }
 
     let imagePoint = imageContainer.convert(point, from: self)
     if !imageContainer.isHidden,
        imageContainer.bounds.contains(imagePoint),
        let hit = imageContainer.hitTest(imagePoint)
     {
+      MessageGestureTrace.trace(
+        "URLPreviewAttachmentView.hitTest point=\(MessageGestureTrace.point(point)) result=image hit=\(type(of: hit))"
+      )
       return hit
     }
 
+    MessageGestureTrace.trace("URLPreviewAttachmentView.hitTest point=\(MessageGestureTrace.point(point)) result=self")
     return self
   }
 
-  func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldReceive event: NSEvent) -> Bool {
-    shouldHandleCardGesture(event: event)
-  }
-
   func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
-    shouldHandleCardGesture(event: event)
+    let result = shouldHandleCardGesture(event: event)
+    MessageGestureTrace.debug(
+      "URLPreviewAttachmentView.delegate.shouldAttempt recognizer=\(type(of: gestureRecognizer)) type=\(event.type.rawValue) clicks=\(event.clickCount) allow=\(result)"
+    )
+    return result
   }
 
   private func shouldHandleCardGesture(event: NSEvent) -> Bool {
     guard event.type == .leftMouseDown, !event.modifierFlags.contains(.control) else {
+      MessageGestureTrace.debug(
+        "URLPreviewAttachmentView.shouldHandleCardGesture allow=false reason=eventOrControl type=\(event.type.rawValue) modifiers=\(event.modifierFlags.rawValue)"
+      )
       return false
     }
 
-    guard imageContainer.hasTapAction else { return true }
+    guard imageContainer.hasTapAction else {
+      MessageGestureTrace.debug("URLPreviewAttachmentView.shouldHandleCardGesture allow=true reason=noImageTap")
+      return true
+    }
     let location = convert(event.locationInWindow, from: nil)
     let imageLocation = convert(location, to: imageContainer)
-    return !imageContainer.bounds.contains(imageLocation)
+    let allow = !imageContainer.bounds.contains(imageLocation)
+    MessageGestureTrace.debug(
+      "URLPreviewAttachmentView.shouldHandleCardGesture allow=\(allow) point=\(MessageGestureTrace.point(location)) imagePoint=\(MessageGestureTrace.point(imageLocation)) reason=imageTapArea"
+    )
+    return allow
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
@@ -732,24 +770,35 @@ private final class PreviewImageContainerView: NSView {
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard onTap != nil, bounds.contains(point), !isHidden else {
-      return super.hitTest(point)
+      let hit = super.hitTest(point)
+      MessageGestureTrace.trace(
+        "URLPreviewImageContainer.hitTest point=\(MessageGestureTrace.point(point)) result=\(String(describing: hit.map { type(of: $0) })) hasTap=\(onTap != nil) hidden=\(isHidden)"
+      )
+      return hit
     }
 
+    MessageGestureTrace.trace("URLPreviewImageContainer.hitTest point=\(MessageGestureTrace.point(point)) result=self")
     return self
   }
 
   override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.debug(
+      "URLPreviewImageContainer.mouseDown type=\(event.type.rawValue) clicks=\(event.clickCount) point=\(MessageGestureTrace.point(convert(event.locationInWindow, from: nil))) hasTap=\(onTap != nil)"
+    )
     if event.modifierFlags.contains(.control), showContextMenu(with: event) {
+      MessageGestureTrace.debug("URLPreviewImageContainer.mouseDown action=contextMenu")
       return
     }
 
     guard onTap != nil, event.type == .leftMouseDown else {
+      MessageGestureTrace.debug("URLPreviewImageContainer.mouseDown forwardingToSuper")
       super.mouseDown(with: event)
       return
     }
 
     setPressed(true)
     guard let window else {
+      MessageGestureTrace.debug("URLPreviewImageContainer.mouseDown noWindow")
       setPressed(false)
       return
     }
@@ -763,11 +812,17 @@ private final class PreviewImageContainerView: NSView {
       let isInside = bounds.contains(convert(next.locationInWindow, from: nil))
       switch next.type {
       case .leftMouseDragged:
+        MessageGestureTrace.trace(
+          "URLPreviewImageContainer.mouseDragged inside=\(isInside) point=\(MessageGestureTrace.point(convert(next.locationInWindow, from: nil)))"
+        )
         setPressed(isInside)
       case .leftMouseUp:
         setPressed(false)
         if isInside {
+          MessageGestureTrace.debug("URLPreviewImageContainer.mouseUp action=onTap")
           onTap?()
+        } else {
+          MessageGestureTrace.debug("URLPreviewImageContainer.mouseUp cancelledOutside")
         }
         return
       default:
@@ -775,11 +830,16 @@ private final class PreviewImageContainerView: NSView {
       }
     }
 
+    MessageGestureTrace.debug("URLPreviewImageContainer.mouseDown trackingEndedWithoutMouseUp")
     setPressed(false)
   }
 
   override func rightMouseDown(with event: NSEvent) {
+    MessageGestureTrace.debug(
+      "URLPreviewImageContainer.rightMouseDown point=\(MessageGestureTrace.point(convert(event.locationInWindow, from: nil)))"
+    )
     if showContextMenu(with: event) {
+      MessageGestureTrace.debug("URLPreviewImageContainer.rightMouseDown action=contextMenu")
       return
     }
 
