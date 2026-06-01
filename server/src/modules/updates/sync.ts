@@ -1,10 +1,11 @@
-import type { Message, Peer, Update, User } from "@inline-chat/protocol/core"
+import type { Message, MessageAttachment, Peer, Update, User } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateBoxInput, type DecryptedUpdate } from "@in/server/db/models/updates"
-import { UpdateBucket, chats, type DbUpdate, type DbUser, type DbFile } from "@in/server/db/schema"
+import { UpdateBucket, chats, messageAttachments, type DbUpdate, type DbUser, type DbFile } from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { eq } from "drizzle-orm"
@@ -119,6 +120,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
 
   // Find attached nodes (later we'll support for types)
   let messageIds: Set<bigint> = new Set()
+  let attachmentIds: Set<number> = new Set()
   let needsChat = false
 
   // Loop through updates to find message ids we need to fetch
@@ -128,6 +130,8 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       messageIds.add(serverUpdate.newMessage.msgId)
     } else if (serverUpdate.oneofKind === "editMessage") {
       messageIds.add(serverUpdate.editMessage.msgId)
+    } else if (serverUpdate.oneofKind === "messageAttachment") {
+      attachmentIds.add(Number(serverUpdate.messageAttachment.attachmentId))
     } else if (serverUpdate.oneofKind === "newChat") {
       needsChat = true
     } else if (serverUpdate.oneofKind === "chatMoved") {
@@ -158,6 +162,61 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
 
   // Fetch from db
   const dbMessages = await MessageModel.getMessagesByIds(chatId, Array.from(messageIds))
+  const dbAttachments = attachmentIds.size > 0
+    ? (
+        await Promise.all(
+          Array.from(attachmentIds).map((attachmentId) =>
+            db._query.messageAttachments.findFirst({
+              where: eq(messageAttachments.id, attachmentId),
+              with: {
+                externalTask: true,
+                linkEmbed: {
+                  with: {
+                    photo: {
+                      with: {
+                        photoSizes: {
+                          with: {
+                            file: true,
+                          },
+                        },
+                      },
+                    },
+                    video: {
+                      with: {
+                        file: true,
+                        photo: {
+                          with: {
+                            photoSizes: {
+                              with: {
+                                file: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    document: {
+                      with: {
+                        file: true,
+                        photo: {
+                          with: {
+                            photoSizes: {
+                              with: {
+                                file: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            }),
+          ),
+        )
+      ).filter((attachment) => attachment !== undefined)
+    : []
   const repliesMap = await getMessageRepliesMap({
     parentChatId: chatId,
     parentMessageIds: dbMessages.map((message) => message.messageId),
@@ -175,6 +234,12 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
     })
     msgs.set(encoded.id, encoded)
   }
+
+  const attachments = new Map(
+    MessageModel.processAttachments(dbAttachments)
+      .map((attachment) => [Number(attachment.id), encodeMessageAttachment(attachment)] as const)
+      .filter((entry): entry is readonly [number, NonNullable<ReturnType<typeof encodeMessageAttachment>>] => entry[1] !== null),
+  )
 
   // Encode updates
   const inflatedUpdates: Update[] = []
@@ -207,6 +272,30 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
           },
         })
         break
+
+      case "messageAttachment": {
+        const attachmentId = serverUpdate.update.messageAttachment.attachmentId
+        const attachment: MessageAttachment =
+          attachments.get(Number(attachmentId)) ?? {
+            id: attachmentId,
+            attachment: { oneofKind: undefined },
+          }
+
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "messageAttachment",
+            messageAttachment: {
+              messageId: serverUpdate.update.messageAttachment.msgId,
+              chatId: serverUpdate.update.messageAttachment.chatId,
+              peerId,
+              attachment,
+            },
+          },
+        })
+        break
+      }
 
       case "deleteMessages":
         inflatedUpdates.push({

@@ -3,18 +3,14 @@ import { isValidLoomUrl, fetchLoomOembed } from "@in/server/libs/loom"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { db } from "@in/server/db"
 import { urlPreview, messageAttachments } from "@in/server/db/schema/attachments"
-import { photos, photoSizes, type DbMessage } from "@in/server/db/schema"
+import { photos, type DbMessage } from "@in/server/db/schema"
 import { uploadPhoto } from "../files/uploadPhoto"
 import { eq } from "drizzle-orm"
-import { InputPeer, Photo_Format, Photo, MessageAttachment } from "@inline-chat/protocol/core"
+import { InputPeer, Photo, MessageAttachment, UrlPreview_MediaType } from "@inline-chat/protocol/core"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { Update } from "@inline-chat/protocol/core"
-import { getUpdateGroup, getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
-import { TPeerInfo } from "@in/server/api-types"
-import { connectionManager } from "@in/server/ws/connections"
+import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { processFullPhoto, type DbFullPhoto } from "@in/server/db/models/files"
-import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
+import { processFullPhoto } from "@in/server/db/models/files"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import sharp from "sharp"
 
@@ -28,6 +24,9 @@ type LoomMetadata = {
   thumbnailWidth: number
   thumbnailHeight: number
   duration: number | null
+  embedUrl: string | null
+  embedWidth: number | null
+  embedHeight: number | null
 }
 
 export async function processLoomLink(
@@ -55,6 +54,9 @@ export async function processLoomLink(
       thumbnailWidth: oembed.thumbnailWidth,
       thumbnailHeight: oembed.thumbnailHeight,
       duration: oembed.duration == null ? null : Math.round(oembed.duration),
+      embedUrl: extractIframeSrc(oembed.html) ?? null,
+      embedWidth: oembed.width ?? null,
+      embedHeight: oembed.height ?? null,
     }
 
     // Process the Loom link
@@ -76,6 +78,7 @@ async function processLoomMetadata(
     const urlEncrypted = encryptMessage(metadata.url)
     const titleEncrypted = encryptMessage(metadata.title)
     const descriptionEncrypted = metadata.description ? encryptMessage(metadata.description) : null
+    const embedUrlEncrypted = metadata.embedUrl ? encryptMessage(metadata.embedUrl) : null
 
     // Download and save thumbnail
     let photoId: number | null = null
@@ -96,6 +99,9 @@ async function processLoomMetadata(
         urlIv: urlEncrypted.iv,
         urlTag: urlEncrypted.authTag,
         siteName: "Loom",
+        provider: "loom",
+        mediaType: "video",
+        mediaKind: "embed",
         title: titleEncrypted.encrypted,
         titleIv: titleEncrypted.iv,
         titleTag: titleEncrypted.authTag,
@@ -103,6 +109,15 @@ async function processLoomMetadata(
         descriptionIv: descriptionEncrypted?.iv,
         descriptionTag: descriptionEncrypted?.authTag,
         photoId: photoId,
+        embedUrl: embedUrlEncrypted?.encrypted,
+        embedUrlIv: embedUrlEncrypted?.iv,
+        embedUrlTag: embedUrlEncrypted?.authTag,
+        embedType: metadata.embedUrl ? "iframe" : null,
+        embedWidth: metadata.embedWidth,
+        embedHeight: metadata.embedHeight,
+        embedDuration: metadata.duration,
+        hasLargeMedia: true,
+        showLargeMedia: true,
         duration: metadata.duration,
         date: new Date(),
       })
@@ -241,6 +256,27 @@ async function sendLoomUpdate(
           description: metadata.description ?? undefined,
           photo: protoPhoto,
           duration: metadata.duration == null ? undefined : BigInt(metadata.duration),
+          mediaType: UrlPreview_MediaType.VIDEO,
+          provider: "loom",
+          media:
+            metadata.embedUrl == null
+              ? undefined
+              : {
+                  media: {
+                    oneofKind: "embed",
+                    embed: {
+                      url: metadata.embedUrl,
+                      type: "iframe",
+                      w: metadata.embedWidth ?? undefined,
+                      h: metadata.embedHeight ?? undefined,
+                      duration: metadata.duration ?? undefined,
+                    },
+                  },
+                },
+          layout: {
+            hasLargeMedia: true,
+            showLargeMedia: true,
+          },
         },
       },
     }
@@ -282,4 +318,8 @@ async function sendLoomUpdate(
   } catch (error) {
     log.error("Failed to send Loom update", { error })
   }
+}
+
+function extractIframeSrc(html: string | undefined): string | undefined {
+  return html?.match(/<iframe\b[^>]*\bsrc=["']([^"']+)["']/i)?.[1]
 }

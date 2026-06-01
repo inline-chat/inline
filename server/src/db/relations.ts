@@ -21,6 +21,7 @@ export const relations = defineRelations(
     photoSizes: schema.photoSizes,
     messageAttachments: schema.messageAttachments,
     urlPreview: schema.urlPreview,
+    urlPreviewCache: schema.urlPreviewCache,
     externalTasks: schema.externalTasks,
     members: schema.members,
     translations: schema.translations,
@@ -216,6 +217,39 @@ export const relations = defineRelations(
       photo: r.one.photos({
         from: r.urlPreview.photoId,
         to: r.photos.id,
+        optional: true,
+      }),
+      video: r.one.videos({
+        from: r.urlPreview.videoId,
+        to: r.videos.id,
+        optional: true,
+      }),
+      document: r.one.documents({
+        from: r.urlPreview.documentId,
+        to: r.documents.id,
+        optional: true,
+      }),
+      cache: r.one.urlPreviewCache({
+        from: r.urlPreview.cacheId,
+        to: r.urlPreviewCache.id,
+        optional: true,
+      }),
+    },
+
+    urlPreviewCache: {
+      photo: r.one.photos({
+        from: r.urlPreviewCache.photoId,
+        to: r.photos.id,
+        optional: true,
+      }),
+      video: r.one.videos({
+        from: r.urlPreviewCache.videoId,
+        to: r.videos.id,
+        optional: true,
+      }),
+      document: r.one.documents({
+        from: r.urlPreviewCache.documentId,
+        to: r.documents.id,
         optional: true,
       }),
     },

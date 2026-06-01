@@ -8,10 +8,12 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import type { Peer } from "@inline-chat/protocol/core"
 import { Functions } from "@in/server/functions"
-import { GetUpdatesResult_ResultType } from "@inline-chat/protocol/core"
+import { GetUpdatesResult_ResultType, UrlPreview_MediaType } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { MembersModel } from "@in/server/db/models/members"
-import { dialogs } from "@in/server/db/schema"
+import { dialogs, messageAttachments, messages, urlPreview } from "@in/server/db/schema"
+import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { and, eq } from "drizzle-orm"
 
 const insertServerUpdate = async (params: {
   bucket: UpdateBucket
@@ -136,6 +138,150 @@ describe("Sync core flow", () => {
       throw new Error("Expected chat payload in newChat update")
     }
     expect(newChat.id).toBe(BigInt(chat.id))
+  })
+
+  it("inflates persisted message attachment updates from chat bucket", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Attachment Sync", ["attachment@sync.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create attachment sync fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Attachment Thread", "thread", false)
+    if (!chat) {
+      throw new Error("Failed to create chat")
+    }
+    await testUtils.addParticipant(chat.id, user.id)
+
+    const peer: Peer = { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } }
+    await Functions.messages.sendMessage(
+      {
+        peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+        message: "hello",
+        skipLinkProcessing: true,
+      },
+      testUtils.functionContext({ userId: user.id }),
+    )
+
+    const [message] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.chatId, chat.id), eq(messages.messageId, 1)))
+      .limit(1)
+    if (!message) {
+      throw new Error("Failed to create message")
+    }
+
+    const encryptedUrl = encryptMessage("https://example.com/article")
+    const encryptedTitle = encryptMessage("Example article")
+    const encryptedDescription = encryptMessage("A short link preview")
+    const encryptedAuthor = encryptMessage("Inline")
+    const encryptedEmbedUrl = encryptMessage("https://example.com/embed/article")
+    const [preview] = await db
+      .insert(urlPreview)
+      .values({
+        url: encryptedUrl.encrypted,
+        urlIv: encryptedUrl.iv,
+        urlTag: encryptedUrl.authTag,
+        siteName: "Example",
+        provider: "generic",
+        mediaType: "video",
+        mediaKind: "embed",
+        title: encryptedTitle.encrypted,
+        titleIv: encryptedTitle.iv,
+        titleTag: encryptedTitle.authTag,
+        description: encryptedDescription.encrypted,
+        descriptionIv: encryptedDescription.iv,
+        descriptionTag: encryptedDescription.authTag,
+        author: encryptedAuthor.encrypted,
+        authorIv: encryptedAuthor.iv,
+        authorTag: encryptedAuthor.authTag,
+        embedUrl: encryptedEmbedUrl.encrypted,
+        embedUrlIv: encryptedEmbedUrl.iv,
+        embedUrlTag: encryptedEmbedUrl.authTag,
+        embedType: "iframe",
+        embedWidth: 640,
+        embedHeight: 360,
+        embedDuration: 42,
+        hasLargeMedia: true,
+        showLargeMedia: true,
+        date: new Date(),
+      })
+      .returning()
+    if (!preview) {
+      throw new Error("Failed to create preview")
+    }
+
+    const [attachment] = await db
+      .insert(messageAttachments)
+      .values({
+        messageId: message.globalId,
+        urlPreviewId: BigInt(preview.id),
+      })
+      .returning()
+    if (!attachment) {
+      throw new Error("Failed to create attachment")
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 2,
+      payload: {
+        oneofKind: "messageAttachment",
+        messageAttachment: {
+          chatId: BigInt(chat.id),
+          msgId: 1n,
+          attachmentId: BigInt(attachment.id),
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.Chat, chatId: chat.id },
+      seqStart: 1,
+      limit: 10,
+    })
+
+    const { updates: inflated } = await Sync.processChatUpdates({
+      chatId: chat.id,
+      peerId: peer,
+      updates: dbUpdates,
+      userId: user.id,
+    })
+
+    expect(inflated).toHaveLength(1)
+    const [firstUpdate] = inflated
+    expect(firstUpdate?.seq).toBe(2)
+    if (!firstUpdate || firstUpdate.update.oneofKind !== "messageAttachment") {
+      throw new Error("Expected messageAttachment update")
+    }
+
+    const attachmentUpdate = firstUpdate.update.messageAttachment
+    expect(attachmentUpdate.messageId).toBe(1n)
+    const protoAttachment = attachmentUpdate.attachment
+    if (!protoAttachment) {
+      throw new Error("Expected attachment payload")
+    }
+    expect(protoAttachment.attachment.oneofKind).toBe("urlPreview")
+    if (protoAttachment.attachment.oneofKind !== "urlPreview") {
+      throw new Error("Expected urlPreview attachment")
+    }
+    expect(protoAttachment.attachment.urlPreview.title).toBe("Example article")
+    expect(protoAttachment.attachment.urlPreview.description).toBe("A short link preview")
+    expect(protoAttachment.attachment.urlPreview.author).toBe("Inline")
+    expect(protoAttachment.attachment.urlPreview.mediaType).toBe(UrlPreview_MediaType.VIDEO)
+    expect(protoAttachment.attachment.urlPreview.media?.media.oneofKind).toBe("embed")
+    if (protoAttachment.attachment.urlPreview.media?.media.oneofKind !== "embed") {
+      throw new Error("Expected embed media")
+    }
+    expect(protoAttachment.attachment.urlPreview.media.media.embed.url).toBe("https://example.com/embed/article")
+    expect(protoAttachment.attachment.urlPreview.media.media.embed.type).toBe("iframe")
+    expect(protoAttachment.attachment.urlPreview.media.media.embed.w).toBe(640)
+    expect(protoAttachment.attachment.urlPreview.media.media.embed.h).toBe(360)
+    expect(protoAttachment.attachment.urlPreview.media.media.embed.duration).toBe(42)
+    expect(protoAttachment.attachment.urlPreview.layout?.hasLargeMedia).toBe(true)
+    expect(protoAttachment.attachment.urlPreview.layout?.showLargeMedia).toBe(true)
   })
 
   it("inflates delete chat updates from chat bucket", async () => {
