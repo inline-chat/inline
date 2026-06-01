@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ToastView: View {
   let toast: ToastData
+  var transitionEdge: Edge = .bottom
   @State private var animationProgress: Double = 0
   @State private var previousMessage: String = ""
   private let toastManager = ToastManager.shared
@@ -11,7 +12,7 @@ struct ToastView: View {
   var body: some View {
     toastCluster
       .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toast.id)
-      .transition(.move(edge: .bottom).combined(with: .opacity))
+      .transition(.move(edge: transitionEdge).combined(with: .opacity))
       .scaleEffect(toast.message != previousMessage ? 1.02 : 1.0)
       .animation(.spring(response: 0.3, dampingFraction: 0.76), value: toast.message)
       .onAppear {
@@ -72,7 +73,7 @@ struct ToastView: View {
 
   private var toastBubble: some View {
     HStack(alignment: toast.showsProgressDetails ? .top : .center, spacing: 10) {
-      toastIcon
+      leadingIndicator
 
       VStack(alignment: .leading, spacing: toast.showsProgressDetails ? 4 : 0) {
         Text(toast.message)
@@ -103,29 +104,37 @@ struct ToastView: View {
     .modifier(ToastBubbleSurfaceModifier(toast: toast, cornerRadius: bubbleCornerRadius))
     .contentShape(.rect(cornerRadius: bubbleCornerRadius))
     .onTapGesture {
+      guard toast.actionTitle == nil, toast.action == nil else { return }
       toastManager.hideToast()
     }
   }
 
   @ViewBuilder
-  private var toastIcon: some View {
-    if let systemImage = toast.systemImage {
-      if systemImage == "notion-logo" || systemImage == "linear-icon" {
-        Image(systemImage)
-          .resizable()
-          .scaledToFit()
-          .frame(width: 16, height: 16)
-          .padding(.top, toast.showsProgressDetails ? 3 : 0)
-          .transition(.scale.combined(with: .opacity))
-          .id(systemImage)
-      } else {
-        Image(systemName: systemImage)
-          .font(.callout.weight(.semibold))
-          .foregroundStyle(iconForegroundColor)
-          .padding(.top, toast.showsProgressDetails ? 3 : 0)
-          .transition(.scale.combined(with: .opacity))
-          .id(systemImage)
-      }
+  private var leadingIndicator: some View {
+    if let countdown = toast.countdown {
+      CountdownToastIndicator(countdown: countdown)
+    } else if let systemImage = toast.systemImage {
+      toastIcon(systemImage)
+    }
+  }
+
+  @ViewBuilder
+  private func toastIcon(_ systemImage: String) -> some View {
+    if systemImage == "notion-logo" || systemImage == "linear-icon" {
+      Image(systemImage)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 16, height: 16)
+        .padding(.top, toast.showsProgressDetails ? 3 : 0)
+        .transition(.scale.combined(with: .opacity))
+        .id(systemImage)
+    } else {
+      Image(systemName: systemImage)
+        .font(.callout.weight(.semibold))
+        .foregroundStyle(iconForegroundColor)
+        .padding(.top, toast.showsProgressDetails ? 3 : 0)
+        .transition(.scale.combined(with: .opacity))
+        .id(systemImage)
     }
   }
 
@@ -186,22 +195,49 @@ struct ToastView: View {
 
 struct ToastContainerModifier: ViewModifier {
   @ObservedObject private var toastManager = ToastManager.shared
+  let placement: ToastPlacement
 
   func body(content: Content) -> some View {
     content
-      .overlay(alignment: .bottom) {
+      .overlay {
         if let toast = toastManager.currentToast {
-          ToastView(toast: toast)
+          let resolvedPlacement = toast.placement ?? placement
+          ToastView(toast: toast, transitionEdge: resolvedPlacement.transitionEdge)
             .padding(.horizontal, 16)
-            .safeAreaPadding(.bottom, 10)
+            .toastPlacement(resolvedPlacement)
         }
       }
   }
 }
 
 extension View {
-  func toastView() -> some View {
-    modifier(ToastContainerModifier())
+  func toastView(placement: ToastPlacement = .standard) -> some View {
+    modifier(ToastContainerModifier(placement: placement))
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func toastPlacement(_ placement: ToastPlacement) -> some View {
+    switch placement {
+      case let .topCenter(offset):
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+          .padding(.top, offset)
+      case let .bottomCenter(offset):
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+          .padding(.bottom, offset)
+    }
+  }
+}
+
+private extension ToastPlacement {
+  var transitionEdge: Edge {
+    switch self {
+      case .topCenter:
+        .top
+      case .bottomCenter:
+        .bottom
+    }
   }
 }
 
@@ -233,8 +269,18 @@ private struct ToastBubbleSurfaceModifier: ViewModifier {
 }
 
 private extension ToastData {
+  struct Countdown {
+    let startDate: Date
+    let duration: TimeInterval
+  }
+
+  var countdown: Countdown? {
+    guard let countdownStartDate, let countdownDuration else { return nil }
+    return Countdown(startDate: countdownStartDate, duration: countdownDuration)
+  }
+
   var showsProgressDetails: Bool {
-    type == .info && shouldStayVisible
+    type == .info && shouldStayVisible && countdown == nil
   }
 
   var statusAccentColor: Color {
@@ -273,6 +319,38 @@ private extension ToastData {
         Color.accentColor.opacity(0.18)
       case .info:
         Color.primary.opacity(0.08)
+    }
+  }
+}
+
+private struct CountdownToastIndicator: View {
+  let countdown: ToastData.Countdown
+
+  private var duration: TimeInterval {
+    max(countdown.duration, 0.1)
+  }
+
+  var body: some View {
+    TimelineView(.periodic(from: countdown.startDate, by: 0.1)) { context in
+      let elapsed = max(0, context.date.timeIntervalSince(countdown.startDate))
+      let remaining = max(0, duration - elapsed)
+      let seconds = max(0, Int(ceil(remaining)))
+      let progress = max(0, min(1, remaining / duration))
+
+      ZStack {
+        Circle()
+          .stroke(Color.secondary.opacity(0.22), lineWidth: 2)
+        Circle()
+          .trim(from: 0, to: progress)
+          .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+        Text("\(seconds)")
+          .font(.system(size: 11, weight: .semibold, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
+      }
+      .frame(width: 24, height: 24)
+      .accessibilityLabel("\(seconds) seconds remaining")
     }
   }
 }

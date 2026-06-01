@@ -49,6 +49,14 @@ public actor UpdatesEngine: Sendable {
             try deleteMessages.apply(db, publishChanges: true)
           }
 
+        case let .clearChatHistory_p(clearChatHistory):
+          if source == .syncCatchup {
+            let peers = try clearChatHistory.apply(db, publishChanges: false)
+            reloadPeers.formUnion(peers)
+          } else {
+            try clearChatHistory.apply(db, publishChanges: true)
+          }
+
         case let .messageAttachment(updateMessageAttachment):
           let peer = try updateMessageAttachment.apply(db, publishChanges: source != .syncCatchup)
           if source == .syncCatchup, let peer {
@@ -204,7 +212,7 @@ public actor UpdatesEngine: Sendable {
 
 // MARK: Extensions
 
-private func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
+func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
   try DbBucketState
     .filter(DbBucketState.Columns.bucketType == 1 && DbBucketState.Columns.entityId == -chatId)
     .deleteAll(db)

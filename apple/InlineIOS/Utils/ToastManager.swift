@@ -17,6 +17,13 @@ enum ToastType {
   }
 }
 
+enum ToastPlacement: Equatable {
+  case topCenter(offset: CGFloat)
+  case bottomCenter(offset: CGFloat)
+
+  static let standard = ToastPlacement.bottomCenter(offset: 120)
+}
+
 struct ToastData: Identifiable {
   let id = UUID()
   let message: String
@@ -27,6 +34,9 @@ struct ToastData: Identifiable {
   var shouldStayVisible: Bool = false
   var progressStep: Int = 0
   var totalSteps: Int = 4
+  var countdownStartDate: Date?
+  var countdownDuration: TimeInterval?
+  var placement: ToastPlacement?
 }
 
 class ToastManager: ObservableObject {
@@ -44,7 +54,8 @@ class ToastManager: ObservableObject {
     systemImage: String? = nil,
     action: (() -> Void)? = nil,
     actionTitle: String? = nil,
-    shouldStayVisible: Bool = false
+    shouldStayVisible: Bool = false,
+    placement: ToastPlacement? = nil
   ) {
     timer?.invalidate()
     timer = nil
@@ -75,7 +86,8 @@ class ToastManager: ObservableObject {
       action: action,
       actionTitle: actionTitle,
       systemImage: systemImage,
-      shouldStayVisible: shouldStayVisible
+      shouldStayVisible: shouldStayVisible,
+      placement: placement
     )
 
     // Store the ID for progress tracking
@@ -94,6 +106,34 @@ class ToastManager: ObservableObject {
     }
   }
 
+  func showUndoCountdown(
+    _ message: String,
+    duration: TimeInterval = 5,
+    actionTitle: String = "Undo",
+    placement: ToastPlacement? = nil,
+    action: @escaping () -> Void
+  ) {
+    timer?.invalidate()
+    timer = nil
+
+    let newToast = ToastData(
+      message: message,
+      type: .info,
+      action: action,
+      actionTitle: actionTitle,
+      systemImage: nil,
+      shouldStayVisible: true,
+      countdownStartDate: Date(),
+      countdownDuration: duration,
+      placement: placement
+    )
+    progressToastId = nil
+
+    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+      currentToast = newToast
+    }
+  }
+
   func updateProgressToast(message: String, systemImage: String? = nil) {
     guard let currentToast,
           currentToast.shouldStayVisible,
@@ -105,7 +145,10 @@ class ToastManager: ObservableObject {
       action: currentToast.action,
       actionTitle: currentToast.actionTitle,
       systemImage: systemImage ?? currentToast.systemImage,
-      shouldStayVisible: currentToast.shouldStayVisible
+      shouldStayVisible: currentToast.shouldStayVisible,
+      countdownStartDate: currentToast.countdownStartDate,
+      countdownDuration: currentToast.countdownDuration,
+      placement: currentToast.placement
     )
 
     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {

@@ -388,6 +388,123 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it("clearChatHistory() accepts chatId target", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const p = client.clearChatHistory({ chatId: 7, keepLastDays: 30, deleteReplyThreads: true })
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall"))
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.CLEAR_CHAT_HISTORY,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing clearChatHistory rpc")
+    expect(rpc.body.rpcCall.input.oneofKind).toBe("clearChatHistory")
+    if (rpc.body.rpcCall.input.oneofKind !== "clearChatHistory") throw new Error("missing clearChatHistory")
+    const payload = rpc.body.rpcCall.input.clearChatHistory
+    expect(payload.target.oneofKind).toBe("peerId")
+    if (payload.target.oneofKind === "peerId") {
+      expect(payload.target.peerId.type.oneofKind).toBe("chat")
+      if (payload.target.peerId.type.oneofKind === "chat") {
+        expect(payload.target.peerId.type.chat.chatId).toBe(7n)
+      }
+    }
+    expect(payload.keepLastDays).toBe(30)
+    expect(payload.deleteReplyThreads).toBe(true)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 6n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "clearChatHistory",
+              clearChatHistory: {
+                updates: [],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toBeUndefined()
+    await client.close()
+  })
+
+  it("clearChatHistory() accepts spaceId target", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const p = client.clearChatHistory({ spaceId: 9, keepLastDays: 0 })
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall"))
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.CLEAR_CHAT_HISTORY,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing clearChatHistory rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "clearChatHistory") throw new Error("missing clearChatHistory")
+    const payload = rpc.body.rpcCall.input.clearChatHistory
+    expect(payload.target.oneofKind).toBe("spaceId")
+    if (payload.target.oneofKind === "spaceId") {
+      expect(payload.target.spaceId).toBe(9n)
+    }
+    expect(payload.keepLastDays).toBe(0)
+    expect(payload.deleteReplyThreads).toBe(false)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 7n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "clearChatHistory",
+              clearChatHistory: {
+                updates: [],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toBeUndefined()
+    await client.close()
+  })
+
+  it("clearChatHistory() rejects invalid targets and ranges", async () => {
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport: new MockTransport(),
+    })
+
+    await expect(client.clearChatHistory({ chatId: 7, spaceId: 9, keepLastDays: 0 } as any)).rejects.toThrow(
+      /exactly one of `chatId`, `userId`, or `spaceId`/,
+    )
+    await expect(client.clearChatHistory({ keepLastDays: 0 } as any)).rejects.toThrow(
+      /exactly one of `chatId`, `userId`, or `spaceId`/,
+    )
+    await expect(client.clearChatHistory({ chatId: 7, keepLastDays: -1 })).rejects.toThrow(/keepLastDays/)
+    await expect(client.clearChatHistory({ chatId: 7, keepLastDays: 36_501 })).rejects.toThrow(/keepLastDays/)
+  })
+
   it("sendMessage() accepts number chatId and uses sendMode", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
@@ -2925,6 +3042,224 @@ describe("InlineSdkClient", () => {
     }
 
     expect(client.exportState().lastUserSeq).toBe(55)
+    await client.close()
+  })
+
+  it("catches up space clear history updates from the space bucket", async () => {
+    const transport = new MockTransport()
+    const store = new MemoryStateStore({ version: 1, lastSeqBySpaceId: { "20": 1 } })
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: store,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const iter = client.events()[Symbol.asyncIterator]()
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 390n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 2,
+                    date: 700n,
+                    update: {
+                      oneofKind: "spaceHasNewUpdates",
+                      spaceHasNewUpdates: {
+                        spaceId: 20n,
+                        updateSeq: 3,
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES))
+    const rpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES)
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing space getUpdates rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing getUpdates input")
+    expect(rpc.body.rpcCall.input.getUpdates.startSeq).toBe(1n)
+    expect(rpc.body.rpcCall.input.getUpdates.seqEnd).toBe(3n)
+    expect(rpc.body.rpcCall.input.getUpdates.bucket?.type.oneofKind).toBe("space")
+    expect(rpc.body.rpcCall.input.getUpdates.bucket?.type.space?.spaceId).toBe(20n)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 391n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [
+                  Update.create({
+                    seq: 3,
+                    date: 701n,
+                    update: {
+                      oneofKind: "clearChatHistory",
+                      clearChatHistory: {
+                        target: { oneofKind: "spaceId", spaceId: 20n },
+                        beforeDate: 600n,
+                        deleteReplyThreads: true,
+                      },
+                    },
+                  }),
+                ],
+                seq: 3n,
+                date: 701n,
+                resultType: GetUpdatesResult_ResultType.SLICE,
+                final: true,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const ev1 = await iter.next()
+    expect(ev1.value.kind).toBe("space.hasUpdates")
+    const ev2 = await iter.next()
+    expect(ev2.value.kind).toBe("space.history.clear")
+    if (ev2.value.kind === "space.history.clear") {
+      expect(ev2.value.spaceId).toBe(20n)
+      expect(ev2.value.beforeDate).toBe(600n)
+      expect(ev2.value.deleteReplyThreads).toBe(true)
+      expect(ev2.value.seq).toBe(3)
+    }
+
+    expect(client.exportState().lastSeqBySpaceId?.["20"]).toBe(3)
+    await client.close()
+  })
+
+  it("emits clear history events for chat, user, and space targets", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const iter = client.events()[Symbol.asyncIterator]()
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 400n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 1,
+                    date: 10n,
+                    update: {
+                      oneofKind: "clearChatHistory",
+                      clearChatHistory: {
+                        target: {
+                          oneofKind: "peerId",
+                          peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+                        },
+                        beforeDate: 5n,
+                        deleteReplyThreads: true,
+                      },
+                    },
+                  }),
+                  Update.create({
+                    seq: 2,
+                    date: 11n,
+                    update: {
+                      oneofKind: "clearChatHistory",
+                      clearChatHistory: {
+                        target: { oneofKind: "spaceId", spaceId: 20n },
+                        deleteReplyThreads: false,
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const ev1 = await iter.next()
+    expect(ev1.value.kind).toBe("message.history.clear")
+    if (ev1.value.kind === "message.history.clear") {
+      expect(ev1.value.chatId).toBe(10n)
+      expect(ev1.value.beforeDate).toBe(5n)
+      expect(ev1.value.deleteReplyThreads).toBe(true)
+      expect(ev1.value.seq).toBe(1)
+    }
+
+    const ev2 = await iter.next()
+    expect(ev2.value.kind).toBe("space.history.clear")
+    if (ev2.value.kind === "space.history.clear") {
+      expect(ev2.value.spaceId).toBe(20n)
+      expect(ev2.value.beforeDate).toBeUndefined()
+      expect(ev2.value.deleteReplyThreads).toBe(false)
+      expect(ev2.value.seq).toBe(2)
+    }
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 401n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 3,
+                    date: 12n,
+                    update: {
+                      oneofKind: "clearChatHistory",
+                      clearChatHistory: {
+                        target: {
+                          oneofKind: "peerId",
+                          peerId: { type: { oneofKind: "user", user: { userId: 1n } } },
+                        },
+                        deleteReplyThreads: false,
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const ev3 = await iter.next()
+    expect(ev3.value.kind).toBe("message.history.clear")
+    if (ev3.value.kind === "message.history.clear") {
+      expect(ev3.value.userId).toBe(1n)
+      expect(ev3.value.chatId).toBeUndefined()
+      expect(ev3.value.deleteReplyThreads).toBe(false)
+      expect(ev3.value.seq).toBe(3)
+    }
+
     await client.close()
   })
 })

@@ -15,6 +15,7 @@ struct ChatToolbarMenuButton: View {
   @State private var showRenameSheet = false
   @State private var showMoveToSpaceSheet = false
   @State private var showMoveOutConfirm = false
+  @State private var showClearHistorySheet = false
   @State private var pendingDestructiveAction: ChatDestructiveAction?
   @State private var loadHistoryTask: Task<Void, Never>?
 
@@ -56,17 +57,18 @@ struct ChatToolbarMenuButton: View {
         }
       }
 
-      if settings.sidebarAsInbox {
+      if settings.sidebarAsInbox,
+         !(model.state.isOpen && model.state.isArchived == false && model.state.isChatListHidden == false) {
         Button("Open in Sidebar", systemImage: "sidebar.left") {
           openInSidebar()
         }
-        .disabled(model.state.isOpen && model.state.isArchived == false && model.state.isChatListHidden == false)
       }
 
-      Button("Load chat history", systemImage: "arrow.down.circle") {
-        loadLast1000Messages()
+      if loadHistoryTask == nil {
+        Button("Load chat history", systemImage: "arrow.down.circle") {
+          loadLast1000Messages()
+        }
       }
-      .disabled(loadHistoryTask != nil)
 
       Divider()
 
@@ -96,11 +98,21 @@ struct ChatToolbarMenuButton: View {
         }
       }
 
-      if let destructiveAction = model.state.destructiveAction {
+      if model.state.canClearHistory || model.state.destructiveAction != nil {
         Divider()
 
-        Button(destructiveAction.title, systemImage: destructiveAction.systemImage, role: .destructive) {
-          pendingDestructiveAction = destructiveAction
+        if model.state.canClearHistory {
+          Button(role: .destructive) {
+            showClearHistorySheet = true
+          } label: {
+            Label("Clear History...", systemImage: "trash")
+          }
+        }
+
+        if let destructiveAction = model.state.destructiveAction {
+          Button(destructiveAction.title, systemImage: destructiveAction.systemImage, role: .destructive) {
+            pendingDestructiveAction = destructiveAction
+          }
         }
       }
     } label: {
@@ -116,6 +128,13 @@ struct ChatToolbarMenuButton: View {
       if let chatId = peer.asThreadId() {
         MoveThreadToSpaceSheet(chatId: chatId, nav2: dependencies.nav2, nav3: dependencies.nav3)
       }
+    }
+    .sheet(isPresented: $showClearHistorySheet) {
+      ClearChatHistorySheet(
+        peer: peer,
+        chatTitle: model.state.title,
+        spaceId: model.state.canClearSpaceHistory ? model.state.chatSpaceId : nil
+      )
     }
     .confirmationDialog(
       "Move this thread out of the space?",
@@ -380,6 +399,8 @@ private struct ChatToolbarMenuState: Equatable {
   var isChatListHidden = false
   var isOpen = false
   var canRename = false
+  var canClearHistory = false
+  var canClearSpaceHistory = false
   var chatSpaceId: Int64?
   var title = "Chat"
   var destructiveAction: ChatDestructiveAction?
@@ -410,6 +431,17 @@ private struct ChatToolbarMenuState: Equatable {
       currentUserId: currentUserId,
       db: db
     )
+    canClearHistory = try Self.resolveCanClearHistory(
+      chat: chat,
+      peer: peer,
+      currentUserId: currentUserId,
+      db: db
+    )
+    canClearSpaceHistory = try Self.resolveCanClearSpaceHistory(
+      chat: chat,
+      currentUserId: currentUserId,
+      db: db
+    )
   }
 
   private static func resolveCanRename(
@@ -420,8 +452,221 @@ private struct ChatToolbarMenuState: Equatable {
   ) throws -> Bool {
     try ChatRenamePermission.canRename(peer: peer, currentUserId: currentUserId, db: db)
   }
+
+  private static func resolveCanClearHistory(
+    chat: Chat?,
+    peer: Peer,
+    currentUserId: Int64?,
+    db: Database
+  ) throws -> Bool {
+    guard let currentUserId else { return false }
+
+    if peer.isPrivate {
+      return true
+    }
+
+    guard peer.isThread, let chat, chat.type == .thread else {
+      return false
+    }
+
+    if chat.createdBy == currentUserId {
+      return true
+    }
+
+    guard let spaceId = chat.spaceId else {
+      return false
+    }
+
+    let member = try Member
+      .filter(Member.Columns.spaceId == spaceId)
+      .filter(Member.Columns.userId == currentUserId)
+      .fetchOne(db)
+
+    return member?.role == .admin || member?.role == .owner
+  }
+
+  private static func resolveCanClearSpaceHistory(
+    chat: Chat?,
+    currentUserId: Int64?,
+    db: Database
+  ) throws -> Bool {
+    guard let currentUserId, let spaceId = chat?.spaceId else { return false }
+
+    let member = try Member
+      .filter(Member.Columns.spaceId == spaceId)
+      .filter(Member.Columns.userId == currentUserId)
+      .fetchOne(db)
+
+    return member?.role == .admin || member?.role == .owner
+  }
 }
 
 private enum ChatToolbarMenuError: Error {
   case invalidHistoryResponse
+}
+
+private struct ClearChatHistorySheet: View {
+  let peer: Peer
+  let chatTitle: String
+  let spaceId: Int64?
+
+  @Environment(\.dismiss) private var dismiss
+  @State private var range: ClearChatHistoryRange = .keep(90)
+  @State private var customDays = 90
+  @State private var deleteReplyThreads = false
+  @State private var clearSpace = false
+  @State private var isSubmitting = false
+  @State private var showClearConfirmation = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Clear History for Everyone")
+          .font(.headline)
+        Text(chatTitle)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+
+      Picker("Range", selection: $range) {
+        ForEach(ClearChatHistoryRange.allCases) { range in
+          Text(range.title).tag(range)
+        }
+      }
+      .pickerStyle(.radioGroup)
+
+      if range == .custom {
+        Stepper("Keep last \(customDays) days", value: $customDays, in: 1 ... 36_500)
+      }
+
+      Toggle("Delete reply threads", isOn: $deleteReplyThreads)
+
+      if spaceId != nil {
+        Toggle("Clear all chats in this space", isOn: $clearSpace)
+      }
+
+      HStack {
+        Spacer()
+        Button("Cancel") {
+          dismiss()
+        }
+        .keyboardShortcut(.defaultAction)
+
+        Button("Clear", role: .destructive) {
+          showClearConfirmation = true
+        }
+        .disabled(isSubmitting)
+      }
+    }
+    .padding(20)
+    .frame(width: 360)
+    .alert("Clear history for everyone?", isPresented: $showClearConfirmation) {
+      Button("Cancel", role: .cancel) {}
+        .keyboardShortcut(.defaultAction)
+
+      Button("Clear History", role: .destructive) {
+        clearHistory()
+      }
+    } message: {
+      Text(clearConfirmationMessage)
+    }
+  }
+
+  private var keepLastDays: Int32 {
+    switch range {
+    case .all:
+      0
+    case let .keep(days):
+      Int32(days)
+    case .custom:
+      Int32(customDays)
+    }
+  }
+
+  private var clearConfirmationMessage: String {
+    let target = clearSpace && spaceId != nil ? "all chats in this space" : "this chat"
+    let rangeText = keepLastDays == 0 ? "all history" : "history older than \(keepLastDays) days"
+    return "This will clear \(rangeText) from \(target) for everyone. You will have 5 seconds to undo before it starts."
+  }
+
+  @MainActor
+  private func clearHistory() {
+    guard !isSubmitting else { return }
+    let selectedKeepLastDays = keepLastDays
+    let shouldDeleteReplyThreads = deleteReplyThreads
+    let selectedSpaceId = clearSpace ? spaceId : nil
+    isSubmitting = true
+
+    DelayedDestructiveActionScheduler.shared.cancelAll()
+    let token = DelayedDestructiveActionScheduler.shared.schedule(
+      onPerforming: {
+        ToastCenter.shared.showLoading("Clearing history...")
+      },
+      action: {
+        if let selectedSpaceId {
+          _ = try await Api.realtime.send(.clearChatHistory(
+            spaceId: selectedSpaceId,
+            keepLastDays: selectedKeepLastDays,
+            deleteReplyThreads: shouldDeleteReplyThreads
+          ))
+        } else {
+          _ = try await Api.realtime.send(.clearChatHistory(
+            peerId: peer,
+            keepLastDays: selectedKeepLastDays,
+            deleteReplyThreads: shouldDeleteReplyThreads
+          ))
+        }
+      },
+      onSuccess: {
+        ToastCenter.shared.showSuccess("History cleared")
+      },
+      onFailure: { _ in
+        ToastCenter.shared.showError("Failed to clear history")
+      }
+    )
+
+    ToastCenter.shared.showUndoCountdown("Clearing history") {
+      if DelayedDestructiveActionScheduler.shared.cancel(token) {
+        ToastCenter.shared.showSuccess("Clear history canceled")
+      }
+    }
+    dismiss()
+  }
+}
+
+private enum ClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
+  case all
+  case keep(Int)
+  case custom
+
+  static let allCases: [ClearChatHistoryRange] = [
+    .keep(90),
+    .keep(7),
+    .keep(30),
+    .all,
+    .custom,
+  ]
+
+  var id: String {
+    switch self {
+    case .all:
+      "all"
+    case let .keep(days):
+      "keep-\(days)"
+    case .custom:
+      "custom"
+    }
+  }
+
+  var title: String {
+    switch self {
+    case .all:
+      "All history"
+    case let .keep(days):
+      "Keep last \(days) days"
+    case .custom:
+      "Custom"
+    }
+  }
 }

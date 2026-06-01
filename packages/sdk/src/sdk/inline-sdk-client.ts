@@ -1,4 +1,5 @@
 import {
+  type ClearChatHistoryInput,
   GetChatInput,
   GetMessagesInput,
   GetMeInput,
@@ -23,6 +24,7 @@ import { WebSocketTransport } from "../realtime/ws-transport.js"
 import type { Transport } from "../realtime/transport.js"
 import type {
   InlineSdkAnswerMessageActionParams,
+  InlineSdkClearChatHistoryParams,
   InlineSdkClientOptions,
   InlineInboundEvent,
   InlineSdkGetMessagesParams,
@@ -81,6 +83,8 @@ export class InlineSdkClient {
 
   private catchUpInFlightByChatId = new Map<bigint, Promise<void>>()
   private catchUpRequestedByChatId = new Map<bigint, { endSeq: number; peer?: Peer }>()
+  private catchUpInFlightBySpaceId = new Map<bigint, Promise<void>>()
+  private catchUpRequestedBySpaceId = new Map<bigint, { endSeq: number }>()
   private userCatchUpInFlight: Promise<void> | null = null
 
   constructor(options: InlineSdkClientOptions) {
@@ -166,7 +170,11 @@ export class InlineSdkClient {
     this.rejectOpen(new Error("closed"))
 
     this.eventStream.close()
-    await Promise.allSettled(this.catchUpInFlightByChatId.values())
+    await Promise.allSettled([
+      ...this.catchUpInFlightByChatId.values(),
+      ...this.catchUpInFlightBySpaceId.values(),
+      ...(this.userCatchUpInFlight ? [this.userCatchUpInFlight] : []),
+    ])
     await this.flushStateSave()
     await this.protocol.stopTransport()
   }
@@ -194,6 +202,7 @@ export class InlineSdkClient {
       version: 1,
       ...(this.state.dateCursor != null ? { dateCursor: this.state.dateCursor } : {}),
       ...(this.state.lastSeqByChatId != null ? { lastSeqByChatId: { ...this.state.lastSeqByChatId } } : {}),
+      ...(this.state.lastSeqBySpaceId != null ? { lastSeqBySpaceId: { ...this.state.lastSeqBySpaceId } } : {}),
       ...(this.state.lastUserSeq != null ? { lastUserSeq: this.state.lastUserSeq } : {}),
     }
   }
@@ -232,6 +241,20 @@ export class InlineSdkClient {
     })
 
     return { messages: result.getMessages.messages }
+  }
+
+  async clearChatHistory(params: InlineSdkClearChatHistoryParams): Promise<void> {
+    const keepLastDays = normalizeKeepLastDays(params.keepLastDays)
+    const target = this.clearHistoryTargetFromParams(params)
+
+    await this.invoke(Method.CLEAR_CHAT_HISTORY, {
+      oneofKind: "clearChatHistory",
+      clearChatHistory: {
+        target,
+        keepLastDays,
+        deleteReplyThreads: params.deleteReplyThreads ?? false,
+      },
+    })
   }
 
   async sendMessage(params: InlineSdkSendMessageParams): Promise<{ messageId: bigint | null }> {
@@ -603,6 +626,65 @@ export class InlineSdkClient {
         return
       }
 
+      case "clearChatHistory": {
+        const payload = update.update.clearChatHistory
+        if (!payload.target) {
+          this.log.warn?.("Skipping clearChatHistory update without target")
+          return
+        }
+        if (payload.target.oneofKind === "spaceId") {
+          this.bumpSpaceSeq(payload.target.spaceId, seq)
+          await this.eventStream.send({
+            kind: "space.history.clear",
+            spaceId: payload.target.spaceId,
+            ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
+            deleteReplyThreads: payload.deleteReplyThreads,
+            deletedChatIds: payload.deletedChatIds,
+            orphanedChatIds: payload.orphanedChatIds,
+            detachedChatIds: payload.detachedChatIds,
+            seq,
+            date,
+          })
+          return
+        }
+
+        const peerId = payload.target.oneofKind === "peerId" ? payload.target.peerId : undefined
+        if (peerId?.type.oneofKind === "chat") {
+          const chatId = peerId.type.chat.chatId
+          this.bumpChatSeq(chatId, seq)
+          await this.eventStream.send({
+            kind: "message.history.clear",
+            chatId,
+            ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
+            deleteReplyThreads: payload.deleteReplyThreads,
+            deletedChatIds: payload.deletedChatIds,
+            orphanedChatIds: payload.orphanedChatIds,
+            detachedChatIds: payload.detachedChatIds,
+            seq,
+            date,
+          })
+          return
+        }
+
+        if (peerId?.type.oneofKind === "user") {
+          await this.eventStream.send({
+            kind: "message.history.clear",
+            userId: peerId.type.user.userId,
+            ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
+            deleteReplyThreads: payload.deleteReplyThreads,
+            deletedChatIds: payload.deletedChatIds,
+            orphanedChatIds: payload.orphanedChatIds,
+            detachedChatIds: payload.detachedChatIds,
+            seq,
+            date,
+          })
+          return
+        }
+
+        this.log.warn?.("Skipping clearChatHistory update without peer target", peerId)
+        return
+      }
+
       case "updateReaction": {
         const reaction = update.update.updateReaction.reaction
         if (!reaction) return
@@ -688,7 +770,7 @@ export class InlineSdkClient {
           seq,
           date,
         })
-        // Space catch-up is intentionally a no-op for MVP.
+        this.requestCatchUpSpace({ spaceId: payload.spaceId, updateSeq: payload.updateSeq })
         return
       }
 
@@ -704,6 +786,17 @@ export class InlineSdkClient {
     const prev = this.state.lastSeqByChatId[key] ?? 0
     if (seq > prev) {
       this.state.lastSeqByChatId[key] = seq
+      this.scheduleStateSave()
+    }
+  }
+
+  private bumpSpaceSeq(spaceId: bigint, seq: number) {
+    if (!Number.isFinite(seq)) return
+    if (!this.state.lastSeqBySpaceId) this.state.lastSeqBySpaceId = {}
+    const key = spaceId.toString()
+    const prev = this.state.lastSeqBySpaceId[key] ?? 0
+    if (seq > prev) {
+      this.state.lastSeqBySpaceId[key] = seq
       this.scheduleStateSave()
     }
   }
@@ -921,6 +1014,130 @@ export class InlineSdkClient {
     return false
   }
 
+  private requestCatchUpSpace(params: { spaceId: bigint; updateSeq: number }) {
+    const previous = this.catchUpRequestedBySpaceId.get(params.spaceId)
+    this.catchUpRequestedBySpaceId.set(params.spaceId, {
+      endSeq: Math.max(previous?.endSeq ?? 0, params.updateSeq),
+    })
+
+    if (this.catchUpInFlightBySpaceId.has(params.spaceId)) {
+      return
+    }
+
+    const task = this.drainCatchUpSpace(params.spaceId)
+      .catch((error) => {
+        this.catchUpRequestedBySpaceId.delete(params.spaceId)
+        this.log.warn?.("GET_UPDATES space catch-up failed; continuing live delivery", {
+          spaceId: params.spaceId.toString(),
+          error: extractErrorMessage(error),
+        })
+      })
+      .finally(() => {
+        this.catchUpInFlightBySpaceId.delete(params.spaceId)
+      })
+    this.catchUpInFlightBySpaceId.set(params.spaceId, task)
+  }
+
+  private async drainCatchUpSpace(spaceId: bigint) {
+    const key = spaceId.toString()
+
+    while (true) {
+      const request = this.catchUpRequestedBySpaceId.get(spaceId)
+      if (!request) return
+
+      const lastSeq = this.state.lastSeqBySpaceId?.[key]
+      const startSeq = lastSeq ?? Math.max(0, request.endSeq - defaultColdStartCatchUpWindow)
+      if (request.endSeq <= startSeq) {
+        this.catchUpRequestedBySpaceId.delete(spaceId)
+        return
+      }
+
+      const stop = await this.doCatchUpSpace(spaceId, startSeq, request.endSeq)
+      if (stop) {
+        this.catchUpRequestedBySpaceId.delete(spaceId)
+        return
+      }
+
+      const latest = this.catchUpRequestedBySpaceId.get(spaceId)
+      const syncedSeq = this.state.lastSeqBySpaceId?.[key] ?? 0
+      if (!latest || latest.endSeq <= syncedSeq) {
+        this.catchUpRequestedBySpaceId.delete(spaceId)
+        return
+      }
+    }
+  }
+
+  private async doCatchUpSpace(spaceId: bigint, startSeq: number, endSeq: number): Promise<boolean> {
+    let cursor = startSeq
+
+    while (cursor < endSeq) {
+      const result = await this.invoke(Method.GET_UPDATES, {
+        oneofKind: "getUpdates",
+        getUpdates: GetUpdatesInput.create({
+          bucket: UpdateBucket.create({
+            type: {
+              oneofKind: "space",
+              space: {
+                spaceId,
+              },
+            },
+          }),
+          startSeq: BigInt(cursor),
+          seqEnd: BigInt(endSeq),
+          totalLimit: defaultCatchUpTotalLimit,
+          limit: defaultCatchUpPageLimit,
+        }),
+      })
+
+      const payload = result.getUpdates
+
+      if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
+        this.log.warn?.("GET_UPDATES space too long; fast-forwarding cursor", {
+          spaceId: spaceId.toString(),
+          seq: payload.seq,
+        })
+        this.bumpSpaceSeq(spaceId, endSeq)
+        if (payload.date !== 0n) {
+          this.state.dateCursor = payload.date
+        }
+        this.scheduleStateSave()
+        return true
+      }
+
+      const deliveredSeq = Number(payload.seq ?? 0n)
+      if (!Number.isSafeInteger(deliveredSeq)) {
+        this.log.warn?.("GET_UPDATES space returned non-integer seq; aborting catch-up", {
+          spaceId: spaceId.toString(),
+        })
+        return true
+      }
+
+      this.bumpSpaceSeq(spaceId, deliveredSeq)
+
+      for (const update of payload.updates) {
+        await this.handleUpdate(update)
+      }
+
+      if (payload.date !== 0n) {
+        this.state.dateCursor = payload.date
+      }
+      this.scheduleStateSave()
+
+      if (payload.final) return true
+      if (deliveredSeq <= cursor) {
+        this.log.warn?.("GET_UPDATES space made no progress; aborting catch-up", {
+          spaceId: spaceId.toString(),
+          cursor,
+          deliveredSeq,
+        })
+        return true
+      }
+      cursor = deliveredSeq
+    }
+
+    return false
+  }
+
   private peerToInputPeer(peer: Peer | undefined, chatId: bigint): InputPeer {
     if (!peer) {
       return InputPeer.create({ type: { oneofKind: "chat", chat: { chatId } } })
@@ -952,6 +1169,22 @@ export class InlineSdkClient {
     return InputPeer.create({
       type: { oneofKind: "chat", chat: { chatId: asInlineId(params.chatId as InlineIdLike, "chatId") } },
     })
+  }
+
+  private clearHistoryTargetFromParams(params: InlineSdkClearChatHistoryParams): ClearChatHistoryInput["target"] {
+    const hasChatId = params.chatId != null
+    const hasUserId = params.userId != null
+    const hasSpaceId = params.spaceId != null
+
+    if ([hasChatId, hasUserId, hasSpaceId].filter(Boolean).length !== 1) {
+      throw new Error("clearChatHistory: provide exactly one of `chatId`, `userId`, or `spaceId`")
+    }
+
+    if (hasSpaceId) {
+      return { oneofKind: "spaceId", spaceId: asInlineId(params.spaceId as InlineIdLike, "spaceId") }
+    }
+
+    return { oneofKind: "peerId", peerId: this.inputPeerFromTarget(params, "clearChatHistory") }
   }
 
   private async loadState() {
@@ -992,6 +1225,7 @@ export class InlineSdkClient {
       version: 1,
       ...(this.state.dateCursor != null ? { dateCursor: this.state.dateCursor } : {}),
       ...(this.state.lastSeqByChatId != null ? { lastSeqByChatId: { ...this.state.lastSeqByChatId } } : {}),
+      ...(this.state.lastSeqBySpaceId != null ? { lastSeqBySpaceId: { ...this.state.lastSeqBySpaceId } } : {}),
       ...(this.state.lastUserSeq != null ? { lastUserSeq: this.state.lastUserSeq } : {}),
     }
 
@@ -1148,6 +1382,13 @@ function normalizePositiveInt(value: number | undefined, field: string): number 
   if (value == null) return undefined
   if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
     throw new Error(`uploadFile: ${field} must be a positive integer`)
+  }
+  return value
+}
+
+function normalizeKeepLastDays(value: number): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0 || value > 36_500) {
+    throw new Error("clearChatHistory: `keepLastDays` must be 0 or a positive integer up to 36500")
   }
   return value
 }

@@ -10,12 +10,19 @@ final class OverlayManager: ObservableObject, ToastPresenting {
   }
 
   struct ToastModel: Equatable {
+    struct Countdown {
+      let startDate: Date
+      let duration: TimeInterval
+    }
+
     let id = UUID()
     let message: String
     let style: ToastStyle
     let showsSpinner: Bool
+    let countdown: Countdown?
     let actionTitle: String?
     let action: (@MainActor () -> Void)?
+    let placement: ToastPlacement
 
     static func == (lhs: ToastModel, rhs: ToastModel) -> Bool {
       lhs.id == rhs.id
@@ -24,12 +31,10 @@ final class OverlayManager: ObservableObject, ToastPresenting {
 
   private weak var toastContainerView: NSView?
   private var toastHostingView: NSHostingView<ToastBannerView>?
-  private var toastTopConstraint: NSLayoutConstraint?
+  private var toastPlacementConstraint: NSLayoutConstraint?
+  private var toastPlacement = ToastPlacement.standard
   @Published private(set) var toastModel: ToastModel?
   private var dismissTask: Task<Void, Never>?
-  private let toastYOffset: CGFloat = 80
-  private let toastVisibleTopOffset: CGFloat = 18
-  private let toastHiddenTopOffset: CGFloat = 8
 
   func attachToast(to containerView: NSView) {
     if toastContainerView !== containerView, toastHostingView != nil {
@@ -39,46 +44,83 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     ToastCenter.shared.presenter = self
   }
 
-  func showLoading(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?) {
+  func showLoading(
+    _ message: String,
+    actionTitle: String?,
+    action: (@MainActor () -> Void)?,
+    placement: ToastPlacement
+  ) {
     showToast(
       message: message,
       style: .info,
       showsSpinner: true,
+      countdown: nil,
       actionTitle: actionTitle,
       action: action,
+      placement: placement,
       autoDismissAfter: nil
     )
   }
 
-  func showInfo(_ message: String) {
+  func showUndoCountdown(
+    _ message: String,
+    duration: TimeInterval,
+    actionTitle: String,
+    action: @escaping @MainActor () -> Void,
+    placement: ToastPlacement
+  ) {
     showToast(
       message: message,
       style: .info,
       showsSpinner: false,
+      countdown: ToastModel.Countdown(startDate: Date(), duration: duration),
+      actionTitle: actionTitle,
+      action: action,
+      placement: placement,
+      autoDismissAfter: nil
+    )
+  }
+
+  func showInfo(_ message: String, placement: ToastPlacement) {
+    showToast(
+      message: message,
+      style: .info,
+      showsSpinner: false,
+      countdown: nil,
       actionTitle: nil,
       action: nil,
+      placement: placement,
       autoDismissAfter: 1.4
     )
   }
 
-  func showSuccess(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?) {
+  func showSuccess(
+    _ message: String,
+    actionTitle: String?,
+    action: (@MainActor () -> Void)?,
+    placement: ToastPlacement
+  ) {
     showToast(
       message: message,
       style: .success,
       showsSpinner: false,
+      countdown: nil,
       actionTitle: actionTitle,
       action: action,
+      placement: placement,
       autoDismissAfter: actionTitle == nil ? 1.4 : 6.0
     )
   }
 
-  func showError(_ message: String) {
+  func showError(_ message: String, placement: ToastPlacement) {
     showToast(
       message: message,
       style: .error,
       showsSpinner: false,
+      countdown: nil,
       actionTitle: nil,
       action: nil,
+      placement: placement,
       autoDismissAfter: 2.0
     )
   }
@@ -86,21 +128,23 @@ final class OverlayManager: ObservableObject, ToastPresenting {
   func dismissToast() {
     dismissTask?.cancel()
     dismissTask = nil
+    let placement = toastModel?.placement ?? toastPlacement
     toastModel = nil
 
     guard let host = toastHostingView else { return }
-    let topConstraint = toastTopConstraint
+    let placementConstraint = toastPlacementConstraint
     let containerView = host.superview
     NSAnimationContext.runAnimationGroup { ctx in
       ctx.duration = 0.2
       host.animator().alphaValue = 0
-      topConstraint?.animator().constant = toastHiddenTopOffset + toastYOffset
+      placementConstraint?.animator().constant = placement.hiddenConstant
       containerView?.animator().layoutSubtreeIfNeeded()
     } completionHandler: { [weak self, weak host] in
       Task { @MainActor in
+        guard self?.toastModel == nil else { return }
         host?.removeFromSuperview()
         self?.toastHostingView = nil
-        self?.toastTopConstraint = nil
+        self?.toastPlacementConstraint = nil
       }
     }
   }
@@ -109,8 +153,10 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     message: String,
     style: ToastStyle,
     showsSpinner: Bool,
+    countdown: ToastModel.Countdown?,
     actionTitle: String?,
     action: (@MainActor () -> Void)?,
+    placement: ToastPlacement,
     autoDismissAfter seconds: TimeInterval?
   ) {
     dismissTask?.cancel()
@@ -120,8 +166,10 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       message: message,
       style: style,
       showsSpinner: showsSpinner,
+      countdown: countdown,
       actionTitle: actionTitle,
-      action: action
+      action: action,
+      placement: placement
     )
     toastModel = model
 
@@ -150,6 +198,9 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     if let existing = toastHostingView {
       host = existing
       host.rootView = banner
+      if toastPlacement != placement || toastPlacementConstraint == nil {
+        setToastPlacement(placement, host: host, containerView: containerView, hidden: true)
+      }
     } else {
       host = NSHostingView(rootView: banner)
       host.translatesAutoresizingMaskIntoConstraints = false
@@ -157,22 +208,31 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       toastHostingView = host
       containerView.addSubview(host)
 
-      let topConstraint = host.topAnchor.constraint(equalTo: containerView.topAnchor, constant: toastHiddenTopOffset + toastYOffset)
-      toastTopConstraint = topConstraint
       NSLayoutConstraint.activate([
-        topConstraint,
         host.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
         host.widthAnchor.constraint(lessThanOrEqualTo: containerView.widthAnchor, constant: -36),
       ])
+      setToastPlacement(placement, host: host, containerView: containerView, hidden: true)
       containerView.layoutSubtreeIfNeeded()
     }
 
     NSAnimationContext.runAnimationGroup { ctx in
       ctx.duration = 0.2
       host.animator().alphaValue = 1
-      toastTopConstraint?.animator().constant = toastVisibleTopOffset + toastYOffset
+      toastPlacementConstraint?.animator().constant = placement.visibleConstant
       containerView.animator().layoutSubtreeIfNeeded()
     }
+  }
+
+  private func setToastPlacement(_ placement: ToastPlacement, host: NSView, containerView: NSView, hidden: Bool) {
+    toastPlacementConstraint?.isActive = false
+
+    let constraint = placement.constraint(host: host, containerView: containerView)
+    constraint.constant = hidden ? placement.hiddenConstant : placement.visibleConstant
+    constraint.isActive = true
+
+    toastPlacement = placement
+    toastPlacementConstraint = constraint
   }
 
   func showError(title: String? = nil, message: String, error: Error? = nil) {
@@ -185,6 +245,35 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     alert.addButton(withTitle: "OK")
 
     alert.runModal() // shows alert modally
+  }
+}
+
+private extension ToastPlacement {
+  var visibleConstant: CGFloat {
+    switch self {
+      case let .topCenter(offset):
+        offset
+      case let .bottomCenter(offset):
+        -offset
+    }
+  }
+
+  var hiddenConstant: CGFloat {
+    switch self {
+      case let .topCenter(offset):
+        max(8, offset - 10)
+      case .bottomCenter:
+        36
+    }
+  }
+
+  func constraint(host: NSView, containerView: NSView) -> NSLayoutConstraint {
+    switch self {
+      case .topCenter:
+        host.topAnchor.constraint(equalTo: containerView.topAnchor)
+      case .bottomCenter:
+        host.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+    }
   }
 }
 
@@ -204,7 +293,7 @@ private struct ToastOverlayModifier: ViewModifier {
 
   func body(content: Content) -> some View {
     content
-      .overlay(alignment: .top) {
+      .overlay {
         if let toast = overlay.toastModel {
           ToastBannerView(
             model: toast,
@@ -212,13 +301,27 @@ private struct ToastOverlayModifier: ViewModifier {
               overlay.dismissToast()
             }
           )
-          .padding(.top, 98)
           .padding(.horizontal, 18)
+          .toastPlacement(toast.placement)
           .transition(.opacity)
           .zIndex(10)
         }
       }
       .animation(.easeOut(duration: 0.2), value: overlay.toastModel?.id)
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func toastPlacement(_ placement: ToastPlacement) -> some View {
+    switch placement {
+      case let .topCenter(offset):
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+          .padding(.top, offset)
+      case let .bottomCenter(offset):
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+          .padding(.bottom, offset)
+    }
   }
 }
 
@@ -260,9 +363,10 @@ private struct ToastBannerView: View {
   }
 
   @ViewBuilder
-  private var toastContent: some View {
-    let shape = Capsule()
-    let content = HStack(spacing: 10) {
+  private var leadingIndicator: some View {
+    if let countdown = model.countdown {
+      CountdownToastIndicator(countdown: countdown)
+    } else {
       if model.showsSpinner {
         ProgressView()
           .controlSize(.small)
@@ -271,6 +375,14 @@ private struct ToastBannerView: View {
       Image(systemName: iconName)
         .font(.system(size: 12, weight: .semibold))
         .foregroundStyle(iconColor)
+    }
+  }
+
+  @ViewBuilder
+  private var toastContent: some View {
+    let shape = Capsule()
+    let content = HStack(spacing: 10) {
+      leadingIndicator
 
       Text(model.message)
         .font(.system(size: 13, weight: .medium))
@@ -322,5 +434,37 @@ private struct ToastBannerView: View {
 
   var body: some View {
     toastContent
+  }
+}
+
+private struct CountdownToastIndicator: View {
+  let countdown: OverlayManager.ToastModel.Countdown
+
+  private var duration: TimeInterval {
+    max(countdown.duration, 0.1)
+  }
+
+  var body: some View {
+    TimelineView(.periodic(from: countdown.startDate, by: 0.1)) { context in
+      let elapsed = max(0, context.date.timeIntervalSince(countdown.startDate))
+      let remaining = max(0, duration - elapsed)
+      let seconds = max(0, Int(ceil(remaining)))
+      let progress = max(0, min(1, remaining / duration))
+
+      ZStack {
+        Circle()
+          .stroke(Color.secondary.opacity(0.22), lineWidth: 2)
+        Circle()
+          .trim(from: 0, to: progress)
+          .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+        Text("\(seconds)")
+          .font(.system(size: 11, weight: .semibold, design: .rounded))
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
+      }
+      .frame(width: 24, height: 24)
+      .accessibilityLabel("\(seconds) seconds remaining")
+    }
   }
 }

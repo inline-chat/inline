@@ -3,7 +3,6 @@ import type {
   MessageActionResponseUi,
   MessageActions,
   MessageEntities,
-  Method,
   Peer,
   Reaction,
   RpcCall,
@@ -89,6 +88,29 @@ export type InlineSdkGetMessagesParams =
       messageIds: InlineIdLike[]
     }
 
+export type InlineSdkClearChatHistoryParams =
+  | {
+      chatId: InlineIdLike
+      userId?: never
+      spaceId?: never
+      keepLastDays: number
+      deleteReplyThreads?: boolean
+    }
+  | {
+      userId: InlineIdLike
+      chatId?: never
+      spaceId?: never
+      keepLastDays: number
+      deleteReplyThreads?: boolean
+    }
+  | {
+      spaceId: InlineIdLike
+      chatId?: never
+      userId?: never
+      keepLastDays: number
+      deleteReplyThreads?: boolean
+    }
+
 export type InlineSdkBinaryInput =
   | Blob
   | Uint8Array
@@ -121,6 +143,27 @@ export type InlineInboundEvent =
   | { kind: "message.new"; chatId: InlineId; message: Message; seq: number; date: InlineUnixSeconds }
   | { kind: "message.edit"; chatId: InlineId; message: Message; seq: number; date: InlineUnixSeconds }
   | { kind: "message.delete"; chatId: InlineId; messageIds: InlineId[]; seq: number; date: InlineUnixSeconds }
+  | ({
+      kind: "message.history.clear"
+      beforeDate?: InlineUnixSeconds
+      deleteReplyThreads: boolean
+      deletedChatIds: InlineId[]
+      orphanedChatIds: InlineId[]
+      detachedChatIds: InlineId[]
+      seq: number
+      date: InlineUnixSeconds
+    } & ({ chatId: InlineId; userId?: never } | { userId: InlineId; chatId?: never }))
+  | {
+      kind: "space.history.clear"
+      spaceId: InlineId
+      beforeDate?: InlineUnixSeconds
+      deleteReplyThreads: boolean
+      deletedChatIds: InlineId[]
+      orphanedChatIds: InlineId[]
+      detachedChatIds: InlineId[]
+      seq: number
+      date: InlineUnixSeconds
+    }
   | { kind: "reaction.add"; chatId: InlineId; reaction: Reaction; seq: number; date: InlineUnixSeconds }
   | { kind: "reaction.delete"; chatId: InlineId; emoji: string; messageId: InlineId; userId: InlineId; seq: number; date: InlineUnixSeconds }
   | {
@@ -148,6 +191,7 @@ export type InlineSdkState = {
   version: 1
   dateCursor?: InlineUnixSeconds
   lastSeqByChatId?: Record<string, number>
+  lastSeqBySpaceId?: Record<string, number>
   lastUserSeq?: number
 }
 
@@ -201,6 +245,7 @@ export const rpcInputKindByMethod = {
   38: "getMessages",
   48: "invokeMessageAction",
   49: "answerMessageAction",
+  53: "clearChatHistory",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -245,6 +290,7 @@ export const rpcResultKindByMethod = {
   38: "getMessages",
   48: "invokeMessageAction",
   49: "answerMessageAction",
+  53: "clearChatHistory",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod
