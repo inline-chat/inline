@@ -6,7 +6,7 @@ import {
 } from "./reply-threads"
 
 describe("inline/reply-threads", () => {
-  it("defaults replyThreads to false when unset", () => {
+  it("treats Inline reply threads as available by default", () => {
     expect(
       isInlineReplyThreadsEnabled({
         cfg: {
@@ -15,17 +15,17 @@ describe("inline/reply-threads", () => {
           },
         } as OpenClawConfig,
       }),
-    ).toBe(false)
+    ).toBe(true)
   })
 
-  it("reads the top-level replyThreads capability", () => {
+  it("keeps reply threads available even when legacy capability config is false", () => {
     expect(
       isInlineReplyThreadsEnabled({
         cfg: {
           channels: {
             inline: {
               capabilities: {
-                replyThreads: true,
+                replyThreads: false,
               },
             },
           },
@@ -34,7 +34,7 @@ describe("inline/reply-threads", () => {
     ).toBe(true)
   })
 
-  it("prefers account-level replyThreads over the base config", () => {
+  it("does not use account-level capability config as a tool/routing gate", () => {
     const cfg = {
       channels: {
         inline: {
@@ -58,6 +58,7 @@ describe("inline/reply-threads", () => {
     expect(getInlineReplyThreadsCapabilityConfig({ cfg, accountId: "work" })).toEqual({
       replyThreads: true,
     })
+    expect(isInlineReplyThreadsEnabled({ cfg, accountId: "missing" })).toBe(true)
   })
 
   it("enables reply-thread handling when placement mode is configured", () => {
@@ -147,6 +148,6 @@ describe("inline/reply-threads", () => {
     } as OpenClawConfig
 
     expect(isInlineReplyThreadsEnabled({ cfg, accountId: "work" })).toBe(true)
-    expect(isInlineReplyThreadsEnabled({ cfg, accountId: "missing" })).toBe(false)
+    expect(isInlineReplyThreadsEnabled({ cfg, accountId: "missing" })).toBe(true)
   })
 })
