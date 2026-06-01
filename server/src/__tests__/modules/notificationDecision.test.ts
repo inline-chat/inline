@@ -98,6 +98,21 @@ describe("notification decision", () => {
     expect(decision.needsExplicitMacNotification).toBe(true)
   })
 
+  test("mentions mode notifies reply-context in threads", () => {
+    const decision = decideNotification({
+      mode: UserSettingsNotificationsMode.Mentions,
+      isUrgentNudge: false,
+      isNudge: false,
+      isDM: false,
+      isReplyToUser: true,
+      isExplicitlyMentioned: false,
+      aiRequiresNotification: false,
+    })
+
+    expect(decision.shouldNotify).toBe(true)
+    expect(decision.needsExplicitMacNotification).toBe(true)
+  })
+
   test("urgent nudge bypasses none mode", () => {
     const decision = decideNotification({
       mode: UserSettingsNotificationsMode.None,
