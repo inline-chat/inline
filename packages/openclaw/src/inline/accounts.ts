@@ -331,9 +331,7 @@ export function inspectInlineAccount(params: {
 
   const tokenFile = account.tokenFile?.trim() ?? ""
   if (tokenFile) {
-    const token = tryReadSecretFileSync(tokenFile, "Inline bot token", {
-      rejectSymlink: true,
-    }) ?? ""
+    const token = tryReadInlineTokenFile(tokenFile)
     return {
       ...account,
       token: token || null,
@@ -413,9 +411,29 @@ export async function resolveInlineToken(account: ResolvedInlineAccount): Promis
     )
   }
 
-  const token = tryReadSecretFileSync(tokenFile, "Inline bot token", {
-    rejectSymlink: true,
-  })
+  const token = readInlineTokenFile(tokenFile)
   if (!token) throw new Error(`Inline tokenFile is empty or unreadable: ${tokenFile}`)
   return token
+}
+
+function tryReadInlineTokenFile(tokenFile: string): string {
+  try {
+    return tryReadSecretFileSync(tokenFile, "Inline bot token", {
+      rejectSymlink: true,
+    }) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function readInlineTokenFile(tokenFile: string): string {
+  try {
+    return tryReadSecretFileSync(tokenFile, "Inline bot token", {
+      rejectSymlink: true,
+    }) ?? ""
+  } catch (error) {
+    throw new Error(`Inline tokenFile is empty or unreadable: ${tokenFile}`, {
+      cause: error,
+    })
+  }
 }

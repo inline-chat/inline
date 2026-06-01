@@ -39,7 +39,7 @@
   "devDependencies": {
     "@types/node": "20.17.19",
     "@vitest/coverage-v8": "4.0.16",
-    "openclaw": "2026.5.18",
+    "openclaw": "2026.5.28",
     "typescript": "5.8.3",
     "vitest": "4.0.16"
   },
@@ -94,7 +94,7 @@
       "pluginApi": ">=2026.5.18"
     },
     "build": {
-      "openclawVersion": "2026.5.18"
+      "openclawVersion": "2026.5.28"
     },
     "release": {
       "publishToClawHub": true,
