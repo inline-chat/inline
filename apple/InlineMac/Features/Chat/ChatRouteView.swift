@@ -12,6 +12,7 @@ struct ChatRouteView: View {
   @Environment(\.nav) private var nav
 
   @State private var chatToolbarState = ChatToolbarState()
+  @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
 
   private var fallbackTitle: String {
@@ -65,6 +66,17 @@ struct ChatRouteView: View {
       .onChange(of: peer.toString(), initial: true) { oldPeer, newPeer in
         navigationTitle = fallbackTitle
         if oldPeer != newPeer {
+          chatToolbarState.dismissPresentation()
+          nudgePopoverPresented = false
+        }
+      }
+      .onEscapeKey(
+        "chat_route_popover_escape_\(peer.toString())",
+        enabled: chatToolbarState.presentation?.isPopover == true || nudgePopoverPresented
+      ) {
+        if nudgePopoverPresented {
+          nudgePopoverPresented = false
+        } else {
           chatToolbarState.dismissPresentation()
         }
       }
@@ -140,7 +152,7 @@ struct ChatRouteView: View {
 
         if case .user = peer {
           ToolbarItem {
-            NudgeButton(peer: peer)
+            NudgeButton(peer: peer, isPopoverPresented: $nudgePopoverPresented)
               .id(peer.id)
           }
 

@@ -17,6 +17,7 @@ public struct NudgeButton: View {
   public let chatId: Int64?
 
   @AppStorage("nudgeGuideSeen", store: UserDefaults.shared) private var hasSeenGuide = false
+  @Binding private var isPopoverPresented: Bool
   @State private var activePopover: NudgePopover?
   @State private var didLongPress = false
   @State private var showUrgent = false
@@ -31,13 +32,16 @@ public struct NudgeButton: View {
   @State private var isSending = false
   @State private var peerDisplayName: String? = nil
 
+  private let syncPopoverPresentation: Bool
   private let longPressDuration: TimeInterval = 1.5
   private let holdProgressRevealDelay: TimeInterval = 0.2
   private let holdProgressUpdateInterval: TimeInterval = 1.0 / 60.0
 
-  public init(peer: Peer, chatId: Int64? = nil) {
+  public init(peer: Peer, chatId: Int64? = nil, isPopoverPresented: Binding<Bool>? = nil) {
     self.peer = peer
     self.chatId = chatId
+    _isPopoverPresented = isPopoverPresented ?? .constant(false)
+    syncPopoverPresentation = isPopoverPresented != nil
   }
 
   public var body: some View {
@@ -149,12 +153,19 @@ public struct NudgeButton: View {
     .accessibilityLabel("Send nudge")
     .disabled(isSending)
     .onChange(of: activePopover) { _, newValue in
+      if syncPopoverPresentation {
+        isPopoverPresented = newValue != nil
+      }
       if newValue == nil {
         showUrgent = false
         holdProgress = 0
         cancelHoldProgress()
         cancelHoldHaptics()
       }
+    }
+    .onChange(of: isPopoverPresented) { _, newValue in
+      guard syncPopoverPresentation, !newValue else { return }
+      activePopover = nil
     }
   }
 
