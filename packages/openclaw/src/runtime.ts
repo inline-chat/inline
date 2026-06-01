@@ -1,23 +1,19 @@
 import type { PluginRuntime } from "openclaw/plugin-sdk/core"
+import { createPluginRuntimeStore } from "openclaw/plugin-sdk/runtime-store"
 
-const runtimeKey = "__inlineOpenClawRuntime"
+const {
+  setRuntime: setInlineRuntime,
+  clearRuntime: clearInlineRuntime,
+  tryGetRuntime: getOptionalInlineRuntime,
+  getRuntime: getInlineRuntime,
+} = createPluginRuntimeStore<PluginRuntime>({
+  pluginId: "inline",
+  errorMessage: "Inline runtime not initialized",
+})
 
-type InlineRuntimeGlobal = typeof globalThis & {
-  [runtimeKey]?: PluginRuntime | null
-}
-
-function runtimeStore(): InlineRuntimeGlobal {
-  return globalThis as InlineRuntimeGlobal
-}
-
-export function setInlineRuntime(next: PluginRuntime): void {
-  runtimeStore()[runtimeKey] = next
-}
-
-export function getInlineRuntime(): PluginRuntime {
-  const runtime = runtimeStore()[runtimeKey]
-  if (!runtime) {
-    throw new Error("Inline runtime not initialized")
-  }
-  return runtime
+export {
+  clearInlineRuntime,
+  getInlineRuntime,
+  getOptionalInlineRuntime,
+  setInlineRuntime,
 }

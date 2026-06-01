@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { PluginRuntime } from "openclaw/plugin-sdk"
 
 describe("runtime", () => {
-  beforeEach(() => {
-    delete (globalThis as Record<string, unknown>).__inlineOpenClawRuntime
+  beforeEach(async () => {
+    vi.resetModules()
+    const mod = await import("./runtime")
+    mod.clearInlineRuntime()
   })
 
   it("throws before initialization", async () => {
