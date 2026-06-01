@@ -222,7 +222,10 @@ final class ChatRouteToolbarTitleModel {
   }
 
   private func sync() {
-    title = resolvedTitle()
+    let nextTitle = resolvedTitle()
+    if shouldApplyResolvedTitle(nextTitle) {
+      title = nextTitle
+    }
     if !isEditingTitle {
       titleDraft = title
       emojiDraft = resolvedEmoji() ?? ""
@@ -260,6 +263,16 @@ final class ChatRouteToolbarTitleModel {
     return peer.isThread ? "Chat" : "Direct Message"
   }
 
+  private func shouldApplyResolvedTitle(_ nextTitle: String) -> Bool {
+    guard ReplyThreadTitleFallback.isGenericFallback(nextTitle) else { return true }
+    guard ReplyThreadTitleFallback.isReplyFallback(title),
+          !ReplyThreadTitleFallback.isGenericFallback(title)
+    else {
+      return true
+    }
+    return false
+  }
+
   private func resolvedIconPeer() -> ChatIcon.PeerType? {
     if let user = resolvedUserInfo() {
       return user.user.isCurrentUser() ? .savedMessage(user.user) : .user(user)
@@ -293,24 +306,16 @@ final class ChatRouteToolbarTitleModel {
       return .text(displayedConnectionState.title.lowercased())
     }
 
-    if peer.isPrivate {
-      if let typingText = ComposeActions.shared.getTypingDisplayText(for: peer), !typingText.isEmpty {
-        return .typing(typingText)
-      }
-
-      if let action = ComposeActions.shared.getComposeAction(for: peer)?.action, action != .typing {
-        return .text(action.toHumanReadable())
-      }
-
-      if let localTime = resolvedLocalTime() {
-        return .text(localTime)
-      }
-
-      return .none
-    }
-
     if let typingText = ComposeActions.shared.getTypingDisplayText(for: peer), !typingText.isEmpty {
       return .typing(typingText)
+    }
+
+    if let action = ComposeActions.shared.getComposeAction(for: peer)?.action, action != .typing {
+      return .text(action.toHumanReadable())
+    }
+
+    if peer.isPrivate {
+      return resolvedLocalTime().map(Status.text) ?? .none
     }
 
     if resolvedChat() != nil {
@@ -319,10 +324,6 @@ final class ChatRouteToolbarTitleModel {
 
     guard let user = resolvedUserInfo()?.user else { return .none }
     guard !user.isCurrentUser() else { return .none }
-
-    if let action = ComposeActions.shared.getComposeAction(for: peer)?.action, action != .typing {
-      return .text(action.toHumanReadable())
-    }
 
     guard let localTime = resolvedLocalTime(for: user) else {
       return .none
