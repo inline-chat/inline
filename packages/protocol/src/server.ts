@@ -188,6 +188,12 @@ export interface ServerUpdate {
          */
         clearChatHistory: ServerChatUpdateClearHistory;
     } | {
+        oneofKind: "messageAttachment";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateMessageAttachment message_attachment = 29;
+         */
+        messageAttachment: ServerChatUpdateMessageAttachment;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -386,6 +392,25 @@ export interface ServerChatUpdateMoved {
      * @generated from protobuf field: optional int64 new_space_id = 3;
      */
     newSpaceId?: bigint;
+}
+/**
+ * Update for a chat when an attachment is added or changed after the message was created.
+ *
+ * @generated from protobuf message server.ServerChatUpdateMessageAttachment
+ */
+export interface ServerChatUpdateMessageAttachment {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 msg_id = 2;
+     */
+    msgId: bigint;
+    /**
+     * @generated from protobuf field: int64 attachment_id = 3;
+     */
+    attachmentId: bigint;
 }
 // ------------------------------------------------------------
 // Space updates
@@ -669,7 +694,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 24, name: "user_chat_open", kind: "message", oneof: "update", T: () => ServerUserUpdateChatOpen },
             { no: 25, name: "user_message_action_invoked", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionInvoked },
             { no: 26, name: "user_message_action_answered", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionAnswered },
-            { no: 27, name: "clear_chat_history", kind: "message", oneof: "update", T: () => ServerChatUpdateClearHistory }
+            { no: 27, name: "clear_chat_history", kind: "message", oneof: "update", T: () => ServerChatUpdateClearHistory },
+            { no: 29, name: "message_attachment", kind: "message", oneof: "update", T: () => ServerChatUpdateMessageAttachment }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -842,6 +868,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         clearChatHistory: ServerChatUpdateClearHistory.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).clearChatHistory)
                     };
                     break;
+                case /* server.ServerChatUpdateMessageAttachment message_attachment */ 29:
+                    message.update = {
+                        oneofKind: "messageAttachment",
+                        messageAttachment: ServerChatUpdateMessageAttachment.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).messageAttachment)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -935,6 +967,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerChatUpdateClearHistory clear_chat_history = 27; */
         if (message.update.oneofKind === "clearChatHistory")
             ServerChatUpdateClearHistory.internalBinaryWrite(message.update.clearChatHistory, writer.tag(27, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateMessageAttachment message_attachment = 29; */
+        if (message.update.oneofKind === "messageAttachment")
+            ServerChatUpdateMessageAttachment.internalBinaryWrite(message.update.messageAttachment, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1617,6 +1652,69 @@ class ServerChatUpdateMoved$Type extends MessageType<ServerChatUpdateMoved> {
  * @generated MessageType for protobuf message server.ServerChatUpdateMoved
  */
 export const ServerChatUpdateMoved = new ServerChatUpdateMoved$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateMessageAttachment$Type extends MessageType<ServerChatUpdateMessageAttachment> {
+    constructor() {
+        super("server.ServerChatUpdateMessageAttachment", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "msg_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "attachment_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateMessageAttachment>): ServerChatUpdateMessageAttachment {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.msgId = 0n;
+        message.attachmentId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateMessageAttachment>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateMessageAttachment): ServerChatUpdateMessageAttachment {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 msg_id */ 2:
+                    message.msgId = reader.int64().toBigInt();
+                    break;
+                case /* int64 attachment_id */ 3:
+                    message.attachmentId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateMessageAttachment, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 msg_id = 2; */
+        if (message.msgId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.msgId);
+        /* int64 attachment_id = 3; */
+        if (message.attachmentId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.attachmentId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateMessageAttachment
+ */
+export const ServerChatUpdateMessageAttachment = new ServerChatUpdateMessageAttachment$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRemoveMember> {
     constructor() {

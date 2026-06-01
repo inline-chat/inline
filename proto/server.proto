@@ -41,6 +41,7 @@ message ServerUpdate {
     ServerUserUpdateMessageActionInvoked user_message_action_invoked = 25;
     ServerUserUpdateMessageActionAnswered user_message_action_answered = 26;
     ServerChatUpdateClearHistory clear_chat_history = 27;
+    ServerChatUpdateMessageAttachment message_attachment = 29;
   }
 }
 
@@ -124,6 +125,13 @@ message ServerChatUpdateMoved {
   int64 chat_id = 1;
   optional int64 old_space_id = 2;
   optional int64 new_space_id = 3;
+}
+
+// Update for a chat when an attachment is added or changed after the message was created.
+message ServerChatUpdateMessageAttachment {
+  int64 chat_id = 1;
+  int64 msg_id = 2;
+  int64 attachment_id = 3;
 }
 
 // ------------------------------------------------------------
