@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import InlineProtocol
+import RealtimeV2
 import Testing
 
 @testable import InlineKit
@@ -99,6 +100,28 @@ struct DialogChatListVisibilityTests {
       #expect(saved.archived == false)
       #expect(saved.chatListHidden == true)
     }
+  }
+
+  @Test("new thread open can wait for local chat creation")
+  func updateDialogOpenCanWaitForLocalChatCreation() {
+    let transaction = UpdateDialogOpenTransaction(
+      peerId: .thread(id: 44),
+      open: true,
+      requiresChatCreated: true
+    )
+    let defaultTransaction = UpdateDialogOpenTransaction(
+      peerId: .thread(id: 45),
+      open: true
+    )
+    let userTransaction = UpdateDialogOpenTransaction(
+      peerId: .user(id: 46),
+      open: true,
+      requiresChatCreated: true
+    )
+
+    #expect(transaction.blockers == [.chatCreated(chatId: 44)])
+    #expect(defaultTransaction.blockers.isEmpty)
+    #expect(userTransaction.blockers.isEmpty)
   }
 
   @Test("protocol dialog omission preserves local open state")
