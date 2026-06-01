@@ -483,7 +483,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       title: url.absoluteString,
       description: nil,
       photoId: nil,
-      duration: nil
+      duration: nil,
+      mediaType: nil
     )
   }
 

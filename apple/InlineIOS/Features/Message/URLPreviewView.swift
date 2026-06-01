@@ -1,9 +1,18 @@
 import InlineKit
-import Nuke
-import NukeUI
+import InlineUI
 import UIKit
 
-class URLPreviewView: UIView {
+class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
+  enum Mode {
+    case compact
+    case large
+  }
+
+  private enum Metrics {
+    static let compactImageSize = CGSize(width: 32, height: 32)
+    static let largeImageWidth: CGFloat = 240
+  }
+
   private let rectangleView: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -11,35 +20,90 @@ class URLPreviewView: UIView {
     return view
   }()
 
-  private let siteNameLabel = UILabel()
   private let titleLabel = UILabel()
   private let descriptionLabel = UILabel()
-  private let imageView: LazyImageView = {
-    let view = LazyImageView()
+  private let imageContainer: UIView = {
+    let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.contentMode = .scaleAspectFill
-    view.clipsToBounds = true
     view.layer.cornerRadius = 6
+    view.layer.masksToBounds = true
+    view.isHidden = true
+    view.isUserInteractionEnabled = false
+    return view
+  }()
+
+  private let imageView: PlatformPhotoView = {
+    let view = PlatformPhotoView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.photoContentMode = .aspectFill
+    view.showsTinyThumbnailBackground = true
+    view.showsLoadingPlaceholder = true
+    view.isUserInteractionEnabled = false
+    return view
+  }()
+
+  private let playIconView: UIImageView = {
+    let view = UIImageView(image: UIImage(systemName: "play.fill"))
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.contentMode = .scaleAspectFit
+    view.tintColor = .white
+    view.isHidden = true
+    view.isUserInteractionEnabled = false
     return view
   }()
 
   private weak var parentViewController: UIViewController?
   private var previewUrl: URL?
+  private var canRemove = false
+  private var onRemove: (() -> Void)?
+  private var activeConstraints: [NSLayoutConstraint] = []
 
   override init(frame: CGRect) {
     super.init(frame: frame)
+    setupImageContainer()
     setupTapGesture()
+    setupContextMenu()
   }
 
   required init?(coder: NSCoder) {
     super.init(coder: coder)
+    setupImageContainer()
     setupTapGesture()
+    setupContextMenu()
+  }
+
+  private func setupImageContainer() {
+    imageContainer.addSubview(imageView)
+    imageContainer.addSubview(playIconView)
+
+    NSLayoutConstraint.activate([
+      imageView.leadingAnchor.constraint(equalTo: imageContainer.leadingAnchor),
+      imageView.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
+      imageView.topAnchor.constraint(equalTo: imageContainer.topAnchor),
+      imageView.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor),
+
+      playIconView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
+      playIconView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
+      playIconView.widthAnchor.constraint(equalToConstant: 22),
+      playIconView.heightAnchor.constraint(equalToConstant: 22),
+    ])
   }
 
   private func setupTapGesture() {
     let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    tap.delegate = self
     addGestureRecognizer(tap)
     isUserInteractionEnabled = true
+  }
+
+  private func setupContextMenu() {
+    addInteraction(UIContextMenuInteraction(delegate: self))
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      for gesture in gestureRecognizers ?? [] where gesture is UILongPressGestureRecognizer {
+        gesture.delegate = self
+      }
+    }
   }
 
   @objc private func handleTap() {
@@ -51,17 +115,21 @@ class URLPreviewView: UIView {
     with preview: UrlPreview,
     photoInfo: PhotoInfo?,
     parentViewController: UIViewController?,
-    outgoing: Bool
+    outgoing: Bool,
+    mode: Mode = .compact,
+    reloadMessageOnFinish message: Message? = nil,
+    canRemove: Bool = false,
+    onRemove: (() -> Void)? = nil
   ) {
     self.parentViewController = parentViewController
-    previewUrl = URL(string: preview.url)
+    previewUrl = preview.openURL
+    self.canRemove = canRemove
+    self.onRemove = onRemove
 
-    subviews.forEach { $0.removeFromSuperview() }
+    resetLayout()
 
-    let maxWidth: CGFloat = 280
     let horizontalPadding: CGFloat = 8
-    let verticalPadding: CGFloat = 6
-    let interLabelSpacing: CGFloat = 4
+    let verticalPadding: CGFloat = mode == .large ? 7 : 4
     let rectangleWidth: CGFloat = 4
     let contentSpacing: CGFloat = 8
     let cornerRadius: CGFloat = 8
@@ -72,137 +140,115 @@ class URLPreviewView: UIView {
     let primaryTextColor = outgoing ? UIColor.white : (theme.primaryTextColor ?? .label)
     let secondaryTextColor = outgoing ? UIColor.white
       .withAlphaComponent(0.7) : (theme.primaryTextColor?.withAlphaComponent(0.7) ?? .secondaryLabel)
-    let rectangleColor = outgoing ? UIColor.white : (theme.accent ?? .systemBlue)
+    let rectangleColor = outgoing ? UIColor.white : theme.accent
 
-    siteNameLabel.text = preview.siteName
-    siteNameLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
-    siteNameLabel.textColor = primaryTextColor
-    siteNameLabel.numberOfLines = 1
-    siteNameLabel.isHidden = preview.siteName == nil
-    siteNameLabel.translatesAutoresizingMaskIntoConstraints = false
-    siteNameLabel.isUserInteractionEnabled = false
+    let isVideo = preview.isVideoPreview
+    let display = preview.displayContent(maxDescriptionLength: mode == .large ? 420 : 110)
 
-    titleLabel.text = preview.title
-    titleLabel.font = UIFont.systemFont(ofSize: 16, weight: .medium)
+    titleLabel.text = display.title
+    titleLabel.font = UIFont.systemFont(ofSize: mode == .large ? 15 : 13, weight: .medium)
     titleLabel.textColor = primaryTextColor
-    titleLabel.numberOfLines = 0
-    titleLabel.isHidden = preview.title == nil
+    titleLabel.numberOfLines = 1
+    titleLabel.lineBreakMode = .byTruncatingTail
+    titleLabel.isHidden = display.title.isEmpty
     titleLabel.translatesAutoresizingMaskIntoConstraints = false
     titleLabel.isUserInteractionEnabled = false
+    titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-    let shouldHideLoomDescription = isLoomPreview(preview)
-    let shouldShowDescription = !shouldHideLoomDescription && preview.description != nil
-    descriptionLabel.text = shouldShowDescription ? preview.description : nil
-    descriptionLabel.font = UIFont.systemFont(ofSize: 14)
+    let shouldShowDescription = display.subtitle != nil
+    descriptionLabel.text = display.subtitle
+    descriptionLabel.font = UIFont.systemFont(ofSize: 12)
     descriptionLabel.textColor = secondaryTextColor
-    descriptionLabel.numberOfLines = 0
+    descriptionLabel.numberOfLines = 1
+    descriptionLabel.lineBreakMode = .byTruncatingTail
     descriptionLabel.isHidden = !shouldShowDescription
     descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
     descriptionLabel.isUserInteractionEnabled = false
+    descriptionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-    imageView.isHidden = true
-    var imageAspect: CGFloat = 2.0 / 3.0 // Default aspect ratio
-    if let photoInfo, let bestSize = photoInfo.bestPhotoSize(), let urlString = bestSize.cdnUrl,
-       let imageUrl = URL(string: urlString)
-    {
-      imageView.isHidden = false
-      imageView.backgroundColor = bgColor.withAlphaComponent(0.2)
-      imageView.url = imageUrl
-      if let width = bestSize.width, let height = bestSize.height, width > 0, height > 0 {
-        imageAspect = CGFloat(height) / CGFloat(width)
-      }
-    }
-    imageView.isUserInteractionEnabled = false
+    configureImage(photoInfo: photoInfo, isVideo: isVideo, backgroundColor: bgColor, reloadMessage: message)
 
     rectangleView.backgroundColor = rectangleColor
     addSubview(rectangleView)
-    addSubview(siteNameLabel)
-    addSubview(titleLabel)
+
+    let bodyStack = UIStackView()
+    bodyStack.axis = .vertical
+    bodyStack.spacing = 4
+    bodyStack.alignment = mode == .large ? .leading : .fill
+    bodyStack.translatesAutoresizingMaskIntoConstraints = false
+    bodyStack.isUserInteractionEnabled = false
+
+    let textStack = UIStackView()
+    textStack.axis = .vertical
+    textStack.spacing = 3
+    textStack.alignment = .fill
+    textStack.translatesAutoresizingMaskIntoConstraints = false
+    textStack.isUserInteractionEnabled = false
+    textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    textStack.addArrangedSubview(titleLabel)
     if shouldShowDescription {
-      addSubview(descriptionLabel)
+      textStack.addArrangedSubview(descriptionLabel)
     }
-    addSubview(imageView)
 
-    NSLayoutConstraint.deactivate(constraints)
+    if mode == .compact {
+      let rowStack = UIStackView()
+      rowStack.axis = .horizontal
+      rowStack.spacing = 8
+      rowStack.alignment = .center
+      rowStack.translatesAutoresizingMaskIntoConstraints = false
+      rowStack.isUserInteractionEnabled = false
 
-    let maxHeight: CGFloat = 200
-    var isPortrait = false
-    var imageWidth: CGFloat = maxWidth
-    var imageHeight: CGFloat = maxHeight
-    if let photoInfo, let bestSize = photoInfo.bestPhotoSize(), let width = bestSize.width,
-       let height = bestSize.height,
-       width > 0, height > 0
-    {
-      let aspectRatio = CGFloat(width) / CGFloat(height)
-      isPortrait = height > width
-      
-      if isPortrait {
-        // Portrait: limit by height, ensure width doesn't exceed maxWidth
-        imageHeight = min(CGFloat(height), maxHeight)
-        imageWidth = min(imageHeight * aspectRatio, maxWidth)
-        // Recalculate height if width was constrained
-        if imageWidth == maxWidth {
-          imageHeight = imageWidth / aspectRatio
-        }
-      } else {
-        // Landscape: limit by width, ensure height doesn't exceed maxHeight
-        imageWidth = min(CGFloat(width), maxWidth)
-        imageHeight = min(imageWidth / aspectRatio, maxHeight)
-        // Recalculate width if height was constrained
-        if imageHeight == maxHeight {
-          imageWidth = imageHeight * aspectRatio
-        }
+      if !imageContainer.isHidden {
+        rowStack.addArrangedSubview(imageContainer)
+        activeConstraints.append(contentsOf: [
+          imageContainer.widthAnchor.constraint(equalToConstant: Metrics.compactImageSize.width),
+          imageContainer.heightAnchor.constraint(equalToConstant: Metrics.compactImageSize.height),
+        ])
       }
+
+      rowStack.addArrangedSubview(textStack)
+      bodyStack.addArrangedSubview(rowStack)
+    } else {
+      if !imageContainer.isHidden {
+        bodyStack.addArrangedSubview(imageContainer)
+        let imageWidth = imageContainer.widthAnchor.constraint(equalToConstant: Metrics.largeImageWidth)
+        imageWidth.priority = .defaultHigh
+        activeConstraints.append(contentsOf: [
+          imageWidth,
+          imageContainer.widthAnchor.constraint(lessThanOrEqualTo: bodyStack.widthAnchor),
+          imageContainer.heightAnchor.constraint(equalTo: imageContainer.widthAnchor, multiplier: 9.0 / 16.0),
+        ])
+      }
+      bodyStack.addArrangedSubview(textStack)
+      activeConstraints.append(textStack.widthAnchor.constraint(equalTo: bodyStack.widthAnchor))
     }
-    var layoutConstraints: [NSLayoutConstraint] = [
-      // Rectangle accent line
+
+    addSubview(bodyStack)
+
+    activeConstraints.append(contentsOf: [
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleView.widthAnchor.constraint(equalToConstant: rectangleWidth),
       rectangleView.topAnchor.constraint(equalTo: topAnchor),
       rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      // Site name label
-      siteNameLabel.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
-      siteNameLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      siteNameLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-
-      // Title label
-      titleLabel.topAnchor.constraint(equalTo: siteNameLabel.bottomAnchor, constant: interLabelSpacing),
-      titleLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-    ]
-
-    if shouldShowDescription {
-      layoutConstraints.append(contentsOf: [
-        descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: interLabelSpacing),
-        descriptionLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-        descriptionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-        imageView.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: verticalPadding),
-      ])
-    } else {
-      layoutConstraints.append(
-        imageView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: verticalPadding)
-      )
-    }
-
-    layoutConstraints.append(contentsOf: [
-      imageView.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      imageView.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth),
-      imageView.widthAnchor.constraint(equalToConstant: imageWidth),
-      imageView.heightAnchor.constraint(equalToConstant: imageHeight),
-      imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
+      bodyStack.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
+      bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+      bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
+      bodyStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
     ])
 
-    NSLayoutConstraint.activate(layoutConstraints)
-
-    let labels: [UILabel] = shouldShowDescription ? [siteNameLabel, titleLabel, descriptionLabel] : [siteNameLabel, titleLabel]
-    for label in labels {
-      label.preferredMaxLayoutWidth = 0
-    }
+    NSLayoutConstraint.activate(activeConstraints)
 
     backgroundColor = bgColor
     layer.cornerRadius = cornerRadius
     layer.masksToBounds = true
+  }
+
+  private func resetLayout() {
+    NSLayoutConstraint.deactivate(activeConstraints)
+    activeConstraints.removeAll()
+    subviews.forEach { $0.removeFromSuperview() }
   }
 
   override func layoutSubviews() {
@@ -218,30 +264,91 @@ class URLPreviewView: UIView {
     }
   }
 
-  // Calculate image size based on available width/height (max 280x180, keep aspect ratio)
-  private func heightForImage(width: CGFloat, height: CGFloat) -> CGFloat {
-    let maxWidth: CGFloat = 280
-    let maxHeight: CGFloat = 180
-    let aspect = width / max(height, 1)
-    var w = min(width, maxWidth)
-    var h = w / aspect
-    if h > maxHeight {
-      h = maxHeight
-      w = h * aspect
-    }
-    return h
+  static func preferredMode(for preview: UrlPreview) -> Mode {
+    preview.isVideoPreview ? .large : .compact
   }
 
-  private func isLoomPreview(_ preview: UrlPreview) -> Bool {
-    if let siteName = preview.siteName?.lowercased(), siteName.contains("loom") {
-      return true
+  private func configureImage(photoInfo: PhotoInfo?, isVideo: Bool, backgroundColor: UIColor, reloadMessage: Message?) {
+    imageContainer.backgroundColor = backgroundColor.withAlphaComponent(0.2)
+    imageContainer.isHidden = !isVideo && photoInfo == nil
+    playIconView.isHidden = !isVideo
+
+    guard let photoInfo else {
+      imageView.showsLoadingPlaceholder = isVideo
+      imageView.setPhoto(nil)
+      return
     }
 
-    if let host = URLComponents(string: preview.url)?.host?.lowercased(), host.contains("loom.com") {
-      return true
-    }
+    imageView.showsLoadingPlaceholder = true
+    imageView.setPhoto(photoInfo, reloadMessageOnFinish: reloadMessage)
+  }
 
-    return preview.url.lowercased().contains("loom.com")
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    guard previewUrl != nil else { return nil }
+
+    return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+      let openAction = UIAction(
+        title: "Open Link",
+        image: UIImage(systemName: "safari")
+      ) { _ in
+        guard let self, let url = self.previewUrl else { return }
+        InAppBrowser.shared.open(url, from: self.parentViewController)
+      }
+
+      let copyAction = UIAction(
+        title: "Copy Link",
+        image: UIImage(systemName: "doc.on.doc")
+      ) { [weak self] _ in
+        UIPasteboard.general.string = self?.previewUrl?.absoluteString
+      }
+
+      var actions: [UIMenuElement] = [openAction, copyAction]
+      if self?.canRemove == true {
+        let removeAction = UIAction(
+          title: "Remove",
+          image: UIImage(systemName: "trash"),
+          attributes: .destructive
+        ) { [weak self] _ in
+          self?.onRemove?()
+        }
+        actions.append(removeAction)
+      }
+
+      return UIMenu(title: "", children: actions)
+    }
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+  ) -> UITargetedPreview? {
+    let parameters = UIPreviewParameters()
+    parameters.backgroundColor = .clear
+    return UITargetedPreview(view: self, parameters: parameters)
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    true
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    false
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    false
   }
 }
 
@@ -287,7 +394,8 @@ struct URLPreviewView_Previews: PreviewProvider {
       title: previewTitle,
       description: previewDescription,
       photoId: 1,
-      duration: nil
+      duration: nil,
+      mediaType: nil
     )
   }
 

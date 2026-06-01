@@ -774,6 +774,35 @@ public extension AppDatabase {
         """)
     }
 
+    migrator.registerMigration("url preview media type") { db in
+      try db.alter(table: "urlPreview") { t in
+        t.add(column: "mediaType", .text)
+      }
+    }
+
+    migrator.registerMigration("url preview typed media") { db in
+      try db.alter(table: "urlPreview") { t in
+        t.add(column: "displayUrl", .text)
+        t.add(column: "provider", .text)
+        t.add(column: "author", .text)
+        t.add(column: "mediaKind", .text)
+        t.add(column: "videoId", .integer)
+        t.add(column: "documentId", .integer)
+        t.add(column: "externalUrl", .text)
+        t.add(column: "externalMimeType", .text)
+        t.add(column: "externalWidth", .integer)
+        t.add(column: "externalHeight", .integer)
+        t.add(column: "externalDuration", .integer)
+        t.add(column: "embedUrl", .text)
+        t.add(column: "embedType", .text)
+        t.add(column: "embedWidth", .integer)
+        t.add(column: "embedHeight", .integer)
+        t.add(column: "embedDuration", .integer)
+        t.add(column: "hasLargeMedia", .boolean)
+        t.add(column: "showLargeMedia", .boolean)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

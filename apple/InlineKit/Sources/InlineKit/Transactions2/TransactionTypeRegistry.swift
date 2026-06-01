@@ -12,6 +12,7 @@ public enum TransactionTypeRegistry {
       case is DeleteReactionTransaction: "delete_reaction"
       case is EditMessageTransaction: "edit_message"
       case is DeleteMessageTransaction: "delete_message"
+      case is DeleteMessageAttachmentTransaction: "delete_message_attachment"
       case is ClearChatHistoryTransaction: "clear_chat_history"
       case is CreateChatTransaction: "create_chat"
       case is CreateSubthreadTransaction: "create_subthread"
@@ -60,6 +61,7 @@ public enum TransactionTypeRegistry {
       case "delete_reaction": return try decoder.decode(DeleteReactionTransaction.self, from: data)
       case "edit_message": return try decoder.decode(EditMessageTransaction.self, from: data)
       case "delete_message": return try decoder.decode(DeleteMessageTransaction.self, from: data)
+      case "delete_message_attachment": return try decoder.decode(DeleteMessageAttachmentTransaction.self, from: data)
       case "clear_chat_history": return try decoder.decode(ClearChatHistoryTransaction.self, from: data)
       case "create_chat": return try decoder.decode(CreateChatTransaction.self, from: data)
       case "create_subthread": return try decoder.decode(CreateSubthreadTransaction.self, from: data)

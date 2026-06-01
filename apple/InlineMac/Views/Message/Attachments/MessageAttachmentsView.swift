@@ -7,8 +7,8 @@ class MessageAttachmentsView: NSStackView {
   // MARK: - Properties
 
   /// Message
-  let message: Message
-  private let usesOutgoingBubbleStyle: Bool
+  private var message: Message
+  private var usesOutgoingBubbleStyle: Bool
 
   /// Renderable attachments (order preserved)
   var attachments: [FullAttachment]
@@ -51,15 +51,34 @@ class MessageAttachmentsView: NSStackView {
     alignment = .leading
   }
 
-  func configure(attachments: [FullAttachment]) {
+  func configure(
+    attachments: [FullAttachment],
+    message: Message? = nil,
+    usesOutgoingBubbleStyle nextStyle: Bool? = nil
+  ) {
     log.trace("Configuring attachments: \(attachments)")
 
+    let nextMessage = message ?? self.message
+    let messageChanged = nextMessage != self.message
+    let nextStyle = nextStyle ?? usesOutgoingBubbleStyle
+    let styleChanged = nextStyle != usesOutgoingBubbleStyle
+    self.message = nextMessage
+    usesOutgoingBubbleStyle = nextStyle
+
     let renderableAttachments = attachments.filter(\.isRenderableAttachment)
-    let renderableIds = renderableAttachments.map(\.id)
-    let currentIds = self.attachments.map(\.id)
 
     // Short‑circuit if nothing changed
-    guard renderableIds != currentIds else { return }
+    guard renderableAttachments != self.attachments || styleChanged else {
+      if messageChanged {
+        updateURLPreviewViews(with: renderableAttachments, message: nextMessage)
+      }
+      return
+    }
+
+    if !styleChanged, updateExistingViews(with: renderableAttachments, message: nextMessage) {
+      self.attachments = renderableAttachments
+      return
+    }
 
     // Reset and rebuild in message order to keep UI deterministic
     attachmentsViewCleanup()
@@ -71,9 +90,7 @@ class MessageAttachmentsView: NSStackView {
     }
   }
 
-  /// Add attachment to the view
-  ///
-  /// TODO: Preserve order of attachments
+  /// Add attachment to the view.
   private func addAttachment(_ attachment: FullAttachment) {
     let attachmentView: AttachmentView
 
@@ -83,8 +100,8 @@ class MessageAttachmentsView: NSStackView {
         message: message,
         usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
       )
-    } else if attachment.isLoomPreview {
-      attachmentView = LoomAttachmentView(
+    } else if attachment.urlPreview != nil {
+      attachmentView = URLPreviewAttachmentView(
         fullAttachment: attachment,
         message: message,
         usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
@@ -96,6 +113,38 @@ class MessageAttachmentsView: NSStackView {
 
     addArrangedSubview(attachmentView)
     attachmentViews[attachment.id] = attachmentView
+  }
+
+  private func updateExistingViews(with next: [FullAttachment], message: Message) -> Bool {
+    guard next.count == attachments.count else { return false }
+
+    for (index, attachment) in next.enumerated() {
+      let previous = attachments[index]
+      guard previous.id == attachment.id,
+            let view = attachmentViews[attachment.id]
+      else {
+        return false
+      }
+
+      if let urlPreviewView = view as? URLPreviewAttachmentView {
+        guard urlPreviewView.canUpdate(with: attachment) else { return false }
+        continue
+      }
+
+      guard previous == attachment else { return false }
+    }
+
+    updateURLPreviewViews(with: next, message: message)
+
+    return true
+  }
+
+  private func updateURLPreviewViews(with next: [FullAttachment], message: Message) {
+    for attachment in next {
+      if let urlPreviewView = attachmentViews[attachment.id] as? URLPreviewAttachmentView {
+        urlPreviewView.update(fullAttachment: attachment, message: message)
+      }
+    }
   }
 
   private func attachmentsViewCleanup() {
@@ -112,23 +161,8 @@ class MessageAttachmentsView: NSStackView {
 // MARK: - Helpers
 
 extension FullAttachment {
-  /// Whether this attachment carries a Loom URL preview we can render.
-  var isLoomPreview: Bool {
-    guard let preview = urlPreview else { return false }
-
-    if let siteName = preview.siteName?.lowercased(), siteName.contains("loom") {
-      return true
-    }
-
-    if let host = URLComponents(string: preview.url)?.host?.lowercased(), host.contains("loom.com") {
-      return true
-    }
-
-    return preview.url.lowercased().contains("loom.com")
-  }
-
   /// Any attachment type the mac client currently knows how to render inline.
   var isRenderableAttachment: Bool {
-    externalTask != nil || isLoomPreview
+    externalTask != nil || urlPreview != nil
   }
 }

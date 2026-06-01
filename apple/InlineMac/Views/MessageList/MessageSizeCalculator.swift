@@ -368,6 +368,7 @@ class MessageSizeCalculator {
         hasDocument == other.hasDocument &&
         hasReactions == other.hasReactions &&
         hasAttachments == other.hasAttachments &&
+        attachmentItems.map { $0.size.height } == other.attachmentItems.map { $0.size.height } &&
         hasActionsRows == other.hasActionsRows &&
         hasTime == other.hasTime &&
         reactionsOutsideBubble == other.reactionsOutsideBubble &&
@@ -1113,24 +1114,29 @@ class MessageSizeCalculator {
     if hasAttachments, let attachmentsWidth {
       attachmentsPlan = LayoutPlan(size: .zero, spacing: .zero)
       attachmentsPlan!.size = NSSize(width: attachmentsWidth, height: 0)
+      let hasURLPreviewAttachment = renderableAttachments.contains { $0.urlPreview != nil }
       attachmentsPlan!.spacing = NSEdgeInsets(
-        top: Theme.messageTextAndPhotoSpacing,
+        top: hasURLPreviewAttachment ? Theme.urlPreviewGroupSpacing : Theme.messageTextAndPhotoSpacing,
         left: bubbleContentHorizontalInset,
-        bottom: 4, // between time and attackment
+        bottom: hasURLPreviewAttachment ? Theme.urlPreviewGroupBottomSpacing : 4,
         right: bubbleContentHorizontalInset
       )
 
-      attachmentItemsPlans = renderableAttachments.map { attachment in
+      attachmentItemsPlans = renderableAttachments.enumerated().map { index, attachment in
         var attachmentPlan = LayoutPlan(size: .zero, spacing: .zero)
+        let isLastAttachment = index == renderableAttachments.count - 1
 
         // Handle different types of attachments
         // External Task (Notion, Linear task, etc)
         if let _ = attachment.externalTask {
           attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
-          attachmentPlan.spacing = .bottom(Theme.messageAttachmentsSpacing)
-        } else if attachment.isLoomPreview {
-          attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.loomPreviewHeight)
-          attachmentPlan.spacing = .bottom(Theme.messageAttachmentsSpacing)
+          attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
+        } else if attachment.urlPreview != nil {
+          let height = attachment.urlPreview?.isVideoPreview == true
+            ? Theme.urlPreviewLargeHeight
+            : Theme.urlPreviewCompactHeight
+          attachmentPlan.size = NSSize(width: attachmentsWidth, height: height)
+          attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
         }
 
         // Add to total height
@@ -1732,21 +1738,27 @@ class MessageSizeCalculator {
     if hasAttachments, let attachmentsWidth {
       attachmentsPlan = LayoutPlan(size: .zero, spacing: .zero)
       attachmentsPlan!.size = NSSize(width: attachmentsWidth, height: 0)
+      let hasURLPreviewAttachment = renderableAttachments.contains { $0.urlPreview != nil }
       attachmentsPlan!.spacing = NSEdgeInsets(
-        top: Theme.messageTextAndPhotoSpacing,
+        top: hasURLPreviewAttachment ? Theme.urlPreviewGroupSpacing : Theme.messageTextAndPhotoSpacing,
         left: 0,
-        bottom: 4,
+        bottom: hasURLPreviewAttachment ? Theme.urlPreviewGroupBottomSpacing : 4,
         right: 0
       )
 
-      attachmentItemsPlans = renderableAttachments.map { attachment in
+      attachmentItemsPlans = renderableAttachments.enumerated().map { index, attachment in
         var attachmentPlan = LayoutPlan(size: .zero, spacing: .zero)
+        let isLastAttachment = index == renderableAttachments.count - 1
+
         if attachment.externalTask != nil {
           attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
-          attachmentPlan.spacing = .bottom(Theme.messageAttachmentsSpacing)
-        } else if attachment.isLoomPreview {
-          attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.loomPreviewHeight)
-          attachmentPlan.spacing = .bottom(Theme.messageAttachmentsSpacing)
+          attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
+        } else if attachment.urlPreview != nil {
+          let height = attachment.urlPreview?.isVideoPreview == true
+            ? Theme.urlPreviewLargeHeight
+            : Theme.urlPreviewCompactHeight
+          attachmentPlan.size = NSSize(width: attachmentsWidth, height: height)
+          attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
         }
 
         attachmentsPlan!.size.height += attachmentPlan.size.height
