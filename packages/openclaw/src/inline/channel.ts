@@ -1481,15 +1481,10 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         : []),
       "- Inline history tools: `read` and `search` return media-aware message payloads (`media`, `attachments`, `attachmentUrls`) so image-only history remains discoverable. `search` is chat-scoped; run it per chat.",
       "- Inline special tools: use `inline_nudge` to send a nudge, and `inline_forward` to forward message ids between chats or users.",
-      ...(isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
-        ? [
-            "- Inline reply threads are enabled: use `thread-create` to create a real reply thread under the current/target chat. On inbound turns, omit `messageId` to anchor it to the current message, or pass `messageId`/`parentMessageId` explicitly.",
-            "- Inline reply threads are enabled: use `thread-reply` to send into a real reply thread, with `threadId` set to the reply-thread chat id returned by `thread-create`.",
-            "- Inline reply-thread turns include nearby parent-chat context by default. If that context is incomplete, call `inline_parent_context` before answering.",
-          ]
-        : [
-            "- Inline reply threads are disabled: `thread-reply` uses the legacy reply path and `thread-create` creates a normal chat, not a dedicated Inline reply-thread chat.",
-          ]),
+      "- Inline reply threads: use normal `reply` for short or newly started parent-chat conversations unless the user asks for a thread.",
+      "- Inline reply threads: use `thread-create` to create or reuse a real reply thread under the current/target chat. On inbound turns, omit `messageId` to anchor it to the current message, or pass `messageId`/`parentMessageId` explicitly.",
+      "- Inline reply threads: use `thread-reply` to send into a real reply thread, with `threadId` set to the reply-thread chat id returned by `thread-create`. Reuse that `threadId`; do not create one thread per message.",
+      "- Inline reply-thread turns include nearby parent-chat context by default. If that context is incomplete, call `inline_parent_context` before answering.",
     ],
   },
 

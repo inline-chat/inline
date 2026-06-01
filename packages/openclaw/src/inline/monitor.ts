@@ -112,6 +112,11 @@ import {
   recordInlineThreadParticipation,
 } from "./thread-participation.js"
 import {
+  lookupInlineReplyThreadRoute,
+  rememberInlineReplyThreadRoute,
+  type InlineReplyThreadRouteRecord,
+} from "./thread-routes.js"
+import {
   logInboundDrop,
   resolveChannelMediaMaxBytes,
   resolveControlCommandGate,
@@ -1331,6 +1336,14 @@ function rememberInlineBotDelivery(params: {
     params.replyThreadContext.childChatId,
     { agentId: params.agentId },
   )
+  rememberInlineReplyThreadRoute({
+    accountId: params.accountId,
+    parentChatId: params.replyThreadContext.parentChatId,
+    threadId: params.replyThreadContext.childChatId,
+    parentMessageId: params.replyThreadContext.parentMessageId,
+    threadLabel: params.replyThreadContext.threadLabel,
+    agentId: params.agentId,
+  })
 }
 
 function hasBotMessageId(cache: Map<string, string[]>, chatId: bigint, messageId: bigint): boolean {
@@ -1988,6 +2001,54 @@ async function resolveInlineInboundReplyThreadContext(params: {
   }
 }
 
+function parseCachedInlineId(raw: string | undefined): bigint | null {
+  if (!raw || !/^\d+$/.test(raw)) return null
+  try {
+    return BigInt(raw)
+  } catch {
+    return null
+  }
+}
+
+async function resolveInlineReplyThreadContextFromRoute(params: {
+  route: InlineReplyThreadRouteRecord
+  client: InlineSdkClient
+  chatCache: Map<bigint, CachedChatInfo>
+  fallbackParentChatTitle: string | null
+}): Promise<InlineReplyThreadContext | null> {
+  const parentChatId = parseCachedInlineId(params.route.parentChatId)
+  const childChatId = parseCachedInlineId(params.route.threadId)
+  if (parentChatId == null || childChatId == null) {
+    return null
+  }
+  const parentMessageId = parseCachedInlineId(params.route.parentMessageId)
+  const parentChatInfo = await resolveChatInfo(params.client, params.chatCache, parentChatId).catch(() => ({
+    kind: "group" as const,
+    title: params.fallbackParentChatTitle,
+  }))
+  const anchorMessage =
+    parentMessageId != null
+      ? await loadInlineReplyThreadAnchorMessage({
+          client: params.client,
+          parentChatId,
+          parentMessageId,
+        }).catch(() => null)
+      : null
+  const labelSource = params.route.threadLabel ?? params.route.title ?? null
+
+  return {
+    childChatId,
+    parentChatId,
+    parentChatTitle: parentChatInfo.title ?? params.fallbackParentChatTitle,
+    parentMessageId,
+    threadLabel: buildInlineReplyThreadLabel({
+      title: labelSource,
+      anchorMessage,
+    }),
+    anchorMessage,
+  }
+}
+
 function normalizeInlineReplyThreadMode(raw: unknown): InlineReplyThreadMode {
   return raw === "thread" || raw === "main" ? raw : "auto"
 }
@@ -2282,9 +2343,7 @@ export async function monitorInlineProvider(params: {
     }
 
     const isGroup = chatInfo.kind !== "direct"
-    const replyThreadsEnabled =
-      account.config.capabilities?.replyThreads === true ||
-      isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+    const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
     const replyThreadContext = await resolveInlineInboundReplyThreadContext({
       replyThreadsEnabled,
       client,
@@ -2583,9 +2642,7 @@ export async function monitorInlineProvider(params: {
     }
 
     const isGroup = chatInfo.kind !== "direct"
-    const replyThreadsEnabled =
-      account.config.capabilities?.replyThreads === true ||
-      isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+    const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
     const replyThreadContext = await resolveInlineInboundReplyThreadContext({
       replyThreadsEnabled,
       client,
@@ -2714,6 +2771,16 @@ export async function monitorInlineProvider(params: {
       replyThreadContext && isGroup
         ? buildInlineReplyThreadSessionKey(route.sessionKey, replyThreadContext.childChatId)
         : route.sessionKey
+    if (replyThreadContext && isGroup) {
+      rememberInlineReplyThreadRoute({
+        accountId: account.accountId,
+        parentChatId: replyThreadContext.parentChatId,
+        threadId: replyThreadContext.childChatId,
+        parentMessageId: replyThreadContext.parentMessageId,
+        threadLabel: replyThreadContext.threadLabel,
+        agentId: route.agentId,
+      })
+    }
     const rememberSentBotMessage = (params: {
       chatId: bigint
       messageId: bigint | null | undefined
@@ -3242,6 +3309,31 @@ export async function monitorInlineProvider(params: {
       !shouldEditCallbackTargetInPlace
 
     if (shouldCreateDeliveryThread) {
+      const cachedRoute = await lookupInlineReplyThreadRoute({
+        accountId: account.accountId,
+        parentChatId: effectiveChatId,
+        parentMessageId: msg.id,
+        agentId: route.agentId,
+      }).catch((error) => {
+        statusSink?.({ lastError: `reply-thread route lookup failed: ${String(error)}` })
+        runtime.error?.(`inline reply-thread route lookup failed: ${String(error)}`)
+        return null
+      })
+      if (cachedRoute) {
+        deliveryReplyThreadContext = await resolveInlineReplyThreadContextFromRoute({
+          route: cachedRoute,
+          client,
+          chatCache,
+          fallbackParentChatTitle: effectiveGroupTitle,
+        }).catch((error) => {
+          statusSink?.({ lastError: `reply-thread route restore failed: ${String(error)}` })
+          runtime.error?.(`inline reply-thread route restore failed: ${String(error)}`)
+          return null
+        })
+      }
+    }
+
+    if (shouldCreateDeliveryThread && !deliveryReplyThreadContext) {
       const createdThread = await createInlineReplyThreadForMessage({
         client,
         parentChatId: effectiveChatId,
@@ -3264,13 +3356,35 @@ export async function monitorInlineProvider(params: {
           }),
           anchorMessage: createdThread.anchorMessage,
         }
+        rememberInlineReplyThreadRoute({
+          accountId: account.accountId,
+          parentChatId: deliveryReplyThreadContext.parentChatId,
+          threadId: deliveryReplyThreadContext.childChatId,
+          parentMessageId: deliveryReplyThreadContext.parentMessageId,
+          title: createdThread.title,
+          threadLabel: deliveryReplyThreadContext.threadLabel,
+          agentId: route.agentId,
+        })
       }
     }
     if (shouldCreateDeliveryThread && !deliveryReplyThreadContext) {
-      await answerCallbackIfNeeded().catch((error) => {
-        runtime.error?.(`inline callback answer failed: ${String(error)}`)
-      })
-      return
+      const cachedRoute = await lookupInlineReplyThreadRoute({
+        accountId: account.accountId,
+        parentChatId: effectiveChatId,
+        parentMessageId: msg.id,
+        agentId: route.agentId,
+      }).catch(() => null)
+      if (cachedRoute) {
+        deliveryReplyThreadContext = await resolveInlineReplyThreadContextFromRoute({
+          route: cachedRoute,
+          client,
+          chatCache,
+          fallbackParentChatTitle: effectiveGroupTitle,
+        }).catch(() => null)
+      }
+    }
+    if (shouldCreateDeliveryThread && !deliveryReplyThreadContext) {
+      runtime.error?.("inline create reply thread failed; falling back to parent chat delivery")
     }
     if (!replyThreadContext && deliveryReplyThreadContext?.anchorMessage != null) {
       effectiveHistoryContext = prependInlineReplyThreadAnchor({

@@ -920,7 +920,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
 
   const mod = await import("./monitor")
   const participationMod = await import("./thread-participation")
+  const routeMod = await import("./thread-routes")
   participationMod.clearInlineThreadParticipationCacheForTest()
+  routeMod.clearInlineReplyThreadRouteCacheForTest()
   return {
     monitorInlineProvider: mod.monitorInlineProvider,
     calls: {
@@ -1985,6 +1987,107 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("reuses a cached active reply thread for later long parent-chat replies", async () => {
+    const register = vi.fn(async () => {})
+    const now = Date.now()
+    const lookup = vi.fn(async (key: string) => {
+      if (!key.includes(":agent:main")) return undefined
+      return {
+        accountId: "default",
+        parentChatId: "88",
+        parentMessageId: "2000",
+        threadId: "8800",
+        threadLabel: "Stable project thread",
+        createdAt: now,
+        updatedAt: now,
+        agentId: "main",
+      }
+    })
+    const openKeyedStore = vi.fn(() => ({ register, lookup }))
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      openKeyedStore,
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 2003n,
+            date: 1_700_000_003n,
+            fromId: 51n,
+            message: "@inlinebot continue the long work",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 2000n,
+            date: 1_700_000_000n,
+            fromId: 51n,
+            message: "@inlinebot start the long work",
+          },
+          {
+            id: 2003n,
+            date: 1_700_000_003n,
+            fromId: 51n,
+            message: "@inlinebot continue the long work",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "cached thread reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "88": { replyThreadMode: "thread" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 8800n,
+          text: "cached thread reply",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SessionKey: "agent:main:inline:group:88:thread:8800",
+          ParentSessionKey: "agent:main:inline:group:88",
+          MessageThreadId: "8800",
+          ThreadLabel: "Stable project thread",
+        }),
+      )
+    })
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ oneofKind: "createSubthread" }),
+    )
+    expect(lookup).toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
   it("can override the parent-size gate to thread small ordinary chats", async () => {
     const harness = await setupMonitorHarness({
       me: {
@@ -2136,7 +2239,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("does not fall back to the parent chat when configured thread creation fails", async () => {
+  it("falls back to the parent chat when automatic thread creation fails", async () => {
     const harness = await setupMonitorHarness({
       me: {
         userId: 777n,
@@ -2160,7 +2263,7 @@ describe("inline/monitor", () => {
         "88": { kind: "group", title: "Project Room" },
       },
       dispatchReplyPayload: {
-        text: "should not send",
+        text: "parent fallback reply",
       },
     })
 
@@ -2183,9 +2286,24 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("inline create reply thread failed"))
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "parent fallback reply",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SessionKey: "agent:main:inline:group:88",
+          To: "inline:88",
+          OriginatingTo: "inline:88",
+        }),
+      )
     })
-    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    const ctx = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
+    expect(ctx).not.toHaveProperty("MessageThreadId")
+    expect(ctx).not.toHaveProperty("ParentSessionKey")
 
     await handle.stop()
   })

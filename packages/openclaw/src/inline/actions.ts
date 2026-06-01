@@ -21,11 +21,11 @@ import {
   type User,
 } from "@inline-chat/realtime-sdk"
 import { listInlineAccountIds, resolveInlineAccount, resolveInlineToken } from "./accounts.js"
-import { isInlineReplyThreadsEnabled } from "./reply-threads.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
 import { sanitizeInlineOutgoingText } from "./message-formatting.js"
 import { normalizeInlineTarget } from "./normalize.js"
+import { rememberInlineReplyThreadRoute } from "./thread-routes.js"
 import {
   sanitizeInlineActionCallbackData,
   sanitizeInlineActionLabel,
@@ -884,7 +884,7 @@ async function findMessageById(params: {
 async function withInlineClient<T>(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
-  fn: (client: InlineSdkClient) => Promise<T>
+  fn: (client: InlineSdkClient, account: ReturnType<typeof resolveInlineAccount>) => Promise<T>
 }): Promise<T> {
   const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
   if (!account.configured || !account.baseUrl) {
@@ -897,7 +897,7 @@ async function withInlineClient<T>(params: {
   })
   await client.connect()
   try {
-    return await params.fn(client)
+    return await params.fn(client, account)
   } finally {
     await client.close().catch(() => {})
   }
@@ -1238,21 +1238,19 @@ export const inlineMessageActions = {
     if (normalizedAction === "reply" || normalizedAction === "thread-reply") {
       const parseMarkdown =
         resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
-      const replyThreadsEnabled =
-        normalizedAction === "thread-reply" &&
-        isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
+      const isThreadReply = normalizedAction === "thread-reply"
       return await withInlineClient({
         cfg,
         accountId,
         fn: async (client) => {
           const actions = resolveInlineMessageActionsParam(params)
-          if (replyThreadsEnabled) {
+          if (isThreadReply) {
             const rawThreadId =
               readFlexibleId(params, "threadId") ??
               readStringParam(params, "threadId")
             if (!rawThreadId) {
               throw new Error(
-                "inline thread-reply: threadId is required when reply threads are enabled",
+                "inline thread-reply: threadId is required. Call thread-create first or use reply for the parent chat.",
               )
             }
             const chatId = parseInlineId(rawThreadId, "threadId")
@@ -1285,14 +1283,7 @@ export const inlineMessageActions = {
               replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
             })
           }
-          const replyParams =
-            normalizedAction === "thread-reply" &&
-            params.threadId != null &&
-            params.to == null &&
-            params.chatId == null &&
-            params.channelId == null
-              ? { ...params, to: params.threadId }
-              : params
+          const replyParams = params
           const chatId = resolveChatIdFromParams(replyParams)
           const replyToMsgId = parseInlineId(
             readFlexibleId(replyParams, "messageId") ??
@@ -1722,13 +1713,11 @@ export const inlineMessageActions = {
     }
 
     if (normalizedAction === "channel-create" || normalizedAction === "thread-create") {
-      const replyThreadsEnabled =
-        normalizedAction === "thread-create" &&
-        isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
+      const isThreadCreate = normalizedAction === "thread-create"
       return await withInlineClient({
         cfg,
         accountId,
-        fn: async (client) => {
+        fn: async (client, account) => {
           const title = requireVisibleActionText(
             readStringParam(params, "title") ??
               readStringParam(params, "name") ??
@@ -1757,7 +1746,7 @@ export const inlineMessageActions = {
             label: "participant",
           })
 
-          if (replyThreadsEnabled) {
+          if (isThreadCreate) {
             const parentChatId = resolveChatIdFromParams(params)
             const parentMessageId = parseOptionalInlineId(
               resolveThreadParentMessageId({
@@ -1785,13 +1774,24 @@ export const inlineMessageActions = {
                 `inline action: expected createSubthread result, got ${String(result.oneofKind)}`,
               )
             }
+            const createdChat = result.createSubthread.chat ?? null
+            if (createdChat?.id != null) {
+              const routeParentMessageId = createdChat.parentMessageId ?? parentMessageId
+              rememberInlineReplyThreadRoute({
+                accountId: account.accountId,
+                parentChatId: createdChat.parentChatId ?? parentChatId,
+                threadId: createdChat.id,
+                title: createdChat.title ?? title,
+                ...(routeParentMessageId != null ? { parentMessageId: routeParentMessageId } : {}),
+              })
+            }
             return jsonResult(
               toJsonSafe({
                 ok: true,
                 title,
                 parentChatId: String(parentChatId),
                 parentMessageId: parentMessageId != null ? String(parentMessageId) : null,
-                chat: result.createSubthread.chat ?? null,
+                chat: createdChat,
                 dialog: result.createSubthread.dialog ?? null,
                 anchorMessage: result.createSubthread.anchorMessage ?? null,
               }),

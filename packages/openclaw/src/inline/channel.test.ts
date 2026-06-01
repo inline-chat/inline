@@ -1326,11 +1326,11 @@ describe("inline/channel", () => {
     }
   })
 
-  it("describes reply-thread action semantics based on replyThreads config", async () => {
+  it("describes reply-thread action semantics as available routing tools", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")
 
-    const disabledHints =
+    const hints =
       inlineChannelPlugin.agentPrompt?.messageToolHints?.({
         cfg: {
           channels: {
@@ -1343,28 +1343,12 @@ describe("inline/channel", () => {
         accountId: "default",
       } as any) ?? []
 
-    expect(disabledHints.join("\n")).toContain("reply threads are disabled")
-    expect(disabledHints.join("\n")).toContain("legacy reply path")
-    expect(disabledHints.join("\n")).toContain("not a dedicated Inline reply-thread chat")
-    expect(disabledHints.join("\n")).toContain("attachmentUrls")
-
-    const enabledHints =
-      inlineChannelPlugin.agentPrompt?.messageToolHints?.({
-        cfg: {
-          channels: {
-            inline: {
-              token: "token",
-              capabilities: { replyThreads: true },
-            },
-          },
-        } as OpenClawConfig,
-        accountId: "default",
-      } as any) ?? []
-
-    expect(enabledHints.join("\n").toLowerCase()).toContain("reply thread")
-    expect(enabledHints.join("\n")).toContain("thread-create")
-    expect(enabledHints.join("\n")).toContain("current message")
-    expect(enabledHints.join("\n")).toContain("attachmentUrls")
+    expect(hints.join("\n").toLowerCase()).toContain("reply thread")
+    expect(hints.join("\n")).toContain("thread-create")
+    expect(hints.join("\n")).toContain("thread-reply")
+    expect(hints.join("\n")).toContain("normal `reply` for short")
+    expect(hints.join("\n")).toContain("do not create one thread per message")
+    expect(hints.join("\n")).toContain("attachmentUrls")
   })
 
   it("keeps gateway startAccount pending until monitor completion", async () => {
@@ -2249,7 +2233,7 @@ describe("inline/channel", () => {
     } as any)
 
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ chatId: 7n, text: "hi" }),
+      expect.objectContaining({ chatId: 42n, text: "hi" }),
     )
     expect(sendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ replyToMsgId: 42n }),
@@ -2265,14 +2249,14 @@ describe("inline/channel", () => {
     } as any)
 
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ chatId: 7n, text: "hi", replyToMsgId: 99n }),
+      expect.objectContaining({ chatId: 42n, text: "hi", replyToMsgId: 99n }),
     )
 
     expect(connect).toHaveBeenCalled()
     expect(close).toHaveBeenCalled()
   })
 
-  it("outbound sendText routes into the child reply-thread chat when replyThreads is enabled", async () => {
+  it("outbound sendText routes into the child reply-thread chat", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -2297,9 +2281,6 @@ describe("inline/channel", () => {
         inline: {
           token: "token",
           baseUrl: "https://api.inline.chat",
-          capabilities: {
-            replyThreads: true,
-          },
         },
       },
     } satisfies OpenClawConfig
@@ -2469,7 +2450,7 @@ describe("inline/channel", () => {
     expect(sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }))
   })
 
-  it("outbound sendMedia routes into the child reply-thread chat when replyThreads is enabled", async () => {
+  it("outbound sendMedia routes into the child reply-thread chat", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -2510,9 +2491,6 @@ describe("inline/channel", () => {
         inline: {
           token: "token",
           baseUrl: "https://api.inline.chat",
-          capabilities: {
-            replyThreads: true,
-          },
           parseMarkdown: true,
         },
       },
