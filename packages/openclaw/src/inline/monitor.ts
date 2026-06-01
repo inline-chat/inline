@@ -44,6 +44,17 @@ import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-r
 import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
 import { isReasoningReplyPayload } from "openclaw/plugin-sdk/reply-payload"
 import {
+  buildChannelProgressDraftLine,
+  buildChannelProgressDraftLineForEntry,
+  createChannelProgressDraftGate,
+  formatChannelProgressDraftText,
+  isChannelProgressDraftWorkToolName,
+  mergeChannelProgressDraftLine,
+  resolveChannelProgressDraftMaxLines,
+  resolveChannelStreamingPreviewToolProgress,
+  type ChannelProgressDraftLine,
+} from "openclaw/plugin-sdk/channel-streaming"
+import {
   findCodeRegions,
   isInsideCode,
   normalizeLowercaseStringOrEmpty,
@@ -178,6 +189,14 @@ type InlineEditStreamState = {
   finalTextAccumulator: string
   failed: boolean
   opChain: Promise<void>
+}
+
+type InlineProgressPlaceholderState = {
+  messageId: bigint | null
+  text: string
+  lines: Array<string | ChannelProgressDraftLine>
+  opChain: Promise<void>
+  closing: boolean
 }
 
 type InlinePendingHistoryEntry = {
@@ -821,21 +840,47 @@ function normalizeInlineStreamingMode(value: unknown): InlineStreamingMode | nul
   }
 }
 
+function resolveExplicitInlineStreamingMode(config: {
+  streaming?: unknown
+  streamMode?: unknown
+}): InlineStreamingMode | null {
+  const streaming = isRecord(config.streaming) ? config.streaming : null
+  return (
+    normalizeInlineStreamingMode(streaming?.mode) ??
+    normalizeInlineStreamingMode(config.streaming) ??
+    normalizeInlineStreamingMode(config.streamMode)
+  )
+}
+
 function resolveInlineStreamingMode(config: {
   streaming?: unknown
   streamMode?: unknown
   streamViaEditMessage?: boolean | undefined
 }): InlineStreamingMode {
-  const streaming = isRecord(config.streaming) ? config.streaming : null
-  const mode =
-    normalizeInlineStreamingMode(streaming?.mode) ??
-    normalizeInlineStreamingMode(config.streaming) ??
-    normalizeInlineStreamingMode(config.streamMode)
+  const mode = resolveExplicitInlineStreamingMode(config)
   if (mode) return mode
   if (typeof config.streaming === "boolean") {
     return config.streaming ? "partial" : "off"
   }
   return config.streamViaEditMessage === true ? "partial" : "off"
+}
+
+function resolveInlineProgressPlaceholderEnabled(config: {
+  streaming?: unknown
+  streamMode?: unknown
+  streamViaEditMessage?: boolean | undefined
+}): boolean {
+  const mode = resolveExplicitInlineStreamingMode(config)
+  if (mode === "off") return false
+  if (mode === "progress") return true
+  if (config.streaming === false) return false
+  if (isRecord(config.streaming) && isRecord(config.streaming.progress)) return true
+
+  return (
+    config.streaming === undefined &&
+    config.streamMode === undefined &&
+    config.streamViaEditMessage !== true
+  )
 }
 
 function resolveInlineBlockStreamingEnabled(config: {
@@ -852,6 +897,12 @@ function resolveInlineBlockStreamingEnabled(config: {
   if (mode === "block") return true
   if (mode === "off") return false
   return undefined
+}
+
+function shouldStartInlineProgressPlaceholderNow(
+  line: string | ChannelProgressDraftLine | undefined,
+): boolean {
+  return typeof line === "object" && line?.kind === "patch" && Boolean(line.detail)
 }
 
 function resolveInlineCommandMenuModelContext(params: {
@@ -3471,14 +3522,20 @@ export async function monitorInlineProvider(params: {
 
     const inlineStreamingMode = resolveInlineStreamingMode(account.config)
     const streamViaEditMessage =
-      (inlineStreamingMode === "partial" || inlineStreamingMode === "progress") &&
+      inlineStreamingMode === "partial" &&
       !shouldEditCallbackTargetInPlace
+    const progressPlaceholderEnabled =
+      resolveInlineProgressPlaceholderEnabled(account.config) &&
+      !shouldEditCallbackTargetInPlace
+    const progressToolProgressEnabled =
+      progressPlaceholderEnabled && resolveChannelStreamingPreviewToolProgress(account.config)
+    const suppressDefaultToolProgressMessages = progressPlaceholderEnabled
     const canReplyToSourceMessage = deliveryChatId === chatId
     const defaultReplyToMsgId =
       canReplyToSourceMessage && isGroup && msg.replyToMsgId != null ? msg.id : undefined
     const inlineBlockStreamingEnabled = resolveInlineBlockStreamingEnabled(account.config)
     const disableBlockStreaming =
-      streamViaEditMessage
+      progressPlaceholderEnabled || streamViaEditMessage
         ? true
         : typeof inlineBlockStreamingEnabled === "boolean"
         ? !inlineBlockStreamingEnabled
@@ -3490,6 +3547,128 @@ export async function monitorInlineProvider(params: {
       finalTextAccumulator: "",
       failed: false,
       opChain: Promise.resolve(),
+    }
+    const progressSeed = `${account.accountId}:${String(deliveryChatId)}:${String(msg.id)}`
+    const progressState: InlineProgressPlaceholderState = {
+      messageId: null,
+      text: "",
+      lines: [],
+      opChain: Promise.resolve(),
+      closing: false,
+    }
+    const renderInlineProgressPlaceholder = async (): Promise<void> => {
+      if (!progressPlaceholderEnabled || progressState.closing) return
+      const text = sanitizeInlineDeliveryText(
+        formatChannelProgressDraftText({
+          entry: account.config,
+          lines: progressState.lines,
+          seed: progressSeed,
+        }),
+      ).trim()
+      if (!text || text === progressState.text) return
+
+      progressState.opChain = progressState.opChain
+        .then(async () => {
+          if (progressState.closing || text === progressState.text) return
+          if (progressState.messageId == null) {
+            const sent = await client.sendMessage({
+              chatId: deliveryChatId,
+              text,
+              sendMode: "silent",
+            })
+            if (sent.messageId == null) {
+              throw new Error("inline progress placeholder: sendMessage returned no messageId")
+            }
+            progressState.messageId = sent.messageId
+            rememberSentBotMessage({
+              chatId: deliveryChatId,
+              messageId: sent.messageId,
+              replyThreadContext: deliveryReplyThreadContext,
+            })
+          } else {
+            const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+              oneofKind: "editMessage",
+              editMessage: {
+                messageId: progressState.messageId,
+                peerId: buildChatPeer(deliveryChatId),
+                text,
+              },
+            })
+            if (result.oneofKind !== "editMessage") {
+              throw new Error(
+                `inline progress placeholder: expected editMessage result, got ${String(result.oneofKind)}`,
+              )
+            }
+          }
+          progressState.text = text
+          statusSink?.({ lastOutboundAt: Date.now() })
+        })
+        .catch((error) => {
+          runtime.error?.(`inline progress placeholder failed: ${String(error)}`)
+        })
+
+      await progressState.opChain
+    }
+    const progressDraftGate = createChannelProgressDraftGate({
+      onStart: renderInlineProgressPlaceholder,
+    })
+    const pushInlineProgressPlaceholder = async (
+      line?: string | ChannelProgressDraftLine,
+      options?: { toolName?: string; startImmediately?: boolean },
+    ): Promise<void> => {
+      if (!progressPlaceholderEnabled || progressState.closing) return
+      if (options?.toolName !== undefined && !isChannelProgressDraftWorkToolName(options.toolName)) {
+        return
+      }
+
+      const normalized = typeof line === "string" ? line.replace(/\s+/g, " ").trim() : line?.text.trim()
+      if (line && !normalized) return
+      if (progressToolProgressEnabled && line && normalized) {
+        const nextLines = mergeChannelProgressDraftLine(progressState.lines, line, {
+          maxLines: resolveChannelProgressDraftMaxLines(account.config),
+        })
+        if (nextLines !== progressState.lines) {
+          progressState.lines = nextLines
+        }
+      }
+
+      const alreadyStarted = progressDraftGate.hasStarted
+      if (options?.startImmediately || shouldStartInlineProgressPlaceholderNow(line)) {
+        await progressDraftGate.startNow()
+      } else {
+        await progressDraftGate.noteWork()
+      }
+      if (alreadyStarted && progressDraftGate.hasStarted) {
+        await renderInlineProgressPlaceholder()
+      }
+    }
+    const cleanupInlineProgressPlaceholder = async (): Promise<void> => {
+      progressDraftGate.cancel()
+      progressState.closing = true
+      await progressState.opChain
+
+      const messageId = progressState.messageId
+      if (messageId == null) return
+
+      try {
+        const result = await client.invokeRaw(Method.DELETE_MESSAGES, {
+          oneofKind: "deleteMessages",
+          deleteMessages: {
+            peerId: buildChatPeer(deliveryChatId),
+            messageIds: [messageId],
+          },
+        })
+        if (result.oneofKind !== "deleteMessages") {
+          throw new Error(
+            `inline progress placeholder: expected deleteMessages result, got ${String(result.oneofKind)}`,
+          )
+        }
+      } catch (error) {
+        runtime.error?.(`inline progress placeholder cleanup failed: ${String(error)}`)
+      } finally {
+        progressState.messageId = null
+        progressState.text = ""
+      }
     }
     let finalDeliveredForCurrentAssistantMessage = false
     const resetEditStreamForAssistantMessage = async (): Promise<void> => {
@@ -3574,6 +3753,12 @@ export async function monitorInlineProvider(params: {
       })
       await editStreamState.opChain
     }
+    const buildInlineProgressLineForEntry = (
+      input: Parameters<typeof buildChannelProgressDraftLineForEntry>[1],
+      options?: Parameters<typeof buildChannelProgressDraftLineForEntry>[2],
+    ): ChannelProgressDraftLine | undefined =>
+      buildChannelProgressDraftLineForEntry(account.config, input, options)
+
     const replyOptions = {
       ...(onModelSelected ? { onModelSelected: onModelSelected as (ctx: unknown) => void } : {}),
       blockReplyTimeoutMs: 25_000,
@@ -3591,26 +3776,175 @@ export async function monitorInlineProvider(params: {
             },
           }
         : {}),
-      ...(streamViaEditMessage
+      ...(progressPlaceholderEnabled
         ? {
-            onToolStart: async () => {
-              await resetEditStreamOnBoundary()
+            onReasoningStream: async () => {
+              await pushInlineProgressPlaceholder()
             },
           }
         : {}),
-      ...(streamViaEditMessage
+      ...(streamViaEditMessage || progressPlaceholderEnabled
+        ? {
+            onToolStart: async (payload: {
+              name?: string
+              phase?: string
+              args?: Record<string, unknown>
+              detailMode?: "explain" | "raw"
+            }) => {
+              await resetEditStreamOnBoundary()
+              const toolName = payload.name?.trim()
+              await pushInlineProgressPlaceholder(
+                buildInlineProgressLineForEntry(
+                  {
+                    event: "tool",
+                    ...(toolName ? { name: toolName } : {}),
+                    ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+                    ...(payload.args !== undefined ? { args: payload.args } : {}),
+                  },
+                  payload.detailMode ? { detailMode: payload.detailMode } : undefined,
+                ),
+                {
+                  ...(toolName ? { toolName } : {}),
+                  startImmediately: true,
+                },
+              )
+            },
+          }
+        : {}),
+      ...(progressPlaceholderEnabled
+        ? {
+            onItemEvent: async (payload: {
+              itemId?: string
+              kind?: string
+              title?: string
+              name?: string
+              phase?: string
+              status?: string
+              summary?: string
+              progressText?: string
+              meta?: string
+            }) => {
+              await pushInlineProgressPlaceholder(
+                buildInlineProgressLineForEntry({
+                  event: "item",
+                  ...(payload.itemId !== undefined ? { itemId: payload.itemId } : {}),
+                  ...(payload.kind !== undefined ? { itemKind: payload.kind } : {}),
+                  ...(payload.title !== undefined ? { title: payload.title } : {}),
+                  ...(payload.name !== undefined ? { name: payload.name } : {}),
+                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+                  ...(payload.status !== undefined ? { status: payload.status } : {}),
+                  ...(payload.summary !== undefined ? { summary: payload.summary } : {}),
+                  ...(payload.progressText !== undefined ? { progressText: payload.progressText } : {}),
+                  ...(payload.meta !== undefined ? { meta: payload.meta } : {}),
+                }),
+              )
+            },
+            onPlanUpdate: async (payload: {
+              phase?: string
+              title?: string
+              explanation?: string
+              steps?: string[]
+            }) => {
+              if (payload.phase !== "update") return
+              await pushInlineProgressPlaceholder(
+                buildChannelProgressDraftLine({
+                  event: "plan",
+                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+                  ...(payload.title !== undefined ? { title: payload.title } : {}),
+                  ...(payload.explanation !== undefined ? { explanation: payload.explanation } : {}),
+                  ...(payload.steps !== undefined ? { steps: payload.steps } : {}),
+                }),
+              )
+            },
+            onApprovalEvent: async (payload: {
+              phase?: string
+              title?: string
+              command?: string
+              reason?: string
+              message?: string
+            }) => {
+              if (payload.phase !== "requested") return
+              await pushInlineProgressPlaceholder(
+                buildChannelProgressDraftLine({
+                  event: "approval",
+                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+                  ...(payload.title !== undefined ? { title: payload.title } : {}),
+                  ...(payload.command !== undefined ? { command: payload.command } : {}),
+                  ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+                  ...(payload.message !== undefined ? { message: payload.message } : {}),
+                }),
+                { startImmediately: true },
+              )
+            },
+            onCommandOutput: async (payload: {
+              phase?: string
+              title?: string
+              name?: string
+              status?: string
+              exitCode?: number | null
+            }) => {
+              if (payload.phase !== "end") return
+              await pushInlineProgressPlaceholder(
+                buildChannelProgressDraftLine({
+                  event: "command-output",
+                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+                  ...(payload.title !== undefined ? { title: payload.title } : {}),
+                  ...(payload.name !== undefined ? { name: payload.name } : {}),
+                  ...(payload.status !== undefined ? { status: payload.status } : {}),
+                  ...(payload.exitCode !== undefined ? { exitCode: payload.exitCode } : {}),
+                }),
+              )
+            },
+            onPatchSummary: async (payload: {
+              phase?: string
+              title?: string
+              name?: string
+              added?: string[]
+              modified?: string[]
+              deleted?: string[]
+              summary?: string
+            }) => {
+              if (payload.phase !== "end") return
+              await pushInlineProgressPlaceholder(
+                buildChannelProgressDraftLine({
+                  event: "patch",
+                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+                  ...(payload.title !== undefined ? { title: payload.title } : {}),
+                  ...(payload.name !== undefined ? { name: payload.name } : {}),
+                  ...(payload.added !== undefined ? { added: payload.added } : {}),
+                  ...(payload.modified !== undefined ? { modified: payload.modified } : {}),
+                  ...(payload.deleted !== undefined ? { deleted: payload.deleted } : {}),
+                  ...(payload.summary !== undefined ? { summary: payload.summary } : {}),
+                }),
+              )
+            },
+          }
+        : {}),
+      ...(streamViaEditMessage || progressPlaceholderEnabled
         ? {
             onCompactionStart: async () => {
               await resetEditStreamOnBoundary()
+              await pushInlineProgressPlaceholder("Compacting context", {
+                startImmediately: true,
+              })
             },
           }
         : {}),
-      ...(streamViaEditMessage
+      ...(streamViaEditMessage || progressPlaceholderEnabled
         ? {
             onCompactionEnd: async () => {
               await resetEditStreamOnBoundary()
+              await pushInlineProgressPlaceholder("Resuming", {
+                startImmediately: true,
+              })
             },
           }
+        : {}),
+      ...(suppressDefaultToolProgressMessages
+        ? { suppressDefaultToolProgressMessages: true }
+        : {}),
+      ...(progressPlaceholderEnabled
+        ? { allowProgressCallbacksWhenSourceDeliverySuppressed: true }
         : {}),
       ...(typeof disableBlockStreaming === "boolean" ? { disableBlockStreaming } : {}),
     }
@@ -3633,6 +3967,7 @@ export async function monitorInlineProvider(params: {
             ) => {
               const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
               if (!visiblePayload) return
+              await cleanupInlineProgressPlaceholder()
 
               const payloadRecord = visiblePayload as InlineReplyPayload & {
                 interactive?: unknown
@@ -3824,6 +4159,7 @@ export async function monitorInlineProvider(params: {
         runtime.error?.(`inline dispatch failed: ${String(error)}`)
       }
 
+      await cleanupInlineProgressPlaceholder()
       if (!delivered && streamViaEditMessage && editStreamState.messageId != null) {
         delivered = true
       }
