@@ -110,6 +110,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case revokeSession // = 50
   case updateDialogOpen // = 51
   case updateDialogOrder // = 52
+  case clearChatHistory // = 53
   case deleteBot // = 54
   case UNRECOGNIZED(Int)
 
@@ -172,6 +173,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 50: self = .revokeSession
     case 51: self = .updateDialogOpen
     case 52: self = .updateDialogOrder
+    case 53: self = .clearChatHistory
     case 54: self = .deleteBot
     default: self = .UNRECOGNIZED(rawValue)
     }
@@ -232,6 +234,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .revokeSession: return 50
     case .updateDialogOpen: return 51
     case .updateDialogOrder: return 52
+    case .clearChatHistory: return 53
     case .deleteBot: return 54
     case .UNRECOGNIZED(let i): return i
     }
@@ -292,6 +295,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .revokeSession,
     .updateDialogOpen,
     .updateDialogOrder,
+    .clearChatHistory,
     .deleteBot,
   ]
 
@@ -3323,6 +3327,13 @@ public struct RpcCall: Sendable {
     set {input = .updateDialogOrder(newValue)}
   }
 
+  public var clearChatHistory_p: ClearChatHistoryInput {
+    get {
+      if case .clearChatHistory_p(let v)? = input {return v}
+      return ClearChatHistoryInput()
+    }
+    set {input = .clearChatHistory_p(newValue)}
+  }
 
   public var deleteBot: DeleteBotInput {
     get {
@@ -3387,6 +3398,7 @@ public struct RpcCall: Sendable {
     case revokeSession(RevokeSessionInput)
     case updateDialogOpen(UpdateDialogOpenInput)
     case updateDialogOrder(UpdateDialogOrderInput)
+    case clearChatHistory_p(ClearChatHistoryInput)
     case deleteBot(DeleteBotInput)
 
   }
@@ -3825,6 +3837,13 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .updateDialogOrder(newValue)}
   }
 
+  public var clearChatHistory_p: ClearChatHistoryResult {
+    get {
+      if case .clearChatHistory_p(let v)? = _storage._result {return v}
+      return ClearChatHistoryResult()
+    }
+    set {_uniqueStorage()._result = .clearChatHistory_p(newValue)}
+  }
 
   public var deleteBot: DeleteBotResult {
     get {
@@ -3889,6 +3908,7 @@ public struct RpcResult: @unchecked Sendable {
     case revokeSession(RevokeSessionResult)
     case updateDialogOpen(UpdateDialogOpenResult)
     case updateDialogOrder(UpdateDialogOrderResult)
+    case clearChatHistory_p(ClearChatHistoryResult)
     case deleteBot(DeleteBotResult)
 
   }
@@ -5697,6 +5717,61 @@ public struct DeleteMessagesResult: Sendable {
   public init() {}
 }
 
+public struct ClearChatHistoryInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Exactly one target must be set: peer_id for one chat/DM, or space_id for all chats in a space.
+  public var target: ClearChatHistoryInput.OneOf_Target? = nil
+
+  public var peerID: InputPeer {
+    get {
+      if case .peerID(let v)? = target {return v}
+      return InputPeer()
+    }
+    set {target = .peerID(newValue)}
+  }
+
+  public var spaceID: Int64 {
+    get {
+      if case .spaceID(let v)? = target {return v}
+      return 0
+    }
+    set {target = .spaceID(newValue)}
+  }
+
+  /// 0 deletes all messages. Positive values keep the last N days and delete older messages.
+  public var keepLastDays: Int32 = 0
+
+  /// If true, reply-thread subthreads anchored to deleted messages are deleted too.
+  /// If false, those subthreads are left orphaned.
+  public var deleteReplyThreads: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  /// Exactly one target must be set: peer_id for one chat/DM, or space_id for all chats in a space.
+  public enum OneOf_Target: Equatable, Sendable {
+    case peerID(InputPeer)
+    case spaceID(Int64)
+
+  }
+
+  public init() {}
+}
+
+public struct ClearChatHistoryResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public struct EditMessageInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -6989,6 +7064,13 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .messageActionAnswered(newValue)}
   }
 
+  public var clearChatHistory_p: UpdateClearChatHistory {
+    get {
+      if case .clearChatHistory_p(let v)? = _storage._update {return v}
+      return UpdateClearChatHistory()
+    }
+    set {_uniqueStorage()._update = .clearChatHistory_p(newValue)}
+  }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -7036,6 +7118,7 @@ public struct Update: @unchecked Sendable {
     case chatOpen(UpdateChatOpen)
     case messageActionInvoked(UpdateMessageActionInvoked)
     case messageActionAnswered(UpdateMessageActionAnswered)
+    case clearChatHistory_p(UpdateClearChatHistory)
 
   }
 
@@ -7736,6 +7819,67 @@ public struct UpdateDeleteMessages: Sendable {
   public init() {}
 
   fileprivate var _peerID: Peer? = nil
+}
+
+public struct UpdateClearChatHistory: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Exactly one target is set: a single chat/DM peer, or every chat/thread in a space.
+  public var target: UpdateClearChatHistory.OneOf_Target? = nil
+
+  public var peerID: Peer {
+    get {
+      if case .peerID(let v)? = target {return v}
+      return Peer()
+    }
+    set {target = .peerID(newValue)}
+  }
+
+  public var spaceID: Int64 {
+    get {
+      if case .spaceID(let v)? = target {return v}
+      return 0
+    }
+    set {target = .spaceID(newValue)}
+  }
+
+  /// If unset, all local messages for the chat should be removed.
+  /// If set, remove messages with date older than this Unix timestamp.
+  public var beforeDate: Int64 {
+    get {return _beforeDate ?? 0}
+    set {_beforeDate = newValue}
+  }
+  /// Returns true if `beforeDate` has been explicitly set.
+  public var hasBeforeDate: Bool {return self._beforeDate != nil}
+  /// Clears the value of `beforeDate`. Subsequent reads from it will return its default value.
+  public mutating func clearBeforeDate() {self._beforeDate = nil}
+
+  /// Mirrors the RPC option for UI/state observers.
+  public var deleteReplyThreads: Bool = false
+
+  /// Reply-thread chats deleted as a direct side effect of this clear.
+  public var deletedChatIds: [Int64] = []
+
+  /// Reply-thread chats kept but detached from the deleted parent message.
+  public var orphanedChatIds: [Int64] = []
+
+  /// Reply-thread chats kept but detached from both parent chat and parent message.
+  public var detachedChatIds: [Int64] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  /// Exactly one target is set: a single chat/DM peer, or every chat/thread in a space.
+  public enum OneOf_Target: Equatable, Sendable {
+    case peerID(Peer)
+    case spaceID(Int64)
+
+  }
+
+  public init() {}
+
+  fileprivate var _beforeDate: Int64? = nil
 }
 
 /// Update when a message ID is updated after sending
@@ -8611,6 +8755,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     50: .same(proto: "REVOKE_SESSION"),
     51: .same(proto: "UPDATE_DIALOG_OPEN"),
     52: .same(proto: "UPDATE_DIALOG_ORDER"),
+    53: .same(proto: "CLEAR_CHAT_HISTORY"),
     54: .same(proto: "DELETE_BOT"),
   ]
 }
@@ -12211,6 +12356,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     51: .same(proto: "revokeSession"),
     52: .same(proto: "updateDialogOpen"),
     53: .same(proto: "updateDialogOrder"),
+    54: .same(proto: "clearChatHistory"),
     55: .same(proto: "deleteBot"),
   ]
 
@@ -12897,6 +13043,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updateDialogOrder(v)
         }
       }()
+      case 54: try {
+        var v: ClearChatHistoryInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .clearChatHistory_p(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .clearChatHistory_p(v)
+        }
+      }()
       case 55: try {
         var v: DeleteBotInput?
         var hadOneofValue = false
@@ -13132,6 +13291,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updateDialogOrder(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 53)
     }()
+    case .clearChatHistory_p?: try {
+      guard case .clearChatHistory_p(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 54)
+    }()
     case .deleteBot?: try {
       guard case .deleteBot(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 55)
@@ -13205,6 +13368,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     51: .same(proto: "revokeSession"),
     52: .same(proto: "updateDialogOpen"),
     53: .same(proto: "updateDialogOrder"),
+    54: .same(proto: "clearChatHistory"),
     55: .same(proto: "deleteBot"),
   ]
 
@@ -13922,6 +14086,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .updateDialogOrder(v)
           }
         }()
+        case 54: try {
+          var v: ClearChatHistoryResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .clearChatHistory_p(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .clearChatHistory_p(v)
+          }
+        }()
         case 55: try {
           var v: DeleteBotResult?
           var hadOneofValue = false
@@ -14158,6 +14335,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .updateDialogOrder?: try {
         guard case .updateDialogOrder(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 53)
+      }()
+      case .clearChatHistory_p?: try {
+        guard case .clearChatHistory_p(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 54)
       }()
       case .deleteBot?: try {
         guard case .deleteBot(let v)? = _storage._result else { preconditionFailure() }
@@ -17362,6 +17543,110 @@ extension DeleteMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
+extension ClearChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ClearChatHistoryInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    4: .standard(proto: "space_id"),
+    2: .standard(proto: "keep_last_days"),
+    3: .standard(proto: "delete_reply_threads"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: InputPeer?
+        var hadOneofValue = false
+        if let current = self.target {
+          hadOneofValue = true
+          if case .peerID(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.target = .peerID(v)
+        }
+      }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.keepLastDays) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.deleteReplyThreads) }()
+      case 4: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.target != nil {try decoder.handleConflictingOneOf()}
+          self.target = .spaceID(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if case .peerID(let v)? = self.target {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.keepLastDays != 0 {
+      try visitor.visitSingularInt32Field(value: self.keepLastDays, fieldNumber: 2)
+    }
+    if self.deleteReplyThreads != false {
+      try visitor.visitSingularBoolField(value: self.deleteReplyThreads, fieldNumber: 3)
+    }
+    try { if case .spaceID(let v)? = self.target {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ClearChatHistoryInput, rhs: ClearChatHistoryInput) -> Bool {
+    if lhs.target != rhs.target {return false}
+    if lhs.keepLastDays != rhs.keepLastDays {return false}
+    if lhs.deleteReplyThreads != rhs.deleteReplyThreads {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ClearChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ClearChatHistoryResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ClearChatHistoryResult, rhs: ClearChatHistoryResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "EditMessageInput"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
@@ -18936,6 +19221,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     34: .standard(proto: "chat_open"),
     35: .standard(proto: "message_action_invoked"),
     36: .standard(proto: "message_action_answered"),
+    37: .standard(proto: "clear_chat_history"),
   ]
 
   fileprivate class _StorageClass {
@@ -19408,6 +19694,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .messageActionAnswered(v)
           }
         }()
+        case 37: try {
+          var v: UpdateClearChatHistory?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .clearChatHistory_p(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .clearChatHistory_p(v)
+          }
+        }()
         default: break
         }
       }
@@ -19558,6 +19857,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .messageActionAnswered?: try {
         guard case .messageActionAnswered(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 36)
+      }()
+      case .clearChatHistory_p?: try {
+        guard case .clearChatHistory_p(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 37)
       }()
       case nil: break
       }
@@ -20761,6 +21064,96 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   public static func ==(lhs: UpdateDeleteMessages, rhs: UpdateDeleteMessages) -> Bool {
     if lhs.messageIds != rhs.messageIds {return false}
     if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateClearChatHistory: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateClearChatHistory"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    4: .standard(proto: "space_id"),
+    2: .standard(proto: "before_date"),
+    3: .standard(proto: "delete_reply_threads"),
+    5: .standard(proto: "deleted_chat_ids"),
+    6: .standard(proto: "orphaned_chat_ids"),
+    7: .standard(proto: "detached_chat_ids"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: Peer?
+        var hadOneofValue = false
+        if let current = self.target {
+          hadOneofValue = true
+          if case .peerID(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.target = .peerID(v)
+        }
+      }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._beforeDate) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.deleteReplyThreads) }()
+      case 4: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.target != nil {try decoder.handleConflictingOneOf()}
+          self.target = .spaceID(v)
+        }
+      }()
+      case 5: try { try decoder.decodeRepeatedInt64Field(value: &self.deletedChatIds) }()
+      case 6: try { try decoder.decodeRepeatedInt64Field(value: &self.orphanedChatIds) }()
+      case 7: try { try decoder.decodeRepeatedInt64Field(value: &self.detachedChatIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if case .peerID(let v)? = self.target {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._beforeDate {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    if self.deleteReplyThreads != false {
+      try visitor.visitSingularBoolField(value: self.deleteReplyThreads, fieldNumber: 3)
+    }
+    try { if case .spaceID(let v)? = self.target {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
+    } }()
+    if !self.deletedChatIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.deletedChatIds, fieldNumber: 5)
+    }
+    if !self.orphanedChatIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.orphanedChatIds, fieldNumber: 6)
+    }
+    if !self.detachedChatIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.detachedChatIds, fieldNumber: 7)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateClearChatHistory, rhs: UpdateClearChatHistory) -> Bool {
+    if lhs.target != rhs.target {return false}
+    if lhs._beforeDate != rhs._beforeDate {return false}
+    if lhs.deleteReplyThreads != rhs.deleteReplyThreads {return false}
+    if lhs.deletedChatIds != rhs.deletedChatIds {return false}
+    if lhs.orphanedChatIds != rhs.orphanedChatIds {return false}
+    if lhs.detachedChatIds != rhs.detachedChatIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

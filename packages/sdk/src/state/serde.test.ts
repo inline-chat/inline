@@ -3,9 +3,21 @@ import { deserializeStateV1, serializeStateV1 } from "./serde.js"
 
 describe("state serde", () => {
   it("roundtrips with bigint dateCursor", () => {
-    const raw = serializeStateV1({ version: 1, dateCursor: 123n, lastSeqByChatId: { "10": 5 } })
+    const raw = serializeStateV1({
+      version: 1,
+      dateCursor: 123n,
+      lastSeqByChatId: { "10": 5 },
+      lastSeqBySpaceId: { "20": 7 },
+      lastUserSeq: 9,
+    })
     const parsed = deserializeStateV1(raw)
-    expect(parsed).toEqual({ version: 1, dateCursor: 123n, lastSeqByChatId: { "10": 5 } })
+    expect(parsed).toEqual({
+      version: 1,
+      dateCursor: 123n,
+      lastSeqByChatId: { "10": 5 },
+      lastSeqBySpaceId: { "20": 7 },
+      lastUserSeq: 9,
+    })
   })
 
   it("serializes and deserializes with empty optional fields", () => {
@@ -34,5 +46,14 @@ describe("state serde", () => {
 
   it("rejects non-object lastSeqByChatId", () => {
     expect(() => deserializeStateV1(JSON.stringify({ version: 1, lastSeqByChatId: 123 }))).toThrow("invalid state json")
+  })
+
+  it("rejects invalid space and user cursors", () => {
+    expect(() => deserializeStateV1(JSON.stringify({ version: 1, lastSeqBySpaceId: { "1": "nope" } }))).toThrow(
+      "invalid state json",
+    )
+    expect(() => deserializeStateV1(JSON.stringify({ version: 1, lastUserSeq: "nope" }))).toThrow(
+      "invalid state json",
+    )
   })
 })

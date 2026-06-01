@@ -17,12 +17,24 @@ describe("JsonFileStateStore", () => {
     const path = join(dir, "state.json")
     const store = new JsonFileStateStore(path)
 
-    await store.save({ version: 1, dateCursor: 99n, lastSeqByChatId: { "1": 2 } })
+    await store.save({
+      version: 1,
+      dateCursor: 99n,
+      lastSeqByChatId: { "1": 2 },
+      lastSeqBySpaceId: { "2": 3 },
+      lastUserSeq: 4,
+    })
 
     const raw = await readFile(path, "utf8")
     expect(raw).toContain("\"dateCursor\": \"99\"")
 
-    expect(await store.load()).toEqual({ version: 1, dateCursor: 99n, lastSeqByChatId: { "1": 2 } })
+    expect(await store.load()).toEqual({
+      version: 1,
+      dateCursor: 99n,
+      lastSeqByChatId: { "1": 2 },
+      lastSeqBySpaceId: { "2": 3 },
+      lastUserSeq: 4,
+    })
   })
 
   it("returns null when file is invalid json", async () => {

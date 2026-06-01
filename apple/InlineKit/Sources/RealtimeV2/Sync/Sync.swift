@@ -505,6 +505,15 @@ actor Sync {
         .chat(peer: payload.message.peerID)
       case let .deleteMessages(payload):
         .chat(peer: payload.peerID)
+      case let .clearChatHistory_p(payload):
+        switch payload.target {
+          case let .peerID(peerID):
+            .chat(peer: peerID)
+          case let .spaceID(spaceID):
+            .space(id: spaceID)
+          case nil:
+            nil
+        }
       case let .messageAttachment(payload):
         .chat(peer: payload.peerID)
       case let .updateReaction(payload):
@@ -672,6 +681,8 @@ actor BucketActor {
       case .deleteChat:
         true
       case .deleteMessages:
+        true
+      case .clearChatHistory_p:
         true
       case .spaceMemberUpdate:
         true
