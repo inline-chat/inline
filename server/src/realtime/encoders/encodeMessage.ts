@@ -26,6 +26,7 @@ import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
 import { decryptBinary } from "@in/server/modules/encryption/encryption"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
+import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 
 export const encodeMessage = ({
   message,
@@ -256,57 +257,12 @@ export const encodeFullMessage = ({
   // Process attachments if they exist
   let attachments: MessageAttachments | undefined = undefined
   if (message.messageAttachments && message.messageAttachments.length > 0) {
-    const statusMap: Record<string, number> = {
-      backlog: 1,
-      todo: 2,
-      in_progress: 3,
-      done: 4,
-      cancelled: 5,
-    }
-    const encodedAttachments = message.messageAttachments.map((attachment) => {
-      let messageAttachment: MessageAttachment = {
-        id: BigInt(attachment.id ?? 0),
-        attachment: { oneofKind: undefined },
-      }
-
-      // Handle external task attachment
-      if (attachment.externalTask) {
-        messageAttachment.attachment = {
-          oneofKind: "externalTask",
-          externalTask: {
-            id: BigInt(attachment.externalTask.id),
-            taskId: attachment.externalTask.taskId ?? "",
-            application: attachment.externalTask.application ?? "",
-            title: attachment.externalTask.title ?? "",
-            status: statusMap[attachment.externalTask.status ?? ""] ?? 0,
-            assignedUserId: BigInt(attachment.externalTask.assignedUserId ?? 0),
-            url: attachment.externalTask.url ?? "",
-            number: attachment.externalTask.number ?? "",
-            date: encodeDateStrict(attachment.externalTask.date),
-          },
-        }
-      }
-      // Handle URL preview attachment
-      else if (attachment.linkEmbed) {
-        messageAttachment.attachment = {
-          oneofKind: "urlPreview",
-          urlPreview: {
-            id: BigInt(attachment.linkEmbed.id),
-            url: attachment.linkEmbed.url ?? undefined,
-            siteName: attachment.linkEmbed.siteName ?? undefined,
-            title: attachment.linkEmbed.title ?? undefined,
-            description: attachment.linkEmbed.description ?? undefined,
-            photo: attachment.linkEmbed.photo ? encodePhoto({ photo: attachment.linkEmbed.photo }) : undefined,
-            duration: encodeDateStrict(attachment.linkEmbed.date),
-          },
-        }
-      }
-
-      return messageAttachment
-    })
+    const encodedAttachments = message.messageAttachments
+      .map((attachment) => encodeMessageAttachment(attachment))
+      .filter((attachment): attachment is MessageAttachment => attachment !== null)
 
     attachments = {
-      attachments: encodedAttachments.filter((a) => a.attachment && a.attachment.oneofKind !== undefined),
+      attachments: encodedAttachments,
     }
   }
 

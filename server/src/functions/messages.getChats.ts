@@ -324,24 +324,6 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
             },
           },
           reactions: true,
-          messageAttachments: {
-            with: {
-              externalTask: true,
-              linkEmbed: {
-                with: {
-                  photo: {
-                    with: {
-                      photoSizes: {
-                        with: {
-                          file: true,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
         },
       },
     },
@@ -368,6 +350,10 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     dialogsList = [...dialogsList, ...createdDialogs]
   }
 
+  const lastMsgAttachmentsByGlobalId = await MessageModel.getAttachmentsByMessageGlobalIds(
+    chats.flatMap((chat) => (chat.lastMsg ? [chat.lastMsg.globalId] : [])),
+  )
+
   // Add chats to results
   const messagesByKey = new Map<string, Message>()
   const missingLastMsgKeys: { chatId: number; messageId: number }[] = []
@@ -377,7 +363,11 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
 
     // last message
     if (chat.lastMsg) {
-      const processedMsg = MessageModel.processMessage(chat.lastMsg)
+      const lastMsg = {
+        ...chat.lastMsg,
+        messageAttachments: lastMsgAttachmentsByGlobalId.get(chat.lastMsg.globalId) ?? [],
+      }
+      const processedMsg = MessageModel.processMessage(lastMsg)
       const encodedMsg = Encoders.fullMessage({
         message: processedMsg,
         encodingForUserId: currentUserId,
@@ -386,8 +376,8 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
       messagesByKey.set(`${chat.id}:${processedMsg.messageId}`, encodedMsg)
 
       // sender
-      if (chat.lastMsg.from) {
-        usersList.push(chat.lastMsg.from)
+      if (lastMsg.from) {
+        usersList.push(lastMsg.from)
       }
     } else if (chat.lastMsgId) {
       // Should be rare (FK enforces validity), but keep the contract: if chat.lastMsgId is set,

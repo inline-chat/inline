@@ -24,7 +24,6 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
-import { processLoomLink } from "@in/server/modules/loom/processLoomLink"
 import { batchEvaluate, type NotificationEvalResult } from "@in/server/modules/notifications/eval"
 import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
@@ -50,6 +49,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { getPreviewUrlsFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
   emitChatListOpenUpdates,
@@ -62,6 +62,7 @@ import {
 } from "@in/server/modules/subthreads"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 import { maybeScheduleThreadTitleGeneration } from "@in/server/modules/threadTitles"
+import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 
 type Input = {
   peerId: InputPeer
@@ -127,9 +128,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let text = outgoingText?.text
   let entities = outgoingText?.entities
 
-  const hasLink =
-    detectHasLink({ entities }) ||
-    (input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false)
+  const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
+  const previewUrls = text && !input.skipLinkProcessing && !hasInputUrlPreview
+    ? getPreviewUrlsFromMessage(text, entities)
+    : []
+  const hasLink = detectHasLink({ entities }) || hasInputUrlPreview || previewUrls.length > 0
 
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
@@ -258,12 +261,6 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     chatId,
   })
 
-  // Process Loom links in the message if any
-  if (text && !input.skipLinkProcessing) {
-    // Process Loom links in parallel with message sending
-    processLoomLink(newMessage, text, BigInt(chatId), currentUserId, inputPeer)
-  }
-
   // encode message info
   const messageInfo: MessageInfo = {
     message: newMessage,
@@ -341,6 +338,17 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     publishToSelfSession: currentUserLayer < 2 || hasAttachments,
     updateGroup,
   })
+
+  // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
+  if (previewUrls.length > 0) {
+    void processUrlPreviews({
+      message: newMessage,
+      previewUrls,
+      chatId,
+      currentUserId,
+      inputPeer,
+    })
+  }
 
   // send notification
   sendNotifications({
@@ -774,6 +782,34 @@ const buildAttachmentUpdates = async ({
               },
             },
           },
+          video: {
+            with: {
+              file: true,
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          document: {
+            with: {
+              file: true,
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -801,32 +837,8 @@ const buildAttachmentUpdates = async ({
     })
   }
 
-  const buildAttachment = (attachment: ReturnType<typeof processAttachments>[number]): MessageAttachment | null => {
-    if (!attachment.linkEmbed) {
-      return null
-    }
-
-    const photo = attachment.linkEmbed.photo ? Encoders.photo({ photo: attachment.linkEmbed.photo }) : undefined
-
-    return {
-      id: BigInt(attachment.id ?? 0),
-      attachment: {
-        oneofKind: "urlPreview",
-        urlPreview: {
-          id: BigInt(attachment.linkEmbed.id),
-          url: attachment.linkEmbed.url ?? undefined,
-          siteName: attachment.linkEmbed.siteName ?? undefined,
-          title: attachment.linkEmbed.title ?? undefined,
-          description: attachment.linkEmbed.description ?? undefined,
-          photo,
-          duration: attachment.linkEmbed.duration == null ? undefined : BigInt(attachment.linkEmbed.duration),
-        },
-      },
-    }
-  }
-
   const attachmentUpdates = processed
-    .map(buildAttachment)
+    .map((attachment) => encodeMessageAttachment(attachment))
     .filter((attachment): attachment is MessageAttachment => attachment !== null)
 
   if (attachmentUpdates.length === 0) {

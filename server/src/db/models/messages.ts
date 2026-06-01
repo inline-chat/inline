@@ -1,4 +1,4 @@
-import { MessageActions, MessageEntities, type InputPeer, type MessageTranslation } from "@inline-chat/protocol/core"
+import { MessageActions, MessageEntities, type InputPeer } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -16,24 +16,21 @@ import {
 import {
   chats,
   messages,
-  type DbChat,
   type DbMessage,
   type DbNewMessage,
   type DbReaction,
   type DbTranslation,
   type DbUser,
 } from "@in/server/db/schema"
-import { type DbMessageAttachment } from "@in/server/db/schema/attachments"
+import { messageAttachments, type DbMessageAttachment } from "@in/server/db/schema/attachments"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
-import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, not, or, sql } from "drizzle-orm"
 import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
-import { UpdateBucket, updates } from "@in/server/db/schema/updates"
+import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
-import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 
 const log = new Log("MessageModel", LogLevel.INFO)
@@ -52,13 +49,18 @@ export const MessageModel = {
   processMessage: processMessage,
   editMessage: editMessage,
   processAttachments: processAttachments,
+  getAttachmentsByMessageGlobalIds: getAttachmentsByMessageGlobalIds,
   getNonFullMessagesFromNewToOld: getNonFullMessagesFromNewToOld,
   getSenderIdForMessage: getSenderIdForMessage,
 }
 
 export type DbInputFullAttachment = DbMessageAttachment & {
   externalTask?: DbExternalTask | null
-  linkEmbed?: DbLinkEmbed | null
+  linkEmbed?: (DbLinkEmbed & {
+    photo?: InputDbFullPhoto | null
+    video?: InputDbFullVideo | null
+    document?: InputDbFullDocument | null
+  }) | null
 }
 
 export type DbInputFullMessage = DbMessage & {
@@ -133,12 +135,34 @@ export type ProcessedExternalTask = Omit<DbExternalTask, "title" | "titleIv" | "
 
 export type ProcessedLinkEmbed = Omit<
   DbLinkEmbed,
-  "url" | "urlIv" | "urlTag" | "title" | "titleIv" | "titleTag" | "description" | "descriptionIv" | "descriptionTag"
+  | "url"
+  | "urlIv"
+  | "urlTag"
+  | "title"
+  | "titleIv"
+  | "titleTag"
+  | "description"
+  | "descriptionIv"
+  | "descriptionTag"
+  | "author"
+  | "authorIv"
+  | "authorTag"
+  | "externalUrl"
+  | "externalUrlIv"
+  | "externalUrlTag"
+  | "embedUrl"
+  | "embedUrlIv"
+  | "embedUrlTag"
 > & {
   url: string | null
   title: string | null
   description: string | null
+  author: string | null
+  externalUrl: string | null
+  embedUrl: string | null
   photo?: DbFullPhoto | null
+  video?: DbFullVideo | null
+  document?: DbFullDocument | null
 }
 
 export type ProcessedAttachment = Omit<DbMessageAttachment, "externalTask" | "linkEmbed"> & {
@@ -166,69 +190,56 @@ type GetMessagesInput = {
   includeAnchor?: boolean
 }
 
+const fullPhotoRelations = {
+  with: {
+    photoSizes: {
+      with: {
+        file: true,
+      },
+    },
+  },
+} as const
+
+const fullVideoRelations = {
+  with: {
+    file: true,
+    photo: fullPhotoRelations,
+  },
+} as const
+
+const fullDocumentRelations = {
+  with: {
+    file: true,
+    photo: fullPhotoRelations,
+  },
+} as const
+
+const fullVoiceRelations = {
+  with: {
+    file: true,
+  },
+} as const
+
+const messageAttachmentRelations = {
+  externalTask: true,
+  linkEmbed: {
+    with: {
+      photo: fullPhotoRelations,
+      video: fullVideoRelations,
+      document: fullDocumentRelations,
+    },
+  },
+} as const
+
+// Keep attachments out of message-root relation trees. Drizzle builds aliases from
+// the full relation path, and Postgres truncates identifiers over 63 bytes.
 const fullMessageRelations = {
   from: true,
   reactions: true,
-  photo: {
-    with: {
-      photoSizes: {
-        with: {
-          file: true,
-        },
-      },
-    },
-  },
-  video: {
-    with: {
-      file: true,
-      photo: {
-        with: {
-          photoSizes: {
-            with: {
-              file: true,
-            },
-          },
-        },
-      },
-    },
-  },
-  document: {
-    with: {
-      file: true,
-      photo: {
-        with: {
-          photoSizes: {
-            with: {
-              file: true,
-            },
-          },
-        },
-      },
-    },
-  },
-  voice: {
-    with: {
-      file: true,
-    },
-  },
-  messageAttachments: {
-    with: {
-      externalTask: true,
-      linkEmbed: {
-        with: {
-          photo: {
-            with: {
-              photoSizes: {
-                with: {
-                  file: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  },
+  photo: fullPhotoRelations,
+  video: fullVideoRelations,
+  document: fullDocumentRelations,
+  voice: fullVoiceRelations,
 } as const
 
 function getResolvedHistoryMode(input: GetMessagesInput): GetMessagesMode {
@@ -242,6 +253,51 @@ function getResolvedHistoryMode(input: GetMessagesInput): GetMessagesMode {
   }
 
   return "latest"
+}
+
+async function getAttachmentsByMessageGlobalIds(globalIds: bigint[]): Promise<Map<bigint, DbInputFullAttachment[]>> {
+  const ids = Array.from(new Set(globalIds))
+  const byMessageId = new Map<bigint, DbInputFullAttachment[]>()
+
+  if (ids.length === 0) {
+    return byMessageId
+  }
+
+  const attachments = await db._query.messageAttachments.findMany({
+    where: inArray(messageAttachments.messageId, ids),
+    orderBy: asc(messageAttachments.id),
+    with: messageAttachmentRelations,
+  })
+
+  for (const attachment of attachments) {
+    if (attachment.messageId === null) {
+      continue
+    }
+
+    let list = byMessageId.get(attachment.messageId)
+    if (!list) {
+      list = []
+      byMessageId.set(attachment.messageId, list)
+    }
+
+    list.push(attachment)
+  }
+
+  return byMessageId
+}
+
+async function addMessageAttachments(messagesList: DbInputFullMessage[]): Promise<DbInputFullMessage[]> {
+  const attachmentsByMessageId = await getAttachmentsByMessageGlobalIds(messagesList.map((message) => message.globalId))
+
+  return messagesList.map((message) => ({
+    ...message,
+    messageAttachments: attachmentsByMessageId.get(message.globalId) ?? [],
+  }))
+}
+
+async function processMessages(messagesList: DbInputFullMessage[]): Promise<DbFullMessage[]> {
+  const hydrated = await addMessageAttachments(messagesList)
+  return hydrated.map(processMessage)
 }
 
 async function getMessages(
@@ -265,7 +321,7 @@ async function getMessages(
       with: fullMessageRelations,
     })
 
-    return latestMessages.map(processMessage)
+    return processMessages(latestMessages)
   }
 
   if (mode === "older") {
@@ -281,7 +337,7 @@ async function getMessages(
       with: fullMessageRelations,
     })
 
-    return olderMessages.map(processMessage)
+    return processMessages(olderMessages)
   }
 
   if (mode === "newer") {
@@ -299,7 +355,7 @@ async function getMessages(
     })
 
     newerMessagesAsc.reverse()
-    return newerMessagesAsc.map(processMessage)
+    return processMessages(newerMessagesAsc)
   }
 
   // mode === "around"
@@ -352,7 +408,7 @@ async function getMessages(
   const combinedAround = [...beforeMessages, ...anchorMessages, ...afterMessages]
   combinedAround.sort((a, b) => b.messageId - a.messageId)
 
-  return combinedAround.map(processMessage)
+  return processMessages(combinedAround)
 }
 
 async function getMessagesWithMediaFilter(input: {
@@ -372,73 +428,10 @@ async function getMessagesWithMediaFilter(input: {
     where: whereClause,
     orderBy: desc(messages.messageId),
     limit: input.limit,
-    with: {
-      from: true,
-      reactions: true,
-      photo: {
-        with: {
-          photoSizes: {
-            with: {
-              file: true,
-            },
-          },
-        },
-      },
-      video: {
-        with: {
-          file: true,
-          photo: {
-            with: {
-              photoSizes: {
-                with: {
-                  file: true,
-                },
-              },
-            },
-          },
-        },
-      },
-      document: {
-        with: {
-          file: true,
-          photo: {
-            with: {
-              photoSizes: {
-                with: {
-                  file: true,
-                },
-              },
-            },
-          },
-        },
-      },
-      voice: {
-        with: {
-          file: true,
-        },
-      },
-      messageAttachments: {
-        with: {
-          externalTask: true,
-          linkEmbed: {
-            with: {
-              photo: {
-                with: {
-                  photoSizes: {
-                    with: {
-                      file: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+    with: fullMessageRelations,
   })
 
-  return result.map(processMessage)
+  return processMessages(result)
 }
 
 function buildMediaFilterClause(filter: MessageMediaFilter) {
@@ -787,77 +780,15 @@ async function getMessageByRandomId(randomId: bigint, fromId: number): Promise<D
 async function getMessage(messageId: number, chatId: number): Promise<DbFullMessage> {
   let result = await db._query.messages.findFirst({
     where: and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)),
-    with: {
-      from: true,
-      reactions: true,
-      photo: {
-        with: {
-          photoSizes: {
-            with: {
-              file: true,
-            },
-          },
-        },
-      },
-      video: {
-        with: {
-          file: true,
-          photo: {
-            with: {
-              photoSizes: {
-                with: {
-                  file: true,
-                },
-              },
-            },
-          },
-        },
-      },
-      document: {
-        with: {
-          file: true,
-          photo: {
-            with: {
-              photoSizes: {
-                with: {
-                  file: true,
-                },
-              },
-            },
-          },
-        },
-      },
-      voice: {
-        with: {
-          file: true,
-        },
-      },
-      messageAttachments: {
-        with: {
-          externalTask: true,
-          linkEmbed: {
-            with: {
-              photo: {
-                with: {
-                  photoSizes: {
-                    with: {
-                      file: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+    with: fullMessageRelations,
   })
 
   if (!result) {
     throw ModelError.MessageInvalid
   }
 
-  return processMessage(result)
+  const [message] = await processMessages([result])
+  return message!
 }
 
 /**
@@ -884,11 +815,15 @@ export function processMessageTranslation(translation: DbTranslation): Processed
 export function processAttachments(
   attachments: (DbMessageAttachment & {
     externalTask?: DbExternalTask | null
-    linkEmbed?: (DbLinkEmbed & { photo?: any | null }) | null
+    linkEmbed?: (DbLinkEmbed & {
+      photo?: InputDbFullPhoto | null
+      video?: InputDbFullVideo | null
+      document?: InputDbFullDocument | null
+    }) | null
   })[],
 ): ProcessedMessageAttachment[] {
   return attachments.map((attachment) => {
-    const { externalTask, linkEmbed, ...rest } = attachment
+    const { externalTask: _externalTask, linkEmbed: _linkEmbed, ...rest } = attachment
     let processed: ProcessedMessageAttachment = { ...rest }
 
     // Process externalTask if present
@@ -920,7 +855,18 @@ export function processAttachments(
         description,
         descriptionIv,
         descriptionTag,
+        author,
+        authorIv,
+        authorTag,
+        externalUrl,
+        externalUrlIv,
+        externalUrlTag,
+        embedUrl,
+        embedUrlIv,
+        embedUrlTag,
         photo,
+        video,
+        document,
         ...rest
       } = attachment.linkEmbed
       processed.linkEmbed = {
@@ -949,7 +895,33 @@ export function processAttachments(
                 authTag: descriptionTag,
               })
             : null,
+        author:
+          author && authorIv && authorTag
+            ? decrypt({
+                encrypted: author,
+                iv: authorIv,
+                authTag: authorTag,
+              })
+            : null,
+        externalUrl:
+          externalUrl && externalUrlIv && externalUrlTag
+            ? decrypt({
+                encrypted: externalUrl,
+                iv: externalUrlIv,
+                authTag: externalUrlTag,
+              })
+            : null,
+        embedUrl:
+          embedUrl && embedUrlIv && embedUrlTag
+            ? decrypt({
+                encrypted: embedUrl,
+                iv: embedUrlIv,
+                authTag: embedUrlTag,
+              })
+            : null,
         photo: photo ? FileModel.processFullPhoto(photo) : null,
+        video: video ? FileModel.processFullVideo(video) : null,
+        document: document ? FileModel.processFullDocument(document) : null,
       }
     }
 
@@ -1120,71 +1092,8 @@ async function getMessagesByIds(chatId: number, messageIds: bigint[]): Promise<D
         messageIds.map((id) => Number(id)),
       ),
     ),
-    with: {
-      from: true,
-      reactions: true,
-      photo: {
-        with: {
-          photoSizes: {
-            with: {
-              file: true,
-            },
-          },
-        },
-      },
-      video: {
-        with: {
-          file: true,
-          photo: {
-            with: {
-              photoSizes: {
-                with: {
-                  file: true,
-                },
-              },
-            },
-          },
-        },
-      },
-      document: {
-        with: {
-          file: true,
-          photo: {
-            with: {
-              photoSizes: {
-                with: {
-                  file: true,
-                },
-              },
-            },
-          },
-        },
-      },
-      voice: {
-        with: {
-          file: true,
-        },
-      },
-      messageAttachments: {
-        with: {
-          externalTask: true,
-          linkEmbed: {
-            with: {
-              photo: {
-                with: {
-                  photoSizes: {
-                    with: {
-                      file: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+    with: fullMessageRelations,
   })
 
-  return result.map(processMessage)
+  return processMessages(result)
 }

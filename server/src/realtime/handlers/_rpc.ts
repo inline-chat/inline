@@ -4,6 +4,7 @@ import { getMe } from "@in/server/realtime/handlers/getMe"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { deleteMessage } from "@in/server/realtime/handlers/messages.deleteMessage"
+import { deleteMessageAttachment } from "@in/server/realtime/handlers/messages.deleteMessageAttachment"
 import { clearChatHistoryHandler } from "@in/server/realtime/handlers/messages.clearChatHistory"
 import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
@@ -77,6 +78,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await deleteMessage(call.input.deleteMessages, handlerContext)
       return { oneofKind: "deleteMessages", deleteMessages: result }
+    }
+
+    case Method.DELETE_MESSAGE_ATTACHMENT: {
+      if (call.input.oneofKind !== "deleteMessageAttachment") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await deleteMessageAttachment(call.input.deleteMessageAttachment, handlerContext)
+      return { oneofKind: "deleteMessageAttachment", deleteMessageAttachment: result }
     }
 
     case Method.CLEAR_CHAT_HISTORY: {

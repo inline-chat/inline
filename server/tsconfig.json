@@ -14,6 +14,9 @@
     },
     {
       "path": "../packages/bot-api-types"
+    },
+    {
+      "path": "../packages/url-preview"
     }
   ],
 
