@@ -51,11 +51,13 @@ function isPlacementMode(raw: unknown): boolean {
 
 function hasReplyThreadConfig(config: {
   replyThreadMode?: unknown
+  replyThreadAutoCreateMinMessages?: unknown
   replyThreadRequireExplicitMention?: unknown
   replyThreadParentHistoryLimit?: unknown
   groups?: unknown
 }): boolean {
   if (isPlacementMode(config.replyThreadMode)) return true
+  if (typeof config.replyThreadAutoCreateMinMessages === "number") return true
   if (typeof config.replyThreadRequireExplicitMention === "boolean") return true
   if (typeof config.replyThreadParentHistoryLimit === "number") return true
   if (!config.groups || typeof config.groups !== "object" || Array.isArray(config.groups)) return false
@@ -64,11 +66,13 @@ function hasReplyThreadConfig(config: {
     if (!group || typeof group !== "object" || Array.isArray(group)) return false
     const groupConfig = group as {
       replyThreadMode?: unknown
+      replyThreadAutoCreateMinMessages?: unknown
       replyThreadRequireExplicitMention?: unknown
       replyThreadParentHistoryLimit?: unknown
     }
     return (
       isPlacementMode(groupConfig.replyThreadMode) ||
+      typeof groupConfig.replyThreadAutoCreateMinMessages === "number" ||
       typeof groupConfig.replyThreadRequireExplicitMention === "boolean" ||
       typeof groupConfig.replyThreadParentHistoryLimit === "number"
     )

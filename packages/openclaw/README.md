@@ -143,7 +143,7 @@ channels:
     requireMention: true # optional: default is false
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
     replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention
-    replyThreadParentHistoryLimit: 0 # optional, default 0; include parent-chat messages before the anchor only when needed
+    replyThreadParentHistoryLimit: 10 # optional, default 10; set 0 to disable parent-chat context before the anchor
 
     # Inbound context history (used to build richer thread context for the agent):
     historyLimit: 50      # group chats
@@ -194,8 +194,8 @@ Reply behavior summary:
 - `replyToId` is always an Inline message id.
 - Inline reply threads are separate and use OpenClaw `threadId`.
 - Keep `replyThreads` off if you only want classic message replies.
-- Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
-- Leave `replyThreadParentHistoryLimit: 0` for focused thread sessions; raise it only for chats where anchor-adjacent parent context matters.
+- Bot-participated reply threads continue without `@bot` by default, including from persisted recent participation state. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
+- `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
 
@@ -272,7 +272,15 @@ Named accounts can override the same `reactionNotifications` mode and `reactionA
 
 ## Extra Agent Tools
 
-The plugin also registers a dedicated `inline_members` tool for space-member discovery outside the `message` action surface.
+The plugin also registers dedicated tools outside the `message` action surface.
+
+`inline_parent_context` fetches more parent-chat history for the current Inline reply-thread session when the automatic context window is not enough.
+
+- Defaults to the current reply thread when invoked from one
+- Optional inputs: `threadId`, `parentChatId`, `parentMessageId`, `beforeMessageId`, `limit`, `includeAnchor`, `accountId`
+- Returned messages are ordered oldest to newest and include media/entity summaries
+
+`inline_members` handles space-member discovery:
 
 - Required input: `spaceId`
 - Optional filters: `query`, `userId`, `limit`, `accountId`

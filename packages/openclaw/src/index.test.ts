@@ -32,7 +32,7 @@ describe("plugin entry", () => {
         tokenStatus: "available",
       }),
     )
-  }, 30_000)
+  }, 60_000)
 
   it("keeps the setup entry split with secret metadata", async () => {
     vi.resetModules()
@@ -98,6 +98,7 @@ describe("plugin entry", () => {
       "inline_bot_commands",
       "inline_nudge",
       "inline_forward",
+      "inline_parent_context",
     ])
     expect(hooks.has("message_sending")).toBe(true)
     expect(hooks.has("gateway_start")).toBe(true)

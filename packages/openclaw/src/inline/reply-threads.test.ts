@@ -106,8 +106,21 @@ describe("inline/reply-threads", () => {
         cfg: {
           channels: {
             inline: {
+              replyThreadAutoCreateMinMessages: 25,
+            },
+          },
+        } as OpenClawConfig,
+      }),
+    ).toBe(true)
+
+    expect(
+      isInlineReplyThreadsEnabled({
+        cfg: {
+          channels: {
+            inline: {
               groups: {
-                "123": { replyThreadParentHistoryLimit: 2 },
+                "123": { replyThreadAutoCreateMinMessages: 2 },
+                "456": { replyThreadParentHistoryLimit: 2 },
               },
             },
           },

@@ -191,7 +191,13 @@ type MonitorSetup = {
     responsePrefix?: string
     responsePrefixContextProvider?: () => unknown
     transformReplyPayload?: (payload: Record<string, unknown>) => Record<string, unknown> | null
+    typingCallbacks?: {
+      onReplyStart: () => Promise<void>
+      onIdle?: () => void
+      onCleanup?: () => void
+    }
   }
+  dispatchTypingLifecycle?: boolean
   partialReplies?: Array<{ text?: string; mediaUrls?: string[]; isReasoning?: boolean }>
   reasoningReplies?: Array<{ text?: string; mediaUrls?: string[]; isReasoning?: boolean }>
   partialRepliesConcurrent?: boolean
@@ -204,6 +210,7 @@ type MonitorSetup = {
   dispatchErrorInfos?: Array<{ kind?: string }>
   sendMessageDelayMs?: number
   createSubthreadError?: string
+  openKeyedStore?: ReturnType<typeof vi.fn>
 }
 
 function buildAccount(overrides?: {
@@ -354,6 +361,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
     return { messageId: 1n }
   })
+  const sendTyping = vi.fn(async () => {})
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
   const answerMessageAction = vi.fn(async () => {})
   const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
@@ -390,6 +398,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const finalizeInboundContext = vi.fn((ctx: any) => ctx)
   const enqueueSystemEvent = vi.fn(() => true)
   const dispatchReply = vi.fn(async ({ dispatcherOptions, replyOptions }: any) => {
+    if (setup.dispatchTypingLifecycle) {
+      await (dispatcherOptions.onReplyStart ?? dispatcherOptions.typingCallbacks?.onReplyStart)?.()
+    }
     if (setup.partialRepliesConcurrent) {
       await Promise.all((setup.partialReplies ?? []).map((partial) => replyOptions?.onPartialReply?.(partial)))
     } else {
@@ -432,6 +443,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
     for (const errInfo of setup.dispatchErrorInfos ?? []) {
       await dispatcherOptions.onError?.(new Error("dispatch error"), { kind: errInfo.kind ?? "final" })
+    }
+    if (setup.dispatchTypingLifecycle) {
+      ;(dispatcherOptions.onIdle ?? dispatcherOptions.typingCallbacks?.onIdle)?.()
+      ;(dispatcherOptions.onCleanup ?? dispatcherOptions.typingCallbacks?.onCleanup)?.()
     }
   })
   const upsertPairingRequest = vi.fn(async () => ({ code: "PAIR-123", created: true }))
@@ -691,7 +706,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         })
         sendMessage = sendMessage
         uploadFile = uploadFile
-        sendTyping = vi.fn(async () => {})
+        sendTyping = sendTyping
         answerMessageAction = answerMessageAction
         invokeRaw = invokeRaw
         invokeUncheckedRaw = this.invokeRaw
@@ -754,10 +769,26 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     )
     return {
       ...actual,
-      createChannelReplyPipeline: vi.fn(() => ({
-        onModelSelected: vi.fn(),
-        ...setup.replyPipeline,
-      })),
+      createChannelReplyPipeline: vi.fn((params: any) => {
+        const typingCallbacks =
+          setup.replyPipeline?.typingCallbacks ??
+          (params.typing
+            ? {
+                onReplyStart: params.typing.start,
+                ...(params.typing.stop
+                  ? {
+                      onIdle: () => void params.typing.stop(),
+                      onCleanup: () => void params.typing.stop(),
+                    }
+                  : {}),
+              }
+            : undefined)
+        return {
+          onModelSelected: vi.fn(),
+          ...(typingCallbacks ? { typingCallbacks } : {}),
+          ...setup.replyPipeline,
+        }
+      }),
     }
   })
   vi.doMock("openclaw/plugin-sdk/skill-commands-runtime", async () => {
@@ -807,6 +838,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     version: "test",
     state: {
       resolveStateDir: () => path.join(os.tmpdir(), "openclaw-inline-tests"),
+      ...(setup.openKeyedStore ? { openKeyedStore: setup.openKeyedStore } : {}),
     },
     media: {
       loadWebMedia: vi.fn(async (mediaUrl: string) => {
@@ -867,10 +899,13 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   } as any)
 
   const mod = await import("./monitor")
+  const participationMod = await import("./thread-participation")
+  participationMod.clearInlineThreadParticipationCacheForTest()
   return {
     monitorInlineProvider: mod.monitorInlineProvider,
     calls: {
       sendMessage,
+      sendTyping,
       invokeRaw,
       uploadFile,
       fetchRemoteMedia,
@@ -1306,6 +1341,8 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
+          SessionKey: "agent:main:inline:group:7000:thread:7100",
+          ParentSessionKey: "agent:main:inline:group:7000",
           To: "inline:7000",
           OriginatingTo: "inline:7000",
           GroupSubject: "Deploy Room",
@@ -1314,15 +1351,9 @@ describe("inline/monitor", () => {
           Body: "can you handle this reply thread?",
           BodyForAgent: "can you handle this reply thread?",
           InboundHistory: expect.arrayContaining([
+            expect.objectContaining({ body: "unrelated parent chat line" }),
             expect.objectContaining({ body: "Parent thread anchor" }),
             expect.objectContaining({ body: "thread follow-up context" }),
-          ]),
-        }),
-      )
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          InboundHistory: expect.not.arrayContaining([
-            expect.objectContaining({ body: "unrelated parent chat line" }),
           ]),
         }),
       )
@@ -1396,6 +1427,8 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
+          SessionKey: "agent:main:inline:group:7000:thread:7100",
+          ParentSessionKey: "agent:main:inline:group:7000",
           MessageThreadId: "7100",
           Body: "follow-up without mention",
           WasMentioned: true,
@@ -1413,6 +1446,90 @@ describe("inline/monitor", () => {
           chatId: 7100n,
           text: "continuing in thread",
         }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("continues bot-participated reply threads from persistent participation when history is sparse", async () => {
+    const register = vi.fn(async () => {})
+    const lookup = vi.fn(async (key: string) =>
+      key === "default:7000:7100" ? { repliedAt: 1_700_000_000 } : undefined,
+    )
+    const openKeyedStore = vi.fn(() => ({ register, lookup }))
+    const harness = await setupMonitorHarness({
+      openKeyedStore,
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7100n,
+          message: {
+            id: 61003n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "still here?",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: deploy plan",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      historyByChat: {
+        "7000": [{ id: 5000n, date: 1_700_000_002n, fromId: 41n, message: "Parent thread anchor" }],
+        "7100": [
+          {
+            id: 61003n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "still here?",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "yes",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(lookup).toHaveBeenCalledWith("default:7000:7100")
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SessionKey: "agent:main:inline:group:7000:thread:7100",
+          ParentSessionKey: "agent:main:inline:group:7000",
+          MessageThreadId: "7100",
+          WasMentioned: true,
+          ExplicitlyMentionedBot: false,
+          MentionSource: "implicit_thread",
+          ImplicitMentionKinds: ["reply_thread"],
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7100n,
+          text: "yes",
+        }),
+      )
+      expect(register).toHaveBeenCalledWith(
+        "default:7000:7100",
+        expect.objectContaining({ agentId: "main" }),
+        { ttlMs: 86_400_000 },
       )
     })
 
@@ -1754,6 +1871,8 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
+          SessionKey: "agent:main:inline:group:88:thread:882002",
+          ParentSessionKey: "agent:main:inline:group:88",
           To: "inline:88",
           OriginatingTo: "inline:88",
           MessageThreadId: "882002",
@@ -1762,16 +1881,12 @@ describe("inline/monitor", () => {
           BodyForAgent: "can you look at this?",
           InboundHistory: [
             expect.objectContaining({
+              body: "unrelated parent room context",
+            }),
+            expect.objectContaining({
               body: "@inlinebot can you look at this?",
             }),
           ],
-        }),
-      )
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          InboundHistory: expect.not.arrayContaining([
-            expect.objectContaining({ body: "unrelated parent room context" }),
-          ]),
         }),
       )
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
@@ -1910,6 +2025,89 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 908n,
+          text: "child reply",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SessionKey: "agent:main:inline:group:90:thread:908",
+          ParentSessionKey: "agent:main:inline:group:90",
+          MessageThreadId: "908",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("sends typing status to the auto-created reply thread chat", async () => {
+    const harness = await setupMonitorHarness({
+      dispatchTypingLifecycle: true,
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 91n,
+          message: {
+            id: 9n,
+            date: 1_700_000_014n,
+            fromId: 51n,
+            message: "@inlinebot answer in a child thread",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "91": { kind: "group", title: "Typing Target Room" },
+      },
+      dispatchReplyPayload: {
+        text: "child reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "91": {
+                replyThreadMode: "thread",
+                replyThreadAutoCreateMinMessages: 0,
+              },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          oneofKind: "createSubthread",
+          createSubthread: expect.objectContaining({
+            parentChatId: 91n,
+            parentMessageId: 9n,
+          }),
+        }),
+      )
+      expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 919n, typing: true })
+      expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 919n, typing: false })
+      expect(harness.calls.recordInboundSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: "agent:main:inline:group:91:thread:919",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 919n,
           text: "child reply",
         }),
       )
@@ -2093,6 +2291,7 @@ describe("inline/monitor", () => {
       const ctx = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
       expect(ctx).toEqual(
         expect.objectContaining({
+          SessionKey: "agent:main:inline:group:7000:thread:7100",
           ParentSessionKey: "agent:main:inline:group:7000",
           MessageThreadId: "7100",
           ThreadLabel: "Re: deploy plan",
@@ -7323,6 +7522,73 @@ describe("inline/monitor", () => {
     })
     expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("queues reply-thread reaction events on the thread session", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "reaction.add",
+          chatId: 7100n,
+          reaction: {
+            emoji: "🔥",
+            userId: 51n,
+            messageId: 61002n,
+            chatId: 7100n,
+            date: 1_700_000_110n,
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: deploy plan",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      participants: {
+        "7100": [{ id: 51n, username: "alice", firstName: "Alice" }],
+      },
+      historyByChat: {
+        "7100": [
+          {
+            id: 61002n,
+            date: 1_700_000_099n,
+            fromId: 777n,
+            message: "earlier bot message",
+            out: true,
+          },
+        ],
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        replyThreads: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.enqueueSystemEvent).toHaveBeenCalledWith(
+        expect.stringContaining("Inline reaction added"),
+        expect.objectContaining({
+          sessionKey: "agent:main:inline:group:7000:thread:7100",
+          contextKey: "inline:reaction:added:7100:61002:51:🔥",
+          forceSenderIsOwnerFalse: true,
+          trusted: false,
+        }),
+      )
+    })
 
     await handle.stop()
   })
