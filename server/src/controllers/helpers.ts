@@ -89,6 +89,7 @@ export type HandlerContext = {
 
 export type UnauthenticatedHandlerContext = {
   ip: string | undefined
+  source?: string
 }
 
 export const makeApiRoute = <Path extends string, ISchema extends TObject, OSchema extends TSchema>(
@@ -182,11 +183,11 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
   const response = TMakeApiResponse(outputType)
   const getRoute = new Elysia({ tags: ["GET"] }).get(
     `${path}`,
-    async ({ query: input, server, request }) => {
+    async ({ query: input, server, request, path: source }) => {
       const measure = measureTime("POST " + path)
       measure.start()
       const ip = getIp(request, server)
-      const context = { ip }
+      const context = { ip, source }
       let result = await method(input, context)
       measure.end()
       return { ok: true, result } as any
@@ -199,11 +200,11 @@ export const makeUnauthApiRoute = <Path extends string, ISchema extends TObject,
 
   const postRoute = new Elysia({ tags: ["POST"] }).post(
     path,
-    async ({ body: input, server, request }) => {
+    async ({ body: input, server, request, path: source }) => {
       const measure = measureTime("POST " + path)
       measure.start()
       const ip = getIp(request, server)
-      const context = { ip }
+      const context = { ip, source }
       let result = await method(input, context)
       measure.end()
       return { ok: true, result } as any

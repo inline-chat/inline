@@ -410,8 +410,13 @@ async function handleAuthorizeSendEmailCode(req: Request, body: unknown): Promis
 
   let sendResult: unknown
   try {
-    const input = Value.Decode(SendEmailCodeInput, { email })
-    sendResult = await sendEmailCodeHandler(input, { ip: clientIp })
+    const input = Value.Decode(SendEmailCodeInput, {
+      email,
+      deviceId: authRequest.deviceId,
+      clientType: "web",
+      deviceName: "ChatGPT MCP",
+    })
+    sendResult = await sendEmailCodeHandler(input, { ip: clientIp, source: "/oauth/authorize/send-email-code" })
     if (!Value.Check(SendEmailCodeResponse, sendResult)) {
       throw new Error("invalid sendEmailCode response")
     }

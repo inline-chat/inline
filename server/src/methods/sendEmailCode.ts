@@ -11,9 +11,17 @@ import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpe
 import { sendEmail } from "@in/server/utils/email"
 import { issueEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
   email: Type.String(),
+  deviceId: Type.Optional(Type.String()),
+  clientType: Type.Optional(
+    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("cli")]),
+  ),
+  clientVersion: Type.Optional(Type.String()),
+  osVersion: Type.Optional(Type.String()),
+  deviceName: Type.Optional(Type.String()),
 })
 
 export const Response = Type.Object({
@@ -24,7 +32,7 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  _: UnauthenticatedHandlerContext,
+  context: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
     if (isValidEmail(input.email) === false) {
@@ -46,6 +54,23 @@ export const handler = async (
     const { code, challengeToken } = await issueEmailLoginChallenge({ email })
 
     await sendEmailCode(email, code, firstName, existingUser)
+
+    BotAlerts.authAttempt({
+      kind: existingUser ? "login" : "signup",
+      contact: { type: "email", value: email },
+      existing: Boolean(user),
+      source: context.source,
+      ip: context.ip,
+      device: {
+        deviceName: input.deviceName,
+        deviceId: input.deviceId,
+        clientType: input.clientType,
+        clientVersion: input.clientVersion,
+        osVersion: input.osVersion,
+      },
+      userId: user?.id,
+      needsInviteCode,
+    })
 
     return { existingUser, needsInviteCode, challengeToken }
   } catch (error) {

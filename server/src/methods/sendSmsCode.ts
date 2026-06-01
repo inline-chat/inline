@@ -9,9 +9,17 @@ import { users } from "@in/server/db/schema"
 import { prelude } from "@in/server/libs/prelude"
 import parsePhoneNumber from "libphonenumber-js"
 import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
+  deviceId: Type.Optional(Type.String()),
+  clientType: Type.Optional(
+    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("cli")]),
+  ),
+  clientVersion: Type.Optional(Type.String()),
+  osVersion: Type.Optional(Type.String()),
+  deviceName: Type.Optional(Type.String()),
 })
 
 export const Response = Type.Object({
@@ -23,7 +31,7 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  _: UnauthenticatedHandlerContext,
+  context: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
     // verify formatting
@@ -49,9 +57,29 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
     }
 
+    const needsInviteCode = await isInviteCodeRequired(existingUser)
+    const isLogin = existingUser ? existingUser.pendingSetup !== true : false
+
+    BotAlerts.authAttempt({
+      kind: isLogin ? "login" : "signup",
+      contact: { type: "phone", value: formattedPhoneNumber },
+      existing: Boolean(existingUser),
+      source: context.source,
+      ip: context.ip,
+      device: {
+        deviceName: input.deviceName,
+        deviceId: input.deviceId,
+        clientType: input.clientType,
+        clientVersion: input.clientVersion,
+        osVersion: input.osVersion,
+      },
+      userId: existingUser?.id,
+      needsInviteCode,
+    })
+
     return {
-      existingUser: existingUser ? existingUser.pendingSetup !== true : false,
-      needsInviteCode: await isInviteCodeRequired(existingUser),
+      existingUser: isLogin,
+      needsInviteCode,
       // pass back valid formatting for number
       phoneNumber: formattedPhoneNumber,
       // human readable phone number
