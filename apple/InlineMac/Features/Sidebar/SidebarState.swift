@@ -1,4 +1,5 @@
 import InlineKit
+import Logger
 
 final class SidebarState {
   static let shared = SidebarState()
@@ -9,10 +10,14 @@ final class SidebarState {
     Task { @MainActor in
       guard AppSettings.shared.sidebarAsInbox else { return }
 
-      if peer.isThread {
-        await Api.realtime.sendQueued(.showInChatList(peerId: peer))
+      do {
+        if peer.isThread {
+          _ = try await Api.realtime.send(.showInChatList(peerId: peer))
+        }
+        _ = try await Api.realtime.send(.updateDialogOpen(peerId: peer, open: true))
+      } catch {
+        Log.shared.error("Failed to keep chat in sidebar", error: error)
       }
-      await Api.realtime.sendQueued(.updateDialogOpen(peerId: peer, open: true))
     }
   }
 }

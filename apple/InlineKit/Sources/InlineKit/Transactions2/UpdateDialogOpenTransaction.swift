@@ -13,6 +13,8 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     let peerId: Peer
     let open: Bool
     let order: String?
+    let intentId: String?
+    let requiresChatCreated: Bool?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -21,11 +23,18 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/UpdateDialogOpen")
 
-  public init(peerId: Peer, open: Bool, order: String? = nil) {
+  public init(
+    peerId: Peer,
+    open: Bool,
+    order: String? = nil,
+    requiresChatCreated: Bool = false
+  ) {
     context = Context(
       peerId: peerId,
       open: open,
-      order: order ?? Self.initialOrder(open: open)
+      order: order ?? Self.initialOrder(open: open),
+      intentId: UUID().uuidString,
+      requiresChatCreated: requiresChatCreated
     )
   }
 
@@ -40,6 +49,8 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
   }
 
   public func optimistic() async {
+    await DialogOpenIntentTracker.shared.mark(context.intentId, peer: context.peerId)
+
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         guard var dialog = try optimisticDialog(db) else { return }
@@ -60,6 +71,8 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       throw TransactionExecutionError.invalid
     }
 
+    let isCurrentIntent = await DialogOpenIntentTracker.shared.isCurrent(context.intentId, peer: context.peerId)
+
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         if response.hasUser {
@@ -68,6 +81,12 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
 
         let chat = Chat(from: response.chat)
         try chat.save(db)
+
+        guard isCurrentIntent else {
+          log.trace("Skipping stale dialog open result for \(context.peerId)")
+          return
+        }
+
         _ = try response.dialog.saveFull(db)
         try Self.applyLocalOpenState(peerId: context.peerId, open: context.open, order: context.order, db: db)
       }
@@ -79,6 +98,16 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
 
   public func failed(error: TransactionError2) async {
     log.error("UpdateDialogOpen transaction failed", error: error)
+  }
+
+  public var blockers: [TransactionBlocker] {
+    guard context.requiresChatCreated == true,
+          case let .thread(chatId) = context.peerId
+    else {
+      return []
+    }
+
+    return [.chatCreated(chatId: chatId)]
   }
 
   private func optimisticDialog(_ db: Database) throws -> Dialog? {
@@ -131,7 +160,34 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
 }
 
 public extension Transaction2 where Self == UpdateDialogOpenTransaction {
-  static func updateDialogOpen(peerId: Peer, open: Bool, order: String? = nil) -> UpdateDialogOpenTransaction {
-    UpdateDialogOpenTransaction(peerId: peerId, open: open, order: order)
+  static func updateDialogOpen(
+    peerId: Peer,
+    open: Bool,
+    order: String? = nil,
+    requiresChatCreated: Bool = false
+  ) -> UpdateDialogOpenTransaction {
+    UpdateDialogOpenTransaction(
+      peerId: peerId,
+      open: open,
+      order: order,
+      requiresChatCreated: requiresChatCreated
+    )
+  }
+}
+
+private actor DialogOpenIntentTracker {
+  static let shared = DialogOpenIntentTracker()
+
+  private var latestIntentByPeer: [Peer: String] = [:]
+
+  func mark(_ intentId: String?, peer: Peer) {
+    guard let intentId else { return }
+    latestIntentByPeer[peer] = intentId
+  }
+
+  func isCurrent(_ intentId: String?, peer: Peer) -> Bool {
+    guard let intentId else { return true }
+    guard let latestIntent = latestIntentByPeer[peer] else { return true }
+    return latestIntent == intentId
   }
 }
