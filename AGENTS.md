@@ -43,6 +43,7 @@
 - If undoing your own changes in a file with other uncommitted edits, ask first.
 - Regenerate protobufs when contracts change (`bun run generate:proto`); run focused `swift build` for touched Swift packages.
 - Run focused tests/typechecks for affected areas; add/update tests for new features and regressions.
+- When adding tests for a small isolated module or helper, place the test file beside the implementation (for example `foo.ts` and `foo.test.ts`). Use `__tests__` only for broader tests that intentionally exercise multiple modules, API flows, or e2e-ish behavior.
 - When data has duplicated or denormalized representations, treat consistency as an invariant: identify the source of truth, update every write path through shared logic, and add regression tests for the invariant instead of fixing only one reader/UI.
 - Web is WIP. Do not extend requested changes or investigations to `landing/` unless explicitly asked.
 - New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
@@ -102,6 +103,7 @@
 - Minimum versions: iOS 18, macOS 15.
 - Prefer Swift Testing (`import Testing`, `@Test`, `@Suite`) and Observation (`@Observable`, `@Bindable`).
 - Prefer focused package builds/tests (for example `swift test`, `swift build`, swift syntax typecheck) over full `xcodebuild`.
+- Do not create new one-off Xcode DerivedData paths for routine builds; they consume storage quickly. Use default DerivedData or an existing shared project path unless the user explicitly approves a new path.
 - `AppDatabase` migrations are in `InlineKit/Sources/InlineKit/Database.swift`; append new migrations at the bottom.
 - For protobuf blobs in DB, follow the `DraftMessage` typed-model + `ProtocolHelpers` + `DatabaseValueConvertible` pattern.
 - Use `Log.scoped`; avoid main-thread heavy work; prefer Swift concurrency and composable views.
@@ -113,6 +115,7 @@
 - `DevBuild` is an opinionated macOS config for `Inline-Dev`; keep it aligned with `Release` and only diverge for its intentional identity values like bundle ID, app name, icon, and `INLINE_USER_PROFILE = devbuild`.
 - TestFlight is deprecated for macOS distribution; Sparkle/DMG direct build is primary.
 - send-message and open-chat paths are latency-critical; progressive/message-list changes must avoid regressions and include focused perf validation.
+- All new client-facing APIs should use RealtimeV2 transactions/RPCs. Do not add new legacy HTTP `ApiClient` endpoints for client flows unless explicitly requested.
 - Xcode project uses filesystem-synced groups.
 - Don't use .receive(on: DispatchQueue.main) for GRDB observations unless we don't need results for render
 - Do not use EnvironmentObject/ObservableObject as much as possible
@@ -127,6 +130,7 @@
 - Use Drizzle flow for schema changes; do not hand-write migrations.
 - User sensitive data must be encrypted.
 - Realtime is primary; legacy REST in `src/methods`; auth in `src/utils/authorize.ts`.
+- All new client-facing APIs belong in RealtimeV2 handlers/functions rather than legacy HTTP methods unless explicitly requested.
 - Encrypt user-sensitive data at rest using existing patterns (`src/modules/encryption/encryption2.ts`).
 - Backend checks from `server/`: `bun test`, `bun run lint`, `bun run typecheck`.
 - User data integrity and correctness must be considered during shutdown, DB downtime, burst requests, and such.
