@@ -215,6 +215,7 @@
                       },
                       "labels": { "type": "array", "items": { "type": "string" } },
                       "maxLines": { "type": "integer", "exclusiveMinimum": 0 },
+                      "maxLineChars": { "type": "integer", "exclusiveMinimum": 0 },
                       "render": { "type": "string", "enum": ["text", "rich"] },
                       "toolProgress": { "type": "boolean" },
                       "commandText": { "type": "string", "enum": ["raw", "status"] }
@@ -756,6 +757,10 @@
                                 "type": "integer",
                                 "exclusiveMinimum": 0
                               },
+                              "maxLineChars": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
                               "render": {
                                 "type": "string",
                                 "enum": [
@@ -1065,19 +1070,19 @@
         },
         "streaming": {
           "label": "Inline Streaming Mode",
-          "help": "Unified Inline stream preview mode: \"off\" | \"partial\" | \"block\" | \"progress\". \"partial\" and \"progress\" use Inline edit previews for visible answer text; reasoning stays out of the chat-visible lane."
+          "help": "Unified Inline stream mode: \"off\" | \"partial\" | \"block\" | \"progress\". \"partial\" edits visible answer previews; \"progress\" sends a silent temporary progress message, edits it while OpenClaw works, and deletes it before the final reply."
         },
         "streaming.mode": {
           "label": "Inline Streaming Mode",
-          "help": "Canonical Inline preview mode: \"off\" | \"partial\" | \"block\" | \"progress\". \"progress\" degrades to answer-only edit previews until Inline has a dedicated progress/reasoning lane."
+          "help": "Canonical Inline stream mode: \"off\" | \"partial\" | \"block\" | \"progress\". Use \"progress\" for the separate temporary working indicator; it is independent from final answer streaming."
         },
         "streaming.preview.toolProgress": {
           "label": "Inline Draft Tool Progress",
-          "help": "Accepted for shared OpenClaw streaming config compatibility. Inline does not render tool-progress text into chat-visible edit previews."
+          "help": "Controls shared preview tool-progress compatibility. Inline answer edit previews stay answer-only; live tool details belong in the temporary progress message."
         },
         "streaming.progress.toolProgress": {
           "label": "Inline Progress Tool Lines",
-          "help": "Accepted for shared OpenClaw streaming config compatibility. Inline keeps progress/tool details out of chat-visible messages."
+          "help": "Show compact tool, plan, command, approval, and patch lines inside the temporary progress message while OpenClaw is working."
         },
         "streaming.block.enabled": {
           "label": "Inline Block Streaming",

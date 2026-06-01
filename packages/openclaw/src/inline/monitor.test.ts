@@ -203,6 +203,7 @@ type MonitorSetup = {
   partialRepliesConcurrent?: boolean
   assistantMessageStartBeforePayloadIndexes?: number[]
   toolStartBeforePayloadIndexes?: number[]
+  itemEventBeforePayloadIndexes?: number[]
   compactionStartBeforePayloadIndexes?: number[]
   compactionEndBeforePayloadIndexes?: number[]
   payloadInfoKinds?: Array<"final" | "partial" | "error">
@@ -355,11 +356,14 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     return { updated: true }
   })
 
+  let nextSentMessageId = 1n
   const sendMessage = vi.fn(async () => {
     if (setup.sendMessageDelayMs != null && setup.sendMessageDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, setup.sendMessageDelayMs))
     }
-    return { messageId: 1n }
+    const messageId = nextSentMessageId
+    nextSentMessageId += 1n
+    return { messageId }
   })
   const sendTyping = vi.fn(async () => {})
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
@@ -420,7 +424,16 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         await replyOptions?.onAssistantMessageStart?.()
       }
       if (setup.toolStartBeforePayloadIndexes?.includes(index)) {
-        await replyOptions?.onToolStart?.({ name: "tool.test" })
+        await replyOptions?.onToolStart?.({ name: "exec", args: { command: "ls" } })
+      }
+      if (setup.itemEventBeforePayloadIndexes?.includes(index)) {
+        await replyOptions?.onItemEvent?.({
+          kind: "command",
+          name: "exec",
+          phase: "end",
+          status: "done",
+          progressText: "listed files",
+        })
       }
       if (setup.compactionStartBeforePayloadIndexes?.includes(index)) {
         await replyOptions?.onCompactionStart?.()
@@ -584,6 +597,12 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         editMessage: { updates: [] },
       }
     }
+    if (method === 4 && input?.oneofKind === "deleteMessages") {
+      return {
+        oneofKind: "deleteMessages",
+        deleteMessages: { updates: [] },
+      }
+    }
     return { oneofKind: undefined }
   })
 
@@ -673,6 +692,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       },
       Method: {
         GET_ME: 1,
+        DELETE_MESSAGES: 4,
         GET_CHAT_HISTORY: 5,
         GET_CHAT: 25,
         GET_CHAT_PARTICIPANTS: 13,
@@ -3916,7 +3936,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("maps unified streaming.mode=progress to Inline edit previews without exposing tool lanes", async () => {
+  it("maps unified streaming.mode=progress to a separate Inline progress placeholder path", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -3952,15 +3972,16 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
-      expect(typeof args?.replyOptions?.onPartialReply).toBe("function")
+      expect(args?.replyOptions?.onPartialReply).toBeUndefined()
       expect(typeof args?.replyOptions?.onToolStart).toBe("function")
+      expect(args?.replyOptions?.suppressDefaultToolProgressMessages).toBe(true)
       expect(args?.replyOptions?.disableBlockStreaming).toBe(true)
     })
 
     await handle.stop()
   })
 
-  it("uses tool-start events as edit-stream boundaries without posting tool progress", async () => {
+  it("sends, edits, and deletes a silent progress placeholder before the final reply", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -3979,6 +4000,7 @@ describe("inline/monitor", () => {
       },
       partialReplies: [{ text: "draft before tool\n\n" }],
       toolStartBeforePayloadIndexes: [0],
+      itemEventBeforePayloadIndexes: [0],
       dispatchReplyPayload: {
         text: "visible after tool",
       },
@@ -3998,7 +4020,36 @@ describe("inline/monitor", () => {
     await waitFor(() => {
       const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
       expect(typeof args?.replyOptions?.onToolStart).toBe("function")
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect(typeof args?.replyOptions?.onItemEvent).toBe("function")
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          chatId: 773n,
+          sendMode: "silent",
+          text: expect.any(String),
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1n,
+            text: expect.stringContaining("listed files"),
+          }),
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        4,
+        expect.objectContaining({
+          oneofKind: "deleteMessages",
+          deleteMessages: expect.objectContaining({
+            messageIds: [1n],
+          }),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({
           chatId: 773n,
           text: "visible after tool",
@@ -4006,10 +4057,13 @@ describe("inline/monitor", () => {
       )
     })
 
-    const sentTexts = harness.calls.sendMessage.mock.calls
-      .map((call) => call[0]?.text)
-      .filter((text): text is string => typeof text === "string")
-    expect(sentTexts).not.toContain("tool.test")
+    const deleteCallIndex = harness.calls.invokeRaw.mock.calls.findIndex(
+      (call) => call[0] === 4 && call[1]?.oneofKind === "deleteMessages",
+    )
+    expect(deleteCallIndex).toBeGreaterThanOrEqual(0)
+    expect(harness.calls.invokeRaw.mock.invocationCallOrder[deleteCallIndex]).toBeLessThan(
+      harness.calls.sendMessage.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
+    )
 
     await handle.stop()
   })
