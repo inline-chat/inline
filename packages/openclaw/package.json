@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.40",
+  "version": "0.0.41",
   "type": "module",
   "files": [
     "dist",
@@ -29,7 +29,7 @@
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.5.28"
+    "openclaw": ">=2026.5.18"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -39,7 +39,7 @@
   "devDependencies": {
     "@types/node": "20.17.19",
     "@vitest/coverage-v8": "4.0.16",
-    "openclaw": "2026.5.28",
+    "openclaw": "2026.5.18",
     "typescript": "5.8.3",
     "vitest": "4.0.16"
   },
@@ -88,13 +88,13 @@
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "packages/openclaw",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.5.28"
+      "minHostVersion": ">=2026.5.18"
     },
     "compat": {
-      "pluginApi": ">=2026.5.28"
+      "pluginApi": ">=2026.5.18"
     },
     "build": {
-      "openclawVersion": "2026.5.28"
+      "openclawVersion": "2026.5.18"
     },
     "release": {
       "publishToClawHub": true,
