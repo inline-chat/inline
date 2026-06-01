@@ -476,6 +476,10 @@ Harness changes made:
 - Passed `0.0.40` release checks: `bun run typecheck`, `bun run lint`, `bun vitest run --coverage.enabled=false` (23 files, 325 tests), and `bun run build`.
 - Packed release artifact: `/tmp/inline-openclaw-inline-0.0.40.tgz`.
 - Passed dry-run: `npm publish --dry-run --ignore-scripts --access public --tag latest`.
+- Published `@inline-openclaw/inline@0.0.40` to npm with `latest` tag; registry now reports latest `0.0.40`.
+- Updated local OpenClaw managed install with `openclaw plugins install @inline-openclaw/inline@0.0.40 --force --pin`.
+- Passed after local `0.0.40` install: `openclaw config validate`, `openclaw gateway health --expect-final --timeout 30000`, and `openclaw plugins doctor`.
+- Verified installed Inline plugin version is `0.0.40`; fresh gateway log scan found no warn/error/fatal entries and no reply-thread route-state/fallback errors.
 - 2026-06-01 review pass: found and fixed a reply-thread route-cache edge case where JSON fallback files could outlive the intended 7-day route TTL.
 - Added `src/inline/thread-routes.test.ts` for route memory lookup, state-dir fallback lookup, and expired fallback rejection.
 - Passed review rerun: `cd packages/openclaw && bun run typecheck`.
