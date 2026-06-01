@@ -1213,7 +1213,7 @@ async function sendNotificationToUser({
   })
 
   if (!suppressionDecision.suppress) {
-    await Notifications.sendToUser({
+    Notifications.sendToUser({
       userId,
       payload: {
         kind: "send_message",
