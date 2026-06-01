@@ -15,6 +15,7 @@ import { Value } from "@sinclair/typebox/value"
 import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { getUpdateGroup } from "@in/server/modules/updates"
 
 const log = new Log("Updates.sendUpdate", LogLevel.INFO)
 
@@ -43,15 +44,17 @@ export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTra
 
   if ("composeAction" in reason) {
     const { update, target, otherPeerId } = reason.composeAction
-    const updates = [{ updateComposeAction: update }]
     const newUpdates = getNewUpdatesForComposeAction(update.userId, target, otherPeerId, update)
 
     if ("userId" in target) {
       RealtimeUpdates.pushToUser(target.userId, [newUpdates])
     } else {
-      // not supported for threads
-      // throw new InlineError(ApiError.PEER_INVALID)
-      return
+      const group = await getUpdateGroup(target, { currentUserId: update.userId })
+      for (const userId of group.userIds) {
+        if (userId !== update.userId) {
+          RealtimeUpdates.pushToUser(userId, [newUpdates])
+        }
+      }
     }
     return
   }
