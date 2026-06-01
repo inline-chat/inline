@@ -182,6 +182,13 @@ Harness changes made:
 - Checked the current managed installed plugin under `~/.openclaw/npm/node_modules/@inline-openclaw/inline/dist`; the runtime JS does not yet contain the new `inline progress placeholder` implementation, so config is ready but the patched dist still needs to be installed for the new behavior.
 - After user approval, ran `bun run build`, copied the fresh `dist`, `openclaw.plugin.json`, and `package.json` into `~/.openclaw/npm/node_modules/@inline-openclaw/inline`, and confirmed the installed runtime JS contains the new progress placeholder code.
 - Restarted the gateway again with `openclaw gateway restart --safe`; health check passed with Inline configured.
+- Started release prep for `@inline-openclaw/inline@0.0.39`:
+  - npm latest is `0.0.38`.
+  - local npm auth is not configured (`npm whoami` returned 401), so publishing needs login/token/CI trusted publishing.
+  - bumped package version to `0.0.39`.
+  - updated README minimum OpenClaw version to `2026.5.28`.
+  - reran release checks and produced `/tmp/inline-openclaw-inline-0.0.39.tgz`.
+  - npm publish dry-run passed for `0.0.39` with `latest` tag and public access.
 
 ## Commands Run
 
@@ -201,6 +208,14 @@ Harness changes made:
 - `cd packages/openclaw && bun run build`
 - `cp -R dist/. "$HOME/.openclaw/npm/node_modules/@inline-openclaw/inline/dist/"`
 - `cp openclaw.plugin.json package.json "$HOME/.openclaw/npm/node_modules/@inline-openclaw/inline/"`
+- `npm view @inline-openclaw/inline version dist-tags --json`
+- `npm whoami`
+- `cd packages/openclaw && bun run lint`
+- `cd packages/openclaw && bun run typecheck`
+- `cd packages/openclaw && bun vitest run --coverage.enabled=false`
+- `cd packages/openclaw && bun run build`
+- `cd packages/openclaw && npm pack --ignore-scripts --pack-destination /tmp --json`
+- `cd packages/openclaw && npm publish --dry-run --ignore-scripts --access public --tag latest`
 
 ## Verification Log
 
@@ -210,11 +225,18 @@ Harness changes made:
 - Passed: `cd packages/openclaw && bun vitest run --coverage.enabled=false` (22 files, 321 tests)
 - Passed after user approval: `cd packages/openclaw && bun run build`
 - Passed after local install: `openclaw gateway health --expect-final --timeout 30000`
+- Passed after `0.0.39` bump: `cd packages/openclaw && bun run lint`
+- Passed after `0.0.39` bump: `cd packages/openclaw && bun run typecheck`
+- Passed after `0.0.39` bump: `cd packages/openclaw && bun vitest run --coverage.enabled=false` (22 files, 321 tests)
+- Passed after `0.0.39` bump: `cd packages/openclaw && bun run build`
+- Packed release artifact: `/tmp/inline-openclaw-inline-0.0.39.tgz`
+- Passed: `cd packages/openclaw && npm publish --dry-run --ignore-scripts --access public --tag latest`
+- Blocked for real public npm publish until npm auth is available.
 
 ## Remaining Todos
 
-- Optional: run the package build/install-gateway flow after explicit confirmation for the build cleanup step.
-- Optional: add a cleanup-failure regression test if desired; current cleanup logs and still sends the final answer by construction.
+- Commit release prep for `@inline-openclaw/inline@0.0.39`.
+- Publish to npm once auth is available.
 
 ## Constraints
 

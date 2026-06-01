@@ -33,7 +33,7 @@ When enabled:
 
 ## Install
 
-Requires OpenClaw `2026.5.18` or newer.
+Requires OpenClaw `2026.5.28` or newer.
 
 From npm (once published):
 
@@ -211,7 +211,7 @@ For `message send`/plugin outbound sends:
 
 - Use `openclaw message send --channel inline --target chat:<id> --message "..."`.
 - If `channels.inline.defaultTo` is set, OpenClaw uses it when no explicit target is supplied. Named accounts can override it with `channels.inline.accounts.<account>.defaultTo`.
-- Some OpenClaw 2026.5.18 CLI help text lists only built-in channel ids, but installed plugin channel ids such as `inline` are accepted.
+- Some OpenClaw CLI help text lists only built-in channel ids, but installed plugin channel ids such as `inline` are accepted.
 - `chat:<id>` targets a chat id.
 - `user:<id>` targets a user id (DM peer).
 - `inline:user:<id>` and `inline:chat:<id>` are accepted and normalized.
