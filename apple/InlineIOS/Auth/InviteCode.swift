@@ -47,6 +47,12 @@ struct InviteCode: View {
         Text(NSLocalizedString("Enter invite code", comment: "Invite code input title"))
           .font(.system(size: 21.0, weight: .semibold))
           .foregroundStyle(.primary)
+
+        Text(NSLocalizedString("You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist.", comment: "Invite code signup requirement description"))
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: 320)
       }
 
       VStack(spacing: 8) {

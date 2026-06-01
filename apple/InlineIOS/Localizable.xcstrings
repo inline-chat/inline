@@ -565,6 +565,9 @@
     "Enter the 8-character invite code." : {
       "comment" : "Invite code validation error"
     },
+    "You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist." : {
+      "comment" : "Invite code signup requirement description"
+    },
     "Enter the code" : {
       "comment" : "Code input title",
       "localizations" : {
