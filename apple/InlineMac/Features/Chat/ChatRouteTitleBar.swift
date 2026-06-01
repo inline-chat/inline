@@ -42,20 +42,10 @@ struct ChatRouteTitleBar: View {
       VStack(alignment: .leading, spacing: 0) {
         titleView
 
-        if let parentThread = model.parentThread {
+        if let subtitle = model.status.text {
+          statusText(subtitle)
+        } else if let parentThread = model.parentThread {
           parentThreadPill(parentThread)
-        } else if let subtitle = model.status.text {
-          Text(subtitle)
-            .font(.system(size: 11))
-            .foregroundStyle(model.status.isTyping ? Color.accentColor : Color.secondary)
-            .lineLimit(1)
-            .id("subtitle-\(model.status.isTyping)-\(subtitle)")
-            .transition(
-              .asymmetric(
-                insertion: .opacity.combined(with: .offset(y: -2)),
-                removal: .opacity
-              )
-            )
         }
       }
       .frame(minWidth: 0, alignment: .leading)
@@ -181,6 +171,20 @@ struct ChatRouteTitleBar: View {
     ParentThreadPill(title: parentThread.title) {
       openParentThread(parentThread)
     }
+  }
+
+  private func statusText(_ subtitle: String) -> some View {
+    Text(subtitle)
+      .font(.system(size: 11))
+      .foregroundStyle(model.status.isTyping ? Color.accentColor : Color.secondary)
+      .lineLimit(1)
+      .id("subtitle-\(model.status.isTyping)-\(subtitle)")
+      .transition(
+        .asymmetric(
+          insertion: .opacity.combined(with: .offset(y: -2)),
+          removal: .opacity
+        )
+      )
   }
 
   private func handleAvatarClick() {

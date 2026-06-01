@@ -232,7 +232,7 @@ private final class NativeWindowTabModel {
         return
       }
 
-      title = chat.humanReadableTitle ?? "Untitled"
+      title = ReplyThreadTitleFallback.title(for: chat, anchorText: nil)
       iconPeer = .chat(chat)
 
     case .none:
