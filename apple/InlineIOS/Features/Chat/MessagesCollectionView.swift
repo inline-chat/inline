@@ -1476,6 +1476,14 @@ private extension MessagesCollectionView {
         }
         actions.append(replyAction)
 
+        let replyThreadAction = UIAction(
+          title: "Reply in Thread",
+          image: UIImage(systemName: "arrowshape.turn.up.left.circle")
+        ) { _ in
+          ReplyThreadNavigator.open(message: message, source: .menu)
+        }
+        actions.append(replyThreadAction)
+
         let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
           [weak self] _ in
           guard let self else { return }

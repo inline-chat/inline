@@ -14,6 +14,7 @@ struct ChatToolbarLeadingView: View {
   @Environment(\.colorScheme) private var colorScheme
 
   @ObservedObject private var composeActions: ComposeActions
+  @State private var replyThreadContext: ReplyThreadToolbarContext?
 
   init(
     peerId: Peer,
@@ -41,9 +42,14 @@ struct ChatToolbarLeadingView: View {
     if case .user = peerId {
       isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? fullChatViewModel.peerUser?
         .username ?? fullChatViewModel.peerUser?.email ?? fullChatViewModel.peerUser?.phoneNumber ?? "Invited User"
-    } else {
-      fullChatViewModel.chat?.humanReadableTitle ?? "Not Loaded Title"
+    } else if let chat = fullChatViewModel.chat {
+      if chat.isReplyThread {
+        return replyThreadContext?.title ?? ReplyThreadToolbarContextLoader.fallbackTitle(for: chat)
+      }
+      return chat.humanReadableTitle ?? "Not Loaded Title"
     }
+
+    return "Not Loaded Title"
   }
 
   private var isPrivateChat: Bool {
@@ -60,6 +66,16 @@ struct ChatToolbarLeadingView: View {
       Color(.systemGray3).adjustLuminosity(by: 0.2),
       Color(.systemGray5).adjustLuminosity(by: 0),
     ]
+  }
+
+  private var replyThreadContextKey: String {
+    guard let chat = fullChatViewModel.chat, chat.isReplyThread else { return "none" }
+    return "\(chat.id):\(chat.parentChatId ?? 0):\(chat.parentMessageId ?? 0):\(chat.title ?? "")"
+  }
+
+  private var threadEmoji: String {
+    let emoji = fullChatViewModel.chat?.emoji?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return emoji?.isEmpty == false ? emoji! : "#"
   }
 
   private func currentComposeAction() -> ApiComposeAction? {
@@ -97,6 +113,8 @@ struct ChatToolbarLeadingView: View {
         } else {
           return .composeAction(composeAction)
         }
+      } else if let parentTitle = replyThreadContext?.parentTitle {
+        return .parentThread(parentTitle)
       }
     }
     return .empty
@@ -106,18 +124,30 @@ struct ChatToolbarLeadingView: View {
   private var subtitleView: some View {
     let subtitle = getCurrentSubtitle()
     if !subtitle.text.isEmpty {
-      HStack(alignment: .center, spacing: 4) {
-        subtitle.animatedIndicator.padding(.top, 2)
-
-        Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .allowsTightening(true)
+      if subtitle.isParentThread {
+        Button(action: openParentThread) {
+          subtitleContent(subtitle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open parent chat \(subtitle.text)")
+      } else {
+        subtitleContent(subtitle)
       }
-      .padding(.top, -2)
     }
+  }
+
+  private func subtitleContent(_ subtitle: ChatSubtitle) -> some View {
+    HStack(alignment: .center, spacing: 4) {
+      subtitle.animatedIndicator.padding(.top, 2)
+
+      Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .allowsTightening(true)
+    }
+    .padding(.top, -2)
   }
 
   var body: some View {
@@ -133,17 +163,15 @@ struct ChatToolbarLeadingView: View {
           )
           .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
           .overlay {
-            Text(
-              String(describing: fullChatViewModel.chat?.emoji ?? "#")
-                .replacingOccurrences(of: "Optional(\"", with: "")
-                .replacingOccurrences(of: "\")", with: "")
-            )
-            .font(.title2)
+            Text(threadEmoji)
+              .font(.title2)
           }
+          .onTapGesture(perform: openChatInfo)
       } else {
         if let user = fullChatViewModel.peerUserInfo {
           UserAvatar(userInfo: user, size: toolbarAvatarSize)
             .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
+            .onTapGesture(perform: openChatInfo)
         } else {
           Circle()
             .fill(
@@ -153,6 +181,7 @@ struct ChatToolbarLeadingView: View {
                 endPoint: .bottom
               )
             ).frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
+            .onTapGesture(perform: openChatInfo)
         }
       }
 
@@ -163,6 +192,7 @@ struct ChatToolbarLeadingView: View {
           .lineLimit(1)
           .truncationMode(.tail)
           .allowsTightening(true)
+          .onTapGesture(perform: openChatInfo)
         subtitleView
       }
     }
@@ -170,16 +200,38 @@ struct ChatToolbarLeadingView: View {
     // `fixedSize()` makes this view resist width constraints, so long titles can overlap the system
     // navigation buttons instead of truncating within the available space.
     .opacity(isChatHeaderPressed ? 0.7 : 1.0)
-    .onTapGesture {
-      if let chatItem = fullChatViewModel.chatItem {
-        router.presentSheet(.chatInfo(chatItem: chatItem))
-      }
-    }
     .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
       withAnimation(.easeInOut(duration: 0.1)) {
         isChatHeaderPressed = pressing
       }
     }, perform: {})
+    .task(id: replyThreadContextKey) {
+      await loadReplyThreadContext()
+    }
+  }
+
+  @MainActor
+  private func loadReplyThreadContext() async {
+    guard let chat = fullChatViewModel.chat, chat.isReplyThread else {
+      replyThreadContext = nil
+      return
+    }
+
+    let chatId = chat.id
+    let context = await ReplyThreadToolbarContextLoader.load(for: chat)
+    guard !Task.isCancelled, fullChatViewModel.chat?.id == chatId else { return }
+    replyThreadContext = context
+  }
+
+  private func openParentThread() {
+    guard let parentPeer = replyThreadContext?.parentPeer, parentPeer != peerId else { return }
+    router.push(.chat(peer: parentPeer))
+  }
+
+  private func openChatInfo() {
+    if let chatItem = fullChatViewModel.chatItem {
+      router.presentSheet(.chatInfo(chatItem: chatItem))
+    }
   }
 }
 
@@ -188,6 +240,7 @@ enum ChatSubtitle {
   case typing(String)
   case composeAction(ApiComposeAction)
   case timezone(String)
+  case parentThread(String)
   case empty
 
   var text: String {
@@ -200,6 +253,8 @@ enum ChatSubtitle {
         action.toHumanReadableForIOS()
       case let .timezone(timezone):
         TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timezone) ?? ""
+      case let .parentThread(title):
+        title
       case .empty:
         ""
     }
@@ -209,9 +264,18 @@ enum ChatSubtitle {
     switch self {
       case .typing:
         true
+      case .parentThread:
+        true
       default:
         false
     }
+  }
+
+  var isParentThread: Bool {
+    if case .parentThread = self {
+      return true
+    }
+    return false
   }
 
   @ViewBuilder
@@ -230,6 +294,10 @@ enum ChatSubtitle {
           default:
             EmptyView()
         }
+      case .parentThread:
+        Image(systemName: "arrowshape.turn.up.left")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
       default:
         EmptyView()
     }
@@ -270,7 +338,7 @@ struct ChatSubtitlePreview: View {
       HStack(alignment: .center, spacing: 4) {
         subtitle.animatedIndicator.padding(.top, 2)
 
-        Text(subtitle.text.lowercased())
+        Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -298,6 +366,7 @@ struct ChatSubtitlePreview: View {
 
     // Timezone
     ChatSubtitlePreview(subtitle: .timezone("America/New_York"))
+    ChatSubtitlePreview(subtitle: .parentThread("Parent Chat"))
 
     // Empty
     ChatSubtitlePreview(subtitle: .empty)

@@ -218,6 +218,14 @@ class UIMessageView: UIView {
     !messageActionRows.isEmpty
   }
 
+  private var shouldShowReplyThreadSummary: Bool {
+    message.hasReplyThreadSummary
+  }
+
+  private var shouldUseWhiteReplyThreadSummary: Bool {
+    outgoing && bubbleColor != .clear
+  }
+
   var isEmojiOnlyMessage: Bool {
     if message.repliedToMessageId != nil || message.forwardFromUserId != nil {
       return false
@@ -330,6 +338,7 @@ class UIMessageView: UIView {
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
   lazy var metadataView = createMessageTimeAndStatus()
   lazy var messageActionsContainer = createMessageActionsContainer()
+  lazy var replyThreadSummaryView = createReplyThreadSummaryView()
   private weak var metadataContainerView: UIStackView?
 
   lazy var reactionsFlowView: ReactionsFlowView = {
@@ -446,6 +455,7 @@ class UIMessageView: UIView {
     setupVideoViewIfNeeded()
     setupDocumentViewIfNeeded()
     setupMessageContainer()
+    setupReplyThreadSummaryIfNeeded()
     setupMessageActionsIfNeeded()
     setupExternalReactionsIfNeeded()
 
@@ -789,6 +799,33 @@ class UIMessageView: UIView {
     }
 
     NSLayoutConstraint.activate(constraints)
+  }
+
+  private func setupReplyThreadSummaryIfNeeded() {
+    guard shouldShowReplyThreadSummary, let summary = message.replyThreadSummary else { return }
+
+    replyThreadSummaryView.configure(
+      replyCount: Int(summary.replyCount),
+      recentAuthors: recentReplyThreadAuthors(),
+      hasUnread: summary.hasUnread_p,
+      outgoing: shouldUseWhiteReplyThreadSummary
+    )
+    replyThreadSummaryView.onTap = { [weak self] in
+      guard let self else { return }
+      ReplyThreadNavigator.open(message: message, source: .summary) { [weak self] loading in
+        self?.replyThreadSummaryView.setLoading(loading)
+      }
+    }
+
+    containerStack.addArrangedSubview(replyThreadSummaryView)
+  }
+
+  private func recentReplyThreadAuthors() -> [UserInfo] {
+    message.replyThreadRecentReplierUserIds.map { userId in
+      ObjectCache.shared.getUser(id: userId) ?? UserInfo(
+        user: User(id: userId, email: nil, firstName: nil)
+      )
+    }
   }
 
   func setupReplyViewIfNeeded() {
