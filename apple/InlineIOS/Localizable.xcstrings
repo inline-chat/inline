@@ -267,6 +267,9 @@
     "Chats" : {
 
     },
+    "Checking..." : {
+      "comment" : "Checking invite code button loading state"
+    },
     "Clear" : {
       "localizations" : {
         "fa" : {
@@ -556,6 +559,12 @@
     "Enable voice messages" : {
 
     },
+    "Enter invite code" : {
+      "comment" : "Invite code input title"
+    },
+    "Enter the 8-character invite code." : {
+      "comment" : "Invite code validation error"
+    },
     "Enter the code" : {
       "comment" : "Code input title",
       "localizations" : {
@@ -634,7 +643,7 @@
     "Experimental" : {
 
     },
-    "Experimental voice features and UI changes may require an app restart. Sync changes apply immediately." : {
+    "Experimental voice features and UI changes may require an app restart." : {
 
     },
     "Failed to load chat" : {
@@ -664,6 +673,9 @@
     },
     "Integrations" : {
 
+    },
+    "Invite Code" : {
+      "comment" : "Invite code input placeholder"
     },
     "Invite Member" : {
 
