@@ -527,12 +527,21 @@ class MessageViewAppKit: NSView {
   private func handleMessageActionTap(_ action: MessageAction) {
     switch action.action {
       case .callback:
+        MessageGestureTrace.debug(
+          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=callback"
+        )
         invokeMessageCallbackAction(action)
       case let .copyText(copyText):
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(copyText.text, forType: .string)
         ToastCenter.shared.showSuccess("Copied")
+        MessageGestureTrace.debug(
+          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=copyText"
+        )
       case nil:
+        MessageGestureTrace.debug(
+          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=nil"
+        )
         break
     }
   }
@@ -680,6 +689,11 @@ class MessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isHidden = true
     view.onTap = { [weak self] flags in
+      if let self {
+        MessageGestureTrace.debug(
+          "MessageView.replyThreadSummaryTap messageId=\(self.message.messageId) modifiers=\(flags.rawValue)"
+        )
+      }
       self?.openReplyThreadFlow(source: .threadSummary, action: Self.replyThreadOpenAction(for: flags))
     }
     return view
@@ -839,7 +853,9 @@ class MessageViewAppKit: NSView {
   }()
 
   private var reactionsView: MessageReactionsView?
-  private var entityClickGesture: NSClickGestureRecognizer?
+  // The second mouse-down event is a reliable double-click boundary even when
+  // AppKit admits NSClickGestureRecognizer but never calls its target action.
+  private var handledDoubleClickEventNumber: Int?
 
   // MARK: - Link Detection
 
@@ -848,23 +864,30 @@ class MessageViewAppKit: NSView {
 
   /// Handles link clicks by opening the URL in the default browser
   private func handleLinkClick(at characterIndex: Int) {
-    for link in detectedLinks where NSLocationInRange(characterIndex, link.range) {
-      log.debug("Link clicked: \(link.url)")
-      NSWorkspace.shared.open(link.url)
+    guard let url = linkURL(at: characterIndex, in: textView.attributedString()) else {
+      MessageGestureTrace.debug(
+        "MessageView.handleLinkClick messageId=\(message.messageId) char=\(characterIndex) result=noURL"
+      )
       return
     }
+    MessageGestureTrace.debug("MessageView.handleLinkClick messageId=\(message.messageId) char=\(characterIndex) url=\(MessageGestureTrace.url(url))")
+    openTextURL(url)
   }
 
   private func linkURLForContextMenu(at characterIndex: Int) -> URL? {
+    linkURL(at: characterIndex, in: textView.attributedString())
+  }
+
+  private func linkURL(at characterIndex: Int, in attributedString: NSAttributedString) -> URL? {
     guard characterIndex != NSNotFound else { return nil }
 
     if let match = detectedLinks.first(where: { NSLocationInRange(characterIndex, $0.range) }) {
       return match.url
     }
 
-    guard let textStorage = textView.textStorage, characterIndex < textStorage.length else { return nil }
+    guard characterIndex < attributedString.length else { return nil }
 
-    if let value = textStorage.attribute(.link, at: characterIndex, effectiveRange: nil) {
+    if let value = attributedString.attribute(.link, at: characterIndex, effectiveRange: nil) {
       if let url = value as? URL {
         return url
       }
@@ -874,6 +897,23 @@ class MessageViewAppKit: NSView {
     }
 
     return nil
+  }
+
+  private func openTextURL(_ url: URL) {
+    if url.scheme == "inline", url.host == "user",
+       let userIdString = url.pathComponents.last,
+       let userId = Int64(userIdString)
+    {
+      MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openInlineUser userId=\(userId)")
+      Task { @MainActor in
+        openChat(peer: .user(id: userId))
+      }
+      return
+    }
+
+    log.debug("Link clicked: \(MessageGestureTrace.url(url))")
+    MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openExternal url=\(MessageGestureTrace.url(url))")
+    NSWorkspace.shared.open(url)
   }
 
   // MARK: - Initialization
@@ -908,7 +948,18 @@ class MessageViewAppKit: NSView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    interactiveHitTest(point) ?? super.hitTest(point)
+    if let result = interactiveHitTestResult(point) {
+      MessageGestureTrace.trace(
+        "MessageView.hitTest messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) interactive=\(result.name) view=\(type(of: result.view))"
+      )
+      return result.view
+    }
+
+    let hit = super.hitTest(point)
+    MessageGestureTrace.trace(
+      "MessageView.hitTest messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) superHit=\(String(describing: hit.map { type(of: $0) }))"
+    )
+    return hit
   }
 
   // MARK: - Setup
@@ -972,10 +1023,7 @@ class MessageViewAppKit: NSView {
       syncDocumentSlotView()
     }
 
-    if hasText {
-      contentView.addSubview(textView)
-      setupEntityClickHandling()
-    }
+    syncTextViewForCurrentProps()
 
     syncMessageActionRowsView(message: fullMessage, props: props)
 
@@ -1023,122 +1071,165 @@ class MessageViewAppKit: NSView {
   }
 
   private func setupEntityClickHandling() {
-    let gesture = NSClickGestureRecognizer(target: self, action: #selector(handleEntityClick(_:)))
-    gesture.numberOfClicksRequired = 1
-    gesture.delaysPrimaryMouseButtonEvents = false
-    gesture.delegate = self
-    textView.addGestureRecognizer(gesture)
-    entityClickGesture = gesture
+    guard let messageTextView = textView as? MessageTextView else {
+      MessageGestureTrace.debug("MessageView.setupEntityClickHandling messageId=\(message.messageId) result=noMessageTextView")
+      return
+    }
+    // Keep entity ownership in the message view, but start from NSTextView's
+    // mouseDown because recognizers attached to text views can be swallowed.
+    messageTextView.onEntityClick = { [weak self] location in
+      self?.handleEntityClick(at: location) ?? false
+    }
+    MessageGestureTrace.debug("MessageView.setupEntityClickHandling messageId=\(message.messageId) mode=mouseDownCallback")
   }
 
-  @objc private func handleEntityClick(_ gesture: NSClickGestureRecognizer) {
-    guard gesture.state == .ended else { return }
+  private func syncTextViewForCurrentProps() {
+    if hasText {
+      if textView.superview == nil {
+        contentView.addSubview(textView)
+        MessageGestureTrace.debug("MessageView.syncTextView messageId=\(message.messageId) action=attachTextView")
+      }
+      if let messageTextView = textView as? MessageTextView {
+        if messageTextView.onEntityClick == nil {
+          setupEntityClickHandling()
+        }
+      } else {
+        setupEntityClickHandling()
+      }
+      return
+    }
 
-    let location = gesture.location(in: textView)
+    guard textView.superview != nil else { return }
+    MessageGestureTrace.debug("MessageView.syncTextView messageId=\(message.messageId) action=detachTextView")
+    (textView as? MessageTextView)?.onEntityClick = nil
+    textView.removeFromSuperview()
+    clearTextViewConstraints()
+    detectedLinks = []
+  }
 
-    // Default path: preserve previous behavior when NSTextView exposes layoutManager/textContainer/textStorage.
-    if let layoutManager = textView.layoutManager,
-       let textContainer = textView.textContainer,
-       let textStorage = textView.textStorage
-    {
-      let characterIndex = layoutManager.characterIndex(
-        for: location,
-        in: textContainer,
-        fractionOfDistanceBetweenInsertionPoints: nil
+  private func clearTextViewConstraints() {
+    NSLayoutConstraint.deactivate([
+      textViewWidthConstraint,
+      textViewHeightConstraint,
+      textViewTopConstraint,
+      textViewLeadingConstraint,
+    ].compactMap(\.self))
+    textViewWidthConstraint = nil
+    textViewHeightConstraint = nil
+    textViewTopConstraint = nil
+    textViewLeadingConstraint = nil
+  }
+
+  @discardableResult
+  private func handleEntityClick(at location: NSPoint) -> Bool {
+    guard let hit = textEntityHit(at: location) else {
+      MessageGestureTrace.debug(
+        "MessageView.handleEntityClick messageId=\(message.messageId) point=\(MessageGestureTrace.point(location)) result=noHit"
       )
+      return false
+    }
+    let handled = handleTextEntityClick(hit, attributedString: textView.attributedString())
+    MessageGestureTrace.debug(
+      "MessageView.handleEntityClick messageId=\(message.messageId) point=\(MessageGestureTrace.point(location)) hit=\(hit) handled=\(handled)"
+    )
+    return handled
+  }
 
-      guard characterIndex != NSNotFound, characterIndex < textStorage.length else { return }
+  @discardableResult
+  private func handleTextEntityClick(
+    _ hit: MessageTextEntityHit,
+    attributedString: NSAttributedString
+  ) -> Bool {
+    switch hit {
+    case let .codeBlock(codeRange):
+      let codeText = (attributedString.string as NSString).substring(with: codeRange)
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(codeText, forType: .string)
+      ToastCenter.shared.showSuccess("Copied code")
+      performProgressiveHaptic()
+      MessageGestureTrace.debug(
+        "MessageView.handleTextEntityClick messageId=\(message.messageId) action=copyCodeBlock range=\(MessageGestureTrace.range(codeRange))"
+      )
+      return true
 
-      if let messageTextView = textView as? MessageTextView,
-         let codeRange = messageTextView.codeBlockRange(at: location)
-      {
-        let codeText = (textStorage.string as NSString).substring(with: codeRange)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(codeText, forType: .string)
-        ToastCenter.shared.showSuccess("Copied code")
-        performProgressiveHaptic()
-        return
+    case let .inlineCode(inlineCodeRange):
+      let inlineCodeText = (attributedString.string as NSString).substring(with: inlineCodeRange)
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(inlineCodeText, forType: .string)
+      ToastCenter.shared.showSuccess("Copied code")
+      performProgressiveHaptic()
+      MessageGestureTrace.debug(
+        "MessageView.handleTextEntityClick messageId=\(message.messageId) action=copyInlineCode range=\(MessageGestureTrace.range(inlineCodeRange))"
+      )
+      return true
+
+    case let .text(range):
+      let characterIndex = range.location
+      guard characterIndex != NSNotFound, characterIndex < attributedString.length else {
+        MessageGestureTrace.debug(
+          "MessageView.handleTextEntityClick messageId=\(message.messageId) action=none reason=badCharacterIndex range=\(MessageGestureTrace.range(range))"
+        )
+        return false
       }
 
-      var inlineCodeRange = NSRange(location: 0, length: 0)
-      if let isInlineCode = textStorage.attribute(
-        .inlineCode,
-        at: characterIndex,
-        effectiveRange: &inlineCodeRange
-      ) as? Bool, isInlineCode {
-        let inlineCodeText = (textStorage.string as NSString).substring(with: inlineCodeRange)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(inlineCodeText, forType: .string)
-        ToastCenter.shared.showSuccess("Copied code")
-        performProgressiveHaptic()
-        return
+      if let userId = attributedString.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) as? Int64 {
+        Task { @MainActor in
+          openChat(peer: .user(id: userId))
+        }
+        MessageGestureTrace.debug(
+          "MessageView.handleTextEntityClick messageId=\(message.messageId) action=openMention userId=\(userId) range=\(MessageGestureTrace.range(range))"
+        )
+        return true
       }
 
-      if let email = textStorage.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
+      if let email = attributedString.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(email, forType: .string)
         ToastCenter.shared.showSuccess("Copied email")
         performProgressiveHaptic()
-      } else if let phoneNumber = textStorage
+        MessageGestureTrace.debug(
+          "MessageView.handleTextEntityClick messageId=\(message.messageId) action=copyEmail range=\(MessageGestureTrace.range(range))"
+        )
+        return true
+      }
+
+      if let phoneNumber = attributedString
         .attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String
       {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(phoneNumber, forType: .string)
         ToastCenter.shared.showSuccess("Copied number")
         performProgressiveHaptic()
+        MessageGestureTrace.debug(
+          "MessageView.handleTextEntityClick messageId=\(message.messageId) action=copyPhone range=\(MessageGestureTrace.range(range))"
+        )
+        return true
       }
 
-      return
+      guard let url = linkURL(at: characterIndex, in: attributedString) else {
+        MessageGestureTrace.debug(
+          "MessageView.handleTextEntityClick messageId=\(message.messageId) action=none reason=noURL range=\(MessageGestureTrace.range(range))"
+        )
+        return false
+      }
+      openTextURL(url)
+      MessageGestureTrace.debug(
+        "MessageView.handleTextEntityClick messageId=\(message.messageId) action=openURL range=\(MessageGestureTrace.range(range)) url=\(MessageGestureTrace.url(url))"
+      )
+      return true
     }
+  }
 
-    // Fallback path (TextKit2 w/out layoutManager/textContainer/textStorage).
-    //
-    // TODO: If we need pixel-perfect link/entity hit testing in TextKit2, use NSTextLayoutManager APIs
-    // to resolve the exact character at point (instead of insertion index heuristics).
-    let characterIndex = textView.characterIndexForInsertion(at: location)
-    let attributed = textView.attributedString()
-    guard characterIndex != NSNotFound, characterIndex < attributed.length else { return }
-
-    if let messageTextView = textView as? MessageTextView,
-       let codeRange = messageTextView.codeBlockRange(at: location)
-    {
-      // TODO: If TextKit2 ever stops providing a coherent .attributedString() here,
-      // switch to reading from NSTextContentStorage/NSTextContentManager.
-      let codeText = (attributed.string as NSString).substring(with: codeRange)
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(codeText, forType: .string)
-      ToastCenter.shared.showSuccess("Copied code")
-      performProgressiveHaptic()
-      return
-    }
-
-    var inlineCodeRange = NSRange(location: 0, length: 0)
-    if let isInlineCode = attributed.attribute(
-      .inlineCode,
-      at: characterIndex,
-      effectiveRange: &inlineCodeRange
-    ) as? Bool, isInlineCode {
-      let inlineCodeText = (attributed.string as NSString).substring(with: inlineCodeRange)
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(inlineCodeText, forType: .string)
-      ToastCenter.shared.showSuccess("Copied code")
-      performProgressiveHaptic()
-      return
-    }
-
-    if let email = attributed.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(email, forType: .string)
-      ToastCenter.shared.showSuccess("Copied email")
-      performProgressiveHaptic()
-    } else if let phoneNumber = attributed
-      .attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String
-    {
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(phoneNumber, forType: .string)
-      ToastCenter.shared.showSuccess("Copied number")
-      performProgressiveHaptic()
-    }
+  private func textEntityHit(at location: NSPoint) -> MessageTextEntityHit? {
+    guard let messageTextView = textView as? MessageTextView else { return nil }
+    let hit = messageTextView.entityHit(
+      at: location,
+      extraTextRanges: detectedLinks.map(\.range)
+    )
+    MessageGestureTrace.trace(
+      "MessageView.textEntityHit messageId=\(message.messageId) point=\(MessageGestureTrace.point(location)) hit=\(String(describing: hit))"
+    )
+    return hit
   }
 
   private func performProgressiveHaptic() {
@@ -1355,6 +1446,7 @@ class MessageViewAppKit: NSView {
     if let gesture = longPressGesture {
       addGestureRecognizer(gesture)
     }
+    MessageGestureTrace.debug("MessageView.setupGestureRecognizers messageId=\(message.messageId) added=longPress")
 
     // Add double click gesture recognizer
     doubleClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
@@ -1364,41 +1456,72 @@ class MessageViewAppKit: NSView {
     if let gesture = doubleClickGesture {
       addGestureRecognizer(gesture)
     }
+    MessageGestureTrace.debug("MessageView.setupGestureRecognizers messageId=\(message.messageId) added=doubleClick")
 
     if showsAvatar {
       avatarView.onClick = { [weak self] in
+        if let self {
+          MessageGestureTrace.debug("MessageView.avatarClick messageId=\(self.message.messageId)")
+        }
         self?.handleAvatarClick()
       }
     }
   }
 
   @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
+    let location = gesture.location(in: self)
+    MessageGestureTrace.debug(
+      "MessageView.handleLongPress messageId=\(message.messageId) state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(location))"
+    )
     if gesture.state == .began {
-      let location = gesture.location(in: self)
-      guard interactiveHitTest(location) == nil else { return }
+      if let result = interactiveHitTestResult(location) {
+        MessageGestureTrace.debug(
+          "MessageView.handleLongPress messageId=\(message.messageId) blocked=interactive target=\(result.name)"
+        )
+        return
+      }
 
       // Provide haptic feedback
       NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
       // Show reaction overlay
+      MessageGestureTrace.debug("MessageView.handleLongPress messageId=\(message.messageId) action=showReactionOverlay")
       showReactionOverlay()
     }
   }
 
   @objc private func handleDoubleClick(_ gesture: NSClickGestureRecognizer) {
     let location = gesture.location(in: self)
-    if interactiveHitTest(location) != nil {
+    MessageGestureTrace.debug(
+      "MessageView.handleDoubleClick messageId=\(message.messageId) state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(location))"
+    )
+    guard gesture.state == .ended else { return }
+    performDoubleClickAck(at: location, source: "recognizer")
+  }
+
+  private func performDoubleClickAck(at location: NSPoint, source: String) {
+    MessageGestureTrace.debug(
+      "MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) point=\(MessageGestureTrace.point(location))"
+    )
+    if let result = interactiveHitTestResult(location) {
+      MessageGestureTrace.debug(
+        "MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=interactive target=\(result.name)"
+      )
       return
     }
 
-    if gesture === doubleClickGesture, isTextPoint(location) {
+    if isTextPoint(location) {
+      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=textPoint")
       return
     }
 
     // Provide haptic feedback
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
-    guard let currentUserId = Auth.shared.getCurrentUserId() else { return }
+    guard let currentUserId = Auth.shared.getCurrentUserId() else {
+      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=noCurrentUser")
+      return
+    }
     let emoji = "✔️"
     let weReacted = fullMessage.groupedReactions
       .first(where: { $0.emoji == emoji })?
@@ -1407,6 +1530,7 @@ class MessageViewAppKit: NSView {
 
     // Set reaction
     if weReacted {
+      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) action=deleteAckReaction")
       // Remove reaction
       Task(priority: .userInitiated) {
         try await Api.realtime.send(.deleteReaction(
@@ -1415,6 +1539,7 @@ class MessageViewAppKit: NSView {
         ))
       }
     } else {
+      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) action=addAckReaction")
       // Add reaction
       Task(priority: .userInitiated) {
         try await Api.realtime.send(.addReaction(
@@ -1435,11 +1560,15 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func handleNameClick() {
+    MessageGestureTrace.debug("MessageView.handleNameClick messageId=\(message.messageId)")
     handleAvatarClick()
   }
 
   @objc private func handleForwardHeaderClick(_: NSClickGestureRecognizer) {
-    guard let forwardedMessageId = message.forwardFromMessageId else { return }
+    guard let forwardedMessageId = message.forwardFromMessageId else {
+      MessageGestureTrace.debug("MessageView.handleForwardHeaderClick messageId=\(message.messageId) result=noForwardedMessageId")
+      return
+    }
 
     var forwardPeer: Peer?
     if let peerUserId = message.forwardFromPeerUserId {
@@ -1456,23 +1585,28 @@ class MessageViewAppKit: NSView {
     let targetPeer = forwardPeer ?? message.peerId
 
     if forwardHeaderIsPrivate, targetPeer.isPrivate, targetPeer != message.peerId {
+      MessageGestureTrace.debug("MessageView.handleForwardHeaderClick messageId=\(message.messageId) action=openPrivateForwardPeer")
       openChat(peer: targetPeer)
       return
     }
 
     if targetPeer == message.peerId {
+      MessageGestureTrace.debug("MessageView.handleForwardHeaderClick messageId=\(message.messageId) action=scrollCurrentPeer")
       let chatState = ChatsManager.shared.get(for: targetPeer, chatId: message.chatId)
       chatState.scrollTo(msgId: forwardedMessageId, reason: .forwarded)
       return
     }
 
+    MessageGestureTrace.debug("MessageView.handleForwardHeaderClick messageId=\(message.messageId) action=openForwardPeerAndScroll")
     let database = dependencies?.database ?? AppDatabase.shared
+    let messageId = message.messageId
     openChat(peer: targetPeer)
 
     Task { @MainActor in
       guard let chat = try? await database.reader.read({ db in
         try Chat.getByPeerId(db: db, peerId: targetPeer)
       }) else {
+        MessageGestureTrace.debug("MessageView.handleForwardHeaderClick messageId=\(messageId) result=noForwardPeerAccess")
         ToastCenter.shared.showError("You don't have access to that chat")
         return
       }
@@ -2000,34 +2134,58 @@ class MessageViewAppKit: NSView {
       }
     }
 
-    // From this point on, only updates happen (no setup)
+    // Initial setup handled the stable constraints. Optional message parts below
+    // still repair their constraints when a reused view gains or loses content.
     if skipUpdates {
       return
     }
 
-    // Update constraints if changed
-    if let text = props.layout.text,
-       let textViewWidthConstraint,
-       let textViewHeightConstraint,
-       let textViewTopConstraint,
-       let textViewLeadingConstraint
-    {
+    // Text can appear/disappear when a view is reused for a different message.
+    syncTextViewForCurrentProps()
+    if let text = props.layout.text, textView.superview != nil {
+      var constraintsToActivate: [NSLayoutConstraint] = []
+      if textViewWidthConstraint == nil {
+        textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: text.size.width)
+        constraintsToActivate.append(textViewWidthConstraint!)
+      }
+      if textViewHeightConstraint == nil {
+        textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: text.size.height)
+        constraintsToActivate.append(textViewHeightConstraint!)
+      }
+      if textViewTopConstraint == nil {
+        textViewTopConstraint = textView.topAnchor.constraint(
+          equalTo: contentView.topAnchor,
+          constant: props.layout.textContentViewTop
+        )
+        constraintsToActivate.append(textViewTopConstraint!)
+      }
+      if textViewLeadingConstraint == nil {
+        textViewLeadingConstraint = textView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: text.spacing.left
+        )
+        constraintsToActivate.append(textViewLeadingConstraint!)
+      }
+      NSLayoutConstraint.activate(constraintsToActivate)
+
       log.trace("Updating text view constraints for message \(text.size)")
-      if textViewWidthConstraint.constant != text.size.width {
-        textViewWidthConstraint.constant = text.size.width
+      if textViewWidthConstraint?.constant != text.size.width {
+        textViewWidthConstraint?.constant = text.size.width
       }
 
-      if textViewHeightConstraint.constant != text.size.height {
-        textViewHeightConstraint.constant = text.size.height
+      if textViewHeightConstraint?.constant != text.size.height {
+        textViewHeightConstraint?.constant = text.size.height
       }
 
-      if textViewTopConstraint.constant != props.layout.textContentViewTop {
-        textViewTopConstraint.constant = props.layout.textContentViewTop
+      if textViewTopConstraint?.constant != props.layout.textContentViewTop {
+        textViewTopConstraint?.constant = props.layout.textContentViewTop
       }
 
-      if textViewLeadingConstraint.constant != text.spacing.left {
-        textViewLeadingConstraint.constant = text.spacing.left
+      if textViewLeadingConstraint?.constant != text.spacing.left {
+        textViewLeadingConstraint?.constant = text.spacing.left
       }
+    } else {
+      clearTextViewConstraints()
     }
 
     if let reply = props.layout.reply,
@@ -3134,6 +3292,7 @@ class MessageViewAppKit: NSView {
     updateReactions(prev: prev, next: fullMessage, props: props)
 
     // Text
+    syncTextViewForCurrentProps()
     setupMessageText()
 
     // Update bubble background
@@ -3580,112 +3739,235 @@ extension MessageViewAppKit {
 // MARK: - NSGestureRecognizerDelegate
 
 extension MessageViewAppKit: NSGestureRecognizerDelegate {
-  func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldReceive event: NSEvent) -> Bool {
-    shouldHandleMessageGesture(gestureRecognizer, event: event)
-  }
-
   func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
-    shouldHandleMessageGesture(gestureRecognizer, event: event)
+    let result = shouldHandleMessageGesture(gestureRecognizer, event: event)
+    MessageGestureTrace.debug(
+      "MessageView.delegate.shouldAttempt messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) event=\(eventSummary(event)) allow=\(result)"
+    )
+
+    if result,
+       gestureRecognizer === doubleClickGesture,
+       event.type == .leftMouseDown,
+       event.clickCount == 2
+    {
+      // Do the ACK work at the second mouse-down boundary. Returning false keeps
+      // the recognizer action fallback from firing a duplicate when it does work.
+      if handledDoubleClickEventNumber == event.eventNumber {
+        MessageGestureTrace.debug(
+          "MessageView.delegate.shouldAttempt messageId=\(message.messageId) recognizer=doubleClick eventNumber=\(event.eventNumber) action=skipDuplicateDoubleClick"
+        )
+        return false
+      }
+
+      handledDoubleClickEventNumber = event.eventNumber
+      let location = convert(event.locationInWindow, from: nil)
+      MessageGestureTrace.debug(
+        "MessageView.delegate.shouldAttempt messageId=\(message.messageId) recognizer=doubleClick eventNumber=\(event.eventNumber) action=handleDoubleClickInDelegate"
+      )
+      performDoubleClickAck(at: location, source: "delegate")
+      return false
+    }
+
+    return result
   }
 
   private func shouldHandleMessageGesture(_ gestureRecognizer: NSGestureRecognizer, event: NSEvent) -> Bool {
     let locationInSelf = convert(event.locationInWindow, from: nil)
-    if (gestureRecognizer === longPressGesture || gestureRecognizer === doubleClickGesture),
-       isTextPoint(locationInSelf)
-    {
+
+    if gestureRecognizer === longPressGesture, event.clickCount > 1 {
+      MessageGestureTrace.debug(
+        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=multiClick"
+      )
       return false
     }
 
-    return interactiveHitTest(locationInSelf) == nil
+    if (gestureRecognizer === longPressGesture || gestureRecognizer === doubleClickGesture),
+       isTextPoint(locationInSelf)
+    {
+      MessageGestureTrace.debug(
+        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textPoint"
+      )
+      return false
+    }
+
+    if let result = interactiveHitTestResult(locationInSelf) {
+      MessageGestureTrace.debug(
+        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=interactive target=\(result.name)"
+      )
+      return false
+    }
+
+    MessageGestureTrace.debug(
+      "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=true"
+    )
+    return true
   }
 
   func gestureRecognizer(
     _ gestureRecognizer: NSGestureRecognizer,
     shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer
   ) -> Bool {
-    (gestureRecognizer === longPressGesture && otherGestureRecognizer === doubleClickGesture)
+    let allow = (gestureRecognizer === longPressGesture && otherGestureRecognizer === doubleClickGesture)
       || (gestureRecognizer === doubleClickGesture && otherGestureRecognizer === longPressGesture)
+    MessageGestureTrace.debug(
+      "MessageView.delegate.simultaneous messageId=\(message.messageId) lhs=\(recognizerName(gestureRecognizer)) rhs=\(recognizerName(otherGestureRecognizer)) allow=\(allow)"
+    )
+    return allow
   }
 
-  private func interactiveHitTest(_ point: NSPoint) -> NSView? {
+  private struct InteractiveHitResult {
+    let name: String
+    let view: NSView
+  }
+
+  private func interactiveHitTestResult(_ point: NSPoint) -> InteractiveHitResult? {
     if let reactionsView {
       let locationInReactions = reactionsView.convert(point, from: self)
       if let hit = reactionsView.interactiveHitTest(locationInReactions) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=reactions point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(locationInReactions)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "reactions", view: hit)
       }
     }
 
     if let messageActionRowsView {
       let pointInActions = messageActionRowsView.convert(point, from: self)
       if let hit = messageActionRowsView.hitTest(pointInActions) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=actions point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInActions)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "actions", view: hit)
       }
     }
 
     if let attachmentsView, attachmentsView.superview != nil, !attachmentsView.isHidden {
       let pointInAttachments = attachmentsView.convert(point, from: self)
       if attachmentsView.bounds.contains(pointInAttachments) {
-        return attachmentsView.hitTest(pointInAttachments) ?? attachmentsView
+        let hit = attachmentsView.hitTest(pointInAttachments) ?? attachmentsView
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=attachments point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInAttachments)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "attachments", view: hit)
       }
     }
 
     if photoView.superview != nil, !photoView.isHidden {
       let pointInPhoto = photoView.convert(point, from: self)
       if let hit = photoView.hitTest(pointInPhoto) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=photo point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInPhoto)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "photo", view: hit)
       }
     }
 
     if videoView.superview != nil, !videoView.isHidden {
       let pointInVideo = videoView.convert(point, from: self)
       if let hit = videoView.hitTest(pointInVideo) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=video point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInVideo)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "video", view: hit)
       }
     }
 
     if documentContainerView.superview != nil, !documentContainerView.isHidden {
       let pointInDocument = documentContainerView.convert(point, from: self)
       if let hit = documentContainerView.hitTest(pointInDocument) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=document point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInDocument)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "document", view: hit)
       }
     }
 
     if replyView.superview != nil, !replyView.isHidden {
       let pointInReply = replyView.convert(point, from: self)
       if let hit = replyView.hitTest(pointInReply) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=reply point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInReply)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "reply", view: hit)
       }
     }
 
     if replyThreadSummaryView.superview != nil, !replyThreadSummaryView.isHidden {
       let pointInSummary = replyThreadSummaryView.convert(point, from: self)
       if let hit = replyThreadSummaryView.hitTest(pointInSummary) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=replyThreadSummary point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInSummary)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "replyThreadSummary", view: hit)
       }
     }
 
     if showsAvatar, avatarView.superview != nil {
       let pointInAvatar = avatarView.convert(point, from: self)
       if let hit = avatarView.hitTest(pointInAvatar) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=avatar point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInAvatar)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "avatar", view: hit)
       }
     }
 
     if showsName, nameLabel.superview != nil {
       let pointInName = nameLabel.convert(point, from: self)
       if let hit = nameLabel.hitTest(pointInName) {
-        return hit
+        MessageGestureTrace.trace(
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=name point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInName)) hit=\(type(of: hit))"
+        )
+        return InteractiveHitResult(name: "name", view: hit)
       }
     }
 
+    MessageGestureTrace.trace(
+      "MessageView.interactiveHitTest messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) target=nil"
+    )
     return nil
   }
 
   private func isTextPoint(_ point: NSPoint) -> Bool {
-    guard textView.superview != nil, !textView.isHidden else { return false }
+    guard textView.superview != nil, !textView.isHidden else {
+      MessageGestureTrace.trace("MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) result=false reason=noTextView")
+      return false
+    }
 
     let pointInText = textView.convert(point, from: self)
-    return textView.bounds.contains(pointInText)
+    guard textView.bounds.contains(pointInText) else {
+      MessageGestureTrace.trace(
+        "MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) textPoint=\(MessageGestureTrace.point(pointInText)) result=false reason=outOfBounds"
+      )
+      return false
+    }
+
+    guard let messageTextView = textView as? MessageTextView else {
+      MessageGestureTrace.trace(
+        "MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) textPoint=\(MessageGestureTrace.point(pointInText)) result=true reason=plainTextView"
+      )
+      return true
+    }
+
+    let codeRange = messageTextView.codeBlockRange(at: pointInText)
+    let inlineRange = messageTextView.inlineCodeRange(at: pointInText)
+    let renderedText = messageTextView.renderedTextContains(pointInText)
+    let result = codeRange != nil || inlineRange != nil || renderedText
+    MessageGestureTrace.trace(
+      "MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) textPoint=\(MessageGestureTrace.point(pointInText)) result=\(result) code=\(MessageGestureTrace.range(codeRange)) inline=\(MessageGestureTrace.range(inlineRange)) rendered=\(renderedText)"
+    )
+    return result
+  }
+
+  private func recognizerName(_ gestureRecognizer: NSGestureRecognizer) -> String {
+    if gestureRecognizer === longPressGesture { return "longPress" }
+    if gestureRecognizer === doubleClickGesture { return "doubleClick" }
+    return String(describing: type(of: gestureRecognizer))
+  }
+
+  private func eventSummary(_ event: NSEvent) -> String {
+    let point = convert(event.locationInWindow, from: nil)
+    return "type=\(event.type.rawValue) clicks=\(event.clickCount) point=\(MessageGestureTrace.point(point)) modifiers=\(event.modifierFlags.rawValue)"
   }
 }
 

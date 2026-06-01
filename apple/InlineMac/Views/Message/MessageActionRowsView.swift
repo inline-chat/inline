@@ -93,9 +93,13 @@ final class MessageActionButtonView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+      MessageGestureTrace.debug(
+        "MessageActionButtonView.ActionButton.mouseDown type=\(event.type.rawValue) clicks=\(event.clickCount)"
+      )
       onPressChange?(true)
       super.mouseDown(with: event)
       onPressChange?(false)
+      MessageGestureTrace.debug("MessageActionButtonView.ActionButton.mouseDown ended")
     }
   }
 
@@ -283,7 +287,11 @@ final class MessageActionButtonView: NSView {
   }
 
   @objc private func handleTap() {
-    guard let action else { return }
+    guard let action else {
+      MessageGestureTrace.debug("MessageActionButtonView.handleTap result=noAction")
+      return
+    }
+    MessageGestureTrace.debug("MessageActionButtonView.handleTap actionId=\(action.actionID)")
     onTap?(action)
   }
 }
