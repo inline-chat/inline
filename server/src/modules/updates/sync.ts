@@ -222,6 +222,27 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         })
         break
 
+      case "clearChatHistory":
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "clearChatHistory",
+            clearChatHistory: {
+              target: {
+                oneofKind: "peerId",
+                peerId,
+              },
+              beforeDate: serverUpdate.update.clearChatHistory.beforeDate,
+              deleteReplyThreads: serverUpdate.update.clearChatHistory.deleteReplyThreads,
+              deletedChatIds: serverUpdate.update.clearChatHistory.deletedChatIds,
+              orphanedChatIds: serverUpdate.update.clearChatHistory.orphanedChatIds,
+              detachedChatIds: serverUpdate.update.clearChatHistory.detachedChatIds,
+            },
+          },
+        })
+        break
+
       case "participantDelete":
         inflatedUpdates.push({
           seq: update.seq,
@@ -400,6 +421,27 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
         spaceMemberAdd: {
           member: payload.spaceMemberAdd.member,
           user,
+        },
+      },
+    }
+  }
+
+  if (payload.oneofKind === "spaceClearHistory") {
+    return {
+      seq,
+      date,
+      update: {
+        oneofKind: "clearChatHistory",
+        clearChatHistory: {
+          target: {
+            oneofKind: "spaceId",
+            spaceId: payload.spaceClearHistory.spaceId,
+          },
+          beforeDate: payload.spaceClearHistory.beforeDate,
+          deleteReplyThreads: payload.spaceClearHistory.deleteReplyThreads,
+          deletedChatIds: payload.spaceClearHistory.deletedChatIds,
+          orphanedChatIds: payload.spaceClearHistory.orphanedChatIds,
+          detachedChatIds: payload.spaceClearHistory.detachedChatIds,
         },
       },
     }

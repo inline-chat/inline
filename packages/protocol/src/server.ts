@@ -114,6 +114,12 @@ export interface ServerUpdate {
          */
         spaceMemberAdd: ServerSpaceUpdateMemberAdd;
     } | {
+        oneofKind: "spaceClearHistory";
+        /**
+         * @generated from protobuf field: server.ServerSpaceUpdateClearHistory space_clear_history = 28;
+         */
+        spaceClearHistory: ServerSpaceUpdateClearHistory;
+    } | {
         oneofKind: "userSpaceMemberDelete";
         /**
          * User bucket updates
@@ -176,6 +182,12 @@ export interface ServerUpdate {
          */
         userMessageActionAnswered: ServerUserUpdateMessageActionAnswered;
     } | {
+        oneofKind: "clearChatHistory";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateClearHistory clear_chat_history = 27;
+         */
+        clearChatHistory: ServerChatUpdateClearHistory;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -227,6 +239,45 @@ export interface ServerChatUpdateDeleteMessages {
      * @generated from protobuf field: repeated int64 msg_ids = 2;
      */
     msgIds: bigint[];
+}
+/**
+ * Update for a chat when history is cleared in bulk.
+ *
+ * @generated from protobuf message server.ServerChatUpdateClearHistory
+ */
+export interface ServerChatUpdateClearHistory {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * If unset, all messages were deleted. If set, messages older than this Unix timestamp were deleted.
+     *
+     * @generated from protobuf field: optional int64 before_date = 2;
+     */
+    beforeDate?: bigint;
+    /**
+     * @generated from protobuf field: bool delete_reply_threads = 3;
+     */
+    deleteReplyThreads: boolean;
+    /**
+     * Reply-thread chats deleted as a direct side effect of this clear.
+     *
+     * @generated from protobuf field: repeated int64 deleted_chat_ids = 4;
+     */
+    deletedChatIds: bigint[];
+    /**
+     * Reply-thread chats kept but detached from the deleted parent message.
+     *
+     * @generated from protobuf field: repeated int64 orphaned_chat_ids = 5;
+     */
+    orphanedChatIds: bigint[];
+    /**
+     * Reply-thread chats kept but detached from both parent chat and parent message.
+     *
+     * @generated from protobuf field: repeated int64 detached_chat_ids = 6;
+     */
+    detachedChatIds: bigint[];
 }
 /**
  * Update for a chat when it is deleted
@@ -380,6 +431,45 @@ export interface ServerSpaceUpdateMemberAdd {
      * @generated from protobuf field: User user = 2;
      */
     user?: User;
+}
+/**
+ * Update for a space when history is cleared across every chat/thread in the space.
+ *
+ * @generated from protobuf message server.ServerSpaceUpdateClearHistory
+ */
+export interface ServerSpaceUpdateClearHistory {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * If unset, all messages were deleted. If set, messages older than this Unix timestamp were deleted.
+     *
+     * @generated from protobuf field: optional int64 before_date = 2;
+     */
+    beforeDate?: bigint;
+    /**
+     * @generated from protobuf field: bool delete_reply_threads = 3;
+     */
+    deleteReplyThreads: boolean;
+    /**
+     * Reply-thread chats deleted as a direct side effect of this clear.
+     *
+     * @generated from protobuf field: repeated int64 deleted_chat_ids = 4;
+     */
+    deletedChatIds: bigint[];
+    /**
+     * Reply-thread chats kept but detached from the deleted parent message.
+     *
+     * @generated from protobuf field: repeated int64 orphaned_chat_ids = 5;
+     */
+    orphanedChatIds: bigint[];
+    /**
+     * Reply-thread chats kept but detached from both parent chat and parent message.
+     *
+     * @generated from protobuf field: repeated int64 detached_chat_ids = 6;
+     */
+    detachedChatIds: bigint[];
 }
 // ------------------------------------------------------------
 // User bucket updates
@@ -568,6 +658,7 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 9, name: "space_remove_member", kind: "message", oneof: "update", T: () => ServerSpaceUpdateRemoveMember },
             { no: 12, name: "space_member_update", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberUpdate },
             { no: 19, name: "space_member_add", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberAdd },
+            { no: 28, name: "space_clear_history", kind: "message", oneof: "update", T: () => ServerSpaceUpdateClearHistory },
             { no: 10, name: "user_space_member_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateSpaceMemberDelete },
             { no: 11, name: "user_chat_participant_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantDelete },
             { no: 14, name: "user_dialog_archived", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogArchived },
@@ -577,7 +668,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 23, name: "user_dialog_notification_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogNotificationSettings },
             { no: 24, name: "user_chat_open", kind: "message", oneof: "update", T: () => ServerUserUpdateChatOpen },
             { no: 25, name: "user_message_action_invoked", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionInvoked },
-            { no: 26, name: "user_message_action_answered", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionAnswered }
+            { no: 26, name: "user_message_action_answered", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionAnswered },
+            { no: 27, name: "clear_chat_history", kind: "message", oneof: "update", T: () => ServerChatUpdateClearHistory }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -678,6 +770,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         spaceMemberAdd: ServerSpaceUpdateMemberAdd.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceMemberAdd)
                     };
                     break;
+                case /* server.ServerSpaceUpdateClearHistory space_clear_history */ 28:
+                    message.update = {
+                        oneofKind: "spaceClearHistory",
+                        spaceClearHistory: ServerSpaceUpdateClearHistory.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceClearHistory)
+                    };
+                    break;
                 case /* server.ServerUserUpdateSpaceMemberDelete user_space_member_delete */ 10:
                     message.update = {
                         oneofKind: "userSpaceMemberDelete",
@@ -738,6 +836,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userMessageActionAnswered: ServerUserUpdateMessageActionAnswered.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userMessageActionAnswered)
                     };
                     break;
+                case /* server.ServerChatUpdateClearHistory clear_chat_history */ 27:
+                    message.update = {
+                        oneofKind: "clearChatHistory",
+                        clearChatHistory: ServerChatUpdateClearHistory.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).clearChatHistory)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -795,6 +899,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerSpaceUpdateMemberAdd space_member_add = 19; */
         if (message.update.oneofKind === "spaceMemberAdd")
             ServerSpaceUpdateMemberAdd.internalBinaryWrite(message.update.spaceMemberAdd, writer.tag(19, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerSpaceUpdateClearHistory space_clear_history = 28; */
+        if (message.update.oneofKind === "spaceClearHistory")
+            ServerSpaceUpdateClearHistory.internalBinaryWrite(message.update.spaceClearHistory, writer.tag(28, WireType.LengthDelimited).fork(), options).join();
         /* server.ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10; */
         if (message.update.oneofKind === "userSpaceMemberDelete")
             ServerUserUpdateSpaceMemberDelete.internalBinaryWrite(message.update.userSpaceMemberDelete, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
@@ -825,6 +932,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateMessageActionAnswered user_message_action_answered = 26; */
         if (message.update.oneofKind === "userMessageActionAnswered")
             ServerUserUpdateMessageActionAnswered.internalBinaryWrite(message.update.userMessageActionAnswered, writer.tag(26, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateClearHistory clear_chat_history = 27; */
+        if (message.update.oneofKind === "clearChatHistory")
+            ServerChatUpdateClearHistory.internalBinaryWrite(message.update.clearChatHistory, writer.tag(27, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1008,6 +1118,116 @@ class ServerChatUpdateDeleteMessages$Type extends MessageType<ServerChatUpdateDe
  * @generated MessageType for protobuf message server.ServerChatUpdateDeleteMessages
  */
 export const ServerChatUpdateDeleteMessages = new ServerChatUpdateDeleteMessages$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateClearHistory$Type extends MessageType<ServerChatUpdateClearHistory> {
+    constructor() {
+        super("server.ServerChatUpdateClearHistory", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "before_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "delete_reply_threads", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "deleted_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "orphaned_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "detached_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateClearHistory>): ServerChatUpdateClearHistory {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.deleteReplyThreads = false;
+        message.deletedChatIds = [];
+        message.orphanedChatIds = [];
+        message.detachedChatIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateClearHistory>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateClearHistory): ServerChatUpdateClearHistory {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 before_date */ 2:
+                    message.beforeDate = reader.int64().toBigInt();
+                    break;
+                case /* bool delete_reply_threads */ 3:
+                    message.deleteReplyThreads = reader.bool();
+                    break;
+                case /* repeated int64 deleted_chat_ids */ 4:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.deletedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.deletedChatIds.push(reader.int64().toBigInt());
+                    break;
+                case /* repeated int64 orphaned_chat_ids */ 5:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.orphanedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.orphanedChatIds.push(reader.int64().toBigInt());
+                    break;
+                case /* repeated int64 detached_chat_ids */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.detachedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.detachedChatIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateClearHistory, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 before_date = 2; */
+        if (message.beforeDate !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.beforeDate);
+        /* bool delete_reply_threads = 3; */
+        if (message.deleteReplyThreads !== false)
+            writer.tag(3, WireType.Varint).bool(message.deleteReplyThreads);
+        /* repeated int64 deleted_chat_ids = 4; */
+        if (message.deletedChatIds.length) {
+            writer.tag(4, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.deletedChatIds.length; i++)
+                writer.int64(message.deletedChatIds[i]);
+            writer.join();
+        }
+        /* repeated int64 orphaned_chat_ids = 5; */
+        if (message.orphanedChatIds.length) {
+            writer.tag(5, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.orphanedChatIds.length; i++)
+                writer.int64(message.orphanedChatIds[i]);
+            writer.join();
+        }
+        /* repeated int64 detached_chat_ids = 6; */
+        if (message.detachedChatIds.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.detachedChatIds.length; i++)
+                writer.int64(message.detachedChatIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateClearHistory
+ */
+export const ServerChatUpdateClearHistory = new ServerChatUpdateClearHistory$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerChatUpdateDeleteChat$Type extends MessageType<ServerChatUpdateDeleteChat> {
     constructor() {
@@ -1551,6 +1771,116 @@ class ServerSpaceUpdateMemberAdd$Type extends MessageType<ServerSpaceUpdateMembe
  * @generated MessageType for protobuf message server.ServerSpaceUpdateMemberAdd
  */
 export const ServerSpaceUpdateMemberAdd = new ServerSpaceUpdateMemberAdd$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerSpaceUpdateClearHistory$Type extends MessageType<ServerSpaceUpdateClearHistory> {
+    constructor() {
+        super("server.ServerSpaceUpdateClearHistory", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "before_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "delete_reply_threads", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "deleted_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "orphaned_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "detached_chat_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerSpaceUpdateClearHistory>): ServerSpaceUpdateClearHistory {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.deleteReplyThreads = false;
+        message.deletedChatIds = [];
+        message.orphanedChatIds = [];
+        message.detachedChatIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<ServerSpaceUpdateClearHistory>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerSpaceUpdateClearHistory): ServerSpaceUpdateClearHistory {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 before_date */ 2:
+                    message.beforeDate = reader.int64().toBigInt();
+                    break;
+                case /* bool delete_reply_threads */ 3:
+                    message.deleteReplyThreads = reader.bool();
+                    break;
+                case /* repeated int64 deleted_chat_ids */ 4:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.deletedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.deletedChatIds.push(reader.int64().toBigInt());
+                    break;
+                case /* repeated int64 orphaned_chat_ids */ 5:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.orphanedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.orphanedChatIds.push(reader.int64().toBigInt());
+                    break;
+                case /* repeated int64 detached_chat_ids */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.detachedChatIds.push(reader.int64().toBigInt());
+                    else
+                        message.detachedChatIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerSpaceUpdateClearHistory, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* optional int64 before_date = 2; */
+        if (message.beforeDate !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.beforeDate);
+        /* bool delete_reply_threads = 3; */
+        if (message.deleteReplyThreads !== false)
+            writer.tag(3, WireType.Varint).bool(message.deleteReplyThreads);
+        /* repeated int64 deleted_chat_ids = 4; */
+        if (message.deletedChatIds.length) {
+            writer.tag(4, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.deletedChatIds.length; i++)
+                writer.int64(message.deletedChatIds[i]);
+            writer.join();
+        }
+        /* repeated int64 orphaned_chat_ids = 5; */
+        if (message.orphanedChatIds.length) {
+            writer.tag(5, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.orphanedChatIds.length; i++)
+                writer.int64(message.orphanedChatIds[i]);
+            writer.join();
+        }
+        /* repeated int64 detached_chat_ids = 6; */
+        if (message.detachedChatIds.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.detachedChatIds.length; i++)
+                writer.int64(message.detachedChatIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerSpaceUpdateClearHistory
+ */
+export const ServerSpaceUpdateClearHistory = new ServerSpaceUpdateClearHistory$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateSpaceMemberDelete$Type extends MessageType<ServerUserUpdateSpaceMemberDelete> {
     constructor() {
