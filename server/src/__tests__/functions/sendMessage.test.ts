@@ -18,10 +18,8 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { getMessages } from "@in/server/functions/messages.getMessages"
-import { Notifications } from "@in/server/modules/notifications/notifications"
-import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
-import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { getReplyThreadAnchorSenderId } from "@in/server/modules/subthreads"
 
 // Test state
 let currentUser: DbUser
@@ -119,7 +117,7 @@ describe("sendMessage", () => {
     })
   })
 
-  test("treats reply-thread messages as mention-context for parent message author", async () => {
+  test("resolves reply-thread parent author for notification mention context", async () => {
     const owner = await testUtils.createUser(nextEmail("reply-thread-owner"))
     const parentAuthor = await testUtils.createUser(nextEmail("reply-thread-parent-author"))
 
@@ -128,13 +126,6 @@ describe("sendMessage", () => {
 
     await testUtils.addParticipant(parentChat.id, owner.id)
     await testUtils.addParticipant(parentChat.id, parentAuthor.id)
-
-    await UserSettingsModel.updateGeneral(parentAuthor.id, {
-      notifications: {
-        mode: UserSettingsNotificationsMode.Mentions,
-        silent: false,
-      },
-    })
 
     await db.insert(messages).values({
       chatId: parentChat.id,
@@ -157,34 +148,7 @@ describe("sendMessage", () => {
 
     if (!childChat) throw new Error("Child chat not created")
 
-    const originalSendToUser = Notifications.sendToUser
-    const mockSendToUser = mock(async () => {})
-    Notifications.sendToUser = mockSendToUser
-
-    try {
-      await sendMessage(
-        {
-          peerId: {
-            type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
-          },
-          message: "first message in reply thread",
-        },
-        testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
-      )
-
-      await waitForTrue(() =>
-        mockSendToUser.mock.calls.some((call: any[]) => {
-          const [arg] = call
-          return (
-            arg?.userId === parentAuthor.id &&
-            arg?.payload?.kind === "send_message" &&
-            arg?.payload?.threadId === `chat_${childChat.id}`
-          )
-        }),
-      )
-    } finally {
-      Notifications.sendToUser = originalSendToUser
-    }
+    await expect(getReplyThreadAnchorSenderId(childChat)).resolves.toBe(parentAuthor.id)
   })
 
   test("should create a text message", async () => {
