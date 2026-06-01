@@ -120,8 +120,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       updateEmbedState(animated: false)
     }
   }
+  var spaceId: Int64? {
+    didSet {
+      autocompleteManager?.configure(spaceId: spaceId)
+    }
+  }
   var mentionManager: MentionManager?
   var slashCommandManager: SlashCommandManager?
+  var autocompleteManager: ComposeAutocompleteManager?
   let draftManager = DraftManager(debounceDelay: 2.0)
 
   let previewViewModel = SwiftUIPhotoPreviewViewModel()
@@ -188,6 +194,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     if window != nil {
       setupMentionManager()
       setupSlashCommandManager()
+      setupAutocompleteManager()
       layoutIfNeeded()
       let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
       if hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
@@ -219,6 +226,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     mentionManager = nil
     slashCommandManager?.cleanup()
     slashCommandManager = nil
+    autocompleteManager?.cleanup()
+    autocompleteManager = nil
   }
 
   override func resignFirstResponder() -> Bool {
@@ -615,7 +624,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     // Extract all entities using TextProcessing module
     let attributedText = textView.attributedText ?? NSAttributedString()
-    let (textFromAttributedString, extractedEntities) = ProcessEntities.fromAttributedString(attributedText)
+    let (textFromAttributedString, extractedEntities) = ProcessEntities.fromAttributedString(
+      attributedText,
+      threadLinkSpaceId: spaceId
+    )
 
     let hasEntities = !extractedEntities.entities.isEmpty
     let entities: MessageEntities? = hasEntities ? extractedEntities : nil

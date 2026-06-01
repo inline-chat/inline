@@ -277,6 +277,30 @@ public class ProcessEntities {
             }
           }
 
+        case .thread:
+          guard case let .thread(thread) = entity.entity, thread.chatID > 0 else {
+            break
+          }
+          attributedString.addAttributes(
+            threadLinkAttributes(.chatId(thread.chatID), configuration: configuration),
+            range: range
+          )
+
+        case .threadTitle:
+          guard case let .threadTitle(threadTitle) = entity.entity,
+                threadTitle.spaceID > 0,
+                threadTitle.title.isEmpty == false
+          else {
+            break
+          }
+          attributedString.addAttributes(
+            threadLinkAttributes(
+              .title(spaceId: threadTitle.spaceID, title: threadTitle.title),
+              configuration: configuration
+            ),
+            range: range
+          )
+
         case .bold:
           // Apply bold formatting
           let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
@@ -339,6 +363,23 @@ public class ProcessEntities {
     return attributedString
   }
 
+  private static func threadLinkAttributes(
+    _ target: ThreadLinkTarget,
+    configuration: Configuration
+  ) -> [NSAttributedString.Key: Any] {
+    var attributes: [NSAttributedString.Key: Any] = [
+      .threadLink: target,
+      .foregroundColor: configuration.linkColor,
+      .underlineStyle: 0,
+    ]
+
+    #if os(macOS)
+    attributes[.cursor] = NSCursor.pointingHand
+    #endif
+
+    return attributes
+  }
+
   private static func applyCodeBlockSpacing(
     text: String,
     blockRange: NSRange,
@@ -387,7 +428,8 @@ public class ProcessEntities {
   ///
   public static func fromAttributedString(
     _ attributedString: NSAttributedString,
-    parseMarkdown: Bool = true
+    parseMarkdown: Bool = true,
+    threadLinkSpaceId: Int64? = nil
   ) -> (text: String, entities: MessageEntities) {
     var text = attributedString.string
     var entities: [MessageEntity] = []
@@ -409,6 +451,38 @@ public class ProcessEntities {
         }
         entities.append(entity)
       }
+    }
+
+    attributedString.enumerateAttribute(
+      .threadLink,
+      in: fullRange,
+      options: []
+    ) { value, range, _ in
+      guard let target = value as? ThreadLinkTarget, range.length > 0 else {
+        return
+      }
+
+      var entity = MessageEntity()
+      entity.offset = Int64(range.location)
+      entity.length = Int64(range.length)
+
+      switch target {
+        case let .chatId(chatId):
+          guard chatId > 0 else { return }
+          entity.type = .thread
+          entity.thread = MessageEntity.MessageEntityThread.with {
+            $0.chatID = chatId
+          }
+        case let .title(spaceId, title):
+          guard spaceId > 0, title.isEmpty == false else { return }
+          entity.type = .threadTitle
+          entity.threadTitle = MessageEntity.MessageEntityThreadTitle.with {
+            $0.spaceID = spaceId
+            $0.title = title
+          }
+      }
+
+      entities.append(entity)
     }
 
     attributedString.enumerateAttribute(
@@ -453,6 +527,10 @@ public class ProcessEntities {
       // Skip if this range is a mention; mention extraction is authoritative.
       let attributesAtLocation = attributedString.attributes(at: range.location, effectiveRange: nil)
       if attributesAtLocation[.mentionUserId] != nil {
+        return
+      }
+
+      if attributesAtLocation[.threadLink] != nil {
         return
       }
 
@@ -629,6 +707,10 @@ public class ProcessEntities {
       // Extract italic entities from _text_ markdown syntax and update all entity offsets
       // NOTE: Only extract if not within code blocks
       entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
+
+      if let threadLinkSpaceId, threadLinkSpaceId > 0 {
+        entities = extractThreadTitleLinks(text: &text, spaceId: threadLinkSpaceId, existingEntities: entities)
+      }
     }
 
     entities = extractEmailEntities(text: text, existingEntities: entities)
@@ -924,6 +1006,17 @@ public class ProcessEntities {
     return NSIntersectionRange(lhsRange, rhs).length > 0
   }
 
+  private static func blocksThreadTitleLinkExtraction(entity: MessageEntity, range: NSRange) -> Bool {
+    guard rangesOverlap(lhs: entity, rhs: range) else { return false }
+
+    switch entity.type {
+      case .bold, .italic:
+        return false
+      default:
+        return true
+    }
+  }
+
   private static func totalRemovedCharacters(before offset: Int, removals: [OffsetRemoval]) -> Int {
     var total = 0
     for removal in removals {
@@ -1186,6 +1279,12 @@ public class ProcessEntities {
     let url: String
   }
 
+  private struct ThreadTitleLinkMatch {
+    let fullRange: NSRange
+    let titleRange: NSRange
+    let title: String
+  }
+
   private static func findMarkdownLinkMatches(in text: String) -> [MarkdownLinkMatch] {
     let nsText = text as NSString
     var matches: [MarkdownLinkMatch] = []
@@ -1315,6 +1414,140 @@ public class ProcessEntities {
     applyOffsetRemovals(&textUrlEntities, removals: removals)
     allEntities.append(contentsOf: textUrlEntities)
     return allEntities
+  }
+
+  private static func extractThreadTitleLinks(
+    text: inout String,
+    spaceId: Int64,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    var allEntities = existingEntities
+    var threadEntities: [MessageEntity] = []
+    let matches = findThreadTitleLinkMatches(in: text)
+
+    guard !matches.isEmpty else { return allEntities }
+
+    var removals: [OffsetRemoval] = []
+
+    for match in matches.reversed() {
+      if isPositionWithinCodeBlock(position: match.fullRange.location, entities: allEntities) {
+        continue
+      }
+
+      if allEntities.contains(where: { blocksThreadTitleLinkExtraction(entity: $0, range: match.fullRange) }) {
+        continue
+      }
+
+      guard let swiftFullRange = Range(match.fullRange, in: text) else {
+        continue
+      }
+
+      text.replaceSubrange(swiftFullRange, with: match.title)
+
+      let prefixLength = match.titleRange.location - match.fullRange.location
+      if prefixLength > 0 {
+        removals.append(OffsetRemoval(position: match.fullRange.location, length: prefixLength))
+      }
+
+      let suffixStart = match.titleRange.location + match.titleRange.length
+      let fullEnd = match.fullRange.location + match.fullRange.length
+      let suffixLength = fullEnd - suffixStart
+      if suffixLength > 0 {
+        removals.append(OffsetRemoval(position: suffixStart, length: suffixLength))
+      }
+
+      var entity = MessageEntity()
+      entity.type = .threadTitle
+      entity.offset = Int64(match.titleRange.location)
+      entity.length = Int64(match.titleRange.length)
+      entity.threadTitle = MessageEntity.MessageEntityThreadTitle.with {
+        $0.spaceID = spaceId
+        $0.title = match.title
+      }
+      threadEntities.append(entity)
+    }
+
+    applyOffsetRemovals(&allEntities, removals: removals)
+    applyOffsetRemovals(&threadEntities, removals: removals)
+    allEntities.append(contentsOf: threadEntities)
+    return allEntities
+  }
+
+  private static func findThreadTitleLinkMatches(in text: String) -> [ThreadTitleLinkMatch] {
+    let nsText = text as NSString
+    var matches: [ThreadTitleLinkMatch] = []
+    var cursor = 0
+
+    while cursor + 3 < nsText.length {
+      guard nsText.character(at: cursor) == 91,
+            nsText.character(at: cursor + 1) == 91
+      else {
+        cursor += 1
+        continue
+      }
+
+      let titleStart = cursor + 2
+      var titleEnd = titleStart
+      var foundClose = false
+
+      while titleEnd + 1 < nsText.length {
+        let character = nsText.character(at: titleEnd)
+        if isLineBreakCharacter(character) {
+          break
+        }
+        if character == 93, nsText.character(at: titleEnd + 1) == 93 {
+          foundClose = true
+          break
+        }
+        titleEnd += 1
+      }
+
+      guard foundClose else {
+        cursor += 2
+        continue
+      }
+
+      let rawTitleRange = NSRange(location: titleStart, length: titleEnd - titleStart)
+      guard let titleRange = trimmedRange(rawTitleRange, in: nsText), titleRange.length > 0 else {
+        cursor = titleEnd + 2
+        continue
+      }
+
+      let title = nsText.substring(with: titleRange)
+      matches.append(
+        ThreadTitleLinkMatch(
+          fullRange: NSRange(location: cursor, length: titleEnd + 2 - cursor),
+          titleRange: titleRange,
+          title: title
+        )
+      )
+
+      cursor = titleEnd + 2
+    }
+
+    return matches
+  }
+
+  private static func trimmedRange(_ range: NSRange, in text: NSString) -> NSRange? {
+    guard range.location != NSNotFound, range.length > 0 else { return nil }
+
+    var start = range.location
+    var end = range.location + range.length
+
+    while start < end {
+      let character = text.character(at: start)
+      guard isInlineWhitespaceCharacter(character) else { break }
+      start += 1
+    }
+
+    while end > start {
+      let character = text.character(at: end - 1)
+      guard isInlineWhitespaceCharacter(character) else { break }
+      end -= 1
+    }
+
+    guard end > start else { return nil }
+    return NSRange(location: start, length: end - start)
   }
 
   private static func extractPreFromMarkdown(

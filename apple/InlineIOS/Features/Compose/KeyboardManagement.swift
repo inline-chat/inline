@@ -28,6 +28,10 @@ extension ComposeView {
       return
     }
 
+    if autocompleteManager?.handleKeyPress(keyString) == true {
+      return
+    }
+
     // Let mention manager handle the key press
     if mentionManager?.handleKeyPress(keyString) == true {
       // Key was handled by mention manager

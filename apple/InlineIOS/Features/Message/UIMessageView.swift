@@ -1296,6 +1296,8 @@ class UIMessageView: UIView {
 
     // Check if tap is on a mention first
     if let attributedText = messageLabel.attributedText {
+      guard characterIndex >= 0, characterIndex < attributedText.length else { return }
+
       var foundMention = false
       attributedText.enumerateAttribute(.mentionUserId, in: NSRange(
         location: 0,
@@ -1316,6 +1318,13 @@ class UIMessageView: UIView {
 
       // If not a mention, check for links
       if !foundMention {
+        if let threadTarget = attributedText
+          .attribute(.threadLink, at: characterIndex, effectiveRange: nil) as? ThreadLinkTarget
+        {
+          ThreadLinkNavigator.open(target: threadTarget)
+          return
+        }
+
         var inlineCodeRange = NSRange(location: 0, length: 0)
         if let isInlineCode = attributedText.attribute(
           .inlineCode,
