@@ -203,13 +203,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     let userInfo = response.notification.request.content.userInfo
-    let userId = userInfo["userId"] as? Int64
-    let isThread = userInfo["isThread"] as? Bool
-    let threadId = userInfo["threadId"] as? String
-    let ogThreadId = threadId?.replacingOccurrences(of: "chat_", with: "")
+    let userId = Self.coerceInt64(userInfo["userId"])
+    let isThread = Self.coerceBool(userInfo["isThread"]) == true
+    let threadId = Self.coerceThreadId(userInfo["threadId"])
 
-    let peerId: Peer? = if isThread == true, let ogThreadId, let threadIdInt = Int64(ogThreadId) {
-      Peer.thread(id: threadIdInt)
+    let peerId: Peer? = if isThread, let threadId {
+      Peer.thread(id: threadId)
     } else if let userId {
       Peer.user(id: userId)
     } else {
@@ -321,6 +320,36 @@ private extension AppDelegate {
     if let int64 = value as? Int64 { return String(int64) }
     if let number = value as? NSNumber { return number.stringValue }
     return nil
+  }
+
+  static func coerceInt64(_ value: Any?) -> Int64? {
+    if let int64 = value as? Int64 { return int64 }
+    if let int = value as? Int { return Int64(int) }
+    if let number = value as? NSNumber { return number.int64Value }
+    if let string = value as? String { return Int64(string) }
+    return nil
+  }
+
+  static func coerceBool(_ value: Any?) -> Bool? {
+    if let bool = value as? Bool { return bool }
+    if let number = value as? NSNumber { return number.boolValue }
+    if let string = value as? String {
+      switch string.lowercased() {
+        case "true", "1", "yes":
+          return true
+        case "false", "0", "no":
+          return false
+        default:
+          return nil
+      }
+    }
+    return nil
+  }
+
+  static func coerceThreadId(_ value: Any?) -> Int64? {
+    guard let raw = coerceString(value) else { return nil }
+    let id = raw.replacingOccurrences(of: "chat_", with: "")
+    return Int64(id)
   }
 
   static func coerceStringArray(_ value: Any?) -> [String] {

@@ -330,6 +330,7 @@ public extension ApiDialog {
     let existing = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
 
     var dialog = Dialog(from: self)
+    try dialog.clearMissingOptionalReferences(db)
 
     if let existing {
       dialog.draftMessage = existing.draftMessage
@@ -372,6 +373,7 @@ public extension InlineProtocol.Dialog {
     let existing = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer.toPeer()))
     if let existing {
       var newDialog = Dialog(from: self)
+      try newDialog.clearMissingOptionalReferences(db)
       newDialog.draftMessage = existing.draftMessage
       if !hasNotificationSettings {
         newDialog.notificationSettings = existing.notificationSettings
@@ -397,9 +399,18 @@ public extension InlineProtocol.Dialog {
       try newDialog.save(db, onConflict: .replace)
       return newDialog
     } else {
-      let newDialog = Dialog(from: self)
+      var newDialog = Dialog(from: self)
+      try newDialog.clearMissingOptionalReferences(db)
       try newDialog.save(db, onConflict: .replace)
       return newDialog
+    }
+  }
+}
+
+private extension Dialog {
+  mutating func clearMissingOptionalReferences(_ db: Database) throws {
+    if let spaceId, try Space.fetchOne(db, id: spaceId) == nil {
+      self.spaceId = nil
     }
   }
 }
