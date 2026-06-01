@@ -1225,7 +1225,7 @@ export interface MessageAttachment {
  */
 export interface UrlPreview {
     /**
-     * ID of external task in our database
+     * ID of the URL preview row in our database.
      *
      * @generated from protobuf field: int64 id = 1;
      */
@@ -1266,6 +1266,231 @@ export interface UrlPreview {
      * @generated from protobuf field: optional int64 duration = 7;
      */
     duration?: bigint;
+    /**
+     * Metadata-derived content type of the preview target
+     *
+     * @generated from protobuf field: optional UrlPreview.MediaType media_type = 8;
+     */
+    mediaType?: UrlPreview_MediaType;
+    /**
+     * Sanitized URL text for display only, not a fetch target.
+     *
+     * @generated from protobuf field: optional string display_url = 9;
+     */
+    displayUrl?: string;
+    /**
+     * Stable provider key from the preview pipeline, such as "youtube" or "loom".
+     *
+     * @generated from protobuf field: optional string provider = 10;
+     */
+    provider?: string;
+    /**
+     * Author, channel, account, or publisher when provided by metadata.
+     *
+     * @generated from protobuf field: optional string author = 11;
+     */
+    author?: string;
+    /**
+     * Typed primary media for this preview.
+     *
+     * @generated from protobuf field: optional UrlPreviewMedia media = 12;
+     */
+    media?: UrlPreviewMedia;
+    /**
+     * Server-provided layout hints that clients can adapt to available space.
+     *
+     * @generated from protobuf field: optional UrlPreviewLayout layout = 13;
+     */
+    layout?: UrlPreviewLayout;
+}
+/**
+ * Compatibility summary of the preview media.
+ *
+ * @generated from protobuf enum UrlPreview.MediaType
+ */
+export enum UrlPreview_MediaType {
+    /**
+     * No typed preview media was detected.
+     *
+     * @generated from protobuf enum value: MEDIA_TYPE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * Metadata explicitly identifies this link as an article.
+     *
+     * @generated from protobuf enum value: MEDIA_TYPE_ARTICLE = 1;
+     */
+    ARTICLE = 1,
+    /**
+     * The preview's primary media is an image.
+     *
+     * @generated from protobuf enum value: MEDIA_TYPE_IMAGE = 2;
+     */
+    IMAGE = 2,
+    /**
+     * The preview's primary media is a video or video player.
+     *
+     * @generated from protobuf enum value: MEDIA_TYPE_VIDEO = 3;
+     */
+    VIDEO = 3,
+    /**
+     * The preview's primary media is a document or downloadable file.
+     *
+     * @generated from protobuf enum value: MEDIA_TYPE_DOCUMENT = 4;
+     */
+    DOCUMENT = 4,
+    /**
+     * The preview's primary media is a provider embed.
+     *
+     * @generated from protobuf enum value: MEDIA_TYPE_EMBED = 5;
+     */
+    EMBED = 5
+}
+/**
+ * Typed media attached to a URL preview.
+ *
+ * @generated from protobuf message UrlPreviewMedia
+ */
+export interface UrlPreviewMedia {
+    /**
+     * @generated from protobuf oneof: media
+     */
+    media: {
+        oneofKind: "photo";
+        /**
+         * Existing cached photo type, used for image links and static visual previews.
+         *
+         * @generated from protobuf field: Photo photo = 1;
+         */
+        photo: Photo;
+    } | {
+        oneofKind: "video";
+        /**
+         * Existing cached video type, used when we import and store the video ourselves.
+         *
+         * @generated from protobuf field: Video video = 2;
+         */
+        video: Video;
+    } | {
+        oneofKind: "document";
+        /**
+         * Existing cached document type, used for downloadable or file previews.
+         *
+         * @generated from protobuf field: Document document = 3;
+         */
+        document: Document;
+    } | {
+        oneofKind: "externalVideo";
+        /**
+         * Validated direct remote video stream that we do not own or cache as a Video yet.
+         *
+         * @generated from protobuf field: UrlPreviewExternalVideo external_video = 4;
+         */
+        externalVideo: UrlPreviewExternalVideo;
+    } | {
+        oneofKind: "embed";
+        /**
+         * Provider or player embed, such as YouTube or Loom when direct media is unavailable.
+         *
+         * @generated from protobuf field: UrlPreviewEmbed embed = 5;
+         */
+        embed: UrlPreviewEmbed;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * Direct remote video metadata for playable previews without duplicating Video storage.
+ *
+ * @generated from protobuf message UrlPreviewExternalVideo
+ */
+export interface UrlPreviewExternalVideo {
+    /**
+     * Validated public media stream URL, such as MP4 or HLS.
+     *
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+    /**
+     * MIME type from metadata or response headers.
+     *
+     * @generated from protobuf field: optional string mime_type = 2;
+     */
+    mimeType?: string;
+    /**
+     * Video width in pixels when known.
+     *
+     * @generated from protobuf field: optional int32 w = 3;
+     */
+    w?: number;
+    /**
+     * Video height in pixels when known.
+     *
+     * @generated from protobuf field: optional int32 h = 4;
+     */
+    h?: number;
+    /**
+     * Duration in seconds when known.
+     *
+     * @generated from protobuf field: optional int32 duration = 5;
+     */
+    duration?: number;
+}
+/**
+ * Provider/player embed metadata.
+ *
+ * @generated from protobuf message UrlPreviewEmbed
+ */
+export interface UrlPreviewEmbed {
+    /**
+     * Validated provider or player URL.
+     *
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+    /**
+     * Provider/player type, such as "iframe", "player", or "video".
+     *
+     * @generated from protobuf field: optional string type = 2;
+     */
+    type?: string;
+    /**
+     * Embed width in pixels when known.
+     *
+     * @generated from protobuf field: optional int32 w = 3;
+     */
+    w?: number;
+    /**
+     * Embed height in pixels when known.
+     *
+     * @generated from protobuf field: optional int32 h = 4;
+     */
+    h?: number;
+    /**
+     * Duration in seconds when known.
+     *
+     * @generated from protobuf field: optional int32 duration = 5;
+     */
+    duration?: number;
+}
+/**
+ * Layout hints for URL preview clients.
+ *
+ * @generated from protobuf message UrlPreviewLayout
+ */
+export interface UrlPreviewLayout {
+    /**
+     * True when metadata or dimensions support a large media preview.
+     *
+     * @generated from protobuf field: bool has_large_media = 1;
+     */
+    hasLargeMedia: boolean;
+    /**
+     * True when clients should prefer large media where appropriate.
+     *
+     * @generated from protobuf field: bool show_large_media = 2;
+     */
+    showLargeMedia: boolean;
 }
 /**
  * @generated from protobuf message MessageAttachmentExternalTask
@@ -2111,6 +2336,12 @@ export interface RpcCall {
          */
         deleteBot: DeleteBotInput;
     } | {
+        oneofKind: "deleteMessageAttachment";
+        /**
+         * @generated from protobuf field: DeleteMessageAttachmentInput deleteMessageAttachment = 56;
+         */
+        deleteMessageAttachment: DeleteMessageAttachmentInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2449,6 +2680,12 @@ export interface RpcResult {
          * @generated from protobuf field: DeleteBotResult deleteBot = 55;
          */
         deleteBot: DeleteBotResult;
+    } | {
+        oneofKind: "deleteMessageAttachment";
+        /**
+         * @generated from protobuf field: DeleteMessageAttachmentResult deleteMessageAttachment = 56;
+         */
+        deleteMessageAttachment: DeleteMessageAttachmentResult;
     } | {
         oneofKind: undefined;
     };
@@ -2943,6 +3180,44 @@ export interface DeleteBotResult {
      * @generated from protobuf field: int64 bot_user_id = 1;
      */
     botUserId: bigint;
+}
+/**
+ * Request to remove a single message attachment from a message.
+ *
+ * @generated from protobuf message DeleteMessageAttachmentInput
+ */
+export interface DeleteMessageAttachmentInput {
+    /**
+     * Peer containing the message.
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Per-chat message id containing the attachment.
+     *
+     * @generated from protobuf field: int64 message_id = 2;
+     */
+    messageId: bigint;
+    /**
+     * Stable server attachment id from MessageAttachment.id.
+     *
+     * @generated from protobuf field: int64 attachment_id = 3;
+     */
+    attachmentId: bigint;
+}
+/**
+ * Result for removing a single message attachment.
+ *
+ * @generated from protobuf message DeleteMessageAttachmentResult
+ */
+export interface DeleteMessageAttachmentResult {
+    /**
+     * Updates generated by the mutation for the calling client to apply.
+     *
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
 }
 /**
  * @generated from protobuf message RevokeSessionInput
@@ -5769,7 +6044,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_BOT = 54;
      */
-    DELETE_BOT = 54
+    DELETE_BOT = 54,
+    /**
+     * @generated from protobuf enum value: DELETE_MESSAGE_ATTACHMENT = 55;
+     */
+    DELETE_MESSAGE_ATTACHMENT = 55
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -8859,7 +9138,13 @@ class UrlPreview$Type extends MessageType<UrlPreview> {
             { no: 4, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "photo", kind: "message", T: () => Photo },
-            { no: 7, name: "duration", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 7, name: "duration", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "media_type", kind: "enum", opt: true, T: () => ["UrlPreview.MediaType", UrlPreview_MediaType, "MEDIA_TYPE_"] },
+            { no: 9, name: "display_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "provider", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 11, name: "author", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 12, name: "media", kind: "message", T: () => UrlPreviewMedia },
+            { no: 13, name: "layout", kind: "message", T: () => UrlPreviewLayout }
         ]);
     }
     create(value?: PartialMessage<UrlPreview>): UrlPreview {
@@ -8895,6 +9180,24 @@ class UrlPreview$Type extends MessageType<UrlPreview> {
                 case /* optional int64 duration */ 7:
                     message.duration = reader.int64().toBigInt();
                     break;
+                case /* optional UrlPreview.MediaType media_type */ 8:
+                    message.mediaType = reader.int32();
+                    break;
+                case /* optional string display_url */ 9:
+                    message.displayUrl = reader.string();
+                    break;
+                case /* optional string provider */ 10:
+                    message.provider = reader.string();
+                    break;
+                case /* optional string author */ 11:
+                    message.author = reader.string();
+                    break;
+                case /* optional UrlPreviewMedia media */ 12:
+                    message.media = UrlPreviewMedia.internalBinaryRead(reader, reader.uint32(), options, message.media);
+                    break;
+                case /* optional UrlPreviewLayout layout */ 13:
+                    message.layout = UrlPreviewLayout.internalBinaryRead(reader, reader.uint32(), options, message.layout);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8928,6 +9231,24 @@ class UrlPreview$Type extends MessageType<UrlPreview> {
         /* optional int64 duration = 7; */
         if (message.duration !== undefined)
             writer.tag(7, WireType.Varint).int64(message.duration);
+        /* optional UrlPreview.MediaType media_type = 8; */
+        if (message.mediaType !== undefined)
+            writer.tag(8, WireType.Varint).int32(message.mediaType);
+        /* optional string display_url = 9; */
+        if (message.displayUrl !== undefined)
+            writer.tag(9, WireType.LengthDelimited).string(message.displayUrl);
+        /* optional string provider = 10; */
+        if (message.provider !== undefined)
+            writer.tag(10, WireType.LengthDelimited).string(message.provider);
+        /* optional string author = 11; */
+        if (message.author !== undefined)
+            writer.tag(11, WireType.LengthDelimited).string(message.author);
+        /* optional UrlPreviewMedia media = 12; */
+        if (message.media)
+            UrlPreviewMedia.internalBinaryWrite(message.media, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
+        /* optional UrlPreviewLayout layout = 13; */
+        if (message.layout)
+            UrlPreviewLayout.internalBinaryWrite(message.layout, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8938,6 +9259,301 @@ class UrlPreview$Type extends MessageType<UrlPreview> {
  * @generated MessageType for protobuf message UrlPreview
  */
 export const UrlPreview = new UrlPreview$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UrlPreviewMedia$Type extends MessageType<UrlPreviewMedia> {
+    constructor() {
+        super("UrlPreviewMedia", [
+            { no: 1, name: "photo", kind: "message", oneof: "media", T: () => Photo },
+            { no: 2, name: "video", kind: "message", oneof: "media", T: () => Video },
+            { no: 3, name: "document", kind: "message", oneof: "media", T: () => Document },
+            { no: 4, name: "external_video", kind: "message", oneof: "media", T: () => UrlPreviewExternalVideo },
+            { no: 5, name: "embed", kind: "message", oneof: "media", T: () => UrlPreviewEmbed }
+        ]);
+    }
+    create(value?: PartialMessage<UrlPreviewMedia>): UrlPreviewMedia {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.media = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<UrlPreviewMedia>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UrlPreviewMedia): UrlPreviewMedia {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Photo photo */ 1:
+                    message.media = {
+                        oneofKind: "photo",
+                        photo: Photo.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).photo)
+                    };
+                    break;
+                case /* Video video */ 2:
+                    message.media = {
+                        oneofKind: "video",
+                        video: Video.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).video)
+                    };
+                    break;
+                case /* Document document */ 3:
+                    message.media = {
+                        oneofKind: "document",
+                        document: Document.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).document)
+                    };
+                    break;
+                case /* UrlPreviewExternalVideo external_video */ 4:
+                    message.media = {
+                        oneofKind: "externalVideo",
+                        externalVideo: UrlPreviewExternalVideo.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).externalVideo)
+                    };
+                    break;
+                case /* UrlPreviewEmbed embed */ 5:
+                    message.media = {
+                        oneofKind: "embed",
+                        embed: UrlPreviewEmbed.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).embed)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UrlPreviewMedia, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Photo photo = 1; */
+        if (message.media.oneofKind === "photo")
+            Photo.internalBinaryWrite(message.media.photo, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Video video = 2; */
+        if (message.media.oneofKind === "video")
+            Video.internalBinaryWrite(message.media.video, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* Document document = 3; */
+        if (message.media.oneofKind === "document")
+            Document.internalBinaryWrite(message.media.document, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* UrlPreviewExternalVideo external_video = 4; */
+        if (message.media.oneofKind === "externalVideo")
+            UrlPreviewExternalVideo.internalBinaryWrite(message.media.externalVideo, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* UrlPreviewEmbed embed = 5; */
+        if (message.media.oneofKind === "embed")
+            UrlPreviewEmbed.internalBinaryWrite(message.media.embed, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UrlPreviewMedia
+ */
+export const UrlPreviewMedia = new UrlPreviewMedia$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UrlPreviewExternalVideo$Type extends MessageType<UrlPreviewExternalVideo> {
+    constructor() {
+        super("UrlPreviewExternalVideo", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "mime_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "w", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "h", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UrlPreviewExternalVideo>): UrlPreviewExternalVideo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<UrlPreviewExternalVideo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UrlPreviewExternalVideo): UrlPreviewExternalVideo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* optional string mime_type */ 2:
+                    message.mimeType = reader.string();
+                    break;
+                case /* optional int32 w */ 3:
+                    message.w = reader.int32();
+                    break;
+                case /* optional int32 h */ 4:
+                    message.h = reader.int32();
+                    break;
+                case /* optional int32 duration */ 5:
+                    message.duration = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UrlPreviewExternalVideo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* optional string mime_type = 2; */
+        if (message.mimeType !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.mimeType);
+        /* optional int32 w = 3; */
+        if (message.w !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.w);
+        /* optional int32 h = 4; */
+        if (message.h !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.h);
+        /* optional int32 duration = 5; */
+        if (message.duration !== undefined)
+            writer.tag(5, WireType.Varint).int32(message.duration);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UrlPreviewExternalVideo
+ */
+export const UrlPreviewExternalVideo = new UrlPreviewExternalVideo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UrlPreviewEmbed$Type extends MessageType<UrlPreviewEmbed> {
+    constructor() {
+        super("UrlPreviewEmbed", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "w", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "h", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UrlPreviewEmbed>): UrlPreviewEmbed {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<UrlPreviewEmbed>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UrlPreviewEmbed): UrlPreviewEmbed {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* optional string type */ 2:
+                    message.type = reader.string();
+                    break;
+                case /* optional int32 w */ 3:
+                    message.w = reader.int32();
+                    break;
+                case /* optional int32 h */ 4:
+                    message.h = reader.int32();
+                    break;
+                case /* optional int32 duration */ 5:
+                    message.duration = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UrlPreviewEmbed, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* optional string type = 2; */
+        if (message.type !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.type);
+        /* optional int32 w = 3; */
+        if (message.w !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.w);
+        /* optional int32 h = 4; */
+        if (message.h !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.h);
+        /* optional int32 duration = 5; */
+        if (message.duration !== undefined)
+            writer.tag(5, WireType.Varint).int32(message.duration);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UrlPreviewEmbed
+ */
+export const UrlPreviewEmbed = new UrlPreviewEmbed$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UrlPreviewLayout$Type extends MessageType<UrlPreviewLayout> {
+    constructor() {
+        super("UrlPreviewLayout", [
+            { no: 1, name: "has_large_media", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "show_large_media", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UrlPreviewLayout>): UrlPreviewLayout {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.hasLargeMedia = false;
+        message.showLargeMedia = false;
+        if (value !== undefined)
+            reflectionMergePartial<UrlPreviewLayout>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UrlPreviewLayout): UrlPreviewLayout {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool has_large_media */ 1:
+                    message.hasLargeMedia = reader.bool();
+                    break;
+                case /* bool show_large_media */ 2:
+                    message.showLargeMedia = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UrlPreviewLayout, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool has_large_media = 1; */
+        if (message.hasLargeMedia !== false)
+            writer.tag(1, WireType.Varint).bool(message.hasLargeMedia);
+        /* bool show_large_media = 2; */
+        if (message.showLargeMedia !== false)
+            writer.tag(2, WireType.Varint).bool(message.showLargeMedia);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UrlPreviewLayout
+ */
+export const UrlPreviewLayout = new UrlPreviewLayout$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageAttachmentExternalTask$Type extends MessageType<MessageAttachmentExternalTask> {
     constructor() {
@@ -9928,7 +10544,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 52, name: "updateDialogOpen", kind: "message", oneof: "input", T: () => UpdateDialogOpenInput },
             { no: 53, name: "updateDialogOrder", kind: "message", oneof: "input", T: () => UpdateDialogOrderInput },
             { no: 54, name: "clearChatHistory", kind: "message", oneof: "input", T: () => ClearChatHistoryInput },
-            { no: 55, name: "deleteBot", kind: "message", oneof: "input", T: () => DeleteBotInput }
+            { no: 55, name: "deleteBot", kind: "message", oneof: "input", T: () => DeleteBotInput },
+            { no: 56, name: "deleteMessageAttachment", kind: "message", oneof: "input", T: () => DeleteMessageAttachmentInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -10271,6 +10888,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteBot: DeleteBotInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteBot)
                     };
                     break;
+                case /* DeleteMessageAttachmentInput deleteMessageAttachment */ 56:
+                    message.input = {
+                        oneofKind: "deleteMessageAttachment",
+                        deleteMessageAttachment: DeleteMessageAttachmentInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteMessageAttachment)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10448,6 +11071,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteBotInput deleteBot = 55; */
         if (message.input.oneofKind === "deleteBot")
             DeleteBotInput.internalBinaryWrite(message.input.deleteBot, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteMessageAttachmentInput deleteMessageAttachment = 56; */
+        if (message.input.oneofKind === "deleteMessageAttachment")
+            DeleteMessageAttachmentInput.internalBinaryWrite(message.input.deleteMessageAttachment, writer.tag(56, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10516,7 +11142,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 52, name: "updateDialogOpen", kind: "message", oneof: "result", T: () => UpdateDialogOpenResult },
             { no: 53, name: "updateDialogOrder", kind: "message", oneof: "result", T: () => UpdateDialogOrderResult },
             { no: 54, name: "clearChatHistory", kind: "message", oneof: "result", T: () => ClearChatHistoryResult },
-            { no: 55, name: "deleteBot", kind: "message", oneof: "result", T: () => DeleteBotResult }
+            { no: 55, name: "deleteBot", kind: "message", oneof: "result", T: () => DeleteBotResult },
+            { no: 56, name: "deleteMessageAttachment", kind: "message", oneof: "result", T: () => DeleteMessageAttachmentResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -10859,6 +11486,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteBot: DeleteBotResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteBot)
                     };
                     break;
+                case /* DeleteMessageAttachmentResult deleteMessageAttachment */ 56:
+                    message.result = {
+                        oneofKind: "deleteMessageAttachment",
+                        deleteMessageAttachment: DeleteMessageAttachmentResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteMessageAttachment)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11036,6 +11669,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteBotResult deleteBot = 55; */
         if (message.result.oneofKind === "deleteBot")
             DeleteBotResult.internalBinaryWrite(message.result.deleteBot, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteMessageAttachmentResult deleteMessageAttachment = 56; */
+        if (message.result.oneofKind === "deleteMessageAttachment")
+            DeleteMessageAttachmentResult.internalBinaryWrite(message.result.deleteMessageAttachment, writer.tag(56, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12639,6 +13275,115 @@ class DeleteBotResult$Type extends MessageType<DeleteBotResult> {
  * @generated MessageType for protobuf message DeleteBotResult
  */
 export const DeleteBotResult = new DeleteBotResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteMessageAttachmentInput$Type extends MessageType<DeleteMessageAttachmentInput> {
+    constructor() {
+        super("DeleteMessageAttachmentInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "attachment_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteMessageAttachmentInput>): DeleteMessageAttachmentInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageId = 0n;
+        message.attachmentId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<DeleteMessageAttachmentInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteMessageAttachmentInput): DeleteMessageAttachmentInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 message_id */ 2:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 attachment_id */ 3:
+                    message.attachmentId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteMessageAttachmentInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 message_id = 2; */
+        if (message.messageId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.messageId);
+        /* int64 attachment_id = 3; */
+        if (message.attachmentId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.attachmentId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteMessageAttachmentInput
+ */
+export const DeleteMessageAttachmentInput = new DeleteMessageAttachmentInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteMessageAttachmentResult$Type extends MessageType<DeleteMessageAttachmentResult> {
+    constructor() {
+        super("DeleteMessageAttachmentResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteMessageAttachmentResult>): DeleteMessageAttachmentResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<DeleteMessageAttachmentResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteMessageAttachmentResult): DeleteMessageAttachmentResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteMessageAttachmentResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteMessageAttachmentResult
+ */
+export const DeleteMessageAttachmentResult = new DeleteMessageAttachmentResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class RevokeSessionInput$Type extends MessageType<RevokeSessionInput> {
     constructor() {
