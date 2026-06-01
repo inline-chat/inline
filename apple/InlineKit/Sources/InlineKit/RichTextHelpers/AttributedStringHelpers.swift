@@ -22,6 +22,17 @@ public class AttributedStringHelpers {
     ]
   }
 
+  public static func threadLinkAttributes(
+    target: ThreadLinkTarget,
+    font: NSFont = .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+  ) -> [NSAttributedString.Key: Any] {
+    [
+      .threadLink: target,
+      .foregroundColor: NSColor.systemBlue,
+      .font: font,
+    ]
+  }
+
   #elseif os(iOS)
   public static func mentionAttributes(
     userId: Int64,
@@ -33,12 +44,27 @@ public class AttributedStringHelpers {
       .font: font,
     ]
   }
+
+  public static func threadLinkAttributes(
+    target: ThreadLinkTarget,
+    font: UIFont = UIFont.systemFont(ofSize: 17, weight: .regular)
+  ) -> [NSAttributedString.Key: Any] {
+    [
+      .threadLink: target,
+      .foregroundColor: UIColor.systemBlue,
+      .font: font,
+    ]
+  }
   #endif
 
   // MARK: - Mention Creation
 
   public static func createMentionAttributedString(_ text: String, userId: Int64) -> NSAttributedString {
     NSAttributedString(string: text, attributes: mentionAttributes(userId: userId))
+  }
+
+  public static func createThreadLinkAttributedString(_ text: String, target: ThreadLinkTarget) -> NSAttributedString {
+    NSAttributedString(string: text, attributes: threadLinkAttributes(target: target))
   }
 
   // MARK: - Mention Manipulation
@@ -52,6 +78,18 @@ public class AttributedStringHelpers {
     let mutableAttributedString = attributedString.mutableCopy() as! NSMutableAttributedString
     let mentionAttributedString = createMentionAttributedString(mentionText, userId: userId)
     mutableAttributedString.replaceCharacters(in: range, with: mentionAttributedString)
+    return mutableAttributedString.copy() as! NSAttributedString
+  }
+
+  public static func replaceThreadLinkInAttributedString(
+    _ attributedString: NSAttributedString,
+    range: NSRange,
+    with text: String,
+    target: ThreadLinkTarget
+  ) -> NSAttributedString {
+    let mutableAttributedString = attributedString.mutableCopy() as! NSMutableAttributedString
+    let threadLinkAttributedString = createThreadLinkAttributedString(text, target: target)
+    mutableAttributedString.replaceCharacters(in: range, with: threadLinkAttributedString)
     return mutableAttributedString.copy() as! NSAttributedString
   }
 
@@ -103,6 +141,7 @@ public class AttributedStringHelpers {
 
 public extension NSAttributedString.Key {
   static let mentionUserId = NSAttributedString.Key("mentionUserId")
+  static let threadLink = NSAttributedString.Key("threadLink")
   static let emailAddress = NSAttributedString.Key("emailAddress")
   static let phoneNumber = NSAttributedString.Key("phoneNumber")
   static let inlineCode = NSAttributedString.Key("inlineCode")

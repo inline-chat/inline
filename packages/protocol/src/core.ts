@@ -908,6 +908,18 @@ export interface MessageEntity {
          */
         pre: MessageEntity_MessageEntityPre;
     } | {
+        oneofKind: "thread";
+        /**
+         * @generated from protobuf field: MessageEntity.MessageEntityThread thread = 7;
+         */
+        thread: MessageEntity_MessageEntityThread;
+    } | {
+        oneofKind: "threadTitle";
+        /**
+         * @generated from protobuf field: MessageEntity.MessageEntityThreadTitle thread_title = 8;
+         */
+        threadTitle: MessageEntity_MessageEntityThreadTitle;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -937,6 +949,28 @@ export interface MessageEntity_MessageEntityPre {
      * @generated from protobuf field: string language = 1;
      */
     language: string;
+}
+/**
+ * @generated from protobuf message MessageEntity.MessageEntityThread
+ */
+export interface MessageEntity_MessageEntityThread {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+}
+/**
+ * @generated from protobuf message MessageEntity.MessageEntityThreadTitle
+ */
+export interface MessageEntity_MessageEntityThreadTitle {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: string title = 2;
+     */
+    title: string;
 }
 /**
  * @generated from protobuf enum MessageEntity.Type
@@ -985,7 +1019,15 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_PHONE_NUMBER = 10;
      */
-    PHONE_NUMBER = 10
+    PHONE_NUMBER = 10,
+    /**
+     * @generated from protobuf enum value: TYPE_THREAD = 11;
+     */
+    THREAD = 11,
+    /**
+     * @generated from protobuf enum value: TYPE_THREAD_TITLE = 12;
+     */
+    THREAD_TITLE = 12
 }
 /**
  * @generated from protobuf message MessageReactions
@@ -8279,7 +8321,9 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
             { no: 3, name: "length", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityMention },
             { no: 5, name: "text_url", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityTextUrl },
-            { no: 6, name: "pre", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityPre }
+            { no: 6, name: "pre", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityPre },
+            { no: 7, name: "thread", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThread },
+            { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle }
         ]);
     }
     create(value?: PartialMessage<MessageEntity>): MessageEntity {
@@ -8324,6 +8368,18 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
                         pre: MessageEntity_MessageEntityPre.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).pre)
                     };
                     break;
+                case /* MessageEntity.MessageEntityThread thread */ 7:
+                    message.entity = {
+                        oneofKind: "thread",
+                        thread: MessageEntity_MessageEntityThread.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).thread)
+                    };
+                    break;
+                case /* MessageEntity.MessageEntityThreadTitle thread_title */ 8:
+                    message.entity = {
+                        oneofKind: "threadTitle",
+                        threadTitle: MessageEntity_MessageEntityThreadTitle.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).threadTitle)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8354,6 +8410,12 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
         /* MessageEntity.MessageEntityPre pre = 6; */
         if (message.entity.oneofKind === "pre")
             MessageEntity_MessageEntityPre.internalBinaryWrite(message.entity.pre, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* MessageEntity.MessageEntityThread thread = 7; */
+        if (message.entity.oneofKind === "thread")
+            MessageEntity_MessageEntityThread.internalBinaryWrite(message.entity.thread, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* MessageEntity.MessageEntityThreadTitle thread_title = 8; */
+        if (message.entity.oneofKind === "threadTitle")
+            MessageEntity_MessageEntityThreadTitle.internalBinaryWrite(message.entity.threadTitle, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8505,6 +8567,108 @@ class MessageEntity_MessageEntityPre$Type extends MessageType<MessageEntity_Mess
  * @generated MessageType for protobuf message MessageEntity.MessageEntityPre
  */
 export const MessageEntity_MessageEntityPre = new MessageEntity_MessageEntityPre$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityThread$Type extends MessageType<MessageEntity_MessageEntityThread> {
+    constructor() {
+        super("MessageEntity.MessageEntityThread", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityThread>): MessageEntity_MessageEntityThread {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityThread>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityThread): MessageEntity_MessageEntityThread {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityThread, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityThread
+ */
+export const MessageEntity_MessageEntityThread = new MessageEntity_MessageEntityThread$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityThreadTitle$Type extends MessageType<MessageEntity_MessageEntityThreadTitle> {
+    constructor() {
+        super("MessageEntity.MessageEntityThreadTitle", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityThreadTitle>): MessageEntity_MessageEntityThreadTitle {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.title = "";
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityThreadTitle>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityThreadTitle): MessageEntity_MessageEntityThreadTitle {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* string title */ 2:
+                    message.title = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityThreadTitle, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* string title = 2; */
+        if (message.title !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.title);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityThreadTitle
+ */
+export const MessageEntity_MessageEntityThreadTitle = new MessageEntity_MessageEntityThreadTitle$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageReactions$Type extends MessageType<MessageReactions> {
     constructor() {

@@ -47,7 +47,15 @@ extension ComposeView: UITextViewDelegate {
     }
 
     let slashActive = slashCommandManager?.handleTextChange(in: textView) ?? false
-    if !slashActive {
+    if slashActive {
+      autocompleteManager?.dismissCompletion()
+      return
+    }
+
+    let autocompleteActive = autocompleteManager?.handleTextChange(in: textView) ?? false
+    if autocompleteActive {
+      mentionManager?.dismissCompletion()
+    } else {
       mentionManager?.handleTextChange(in: textView)
     }
   }
@@ -59,12 +67,15 @@ extension ComposeView: UITextViewDelegate {
       }
     }
 
-    if slashCommandManager?.isCompletionVisible != true {
+    if slashCommandManager?.isCompletionVisible != true,
+       autocompleteManager?.isCompletionVisible != true
+    {
       mentionManager?.handleIncomingText(text)
     }
 
     // If deleting inside a mention, strip mention styling first, then apply the delete.
     if slashCommandManager?.isCompletionVisible != true,
+       autocompleteManager?.isCompletionVisible != true,
        mentionManager?.handleMentionRemovalOnDelete(in: textView, changeRange: range, replacementText: text) == true
     {
       return false
@@ -72,6 +83,7 @@ extension ComposeView: UITextViewDelegate {
 
     // Auto-pick an exact mention match when typing space/punctuation at the end of a single result.
     if slashCommandManager?.isCompletionVisible != true,
+       autocompleteManager?.isCompletionVisible != true,
        mentionManager?.handleAutoPickIfNeeded(in: textView, changeRange: range, replacementText: text) == true
     {
       return false
@@ -87,7 +99,15 @@ extension ComposeView: UITextViewDelegate {
     textView.updateTypingAttributesIfNeeded()
 
     let slashActive = slashCommandManager?.handleTextChange(in: textView) ?? false
-    if !slashActive {
+    if slashActive {
+      autocompleteManager?.dismissCompletion()
+      return
+    }
+
+    let autocompleteActive = autocompleteManager?.handleTextChange(in: textView) ?? false
+    if autocompleteActive {
+      mentionManager?.dismissCompletion()
+    } else {
       mentionManager?.handleTextChange(in: textView)
     }
   }

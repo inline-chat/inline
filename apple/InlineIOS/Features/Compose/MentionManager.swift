@@ -233,6 +233,10 @@ class MentionManager: NSObject {
     cancellables.removeAll()
   }
 
+  func dismissCompletion() {
+    hideMentionCompletion()
+  }
+
   // MARK: - Mention Detection
 
   private func detectMentionAtCursor(in textView: UITextView) {

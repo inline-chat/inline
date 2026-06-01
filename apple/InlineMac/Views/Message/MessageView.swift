@@ -1074,6 +1074,13 @@ class MessageViewAppKit: NSView {
         return
       }
 
+      if let threadTarget = textStorage.attribute(.threadLink, at: characterIndex, effectiveRange: nil)
+        as? ThreadLinkTarget
+      {
+        openThreadLink(threadTarget)
+        return
+      }
+
       if let email = textStorage.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(email, forType: .string)
@@ -1126,6 +1133,13 @@ class MessageViewAppKit: NSView {
       return
     }
 
+    if let threadTarget = attributed.attribute(.threadLink, at: characterIndex, effectiveRange: nil)
+      as? ThreadLinkTarget
+    {
+      openThreadLink(threadTarget)
+      return
+    }
+
     if let email = attributed.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(email, forType: .string)
@@ -1138,6 +1152,30 @@ class MessageViewAppKit: NSView {
       NSPasteboard.general.setString(phoneNumber, forType: .string)
       ToastCenter.shared.showSuccess("Copied number")
       performProgressiveHaptic()
+    }
+  }
+
+  private func openThreadLink(_ target: ThreadLinkTarget) {
+    if let peer = target.directPeer {
+      openChat(peer: peer)
+      performProgressiveHaptic()
+      return
+    }
+
+    let database = dependencies?.database ?? AppDatabase.shared
+    Task { @MainActor in
+      do {
+        guard let peer = try await ThreadLinkResolver.resolve(target, database: database) else {
+          ToastCenter.shared.showError("Thread not found")
+          return
+        }
+
+        openChat(peer: peer)
+        performProgressiveHaptic()
+      } catch {
+        ToastCenter.shared.showError("Failed to open thread")
+        log.error("Failed to resolve thread link", error: error)
+      }
     }
   }
 

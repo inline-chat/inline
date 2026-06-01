@@ -250,6 +250,21 @@ struct ChatView: View {
     }
     .onReceive(
       NotificationCenter.default
+        .publisher(for: .navigateToThreadLink)
+    ) { notification in
+      let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
+        .user(id: userId)
+      } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
+        .thread(id: threadId)
+      } else {
+        nil
+      }
+
+      guard let targetPeer, targetPeer != peerId else { return }
+      router.push(.chat(peer: targetPeer))
+    }
+    .onReceive(
+      NotificationCenter.default
         .publisher(for: .navigateToReplyThread)
     ) { notification in
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {

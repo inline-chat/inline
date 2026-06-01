@@ -1,4 +1,5 @@
 import Foundation
+import InlineKit
 @testable import InlineProtocol
 import Testing
 @testable import TextProcessing
@@ -43,6 +44,34 @@ struct ProcessEntitiesTests {
     entity.length = length
     entity.mention = MessageEntity.MessageEntityMention.with {
       $0.userID = userId
+    }
+    return entity
+  }
+
+  private func createThreadEntity(offset: Int64, length: Int64, chatId: Int64) -> MessageEntity {
+    var entity = MessageEntity()
+    entity.type = .thread
+    entity.offset = offset
+    entity.length = length
+    entity.thread = MessageEntity.MessageEntityThread.with {
+      $0.chatID = chatId
+    }
+    return entity
+  }
+
+  private func createThreadTitleEntity(
+    offset: Int64,
+    length: Int64,
+    spaceId: Int64,
+    title: String
+  ) -> MessageEntity {
+    var entity = MessageEntity()
+    entity.type = .threadTitle
+    entity.offset = offset
+    entity.length = length
+    entity.threadTitle = MessageEntity.MessageEntityThreadTitle.with {
+      $0.spaceID = spaceId
+      $0.title = title
     }
     return entity
   }
@@ -119,6 +148,51 @@ struct ProcessEntitiesTests {
     #expect(attributes[.mentionUserId] as? Int64 == 123)
     #expect(attributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
     #expect(attributes[.link] as? String == "inline://user/123")
+  }
+
+  @Test("Thread link entity")
+  func testThreadLinkEntity() {
+    let text = "Open [[Engineering]]"
+    let threadRange = rangeOfSubstring("[[Engineering]]", in: text)
+    let entities = createMessageEntities([
+      createThreadEntity(offset: Int64(threadRange.location), length: Int64(threadRange.length), chatId: 42),
+    ])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let attributes = result.attributes(at: threadRange.location, effectiveRange: nil)
+    #expect(attributes[.threadLink] as? ThreadLinkTarget == .chatId(42))
+    #expect(attributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(attributes[.link] == nil)
+  }
+
+  @Test("Thread title entity")
+  func testThreadTitleEntity() {
+    let text = "Open [[Planning]]"
+    let threadRange = rangeOfSubstring("[[Planning]]", in: text)
+    let entities = createMessageEntities([
+      createThreadTitleEntity(
+        offset: Int64(threadRange.location),
+        length: Int64(threadRange.length),
+        spaceId: 7,
+        title: "Planning"
+      ),
+    ])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let attributes = result.attributes(at: threadRange.location, effectiveRange: nil)
+    #expect(attributes[.threadLink] as? ThreadLinkTarget == .title(spaceId: 7, title: "Planning"))
+    #expect(attributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(attributes[.link] == nil)
   }
 
   @Test("Bold text")
@@ -897,6 +971,133 @@ struct ProcessEntitiesTests {
     #expect(italicEntity != nil)
     #expect(italicEntity!.offset == 25)
     #expect(italicEntity!.length == 6)
+  }
+
+  @Test("Extract thread links from attributed string")
+  func testExtractThreadLinksFromAttributedString() {
+    let text = "Open [[Roadmap]] and [[Planning]]"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let roadmapRange = rangeOfSubstring("[[Roadmap]]", in: text)
+    attributedString.addAttribute(.threadLink, value: ThreadLinkTarget.chatId(42), range: roadmapRange)
+
+    let planningRange = rangeOfSubstring("[[Planning]]", in: text)
+    attributedString.addAttribute(
+      .threadLink,
+      value: ThreadLinkTarget.title(spaceId: 7, title: "Planning"),
+      range: planningRange
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 2)
+
+    let threadEntity = result.entities.entities.first { $0.type == .thread }
+    #expect(threadEntity?.offset == Int64(roadmapRange.location))
+    #expect(threadEntity?.length == Int64(roadmapRange.length))
+    #expect(threadEntity?.thread.chatID == 42)
+
+    let threadTitleEntity = result.entities.entities.first { $0.type == .threadTitle }
+    #expect(threadTitleEntity?.offset == Int64(planningRange.location))
+    #expect(threadTitleEntity?.length == Int64(planningRange.length))
+    #expect(threadTitleEntity?.threadTitle.spaceID == 7)
+    #expect(threadTitleEntity?.threadTitle.title == "Planning")
+  }
+
+  @Test("Extract thread title link syntax")
+  func testExtractThreadTitleLinkSyntax() {
+    let text = "Open [[Planning]] now"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
+
+    #expect(result.text == "Open Planning now")
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .threadTitle)
+    #expect(entity.offset == 5)
+    #expect(entity.length == 8)
+    #expect(entity.threadTitle.spaceID == 7)
+    #expect(entity.threadTitle.title == "Planning")
+  }
+
+  @Test("Extract thread title link syntax after inline markdown")
+  func testExtractThreadTitleLinkSyntaxAfterInlineMarkdown() {
+    let text = "Open [[Project **Plan**]] now"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
+
+    #expect(result.text == "Open Project Plan now")
+
+    let threadEntity = result.entities.entities.first { $0.type == .threadTitle }
+    #expect(threadEntity?.offset == 5)
+    #expect(threadEntity?.length == 12)
+    #expect(threadEntity?.threadTitle.spaceID == 7)
+    #expect(threadEntity?.threadTitle.title == "Project Plan")
+
+    let boldEntity = result.entities.entities.first { $0.type == .bold }
+    #expect(boldEntity?.offset == 13)
+    #expect(boldEntity?.length == 4)
+  }
+
+  @Test("Extract thread title link syntax trims title whitespace")
+  func testExtractThreadTitleLinkSyntaxTrimsTitleWhitespace() {
+    let text = "Open [[  Planning  ]] now"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
+
+    #expect(result.text == "Open Planning now")
+
+    let entity = result.entities.entities.first { $0.type == .threadTitle }
+    #expect(entity?.offset == 5)
+    #expect(entity?.length == 8)
+    #expect(entity?.threadTitle.spaceID == 7)
+    #expect(entity?.threadTitle.title == "Planning")
+  }
+
+  @Test("Does not extract thread title link syntax without a space")
+  func testDoesNotExtractThreadTitleLinkSyntaxWithoutSpace() {
+    let text = "Open [[Planning]] now"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.isEmpty)
+  }
+
+  @Test("Does not extract thread title link syntax inside code")
+  func testDoesNotExtractThreadTitleLinkSyntaxInsideCode() {
+    let text = "Open `[[Planning]]` now"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
+
+    #expect(result.text == "Open [[Planning]] now")
+    #expect(result.entities.entities.count == 1)
+    #expect(result.entities.entities[0].type == .code)
   }
 
   @Test("Verify offset preservation with complex formatting")
