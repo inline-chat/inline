@@ -24,6 +24,11 @@ type AlertDevice = {
   osVersion?: string | null
 }
 
+type AlertAuthContact = {
+  type: "email" | "phone"
+  value: string
+}
+
 async function getAlertUser(userId: number): Promise<AlertUser | null> {
   try {
     const user = await db
@@ -87,7 +92,64 @@ function adminUserLink(user: AlertUser): string {
   return `[${label}](${adminUserUrl(user.id)})`
 }
 
+function authContactDetails(contact: AlertAuthContact): string {
+  // Intentionally unmasked for now so auth alerts can help debug stuck users and abuse.
+  // TODO: replace raw contact details with admin-only auth logs plus safe alert fingerprints.
+  switch (contact.type) {
+    case "email":
+      return `email ${compact(contact.value)}`
+    case "phone":
+      return `phone ${compact(contact.value)}`
+  }
+}
+
+function clientDetails(device?: AlertDevice): string {
+  if (!device) return "unknown"
+
+  const parts: string[] = []
+  if (device.clientType) parts.push(compact(device.clientType))
+  if (device.clientVersion) parts.push(compact(device.clientVersion))
+  if (device.osVersion) parts.push(`os ${compact(device.osVersion)}`)
+  if (device.deviceName) parts.push(`device ${compact(device.deviceName)}`)
+  if (device.deviceId) parts.push(`deviceId ${compact(device.deviceId)}`)
+
+  return parts.length > 0 ? parts.join(", ") : "unknown"
+}
+
+function compact(value: string, maxLength = 160): string {
+  const text = value.replace(/\s+/g, " ").trim()
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text
+}
+
 export const BotAlerts = {
+  authAttempt(props: {
+    kind: "login" | "signup"
+    contact: AlertAuthContact
+    existing: boolean
+    source?: string
+    ip?: string
+    device?: AlertDevice
+    userId?: number | null
+    needsInviteCode?: boolean
+  }) {
+    void (async () => {
+      const user = props.userId ? await getAlertUser(props.userId) : null
+      const userText = user ? `${adminUserLink(user)} with ` : ""
+      const contactText = authContactDetails(props.contact)
+      const account = props.existing ? "existing" : "new"
+      const lines = [
+        `${props.kind === "login" ? "Login" : "Signup"} attempted: ${userText}${contactText}`,
+        `account: ${account}`,
+        `source: ${props.source ? compact(props.source) : "unknown"}`,
+        `ip: ${props.ip ? compact(props.ip) : "unknown"}`,
+        `client: ${clientDetails(props.device)}`,
+        `invite: ${props.needsInviteCode ? "required" : "not required"}`,
+      ]
+
+      sendInlineOnlyBotEvent(lines.join("\n"))
+    })()
+  },
+
   spaceInvite(props: { inviterUserId: number; invitedUserId: number; spaceId: number; spaceName: string | null }) {
     void (async () => {
       const [inviter, invited] = await Promise.all([getAlertUser(props.inviterUserId), getAlertUser(props.invitedUserId)])
