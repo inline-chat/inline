@@ -102,4 +102,28 @@ struct FileUploadProgressTests {
 
     #expect(state == .inactive)
   }
+
+  @Test("download progress clamps invalid totals without reporting completion")
+  func testDownloadProgressClamp() {
+    let snapshot = DownloadProgress(
+      id: "doc_1",
+      bytesReceived: 512,
+      totalBytes: -1
+    )
+
+    #expect(snapshot.bytesReceived == 512)
+    #expect(snapshot.totalBytes == 0)
+    #expect(snapshot.progress == 0)
+    #expect(!snapshot.isComplete)
+  }
+
+  @Test("download completion is explicit even for unknown totals")
+  func testDownloadProgressExplicitCompletion() {
+    let snapshot = DownloadProgress.completed(id: "video_1", totalBytes: 0)
+
+    #expect(snapshot.bytesReceived == 0)
+    #expect(snapshot.totalBytes == 0)
+    #expect(snapshot.progress == 1)
+    #expect(snapshot.isComplete)
+  }
 }

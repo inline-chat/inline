@@ -502,6 +502,7 @@ class DocumentView: NSView {
         DispatchQueue.main.async {
           self.locallyAvailableFileURL = fileURL
           self.documentState = .locallyAvailable
+          self.stopMonitoringProgress()
           self.autoSaveDownloadedFileIfNeeded(sourceURL: fileURL)
         }
       // Success - refresh document info
@@ -530,6 +531,21 @@ class DocumentView: NSView {
   deinit {
     stopMonitoringProgress()
     clearUploadProgressBinding(resetState: true)
+  }
+
+  override func viewDidMoveToSuperview() {
+    super.viewDidMoveToSuperview()
+
+    if superview == nil {
+      stopMonitoringProgress()
+      clearUploadProgressBinding(resetState: false)
+    } else {
+      syncUploadProgressBinding()
+      documentState = determineDocumentState(documentInfo)
+      if case .downloading = documentState {
+        startMonitoringProgress()
+      }
+    }
   }
 
   @objc private func handleClose() {
@@ -590,18 +606,30 @@ class DocumentView: NSView {
     }
 
     let documentId = documentInfo.id
-    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-      return .downloading(bytesReceived: 0, totalBytes: Int64(documentInfo.document.size ?? 0))
+    let progress = FileDownloader.shared.currentDocumentProgress(documentId: documentId)
+    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) || progress?.isLiveOrCompleting == true {
+      return .downloading(
+        bytesReceived: progress?.bytesReceived ?? 0,
+        totalBytes: progress?.displayTotalBytes(fallback: Int64(documentInfo.document.size ?? 0))
+          ?? Int64(documentInfo.document.size ?? 0)
+      )
     }
 
     return .needsDownload
   }
 
   private func pendingUploadDisplayState() -> DocumentPendingUploadDisplayState {
-    DocumentPendingUploadDisplayState.resolve(
+    let progress: UploadProgressSnapshot?
+    if let id = documentInfo.document.id, uploadProgressSnapshot?.id == "document_\(id)" {
+      progress = uploadProgressSnapshot
+    } else {
+      progress = nil
+    }
+
+    return DocumentPendingUploadDisplayState.resolve(
       isPendingMessage: isPendingOutgoingUploadMessage(),
       localDocumentId: documentInfo.document.id,
-      progress: uploadProgressSnapshot
+      progress: progress
     )
   }
 
@@ -625,32 +653,36 @@ class DocumentView: NSView {
     Log.shared.info("Starting progress subscription for document \(documentInfo.id)")
 
     let documentId = documentInfo.id
+    if let progress = FileDownloader.shared.currentDocumentProgress(documentId: documentId) {
+      applyDownloadProgress(progress, documentId: documentId)
+    }
+
     downloadProgressSubscription = FileDownloader.shared.documentProgressPublisher(documentId: documentId)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] progress in
         guard let self else { return }
 
         Log.shared.info("Document \(documentId) progress: \(progress)")
-
-        if progress.isComplete {
-          documentState = .locallyAvailable
-          stopMonitoringProgress()
-        } else if let error = progress.error {
-          Log.shared.error("Document download failed: \(error)")
-          documentState = .needsDownload
-          stopMonitoringProgress()
-        } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-          documentState = .downloading(
-            bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(documentInfo.document.size ?? 0)
-          )
-        } else if progress.bytesReceived > 0 {
-          documentState = .downloading(
-            bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(documentInfo.document.size ?? 0)
-          )
-        }
+        self.applyDownloadProgress(progress, documentId: documentId)
       }
+  }
+
+  private func applyDownloadProgress(_ progress: DownloadProgress, documentId: Int64) {
+    guard documentInfo.id == documentId else { return }
+
+    if let error = progress.error {
+      Log.shared.error("Document download failed: \(error)")
+      documentState = .needsDownload
+      stopMonitoringProgress()
+      return
+    }
+
+    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) || progress.isLiveOrCompleting {
+      documentState = .downloading(
+        bytesReceived: progress.bytesReceived,
+        totalBytes: progress.displayTotalBytes(fallback: Int64(documentInfo.document.size ?? 0))
+      )
+    }
   }
 
   private func syncUploadProgressBinding() {
@@ -667,8 +699,18 @@ class DocumentView: NSView {
 
     clearUploadProgressBinding(resetState: false)
     uploadProgressLocalId = documentLocalId
+    let uploadId = "document_\(documentLocalId)"
+    if uploadProgressSnapshot?.id != uploadId {
+      uploadProgressSnapshot = .processing(id: uploadId)
+    }
+
     uploadProgressBindingTask = Task { @MainActor [weak self] in
       guard let self else { return }
+
+      if let current = await FileUploader.shared.currentDocumentProgress(documentLocalId: documentLocalId) {
+        guard !Task.isCancelled, self.uploadProgressLocalId == documentLocalId else { return }
+        self.applyUploadProgress(current, documentLocalId: documentLocalId)
+      }
 
       let publisher = await FileUploader.shared.documentProgressPublisher(documentLocalId: documentLocalId)
       guard !Task.isCancelled, self.uploadProgressLocalId == documentLocalId else { return }
@@ -678,17 +720,22 @@ class DocumentView: NSView {
         .receive(on: DispatchQueue.main)
         .sink { [weak self] progress in
           guard let self else { return }
-
-          self.uploadProgressSnapshot = progress
-          self.documentState = self.determineDocumentState(self.documentInfo)
-
-          switch progress.stage {
-          case .failed, .completed:
-            self.clearUploadProgressBinding(resetState: false)
-          case .processing, .uploading:
-            break
-          }
+          self.applyUploadProgress(progress, documentLocalId: documentLocalId)
         }
+    }
+  }
+
+  private func applyUploadProgress(_ progress: UploadProgressSnapshot, documentLocalId: Int64) {
+    guard uploadProgressLocalId == documentLocalId else { return }
+
+    uploadProgressSnapshot = progress
+    documentState = determineDocumentState(documentInfo)
+
+    switch progress.stage {
+    case .failed, .completed:
+      clearUploadProgressBinding(resetState: false)
+    case .processing, .uploading:
+      break
     }
   }
 
@@ -942,5 +989,16 @@ extension DocumentView {
       Log.shared.error("Error comparing files", error: error)
       return false
     }
+  }
+}
+
+private extension DownloadProgress {
+  var isLiveOrCompleting: Bool {
+    error == nil && bytesReceived > 0 && !isComplete
+  }
+
+  func displayTotalBytes(fallback: Int64) -> Int64 {
+    let safeFallback = max(0, fallback)
+    return totalBytes > 0 ? totalBytes : max(bytesReceived, safeFallback)
   }
 }

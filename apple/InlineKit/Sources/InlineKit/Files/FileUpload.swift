@@ -241,12 +241,24 @@ public actor FileUploader {
     return publisher
   }
 
+  private func currentProgress(for uploadId: String) -> UploadProgressSnapshot? {
+    latestProgress[uploadId] ?? uploadTasks[uploadId]?.progress ?? progressPublishers[uploadId]?.value
+  }
+
   public func videoProgressPublisher(videoLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
     progressPublisher(for: getUploadId(videoId: videoLocalId)).eraseToAnyPublisher()
   }
 
+  public func currentVideoProgress(videoLocalId: Int64) -> UploadProgressSnapshot? {
+    currentProgress(for: getUploadId(videoId: videoLocalId))
+  }
+
   public func documentProgressPublisher(documentLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
     progressPublisher(for: getUploadId(documentId: documentLocalId)).eraseToAnyPublisher()
+  }
+
+  public func currentDocumentProgress(documentLocalId: Int64) -> UploadProgressSnapshot? {
+    currentProgress(for: getUploadId(documentId: documentLocalId))
   }
 
   public func photoProgressPublisher(photoLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
@@ -273,6 +285,10 @@ public actor FileUploader {
     }
   }
 
+  public func clearUploadProgressHandler(for uploadId: String) {
+    progressHandlers.removeValue(forKey: uploadId)
+  }
+
   // Legacy API preserved for existing call sites that only understand fraction and -1 processing sentinel.
   public func setProgressHandler(for uploadId: String, handler: @escaping @Sendable (Double) -> Void) {
     setUploadProgressHandler(for: uploadId) { progress in
@@ -285,6 +301,10 @@ public actor FileUploader {
         handler(0)
       }
     }
+  }
+
+  public func clearProgressHandler(for uploadId: String) {
+    clearUploadProgressHandler(for: uploadId)
   }
 
   // MARK: - Upload Methods

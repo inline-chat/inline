@@ -25,6 +25,8 @@ class DocumentView: UIView {
   private var progressSubscription: AnyCancellable?
   private var uploadProgressSubscription: AnyCancellable?
   private var uploadProgressBindingTask: Task<Void, Never>?
+  private var uploadProgressLocalId: Int64?
+  private var uploadProgressSnapshot: UploadProgressSnapshot?
   private var isUploadProcessing = false
   private var documentState: DocumentState = .needsDownload {
     didSet {
@@ -78,20 +80,11 @@ class DocumentView: UIView {
     setupContent()
     setupProgressLayer()
 
-    // Determine initial state
     if let document {
       documentState = determineDocumentState(document)
     }
 
-    // Check if this is a sending message with document - show uploading state
-    if let message = fullMessage?.message,
-       message.status == .sending,
-       message.documentId != nil
-    {
-      Self.log.trace("📤 Message is sending with document - setting uploading state")
-      documentState = .uploading(bytesSent: 0, totalBytes: Int64(document?.size ?? 0))
-      startMonitoringUploadProgress()
-    }
+    syncUploadProgressBinding()
 
     updateUIForDocumentState()
 
@@ -310,7 +303,7 @@ class DocumentView: UIView {
     isBeingRemoved = false
     progressSubscription?.cancel()
     progressSubscription = nil
-    clearUploadProgressBinding()
+    clearUploadProgressBinding(resetState: true)
 
     setupContent()
 
@@ -320,13 +313,7 @@ class DocumentView: UIView {
       documentState = .needsDownload
     }
 
-    if fullMessage.message.status == .sending,
-       fullMessage.message.documentId != nil,
-       let document
-    {
-      documentState = .uploading(bytesSent: 0, totalBytes: Int64(document.size ?? 0))
-      startMonitoringUploadProgress()
-    }
+    syncUploadProgressBinding()
 
     updateUIForDocumentState()
     invalidateIntrinsicContentSize()
@@ -408,7 +395,7 @@ class DocumentView: UIView {
 
         case let .downloading(bytesReceived, totalBytes):
           hideUploadingSpinner()
-          let progress = Double(bytesReceived) / Double(totalBytes)
+          let progress = totalBytes > 0 ? Double(bytesReceived) / Double(totalBytes) : 0
           updateProgressPath(progress: CGFloat(progress))
 
           let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
@@ -458,10 +445,14 @@ class DocumentView: UIView {
         switch result {
           case .success:
             self.documentState = .locallyAvailable
+            self.progressSubscription?.cancel()
+            self.progressSubscription = nil
 
           case let .failure(error):
             Self.log.error("Document download failed:", error: error)
             self.documentState = .needsDownload
+            self.progressSubscription?.cancel()
+            self.progressSubscription = nil
         }
       }
     }
@@ -521,7 +512,7 @@ class DocumentView: UIView {
       hideUploadingSpinner()
       progressSubscription?.cancel()
       progressSubscription = nil
-      clearUploadProgressBinding()
+      clearUploadProgressBinding(resetState: true)
     }
   }
 
@@ -671,9 +662,12 @@ class DocumentView: UIView {
 
     isUploadProcessing = false
     let fileSize = Int64(document.size ?? 0)
+    if let documentLocalId = document.id {
+      uploadProgressSnapshot = .processing(id: "document_\(documentLocalId)")
+    }
     documentState = .uploading(bytesSent: 0, totalBytes: fileSize)
 
-    startMonitoringUploadProgress()
+    syncUploadProgressBinding()
   }
 
   // Public method to be called when document upload begins
@@ -689,72 +683,108 @@ class DocumentView: UIView {
     isUploadProcessing = false
     hideUploadingSpinner()
     documentState = .locallyAvailable
-    clearUploadProgressBinding()
+    clearUploadProgressBinding(resetState: true)
   }
 
   func failUpload() {
     isUploadProcessing = false
     hideUploadingSpinner()
     documentState = .locallyAvailable
-    clearUploadProgressBinding()
+    clearUploadProgressBinding(resetState: true)
   }
 
-  private func startMonitoringUploadProgress() {
-    clearUploadProgressBinding()
-
-    guard let document else { return }
-    let fallbackTotalBytes = Int64(document.size ?? 0)
-
-    guard let localDocumentId = document.id else {
-      Self.log.warning("Document upload progress unavailable without local document ID")
-      DispatchQueue.main.async { [weak self] in
-        self?.updateUploadProgress(bytesSent: 0, totalBytes: fallbackTotalBytes)
-      }
+  private func syncUploadProgressBinding() {
+    guard isPendingOutgoingUploadMessage(), let document, let localDocumentId = document.id else {
+      clearUploadProgressBinding(resetState: true)
       return
     }
 
+    if uploadProgressLocalId == localDocumentId,
+       uploadProgressBindingTask != nil || uploadProgressSubscription != nil
+    {
+      return
+    }
+
+    clearUploadProgressBinding(resetState: false)
+    uploadProgressLocalId = localDocumentId
+    let uploadId = "document_\(localDocumentId)"
+    if uploadProgressSnapshot?.id != uploadId {
+      uploadProgressSnapshot = .processing(id: uploadId)
+    }
+
+    let fallbackTotalBytes = Int64(document.size ?? 0)
+    documentState = determineDocumentState(document)
+
     uploadProgressBindingTask = Task { @MainActor [weak self] in
       guard let self else { return }
+      if let current = await FileUploader.shared.currentDocumentProgress(documentLocalId: localDocumentId) {
+        guard !Task.isCancelled, self.uploadProgressLocalId == localDocumentId else { return }
+        self.applyUploadProgress(current, localDocumentId: localDocumentId, fallbackTotalBytes: fallbackTotalBytes)
+      }
+
       let publisher = await FileUploader.shared.documentProgressPublisher(documentLocalId: localDocumentId)
-      guard !Task.isCancelled else { return }
+      guard !Task.isCancelled, self.uploadProgressLocalId == localDocumentId else { return }
 
       self.uploadProgressBindingTask = nil
       self.uploadProgressSubscription = publisher
         .receive(on: DispatchQueue.main)
         .sink { [weak self] snapshot in
           guard let self else { return }
-
-          switch snapshot.stage {
-            case .processing:
-              self.isUploadProcessing = true
-              let totalBytes = max(snapshot.totalBytes, fallbackTotalBytes)
-              self.updateUploadProgress(bytesSent: 0, totalBytes: totalBytes)
-            case .uploading:
-              self.isUploadProcessing = false
-              let totalBytes = snapshot.totalBytes > 0 ? snapshot.totalBytes : fallbackTotalBytes
-              self.updateUploadProgress(bytesSent: snapshot.bytesSent, totalBytes: totalBytes)
-            case .completed:
-              self.isUploadProcessing = false
-              self.completeUpload()
-            case .failed:
-              self.isUploadProcessing = false
-              self.failUpload()
-          }
+          self.applyUploadProgress(snapshot, localDocumentId: localDocumentId, fallbackTotalBytes: fallbackTotalBytes)
         }
     }
   }
 
-  private func clearUploadProgressBinding() {
+  private func applyUploadProgress(
+    _ snapshot: UploadProgressSnapshot,
+    localDocumentId: Int64,
+    fallbackTotalBytes: Int64
+  ) {
+    guard document?.id == localDocumentId else { return }
+    uploadProgressSnapshot = snapshot
+
+    switch snapshot.stage {
+      case .processing:
+        isUploadProcessing = true
+        let totalBytes = max(snapshot.totalBytes, fallbackTotalBytes)
+        updateUploadProgress(bytesSent: 0, totalBytes: totalBytes)
+      case .uploading:
+        isUploadProcessing = false
+        let totalBytes = snapshot.totalBytes > 0 ? snapshot.totalBytes : fallbackTotalBytes
+        updateUploadProgress(bytesSent: snapshot.bytesSent, totalBytes: totalBytes)
+      case .completed:
+        isUploadProcessing = false
+        completeUpload()
+      case .failed:
+        isUploadProcessing = false
+        failUpload()
+    }
+  }
+
+  private func clearUploadProgressBinding(resetState: Bool) {
     isUploadProcessing = false
     uploadProgressBindingTask?.cancel()
     uploadProgressBindingTask = nil
     uploadProgressSubscription?.cancel()
     uploadProgressSubscription = nil
+    uploadProgressLocalId = nil
+    if resetState {
+      uploadProgressSnapshot = nil
+    }
   }
 
   // MARK: - Document State Management
 
   private func determineDocumentState(_ document: Document) -> DocumentState {
+    switch pendingUploadDisplayState(document) {
+      case .inactive:
+        break
+      case .processing:
+        return .uploading(bytesSent: 0, totalBytes: Int64(document.size ?? 0))
+      case let .uploading(bytesSent, totalBytes):
+        return .uploading(bytesSent: bytesSent, totalBytes: totalBytes)
+    }
+
     if let localPath = document.localPath {
       let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
       let fileURL = cacheDirectory.appendingPathComponent(localPath)
@@ -768,11 +798,33 @@ class DocumentView: UIView {
     // Use DocumentInfo.id consistently so forwarded copies follow the same progress stream.
     guard let documentInfo else { return .needsDownload }
     let documentId = documentInfo.id
-    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-      return .downloading(bytesReceived: 0, totalBytes: Int64(document.size ?? 0))
+    let progress = FileDownloader.shared.currentDocumentProgress(documentId: documentId)
+    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) || progress?.isLiveOrCompleting == true {
+      let bytesReceived = progress?.bytesReceived ?? 0
+      let totalBytes = progress?.displayTotalBytes(fallback: Int64(document.size ?? 0)) ?? Int64(document.size ?? 0)
+      return .downloading(bytesReceived: bytesReceived, totalBytes: totalBytes)
     }
 
     return .needsDownload
+  }
+
+  private func pendingUploadDisplayState(_ document: Document) -> DocumentPendingUploadDisplayState {
+    let progress: UploadProgressSnapshot?
+    if let id = document.id, uploadProgressSnapshot?.id == "document_\(id)" {
+      progress = uploadProgressSnapshot
+    } else {
+      progress = nil
+    }
+
+    return DocumentPendingUploadDisplayState.resolve(
+      isPendingMessage: isPendingOutgoingUploadMessage(),
+      localDocumentId: document.id,
+      progress: progress
+    )
+  }
+
+  private func isPendingOutgoingUploadMessage() -> Bool {
+    fullMessage?.message.status == .sending && document?.cdnUrl == nil
   }
 
   // MARK: - Progress Monitoring
@@ -783,31 +835,35 @@ class DocumentView: UIView {
     progressSubscription?.cancel()
 
     let documentId = documentInfo.id
+    if let progress = FileDownloader.shared.currentDocumentProgress(documentId: documentId) {
+      applyDownloadProgress(progress, documentId: documentId)
+    }
+
     progressSubscription = FileDownloader.shared.documentProgressPublisher(documentId: documentId)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] progress in
         guard let self else { return }
 
         Self.log.trace("📄 Document \(documentId) progress: \(progress)")
-
-        if progress.isComplete {
-          documentState = .locallyAvailable
-        } else if let error = progress.error {
-          Self.log.error("Document download failed:", error: error)
-          documentState = .needsDownload
-        } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-          documentState = .downloading(
-            bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document?.size ?? 0)
-          )
-        } else if progress.bytesReceived > 0 {
-          // We have progress but no active task - might be completing
-          documentState = .downloading(
-            bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(document?.size ?? 0)
-          )
-        }
+        self.applyDownloadProgress(progress, documentId: documentId)
       }
+  }
+
+  private func applyDownloadProgress(_ progress: DownloadProgress, documentId: Int64) {
+    guard documentInfo?.id == documentId else { return }
+
+    if let error = progress.error {
+      Self.log.error("Document download failed:", error: error)
+      documentState = .needsDownload
+      return
+    }
+
+    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) || progress.isLiveOrCompleting {
+      documentState = .downloading(
+        bytesReceived: progress.bytesReceived,
+        totalBytes: progress.displayTotalBytes(fallback: Int64(document?.size ?? 0))
+      )
+    }
   }
 
   @objc func handleDocumentTappedNotification(_ notification: Notification) {
@@ -877,7 +933,6 @@ class DocumentView: UIView {
 
     // If message is no longer sending and has document, complete upload
     if newStatus != .sending,
-       fullMessage.message.documentId != nil,
        case .uploading = documentState
     {
       Self.log.trace("📤 Message no longer sending - completing upload")
@@ -888,8 +943,35 @@ class DocumentView: UIView {
   }
 
   deinit {
-    clearUploadProgressBinding()
+    progressSubscription?.cancel()
+    clearUploadProgressBinding(resetState: true)
     NotificationCenter.default.removeObserver(self)
+  }
+
+  override func didMoveToSuperview() {
+    super.didMoveToSuperview()
+
+    if superview == nil {
+      progressSubscription?.cancel()
+      progressSubscription = nil
+      clearUploadProgressBinding(resetState: false)
+    } else {
+      syncUploadProgressBinding()
+      if let document, case .downloading = determineDocumentState(document) {
+        startMonitoringProgress()
+      }
+    }
+  }
+}
+
+private extension DownloadProgress {
+  var isLiveOrCompleting: Bool {
+    error == nil && bytesReceived > 0 && !isComplete
+  }
+
+  func displayTotalBytes(fallback: Int64) -> Int64 {
+    let safeFallback = max(0, fallback)
+    return totalBytes > 0 ? totalBytes : max(bytesReceived, safeFallback)
   }
 }
 
