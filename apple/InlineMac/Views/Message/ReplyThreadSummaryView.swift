@@ -2,6 +2,13 @@ import AppKit
 import InlineKit
 
 final class ReplyThreadSummaryView: NSView {
+  static let baseHeight: CGFloat = 30
+  static let titleExtraHeight: CGFloat = 16
+
+  static func height(hasTitle: Bool) -> CGFloat {
+    baseHeight + (hasTitle ? titleExtraHeight : 0)
+  }
+
   private enum Constants {
     static let avatarSize: CGFloat = 16
     static let avatarOverlap: CGFloat = 6
@@ -11,9 +18,11 @@ final class ReplyThreadSummaryView: NSView {
     static let unreadDotSize: CGFloat = 6
     static let cornerRadius: CGFloat = 8
     static let minWidth: CGFloat = 200
+    static let titleTopPadding: CGFloat = 7
+    static let titledRowCenterOffset: CGFloat = 8
   }
 
-  var onTap: (() -> Void)?
+  var onTap: ((NSEvent.ModifierFlags) -> Void)?
 
   private var style: EmbeddedMessageView.EmbeddedMessageStyle
   private var avatarViews: [UserAvatarView] = []
@@ -23,19 +32,34 @@ final class ReplyThreadSummaryView: NSView {
   private var unreadDotLeadingConstraint: NSLayoutConstraint?
   private var unreadDotWidthConstraint: NSLayoutConstraint?
   private var spinnerWidthConstraint: NSLayoutConstraint?
+  private var avatarsCenterYConstraint: NSLayoutConstraint?
+  private var replyCountCenterYConstraint: NSLayoutConstraint?
+  private var unreadDotCenterYConstraint: NSLayoutConstraint?
+  private var spinnerCenterYConstraint: NSLayoutConstraint?
+  private var hasTitle = false
   private var loading = false
   private var trackingAreaRef: NSTrackingArea?
   private var hovering = false {
     didSet { applyStyle() }
   }
-  private var pressed = false {
-    didSet { applyStyle() }
-  }
+  private var pressed = false
 
   private lazy var avatarsContainer: NSView = {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
+  }()
+
+  private lazy var titleLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+    label.lineBreakMode = .byTruncatingTail
+    label.maximumNumberOfLines = 1
+    label.cell?.usesSingleLineMode = true
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    label.isHidden = true
+    return label
   }()
 
   private lazy var replyCountLabel: NSTextField = {
@@ -67,13 +91,6 @@ final class ReplyThreadSummaryView: NSView {
     return spinner
   }()
 
-  private lazy var tapGesture: NSClickGestureRecognizer = {
-    let gesture = NSClickGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-    gesture.numberOfClicksRequired = 1
-    gesture.buttonMask = 0x1
-    return gesture
-  }()
-
   init(style: EmbeddedMessageView.EmbeddedMessageStyle) {
     self.style = style
     super.init(frame: .zero)
@@ -95,7 +112,8 @@ final class ReplyThreadSummaryView: NSView {
     applyStyle()
   }
 
-  func update(replyCount: Int, recentAuthors: [UserInfo], hasUnread: Bool) {
+  func update(replyCount: Int, recentAuthors: [UserInfo], hasUnread: Bool, title: String?) {
+    updateTitle(title)
     let countText = replyCount == 1 ? "1 reply" : "\(replyCount) replies"
     replyCountLabel.stringValue = countText
     unreadDotView.isHidden = !hasUnread
@@ -118,6 +136,7 @@ final class ReplyThreadSummaryView: NSView {
   }
 
   func clear() {
+    updateTitle(nil)
     replyCountLabel.stringValue = ""
     unreadDotView.isHidden = true
     unreadDotLeadingConstraint?.constant = 0
@@ -126,7 +145,7 @@ final class ReplyThreadSummaryView: NSView {
     spinnerWidthConstraint?.constant = 0
     setLoading(false)
     hovering = false
-    pressed = false
+    setPressed(false)
     isHidden = true
   }
 
@@ -136,12 +155,13 @@ final class ReplyThreadSummaryView: NSView {
     layer?.masksToBounds = true
     layer?.cornerRadius = Constants.cornerRadius
     layer?.borderWidth = 0
+    PressScaleAnimator.prepare(self)
 
+    addSubview(titleLabel)
     addSubview(avatarsContainer)
     addSubview(replyCountLabel)
     addSubview(unreadDotView)
     addSubview(spinnerView)
-    addGestureRecognizer(tapGesture)
 
     avatarsWidthConstraint = avatarsContainer.widthAnchor.constraint(equalToConstant: 0)
     avatarsToLabelSpacingConstraint = replyCountLabel.leadingAnchor.constraint(
@@ -157,20 +177,31 @@ final class ReplyThreadSummaryView: NSView {
     )
     unreadDotWidthConstraint = unreadDotView.widthAnchor.constraint(equalToConstant: Constants.unreadDotSize)
     spinnerWidthConstraint = spinnerView.widthAnchor.constraint(equalToConstant: 0)
+    avatarsCenterYConstraint = avatarsContainer.centerYAnchor.constraint(equalTo: centerYAnchor)
+    replyCountCenterYConstraint = replyCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+    unreadDotCenterYConstraint = unreadDotView.centerYAnchor.constraint(equalTo: centerYAnchor)
+    spinnerCenterYConstraint = spinnerView.centerYAnchor.constraint(equalTo: centerYAnchor)
 
     NSLayoutConstraint.activate([
       minWidthConstraint!,
 
+      titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.titleTopPadding),
+      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
+      titleLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: trailingAnchor,
+        constant: -Constants.horizontalPadding
+      ),
+
       avatarsContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
-      avatarsContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
+      avatarsCenterYConstraint!,
       avatarsContainer.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
       avatarsWidthConstraint!,
 
       avatarsToLabelSpacingConstraint!,
-      replyCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+      replyCountCenterYConstraint!,
 
       unreadDotLeadingConstraint!,
-      unreadDotView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      unreadDotCenterYConstraint!,
       unreadDotWidthConstraint!,
       unreadDotView.heightAnchor.constraint(equalToConstant: Constants.unreadDotSize),
 
@@ -179,7 +210,7 @@ final class ReplyThreadSummaryView: NSView {
         constant: Constants.contentSpacing
       ),
       spinnerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
-      spinnerView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      spinnerCenterYConstraint!,
       spinnerWidthConstraint!,
       spinnerView.heightAnchor.constraint(equalToConstant: 12),
 
@@ -187,6 +218,23 @@ final class ReplyThreadSummaryView: NSView {
     ])
 
     applyStyle()
+  }
+
+  private func updateTitle(_ title: String?) {
+    let title = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let nextHasTitle = title?.isEmpty == false
+    hasTitle = nextHasTitle
+    titleLabel.stringValue = nextHasTitle ? (title ?? "") : ""
+    titleLabel.isHidden = !nextHasTitle
+    replyCountLabel.font = .systemFont(
+      ofSize: nextHasTitle ? NSFont.smallSystemFontSize : NSFont.systemFontSize
+    )
+
+    let rowOffset = nextHasTitle ? Constants.titledRowCenterOffset : 0
+    avatarsCenterYConstraint?.constant = rowOffset
+    replyCountCenterYConstraint?.constant = rowOffset
+    unreadDotCenterYConstraint?.constant = rowOffset
+    spinnerCenterYConstraint?.constant = rowOffset
   }
 
   private func updateAvatars(authors: [UserInfo]) {
@@ -237,7 +285,8 @@ final class ReplyThreadSummaryView: NSView {
 
     switch style {
     case .colored:
-      replyCountLabel.textColor = .labelColor
+      titleLabel.textColor = .labelColor
+      replyCountLabel.textColor = hasTitle ? .secondaryLabelColor : .labelColor
       unreadDotView.layer?.backgroundColor = NSColor.secondaryLabelColor.cgColor
       bgColor = .labelColor
       baseAlpha = 0.055
@@ -245,7 +294,8 @@ final class ReplyThreadSummaryView: NSView {
       pressedAlpha = 0.11
       spinnerView.appearance = nil
     case .white:
-      replyCountLabel.textColor = NSColor.white.withAlphaComponent(0.96)
+      titleLabel.textColor = NSColor.white.withAlphaComponent(0.96)
+      replyCountLabel.textColor = NSColor.white.withAlphaComponent(hasTitle ? 0.72 : 0.96)
       unreadDotView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.8).cgColor
       bgColor = .white
       baseAlpha = 0.1
@@ -256,6 +306,23 @@ final class ReplyThreadSummaryView: NSView {
 
     let alpha = pressed ? pressedAlpha : (hovering ? hoverAlpha : baseAlpha)
     layer?.backgroundColor = bgColor.withAlphaComponent(alpha).cgColor
+  }
+
+  private func setPressed(_ pressed: Bool) {
+    guard self.pressed != pressed else { return }
+    self.pressed = pressed
+    applyStyle()
+    PressScaleAnimator.setPressed(pressed, on: self)
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil {
+      setPressed(false)
+    } else {
+      layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+      PressScaleAnimator.prepare(self)
+    }
   }
 
   override func updateTrackingAreas() {
@@ -274,12 +341,6 @@ final class ReplyThreadSummaryView: NSView {
     trackingAreaRef = area
   }
 
-  override func resetCursorRects() {
-    super.resetCursorRects()
-    guard onTap != nil else { return }
-    addCursorRect(bounds, cursor: .pointingHand)
-  }
-
   override func mouseEntered(with event: NSEvent) {
     super.mouseEntered(with: event)
     guard onTap != nil else { return }
@@ -289,16 +350,42 @@ final class ReplyThreadSummaryView: NSView {
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
     hovering = false
-    pressed = false
+    setPressed(false)
   }
 
-  @objc private func handleTap(_: NSClickGestureRecognizer) {
-    guard onTap != nil else { return }
-    pressed = true
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-      guard let self else { return }
-      self.pressed = self.hovering
+  override func mouseDown(with event: NSEvent) {
+    guard onTap != nil, event.type == .leftMouseDown else {
+      super.mouseDown(with: event)
+      return
     }
-    onTap?()
+
+    setPressed(true)
+    guard let window else {
+      setPressed(false)
+      return
+    }
+
+    while let next = window.nextEvent(
+      matching: [.leftMouseDragged, .leftMouseUp],
+      until: .distantFuture,
+      inMode: .eventTracking,
+      dequeue: true
+    ) {
+      let isInside = bounds.contains(convert(next.locationInWindow, from: nil))
+      switch next.type {
+      case .leftMouseDragged:
+        setPressed(isInside)
+      case .leftMouseUp:
+        setPressed(false)
+        if isInside {
+          onTap?(next.modifierFlags)
+        }
+        return
+      default:
+        break
+      }
+    }
+
+    setPressed(false)
   }
 }

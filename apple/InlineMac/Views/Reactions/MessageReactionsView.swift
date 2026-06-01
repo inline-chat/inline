@@ -28,14 +28,19 @@ final class MessageReactionsView: NSView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    let hitView = super.hitTest(point)
-    var current = hitView
-    while let view = current {
-      if let button = view as? ReactionChipButton {
-        return button
+    interactiveHitTest(point)
+  }
+
+  func interactiveHitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, alphaValue > 0.01 else { return nil }
+
+    for case let chip as ReactionChipButton in subviews.reversed() {
+      let pointInChip = chip.convert(point, from: self)
+      if let hit = chip.hitTest(pointInChip) {
+        return hit
       }
-      current = view.superview
     }
+
     return nil
   }
 

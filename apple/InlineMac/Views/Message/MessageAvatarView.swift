@@ -52,6 +52,7 @@ class UserAvatarView: NSView {
 
     // 3. For manual layout, set this to true
     translatesAutoresizingMaskIntoConstraints = true
+    PressScaleAnimator.prepare(self)
   }
 
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
@@ -171,6 +172,7 @@ class UserAvatarView: NSView {
       setPressed(false)
     } else {
       layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+      PressScaleAnimator.prepare(self)
     }
   }
 
@@ -182,13 +184,6 @@ class UserAvatarView: NSView {
   }
 
   private func applyPressedTransform() {
-    CATransaction.begin()
-    CATransaction.setAnimationDuration(isPressed ? 0.06 : 0.10)
-    CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
-    layer?.transform = isPressed
-      ? CATransform3DMakeScale(0.95, 0.95, 1)
-      : CATransform3DIdentity
-    CATransaction.commit()
-    CATransaction.flush()
+    PressScaleAnimator.setPressed(isPressed, on: self)
   }
 }

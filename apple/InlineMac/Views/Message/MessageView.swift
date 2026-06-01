@@ -30,6 +30,12 @@ private enum ReplyThreadOpenSource {
   case threadSummary
 }
 
+private enum ReplyThreadOpenAction {
+  case current
+  case sidebarBackground
+  case newTab
+}
+
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
   private let log = Log.scoped("MessageView", enableTracing: false)
@@ -320,10 +326,13 @@ class MessageViewAppKit: NSView {
   }()
 
   private lazy var nameLabel: NSTextField = {
-    let label = NSTextField(labelWithString: "")
+    let label = MessageSenderNameLabel()
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = senderFont
     label.lineBreakMode = .byTruncatingTail
+    let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleNameClick))
+    clickGesture.delaysPrimaryMouseButtonEvents = false
+    label.addGestureRecognizer(clickGesture)
 
     return label
   }()
@@ -670,8 +679,8 @@ class MessageViewAppKit: NSView {
     let view = ReplyThreadSummaryView(style: embeddedReplyStyle)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isHidden = true
-    view.onTap = { [weak self] in
-      self?.openReplyThreadFlow(source: .threadSummary)
+    view.onTap = { [weak self] flags in
+      self?.openReplyThreadFlow(source: .threadSummary, action: Self.replyThreadOpenAction(for: flags))
     }
     return view
   }()
@@ -696,9 +705,22 @@ class MessageViewAppKit: NSView {
     replyThreadSummaryView.update(
       replyCount: Int(summary.replyCount),
       recentAuthors: recentReplyThreadAuthors(),
-      hasUnread: summary.hasUnread_p
+      hasUnread: summary.hasUnread_p,
+      title: props.replyThreadTitle
     )
     replyThreadSummaryView.isHidden = false
+  }
+
+  private static func replyThreadOpenAction(for flags: NSEvent.ModifierFlags) -> ReplyThreadOpenAction {
+    if flags.contains(.option) {
+      return .sidebarBackground
+    }
+
+    if flags.contains(.command) {
+      return .newTab
+    }
+
+    return .current
   }
 
   private func recentReplyThreadAuthors() -> [UserInfo] {
@@ -883,6 +905,10 @@ class MessageViewAppKit: NSView {
 
   override func layout() {
     super.layout()
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    interactiveHitTest(point) ?? super.hitTest(point)
   }
 
   // MARK: - Setup
@@ -1324,6 +1350,7 @@ class MessageViewAppKit: NSView {
     longPressGesture = NSPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
     longPressGesture?.minimumPressDuration = 0.5
     longPressGesture?.allowableMovement = 10
+    longPressGesture?.delaysPrimaryMouseButtonEvents = false
     longPressGesture?.delegate = self
     if let gesture = longPressGesture {
       addGestureRecognizer(gesture)
@@ -1347,6 +1374,9 @@ class MessageViewAppKit: NSView {
 
   @objc private func handleLongPress(_ gesture: NSPressGestureRecognizer) {
     if gesture.state == .began {
+      let location = gesture.location(in: self)
+      guard interactiveHitTest(location) == nil else { return }
+
       // Provide haptic feedback
       NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
@@ -1356,12 +1386,13 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func handleDoubleClick(_ gesture: NSClickGestureRecognizer) {
-    // Check if click is within text view bounds
     let location = gesture.location(in: self)
-    if hasText, let textViewFrame = textView.superview?.convert(textView.frame, to: self),
-       textViewFrame.contains(location)
-    {
-      return // Ignore double click if it's on the text
+    if interactiveHitTest(location) != nil {
+      return
+    }
+
+    if gesture === doubleClickGesture, isTextPoint(location) {
+      return
     }
 
     // Provide haptic feedback
@@ -1401,6 +1432,10 @@ class MessageViewAppKit: NSView {
     Task { @MainActor in
       openChat(peer: .user(id: user.id))
     }
+  }
+
+  @objc private func handleNameClick() {
+    handleAvatarClick()
   }
 
   @objc private func handleForwardHeaderClick(_: NSClickGestureRecognizer) {
@@ -2608,10 +2643,15 @@ class MessageViewAppKit: NSView {
     openReplyThreadFlow(source: .menu)
   }
 
-  private func openReplyThreadFlow(source: ReplyThreadOpenSource) {
+  private func openReplyThreadFlow(
+    source: ReplyThreadOpenSource,
+    action: ReplyThreadOpenAction = .current
+  ) {
     guard !isAnchorMessage else { return }
-    focusWindowIfNeeded()
-    let useInlineSpinner = source == .threadSummary && hasReplyThreadSummary
+    if action == .current {
+      focusWindowIfNeeded()
+    }
+    let useInlineSpinner = source == .threadSummary && hasReplyThreadSummary && action == .current
 
     if useInlineSpinner {
       replyThreadSummaryView.setLoading(true)
@@ -2630,7 +2670,7 @@ class MessageViewAppKit: NSView {
       }
 
       if let existingPeer = message.replyThreadPeer {
-        openReplyThread(peer: existingPeer, dependencies: dependencies)
+        openReplyThread(peer: existingPeer, dependencies: dependencies, action: action)
         return
       }
 
@@ -2655,7 +2695,7 @@ class MessageViewAppKit: NSView {
         if !useInlineSpinner {
           ToastCenter.shared.dismiss()
         }
-        openReplyThread(peer: threadPeer, dependencies: dependencies)
+        openReplyThread(peer: threadPeer, dependencies: dependencies, action: action)
       } catch {
         if !useInlineSpinner {
           ToastCenter.shared.dismiss()
@@ -2666,8 +2706,38 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  private func openReplyThread(peer: Peer, dependencies: AppDependencies) {
-    dependencies.openChatRoute(peer: peer)
+  private func openReplyThread(
+    peer: Peer,
+    dependencies: AppDependencies,
+    action: ReplyThreadOpenAction
+  ) {
+    switch action {
+    case .current:
+      dependencies.openChatRoute(peer: peer)
+    case .sidebarBackground:
+      openReplyThreadInSidebar(peer: peer, dependencies: dependencies)
+    case .newTab:
+      MainWindowOpenCoordinator.shared.openTab(.chat(peer: peer))
+    }
+  }
+
+  private func openReplyThreadInSidebar(peer: Peer, dependencies: AppDependencies) {
+    let realtimeV2 = dependencies.realtimeV2
+    let log = log
+
+    Task(priority: .userInitiated) {
+      do {
+        if peer.isThread {
+          _ = try await realtimeV2.send(.showInChatList(peerId: peer))
+        }
+        _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+      } catch {
+        await MainActor.run {
+          ToastCenter.shared.showError("Failed to open thread in sidebar")
+        }
+        log.error("Failed to open reply thread in sidebar", error: error)
+      }
+    }
   }
 
   @objc private func forwardMessage() {
@@ -3506,16 +3576,112 @@ extension MessageViewAppKit {
 // MARK: - NSGestureRecognizerDelegate
 
 extension MessageViewAppKit: NSGestureRecognizerDelegate {
-  func gestureRecognizer(_: NSGestureRecognizer, shouldReceive event: NSEvent) -> Bool {
-    guard let reactionsView else { return true }
+  func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldReceive event: NSEvent) -> Bool {
+    shouldHandleMessageGesture(gestureRecognizer, event: event)
+  }
 
+  func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
+    shouldHandleMessageGesture(gestureRecognizer, event: event)
+  }
+
+  private func shouldHandleMessageGesture(_ gestureRecognizer: NSGestureRecognizer, event: NSEvent) -> Bool {
     let locationInSelf = convert(event.locationInWindow, from: nil)
-    let locationInReactions = reactionsView.convert(locationInSelf, from: self)
-    if reactionsView.bounds.contains(locationInReactions) {
+    if (gestureRecognizer === longPressGesture || gestureRecognizer === doubleClickGesture),
+       isTextPoint(locationInSelf)
+    {
       return false
     }
 
-    return true
+    return interactiveHitTest(locationInSelf) == nil
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: NSGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer
+  ) -> Bool {
+    (gestureRecognizer === longPressGesture && otherGestureRecognizer === doubleClickGesture)
+      || (gestureRecognizer === doubleClickGesture && otherGestureRecognizer === longPressGesture)
+  }
+
+  private func interactiveHitTest(_ point: NSPoint) -> NSView? {
+    if let reactionsView {
+      let locationInReactions = reactionsView.convert(point, from: self)
+      if let hit = reactionsView.interactiveHitTest(locationInReactions) {
+        return hit
+      }
+    }
+
+    if let messageActionRowsView {
+      let pointInActions = messageActionRowsView.convert(point, from: self)
+      if let hit = messageActionRowsView.hitTest(pointInActions) {
+        return hit
+      }
+    }
+
+    if let attachmentsView, attachmentsView.superview != nil, !attachmentsView.isHidden {
+      let pointInAttachments = attachmentsView.convert(point, from: self)
+      if attachmentsView.bounds.contains(pointInAttachments) {
+        return attachmentsView.hitTest(pointInAttachments) ?? attachmentsView
+      }
+    }
+
+    if photoView.superview != nil, !photoView.isHidden {
+      let pointInPhoto = photoView.convert(point, from: self)
+      if let hit = photoView.hitTest(pointInPhoto) {
+        return hit
+      }
+    }
+
+    if videoView.superview != nil, !videoView.isHidden {
+      let pointInVideo = videoView.convert(point, from: self)
+      if let hit = videoView.hitTest(pointInVideo) {
+        return hit
+      }
+    }
+
+    if documentContainerView.superview != nil, !documentContainerView.isHidden {
+      let pointInDocument = documentContainerView.convert(point, from: self)
+      if let hit = documentContainerView.hitTest(pointInDocument) {
+        return hit
+      }
+    }
+
+    if replyView.superview != nil, !replyView.isHidden {
+      let pointInReply = replyView.convert(point, from: self)
+      if let hit = replyView.hitTest(pointInReply) {
+        return hit
+      }
+    }
+
+    if replyThreadSummaryView.superview != nil, !replyThreadSummaryView.isHidden {
+      let pointInSummary = replyThreadSummaryView.convert(point, from: self)
+      if let hit = replyThreadSummaryView.hitTest(pointInSummary) {
+        return hit
+      }
+    }
+
+    if showsAvatar, avatarView.superview != nil {
+      let pointInAvatar = avatarView.convert(point, from: self)
+      if let hit = avatarView.hitTest(pointInAvatar) {
+        return hit
+      }
+    }
+
+    if showsName, nameLabel.superview != nil {
+      let pointInName = nameLabel.convert(point, from: self)
+      if let hit = nameLabel.hitTest(pointInName) {
+        return hit
+      }
+    }
+
+    return nil
+  }
+
+  private func isTextPoint(_ point: NSPoint) -> Bool {
+    guard textView.superview != nil, !textView.isHidden else { return false }
+
+    let pointInText = textView.convert(point, from: self)
+    return textView.bounds.contains(pointInText)
   }
 }
 

@@ -73,7 +73,7 @@ class MessageSizeCalculator {
   static let messageActionRowSpacing: CGFloat = 4
   static let bubbleMessageActionRowHeight: CGFloat = 28
   static let minimalMessageActionRowHeight: CGFloat = 24
-  static let replyThreadSummaryHeight: CGFloat = 30
+  static let replyThreadSummaryHeight: CGFloat = ReplyThreadSummaryView.height(hasTitle: false)
   // Core Text typographic settings
   private let typographicSettings: [NSAttributedString.Key: Any]
 
@@ -626,6 +626,10 @@ class MessageSizeCalculator {
     return min(parentAvailableWidth, proposed)
   }
 
+  private func replyThreadSummaryHeight(for props: MessageViewInputProps) -> CGFloat {
+    ReplyThreadSummaryView.height(hasTitle: props.replyThreadTitle?.isEmpty == false)
+  }
+
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
     // Hash-based approach is faster than string concatenation
     let hashValue =
@@ -1142,7 +1146,7 @@ class MessageSizeCalculator {
     if hasReplyThreadSummary {
       let summaryWidth = max(200, min(parentAvailableWidth, 260))
       replyThreadSummaryPlan = LayoutPlan(size: .zero, spacing: .zero)
-      replyThreadSummaryPlan!.size.height = Self.replyThreadSummaryHeight
+      replyThreadSummaryPlan!.size.height = replyThreadSummaryHeight(for: props)
       replyThreadSummaryPlan!.size.width = summaryWidth
       replyThreadSummaryPlan!.spacing = .init(
         top: 6.0,
@@ -1753,7 +1757,7 @@ class MessageSizeCalculator {
 
     if hasReplyThreadSummary {
       replyThreadSummaryPlan = LayoutPlan(size: .zero, spacing: .zero)
-      replyThreadSummaryPlan!.size.height = Self.replyThreadSummaryHeight
+      replyThreadSummaryPlan!.size.height = replyThreadSummaryHeight(for: props)
       replyThreadSummaryPlan!.size.width = max(200, min(260, parentAvailableWidth))
       replyThreadSummaryPlan!.spacing = .init(
         top: 4.0,

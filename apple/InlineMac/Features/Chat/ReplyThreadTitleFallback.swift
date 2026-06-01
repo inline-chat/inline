@@ -4,6 +4,7 @@ import InlineKit
 
 enum ReplyThreadTitleFallback {
   private static let maxExcerptLength = 72
+  static let genericFallbackTitle = "Re: Message"
 
   static func title(for chat: Chat, db: Database) throws -> String {
     try title(for: chat, anchorText: anchorText(for: chat, db: db))
@@ -19,6 +20,17 @@ enum ReplyThreadTitleFallback {
     }
 
     return fallback(anchorText: anchorText)
+  }
+
+  static func explicitTitle(chatId: Int64, db: Database) throws -> String? {
+    guard let chat = try Chat.fetchOne(db, id: chatId),
+          let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+          title.isEmpty == false
+    else {
+      return nil
+    }
+
+    return title
   }
 
   static func titlesByChatId(for items: [HomeChatItem], db: Database) throws -> [Int64: String] {
@@ -51,6 +63,14 @@ enum ReplyThreadTitleFallback {
     return message?.stringRepresentationPlain
   }
 
+  static func isGenericFallback(_ title: String) -> Bool {
+    title == genericFallbackTitle
+  }
+
+  static func isReplyFallback(_ title: String) -> Bool {
+    title == genericFallbackTitle || title.hasPrefix("Re: ")
+  }
+
   private static func needsFallback(_ chat: Chat) -> Bool {
     guard chat.isReplyThread else { return false }
     let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -65,7 +85,7 @@ enum ReplyThreadTitleFallback {
       .trimmingCharacters(in: .whitespacesAndNewlines)
 
     guard let excerpt, excerpt.isEmpty == false else {
-      return "Re: Message"
+      return genericFallbackTitle
     }
 
     return "Re: \(String(excerpt.prefix(maxExcerptLength)))"
