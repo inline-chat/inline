@@ -480,6 +480,14 @@ Harness changes made:
 - Updated local OpenClaw managed install with `openclaw plugins install @inline-openclaw/inline@0.0.40 --force --pin`.
 - Passed after local `0.0.40` install: `openclaw config validate`, `openclaw gateway health --expect-final --timeout 30000`, and `openclaw plugins doctor`.
 - Verified installed Inline plugin version is `0.0.40`; fresh gateway log scan found no warn/error/fatal entries and no reply-thread route-state/fallback errors.
+- 2026-06-01 release prep: started `@inline-openclaw/inline@0.0.41` to lower the supported OpenClaw SDK floor from `2026.5.28` to `2026.5.18`.
+- Verified `openclaw@2026.5.18` exports all 44 `openclaw/plugin-sdk` subpaths used by the built Inline plugin artifact.
+- Lowered `peerDependencies.openclaw`, `openclaw.install.minHostVersion`, `openclaw.compat.pluginApi`, `openclaw.build.openclawVersion`, and dev SDK to `2026.5.18`; updated `bun.lock`.
+- Passed `0.0.41` compatibility checks: `bun run typecheck`, `bun run lint`, focused reply-thread tests (5 files, 218 tests), `bun vitest run --coverage.enabled=false` (23 files, 325 tests), and `bun run build`.
+- Increased the artifact-packaging test timeout from 30s to 60s because the older OpenClaw dependency tree can make npm/tar/import work exceed 30s under full-suite parallel load.
+- Packed release artifact: `/tmp/inline-openclaw-inline-0.0.41.tgz`.
+- Passed dry-run: `npm publish --dry-run --ignore-scripts --access public --tag latest`.
+- Passed temp install/import smoke test with `openclaw@2026.5.18` plus `/tmp/inline-openclaw-inline-0.0.41.tgz`.
 - 2026-06-01 review pass: found and fixed a reply-thread route-cache edge case where JSON fallback files could outlive the intended 7-day route TTL.
 - Added `src/inline/thread-routes.test.ts` for route memory lookup, state-dir fallback lookup, and expired fallback rejection.
 - Passed review rerun: `cd packages/openclaw && bun run typecheck`.
