@@ -33,6 +33,13 @@ struct OnboardingInviteCode: View {
         .font(.system(size: 21.0, weight: .semibold))
         .foregroundStyle(.primary)
 
+      Text("You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist.")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .frame(width: 320)
+        .padding(.top, 2)
+
       inviteField
         .focused($focusedField, equals: .code)
         .disabled(formState.isLoading)
