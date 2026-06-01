@@ -167,8 +167,13 @@ public enum Theme {
   public static let voiceMessageViewWidth: CGFloat = 240.0
   public static let attachmentViewWidth: CGFloat = 260.0
   public static let externalTaskViewHeight: CGFloat = 46.0
-  public static let loomPreviewHeight: CGFloat = 64.0
-  public static let messageAttachmentsSpacing: CGFloat = 8.0
+  public static let urlPreviewCompactHeight: CGFloat = 36.0
+  public static let urlPreviewLargeHeight: CGFloat = 182.0
+  public static let urlPreviewHeight: CGFloat = urlPreviewCompactHeight
+  public static let loomPreviewHeight: CGFloat = urlPreviewLargeHeight
+  public static let urlPreviewGroupSpacing: CGFloat = 5.0
+  public static let urlPreviewGroupBottomSpacing: CGFloat = 2.0
+  public static let messageAttachmentsSpacing: CGFloat = 4.0
   public static let scrollButtonSize: CGFloat = 32.0
 
   public static let composeMinHeight: CGFloat = 44

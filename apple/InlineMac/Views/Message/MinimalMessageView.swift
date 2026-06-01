@@ -3184,7 +3184,11 @@ class MinimalMessageViewAppKit: NSView {
 
     if hasAttachments {
       if let attachmentsView {
-        attachmentsView.configure(attachments: fullMessage.attachments)
+        attachmentsView.configure(
+          attachments: fullMessage.attachments,
+          message: fullMessage.message,
+          usesOutgoingBubbleStyle: false
+        )
       } else {
         attachmentsView = createAttachmentsView()
         contentView.addSubview(attachmentsView!)

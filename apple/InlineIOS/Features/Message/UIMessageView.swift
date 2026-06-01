@@ -540,9 +540,55 @@ class UIMessageView: UIView {
       with: attachment.urlPreview!,
       photoInfo: attachment.photoInfo,
       parentViewController: findViewController(),
-      outgoing: outgoing
+      outgoing: outgoing,
+      mode: URLPreviewView.preferredMode(for: attachment.urlPreview!),
+      reloadMessageOnFinish: message,
+      canRemove: outgoing && attachment.attachment.attachmentId != nil,
+      onRemove: { [weak self] in
+        self?.removeURLPreviewAttachment(attachment)
+      }
     )
     return previewView
+  }
+
+  private func removeURLPreviewAttachment(_ attachment: FullAttachment) {
+    guard let attachmentId = attachment.attachment.attachmentId else {
+      Log.shared.error("Missing URL preview attachment id for deletion")
+      return
+    }
+
+    let peerId = message.peerId
+    let messageId = message.messageId
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.deleteMessageAttachment(
+          peerId: peerId,
+          messageId: messageId,
+          attachmentId: attachmentId
+        ))
+      } catch {
+        Log.shared.error("Failed to remove URL preview attachment", error: error)
+        await MainActor.run {
+          ToastManager.shared.showToast(
+            "Remove failed",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+        }
+      }
+    }
+  }
+
+  private func addURLPreviewView(for attachment: FullAttachment, to stack: UIStackView) {
+    let spacing = stack.spacing / 2
+    if let previousView = stack.arrangedSubviews.last {
+      stack.setCustomSpacing(spacing, after: previousView)
+    }
+
+    let previewView = createURLPreviewView(for: attachment)
+    stack.addArrangedSubview(previewView)
+    stack.setCustomSpacing(spacing, after: previewView)
   }
 
   func addFloatingMetadata(relativeTo mediaView: UIView) {
@@ -994,8 +1040,7 @@ class UIMessageView: UIView {
           innerContainer.addArrangedSubview(messageAttachmentEmbed)
         }
         if attachment.urlPreview != nil {
-          let previewView = createURLPreviewView(for: attachment)
-          innerContainer.addArrangedSubview(previewView)
+          addURLPreviewView(for: attachment, to: innerContainer)
         }
       }
 
@@ -1046,8 +1091,7 @@ class UIMessageView: UIView {
           multiLineContainer.addArrangedSubview(messageAttachmentEmbed)
         }
         if attachment.urlPreview != nil {
-          let previewView = createURLPreviewView(for: attachment)
-          multiLineContainer.addArrangedSubview(previewView)
+          addURLPreviewView(for: attachment, to: multiLineContainer)
         }
       }
       if shouldShowReactionsInsideBubble {
