@@ -77,18 +77,7 @@ extension ComposeView: UITextViewDelegate {
       return false
     }
 
-    // Check if the change might affect existing mentions or entities
-    if let originalEntities = originalDraftEntities, !originalEntities.entities.isEmpty {
-      // Check if the change overlaps with any existing entity ranges
-      for entity in originalEntities.entities {
-        let entityRange = NSRange(location: Int(entity.offset), length: Int(entity.length))
-        if NSIntersectionRange(range, entityRange).length > 0 {
-          // The change affects an entity, clear original entities to prevent conflicts
-          originalDraftEntities = nil
-          break
-        }
-      }
-    }
+    draftManager.invalidateLoadedEntities(overlapping: range)
 
     return true
   }

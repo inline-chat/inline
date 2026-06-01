@@ -49,69 +49,96 @@ public final class Drafts: @unchecked Sendable {
     }
   }
 
-  public func update(peerId: Peer, text: String, entities: MessageEntities?) {
-    let draft = MessageDraft(text: text, entities: entities)
-    let requestToken = registerRequest(for: peerId)
-
-    log.debug("Draft update for peer \(peerId): \(draft)")
-
-    let log = self.log
-
+  @discardableResult
+  public func update(peerId: Peer, text: String, entities: MessageEntities?) -> Task<Bool, Never> {
     Task(priority: .utility) { [self] in
-      guard isLatestRequest(requestToken, for: peerId) else {
-        log.debug("Skipping stale draft update for peer \(peerId)")
-        return
-      }
-
       do {
-        try await AppDatabase.shared.dbWriter.write { db in
-          guard isLatestRequest(requestToken, for: peerId) else {
-            log.debug("Skipping stale draft update in DB write for peer \(peerId)")
-            return
-          }
-
-          if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)) {
-            let protocolDraft = InlineProtocol.DraftMessage.with {
-              $0.text = draft.text
-              if let entities = draft.entities {
-                $0.entities = entities
-              }
-            }
-            dialog.draftMessage = protocolDraft
-            log.debug("Draft protocol payload for peer \(peerId): \(protocolDraft)")
-            try dialog.save(db)
-          }
-        }
+        return try await updateNow(peerId: peerId, text: text, entities: entities)
       } catch {
         Log.shared.error("Failed to update draft", error: error)
+        return false
       }
     }
   }
 
-  public func clear(peerId: Peer) {
-    let requestToken = registerRequest(for: peerId)
-
+  @discardableResult
+  public func clear(peerId: Peer) -> Task<Bool, Never> {
     Task(priority: .utility) { [self] in
-      guard isLatestRequest(requestToken, for: peerId) else {
-        log.debug("Skipping stale draft clear for peer \(peerId)")
-        return
-      }
-
       do {
-        try await AppDatabase.shared.dbWriter.write { db in
-          guard isLatestRequest(requestToken, for: peerId) else {
-            log.debug("Skipping stale draft clear in DB write for peer \(peerId)")
-            return
-          }
-
-          if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)) {
-            dialog.draftMessage = nil
-            try dialog.save(db)
-          }
-        }
+        return try await clearNow(peerId: peerId)
       } catch {
         Log.shared.error("Failed to clear draft", error: error)
+        return false
       }
     }
+  }
+
+  @discardableResult
+  public func updateNow(peerId: Peer, text: String, entities: MessageEntities?) async throws -> Bool {
+    let entities = normalizedEntities(entities)
+    let draft = MessageDraft(text: text, entities: entities)
+    let requestToken = registerRequest(for: peerId)
+
+    log.debug(
+      "Draft update requested for peer \(peerId), length=\(draft.text.utf16.count), entities=\(draft.entities?.entities.count ?? 0)"
+    )
+
+    guard isLatestRequest(requestToken, for: peerId) else {
+      log.debug("Skipping stale draft update for peer \(peerId)")
+      return false
+    }
+
+    return try await AppDatabase.shared.dbWriter.write { db in
+      guard isLatestRequest(requestToken, for: peerId) else {
+        log.debug("Skipping stale draft update in DB write for peer \(peerId)")
+        return false
+      }
+
+      guard var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)) else {
+        log.warning("Skipping draft update because dialog is missing for peer \(peerId)")
+        return false
+      }
+
+      let protocolDraft = InlineProtocol.DraftMessage.with {
+        $0.text = draft.text
+        if let entities = draft.entities {
+          $0.entities = entities
+        }
+      }
+      dialog.draftMessage = protocolDraft
+      try dialog.save(db)
+      return true
+    }
+  }
+
+  @discardableResult
+  public func clearNow(peerId: Peer) async throws -> Bool {
+    let requestToken = registerRequest(for: peerId)
+
+    guard isLatestRequest(requestToken, for: peerId) else {
+      log.debug("Skipping stale draft clear for peer \(peerId)")
+      return false
+    }
+
+    return try await AppDatabase.shared.dbWriter.write { db in
+      guard isLatestRequest(requestToken, for: peerId) else {
+        log.debug("Skipping stale draft clear in DB write for peer \(peerId)")
+        return false
+      }
+
+      guard var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)) else {
+        log.warning("Skipping draft clear because dialog is missing for peer \(peerId)")
+        return false
+      }
+
+      dialog.draftMessage = nil
+      try dialog.save(db)
+      return true
+    }
+  }
+
+  private func normalizedEntities(_ entities: MessageEntities?) -> MessageEntities? {
+    guard let entities, !entities.entities.isEmpty else { return nil }
+    return entities
   }
 }

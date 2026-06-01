@@ -1547,15 +1547,3 @@ public class ProcessEntities {
     return allEntities
   }
 }
-
-// MARK: - Integrate with drafts for easier usage
-
-public extension Drafts {
-  func update(peerId: InlineKit.Peer, attributedString: NSAttributedString) {
-    // Extract entities from attributed string
-    let (text, entities) = ProcessEntities.fromAttributedString(attributedString, parseMarkdown: false)
-
-    // Update
-    update(peerId: peerId, text: text, entities: entities)
-  }
-}

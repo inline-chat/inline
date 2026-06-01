@@ -71,7 +71,7 @@ class ComposeAppKit: NSView {
   private var commandMenuConstraints: [NSLayoutConstraint] = []
 
   // Draft
-  private var draftDebounceTask: Task<Void, Never>?
+  private let draftManager = DraftManager(debounceDelay: 3.0)
   private var initializedDraft = false
   private var didRequestFinalDraftPersistence = false
 
@@ -1927,15 +1927,15 @@ extension ComposeAppKit {
     guard let dialog else { return false }
 
     // Check if there is a draft message
-    guard let draft = dialog.draftMessage else { return false }
+    guard let draft = draftManager.load(dialog.draftMessage) else { return false }
 
     // Convert to attributed string. Most drafts are plain text, so avoid entity
     // parsing work when protobuf entities are not present.
     let attributedString: NSAttributedString
-    if draft.hasEntities {
+    if let entities = draft.entities {
       attributedString = toAttributedString(
         text: draft.text,
-        entities: draft.entities
+        entities: entities
       )
     } else {
       attributedString = textEditor.createAttributedString(draft.text)
@@ -1958,21 +1958,18 @@ extension ComposeAppKit {
       clearDraft()
       return
     }
-    Drafts.shared.update(peerId: peerId, attributedString: textEditor.attributedString)
+    draftManager.save(peerId: peerId, attributedString: textEditor.attributedString)
   }
 
   private func clearDraft() {
-    draftDebounceTask?.cancel()
-    draftDebounceTask = nil
-    Drafts.shared.clear(peerId: peerId)
+    draftManager.clear(peerId: peerId)
   }
 
   private func requestImmediateDraftPersistenceIfNeeded() {
     guard didRequestFinalDraftPersistence == false else { return }
     didRequestFinalDraftPersistence = true
 
-    draftDebounceTask?.cancel()
-    draftDebounceTask = nil
+    draftManager.cancelPendingSave()
 
     if isEmptyTrimmed {
       clearDraft()
@@ -1984,11 +1981,8 @@ extension ComposeAppKit {
   /// Triggers save with a 3s delay which cancels previous Task thus creating a basic debounced
   /// version to be used on textDidChange.
   private func saveDraftWithDebounce() {
-    draftDebounceTask?.cancel()
-    draftDebounceTask = Task { [weak self] in
-      try? await Task.sleep(for: .seconds(3), tolerance: .milliseconds(500))
-      guard !Task.isCancelled else { return }
-      self?.saveDraft()
+    draftManager.scheduleSave(peerId: peerId) { [weak self] in
+      self?.textEditor.attributedString ?? NSAttributedString()
     }
   }
 }

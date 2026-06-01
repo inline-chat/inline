@@ -9,8 +9,7 @@ extension ComposeView: MentionManagerDelegate {
     // Update height if needed after mention replacement
     updateHeight()
 
-    // Clear original entities since we've modified mentions
-    originalDraftEntities = nil
+    draftManager.invalidateLoadedEntities()
   }
 
   func mentionManagerDidDismiss(_ manager: MentionManager) {
