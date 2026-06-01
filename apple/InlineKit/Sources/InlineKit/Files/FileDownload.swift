@@ -20,19 +20,53 @@ public struct DownloadProgress: Equatable {
   public let error: Error?
 
   public init(id: String, bytesReceived: Int64, totalBytes: Int64, error: Error? = nil) {
+    self.init(
+      id: id,
+      bytesReceived: bytesReceived,
+      totalBytes: totalBytes,
+      isComplete: nil,
+      error: error
+    )
+  }
+
+  private init(
+    id: String,
+    bytesReceived: Int64,
+    totalBytes: Int64,
+    isComplete: Bool?,
+    error: Error? = nil
+  ) {
+    let clampedTotalBytes = max(0, totalBytes)
+    let clampedBytesReceived = if clampedTotalBytes > 0 {
+      min(max(0, bytesReceived), clampedTotalBytes)
+    } else {
+      max(0, bytesReceived)
+    }
+
     self.id = id
-    self.bytesReceived = bytesReceived
-    self.totalBytes = totalBytes
-    progress = totalBytes > 0 ? Double(bytesReceived) / Double(totalBytes) : 0
-
-    // Fix: Only consider complete if we have received bytes and they match total bytes
-    isComplete = totalBytes > 0 && bytesReceived == totalBytes && error == nil
-
+    self.bytesReceived = clampedBytesReceived
+    self.totalBytes = clampedTotalBytes
     self.error = error
+    self.isComplete = error == nil && (isComplete ?? (
+      clampedTotalBytes > 0 && clampedBytesReceived >= clampedTotalBytes
+    ))
+    progress = if self.isComplete {
+      1
+    } else if clampedTotalBytes > 0 {
+      Double(clampedBytesReceived) / Double(clampedTotalBytes)
+    } else {
+      0
+    }
   }
 
   public static func completed(id: String, totalBytes: Int64) -> DownloadProgress {
-    DownloadProgress(id: id, bytesReceived: totalBytes, totalBytes: totalBytes)
+    let clampedTotalBytes = max(0, totalBytes)
+    return DownloadProgress(
+      id: id,
+      bytesReceived: clampedTotalBytes,
+      totalBytes: clampedTotalBytes,
+      isComplete: true
+    )
   }
 
   public static func failed(id: String, error: Error) -> DownloadProgress {
@@ -56,6 +90,7 @@ public final class FileDownloader: NSObject, Sendable {
   public static let shared = FileDownloader()
 
   private var progressPublishers: [String: CurrentValueSubject<DownloadProgress, Never>] = [:]
+  private var latestProgress: [String: DownloadProgress] = [:]
   private var activeTasks: [String: URLSessionDownloadTask] = [:]
   private var session: URLSession!
   private let log = Log.scoped("FileDownloader")
@@ -73,9 +108,17 @@ public final class FileDownloader: NSObject, Sendable {
     progressPublisher(for: "doc_\(documentId)")
   }
 
+  public func currentDocumentProgress(documentId: Int64) -> DownloadProgress? {
+    currentProgress(for: "doc_\(documentId)")
+  }
+
   /// Get a publisher for tracking download progress of a video
   public func videoProgressPublisher(videoId: Int64) -> AnyPublisher<DownloadProgress, Never> {
     progressPublisher(for: "video_\(videoId)")
+  }
+
+  public func currentVideoProgress(videoId: Int64) -> DownloadProgress? {
+    currentProgress(for: "video_\(videoId)")
   }
 
   /// Get a publisher for tracking download progress of a photo
@@ -113,6 +156,7 @@ public final class FileDownloader: NSObject, Sendable {
       id: downloadId,
       url: url,
       localUrl: localUrl,
+      expectedBytes: Int64(document.document.size ?? 0),
       completion: { [weak self] result in
         guard let self else { return }
 
@@ -129,6 +173,7 @@ public final class FileDownloader: NSObject, Sendable {
                 completion(.success(fileUrl))
               } catch {
                 self.log.error("Error saving document download: \(error)")
+                self.failDownload(id: downloadId, error: error)
                 completion(.failure(error))
               }
             }
@@ -167,6 +212,7 @@ public final class FileDownloader: NSObject, Sendable {
       id: downloadId,
       url: url,
       localUrl: localUrl,
+      expectedBytes: Int64(video.video.size ?? 0),
       completion: { [weak self] result in
         guard let self else { return }
 
@@ -179,6 +225,7 @@ public final class FileDownloader: NSObject, Sendable {
                 completion(.success(fileUrl))
               } catch {
                 self.log.error("Error saving video download: \(error)")
+                self.failDownload(id: downloadId, error: error)
                 completion(.failure(error))
               }
             }
@@ -219,6 +266,7 @@ public final class FileDownloader: NSObject, Sendable {
       id: downloadId,
       url: url,
       localUrl: localUrl,
+      expectedBytes: voice.size,
       completion: { [weak self] result in
         guard let self else { return }
 
@@ -230,6 +278,7 @@ public final class FileDownloader: NSObject, Sendable {
               completion(.success(fileURL))
             } catch {
               self.log.error("Error saving voice download: \(error)")
+              self.failDownload(id: downloadId, error: error)
               completion(.failure(error))
             }
           }
@@ -291,13 +340,27 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     // Create a new publisher with initial state (not complete)
-    let initialProgress = DownloadProgress(id: id, bytesReceived: 0, totalBytes: 0)
+    let initialProgress = latestProgress[id] ?? DownloadProgress(id: id, bytesReceived: 0, totalBytes: 0)
     let publisher = CurrentValueSubject<DownloadProgress, Never>(initialProgress)
 
     log.debug("Created new progress publisher for \(id): \(initialProgress)")
 
     progressPublishers[id] = publisher
     return publisher.eraseToAnyPublisher()
+  }
+
+  private func currentProgress(for id: String) -> DownloadProgress? {
+    latestProgress[id] ?? progressPublishers[id]?.value
+  }
+
+  private func publishProgress(_ progress: DownloadProgress) {
+    latestProgress[progress.id] = progress
+
+    if let publisher = progressPublishers[progress.id] {
+      publisher.send(progress)
+    } else {
+      progressPublishers[progress.id] = CurrentValueSubject<DownloadProgress, Never>(progress)
+    }
   }
 
   private func cancelDownload(id: String) {
@@ -318,9 +381,8 @@ public final class FileDownloader: NSObject, Sendable {
 
     activeTasks[id] = nil
 
-    if let publisher = progressPublishers[id] {
-      let lastProgress = publisher.value
-      publisher.send(
+    if let lastProgress = currentProgress(for: id) {
+      publishProgress(
         DownloadProgress(
           id: id,
           bytesReceived: lastProgress.bytesReceived,
@@ -335,7 +397,13 @@ public final class FileDownloader: NSObject, Sendable {
     }
   }
 
-  private func downloadFile(id: String, url: URL, localUrl: URL, completion: @escaping (Result<URL, Error>) -> Void) {
+  private func downloadFile(
+    id: String,
+    url: URL,
+    localUrl: URL,
+    expectedBytes: Int64 = 0,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
     // Create download task
     let task = session.downloadTask(with: url)
     task.taskDescription = id
@@ -343,12 +411,7 @@ public final class FileDownloader: NSObject, Sendable {
     // Store task and completion handler
     activeTasks[id] = task
 
-    // Initialize progress publisher if it doesn't exist
-    if progressPublishers[id] == nil {
-      progressPublishers[id] = CurrentValueSubject<DownloadProgress, Never>(
-        DownloadProgress(id: id, bytesReceived: 0, totalBytes: 0)
-      )
-    }
+    publishProgress(DownloadProgress(id: id, bytesReceived: 0, totalBytes: expectedBytes))
 
     // Store completion handler
     downloadCompletions[id] = { [weak self] result in
@@ -361,6 +424,7 @@ public final class FileDownloader: NSObject, Sendable {
           completion(.success(localUrl))
         } catch {
           log.error("Error moving downloaded file: \(error)")
+          self.failDownload(id: id, error: error)
           completion(.failure(error))
         }
       } else {
@@ -380,24 +444,29 @@ public final class FileDownloader: NSObject, Sendable {
   private func updateProgress(id: String, bytesReceived: Int64, totalBytes: Int64) {
     log.debug("Progress update for \(id): \(bytesReceived)/\(totalBytes)")
     let progress = DownloadProgress(id: id, bytesReceived: bytesReceived, totalBytes: totalBytes)
-    progressPublishers[id]?.send(progress)
+    publishProgress(progress)
   }
 
   private func completeDownload(id: String, location: URL?, error: Error?) {
     if let error {
-      progressPublishers[id]?.send(DownloadProgress.failed(id: id, error: error))
+      publishProgress(DownloadProgress.failed(id: id, error: error))
       if let completion = downloadCompletions[id] {
         downloadCompletions[id] = nil
         completion(.failure(error))
       }
-    } else if let location, let publisher = progressPublishers[id] {
-      let lastProgress = publisher.value
-      progressPublishers[id]?.send(DownloadProgress.completed(id: id, totalBytes: lastProgress.totalBytes))
+    } else if let location {
+      let lastProgress = currentProgress(for: id) ?? DownloadProgress(id: id, bytesReceived: 0, totalBytes: 0)
+      let totalBytes = max(lastProgress.totalBytes, lastProgress.bytesReceived)
+      publishProgress(DownloadProgress.completed(id: id, totalBytes: totalBytes))
       if let completion = downloadCompletions[id] {
         downloadCompletions[id] = nil
         completion(.success(location))
       }
     }
+  }
+
+  private func failDownload(id: String, error: Error) {
+    publishProgress(DownloadProgress.failed(id: id, error: error))
   }
 }
 
@@ -423,19 +492,13 @@ extension FileDownloader: URLSessionDownloadDelegate {
       try FileManager.default.copyItem(at: location, to: persistentTempURL)
 
       DispatchQueue.main.async {
-        if let completion = self.downloadCompletions[taskId] {
-          self.downloadCompletions[taskId] = nil  // Prevent double call
-          completion(.success(persistentTempURL))
-        }
+        self.completeDownload(id: taskId, location: persistentTempURL, error: nil)
       }
     } catch {
       let downloadError = error
       DispatchQueue.main.async {
         self.log.error("Error copying temporary file: \(downloadError)")
-        if let completion = self.downloadCompletions[taskId] {
-          self.downloadCompletions[taskId] = nil  // Prevent double call
-          completion(.failure(downloadError))
-        }
+        self.completeDownload(id: taskId, location: nil, error: downloadError)
       }
     }
   }
