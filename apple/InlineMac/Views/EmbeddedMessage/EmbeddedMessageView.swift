@@ -4,7 +4,7 @@ import InlineUI
 import SwiftUI
 import Translation
 
-class EmbeddedMessageView: NSView {
+class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   // MARK: - Constants
 
   private enum Constants {
@@ -33,6 +33,7 @@ class EmbeddedMessageView: NSView {
   private var message: Message?
   private var relatedMessage: Message?
   private var senderNameForColor: String?
+  private var pressed = false
   private var simplePhotoView: SimplePhotoView?
   private var textLeadingConstraint: NSLayoutConstraint?
   private var nameTrailingConstraint: NSLayoutConstraint?
@@ -117,6 +118,11 @@ class EmbeddedMessageView: NSView {
 
   private var shouldUseSenderColor: Bool {
     style == .colored && kind == .replyInMessage
+  }
+
+  private var isTappable: Bool {
+    guard let message else { return false }
+    return message.status != .sending && message.status != .failed
   }
 
   private var rectangleColor: NSColor {
@@ -207,6 +213,7 @@ class EmbeddedMessageView: NSView {
   private func setupView() {
     wantsLayer = true
     layer?.masksToBounds = true
+    PressScaleAnimator.prepare(self)
 
     translatesAutoresizingMaskIntoConstraints = false
 
@@ -260,7 +267,18 @@ class EmbeddedMessageView: NSView {
       target: self,
       action: #selector(handleTap)
     )
+    clickGesture.delegate = self
     addGestureRecognizer(clickGesture)
+
+    let pressGesture = NSPressGestureRecognizer(
+      target: self,
+      action: #selector(handlePress)
+    )
+    pressGesture.minimumPressDuration = 0
+    pressGesture.allowableMovement = .greatestFiniteMagnitude
+    pressGesture.delaysPrimaryMouseButtonEvents = false
+    pressGesture.delegate = self
+    addGestureRecognizer(pressGesture)
 
     applyBackgroundAppearance()
     applyLeadingBarAppearance()
@@ -303,6 +321,18 @@ class EmbeddedMessageView: NSView {
         .unknown
     }
     chatState.scrollTo(msgId: messageId, reason: reason)
+  }
+
+  @objc private func handlePress(_ gesture: NSPressGestureRecognizer) {
+    switch gesture.state {
+    case .began, .changed:
+      let inside = bounds.contains(gesture.location(in: self))
+      setPressed(isTappable && inside)
+    case .ended, .cancelled, .failed:
+      setPressed(false)
+    default:
+      break
+    }
   }
 
   func update(with embeddedMessage: EmbeddedMessage, kind: Kind) {
@@ -482,6 +512,29 @@ class EmbeddedMessageView: NSView {
     nameLabel.textColor = nameLabelColor
     messageLabel.textColor = textColor
     applyBackgroundAppearance()
+  }
+
+  private func setPressed(_ pressed: Bool) {
+    guard self.pressed != pressed else { return }
+    self.pressed = pressed
+    alphaValue = pressed ? 0.92 : 1
+    PressScaleAnimator.setPressed(pressed, on: self)
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil {
+      setPressed(false)
+    } else {
+      PressScaleAnimator.prepare(self)
+    }
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: NSGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer
+  ) -> Bool {
+    true
   }
 
   private func forwardDescription(for senderName: String, messageText: String) -> String {
