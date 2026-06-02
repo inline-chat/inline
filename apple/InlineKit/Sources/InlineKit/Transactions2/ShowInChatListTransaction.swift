@@ -54,8 +54,8 @@ public struct ShowInChatListTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        let chat = Chat(from: response.chat)
-        try chat.save(db)
+        var chat = Chat(from: response.chat)
+        try chat.saveWithValidLastMsg(db)
         _ = try response.dialog.saveFull(db)
       }
     } catch {

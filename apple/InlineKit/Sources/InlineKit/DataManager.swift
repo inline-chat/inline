@@ -96,8 +96,10 @@ public class DataManager: ObservableObject {
       let result = try await ApiClient.shared.createPrivateChat(userId: userId)
 
       try await database.dbWriter.write { db in
-        let chat = Chat(from: result.chat)
-        try chat.save(db)
+        try result.user.saveFull(db)
+
+        var chat = Chat(from: result.chat)
+        try chat.saveWithValidLastMsg(db)
 
         try result.dialog.saveFull(db)
       }
@@ -129,8 +131,11 @@ public class DataManager: ObservableObject {
       // Remote call
       let result = try await ApiClient.shared.createPrivateChat(userId: userId)
       try await database.dbWriter.write { db in
-        let chat = Chat(from: result.chat)
-        try chat.save(db, onConflict: .replace)
+        try result.user.saveFull(db)
+
+        var chat = Chat(from: result.chat)
+        try chat.saveWithValidLastMsg(db)
+
         let dialog = Dialog(from: result.dialog)
         try dialog.save(db, onConflict: .replace)
       }
@@ -251,7 +256,8 @@ public class DataManager: ObservableObject {
           return chat
         }
         try chats.forEach { chat in
-          try chat.save(db, onConflict: .replace)
+          var chat = chat
+          try chat.saveWithValidLastMsg(db)
         }
 
         // Save messages
@@ -263,7 +269,8 @@ public class DataManager: ObservableObject {
         // Update chat's last message ids now
         let chats_ = result.chats.map { chat in Chat(from: chat) }
         try chats_.forEach { chat in
-          try chat.save(db, onConflict: .replace)
+          var chat = chat
+          try chat.saveWithValidLastMsg(db)
         }
 
         try result.dialogs.forEach { dialog in
@@ -305,7 +312,8 @@ public class DataManager: ObservableObject {
           return chat
         }
         try chats.forEach { chat in
-          try chat.save(db, onConflict: .replace)
+          var chat = chat
+          try chat.saveWithValidLastMsg(db)
         }
 
         // Save messages
@@ -324,7 +332,8 @@ public class DataManager: ObservableObject {
           return chat
         }
         try chats_.forEach { chat in
-          try chat.save(db, onConflict: .replace)
+          var chat = chat
+          try chat.saveWithValidLastMsg(db)
         }
 
         // Save dialogs (merge with existing local-only fields such as drafts/settings).

@@ -240,6 +240,42 @@ struct DialogChatListVisibilityTests {
     }
   }
 
+  @Test("private chat save creates placeholder user when user is missing")
+  func privateChatSaveCreatesMissingPeerUserPlaceholder() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      var chat = Chat(
+        id: 50,
+        date: Date(timeIntervalSince1970: 50),
+        type: .privateChat,
+        title: nil,
+        spaceId: nil,
+        peerUserId: 42
+      )
+
+      try chat.saveWithValidLastMsg(db)
+
+      let user = try #require(try User.fetchOne(db, id: 42))
+      let savedChat = try #require(try Chat.getByPeerId(db: db, peerId: .user(id: 42)))
+
+      #expect(user.needsDisplayNameFetch)
+      #expect(savedChat.id == 50)
+      #expect(savedChat.peerUserId == 42)
+    }
+  }
+
+  @Test("placeholder user requires display name refresh")
+  func placeholderUserRequiresDisplayNameRefresh() {
+    let placeholder = UserInfo.placeholder(id: 42).user
+    let named = User(id: 43, email: nil, firstName: "Riley", lastName: "Stone", username: nil)
+
+    #expect(placeholder.needsDisplayNameFetch)
+    #expect(placeholder.displayName == "User")
+    #expect(named.needsDisplayNameFetch == false)
+    #expect(named.displayName == "Riley Stone")
+  }
+
   @Test("protocol dialog omission preserves hidden state")
   func protocolDialogOmissionPreservesHiddenState() throws {
     let dbQueue = try makeInMemoryDB()

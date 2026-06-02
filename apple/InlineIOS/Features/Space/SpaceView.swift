@@ -147,31 +147,19 @@ struct SpaceView: View {
   // MARK: - Actions
 
   private func handleItemTap(_ item: HomeChatItem) {
-    if let user = item.user {
-      router.push(.chat(peer: .user(id: user.user.id)))
-    } else if let chat = item.chat {
-      router.push(.chat(peer: .thread(id: chat.id)))
-    }
+    router.push(.chat(peer: item.peerId))
   }
 
   private func handleArchive(_ item: HomeChatItem) {
     Task {
-      if let user = item.user {
-        try await data.updateDialog(peerId: .user(id: user.user.id), archived: true)
-      } else if let chat = item.chat {
-        try await data.updateDialog(peerId: .thread(id: chat.id), archived: true)
-      }
+      try await data.updateDialog(peerId: item.peerId, archived: true)
     }
   }
 
   private func handlePin(_ item: HomeChatItem) {
     Task {
       let isPinned = item.dialog.pinned ?? false
-      if let user = item.user {
-        try await data.updateDialog(peerId: .user(id: user.user.id), pinned: !isPinned)
-      } else if let chat = item.chat {
-        try await data.updateDialog(peerId: .thread(id: chat.id), pinned: !isPinned)
-      }
+      try await data.updateDialog(peerId: item.peerId, pinned: !isPinned)
     }
   }
 

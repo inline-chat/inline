@@ -248,7 +248,15 @@ public extension Chat {
 }
 
 public extension Chat {
+  func ensurePeerUserExists(_ db: Database) throws {
+    guard let peerUserId else { return }
+    guard try User.fetchOne(db, id: peerUserId) == nil else { return }
+    try User(id: peerUserId, email: nil, firstName: nil).save(db)
+  }
+
   mutating func saveWithValidLastMsg(_ db: Database) throws {
+    try ensurePeerUserExists(db)
+
     if let existing = try Chat.fetchOne(db, key: id), lastMsgId == nil {
       lastMsgId = existing.lastMsgId
     }

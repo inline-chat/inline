@@ -103,6 +103,10 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
     dialog.peerId
   }
 
+  public var displayUserInfo: UserInfo? {
+    user ?? dialog.peerUserId.map { UserInfo.placeholder(id: $0) }
+  }
+
   public init(
     dialog: Dialog,
     user: UserInfo?,

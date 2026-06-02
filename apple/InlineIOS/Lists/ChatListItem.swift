@@ -270,7 +270,7 @@ struct ChatListItem: View {
         }
       case let .user(userInfo, _):
         HStack(spacing: 0) {
-          Text(userInfo.user.displayName)
+          Text(userInfo.user.needsDisplayNameFetch ? "Loading..." : userInfo.user.displayName)
             .font(Self.titleFont)
             .foregroundColor(Self.titleColor)
             .lineLimit(1)

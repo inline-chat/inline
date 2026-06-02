@@ -635,7 +635,7 @@ private struct ExperimentalChatListView: View {
 
   @ViewBuilder
   private func rowContent(for item: HomeChatItem) -> some View {
-    if let user = item.user {
+    if let user = item.displayUserInfo {
       ChatListItem(
         type: .user(user, chat: item.chat),
         dialog: item.dialog,
