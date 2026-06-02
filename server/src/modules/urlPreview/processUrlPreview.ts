@@ -1,8 +1,11 @@
 import {
+  extractPreviewRoutes,
   extractPreviewUrls,
+  fetchAuthenticatedUrlPreview,
   fetchBinary,
   fetchUrlPreview,
   normalizePreviewUrl,
+  type PreviewRoute,
   type UrlPreviewResult,
 } from "@inline-chat/url-preview"
 import {
@@ -33,6 +36,7 @@ import {
   touchPreviewCache,
   upsertPreviewCache,
 } from "@in/server/modules/urlPreview/cache"
+import { resolvePreviewAuth } from "@in/server/modules/urlPreview/auth"
 import {
   encodeMessageAttachment,
   encodeMessageAttachmentUpdate,
@@ -47,7 +51,8 @@ const log = new Log("modules.urlPreview")
 
 type ProcessUrlPreviewInput = {
   message: DbMessage
-  previewUrl: string
+  previewUrl?: string
+  previewRoute?: PreviewRoute
   chatId: number
   currentUserId: number
   inputPeer: InputPeer
@@ -131,25 +136,43 @@ export function getPreviewUrlsFromMessage(text: string, entities?: MessageEntiti
   return extractPreviewUrls(text, collectEntityUrls(text, entities), { limit: maxPreviewUrls })
 }
 
+export function getPreviewRoutesFromMessage(text: string, entities?: MessageEntities | null): PreviewRoute[] {
+  return extractPreviewRoutes(text, collectEntityUrls(text, entities), { limit: maxPreviewUrls })
+}
+
 export async function processUrlPreviews(
-  input: Omit<ProcessUrlPreviewInput, "previewUrl"> & { previewUrls: string[] },
+  input: Omit<ProcessUrlPreviewInput, "previewUrl" | "previewRoute"> & {
+    previewUrls?: string[]
+    previewRoutes?: PreviewRoute[]
+  },
 ): Promise<void> {
-  for (const previewUrl of input.previewUrls.slice(0, maxPreviewUrls)) {
-    await processUrlPreview({ ...input, previewUrl })
+  const routes = input.previewRoutes ?? input.previewUrls?.map(generalPreviewRoute) ?? []
+  for (const previewRoute of routes.slice(0, maxPreviewUrls)) {
+    await processUrlPreview({ ...input, previewRoute })
   }
 }
 
 export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<void> {
+  const previewRoute = input.previewRoute ?? (input.previewUrl ? generalPreviewRoute(input.previewUrl) : null)
+  if (!previewRoute) {
+    return
+  }
+
   const releaseSlot = await acquirePreviewSlot(input)
   if (!releaseSlot) {
     return
   }
 
   try {
-    const cached = await getFreshPreviewCache(input.previewUrl).catch((error) => {
+    if (previewRoute.kind === "authenticated") {
+      await processAuthenticatedUrlPreview(input, previewRoute)
+      return
+    }
+
+    const cached = await getFreshPreviewCache(previewRoute.url).catch((error) => {
       log.warn("Failed to read URL preview cache", {
         error,
-        url: input.previewUrl,
+        url: previewRoute.url,
         messageId: input.message.messageId,
         chatId: input.chatId,
       })
@@ -169,7 +192,7 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
       return
     }
 
-    const metadata = await fetchUrlPreview(input.previewUrl, {
+    const metadata = await fetchUrlPreview(previewRoute.url, {
       maxDescriptionLength,
       maxTitleLength,
       maxSiteNameLength,
@@ -197,13 +220,52 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
   } catch (error) {
     log.warn("Failed to process URL preview", {
       error,
-      url: input.previewUrl,
+      url: previewRouteUrl(previewRoute),
       messageId: input.message.messageId,
       chatId: input.chatId,
     })
   } finally {
     releaseSlot()
   }
+}
+
+function generalPreviewRoute(url: string): PreviewRoute {
+  return { kind: "general", url }
+}
+
+async function processAuthenticatedUrlPreview(
+  input: ProcessUrlPreviewInput,
+  previewRoute: PreviewRoute & { kind: "authenticated" },
+): Promise<void> {
+  const auth = await resolvePreviewAuth({
+    provider: previewRoute.parsedUrl.provider,
+    currentUserId: input.currentUserId,
+    chatId: input.chatId,
+  })
+  if (!auth) {
+    return
+  }
+
+  const metadata = await fetchAuthenticatedUrlPreview(previewRoute.parsedUrl, auth, {
+    maxDescriptionLength,
+    maxTitleLength,
+    maxSiteNameLength,
+  })
+  if (!metadata) {
+    return
+  }
+
+  const photoId = metadata.imageUrl ? await getOrSavePreviewImage(metadata.imageUrl, input.currentUserId) : null
+  const inserted = await insertPreviewAttachment(
+    input.message,
+    input.chatId,
+    previewSourceFromMetadata(metadata, photoId, null),
+  )
+  await pushInsertedPreviewAttachment(input, inserted)
+}
+
+function previewRouteUrl(route: PreviewRoute): string {
+  return route.kind === "general" ? route.url : route.parsedUrl.normalizedUrl
 }
 
 function collectEntityUrls(text: string, entities?: MessageEntities | null): string[] {
@@ -633,7 +695,7 @@ async function acquirePreviewSlot(input: ProcessUrlPreviewInput): Promise<(() =>
 
   if (queuedPreviewJobs.length >= maxQueuedPreviewJobs) {
     log.warn("Dropping URL preview because the preview queue is full", {
-      url: input.previewUrl,
+      url: input.previewRoute ? previewRouteUrl(input.previewRoute) : input.previewUrl,
       messageId: input.message.messageId,
       chatId: input.chatId,
       activePreviewJobs,

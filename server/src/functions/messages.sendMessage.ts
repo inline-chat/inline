@@ -49,7 +49,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
-import { getPreviewUrlsFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
+import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
   emitChatListOpenUpdates,
@@ -129,10 +129,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let entities = outgoingText?.entities
 
   const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
-  const previewUrls = text && !input.skipLinkProcessing && !hasInputUrlPreview
-    ? getPreviewUrlsFromMessage(text, entities)
+  const previewRoutes = text && !input.skipLinkProcessing && !hasInputUrlPreview
+    ? getPreviewRoutesFromMessage(text, entities)
     : []
-  const hasLink = detectHasLink({ entities }) || hasInputUrlPreview || previewUrls.length > 0
+  const hasLink = detectHasLink({ entities }) || hasInputUrlPreview || previewRoutes.length > 0
 
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
@@ -340,10 +340,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   })
 
   // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
-  if (previewUrls.length > 0) {
+  if (previewRoutes.length > 0) {
     void processUrlPreviews({
       message: newMessage,
-      previewUrls,
+      previewRoutes,
       chatId,
       currentUserId,
       inputPeer,

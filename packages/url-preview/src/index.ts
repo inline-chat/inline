@@ -4,11 +4,38 @@ import { normalizePreviewUrl } from "./normalize.js"
 import type { FetchUrlPreviewOptions, UrlPreviewResult } from "./types.js"
 
 export { UrlPreviewError } from "./errors.js"
+export {
+  authenticatedPreviewProviders,
+  fetchAuthenticatedUrlPreview,
+  parseAuthenticatedPreviewUrl,
+} from "./auth/index.js"
 export { extractPreviewUrl, extractPreviewUrls } from "./extract.js"
 export { filterPreviewUrl, isBlockedHostname, isBlockedIp } from "./filters.js"
 export { fetchBinary } from "./network.js"
 export { normalizeMetadataUrl, normalizePreviewUrl, trimUrlToken } from "./normalize.js"
 export { isLoomUrl, isYouTubeUrl, normalizeYouTubeUrl } from "./providers/index.js"
+export { extractPreviewRoutes, routePreviewUrl } from "./router.js"
+export { extractPreviewTargets } from "./auth/index.js"
+export {
+  fetchNotionPreview,
+  isNotionWebHost,
+  parseNotionUrl,
+} from "./auth/providers/notion/index.js"
+export type {
+  AuthenticatedPreviewProvider,
+  AuthenticatedPreviewResult,
+  AuthPreviewOptions,
+  ParsedProviderUrl,
+  PreviewAuthOwner,
+  PreviewCredential,
+} from "./auth/index.js"
+export type { PreviewRoute } from "./router.js"
+export type { ExtractedPreviewTarget } from "./auth/index.js"
+export type {
+  NotionParsedResourceType,
+  NotionParsedUrl,
+  NotionPreviewResourceType,
+} from "./auth/providers/notion/index.js"
 export type {
   FetchBinaryOptions,
   FetchBinaryResult,

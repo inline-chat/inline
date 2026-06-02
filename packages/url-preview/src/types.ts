@@ -1,4 +1,4 @@
-export type PreviewProvider = "generic" | "loom" | "youtube"
+export type PreviewProvider = "generic" | "loom" | "youtube" | "notion" | (string & {})
 export type PreviewMediaType = "article" | "image" | "video" | "document" | "embed"
 
 /** Source media detected by the URL preview fetch pipeline. */

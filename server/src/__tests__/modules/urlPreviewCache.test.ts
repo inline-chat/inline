@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { eq } from "drizzle-orm"
 
 import { db, schema } from "@in/server/db"
-import { processUrlPreview } from "@in/server/modules/urlPreview/processUrlPreview"
+import { encrypt } from "@in/server/modules/encryption/encryption"
+import { getPreviewRoutesFromMessage, processUrlPreview } from "@in/server/modules/urlPreview/processUrlPreview"
 import {
   getFreshPreviewCache,
   upsertPreviewCache,
@@ -158,6 +159,91 @@ describe("URL preview cache", () => {
     expect(fetchCalls).toBe(0)
     expect(preview.cacheId).toBe(cache.id)
     expect(preview.mediaType).toBe("video")
+
+    const attachments = await db.select().from(schema.messageAttachments)
+    expect(attachments).toHaveLength(1)
+    expect(attachments[0]?.urlPreviewId).toBe(BigInt(preview.id))
+  })
+
+  it("does not store authenticated Notion previews in the global cache", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Notion URL Preview", ["notion-preview@example.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create Notion preview test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create Notion preview test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://www.notion.so/workspace/Roadmap-0123456789abcdef0123456789abcdef",
+    })
+
+    const token = encrypt(JSON.stringify({ data: { access_token: "notion-token" } }))
+    await db.insert(schema.integrations).values({
+      provider: "notion",
+      spaceId: space.id,
+      userId: user.id,
+      accessTokenEncrypted: token.encrypted,
+      accessTokenIv: token.iv,
+      accessTokenTag: token.authTag,
+    })
+
+    const [previewRoute] = getPreviewRoutesFromMessage(
+      "https://www.notion.so/workspace/Roadmap-0123456789abcdef0123456789abcdef",
+    )
+    if (!previewRoute || previewRoute.kind !== "authenticated") {
+      throw new Error("Expected authenticated Notion preview route")
+    }
+
+    const fetchedUrls: string[] = []
+    globalThis.fetch = (async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      fetchedUrls.push(String(url))
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer notion-token")
+      expect(new Headers(init?.headers).get("Notion-Version")).toBe("2026-03-11")
+      return Response.json({
+        object: "page",
+        properties: {
+          Name: {
+            type: "title",
+            title: [{ plain_text: "Product roadmap" }],
+          },
+          Summary: {
+            type: "rich_text",
+            rich_text: [{ plain_text: "Launch plan and milestones." }],
+          },
+        },
+      })
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewRoute,
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    expect(fetchedUrls).toEqual(["https://api.notion.com/v1/pages/01234567-89ab-cdef-0123-456789abcdef"])
+
+    const cacheRows = await db.select().from(schema.urlPreviewCache)
+    expect(cacheRows).toHaveLength(0)
+
+    const [preview] = await db.select().from(schema.urlPreview).limit(1)
+    if (!preview) {
+      throw new Error("Expected authenticated preview row")
+    }
+    expect(preview.provider).toBe("notion")
+    expect(preview.cacheId).toBeNull()
 
     const attachments = await db.select().from(schema.messageAttachments)
     expect(attachments).toHaveLength(1)
