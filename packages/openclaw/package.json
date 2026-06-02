@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.42",
+  "version": "0.0.43",
   "type": "module",
   "files": [
     "dist",
