@@ -64,40 +64,22 @@ struct ArchivedChatsView: View {
       items: chatItems,
       isArchived: true,
       onItemTap: { item in
-        if let user = item.user {
-          router.push(.chat(peer: .user(id: user.user.id)))
-        } else if let chat = item.chat {
-          router.push(.chat(peer: .thread(id: chat.id)))
-        }
+        router.push(.chat(peer: item.peerId))
       },
       onArchive: { item in
         Task {
-          if let user = item.user {
-            try await data.updateDialog(
-              peerId: .user(id: user.user.id),
-              archived: false
-            )
-          } else if let chat = item.chat {
-            try await data.updateDialog(
-              peerId: .thread(id: chat.id),
-              archived: false
-            )
-          }
+          try await data.updateDialog(
+            peerId: item.peerId,
+            archived: false
+          )
         }
       },
       onPin: { item in
         Task {
-          if let user = item.user {
-            try await data.updateDialog(
-              peerId: .user(id: user.user.id),
-              pinned: !(item.dialog.pinned ?? false)
-            )
-          } else if let chat = item.chat {
-            try await data.updateDialog(
-              peerId: .thread(id: chat.id),
-              pinned: !(item.dialog.pinned ?? false)
-            )
-          }
+          try await data.updateDialog(
+            peerId: item.peerId,
+            pinned: !(item.dialog.pinned ?? false)
+          )
         }
       },
       onRead: { item in
@@ -188,7 +170,7 @@ struct ArchivedChatsView: View {
   private func combinedItemRow(for item: SpaceCombinedItem) -> some View {
     switch item {
       case let .member(memberChat):
-        if let userInfo = memberChat.userInfo {
+        if let userInfo = memberChat.displayUserInfo {
           ChatListItem(
             type: .user(userInfo, chat: memberChat.chat),
             dialog: memberChat.dialog,
@@ -197,7 +179,7 @@ struct ArchivedChatsView: View {
           )
           .contentShape(Rectangle())
           .onTapGesture {
-            router.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
+            router.push(.chat(peer: memberChat.peerId))
           }
         }
 
@@ -224,7 +206,7 @@ private enum SpaceCombinedItem: Identifiable {
 
   var id: Int64 {
     switch self {
-      case let .member(item): item.user?.id ?? 0
+      case let .member(item): item.dialog.peerUserId ?? item.id
       case let .chat(item): item.id
     }
   }

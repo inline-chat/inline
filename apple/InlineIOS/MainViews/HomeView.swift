@@ -138,40 +138,22 @@ struct HomeView: View {
               items: chatItems,
               isArchived: false,
               onItemTap: { item in
-                if let user = item.user {
-                  router.push(.chat(peer: .user(id: user.user.id)))
-                } else if let chat = item.chat {
-                  router.push(.chat(peer: .thread(id: chat.id)))
-                }
+                router.push(.chat(peer: item.peerId))
               },
               onArchive: { item in
                 Task {
-                  if let user = item.user {
-                    try await dataManager.updateDialog(
-                      peerId: .user(id: user.user.id),
-                      archived: true
-                    )
-                  } else if let chat = item.chat {
-                    try await dataManager.updateDialog(
-                      peerId: .thread(id: chat.id),
-                      archived: true
-                    )
-                  }
+                  try await dataManager.updateDialog(
+                    peerId: item.peerId,
+                    archived: true
+                  )
                 }
               },
               onPin: { item in
                 Task {
-                  if let user = item.user {
-                    try await dataManager.updateDialog(
-                      peerId: .user(id: user.user.id),
-                      pinned: !(item.dialog.pinned ?? false)
-                    )
-                  } else if let chat = item.chat {
-                    try await dataManager.updateDialog(
-                      peerId: .thread(id: chat.id),
-                      pinned: !(item.dialog.pinned ?? false)
-                    )
-                  }
+                  try await dataManager.updateDialog(
+                    peerId: item.peerId,
+                    pinned: !(item.dialog.pinned ?? false)
+                  )
                 }
               },
               onRead: { item in

@@ -83,7 +83,7 @@ struct ChatListView: View {
     Button {
       onItemTap(item)
     } label: {
-      if let user = item.user {
+      if let user = item.displayUserInfo {
         ChatListItem(
           type: .user(user, chat: item.chat),
           dialog: item.dialog,

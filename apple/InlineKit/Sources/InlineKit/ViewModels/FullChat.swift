@@ -380,15 +380,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       return
     }
 
-    if self.peerUser == nil {
-      do {
-        if let userId = peer_.asUserId() {
-          try await DataManager.shared.getUser(id: userId)
-        }
-      } catch {
-        log.error("Failed to refetch user info \(error)")
-      }
-    }
+    await fetchPeerUserIfNeeded(peer: peer_)
 
     guard !Task.isCancelled else { return }
     _ = try? await Api.realtime.send(.getChat(peer: peer_))
@@ -436,14 +428,31 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
       group.addTask {
         guard !Task.isCancelled else { return }
-        if self.peerUser == nil, let userId = peer.asUserId() {
-          do {
-            try await DataManager.shared.getUser(id: userId)
-          } catch {
-            self.log.error("Failed to refetch user info \(error)")
-          }
-        }
+        await self.fetchPeerUserIfNeeded(peer: peer)
       }
+    }
+  }
+
+  private func fetchPeerUserIfNeeded(peer: Peer) async {
+    guard let userId = peer.asUserId() else { return }
+    guard await shouldFetchPeerUser(userId: userId) else { return }
+
+    do {
+      try await DataManager.shared.getUser(id: userId)
+    } catch {
+      log.error("Failed to refetch user info \(error)")
+    }
+  }
+
+  private func shouldFetchPeerUser(userId: Int64) async -> Bool {
+    do {
+      return try await db.reader.read { db in
+        guard let user = try User.fetchOne(db, id: userId) else { return true }
+        return user.needsDisplayNameFetch
+      }
+    } catch {
+      log.error("Failed to inspect cached user info \(error)")
+      return true
     }
   }
 
@@ -509,13 +518,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
     do {
       try Task.checkCancellation()
-      if self.peerUser == nil, let userId = peer_.asUserId() {
-        let hasUser = try await db.reader.read { db in
-          try User.fetchOne(db, id: userId) != nil
-        }
-        if !hasUser {
-          try await DataManager.shared.getUser(id: userId)
-        }
+      if let userId = peer_.asUserId(), await shouldFetchPeerUser(userId: userId) {
+        try await DataManager.shared.getUser(id: userId)
         try Task.checkCancellation()
 
         if let loadedChatItem = try await queryChatItemFromDatabase() {

@@ -35,13 +35,14 @@ struct ChatToolbarLeadingView: View {
   }
 
   private var isCurrentUser: Bool {
-    fullChatViewModel.peerUser?.id == Auth.shared.getCurrentUserId()
+    peerId.asUserId() == Auth.shared.getCurrentUserId()
   }
 
   private var title: String {
     if case .user = peerId {
-      isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? fullChatViewModel.peerUser?
-        .username ?? fullChatViewModel.peerUser?.email ?? fullChatViewModel.peerUser?.phoneNumber ?? "Invited User"
+      return isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser.map {
+        $0.needsDisplayNameFetch ? "Loading..." : $0.displayName
+      } ?? "Loading..."
     } else if let chat = fullChatViewModel.chat {
       if chat.isReplyThread {
         return replyThreadContext?.title ?? ReplyThreadToolbarContextLoader.fallbackTitle(for: chat)

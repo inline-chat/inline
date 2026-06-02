@@ -166,11 +166,7 @@ struct DirectChatItem: View {
       return "Saved Message"
     }
 
-    return userInfo.user.firstName
-      ?? userInfo.user.username
-      ?? userInfo.user.email
-      ?? userInfo.user.phoneNumber
-      ?? "Invited User"
+    return userInfo.user.needsDisplayNameFetch ? "Loading..." : userInfo.user.displayName
   }
 
   @ViewBuilder

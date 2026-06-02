@@ -15,6 +15,10 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
     userInfo?.user
   }
 
+  public var displayUserInfo: UserInfo? {
+    userInfo ?? dialog.peerUserId.map { UserInfo.placeholder(id: $0) }
+  }
+
   // Last message
   public var message: Message?
   public var from: UserInfo?
@@ -29,7 +33,7 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
 
   public var title: String? {
     if let user {
-      user.fullName
+      user.displayName
     } else {
       chat?.humanReadableTitle
     }

@@ -68,8 +68,8 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
           _ = try User.save(db, user: response.user)
         }
 
-        let chat = Chat(from: response.chat)
-        try chat.save(db)
+        var chat = Chat(from: response.chat)
+        try chat.saveWithValidLastMsg(db)
         _ = try response.dialog.saveFull(db)
       }
     } catch {

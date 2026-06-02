@@ -145,20 +145,46 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   private static let nameFormatter = PersonNameComponentsFormatter()
   public var fullName: String {
-    let nameComponents = PersonNameComponents(
+    resolvedFullName ?? ""
+  }
+
+  public var displayName: String {
+    resolvedFullName
+      ?? normalizedUserText(username)
+      ?? normalizedUserText(email)
+      ?? normalizedUserText(phoneNumber)
+      ?? "User"
+  }
+
+  public var shortDisplayName: String {
+    normalizedUserText(firstName)
+      ?? normalizedUserText(username)
+      ?? normalizedUserText(email)
+      ?? normalizedUserText(phoneNumber)
+      ?? "User"
+  }
+
+  public var needsDisplayNameFetch: Bool {
+    resolvedFullName == nil &&
+      normalizedUserText(username) == nil &&
+      normalizedUserText(email) == nil &&
+      normalizedUserText(phoneNumber) == nil
+  }
+
+  private var resolvedFullName: String? {
+    let components = PersonNameComponents(
       givenName: firstName,
       familyName: lastName
     )
 
-    return Self.nameFormatter.string(from: nameComponents)
-  }
+    if let formatted = normalizedUserText(Self.nameFormatter.string(from: components)) {
+      return formatted
+    }
 
-  public var displayName: String {
-    firstName != nil ? fullName : (username ?? email ?? phoneNumber ?? "User")
-  }
-
-  public var shortDisplayName: String {
-    firstName != nil ? firstName! : (username ?? email ?? phoneNumber ?? "User")
+    let direct = [firstName, lastName]
+      .compactMap(normalizedUserText)
+      .joined(separator: " ")
+    return normalizedUserText(direct)
   }
 }
 
@@ -498,9 +524,20 @@ public extension User {
 }
 
 public extension UserInfo {
+  static func placeholder(id: Int64) -> UserInfo {
+    UserInfo(user: User(id: id, email: nil, firstName: nil), profilePhotos: nil)
+  }
+
   var stableAvatarIdentity: String? {
     profilePhoto?.first?.stableAvatarIdentity ?? user.stableAvatarIdentity
   }
+}
+
+private func normalizedUserText(_ value: String?) -> String? {
+  guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+    return nil
+  }
+  return trimmed
 }
 
 private func normalizedAvatarIdentityValue(_ value: String?) -> String? {
