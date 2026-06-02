@@ -26,7 +26,13 @@ final class ComposeAutocompleteManager: NSObject {
   private weak var parentView: UIView?
 
   init(database: AppDatabase, spaceId: Int64?) {
-    viewModel = ComposeAutocompleteViewModel(db: database, spaceId: spaceId)
+    viewModel = ComposeAutocompleteViewModel(
+      db: database,
+      spaceId: spaceId,
+      recentThreadChatIds: { limit in
+        Self.recentThreadChatIds(limit: limit)
+      }
+    )
     super.init()
     bindViewModel()
   }
@@ -101,6 +107,30 @@ final class ComposeAutocompleteManager: NSObject {
     let view = ComposeAutocompleteCompletionView()
     view.delegate = self
     completionView = view
+  }
+
+  private static func recentThreadChatIds(limit: Int) -> [Int64] {
+    var ids: [Int64] = []
+    var seen = Set<Int64>()
+
+    func append(_ destination: Navigation.Destination?) {
+      guard let destination,
+            ids.count < limit,
+            case let .chat(peer) = destination,
+            let chatId = peer.asThreadId(),
+            seen.insert(chatId).inserted
+      else {
+        return
+      }
+      ids.append(chatId)
+    }
+
+    append(Navigation.shared.activeDestination)
+    for destination in Navigation.shared.pathComponents.reversed() {
+      append(destination)
+    }
+
+    return ids
   }
 
   @discardableResult
@@ -180,6 +210,9 @@ final class ComposeAutocompleteManager: NSObject {
         textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
         dismissCompletion()
         delegate?.composeAutocompleteManager(self, didInsert: item, for: replacedRange)
+
+      case .emoji:
+        dismissCompletion()
     }
   }
 }

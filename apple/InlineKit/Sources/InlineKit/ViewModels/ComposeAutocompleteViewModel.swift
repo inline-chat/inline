@@ -5,6 +5,7 @@ import Logger
 
 public enum ComposeAutocompleteKind: String, Hashable, Sendable {
   case thread
+  case emoji
 }
 
 public struct ComposeAutocompleteMatch: Hashable {
@@ -22,6 +23,7 @@ public struct ComposeAutocompleteMatch: Hashable {
 public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   public enum Payload: Hashable, Sendable {
     case thread(chatId: Int64, spaceId: Int64?, title: String)
+    case emoji(value: String, shortcode: String)
   }
 
   public let id: String
@@ -51,6 +53,15 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   }
 }
 
+public typealias ComposeEmojiAutocompleteItemsProvider = @MainActor (
+  _ query: String,
+  _ limit: Int
+) -> [ComposeAutocompleteItem]
+
+public typealias ComposeThreadRecentChatIdsProvider = @MainActor (
+  _ limit: Int
+) -> [Int64]
+
 @MainActor
 public final class ComposeAutocompleteViewModel: ObservableObject {
   @Published public private(set) var match: ComposeAutocompleteMatch?
@@ -60,14 +71,25 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
   private let log = Log.scoped("ComposeAutocompleteViewModel")
   private let db: AppDatabase
   private let limit: Int
+  private let recentThreadChatIds: ComposeThreadRecentChatIdsProvider
+  private let emojiItems: ComposeEmojiAutocompleteItemsProvider
   private var spaceId: Int64?
   private var loadTask: Task<Void, Never>?
   private var loadToken = UUID()
+  private let recentThreadLimit = 5
 
-  public init(db: AppDatabase = .shared, spaceId: Int64? = nil, limit: Int = 8) {
+  public init(
+    db: AppDatabase = .shared,
+    spaceId: Int64? = nil,
+    limit: Int = 8,
+    recentThreadChatIds: @escaping ComposeThreadRecentChatIdsProvider = { _ in [] },
+    emojiItems: @escaping ComposeEmojiAutocompleteItemsProvider = { _, _ in [] }
+  ) {
     self.db = db
     self.spaceId = spaceId
     self.limit = limit
+    self.recentThreadChatIds = recentThreadChatIds
+    self.emojiItems = emojiItems
   }
 
   deinit {
@@ -130,56 +152,72 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     }
 
     switch match.kind {
-      case .thread:
-        loadThreadItems(query: match.query)
+    case .thread:
+      loadThreadItems(query: match.query)
+    case .emoji:
+      loadEmojiItems(query: match.query)
     }
   }
 
+  private func loadEmojiItems(query: String) {
+    let items = emojiItems(query, limit)
+    self.items = items
+    selectedIndex = items.isEmpty ? 0 : min(selectedIndex, items.count - 1)
+  }
+
   private func loadThreadItems(query: String) {
-    guard let spaceId, spaceId > 0 else {
+    guard !query.isEmpty else {
+      loadRecentThreadItems()
+      return
+    }
+
+    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmedQuery.count >= 3 else {
       items = []
       selectedIndex = 0
       return
     }
 
-    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
     let token = UUID()
     loadToken = token
 
     loadTask = Task { [db, limit] in
       do {
-        let chats = try await db.reader.read { db in
-          var request = Chat
+        let items = try await db.reader.read { db in
+          let request = Chat
             .filter(Chat.Columns.type == ChatType.thread.rawValue)
-            .filter(Chat.Columns.spaceId == spaceId)
             .filter(Chat.Columns.parentMessageId == nil)
+            .filter(sql: "title LIKE ? COLLATE NOCASE", arguments: StatementArguments(["%\(trimmedQuery)%"]))
 
-          if !trimmedQuery.isEmpty {
-            request = request.filter(Chat.Columns.title.like("%\(trimmedQuery)%"))
-          }
-
-          return try request
+          let chats = try request
             .order(Chat.Columns.date.desc)
             .limit(limit)
             .fetchAll(db)
-        }
 
-        let items = chats.compactMap { chat -> ComposeAutocompleteItem? in
-          guard let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-                !title.isEmpty
-          else {
-            return nil
+          var spaceNames: [Int64: String] = [:]
+          for spaceId in Set(chats.compactMap(\.spaceId)) {
+            if let space = try Space.fetchOne(db, id: spaceId) {
+              spaceNames[spaceId] = space.displayName
+            }
           }
 
-          return ComposeAutocompleteItem(
-            id: "thread-\(chat.id)",
-            kind: .thread,
-            title: title,
-            subtitle: "Thread",
-            symbol: "bubble.left",
-            emoji: chat.emoji,
-            payload: .thread(chatId: chat.id, spaceId: chat.spaceId, title: title)
-          )
+          return chats.compactMap { chat -> ComposeAutocompleteItem? in
+            guard let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !title.isEmpty
+            else {
+              return nil
+            }
+
+            let subtitle = chat.spaceId.flatMap { spaceNames[$0] } ?? "Thread"
+            return ComposeAutocompleteItem(
+              id: "thread-\(chat.id)",
+              kind: .thread,
+              title: title,
+              subtitle: subtitle,
+              emoji: chat.emoji,
+              payload: .thread(chatId: chat.id, spaceId: chat.spaceId, title: title)
+            )
+          }
         }
 
         await MainActor.run { [weak self] in
@@ -193,6 +231,74 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
           self.items = []
           self.selectedIndex = 0
           self.log.error("Failed to load thread autocomplete items", error: error)
+        }
+      }
+    }
+  }
+
+  private func loadRecentThreadItems() {
+    let chatIds = recentThreadChatIds(recentThreadLimit)
+    guard !chatIds.isEmpty else {
+      items = []
+      selectedIndex = 0
+      return
+    }
+
+    let token = UUID()
+    loadToken = token
+
+    loadTask = Task { [db] in
+      do {
+        let items = try await db.reader.read { db in
+          var items: [ComposeAutocompleteItem] = []
+          var spaceNames: [Int64: String] = [:]
+
+          for chatId in chatIds {
+            guard let chat = try Chat.fetchOne(db, id: chatId),
+                  chat.type == .thread,
+                  chat.parentMessageId == nil,
+                  let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !title.isEmpty
+            else {
+              continue
+            }
+
+            let subtitle: String
+            if let spaceId = chat.spaceId {
+              if spaceNames[spaceId] == nil, let space = try Space.fetchOne(db, id: spaceId) {
+                spaceNames[spaceId] = space.displayName
+              }
+              subtitle = spaceNames[spaceId] ?? "Thread"
+            } else {
+              subtitle = "Thread"
+            }
+
+            items.append(
+              ComposeAutocompleteItem(
+                id: "thread-\(chat.id)",
+                kind: .thread,
+                title: title,
+                subtitle: subtitle,
+                emoji: chat.emoji,
+                payload: .thread(chatId: chat.id, spaceId: chat.spaceId, title: title)
+              )
+            )
+          }
+
+          return items
+        }
+
+        await MainActor.run { [weak self] in
+          guard let self, self.loadToken == token else { return }
+          self.items = items
+          self.selectedIndex = items.isEmpty ? 0 : min(self.selectedIndex, items.count - 1)
+        }
+      } catch {
+        await MainActor.run { [weak self] in
+          guard let self, self.loadToken == token else { return }
+          self.items = []
+          self.selectedIndex = 0
+          self.log.error("Failed to load recent thread autocomplete items", error: error)
         }
       }
     }
