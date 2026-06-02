@@ -11,6 +11,8 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
   private enum Metrics {
     static let compactImageSize = CGSize(width: 32, height: 32)
     static let largeImageWidth: CGFloat = 240
+    static let providerPlaceholderSize: CGFloat = 24
+    static let pressedScale: CGFloat = 0.97
   }
 
   private let rectangleView: UIView = {
@@ -52,11 +54,21 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     return view
   }()
 
+  private let providerPlaceholderView: UIImageView = {
+    let view = UIImageView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.contentMode = .scaleAspectFit
+    view.isHidden = true
+    view.isUserInteractionEnabled = false
+    return view
+  }()
+
   private weak var parentViewController: UIViewController?
   private var previewUrl: URL?
   private var canRemove = false
   private var onRemove: (() -> Void)?
   private var activeConstraints: [NSLayoutConstraint] = []
+  private var pressed = false
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -74,6 +86,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
   private func setupImageContainer() {
     imageContainer.addSubview(imageView)
+    imageContainer.addSubview(providerPlaceholderView)
     imageContainer.addSubview(playIconView)
 
     NSLayoutConstraint.activate([
@@ -81,6 +94,11 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
       imageView.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
       imageView.topAnchor.constraint(equalTo: imageContainer.topAnchor),
       imageView.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor),
+
+      providerPlaceholderView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
+      providerPlaceholderView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
+      providerPlaceholderView.widthAnchor.constraint(equalToConstant: Metrics.providerPlaceholderSize),
+      providerPlaceholderView.heightAnchor.constraint(equalToConstant: Metrics.providerPlaceholderSize),
 
       playIconView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
       playIconView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
@@ -128,10 +146,10 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
     resetLayout()
 
-    let horizontalPadding: CGFloat = 8
-    let verticalPadding: CGFloat = mode == .large ? 7 : 4
+    let trailingPadding: CGFloat = 8
+    let verticalPadding: CGFloat = mode == .large ? 7 : 6
     let rectangleWidth: CGFloat = 4
-    let contentSpacing: CGFloat = 8
+    let contentSpacing: CGFloat = mode == .large ? 8 : 12
     let cornerRadius: CGFloat = 8
 
     let theme = ThemeManager.shared.selected
@@ -166,7 +184,13 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     descriptionLabel.isUserInteractionEnabled = false
     descriptionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-    configureImage(photoInfo: photoInfo, isVideo: isVideo, backgroundColor: bgColor, reloadMessage: message)
+    configureImage(
+      photoInfo: photoInfo,
+      isVideo: isVideo,
+      providerPlaceholderImage: !isVideo && photoInfo == nil && preview.isNotionPreview ? UIImage(named: "notion-logo") : nil,
+      backgroundColor: bgColor,
+      reloadMessage: message
+    )
 
     rectangleView.backgroundColor = rectangleColor
     addSubview(rectangleView)
@@ -233,7 +257,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
       rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       bodyStack.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+      bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingPadding),
       bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
       bodyStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
     ])
@@ -249,6 +273,9 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     NSLayoutConstraint.deactivate(activeConstraints)
     activeConstraints.removeAll()
     subviews.forEach { $0.removeFromSuperview() }
+    pressed = false
+    alpha = 1
+    transform = .identity
   }
 
   override func layoutSubviews() {
@@ -268,19 +295,70 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     preview.isVideoPreview ? .large : .compact
   }
 
-  private func configureImage(photoInfo: PhotoInfo?, isVideo: Bool, backgroundColor: UIColor, reloadMessage: Message?) {
-    imageContainer.backgroundColor = backgroundColor.withAlphaComponent(0.2)
-    imageContainer.isHidden = !isVideo && photoInfo == nil
+  private func configureImage(
+    photoInfo: PhotoInfo?,
+    isVideo: Bool,
+    providerPlaceholderImage: UIImage?,
+    backgroundColor: UIColor,
+    reloadMessage: Message?
+  ) {
+    let showsProviderPlaceholder = providerPlaceholderImage != nil
+    imageContainer.backgroundColor = showsProviderPlaceholder ? .clear : backgroundColor.withAlphaComponent(0.2)
+    imageContainer.isHidden = !isVideo && photoInfo == nil && !showsProviderPlaceholder
     playIconView.isHidden = !isVideo
+    providerPlaceholderView.image = providerPlaceholderImage
+    providerPlaceholderView.isHidden = !showsProviderPlaceholder
 
     guard let photoInfo else {
-      imageView.showsLoadingPlaceholder = isVideo
+      imageView.isHidden = showsProviderPlaceholder
+      imageView.showsLoadingPlaceholder = isVideo && !showsProviderPlaceholder
       imageView.setPhoto(nil)
       return
     }
 
+    imageView.isHidden = false
+    providerPlaceholderView.isHidden = true
+    imageContainer.backgroundColor = backgroundColor.withAlphaComponent(0.2)
     imageView.showsLoadingPlaceholder = true
     imageView.setPhoto(photoInfo, reloadMessageOnFinish: reloadMessage)
+  }
+
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+    super.touchesBegan(touches, with: event)
+    setPressed(true)
+  }
+
+  override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+    super.touchesMoved(touches, with: event)
+    guard let touch = touches.first else { return }
+    let location = touch.location(in: self)
+    setPressed(bounds.insetBy(dx: -12, dy: -12).contains(location))
+  }
+
+  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+    setPressed(false)
+    super.touchesEnded(touches, with: event)
+  }
+
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+    setPressed(false)
+    super.touchesCancelled(touches, with: event)
+  }
+
+  private func setPressed(_ pressed: Bool) {
+    guard self.pressed != pressed else { return }
+    self.pressed = pressed
+
+    UIView.animate(
+      withDuration: pressed ? 0.08 : 0.14,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]
+    ) {
+      self.alpha = pressed ? 0.92 : 1
+      self.transform = pressed
+        ? CGAffineTransform(scaleX: Metrics.pressedScale, y: Metrics.pressedScale)
+        : .identity
+    }
   }
 
   func contextMenuInteraction(

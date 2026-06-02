@@ -33,6 +33,10 @@ public extension UrlPreview {
     return host
   }
 
+  var isNotionPreview: Bool {
+    displaySource == KnownURLPreviewProvider.notion.displayName
+  }
+
   private static func normalizedHost(for url: String) -> String? {
     let value = url.trimmingCharacters(in: .whitespacesAndNewlines)
     let host = URLComponents(string: value)?.host
