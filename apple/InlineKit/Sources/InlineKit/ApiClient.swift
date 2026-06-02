@@ -678,7 +678,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public func sendComposeAction(peerId: Peer, action: ApiComposeAction?) async throws
     -> EmptyPayload
   {
-    try await request(
+    let requestAction: ApiComposeAction? = if action == .recordingVoice && !ExperimentalFeatureFlags.voiceMessagesEnabled {
+      nil
+    } else {
+      action
+    }
+
+    return try await request(
       .sendComposeAction,
       queryItems: [
         URLQueryItem(name: "peerUserId", value: peerId.asUserId().map(String.init)),
@@ -686,7 +692,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           name: "peerThreadId",
           value: peerId.asThreadId().map(String.init)
         ),
-        URLQueryItem(name: "action", value: action?.rawValue),
+        URLQueryItem(name: "action", value: requestAction?.rawValue),
       ],
       includeToken: true
     )
@@ -1360,7 +1366,7 @@ public enum ApiComposeAction: String, Codable, Sendable {
         "uploading video..."
 
       case .recordingVoice:
-        "recording voice..."
+        ExperimentalFeatureFlags.voiceMessagesEnabled ? "recording voice..." : "typing..."
     }
   }
 
@@ -1379,7 +1385,7 @@ public enum ApiComposeAction: String, Codable, Sendable {
         "uploading video"
 
       case .recordingVoice:
-        "recording voice"
+        ExperimentalFeatureFlags.voiceMessagesEnabled ? "recording voice" : "typing"
     }
   }
 }

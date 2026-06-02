@@ -415,6 +415,10 @@ public actor FileUploader {
   public func uploadVoice(
     voiceContent: Client_MessageVoiceContent
   ) async throws -> Int64 {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      throw FileUploadError.invalidVoice
+    }
+
     let localVoiceId = voiceContent.voiceID
     guard localVoiceId != 0 else {
       throw FileUploadError.invalidVoiceId

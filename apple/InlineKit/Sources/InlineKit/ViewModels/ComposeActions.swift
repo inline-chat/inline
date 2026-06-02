@@ -40,6 +40,11 @@ public class ComposeActions: ObservableObject {
 
   /// Add compose action for a specific user in a peer
   public func addComposeAction(for peer: Peer, action: ApiComposeAction, userId: Int64) {
+    guard action != .recordingVoice || ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      removeComposeAction(for: peer, userId: userId)
+      return
+    }
+
     log.trace("action \(action) added for user \(userId) in \(peer)")
 
     // Cancel existing task for this user in this peer
@@ -101,7 +106,9 @@ public class ComposeActions: ObservableObject {
 
   /// Get the first compose action for a peer (backwards compatibility)
   public func getComposeAction(for peer: Peer) -> ComposeActionInfo? {
-    actions[peer]?.values.first
+    actions[peer]?.values.first { action in
+      action.action != .recordingVoice || ExperimentalFeatureFlags.voiceMessagesEnabled
+    }
   }
 
   /// Remove compose action for peer (backwards compatibility - removes all)
@@ -328,5 +335,59 @@ public extension ComposeActions {
   /// Starts a video upload compose action
   func startVideoUpload(for peerId: Peer) -> @Sendable () -> Void {
     startUpload(for: peerId, action: .uploadingVideo)
+  }
+
+  /// Keeps a voice-recording compose action alive until recording stops.
+  func startVoiceRecording(for peerId: Peer) -> @Sendable () -> Void {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      return {}
+    }
+
+    lastTypingSent[peerId] = Date()
+
+    Task.detached(priority: .userInitiated) {
+      do {
+        try await self.sendComposeAction(for: peerId, action: .recordingVoice)
+      } catch {
+        await self.log.error("Failed to send recording voice status: \(error)")
+      }
+    }
+
+    let task = Task.detached(priority: .userInitiated) {
+      do {
+        while !Task.isCancelled {
+          try await Task.sleep(for: .seconds(3))
+          guard !Task.isCancelled else { break }
+          try await self.sendComposeAction(for: peerId, action: .recordingVoice)
+          await MainActor.run {
+            self.lastTypingSent[peerId] = Date()
+          }
+        }
+      } catch {
+        await self.log.error("Failed to keep recording voice status alive: \(error)")
+      }
+    }
+
+    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
+    if cancelTasks[peerId] == nil {
+      cancelTasks[peerId] = [:]
+    }
+    cancelTasks[peerId]![currentUserId] = task
+
+    return {
+      Task { @MainActor in
+        self.cancelTasks[peerId]?[currentUserId]?.cancel()
+        self.cancelTasks[peerId]?[currentUserId] = nil
+
+        Task.detached(priority: .userInitiated) {
+          do {
+            try await self.sendComposeAction(for: peerId, action: nil)
+          } catch {
+            await self.log.error("Failed to send stop recording voice status: \(error)")
+          }
+        }
+        self.lastTypingSent[peerId] = nil
+      }
+    }
   }
 }

@@ -42,11 +42,14 @@ public struct SharedAudioPlayerState: Equatable, Sendable {
 }
 
 public enum SharedAudioPlayerError: LocalizedError {
+  case voiceMessagesDisabled
   case missingVoice
   case missingLocalFile
 
   public var errorDescription: String? {
     switch self {
+    case .voiceMessagesDisabled:
+      "Voice messages are not enabled."
     case .missingVoice:
       "The selected message doesn't contain a playable voice payload."
     case .missingLocalFile:
@@ -70,6 +73,10 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
   }
 
   public func toggleVoicePlayback(for message: Message, fileURLOverride: URL? = nil) throws {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      throw SharedAudioPlayerError.voiceMessagesDisabled
+    }
+
     let item = try voiceItem(for: message)
 
     if state.item == item {
@@ -85,6 +92,10 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
   }
 
   public func playVoice(for message: Message, fileURLOverride: URL? = nil) throws {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      throw SharedAudioPlayerError.voiceMessagesDisabled
+    }
+
     let item = try voiceItem(for: message)
     let fileURL = try resolvedVoiceURL(for: message, fileURLOverride: fileURLOverride)
 
@@ -131,6 +142,7 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
   }
 
   public func seekVoice(to progress: Double, for message: Message) {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
     guard isCurrentVoice(message), let audioPlayer else { return }
     let clampedProgress = min(max(progress, 0), 1)
     audioPlayer.currentTime = audioPlayer.duration * clampedProgress
@@ -139,6 +151,7 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
   }
 
   public func isCurrentVoice(_ message: Message) -> Bool {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return false }
     guard let currentItem = state.item else { return false }
     guard let voice = message.voiceContent else { return false }
 

@@ -44,6 +44,17 @@ class ComposeAppKit: NSView {
     !isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil
   }
 
+  private var canStartVoiceRecording: Bool {
+    ExperimentalFeatureFlags.voiceMessagesEnabled &&
+      voiceViewModel.isActive == false &&
+      isEmptyTrimmed &&
+      attachmentItems.isEmpty &&
+      state.editingMsgId == nil &&
+      state.forwardContext == nil
+  }
+
+  private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: peerId)
+
   // [uniqueId: FileMediaItem]
   private var attachmentItems: [String: FileMediaItem] = [:] {
     didSet {
@@ -179,6 +190,37 @@ class ComposeAppKit: NSView {
       self?.state.setSendSilently(false)
     }
     view.isHidden = true
+    return view
+  }()
+
+  private lazy var voiceButton: ComposeVoiceButton = {
+    let view = ComposeVoiceButton()
+    view.onClick = { [weak self] in
+      self?.startVoiceRecording()
+    }
+    view.isHidden = true
+    return view
+  }()
+
+  private lazy var voiceInputView: NSHostingView<ComposeVoiceInputView> = {
+    let view = NSHostingView(rootView: ComposeVoiceInputView(
+      viewModel: voiceViewModel,
+      onPause: { [weak self] in
+        self?.voiceViewModel.pauseRecording()
+      },
+      onPlay: { [weak self] in
+        self?.voiceViewModel.togglePlayback()
+      },
+      onCancel: { [weak self] in
+        self?.voiceViewModel.cancel()
+      },
+      onSend: { [weak self] in
+        self?.sendVoiceRecording()
+      }
+    ))
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
     return view
   }()
 
@@ -326,13 +368,16 @@ class ComposeAppKit: NSView {
     // to bottom
     addSubview(sendButton)
     addSubview(silentModeButton)
+    addSubview(voiceButton)
     addSubview(emojiButton)
     addSubview(menuButton)
     addSubview(textEditor)
+    addSubview(voiceInputView)
 
     setupReplyingView()
     setUpConstraints()
     updateSilentModeUI(animated: false, forceLayout: false)
+    updateVoiceAvailability()
     setupTextEditor()
   }
 
@@ -378,6 +423,14 @@ class ComposeAppKit: NSView {
         equalTo: trailingAnchor, constant: -horizontalOuterSpacing
       ),
       sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
+
+      // voice
+      voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
+      voiceInputView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
+      voiceInputView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      voiceInputView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      voiceInputView.heightAnchor.constraint(equalToConstant: Theme.composeMinHeight),
 
       // send silently indicator
       silentModeButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -silentModeButtonBottomSpacing),
@@ -436,6 +489,7 @@ class ComposeAppKit: NSView {
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
         updateMessageView(to: replyingToMsgId, kind: .replying, animate: true)
+        updateVoiceAvailability()
         focus()
       }.store(in: &cancellables)
 
@@ -443,6 +497,7 @@ class ComposeAppKit: NSView {
       .sink { [weak self] editingMsgId in
         guard let self else { return }
         updateMessageView(to: editingMsgId, kind: .editing, animate: true)
+        updateVoiceAvailability()
         focus()
       }.store(in: &cancellables)
 
@@ -469,6 +524,14 @@ class ComposeAppKit: NSView {
         )
       }.store(in: &cancellables)
 
+    voiceViewModel.$phase
+      .sink { [weak self] _ in
+        guard let self else { return }
+        updateVoiceAvailability()
+        updateHeight(animate: true)
+      }
+      .store(in: &cancellables)
+
     Publishers.CombineLatest3(
       autocompleteViewModel.$items,
       autocompleteViewModel.$selectedIndex,
@@ -482,10 +545,11 @@ class ComposeAppKit: NSView {
 
   private func updateSilentModeUI(animated: Bool = true, forceLayout: Bool = true) {
     let isEnabled = state.sendSilently
+    let shouldShow = isEnabled && !voiceViewModel.isActive && canSend
     sendButton.updateSendSilently(isEnabled)
-    silentModeButton.isHidden = !isEnabled
-    silentModeButtonWidthConstraint?.constant = isEnabled ? ComposeSilentModeButton.controlSize : 0
-    silentModeToEmojiConstraint?.constant = isEnabled ? -rightButtonSpacing : 0
+    silentModeButton.isHidden = !shouldShow
+    silentModeButtonWidthConstraint?.constant = shouldShow ? ComposeSilentModeButton.controlSize : 0
+    silentModeToEmojiConstraint?.constant = shouldShow ? -rightButtonSpacing : 0
 
     guard animated else {
       if forceLayout {
@@ -498,6 +562,69 @@ class ComposeAppKit: NSView {
       context.duration = 0.16
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
       self.layoutSubtreeIfNeeded()
+    }
+  }
+
+  private func updateVoiceAvailability() {
+    let isVoiceActive = voiceViewModel.isActive
+    let shouldShowVoiceButton = canStartVoiceRecording
+
+    voiceInputView.isHidden = !isVoiceActive
+    textEditor.isHidden = isVoiceActive
+    menuButton.isHidden = isVoiceActive
+    emojiButton.isHidden = isVoiceActive
+    attachments.isHidden = isVoiceActive
+    voiceButton.isHidden = isVoiceActive || !shouldShowVoiceButton
+    sendButton.isHidden = isVoiceActive || shouldShowVoiceButton
+
+    updateSilentModeUI(animated: false, forceLayout: false)
+  }
+
+  private func startVoiceRecording() {
+    guard canStartVoiceRecording else { return }
+    focusWindowIfNeeded()
+
+    Task { [weak self] in
+      guard let self else { return }
+      await voiceViewModel.start()
+    }
+  }
+
+  private func sendVoiceRecording() {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      voiceViewModel.cancel()
+      return
+    }
+
+    do {
+      guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }
+
+      keepCurrentChatInSidebar()
+      Transactions.shared.mutate(
+        transaction: .sendMessage(
+          TransactionSendMessage(
+            text: nil,
+            peerId: peerId,
+            chatId: chatId ?? 0,
+            mediaItems: [mediaItem],
+            replyToMsgId: state.replyingToMsgId,
+            isSticker: nil,
+            entities: nil,
+            sendMode: state.sendSilently ? .modeSilent : nil
+          )
+        )
+      )
+
+      state.clearReplyingToMsgId()
+      clearDraft()
+      updateSendButtonIfNeeded()
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        self.state.scrollToBottom()
+      }
+    } catch {
+      log.error("Failed to send voice recording", error: error)
+      ToastCenter.shared.showError("Failed to send voice message")
     }
   }
 
@@ -683,17 +810,11 @@ class ComposeAppKit: NSView {
   }
 
   private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu, match: ComposeAutocompleteMatch) {
-    guard match.kind == .emoji, menu.isShowingEmojiPalette else {
-      autocompleteMenuLeadingConstraint?.constant = 0
-      return
-    }
-
     layoutSubtreeIfNeeded()
     autocompleteMenuLeadingConstraint?.constant = textEditor.frame.minX
   }
 
   private func autocompleteMenuWidth(for match: ComposeAutocompleteMatch) -> CGFloat? {
-    guard match.kind == .emoji else { return nil }
     layoutSubtreeIfNeeded()
     let width = textEditor.frame.width
     return width > 1 ? width : nil
@@ -879,12 +1000,18 @@ class ComposeAppKit: NSView {
   }
 
   func focusEditor() {
+    guard !voiceViewModel.isActive else { return }
     textEditor.focus()
   }
 
   // MARK: - Height
 
   private func getTextViewHeight() -> CGFloat {
+    if voiceViewModel.isActive {
+      textViewHeight = Theme.composeMinHeight
+      return textViewHeight
+    }
+
     textViewHeight = min(300.0, max(
       textEditor.minHeight,
       textViewContentHeight + textEditor.verticalPadding * 2
@@ -902,8 +1029,9 @@ class ComposeAppKit: NSView {
       height += Theme.embeddedMessageHeight
     }
 
-    // Attachments
-    height += attachments.getHeight()
+    if !voiceViewModel.isActive {
+      height += attachments.getHeight()
+    }
 
     return height
   }
@@ -1040,7 +1168,7 @@ class ComposeAppKit: NSView {
           // set manually without updating height
           textEditor.replaceAttributedString(attributedString)
           textEditor.showPlaceholder(text.isEmpty)
-          sendButton.updateCanSend(canSend)
+          updateSendButtonIfNeeded()
           // calculate text height to prepare for height change
           updateContentHeight(for: textEditor.textView)
         }
@@ -1267,9 +1395,10 @@ class ComposeAppKit: NSView {
 
   // Clear, reset height
   func clear() {
+    voiceViewModel.cancel()
+
     // State
     attachmentItems.removeAll()
-    sendButton.updateCanSend(false)
     state.clearReplyingToMsgId()
     state.clearEditingMsgId()
     state.clearForwarding()
@@ -1282,6 +1411,7 @@ class ComposeAppKit: NSView {
         .getTypingLineHeight() // manually for now, FIXME: make it automatic in texteditor.clear
     textEditor.clear()
     clearAttachments(updateHeights: false)
+    updateSendButtonIfNeeded()
 
     // must be last call
     updateHeight()
@@ -1289,6 +1419,14 @@ class ComposeAppKit: NSView {
 
   // Send the message
   func send(sendMode: MessageSendMode? = nil) {
+    if voiceViewModel.phase == .review {
+      sendVoiceRecording()
+      return
+    }
+    if voiceViewModel.isActive {
+      return
+    }
+
     // DispatchQueue.main.async(qos: .userInteractive) {
     ignoreNextHeightChange = true
     let attributedString = trimmedAttributedString(textEditor.attributedString)
@@ -1518,6 +1656,7 @@ class ComposeAppKit: NSView {
   }
 
   func focus() {
+    guard !voiceViewModel.isActive else { return }
     textEditor.focus()
   }
 
@@ -1541,7 +1680,7 @@ class ComposeAppKit: NSView {
     }
     // reevaluate placeholder
     textEditor.showPlaceholder(text.isEmpty)
-    sendButton.updateCanSend(canSend)
+    updateSendButtonIfNeeded()
   }
 
   private var keyMonitorUnsubscribe: (() -> Void)?
@@ -1555,6 +1694,7 @@ class ComposeAppKit: NSView {
       key: "compose\(peerId)",
       handler: { [weak self] event in
         guard let self else { return }
+        guard !voiceViewModel.isActive else { return }
 
         // Only allow valid printable characters, not control/navigation keys
         guard let characters = event.characters,
@@ -1591,6 +1731,8 @@ class ComposeAppKit: NSView {
   }
 
   private func handleGlobalPaste() {
+    guard !voiceViewModel.isActive else { return }
+
     let pasteboard = NSPasteboard.general
 
     // If this is non-text content, route through attachments.
@@ -1606,6 +1748,7 @@ class ComposeAppKit: NSView {
 
   deinit {
     requestImmediateDraftPersistenceIfNeeded()
+    cancellables.removeAll()
 
     // Clean up
     keyMonitorUnsubscribe?()
@@ -1640,6 +1783,8 @@ class ComposeAppKit: NSView {
 
 extension ComposeAppKit {
   func handlePasteboardAttachments(_ attachments: [PasteboardAttachment]) {
+    guard !voiceViewModel.isActive else { return }
+
     for attachment in attachments {
       switch attachment {
         case let .image(image, url):
@@ -1657,6 +1802,8 @@ extension ComposeAppKit {
   }
 
   func handleFileDrop(_ urls: [URL]) {
+    guard !voiceViewModel.isActive else { return }
+
     for url in urls {
       if isVideoFile(url) {
         Task { [weak self] in await self?.addVideo(url) }
@@ -1667,12 +1814,16 @@ extension ComposeAppKit {
   }
 
   func handleTextDropOrPaste(_ text: String) {
+    guard !voiceViewModel.isActive else { return }
+
     textEditor.insertText(text)
     focusWindowIfNeeded()
     focus()
   }
 
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
+    guard !voiceViewModel.isActive else { return }
+
     addImage(image, url)
     focusWindowIfNeeded()
     focus()
@@ -1880,6 +2031,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   /// Reflect state changes in send button
   func updateSendButtonIfNeeded() {
     sendButton.updateCanSend(canSend)
+    updateVoiceAvailability()
   }
 
   func calculateContentHeight(for textView: NSTextView) -> CGFloat {

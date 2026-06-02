@@ -683,7 +683,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 public extension Message {
   /// Returns a string representation of the message, including emojis for different media types.
   var stringRepresentationWithEmoji: String {
-    if let text, !text.isEmpty {
+    if hasUnsupportedTypes {
+      "Unsupported message"
+    } else if let text, !text.isEmpty {
       text
     } else if isSticker == true {
       "🖼️ Sticker"
@@ -695,7 +697,7 @@ public extension Message {
       "🎥 Video"
     } else if let _ = documentId {
       "📄 Document"
-    } else if hasVoice {
+    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && hasVoice {
       "🎤 Voice message"
     } else {
       "Message"
@@ -704,7 +706,9 @@ public extension Message {
 
   /// Returns a string representation of the message without emoji prefixes.
   var stringRepresentationPlain: String {
-    if let text, !text.isEmpty {
+    if hasUnsupportedTypes {
+      "Unsupported message"
+    } else if let text, !text.isEmpty {
       text
     } else if isSticker == true {
       "Sticker"
@@ -716,7 +720,7 @@ public extension Message {
       "Video"
     } else if let _ = documentId {
       "Document"
-    } else if hasVoice {
+    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && hasVoice {
       "Voice message"
     } else {
       "Message"
@@ -730,7 +734,9 @@ public extension Message {
 
 public extension InlineProtocol.Message {
   var stringRepresentationWithEmoji: String {
-    if hasMessage {
+    if media.voice.hasVoice && !ExperimentalFeatureFlags.voiceMessagesEnabled {
+      "Unsupported message"
+    } else if hasMessage {
       message
     } else if isSticker == true {
       "🖼️ Sticker"
@@ -742,7 +748,7 @@ public extension InlineProtocol.Message {
       "🎥 Video"
     } else if media.document.hasDocument {
       "📄 Document"
-    } else if media.voice.hasVoice {
+    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && media.voice.hasVoice {
       "🎤 Voice message"
     } else {
       "Message"
@@ -750,7 +756,9 @@ public extension InlineProtocol.Message {
   }
 
   var stringRepresentationPlain: String {
-    if hasMessage {
+    if media.voice.hasVoice && !ExperimentalFeatureFlags.voiceMessagesEnabled {
+      "Unsupported message"
+    } else if hasMessage {
       message
     } else if isSticker == true {
       "Sticker"
@@ -762,7 +770,7 @@ public extension InlineProtocol.Message {
       "Video"
     } else if media.document.hasDocument {
       "Document"
-    } else if media.voice.hasVoice {
+    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && media.voice.hasVoice {
       "Voice message"
     } else {
       "Message"
