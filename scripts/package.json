@@ -17,6 +17,8 @@
     "macos:build-direct-local": "BUILD_ID=${BUILD_ID:-$(date +%Y%m%d-%H%M%S)}; CHANNEL=${CHANNEL:-beta} SKIP_NOTARIZE=1 OUTPUT_DIR=../build/macos-direct-local-$BUILD_ID bash macos/build-direct.sh",
     "macos:release-app": "bun run macos/release-app.ts",
     "macos:appcast-only": "bash macos/appcast-only.sh",
+    "cleanup:builds": "bun run cleanup-build-artifacts.ts",
+    "cleanup:builds:deep": "bun run cleanup-build-artifacts.ts --deep",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "bunx oxlint --ignore-path ../.oxlintignore .",
     "test": "echo \"No tests yet for inline-scripts\""
