@@ -122,12 +122,16 @@ export type SendMessageParams = BotTargetInput & {
   text: string
   reply_to_message_id?: BotInputId
   entities?: BotMessageEntityInput[]
+  parse_markdown?: boolean
+  parseMarkdown?: boolean
 }
 
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
   text: string
   entities?: BotMessageEntityInput[]
+  parse_markdown?: boolean
+  parseMarkdown?: boolean
 }
 
 export type DeleteMessageParams = BotTargetInput & {

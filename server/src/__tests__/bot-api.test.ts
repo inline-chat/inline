@@ -324,6 +324,73 @@ describe("Bot HTTP API", () => {
     expect(compatJson.ok).toBe(true)
   })
 
+  it("parses inline markdown mention links on sendMessage when requested", async () => {
+    const [bot] = await db
+      .insert(users)
+      .values({
+        firstName: "MentionBot",
+        username: "mentionbot",
+        bot: true,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    const [human] = await db
+      .insert(users)
+      .values({
+        firstName: "Mentioned",
+        username: "mentioned",
+        bot: false,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    const { token } = await generateToken(bot!.id)
+    await SessionsModel.create({
+      userId: bot!.id,
+      tokenHash: hashToken(token),
+      personalData: {},
+      clientType: "api",
+    })
+
+    const sendRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: `hi [@Mentioned](inline://user?id=${human!.id})`,
+          parse_markdown: true,
+        }),
+      }),
+    )
+
+    expect(sendRes.status).toBe(200)
+    const sendJson = await sendRes.json()
+    expect(sendJson.ok).toBe(true)
+    expect(sendJson.result.message.text).toBe("hi @Mentioned")
+    expect(sendJson.result.message.entities).toEqual([
+      {
+        type: "mention",
+        offset: 3,
+        length: 10,
+        user: {
+          id: human!.id,
+          is_bot: false,
+          username: "mentioned",
+          first_name: "Mentioned",
+        },
+      },
+    ])
+  })
+
   it("prefers POST JSON body values over query values when both are provided", async () => {
     const [bot] = await db
       .insert(users)

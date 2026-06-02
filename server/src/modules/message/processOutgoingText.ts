@@ -21,6 +21,12 @@ type MentionCandidate = {
   username: string
 }
 
+type InlineMentionLink = {
+  entity: MessageEntity
+  userId?: number
+  username?: string
+}
+
 const isMentionChar = (char: string): boolean => {
   const code = char.charCodeAt(0)
   return (
@@ -88,6 +94,171 @@ const isRangeOverlappingClientEntity = (
   return clientEntityRanges.some((clientRange) => {
     return range.start < clientRange.end && clientRange.start < range.end
   })
+}
+
+const parsePositiveSafeInt = (value: string | null): number | null => {
+  if (!value || !/^\d+$/.test(value)) {
+    return null
+  }
+
+  const id = Number(value)
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return null
+  }
+
+  return id
+}
+
+const normalizeUsername = (value: string | null): string | null => {
+  const username = value?.trim().replace(/^@/, "").toLowerCase()
+  if (!username || username.length < 2 || !/^[a-z0-9_]+$/.test(username)) {
+    return null
+  }
+
+  return username
+}
+
+const parseInlineUserLink = (rawUrl: string): { userId?: number; username?: string } | null => {
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return null
+  }
+
+  if (url.protocol.toLowerCase() !== "inline:" || url.hostname.toLowerCase() !== "user") {
+    return null
+  }
+
+  const queryUserId = parsePositiveSafeInt(url.searchParams.get("id") ?? url.searchParams.get("user_id"))
+  const pathUserId = parsePositiveSafeInt(url.pathname.replace(/^\/+/, ""))
+  const username = normalizeUsername(url.searchParams.get("username"))
+
+  if (queryUserId) {
+    return { userId: queryUserId }
+  }
+  if (pathUserId) {
+    return { userId: pathUserId }
+  }
+  if (username) {
+    return { username }
+  }
+
+  return null
+}
+
+const resolveInlineMentionLinks = async (
+  entities: MessageEntities | undefined,
+): Promise<MessageEntities | undefined> => {
+  if (!entities || entities.entities.length === 0) {
+    return entities
+  }
+
+  const links: InlineMentionLink[] = []
+  for (const entity of entities.entities) {
+    if (
+      entity?.type !== MessageEntity_Type.TEXT_URL ||
+      entity.entity.oneofKind !== "textUrl" ||
+      !entity.entity.textUrl.url
+    ) {
+      continue
+    }
+
+    const parsed = parseInlineUserLink(entity.entity.textUrl.url)
+    if (!parsed) {
+      continue
+    }
+
+    links.push({
+      entity,
+      ...(parsed.userId ? { userId: parsed.userId } : {}),
+      ...(parsed.username ? { username: parsed.username } : {}),
+    })
+  }
+
+  if (links.length === 0) {
+    return entities
+  }
+
+  const ids = [...new Set(links.map((link) => link.userId).filter((id): id is number => id !== undefined))]
+  const usernames = [
+    ...new Set(links.map((link) => link.username).filter((username): username is string => username !== undefined)),
+  ]
+
+  const usersById = new Map<number, number>()
+  const usersByUsername = new Map<string, number>()
+
+  if (ids.length > 0) {
+    const rows = await db
+      .select({
+        id: users.id,
+        username: users.username,
+      })
+      .from(users)
+      .where(and(inArray(users.id, ids), userNotDeleted()))
+
+    for (const user of rows) {
+      usersById.set(user.id, user.id)
+      if (user.username) {
+        usersByUsername.set(user.username.toLowerCase(), user.id)
+      }
+    }
+  }
+
+  if (usernames.length > 0) {
+    const rows = await db
+      .select({
+        id: users.id,
+        username: users.username,
+      })
+      .from(users)
+      .where(and(inArray(lower(users.username), usernames), userNotDeleted()))
+
+    for (const user of rows) {
+      usersById.set(user.id, user.id)
+      if (user.username) {
+        usersByUsername.set(user.username.toLowerCase(), user.id)
+      }
+    }
+  }
+
+  let changed = false
+  const resolvedEntities = entities.entities.map((entity) => {
+    const link = links.find((candidate) => candidate.entity === entity)
+    if (!link) {
+      return entity
+    }
+
+    let userId: number | undefined
+    if (link.userId) {
+      userId = usersById.get(link.userId)
+    } else if (link.username) {
+      userId = usersByUsername.get(link.username)
+    }
+    if (!userId) {
+      return entity
+    }
+
+    changed = true
+    return {
+      ...entity,
+      type: MessageEntity_Type.MENTION,
+      entity: {
+        oneofKind: "mention" as const,
+        mention: {
+          userId: BigInt(userId),
+        },
+      },
+    }
+  })
+
+  if (!changed) {
+    return entities
+  }
+
+  return {
+    entities: resolvedEntities,
+  }
 }
 
 const parseMissingMentionEntitiesByUsername = async ({
@@ -196,6 +367,7 @@ export const processOutgoingText = async (
     entities = processed.entities
   }
 
+  entities = await resolveInlineMentionLinks(entities)
   entities = await parseMissingMentionEntitiesByUsername({
     text,
     entities,

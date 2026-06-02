@@ -1,0 +1,151 @@
+import { beforeEach, describe, expect, test } from "bun:test"
+import { MessageEntity_Type } from "@inline-chat/protocol/core"
+import { db } from "@in/server/db"
+import { users } from "@in/server/db/schema"
+import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
+import { eq } from "drizzle-orm"
+
+const runId = Date.now()
+let userIndex = 0
+const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
+
+describe("processOutgoingText", () => {
+  setupTestLifecycle()
+
+  beforeEach(() => {
+    userIndex = 0
+  })
+
+  test("converts markdown inline user id links to mention entities", async () => {
+    const user = await testUtils.createUser(nextEmail("inline-link-id"))
+
+    const result = await processOutgoingText({
+      text: `cc [@Mo](inline://user?id=${user.id}) please`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc @Mo please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const mention = result.entities!.entities[0]!
+    expect(mention.type).toBe(MessageEntity_Type.MENTION)
+    expect(mention.offset).toBe(3n)
+    expect(mention.length).toBe(3n)
+    expect(mention.entity.oneofKind).toBe("mention")
+    if (mention.entity.oneofKind !== "mention") {
+      throw new Error("Expected mention entity")
+    }
+    expect(mention.entity.mention.userId).toBe(BigInt(user.id))
+  })
+
+  test("converts markdown inline username links to mention entities", async () => {
+    const user = await testUtils.createUser(nextEmail("inline-link-username"))
+    await db.update(users).set({ username: "linkedmo" }).where(eq(users.id, user.id)).execute()
+
+    const result = await processOutgoingText({
+      text: "cc [@Mo](inline://user?username=LinkedMo) please",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc @Mo please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const mention = result.entities!.entities[0]!
+    expect(mention.type).toBe(MessageEntity_Type.MENTION)
+    expect(mention.entity.oneofKind).toBe("mention")
+    if (mention.entity.oneofKind !== "mention") {
+      throw new Error("Expected mention entity")
+    }
+    expect(mention.entity.mention.userId).toBe(BigInt(user.id))
+  })
+
+  test("converts explicit inline user text_url entities to mention entities", async () => {
+    const user = await testUtils.createUser(nextEmail("inline-link-entity"))
+
+    const result = await processOutgoingText({
+      text: "cc @Mo",
+      entities: {
+        entities: [
+          {
+            type: MessageEntity_Type.TEXT_URL,
+            offset: 3n,
+            length: 3n,
+            entity: {
+              oneofKind: "textUrl",
+              textUrl: { url: `inline://user/${user.id}` },
+            },
+          },
+        ],
+      },
+    })
+
+    expect(result.text).toBe("cc @Mo")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const mention = result.entities!.entities[0]!
+    expect(mention.type).toBe(MessageEntity_Type.MENTION)
+    expect(mention.offset).toBe(3n)
+    expect(mention.length).toBe(3n)
+    expect(mention.entity.oneofKind).toBe("mention")
+    if (mention.entity.oneofKind !== "mention") {
+      throw new Error("Expected mention entity")
+    }
+    expect(mention.entity.mention.userId).toBe(BigInt(user.id))
+  })
+
+  test("prefers inline user id links over username fallbacks", async () => {
+    const idUser = await testUtils.createUser(nextEmail("inline-link-id-priority"))
+    const usernameUser = await testUtils.createUser(nextEmail("inline-link-username-fallback"))
+    await db.update(users).set({ username: "linkedmo" }).where(eq(users.id, usernameUser.id)).execute()
+
+    const result = await processOutgoingText({
+      text: `cc [@Mo](inline://user/${idUser.id}?username=linkedmo)`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.entities?.entities).toHaveLength(1)
+    const mention = result.entities!.entities[0]!
+    expect(mention.entity.oneofKind).toBe("mention")
+    if (mention.entity.oneofKind !== "mention") {
+      throw new Error("Expected mention entity")
+    }
+    expect(mention.entity.mention.userId).toBe(BigInt(idUser.id))
+  })
+
+  test("keeps unresolved inline user links as text urls", async () => {
+    const result = await processOutgoingText({
+      text: "cc [@Missing](inline://user?id=99999999)",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc @Missing")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const entity = result.entities!.entities[0]!
+    expect(entity.type).toBe(MessageEntity_Type.TEXT_URL)
+    expect(entity.entity).toEqual({
+      oneofKind: "textUrl",
+      textUrl: { url: "inline://user?id=99999999" },
+    })
+  })
+
+  test("does not duplicate bare username mentions covered by inline mention links", async () => {
+    const user = await testUtils.createUser(nextEmail("inline-link-no-duplicate"))
+    await db.update(users).set({ username: "nodupe" }).where(eq(users.id, user.id)).execute()
+
+    const result = await processOutgoingText({
+      text: "cc [@nodupe](inline://user?username=nodupe)",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc @nodupe")
+    expect(result.entities?.entities).toHaveLength(1)
+    expect(result.entities?.entities[0]?.type).toBe(MessageEntity_Type.MENTION)
+  })
+})

@@ -284,6 +284,18 @@ const parseMaybeJsonValue = (value: unknown): unknown => {
   }
 }
 
+const parseBotBoolean = (value: unknown): boolean | undefined => {
+  if (value === undefined || value === null || value === "") return undefined
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "true" || normalized === "1") return true
+    if (normalized === "false" || normalized === "0") return false
+  }
+
+  throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+}
+
 const mentionUserIdsFromEntities = (entities: any): number[] => {
   if (!entities?.entities) return []
   const ids: number[] = []
@@ -447,6 +459,7 @@ const botMethods = (authPlugin: any): any => {
 
         const replyToMessageId = normalizeInputId(input["reply_to_message_id"] as any)
         const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
+        const parseMarkdown = parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
         const inputPeer = await makeInputPeerFromBotTarget(input, store.currentUserId)
         const chatResult = await getChatFn({ peerId: inputPeer }, ctxFromStore(store))
         const chatId = Number(chatResult.chat.id)
@@ -459,6 +472,7 @@ const botMethods = (authPlugin: any): any => {
             message: text,
             replyToMessageId: replyToMessageId ? BigInt(replyToMessageId) : undefined,
             entities,
+            parseMarkdown,
             randomId,
           },
           ctxFromStore(store),
@@ -609,6 +623,7 @@ const botMethods = (authPlugin: any): any => {
         const input = mergePostInput(body, query)
         const peerId = await makeInputPeerFromBotTarget(input, store.currentUserId)
         const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
+        const parseMarkdown = parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
 
         const messageId = normalizeInputId(input["message_id"] as any)
         if (!messageId) {
@@ -625,7 +640,7 @@ const botMethods = (authPlugin: any): any => {
         const botChat = toBotChat(chat)
 
         await editMessageFn(
-          { messageId: BigInt(messageId), peer: peerId, text, entities },
+          { messageId: BigInt(messageId), peer: peerId, text, entities, parseMarkdown },
           ctxFromStore(store),
         )
 

@@ -81,6 +81,8 @@ export const TSendMessageInput = t.Object({
   text: t.String(),
   reply_to_message_id: t.Optional(TTargetId),
   entities: t.Optional(TBotMessageEntitiesInput),
+  parse_markdown: t.Optional(t.Boolean()),
+  parseMarkdown: t.Optional(t.Boolean()),
 })
 
 export const TGetChatInput = t.Object({
@@ -98,6 +100,8 @@ export const TEditMessageTextInput = t.Object({
   message_id: TTargetId,
   text: t.String(),
   entities: t.Optional(TBotMessageEntitiesInput),
+  parse_markdown: t.Optional(t.Boolean()),
+  parseMarkdown: t.Optional(t.Boolean()),
 })
 
 export const TDeleteMessageInput = t.Object({
