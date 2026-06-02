@@ -242,6 +242,11 @@ public final class FileDownloader: NSObject, Sendable {
     message: Message,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      completion(.failure(FileCacheError.failedToFetch))
+      return
+    }
+
     guard let voice = message.voiceContent else {
       completion(.failure(FileCacheError.failedToSave))
       return
@@ -259,7 +264,8 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "voice_\(voice.voiceID)"
-    let localPath = "\(UUID().uuidString).ogg"
+    let fileExtension = Self.voiceFileExtension(mimeType: voice.mimeType)
+    let localPath = "\(UUID().uuidString).\(fileExtension)"
     let localUrl = FileCache.getUrl(for: .voices, localPath: localPath)
 
     downloadFile(
@@ -330,6 +336,17 @@ public final class FileDownloader: NSObject, Sendable {
 
   public func isVoiceDownloadActive(voiceId: Int64) -> Bool {
     isDownloadActive(for: "voice_\(voiceId)")
+  }
+
+  private static func voiceFileExtension(mimeType: String) -> String {
+    switch mimeType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+      case "audio/mp4", "audio/x-m4a":
+        return "m4a"
+      case "audio/ogg":
+        return "ogg"
+      default:
+        return "ogg"
+    }
   }
 
   // MARK: - Private Methods

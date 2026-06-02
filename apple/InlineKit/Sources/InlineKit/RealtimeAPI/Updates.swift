@@ -393,7 +393,7 @@ extension InlineProtocol.UpdateComposeAction {
       case .uploadingVideo:
         .uploadingVideo
       case .recordingVoice:
-        .recordingVoice
+        ExperimentalFeatureFlags.voiceMessagesEnabled ? .recordingVoice : nil
       default:
         nil
     }

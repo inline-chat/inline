@@ -80,6 +80,12 @@ public struct VoiceMessageBubble: View {
   }
 
   public var body: some View {
+    if ExperimentalFeatureFlags.voiceMessagesEnabled {
+      content
+    }
+  }
+
+  private var content: some View {
     HStack(spacing: 10) {
       primaryButton
 
