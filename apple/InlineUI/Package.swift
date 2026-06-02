@@ -21,6 +21,7 @@ let package = Package(
 
   products: [
     .library(name: "InlineUI", targets: ["InlineUI"]),
+    .library(name: "EmojiAutocomplete", targets: ["EmojiAutocomplete"]),
     .library(name: "TextProcessing", targets: ["TextProcessing"]),
     .library(name: "Translation", targets: ["Translation"]),
     .library(name: "Invite", targets: ["Invite"]),
@@ -49,8 +50,14 @@ let package = Package(
     ),
 
     .target(
+      name: "EmojiAutocomplete",
+      dependencies: [],
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
       name: "TextProcessing",
-      dependencies: baseDependencies,
+      dependencies: baseDependencies + ["EmojiAutocomplete"],
       swiftSettings: swiftSettings
     ),
 
@@ -68,7 +75,7 @@ let package = Package(
 
     .testTarget(
       name: "InlineUITests",
-      dependencies: ["InlineUI", "TextProcessing", "Translation"],
+      dependencies: ["InlineUI", "EmojiAutocomplete", "TextProcessing", "Translation"],
       swiftSettings: swiftSettings
     ),
   ]
