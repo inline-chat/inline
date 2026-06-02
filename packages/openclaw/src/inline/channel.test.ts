@@ -76,6 +76,7 @@ describe("inline/channel", () => {
       rules: expect.arrayContaining([
         "Prefer bullet lists over markdown tables.",
         "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
+        "Mention Inline users with markdown links like [@FirstName](inline://user?id=123); use inline://user?username=username only when the user id is unavailable.",
       ]),
     })
     expect(

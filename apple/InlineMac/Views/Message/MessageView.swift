@@ -900,20 +900,42 @@ class MessageViewAppKit: NSView {
   }
 
   private func openTextURL(_ url: URL) {
-    if url.scheme == "inline", url.host == "user",
-       let userIdString = url.pathComponents.last,
-       let userId = Int64(userIdString)
-    {
+    if let userId = inlineUserId(from: url) {
       MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openInlineUser userId=\(userId)")
       Task { @MainActor in
         openChat(peer: .user(id: userId))
       }
       return
     }
+    if url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" {
+      MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=unresolvedInlineUser")
+      return
+    }
 
     log.debug("Link clicked: \(MessageGestureTrace.url(url))")
     MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openExternal url=\(MessageGestureTrace.url(url))")
     NSWorkspace.shared.open(url)
+  }
+
+  private func inlineUserId(from url: URL) -> Int64? {
+    guard url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" else {
+      return nil
+    }
+
+    if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      let queryId = components.queryItems?.first {
+        let name = $0.name.lowercased()
+        return name == "id" || name == "user_id"
+      }?.value
+      if let queryId, let userId = Int64(queryId), userId > 0 {
+        return userId
+      }
+    }
+
+    guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
+      return nil
+    }
+    return userId
   }
 
   // MARK: - Initialization

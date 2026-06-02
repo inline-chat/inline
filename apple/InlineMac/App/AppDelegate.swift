@@ -259,13 +259,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       NSApp.activate(ignoringOtherApps: true)
       setupMainWindow()
 
-      // Parse the URL path
-      let pathComponents = url.pathComponents
-
       // Handle different URL patterns
       switch url.host {
       case "user":
-        handleUserURL(pathComponents: pathComponents)
+        handleUserURL(url)
       case "integrations":
         showAndFocusMainWindow()
         NotificationCenter.default.post(name: .integrationCallback, object: url)
@@ -275,14 +272,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  @MainActor private func handleUserURL(pathComponents: [String]) {
-    // Expected format: inline://user/<id>
-    // pathComponents will be ["/", "<id>"]
-    guard pathComponents.count >= 2,
-          let userIdString = pathComponents.last,
-          let userId = Int64(userIdString)
-    else {
-      log.error("Invalid user URL format. Expected: inline://user/<id>")
+  @MainActor private func handleUserURL(_ url: URL) {
+    guard let userId = inlineUserId(from: url) else {
+      log.error("Invalid user URL format. Expected: inline://user/<id> or inline://user?id=<id>")
       return
     }
 
@@ -291,6 +283,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Navigate to the user chat
     let peer: Peer = .user(id: userId)
     openChat(peer: peer)
+  }
+
+  private func inlineUserId(from url: URL) -> Int64? {
+    guard url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" else {
+      return nil
+    }
+
+    if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      let queryId = components.queryItems?.first {
+        let name = $0.name.lowercased()
+        return name == "id" || name == "user_id"
+      }?.value
+      if let queryId, let userId = Int64(queryId), userId > 0 {
+        return userId
+      }
+    }
+
+    guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
+      return nil
+    }
+    return userId
   }
 
   @MainActor private func openChat(peer: Peer) {

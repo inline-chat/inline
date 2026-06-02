@@ -395,6 +395,15 @@ class UIMessageView: UIView {
 
   func handleLinkTap() {
     linkTapHandler = { [weak self] url in
+      if let userId = Self.inlineUserId(from: url) {
+        NotificationCenter.default.post(
+          name: Notification.Name("MentionTapped"),
+          object: nil,
+          userInfo: ["userId": userId]
+        )
+        return
+      }
+
       InAppBrowser.shared.open(url, from: self?.findViewController())
     }
   }
@@ -1459,22 +1468,26 @@ class UIMessageView: UIView {
   }
 
   private func resolveLinkURL(from value: Any?) -> URL? {
-    if let url = value as? URL,
-       let scheme = url.scheme?.lowercased(),
-       ["http", "https"].contains(scheme)
-    {
-      return url
+    if let url = value as? URL {
+      if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+        return url
+      }
+      if Self.inlineUserId(from: url) != nil {
+        return url
+      }
     }
 
     guard let urlString = value as? String else {
       return nil
     }
 
-    if let url = URL(string: urlString),
-       let scheme = url.scheme?.lowercased(),
-       ["http", "https"].contains(scheme)
-    {
-      return url
+    if let url = URL(string: urlString) {
+      if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+        return url
+      }
+      if Self.inlineUserId(from: url) != nil {
+        return url
+      }
     }
 
     if urlString.contains("://") {
@@ -1489,6 +1502,27 @@ class UIMessageView: UIView {
     }
 
     return url
+  }
+
+  private static func inlineUserId(from url: URL) -> Int64? {
+    guard url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" else {
+      return nil
+    }
+
+    if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      let queryId = components.queryItems?.first {
+        let name = $0.name.lowercased()
+        return name == "id" || name == "user_id"
+      }?.value
+      if let queryId, let userId = Int64(queryId), userId > 0 {
+        return userId
+      }
+    }
+
+    guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
+      return nil
+    }
+    return userId
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {

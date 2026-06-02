@@ -194,7 +194,22 @@ public class ProcessEntities {
 
         case .textURL:
           if case let .textURL(textURL) = entity.entity {
-            if let emailAddress = emailAddress(from: textURL.url) {
+            if let userId = inlineUserId(from: textURL.url) {
+              var attributes: [NSAttributedString.Key: Any] = [
+                .mentionUserId: userId,
+                .foregroundColor: configuration.linkColor,
+                .underlineStyle: 0,
+              ]
+              if configuration.convertMentionsToLink {
+                attributes[.link] = "inline://user/\(userId)"
+              }
+
+              #if os(macOS)
+              attributes[.cursor] = NSCursor.pointingHand
+              #endif
+
+              attributedString.addAttributes(attributes, range: range)
+            } else if let emailAddress = emailAddress(from: textURL.url) {
               var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: configuration.linkColor,
                 .underlineStyle: 0,
@@ -550,6 +565,18 @@ public class ProcessEntities {
 
       guard let urlString, !urlString.isEmpty else { return }
 
+      if let userId = inlineUserId(from: urlString) {
+        var entity = MessageEntity()
+        entity.type = .mention
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entity.mention = MessageEntity.MessageEntityMention.with {
+          $0.userID = userId
+        }
+        entities.append(entity)
+        return
+      }
+
       if emailAddress(from: urlString) != nil {
         var entity = MessageEntity()
         entity.type = .email
@@ -732,6 +759,31 @@ public class ProcessEntities {
           let scheme = url.scheme?.lowercased()
     else { return false }
     return allowedExternalLinkSchemes.contains(scheme)
+  }
+
+  private static func inlineUserId(from urlString: String) -> Int64? {
+    guard let components = URLComponents(string: urlString),
+          components.scheme?.lowercased() == "inline",
+          components.host?.lowercased() == "user"
+    else { return nil }
+
+    let queryId = components.queryItems?.first {
+      let name = $0.name.lowercased()
+      return name == "id" || name == "user_id"
+    }?.value
+    if let id = positiveInt64(queryId) {
+      return id
+    }
+
+    let pathId = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    return positiveInt64(pathId)
+  }
+
+  private static func positiveInt64(_ value: String?) -> Int64? {
+    guard let value, !value.isEmpty, value.allSatisfy(\.isNumber), let id = Int64(value), id > 0 else {
+      return nil
+    }
+    return id
   }
 
   private static func emailAddress(from urlString: String) -> String? {

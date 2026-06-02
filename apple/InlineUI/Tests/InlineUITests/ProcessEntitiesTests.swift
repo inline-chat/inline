@@ -302,6 +302,47 @@ struct ProcessEntitiesTests {
     #expect((textUrlAttributes[.link] as? URL)?.absoluteString == "https://docs.example.com")
   }
 
+  @Test("Inline user text_url applies mention attributes")
+  func testInlineUserTextURLAppliesMentionAttributes() {
+    let text = "Hi @Mo"
+    let range = rangeOfSubstring("@Mo", in: text)
+    var entity = MessageEntity()
+    entity.type = .textURL
+    entity.offset = Int64(range.location)
+    entity.length = Int64(range.length)
+    entity.textURL = MessageEntity.MessageEntityTextUrl.with {
+      $0.url = "inline://user?id=123"
+    }
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: createMessageEntities([entity]),
+      configuration: testConfiguration
+    )
+
+    let attributes = result.attributes(at: range.location, effectiveRange: nil)
+    #expect(attributes[.mentionUserId] as? Int64 == 123)
+    #expect(attributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(attributes[.link] as? String == "inline://user/123")
+  }
+
+  @Test("Extract inline user link attribute as mention entity")
+  func testExtractInlineUserLinkAsMentionEntity() {
+    let text = "Hi @Mo"
+    let range = rangeOfSubstring("@Mo", in: text)
+    let attributedString = NSMutableAttributedString(string: text)
+    attributedString.addAttribute(.link, value: "inline://user?id=123", range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+    #expect(result.entities.entities[0].type == .mention)
+    #expect(result.entities.entities[0].offset == Int64(range.location))
+    #expect(result.entities.entities[0].length == Int64(range.length))
+    #expect(result.entities.entities[0].mention.userID == 123)
+  }
+
   @Test("Email entities apply email attributes without link")
   func testEmailEntities() {
     let text = "Contact test@example.com for details"
