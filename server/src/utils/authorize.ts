@@ -129,12 +129,12 @@ const spaceMember = async (spaceId: number, currentUserId: number): Promise<{ me
 }
 
 const spaceAdmin = async (spaceId: number, currentUserId: number): Promise<{ member: DbMember }> => {
-  const member = await db.query.members.findFirst({
-    where: {
-      spaceId,
-      userId: currentUserId,
-      OR: [{ role: "admin" }, { role: "owner" }],
-    },
+  const member = await db._query.members.findFirst({
+    where: and(
+      eq(members.spaceId, spaceId),
+      eq(members.userId, currentUserId),
+      inArray(members.role, ["admin", "owner"]),
+    ),
   })
 
   if (member === undefined) {
@@ -142,7 +142,7 @@ const spaceAdmin = async (spaceId: number, currentUserId: number): Promise<{ mem
       ...(await getSpaceDetails(spaceId, currentUserId)),
       ...(await getMemberDetails(spaceId, currentUserId)),
     }))
-    throw new InlineError(InlineError.ApiError.USER_NOT_PARTICIPANT)
+    throw new InlineError(InlineError.ApiError.SPACE_ADMIN_REQUIRED)
   }
 
   return { member }
