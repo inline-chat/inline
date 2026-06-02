@@ -64,6 +64,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     photo: fullMessage.photo ?? undefined,
     video: fullMessage.video ?? undefined,
     document: fullMessage.document ?? undefined,
+    voice: fullMessage.voice ?? undefined,
   }
 
   let { selfUpdates } = await pushUpdates({
