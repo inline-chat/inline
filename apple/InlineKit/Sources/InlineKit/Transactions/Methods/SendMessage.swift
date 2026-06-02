@@ -160,6 +160,7 @@ public struct TransactionSendMessage: Transaction {
   // Methods
   public func optimistic() {
     let media = attachments.first?.media
+    let voiceContent = ExperimentalFeatureFlags.voiceMessagesEnabled ? media?.asVoiceContent() : nil
     Log.shared.debug("Optimistic send message \(media.debugDescription)")
     let message = Message(
       messageId: temporaryMessageId,
@@ -177,7 +178,7 @@ public struct TransactionSendMessage: Transaction {
       photoId: media?.asPhotoId(),
       videoId: media?.asVideoId(),
       documentId: media?.asDocumentId(),
-      contentPayload: media?.asVoiceContent().map { voiceContent in
+      contentPayload: voiceContent.map { voiceContent in
         Client_MessageContentPayload.with {
           $0.voice = voiceContent
         }
@@ -330,6 +331,10 @@ public struct TransactionSendMessage: Transaction {
           }
 
         case let .voice(voiceContent):
+          guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+            throw FileUploadError.invalidVoice
+          }
+
           let localVoiceId = voiceContent.voiceID
           guard localVoiceId != 0 else {
             throw FileUploadError.invalidVoiceId
