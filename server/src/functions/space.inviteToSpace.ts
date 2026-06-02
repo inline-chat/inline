@@ -6,7 +6,6 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { Update, type InviteToSpaceInput, type InviteToSpaceResult } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { isValidEmail, isValidSpaceId } from "@in/server/utils/validate"
-import { Authorize } from "@in/server/utils/authorize"
 import { MembersModel } from "@in/server/db/models/members"
 import { sendEmail } from "@in/server/utils/email"
 import { SpaceModel } from "@in/server/db/models/spaces"
@@ -44,19 +43,7 @@ export const inviteToSpace = async (
     throw RealtimeRpcError.SpaceIdInvalid()
   }
 
-  // Validate our permission in this space and maximum role we can assign
-  const { member: ourMembership } = await Authorize.spaceMember(spaceId, context.currentUserId)
-
-  const isMember = input.role?.role.oneofKind === "member"
-  const isAdmin = input.role?.role.oneofKind === "admin"
-
-  if (ourMembership.role === "member" && isMember) {
-    throw RealtimeRpcError.SpaceAdminRequired()
-  }
-
-  if (ourMembership.role === "member" && isAdmin) {
-    throw RealtimeRpcError.SpaceAdminRequired()
-  }
+  await ensureCanInvite(space, input, context)
 
   let inviteInfo: InviteInfo
 
@@ -130,6 +117,30 @@ export const inviteToSpace = async (
 
 type InviteInfo = {
   user: DbUser
+}
+
+// ------------------------------------------------------------
+
+async function ensureCanInvite(space: DbSpace, input: InviteToSpaceInput, context: FunctionContext): Promise<void> {
+  const roleKind = input.role?.role.oneofKind
+  if (roleKind && roleKind !== "member" && roleKind !== "admin") {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  const member = await MembersModel.getMemberByUserId(space.id, context.currentUserId)
+  if (!member) {
+    throw RealtimeRpcError.SpaceAdminRequired()
+  }
+
+  if (member.role === "admin" || member.role === "owner") {
+    return
+  }
+
+  if (space.isPublic && roleKind !== "admin") {
+    return
+  }
+
+  throw RealtimeRpcError.SpaceAdminRequired()
 }
 
 // ------------------------------------------------------------
