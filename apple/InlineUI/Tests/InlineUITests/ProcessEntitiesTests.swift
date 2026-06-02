@@ -782,7 +782,7 @@ struct ProcessEntitiesTests {
     let boldRange = NSRange(location: 8, length: 4)
 
     #if os(macOS)
-    let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask)
+    let boldFont = PlatformFontTraits.settingBold(true, on: testConfiguration.font)
     #else
     let safeSize = max(testConfiguration.font.pointSize, 12.0)
     let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
@@ -861,7 +861,7 @@ struct ProcessEntitiesTests {
     let boldRange = NSRange(location: 16, length: 4)
 
     #if os(macOS)
-    let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask)
+    let boldFont = PlatformFontTraits.settingBold(true, on: testConfiguration.font)
     #else
     let safeSize = max(testConfiguration.font.pointSize, 12.0)
     let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
@@ -918,7 +918,7 @@ struct ProcessEntitiesTests {
     // Add bold
     let boldRange = NSRange(location: 19, length: 4)
     #if os(macOS)
-    let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask)
+    let boldFont = PlatformFontTraits.settingBold(true, on: testConfiguration.font)
     #else
     let safeSize = max(testConfiguration.font.pointSize, 12.0)
     let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
@@ -984,7 +984,7 @@ struct ProcessEntitiesTests {
     // Add bold font to the "bold text" part (without the markdown markers)
     let boldRange = NSRange(location: 5, length: 9) // "bold text"
     #if os(macOS)
-    let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask)
+    let boldFont = PlatformFontTraits.settingBold(true, on: testConfiguration.font)
     #else
     let safeSize = max(testConfiguration.font.pointSize, 12.0)
     let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
