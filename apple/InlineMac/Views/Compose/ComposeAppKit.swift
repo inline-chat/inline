@@ -72,13 +72,56 @@ class ComposeAppKit: NSView {
 
   // Shared autocomplete
   private let threadLinkDetector = ThreadLinkDetector()
+  private let emojiAutocompleteDetector = EmojiAutocompleteDetector()
   private lazy var autocompleteViewModel = ComposeAutocompleteViewModel(
     db: dependencies.database,
-    spaceId: chat?.spaceId
+    spaceId: chat?.spaceId,
+    limit: 24,
+    recentThreadChatIds: { [weak self] limit in
+      self?.recentThreadChatIds(limit: limit) ?? []
+    },
+    emojiItems: { query, limit in
+      ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
+    }
   )
   private var autocompleteMenu: ComposeAutocompleteMenu?
   private var autocompleteMenuConstraints: [NSLayoutConstraint] = []
+  private var autocompleteMenuLeadingConstraint: NSLayoutConstraint?
   private var autocompleteKeyMonitorEscUnsubscribe: (() -> Void)?
+
+  private func recentThreadChatIds(limit: Int) -> [Int64] {
+    var ids: [Int64] = []
+    var seen = Set<Int64>()
+
+    func append(_ peer: InlineKit.Peer?) {
+      guard ids.count < limit,
+            let chatId = peer?.asThreadId(),
+            seen.insert(chatId).inserted
+      else {
+        return
+      }
+      ids.append(chatId)
+    }
+
+    if let nav3 = dependencies.nav3, nav3.historyIndex >= 0 {
+      let count = min(nav3.historyIndex + 1, nav3.history.count)
+      for route in nav3.history.prefix(count).reversed() {
+        append(route.selectedPeer)
+      }
+    }
+
+    if let nav2 = dependencies.nav2 {
+      for entry in nav2.history.reversed() {
+        append(entry.route.selectedPeer)
+      }
+    }
+
+    for entry in dependencies.nav.history.reversed() {
+      append(entry.route.selectedPeer)
+    }
+
+    return ids
+  }
 
   // Draft
   private let draftManager = DraftManager(debounceDelay: 3.0)
@@ -593,11 +636,13 @@ class ComposeAppKit: NSView {
     parentView.addSubview(menu)
     NSLayoutConstraint.deactivate(autocompleteMenuConstraints)
     autocompleteMenuConstraints.removeAll()
+    autocompleteMenuLeadingConstraint = nil
 
+    let leadingConstraint = menu.leadingAnchor.constraint(equalTo: leadingAnchor)
+    autocompleteMenuLeadingConstraint = leadingConstraint
     autocompleteMenuConstraints = [
-      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
-      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor),
+      leadingConstraint,
+      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
     ]
 
     NSLayoutConstraint.activate(autocompleteMenuConstraints)
@@ -608,7 +653,7 @@ class ComposeAppKit: NSView {
     selectedIndex: Int,
     match: ComposeAutocompleteMatch?
   ) {
-    guard match != nil, !items.isEmpty else {
+    guard let match, !items.isEmpty else {
       autocompleteMenu?.hide()
       autocompleteKeyMonitorEscUnsubscribe?()
       autocompleteKeyMonitorEscUnsubscribe = nil
@@ -617,7 +662,14 @@ class ComposeAppKit: NSView {
 
     ensureAutocompleteMenu()
     addAutocompleteMenuToSuperview()
-    autocompleteMenu?.update(items: items, selectedIndex: selectedIndex)
+    autocompleteMenu?.update(
+      items: items,
+      selectedIndex: selectedIndex,
+      availableWidth: autocompleteMenuWidth(for: match)
+    )
+    if let autocompleteMenu {
+      updateAutocompleteMenuPosition(menu: autocompleteMenu, match: match)
+    }
     autocompleteMenu?.show()
 
     autocompleteKeyMonitorEscUnsubscribe?()
@@ -628,6 +680,23 @@ class ComposeAppKit: NSView {
         self?.hideAutocomplete()
       }
     )
+  }
+
+  private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu, match: ComposeAutocompleteMatch) {
+    guard match.kind == .emoji, menu.isShowingEmojiPalette else {
+      autocompleteMenuLeadingConstraint?.constant = 0
+      return
+    }
+
+    layoutSubtreeIfNeeded()
+    autocompleteMenuLeadingConstraint?.constant = textEditor.frame.minX
+  }
+
+  private func autocompleteMenuWidth(for match: ComposeAutocompleteMatch) -> CGFloat? {
+    guard match.kind == .emoji else { return nil }
+    layoutSubtreeIfNeeded()
+    let width = textEditor.frame.width
+    return width > 1 ? width : nil
   }
 
   private func showMentionCompletion(for query: String) {
@@ -741,12 +810,32 @@ class ComposeAppKit: NSView {
   }
 
   @discardableResult
-  private func detectThreadAutocompleteAtCursor() -> Bool {
-    guard chat?.spaceId != nil else {
-      hideAutocomplete()
-      return false
+  private func detectEmojiAutocompleteAtCursor() -> Bool {
+    let cursorPosition = textEditor.textView.selectedRange().location
+    let attributedText = textEditor.attributedString
+
+    if let emojiRange = emojiAutocompleteDetector.detectEmojiAutocompleteAt(cursorPosition: cursorPosition, in: attributedText) {
+      hideMentionCompletion()
+      hideCommandCompletion()
+      autocompleteViewModel.update(
+        match: ComposeAutocompleteMatch(
+          kind: .emoji,
+          range: emojiRange.range,
+          query: emojiRange.query
+        )
+      )
+      return true
     }
 
+    if autocompleteViewModel.match?.kind == .emoji {
+      hideAutocomplete()
+    }
+
+    return false
+  }
+
+  @discardableResult
+  private func detectThreadAutocompleteAtCursor() -> Bool {
     let cursorPosition = textEditor.textView.selectedRange().location
     let attributedText = textEditor.attributedString
 
@@ -771,6 +860,9 @@ class ComposeAppKit: NSView {
   private func detectComposeCompletionsAtCursor() {
     if detectSlashCommandAtCursor() {
       hideAutocomplete()
+      return
+    }
+    if detectEmojiAutocompleteAtCursor() {
       return
     }
     if detectThreadAutocompleteAtCursor() {
@@ -1589,6 +1681,11 @@ extension ComposeAppKit {
 
 // MARK: Delegate
 
+private enum ComposeAutocompleteArrowDirection {
+  case previous
+  case next
+}
+
 extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   // Implement delegate methods as needed
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool {
@@ -1599,8 +1696,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
     if autocompleteMenu?.isVisible == true {
-      autocompleteViewModel.selectPrevious()
-      return true
+      return handleAutocompleteArrow(.previous)
     }
 
     if commandCompletionMenu?.isVisible == true {
@@ -1835,8 +1931,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool {
     if autocompleteMenu?.isVisible == true {
-      autocompleteViewModel.selectNext()
-      return true
+      return handleAutocompleteArrow(.next)
     }
 
     if commandCompletionMenu?.isVisible == true {
@@ -1851,6 +1946,58 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     return false // not handled
+  }
+
+  func textViewDidPressArrowLeft(_ textView: NSTextView) -> Bool {
+    guard let autocompleteMenu,
+          autocompleteMenu.isVisible,
+          autocompleteMenu.isShowingEmojiPalette
+    else {
+      return false
+    }
+
+    return handleAutocompleteArrow(.previous)
+  }
+
+  func textViewDidPressArrowRight(_ textView: NSTextView) -> Bool {
+    guard let autocompleteMenu,
+          autocompleteMenu.isVisible,
+          autocompleteMenu.isShowingEmojiPalette
+    else {
+      return false
+    }
+
+    return handleAutocompleteArrow(.next)
+  }
+
+  private func handleAutocompleteArrow(_ direction: ComposeAutocompleteArrowDirection) -> Bool {
+    guard let autocompleteMenu, autocompleteMenu.isVisible else { return false }
+
+    if autocompleteMenu.isShowingEmojiPalette, isAtEmojiPaletteEdge(direction) {
+      hideAutocomplete()
+      return false
+    }
+
+    switch direction {
+    case .previous:
+      autocompleteViewModel.selectPrevious()
+    case .next:
+      autocompleteViewModel.selectNext()
+    }
+
+    return true
+  }
+
+  private func isAtEmojiPaletteEdge(_ direction: ComposeAutocompleteArrowDirection) -> Bool {
+    let count = autocompleteViewModel.items.count
+    guard count > 0 else { return true }
+
+    switch direction {
+    case .previous:
+      return autocompleteViewModel.selectedIndex <= 0
+    case .next:
+      return autocompleteViewModel.selectedIndex >= count - 1
+    }
   }
 
   func textViewDidPressTab(_ textView: NSTextView) -> Bool {
@@ -1912,10 +2059,34 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidLoseFocus(_ textView: NSTextView) {
-    // Hide mention menu when text view loses focus
-    hideMentionCompletion()
-    hideCommandCompletion()
-    hideAutocomplete()
+    DispatchQueue.main.async { [weak self, weak textView] in
+      guard let self, let textView else { return }
+
+      if window?.firstResponder === textView {
+        return
+      }
+
+      if autocompleteMenuContainsFirstResponder() {
+        focus()
+        return
+      }
+
+      // Hide mention menu when text view loses focus
+      hideMentionCompletion()
+      hideCommandCompletion()
+      hideAutocomplete()
+    }
+  }
+
+  private func autocompleteMenuContainsFirstResponder() -> Bool {
+    guard let menu = autocompleteMenu,
+          menu.isVisible,
+          let responderView = window?.firstResponder as? NSView
+    else {
+      return false
+    }
+
+    return responderView === menu || responderView.isDescendant(of: menu)
   }
 }
 
@@ -2028,6 +2199,21 @@ extension ComposeAppKit: ComposeAutocompleteMenuDelegate {
         ignoreNextHeightChange = true
         textEditor.setAttributedString(result.newAttributedText)
         textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+        ignoreNextHeightChange = false
+
+        hideAutocomplete()
+        updateHeightIfNeeded(for: textEditor.textView)
+
+      case let .emoji(value, _):
+        let result = emojiAutocompleteDetector.replaceEmojiAutocomplete(
+          in: textEditor.attributedString,
+          range: match.range,
+          with: value
+        )
+
+        ignoreNextHeightChange = true
+        textEditor.setAttributedString(result.attributedText)
+        textEditor.textView.setSelectedRange(NSRange(location: result.cursorPosition, length: 0))
         ignoreNextHeightChange = false
 
         hideAutocomplete()
