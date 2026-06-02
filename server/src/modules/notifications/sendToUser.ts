@@ -1,6 +1,7 @@
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { getApnProvider } from "@in/server/libs/apn"
 import { isSuppressedApnFailure, summarizeApnFailure } from "@in/server/libs/apnFailures"
+import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
 import { configureAlertNotification, configureBackgroundNotification, iOSTopic } from "./utils"
@@ -70,12 +71,38 @@ const configureTimeSensitive = (notification: Notification) => {
   aps["interruption-level"] = "time-sensitive"
 }
 
+export const shouldPlayNotificationSound = ({
+  silent,
+  isUrgentNudge,
+}: {
+  silent: boolean
+  isUrgentNudge?: boolean
+}) => {
+  return isUrgentNudge || !silent
+}
+
+const configureSound = ({
+  notification,
+  silent,
+  isUrgentNudge,
+}: {
+  notification: Notification
+  silent: boolean
+  isUrgentNudge?: boolean
+}) => {
+  if (shouldPlayNotificationSound({ silent, isUrgentNudge })) {
+    notification.sound = "default"
+  }
+}
+
 const configurePlaintextSendMessageNotification = ({
   notification,
   payload,
+  silent,
 }: {
   notification: Notification
   payload: SendMessagePushPayload
+  silent: boolean
 }) => {
   const senderPayload: Record<string, unknown> = { id: payload.senderUserId }
 
@@ -96,7 +123,7 @@ const configurePlaintextSendMessageNotification = ({
   notification.mutableContent = true
   configureAlertNotification(notification)
 
-  notification.sound = "default"
+  configureSound({ notification, silent, isUrgentNudge: payload.isUrgentNudge })
   if (payload.isUrgentNudge) {
     configureTimeSensitive(notification)
   }
@@ -137,6 +164,18 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
     if (!apnProvider) {
       Log.shared.error("APN provider not found", { userId })
       return
+    }
+
+    let silent = false
+    if (payload.kind === "send_message" || payload.kind === "alert") {
+      try {
+        silent = (await getCachedUserSettings(userId))?.notifications.silent ?? false
+      } catch (error) {
+        log.error("Failed to load notification sound settings", {
+          error,
+          userId,
+        })
+      }
     }
 
     for (const session of userSessions) {
@@ -190,7 +229,7 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
             notification.mutableContent = true
             configureAlertNotification(notification)
 
-            notification.sound = "default"
+            configureSound({ notification, silent, isUrgentNudge: payload.isUrgentNudge })
             if (payload.isUrgentNudge) {
               configureTimeSensitive(notification)
             }
@@ -200,10 +239,10 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
               body: genericEncryptedAlertBody,
             }
           } else {
-            configurePlaintextSendMessageNotification({ notification, payload })
+            configurePlaintextSendMessageNotification({ notification, payload, silent })
           }
         } else {
-          configurePlaintextSendMessageNotification({ notification, payload })
+          configurePlaintextSendMessageNotification({ notification, payload, silent })
         }
       } else if (payload.kind === "alert") {
         notification.payload = {
@@ -218,7 +257,7 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
         notification.mutableContent = false
         configureAlertNotification(notification)
 
-        notification.sound = "default"
+        configureSound({ notification, silent })
         notification.alert = {
           title: payload.title,
           body: payload.body,

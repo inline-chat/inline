@@ -13,6 +13,7 @@ struct SettingsView: View {
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @EnvironmentObject private var mainRouter: MainViewRouter
   @EnvironmentObject private var fileUploadViewModel: FileUploadViewModel
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   @State private var isClearing = false
   @State private var showClearCacheAlert = false
@@ -48,6 +49,18 @@ struct SettingsView: View {
           iconColor: .blue,
           title: "Appearance"
         )
+      }
+
+      Section("Notifications") {
+        SettingsItem(
+          icon: "speaker.slash.fill",
+          iconColor: .red,
+          title: "Disable notification sound"
+        ) {
+          Toggle("", isOn: $notificationSettings.silent)
+            .labelsHidden()
+            .accessibilityLabel("Disable notification sound")
+        }
       }
 
       Section(footer: Text("When off, links open in your default browser or the matching app.")) {
@@ -229,5 +242,6 @@ struct SettingsView: View {
     .environmentObject(OnboardingNavigation())
     .environmentObject(MainViewRouter())
     .environmentObject(FileUploadViewModel())
+    .environmentObject(INUserSettings.current.notification)
     .environment(Router(initialTab: .chats))
 }
