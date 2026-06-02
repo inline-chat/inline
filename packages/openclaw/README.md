@@ -20,7 +20,7 @@ Supports:
 Reply-thread behavior:
 
 - Small/new parent-chat conversations stay in the parent chat by default.
-- `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery once `replyThreadAutoCreateMinMessages` is reached.
+- `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery once `replyThreadAutoCreateMinMessages` is reached; each triggering parent-chat message gets its own child reply thread.
 - `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
 - `thread-create` creates a real Inline reply thread. `thread-reply` sends into the child reply-thread chat id returned by `thread-create`.
 - Inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`.
@@ -135,7 +135,7 @@ channels:
       - "inline:123" # or "user:123" or just "123"
     requireMention: true # optional: default is false
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
-    replyThreadMode: "auto" # auto|thread|main; thread auto-routes long parent-chat replies into one reply thread
+    replyThreadMode: "auto" # auto|thread|main; thread auto-routes long parent-chat replies into per-message reply threads
     replyThreadAutoCreateMinMessages: 50 # optional, default 50; avoids creating reply threads for small/new chats
     replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention
     replyThreadParentHistoryLimit: 10 # optional, default 10; set 0 to disable parent-chat context before the anchor
@@ -186,7 +186,8 @@ Reply behavior summary:
 - `replyToId` is always an Inline message id.
 - Inline reply threads are separate and use OpenClaw `threadId`.
 - Use `replyThreadMode: "main"` if you only want automatic parent-chat replies to stay in the parent chat.
-- Use `replyThreadMode: "thread"` plus `replyThreadAutoCreateMinMessages` when long parent-chat conversations should move into one stable reply thread.
+- Use `replyThreadMode: "thread"` plus `replyThreadAutoCreateMinMessages` when parent-chat bot turns should move into child reply threads anchored to the triggering parent messages.
+- In an Inline group, authorized users can run `/threadreply` to choose the chat's mode with buttons, or `/threadreply thread|main|auto|inherit|status`.
 - Bot-participated reply threads continue without `@bot` by default, including from persisted recent participation state. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
 - `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
 
@@ -237,7 +238,7 @@ Inline reply-thread semantics:
 - `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id.
 - `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor.
 - Automatic thread creation falls back to parent-chat delivery if the reply thread cannot be created.
-- Existing route state is reused so long conversations stay in one reply thread instead of creating one thread per message.
+- Existing route state is reused only for the same parent-message anchor. New parent-chat messages get separate reply threads; messages already inside a reply thread stay in that thread and do not create nested threads.
 - If the current reply-thread message has no direct media, OpenClaw can inherit the anchor message media so image/file-only thread starters remain visible to the agent.
 
 You can gate action groups from config:
@@ -291,6 +292,7 @@ Bot command sync:
 
 - On `gateway_start`, the plugin registers default bot commands for each enabled/configured Inline account.
 - Default commands include the same user-facing command set as bundled chat providers (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
+- Inline also registers `/threadreply` to manage this group's reply-thread mode from chat.
 - The plugin uses OpenClaw's command, skill command, and plugin command registries when available.
 - Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`. Disabled startup sync clears existing Inline bot commands for the affected account.
 - Disable skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.

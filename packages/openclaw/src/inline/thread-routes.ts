@@ -206,6 +206,7 @@ function keysForLookup(params: {
   const keys = new Set<string>()
   if (params.parentMessageId) {
     keys.add(messageKey(params.accountId, params.parentChatId, params.parentMessageId))
+    return [...keys]
   }
   if (params.agentId) {
     keys.add(activeKey(params.accountId, params.parentChatId, params.agentId))

@@ -43,6 +43,7 @@ Notes:
 - Inline reply threads are off by default. Enable `channels.inline.capabilities.replyThreads: true` if you want OpenClaw `threadId` to map to real Inline reply-thread chats.
 - `replyToId` is still a message reply id. Enabling `replyThreads` adds Inline reply-thread behavior; it does not replace ordinary message replies.
 - You can override the thread toggle per account with `channels.inline.accounts.<account>.capabilities.replyThreads`.
+- In an Inline group, authorized users can run `/threadreply` to choose this chat's automatic reply-thread mode with buttons.
 - Bot-participated reply threads continue without an explicit mention by default, matching Slack, and recent participation is persisted so sparse follow-ups still route. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
 - Reply-thread context defaults to nearby parent-chat messages, the anchor message, and child-thread history. Set `replyThreadParentHistoryLimit: 0` only when a chat should stay strictly thread-local.
 - Use `inline_parent_context` from a reply-thread session when the agent needs more complete parent-chat history than the automatic context window.

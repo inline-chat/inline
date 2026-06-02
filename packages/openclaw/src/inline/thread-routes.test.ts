@@ -84,6 +84,25 @@ describe("inline/thread-routes", () => {
     })
   })
 
+  it("does not use an active route for a different parent message", async () => {
+    rememberInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: 7000n,
+      threadId: 7100n,
+      parentMessageId: 700001n,
+      agentId: "main",
+    })
+
+    await expect(
+      lookupInlineReplyThreadRoute({
+        accountId: "default",
+        parentChatId: 7000n,
+        parentMessageId: 700002n,
+        agentId: "main",
+      }),
+    ).resolves.toBeNull()
+  })
+
   it("reads active route files when keyed store is unavailable", async () => {
     const stateDir = setStateDir()
     writeRoutesFile(stateDir, Date.now())
