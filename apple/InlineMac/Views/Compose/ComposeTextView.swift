@@ -8,6 +8,8 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool
   func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool
+  func textViewDidPressArrowLeft(_ textView: NSTextView) -> Bool
+  func textViewDidPressArrowRight(_ textView: NSTextView) -> Bool
   func textViewDidPressTab(_ textView: NSTextView) -> Bool
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool
   func textViewDidChangeFormatting(_ textView: NSTextView)
@@ -69,6 +71,24 @@ class ComposeNSTextView: NSTextView {
     if event.keyCode == 125 {
       if let delegate = delegate as? ComposeTextViewDelegate {
         if delegate.textViewDidPressArrowDown(self) {
+          return
+        }
+      }
+    }
+
+    // Handle arrow left key
+    if event.keyCode == 123 {
+      if let delegate = delegate as? ComposeTextViewDelegate {
+        if delegate.textViewDidPressArrowLeft(self) {
+          return
+        }
+      }
+    }
+
+    // Handle arrow right key
+    if event.keyCode == 124 {
+      if let delegate = delegate as? ComposeTextViewDelegate {
+        if delegate.textViewDidPressArrowRight(self) {
           return
         }
       }
