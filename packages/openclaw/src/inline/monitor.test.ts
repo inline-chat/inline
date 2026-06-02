@@ -159,6 +159,8 @@ type MonitorSetup = {
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   mentionRegexes?: RegExp[]
   matchesMentionPatterns?: (text: string, regexes: RegExp[]) => boolean
+  sendTyping?: (params: { chatId: bigint; typing: boolean }) => Promise<void>
+  hasControlCommand?: (text?: string) => boolean
   shouldHandleTextCommands?: (params: {
     cfg: unknown
     surface: string
@@ -365,7 +367,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     nextSentMessageId += 1n
     return { messageId }
   })
-  const sendTyping = vi.fn(async () => {})
+  const sendTyping = vi.fn(setup.sendTyping ?? (async () => {}))
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
   const answerMessageAction = vi.fn(async () => {})
   const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
@@ -889,7 +891,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         saveMediaBuffer,
       },
       text: {
-        hasControlCommand: (text?: string) => /^\/\S+/.test((text ?? "").trim()),
+        hasControlCommand: setup.hasControlCommand ?? ((text?: string) => /^\/\S+/.test((text ?? "").trim())),
       },
       routing: {
         resolveAgentRoute,
@@ -2169,7 +2171,70 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("sends typing status to the auto-created reply thread chat", async () => {
+  it("uses top-level Inline reply-thread defaults for parent-chat delivery", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 92n,
+          message: {
+            id: 80n,
+            date: 1_700_000_015n,
+            fromId: 51n,
+            message: "@inlinebot use the top level thread config",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "92": { kind: "group", title: "Top Level Thread Defaults" },
+      },
+      dispatchReplyPayload: {
+        text: "top level child reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            replyThreadMode: "thread",
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          oneofKind: "createSubthread",
+          createSubthread: expect.objectContaining({
+            parentChatId: 92n,
+            parentMessageId: 80n,
+          }),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 9280n,
+          text: "top level child reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("sends typing status to the parent chat and auto-created reply thread chat", async () => {
     const harness = await setupMonitorHarness({
       dispatchTypingLifecycle: true,
       me: {
@@ -2227,6 +2292,8 @@ describe("inline/monitor", () => {
           }),
         }),
       )
+      expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 91n, typing: true })
+      expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 91n, typing: false })
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 919n, typing: true })
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 919n, typing: false })
       expect(harness.calls.recordInboundSession).toHaveBeenCalledWith(
@@ -2241,6 +2308,76 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("keeps auto-created reply-thread delivery when mirrored parent typing fails", async () => {
+    const runtimeError = vi.fn()
+    const harness = await setupMonitorHarness({
+      dispatchTypingLifecycle: true,
+      sendTyping: async ({ chatId }) => {
+        if (chatId === 94n) {
+          throw new Error("parent typing unavailable")
+        }
+      },
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 94n,
+          message: {
+            id: 10n,
+            date: 1_700_000_014n,
+            fromId: 51n,
+            message: "@inlinebot answer despite parent typing failure",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "94": { kind: "group", title: "Parent Typing Failure Room" },
+      },
+      dispatchReplyPayload: {
+        text: "child reply after parent typing failure",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "94": {
+                replyThreadMode: "thread",
+                replyThreadAutoCreateMinMessages: 0,
+              },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: runtimeError } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 9410n, typing: true })
+      expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 9410n, typing: false })
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 9410n,
+          text: "child reply after parent typing failure",
+        }),
+      )
+    })
+    expect(runtimeError).toHaveBeenCalledWith(expect.stringContaining("inline parent reply-thread typing failed"))
+    expect(runtimeError).toHaveBeenCalledWith(expect.stringContaining("inline typing start failed for chat 94"))
+    expect(runtimeError).not.toHaveBeenCalledWith(expect.stringMatching(/^inline typing start failed: /))
 
     await handle.stop()
   })
@@ -6409,6 +6546,7 @@ describe("inline/monitor", () => {
   })
 
   it("keeps registered Inline plugin commands active when text commands are disabled", async () => {
+    const hasControlCommand = vi.fn(() => false)
     const shouldHandleTextCommands = vi.fn(({ cfg, commandSource }: any) => {
       if (commandSource === "native") return true
       return cfg.commands?.text !== false
@@ -6426,7 +6564,7 @@ describe("inline/monitor", () => {
             id: 60026n,
             date: 1_700_000_026n,
             fromId: 51n,
-            message: "/plugin_cmd",
+            message: "/threadreply",
             mentioned: false,
           },
         },
@@ -6434,8 +6572,9 @@ describe("inline/monitor", () => {
       chats: {
         "88": { kind: "group", title: "Project Room" },
       },
+      hasControlCommand,
       shouldHandleTextCommands,
-      pluginCommands: [{ name: "plugin_cmd", description: "Run plugin command." }],
+      pluginCommands: [{ name: "threadreply", description: "Set Inline reply-thread mode." }],
       dispatchReplyPayload: {
         text: "plugin handled",
       },
@@ -6468,12 +6607,97 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          CommandBody: "/plugin_cmd",
+          CommandBody: "/threadreply",
           CommandSource: "native",
           WasMentioned: true,
           CommandAuthorized: true,
         }),
       )
+    })
+
+    await handle.stop()
+  })
+
+  it("keeps registered Inline plugin command button callbacks active when text commands are disabled", async () => {
+    const hasControlCommand = vi.fn(() => false)
+    const shouldHandleTextCommands = vi.fn(({ cfg, commandSource }: any) => {
+      if (commandSource === "native") return true
+      return cfg.commands?.text !== false
+    })
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 88n,
+          interactionId: 44n,
+          messageId: 60027n,
+          actorUserId: 51n,
+          actionId: "threadreply-min",
+          data: new TextEncoder().encode("/threadreply min 0"),
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [{ id: 60027n, date: 1_700_000_027n, fromId: 777n, message: "Thread reply mode?" }],
+      },
+      hasControlCommand,
+      shouldHandleTextCommands,
+      pluginCommands: [{ name: "threadreply", description: "Set Inline reply-thread mode." }],
+      dispatchReplyPayload: {
+        text: "plugin button handled",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        commands: {
+          text: false,
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        allowFrom: ["51"],
+        groupAllowFrom: [],
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledWith({ interactionId: 44n })
+      expect(shouldHandleTextCommands).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "inline",
+          commandSource: "native",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          CommandBody: "/threadreply min 0",
+          CommandSource: "native",
+          WasMentioned: true,
+          CommandAuthorized: true,
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 60027n,
+            text: "plugin button handled",
+          }),
+        }),
+      )
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
     })
 
     await handle.stop()
