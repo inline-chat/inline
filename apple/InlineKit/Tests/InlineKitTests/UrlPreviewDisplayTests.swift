@@ -58,6 +58,17 @@ struct UrlPreviewDisplayTests {
     #expect(display.source == "X")
   }
 
+  @Test("identifies notion previews from host and provider labels")
+  func identifiesNotionPreviews() {
+    let host = makePreview(url: "https://workspace.notion.site/page")
+    let label = makePreview(url: "https://example.com/page", provider: "notion")
+    let other = makePreview(url: "https://example.com/page")
+
+    #expect(host.isNotionPreview)
+    #expect(label.isNotionPreview)
+    #expect(!other.isNotionPreview)
+  }
+
   @Test("joins source and truncated description")
   func joinsSourceAndTruncatedDescription() {
     let preview = makePreview(

@@ -4,7 +4,7 @@ import InlineUI
 import Logger
 import Quartz
 
-final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognizerDelegate {
+final class URLPreviewAttachmentView: NSView, AttachmentView {
   private enum Mode {
     case compact
     case large
@@ -21,12 +21,15 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
 
   private enum Constants {
     static let cornerRadius: CGFloat = 8
-    static let compactPadding: CGFloat = 2
+    static let compactVerticalPadding: CGFloat = 4
+    static let compactLeadingPadding: CGFloat = 6
+    static let compactTrailingPadding: CGFloat = 2
     static let largePadding: CGFloat = 4
     static let spacing: CGFloat = 7
     static let largeSpacing: CGFloat = 6
     static let accentWidth: CGFloat = 3
     static let playIconSize: CGFloat = 18
+    static let providerPlaceholderSize: CGFloat = 24
     static let largeMediaHeight: CGFloat = 134
   }
 
@@ -60,6 +63,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
   private var previewURL: URL?
   private var previewImageURL: URL?
   private var tempPreviewImageURL: URL?
+  private var pressed = false
 
   private lazy var accentView: NSView = {
     let view = NSView()
@@ -118,6 +122,14 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     return view
   }()
 
+  private lazy var providerPlaceholderView: NSImageView = {
+    let view = NSImageView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.imageScaling = .scaleProportionallyUpOrDown
+    view.isHidden = true
+    return view
+  }()
+
   private lazy var textStack: NSStackView = {
     let stack = NSStackView()
     stack.translatesAutoresizingMaskIntoConstraints = false
@@ -160,7 +172,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     guard fullAttachment.urlPreview != nil else { return }
     setup()
     configure()
-    addClickGesture()
     updateColors()
   }
 
@@ -178,7 +189,10 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     layer?.cornerRadius = Constants.cornerRadius
     layer?.masksToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
-    let padding = mode == .large ? Constants.largePadding : Constants.compactPadding
+    PressScaleAnimator.prepare(self)
+    let verticalPadding = mode == .large ? Constants.largePadding : Constants.compactVerticalPadding
+    let leadingPadding = mode == .large ? Constants.largePadding : Constants.compactLeadingPadding
+    let trailingPadding = mode == .large ? Constants.largePadding : Constants.compactTrailingPadding
 
     addSubview(backgroundView)
     addSubview(accentView)
@@ -197,10 +211,10 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
       accentView.bottomAnchor.constraint(equalTo: bottomAnchor),
       accentView.widthAnchor.constraint(equalToConstant: Constants.accentWidth),
 
-      contentStack.leadingAnchor.constraint(equalTo: accentView.trailingAnchor, constant: padding),
-      contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
-      contentStack.topAnchor.constraint(equalTo: topAnchor, constant: padding),
-      contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
+      contentStack.leadingAnchor.constraint(equalTo: accentView.trailingAnchor, constant: leadingPadding),
+      contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingPadding),
+      contentStack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
+      contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
     ])
 
     contentStack.addArrangedSubview(imageContainer)
@@ -221,6 +235,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     }
 
     imageContainer.addSubview(photoView)
+    imageContainer.addSubview(providerPlaceholderView)
     imageContainer.addSubview(playIconView)
     imageContainer.contextMenuProvider = { [weak self] in
       self?.makeContextMenu()
@@ -231,6 +246,11 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
       photoView.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
       photoView.topAnchor.constraint(equalTo: imageContainer.topAnchor),
       photoView.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor),
+
+      providerPlaceholderView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
+      providerPlaceholderView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
+      providerPlaceholderView.widthAnchor.constraint(equalToConstant: Constants.providerPlaceholderSize),
+      providerPlaceholderView.heightAnchor.constraint(equalToConstant: Constants.providerPlaceholderSize),
 
       playIconView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
       playIconView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
@@ -265,18 +285,33 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     setAccessibilityRole(.group)
 
     playIconView.isHidden = !isVideo
-    configureImage(showPlaceholder: isVideo, opensLinkOnImage: isVideo)
+    let showsProviderPlaceholder = !isVideo && fullAttachment.photoInfo == nil && preview.isNotionPreview
+    configureImage(
+      showLoadingPlaceholder: isVideo,
+      opensLinkOnImage: isVideo,
+      providerPlaceholderImage: showsProviderPlaceholder ? NSImage(named: "notion-logo") : nil
+    )
   }
 
-  private func configureImage(showPlaceholder: Bool, opensLinkOnImage: Bool) {
+  private func configureImage(
+    showLoadingPlaceholder: Bool,
+    opensLinkOnImage: Bool,
+    providerPlaceholderImage: NSImage?
+  ) {
     imageContainer.onTap = nil
+    providerPlaceholderView.image = providerPlaceholderImage
+    providerPlaceholderView.isHidden = providerPlaceholderImage == nil
+    imageContainer.layer?.backgroundColor = providerPlaceholderImage == nil
+      ? imagePlaceholderBackgroundColor.cgColor
+      : NSColor.clear.cgColor
 
     guard let photoInfo = fullAttachment.photoInfo else {
       clearPreviewImageURL()
-      imageContainer.isHidden = !showPlaceholder
-      photoView.showsLoadingPlaceholder = showPlaceholder
+      imageContainer.isHidden = !showLoadingPlaceholder && providerPlaceholderImage == nil
+      photoView.isHidden = providerPlaceholderImage != nil
+      photoView.showsLoadingPlaceholder = showLoadingPlaceholder && providerPlaceholderImage == nil
       photoView.setPhoto(nil)
-      if showPlaceholder, opensLinkOnImage {
+      if !imageContainer.isHidden, opensLinkOnImage {
         imageContainer.onTap = { [weak self] in
           self?.openPreviewURL()
         }
@@ -285,6 +320,9 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     }
 
     imageContainer.isHidden = false
+    photoView.isHidden = false
+    providerPlaceholderView.isHidden = true
+    imageContainer.layer?.backgroundColor = imagePlaceholderBackgroundColor.cgColor
     photoView.showsLoadingPlaceholder = true
     photoView.setPhoto(photoInfo, reloadMessageOnFinish: message)
 
@@ -297,32 +335,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
         self?.openPhotoPreview(for: photoInfo)
       }
     }
-  }
-
-  private func addClickGesture() {
-    let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
-    clickGesture.delaysPrimaryMouseButtonEvents = false
-    clickGesture.delegate = self
-    addGestureRecognizer(clickGesture)
-    MessageGestureTrace.debug("URLPreviewAttachmentView.addClickGesture")
-  }
-
-  @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
-    MessageGestureTrace.debug(
-      "URLPreviewAttachmentView.handleClick state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(gesture.location(in: self))) imageHasTap=\(imageContainer.hasTapAction)"
-    )
-    if imageContainer.hasTapAction {
-      let location = convert(gesture.location(in: self), to: imageContainer)
-      guard !imageContainer.bounds.contains(location) else {
-        MessageGestureTrace.debug(
-          "URLPreviewAttachmentView.handleClick blocked=imageTapArea local=\(MessageGestureTrace.point(location))"
-        )
-        return
-      }
-    }
-
-    MessageGestureTrace.debug("URLPreviewAttachmentView.handleClick action=openPreviewURL")
-    openPreviewURL()
   }
 
   private func openPreviewURL() {
@@ -398,6 +410,10 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
 
   private var backgroundColor: NSColor {
     usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.08) : .labelColor.withAlphaComponent(0.02)
+  }
+
+  private var imagePlaceholderBackgroundColor: NSColor {
+    .labelColor.withAlphaComponent(0.05)
   }
 
   private var canRemovePreview: Bool {
@@ -505,7 +521,10 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     super.viewDidMoveToWindow()
     updateColors()
     if window != nil {
+      PressScaleAnimator.prepare(self)
       PressScaleAnimator.prepare(imageContainer)
+    } else {
+      setPressed(false)
     }
   }
 
@@ -535,8 +554,42 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
       return
     }
 
-    MessageGestureTrace.trace("URLPreviewAttachmentView.mouseDown forwardingToSuper")
-    super.mouseDown(with: event)
+    guard event.type == .leftMouseDown, event.clickCount == 1, previewURL != nil else {
+      MessageGestureTrace.trace("URLPreviewAttachmentView.mouseDown forwardingToSuper")
+      super.mouseDown(with: event)
+      return
+    }
+
+    setPressed(true)
+    guard let window else {
+      setPressed(false)
+      return
+    }
+
+    while let next = window.nextEvent(
+      matching: [.leftMouseDragged, .leftMouseUp],
+      until: .distantFuture,
+      inMode: .eventTracking,
+      dequeue: true
+    ) {
+      let location = convert(next.locationInWindow, from: nil)
+      let isInside = bounds.contains(location)
+      switch next.type {
+      case .leftMouseDragged:
+        setPressed(isInside)
+      case .leftMouseUp:
+        setPressed(false)
+        if isInside {
+          MessageGestureTrace.debug("URLPreviewAttachmentView.mouseUp action=openPreviewURL")
+          openPreviewURL()
+        }
+        return
+      default:
+        break
+      }
+    }
+
+    setPressed(false)
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
@@ -549,6 +602,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
 
     let imagePoint = imageContainer.convert(point, from: self)
     if !imageContainer.isHidden,
+       imageContainer.hasTapAction,
        imageContainer.bounds.contains(imagePoint),
        let hit = imageContainer.hitTest(imagePoint)
     {
@@ -562,43 +616,22 @@ final class URLPreviewAttachmentView: NSView, AttachmentView, NSGestureRecognize
     return self
   }
 
-  func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
-    let result = shouldHandleCardGesture(event: event)
-    MessageGestureTrace.debug(
-      "URLPreviewAttachmentView.delegate.shouldAttempt recognizer=\(type(of: gestureRecognizer)) type=\(event.type.rawValue) clicks=\(event.clickCount) allow=\(result)"
-    )
-    return result
-  }
-
-  private func shouldHandleCardGesture(event: NSEvent) -> Bool {
-    guard event.type == .leftMouseDown, !event.modifierFlags.contains(.control) else {
-      MessageGestureTrace.debug(
-        "URLPreviewAttachmentView.shouldHandleCardGesture allow=false reason=eventOrControl type=\(event.type.rawValue) modifiers=\(event.modifierFlags.rawValue)"
-      )
-      return false
-    }
-
-    guard imageContainer.hasTapAction else {
-      MessageGestureTrace.debug("URLPreviewAttachmentView.shouldHandleCardGesture allow=true reason=noImageTap")
-      return true
-    }
-    let location = convert(event.locationInWindow, from: nil)
-    let imageLocation = convert(location, to: imageContainer)
-    let allow = !imageContainer.bounds.contains(imageLocation)
-    MessageGestureTrace.debug(
-      "URLPreviewAttachmentView.shouldHandleCardGesture allow=\(allow) point=\(MessageGestureTrace.point(location)) imagePoint=\(MessageGestureTrace.point(imageLocation)) reason=imageTapArea"
-    )
-    return allow
-  }
-
   override func menu(for event: NSEvent) -> NSMenu? {
     makeContextMenu() ?? super.menu(for: event)
   }
 
   private func showContextMenu(with event: NSEvent) -> Bool {
     guard let menu = makeContextMenu() else { return false }
+    setPressed(false)
     NSMenu.popUpContextMenu(menu, with: event, for: self)
     return true
+  }
+
+  private func setPressed(_ pressed: Bool) {
+    guard self.pressed != pressed else { return }
+    self.pressed = pressed
+    alphaValue = pressed ? 0.92 : 1
+    PressScaleAnimator.setPressed(pressed, on: self)
   }
 
   private func makeContextMenu() -> NSMenu? {
