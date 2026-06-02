@@ -60,6 +60,7 @@ describe("plugin entry", () => {
     const runtime = { version: "test" } as unknown as PluginRuntime
     let registered = false
     const registeredToolNames: string[] = []
+    const registeredCommandNames: string[] = []
     const hooks = new Map<string, Function>()
     const api = {
       registrationMode: "full",
@@ -83,6 +84,9 @@ describe("plugin entry", () => {
       registerTool: (_tool, opts) => {
         registeredToolNames.push(...(opts?.names ?? []))
       },
+      registerCommand: (command) => {
+        registeredCommandNames.push(command.name)
+      },
       on: (hookName: string, handler: Function) => {
         hooks.set(hookName, handler)
       },
@@ -100,6 +104,7 @@ describe("plugin entry", () => {
       "inline_forward",
       "inline_parent_context",
     ])
+    expect(registeredCommandNames).toEqual(["threadreply"])
     expect(hooks.has("message_sending")).toBe(true)
     expect(hooks.has("gateway_start")).toBe(true)
 

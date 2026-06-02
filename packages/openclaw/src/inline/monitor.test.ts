@@ -1987,7 +1987,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("reuses a cached active reply thread for later long parent-chat replies", async () => {
+  it("creates a new reply thread for a new parent-chat message even when an older active route exists", async () => {
     const register = vi.fn(async () => {})
     const now = Date.now()
     const lookup = vi.fn(async (key: string) => {
@@ -2043,7 +2043,7 @@ describe("inline/monitor", () => {
         ],
       },
       dispatchReplyPayload: {
-        text: "cached thread reply",
+        text: "new thread reply",
       },
     })
 
@@ -2064,25 +2064,31 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          oneofKind: "createSubthread",
+          createSubthread: expect.objectContaining({
+            parentChatId: 88n,
+            parentMessageId: 2003n,
+          }),
+        }),
+      )
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          chatId: 8800n,
-          text: "cached thread reply",
+          chatId: 882003n,
+          text: "new thread reply",
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          SessionKey: "agent:main:inline:group:88:thread:8800",
+          SessionKey: "agent:main:inline:group:88:thread:882003",
           ParentSessionKey: "agent:main:inline:group:88",
-          MessageThreadId: "8800",
-          ThreadLabel: "Stable project thread",
+          MessageThreadId: "882003",
+          ThreadLabel: "Re: @inlinebot continue the long work",
         }),
       )
     })
-    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
-      42,
-      expect.objectContaining({ oneofKind: "createSubthread" }),
-    )
     expect(lookup).toHaveBeenCalled()
 
     await handle.stop()

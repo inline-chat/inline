@@ -7,6 +7,7 @@ import { sanitizeInlineVisibleText } from "./inline/outbound-sanitize.js"
 import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
+import { createInlineThreadReplyCommand } from "./inline/threadreply-command.js"
 
 export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   api.registerTool((ctx) => createInlineMembersTool(ctx) as AnyAgentTool, {
@@ -24,6 +25,11 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   api.registerTool((ctx) => createInlineParentContextTool(ctx) as AnyAgentTool, {
     names: ["inline_parent_context"],
   })
+  const registerCommand = (api as { registerCommand?: OpenClawPluginApi["registerCommand"] })
+    .registerCommand
+  if (typeof registerCommand === "function") {
+    registerCommand(createInlineThreadReplyCommand(api))
+  }
   api.on("message_sending", (event, ctx) => {
     if (ctx.channelId !== "inline") return
     const visible = sanitizeInlineVisibleText(event.content)
