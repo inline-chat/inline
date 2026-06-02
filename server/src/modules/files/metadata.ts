@@ -197,8 +197,8 @@ export const getDocumentMetadataAndValidate = async (
   return { mimeType, fileName, extension }
 }
 
-const validVoiceMimeTypes = ["audio/ogg"]
-const validVoiceExtensions = ["ogg", "oga"]
+const validVoiceMimeTypes = ["audio/ogg", "audio/mp4", "audio/x-m4a"]
+const validVoiceExtensions = ["ogg", "oga", "m4a", "mp4"]
 const maxVoiceFileSize = 20_000_000 // 20MB
 const maxVoiceWaveformBytes = 2048
 const documentMimeTypesByExtension: Record<string, string> = {
@@ -257,7 +257,7 @@ export const getVoiceMetadataAndValidate = async (
   }
 
   if (!extension || !validVoiceExtensions.includes(extension)) {
-    throw badRequest("Voice upload requires .ogg or .oga extension")
+    throw badRequest("Voice upload requires .ogg, .oga, .m4a, or .mp4 extension")
   }
 
   if (size > maxVoiceFileSize) {
@@ -265,7 +265,7 @@ export const getVoiceMetadataAndValidate = async (
   }
 
   if (!validVoiceMimeTypes.includes(mimeType)) {
-    throw badRequest("Voice upload requires audio/ogg MIME type")
+    throw badRequest("Voice upload requires audio/ogg, audio/mp4, or audio/x-m4a MIME type")
   }
 
   extension = extension ?? "ogg"
