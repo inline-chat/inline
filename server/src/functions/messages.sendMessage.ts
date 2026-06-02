@@ -63,6 +63,7 @@ import {
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 import { maybeScheduleThreadTitleGeneration } from "@in/server/modules/threadTitles"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
+import { VoiceTranscriptionModule } from "@in/server/modules/voiceTranscription"
 
 type Input = {
   peerId: InputPeer
@@ -347,6 +348,15 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       chatId,
       currentUserId,
       inputPeer,
+    })
+  }
+
+  if (dbFullVoice && !text) {
+    VoiceTranscriptionModule.schedule({
+      message: newMessage,
+      voice: dbFullVoice,
+      inputPeer,
+      context,
     })
   }
 

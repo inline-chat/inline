@@ -11,7 +11,7 @@ import { editMessage } from "@in/server/functions/messages.editMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema"
+import { files, users, voices } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 
 let currentUser: DbUser
@@ -29,6 +29,38 @@ function extractEditedMessage(result: EditMessageResult): Message | null {
     return null
   }
   return update.update.editMessage?.message ?? null
+}
+
+async function createVoiceForUser(userId: number) {
+  const [file] = await db
+    .insert(files)
+    .values({
+      fileUniqueId: `EDIT-VOICE-${runId}-${userIndex++}`,
+      userId,
+      fileType: "voice",
+      mimeType: "audio/ogg",
+      fileSize: 321,
+    })
+    .returning()
+
+  if (!file) {
+    throw new Error("Failed to create test voice file")
+  }
+
+  const [voice] = await db
+    .insert(voices)
+    .values({
+      fileId: file.id,
+      duration: 8,
+      waveform: Buffer.from([1, 2, 3]),
+    })
+    .returning()
+
+  if (!voice) {
+    throw new Error("Failed to create test voice")
+  }
+
+  return voice
 }
 
 describe("editMessage function", () => {
@@ -173,5 +205,34 @@ describe("editMessage function", () => {
     expect(editedMessage?.message).toBe("buttons cleared")
     expect(editedMessage?.actions).toBeTruthy()
     expect(editedMessage?.actions?.rows).toEqual([])
+  })
+
+  test("preserves voice media when editing voice message text", async () => {
+    const voice = await createVoiceForUser(currentUser.id)
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        voiceId: BigInt(voice.id),
+      },
+      context,
+    )
+
+    const sentMessageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(sentMessageId).toBeTruthy()
+
+    const result = await editMessage(
+      {
+        messageId: sentMessageId!,
+        peer: privateChatPeerId,
+        text: "voice transcript",
+      },
+      context,
+    )
+
+    const editedMessage = extractEditedMessage(result)
+    expect(editedMessage?.message).toBe("voice transcript")
+    expect(editedMessage?.media?.media.oneofKind).toBe("voice")
   })
 })
