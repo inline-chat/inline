@@ -255,6 +255,46 @@ function buildInlineTypingDispatcherOptions(typingCallbacks?: InlineTypingCallba
   }
 }
 
+function uniqueInlineChatIds(chatIds: Array<bigint | null | undefined>): bigint[] {
+  const seen = new Set<string>()
+  const out: bigint[] = []
+  for (const chatId of chatIds) {
+    if (chatId == null) continue
+    const key = String(chatId)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(chatId)
+  }
+  return out
+}
+
+async function sendInlineTypingToChats(params: {
+  client: Pick<InlineSdkClient, "sendTyping">
+  chatIds: bigint[]
+  typing: boolean
+  onPartialError?: (chatId: bigint, error: unknown) => void
+}): Promise<void> {
+  if (params.chatIds.length === 0) return
+
+  const failures: Array<{ chatId: bigint; error: unknown }> = []
+  await Promise.all(
+    params.chatIds.map(async (chatId) => {
+      try {
+        await params.client.sendTyping({ chatId, typing: params.typing })
+      } catch (error) {
+        failures.push({ chatId, error })
+      }
+    }),
+  )
+  if (failures.length === 0) return
+  if (failures.length === params.chatIds.length) {
+    throw failures[0]?.error ?? new Error("inline typing failed")
+  }
+  for (const failure of failures) {
+    params.onPartialError?.(failure.chatId, failure.error)
+  }
+}
+
 function buildInlineReplyThreadSessionKey(parentSessionKey: string, threadChatId: bigint): string {
   const suffix = `:thread:${String(threadChatId)}`
   return parentSessionKey.endsWith(suffix) ? parentSessionKey : `${parentSessionKey}${suffix}`
@@ -2642,6 +2682,12 @@ export async function monitorInlineProvider(params: {
     }
 
     const isGroup = chatInfo.kind !== "direct"
+    const inlineThreadDefaults = (cfg.channels?.inline ?? {}) as {
+      replyThreadMode?: unknown
+      replyThreadAutoCreateMinMessages?: number
+      replyThreadRequireExplicitMention?: boolean
+      replyThreadParentHistoryLimit?: number
+    }
     const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
     const replyThreadContext = await resolveInlineInboundReplyThreadContext({
       replyThreadsEnabled,
@@ -2661,7 +2707,9 @@ export async function monitorInlineProvider(params: {
             cfg,
             accountId: account.accountId,
             groupId: String(effectiveChatId),
-            defaultMode: normalizeInlineReplyThreadMode(account.config.replyThreadMode),
+            defaultMode: normalizeInlineReplyThreadMode(
+              account.config.replyThreadMode ?? inlineThreadDefaults.replyThreadMode,
+            ),
           })
         : "auto"
     const replyThreadAutoCreateMinMessages =
@@ -2672,6 +2720,7 @@ export async function monitorInlineProvider(params: {
             groupId: String(effectiveChatId),
             defaultMinMessages:
               account.config.replyThreadAutoCreateMinMessages ??
+              inlineThreadDefaults.replyThreadAutoCreateMinMessages ??
               DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES,
           })
         : DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES
@@ -2681,7 +2730,10 @@ export async function monitorInlineProvider(params: {
             cfg,
             accountId: account.accountId,
             groupId: String(effectiveChatId),
-            defaultRequireExplicitMention: account.config.replyThreadRequireExplicitMention ?? false,
+            defaultRequireExplicitMention:
+              account.config.replyThreadRequireExplicitMention ??
+              inlineThreadDefaults.replyThreadRequireExplicitMention ??
+              false,
           })
         : false
     const replyThreadParentHistoryLimit =
@@ -2692,6 +2744,7 @@ export async function monitorInlineProvider(params: {
             groupId: String(effectiveChatId),
             defaultLimit:
               account.config.replyThreadParentHistoryLimit ??
+              inlineThreadDefaults.replyThreadParentHistoryLimit ??
               DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT,
           })
         : DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT
@@ -2796,22 +2849,20 @@ export async function monitorInlineProvider(params: {
         replyThreadContext: params.replyThreadContext ?? null,
       })
     }
-    const nativeCallbackCommandBody = callbackActionEvent
-      ? parseInlineNativeCommandCallbackData(callbackDataToUtf8(callbackActionEvent.data))
-      : null
-    const hasControlCommand = core.channel.text.hasControlCommand(
+    const hasTextControlCommand = core.channel.text.hasControlCommand(
       callbackCommandBody ?? rawBody,
       cfg,
       botUsername ? { botUsername } : undefined,
     )
+    const isRegisteredNativeCommand = isInlineNativeCommandBody({
+      cfg,
+      account,
+      commandBody: normalizedCommandBody,
+      agentId: route.agentId,
+    })
+    const hasControlCommand = hasTextControlCommand || isRegisteredNativeCommand
     const commandSource = hasControlCommand
-      ? (nativeCallbackCommandBody != null || !callbackActionEvent) &&
-        isInlineNativeCommandBody({
-          cfg,
-          account,
-          commandBody: normalizedCommandBody,
-          agentId: route.agentId,
-        })
+      ? isRegisteredNativeCommand
         ? "native"
         : "text"
       : undefined
@@ -3307,8 +3358,17 @@ export async function monitorInlineProvider(params: {
         minMessages: replyThreadAutoCreateMinMessages,
       }) &&
       !shouldEditCallbackTargetInPlace
+    let parentThreadCreationTyping = false
+    const setParentThreadCreationTyping = async (typing: boolean): Promise<void> => {
+      if (!shouldCreateDeliveryThread || parentThreadCreationTyping === typing) return
+      parentThreadCreationTyping = typing
+      await client
+        .sendTyping({ chatId: effectiveChatId, typing })
+        .catch((error) => runtime.error?.(`inline parent reply-thread typing failed: ${String(error)}`))
+    }
 
     if (shouldCreateDeliveryThread) {
+      await setParentThreadCreationTyping(true)
       const cachedRoute = await lookupInlineReplyThreadRoute({
         accountId: account.accountId,
         parentChatId: effectiveChatId,
@@ -3386,6 +3446,7 @@ export async function monitorInlineProvider(params: {
     if (shouldCreateDeliveryThread && !deliveryReplyThreadContext) {
       runtime.error?.("inline create reply thread failed; falling back to parent chat delivery")
     }
+    await setParentThreadCreationTyping(false)
     if (!replyThreadContext && deliveryReplyThreadContext?.anchorMessage != null) {
       effectiveHistoryContext = prependInlineReplyThreadAnchor({
         historyContext: {
@@ -3424,6 +3485,10 @@ export async function monitorInlineProvider(params: {
     }
 
     const deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
+    const typingChatIds = uniqueInlineChatIds([
+      deliveryChatId,
+      !replyThreadContext && deliveryReplyThreadContext ? deliveryReplyThreadContext.parentChatId : null,
+    ])
     const deliverySessionKey =
       deliveryReplyThreadContext && isGroup
         ? buildInlineReplyThreadSessionKey(route.sessionKey, deliveryReplyThreadContext.childChatId)
@@ -3599,8 +3664,22 @@ export async function monitorInlineProvider(params: {
       channel: CHANNEL_ID,
       accountId: account.accountId,
       typing: {
-        start: () => client.sendTyping({ chatId: deliveryChatId, typing: true }),
-        stop: () => client.sendTyping({ chatId: deliveryChatId, typing: false }),
+        start: () =>
+          sendInlineTypingToChats({
+            client,
+            chatIds: typingChatIds,
+            typing: true,
+            onPartialError: (chatId, error) =>
+              runtime.error?.(`inline typing start failed for chat ${String(chatId)}: ${String(error)}`),
+          }),
+        stop: () =>
+          sendInlineTypingToChats({
+            client,
+            chatIds: typingChatIds,
+            typing: false,
+            onPartialError: (chatId, error) =>
+              runtime.error?.(`inline typing stop failed for chat ${String(chatId)}: ${String(error)}`),
+          }),
         onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
         onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
       },
@@ -4296,6 +4375,7 @@ export async function monitorInlineProvider(params: {
         statusSink?.({ lastOutboundAt: Date.now() })
       }
     } finally {
+      await setParentThreadCreationTyping(false)
       if (callbackActionEvent && !callbackActionAnswered) {
         try {
           await answerCallbackIfNeeded()

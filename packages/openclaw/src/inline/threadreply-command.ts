@@ -7,18 +7,21 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../openclaw-compat.js"
 import { normalizeInlineTarget } from "./normalize.js"
 import {
+  resolveInlineGroupReplyThreadAutoCreateMinMessages,
   resolveInlineGroupReplyThreadMode,
   type InlineReplyThreadMode,
 } from "./policy.js"
 
 type InlineGroupConfig = {
   replyThreadMode?: InlineReplyThreadMode | undefined
+  replyThreadAutoCreateMinMessages?: number | undefined
   [key: string]: unknown
 }
 
 type InlineAccountConfig = {
   groups?: Record<string, InlineGroupConfig | undefined> | undefined
   replyThreadMode?: InlineReplyThreadMode | undefined
+  replyThreadAutoCreateMinMessages?: number | undefined
   [key: string]: unknown
 }
 
@@ -31,6 +34,7 @@ const MODE_LABELS: Record<InlineReplyThreadMode, string> = {
   thread: "thread",
   main: "main",
 }
+const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -47,6 +51,21 @@ function normalizeMode(raw: unknown): InlineReplyThreadMode | null {
   if (normalized === "off" || normalized === "parent" || normalized === "parentchat") return "main"
   if (normalized === "auto" || normalized === "thread" || normalized === "main") return normalized
   return null
+}
+
+function normalizeMin(raw: unknown): number | null {
+  if (typeof raw !== "number") return null
+  if (!Number.isInteger(raw) || raw < 0) return null
+  return raw
+}
+
+function parseMinArg(raw: string | undefined): number | "inherit" | null {
+  const value = raw?.trim().toLowerCase()
+  if (!value) return null
+  if (value === "inherit" || value === "default" || value === "unset") return "inherit"
+  if (!/^\d+$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : null
 }
 
 function resolveInlineGroupId(ctx: PluginCommandContext): string | null {
@@ -92,6 +111,23 @@ function resolveCurrentMode(params: {
   })
 }
 
+function resolveCurrentMinMessages(params: {
+  cfg: OpenClawConfig
+  accountId?: string | undefined
+  groupId: string
+}): number {
+  const inline = asInlineConfig(params.cfg.channels?.inline) ?? {}
+  const accountConfig = resolveInlineConfigForAccount(inline, params.accountId)
+  return resolveInlineGroupReplyThreadAutoCreateMinMessages({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+    groupId: params.groupId,
+    defaultMinMessages:
+      normalizeMin(accountConfig.replyThreadAutoCreateMinMessages) ??
+      DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES,
+  })
+}
+
 function readExplicitMode(params: {
   cfg: OpenClawConfig
   accountId?: string | undefined
@@ -102,6 +138,18 @@ function readExplicitMode(params: {
   const accountConfig = resolveInlineConfigForAccount(inline, params.accountId)
   const group = accountConfig.groups?.[params.groupId]
   return normalizeMode(group?.replyThreadMode)
+}
+
+function readExplicitMinMessages(params: {
+  cfg: OpenClawConfig
+  accountId?: string | undefined
+  groupId: string
+}): number | null {
+  const inline = asInlineConfig(params.cfg.channels?.inline)
+  if (!inline) return null
+  const accountConfig = resolveInlineConfigForAccount(inline, params.accountId)
+  const group = accountConfig.groups?.[params.groupId]
+  return normalizeMin(group?.replyThreadAutoCreateMinMessages)
 }
 
 function ensureRecordField(
@@ -169,6 +217,33 @@ function setGroupMode(params: {
   group.replyThreadMode = params.mode
 }
 
+function setGroupMinMessages(params: {
+  draft: OpenClawConfig
+  accountId?: string | undefined
+  groupId: string
+  minMessages: number | "inherit"
+}): void {
+  const root = params.draft as OpenClawConfig & { channels?: Record<string, unknown> }
+  const channels = root.channels ?? {}
+  root.channels = channels
+  const inline = asInlineConfig(channels.inline) ?? {}
+  channels.inline = inline
+  const accountConfig = resolveMutableInlineConfigForAccount(inline, params.accountId)
+  const groups = ensureRecordField(accountConfig as Record<string, unknown>, "groups") as Record<
+    string,
+    InlineGroupConfig | undefined
+  >
+  const group = isRecord(groups[params.groupId]) ? (groups[params.groupId] as InlineGroupConfig) : {}
+  groups[params.groupId] = group
+
+  if (params.minMessages === "inherit") {
+    delete group.replyThreadAutoCreateMinMessages
+    return
+  }
+
+  group.replyThreadAutoCreateMinMessages = params.minMessages
+}
+
 function buildStatusText(params: {
   cfg: OpenClawConfig
   accountId?: string | undefined
@@ -176,11 +251,17 @@ function buildStatusText(params: {
 }): string {
   const explicit = readExplicitMode(params)
   const current = resolveCurrentMode(params)
+  const explicitMin = readExplicitMinMessages(params)
+  const currentMin = resolveCurrentMinMessages(params)
   return [
     `Thread reply mode for chat ${params.groupId}: ${MODE_LABELS[current]}.`,
     explicit
       ? `Explicit chat override: ${MODE_LABELS[explicit]}.`
       : "Explicit chat override: inherit.",
+    `Auto-create minimum messages: ${currentMin}.`,
+    explicitMin != null
+      ? `Explicit minimum override: ${explicitMin}.`
+      : "Explicit minimum override: inherit.",
   ].join("\n")
 }
 
@@ -205,7 +286,12 @@ function buildModeButtons() {
           { text: "Main", callback_data: "/threadreply main" },
           { text: "Auto", callback_data: "/threadreply auto" },
         ],
-        [{ text: "Inherit", callback_data: "/threadreply inherit" }],
+        [{ text: "Inherit Mode", callback_data: "/threadreply inherit" }],
+        [
+          { text: "Min 0", callback_data: "/threadreply min 0" },
+          { text: "Min 50", callback_data: "/threadreply min 50" },
+          { text: "Inherit Min", callback_data: "/threadreply min inherit" },
+        ],
       ],
     },
   }
@@ -234,7 +320,35 @@ export async function handleInlineThreadReplyCommand(
   }
 
   const currentConfig = api.runtime.config.current() as OpenClawConfig
-  const action = normalizeAction(ctx.args?.trim() ?? "")
+  const args = ctx.args?.trim() ?? ""
+  const [first = "", second, ...rest] = args.split(/\s+/).filter(Boolean)
+  if (["min", "minimum", "threshold", "limit"].includes(first.trim().toLowerCase())) {
+    const minMessages = parseMinArg(second)
+    if (minMessages == null || rest.length > 0) {
+      return { text: "Usage: /threadreply min <0-or-greater>|inherit" }
+    }
+    const committed = await api.runtime.config.mutateConfigFile({
+      afterWrite: { mode: "auto" },
+      mutate: (draft) => {
+        setGroupMinMessages({
+          draft,
+          accountId: ctx.accountId,
+          groupId,
+          minMessages,
+        })
+      },
+    })
+    const nextConfig = committed.nextConfig as OpenClawConfig
+    return {
+      text: buildStatusText({
+        cfg: nextConfig,
+        accountId: ctx.accountId,
+        groupId,
+      }),
+    }
+  }
+
+  const action = normalizeAction(args)
   if (action === "help") {
     return {
       text: buildMenuText({
@@ -258,11 +372,13 @@ export async function handleInlineThreadReplyCommand(
     return {
       text: [
         "Usage: /threadreply thread|main|auto|inherit|status",
+        "       /threadreply min <0-or-greater>|inherit",
         "",
-        "- thread: auto-route long parent-chat replies into an Inline reply thread.",
+        "- thread: auto-route parent-chat replies into per-message Inline reply threads once the minimum is reached.",
         "- main: keep automatic replies in the parent chat.",
         "- auto: use Inline's automatic default behavior for this chat.",
         "- inherit: remove this chat override and use account/default config.",
+        "- min: set how many parent-chat messages must exist before automatic thread creation.",
       ].join("\n"),
     }
   }
