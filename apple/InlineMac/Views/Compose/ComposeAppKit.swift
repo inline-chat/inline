@@ -1546,6 +1546,7 @@ class ComposeAppKit: NSView {
 
   private var keyMonitorUnsubscribe: (() -> Void)?
   private var keyMonitorPasteUnsubscribe: (() -> Void)?
+  private var keyMonitorComposeShortcutUnsubscribe: (() -> Void)?
   private var pendingImageSaveTasks: [String: Task<Void, Never>] = [:]
   private var pendingVideoSaveTasks: [String: Task<Void, Never>] = [:]
 
@@ -1588,6 +1589,35 @@ class ComposeAppKit: NSView {
         self?.handleGlobalPaste()
       }
     )
+
+    keyMonitorComposeShortcutUnsubscribe = dependencies.keyMonitor?.addComposeShortcutHandler(
+      key: "compose_shortcuts_\(peerId)",
+      handler: { [weak self] event in
+        self?.handleGlobalComposeShortcut(event) ?? false
+      }
+    )
+  }
+
+  private func handleGlobalComposeShortcut(_ event: NSEvent) -> Bool {
+    guard dependencies.nav3?.cmdKVisible != true else { return false }
+    guard isActiveChatRoute() else { return false }
+
+    switch event.charactersIgnoringModifiers?.lowercased() {
+      case "r":
+        guard !shouldDeferComposeShortcutToMenus() else { return false }
+        return beginReplyingToLastMessage()
+      case "e":
+        guard !shouldDeferComposeShortcutToMenus() else { return false }
+        return beginEditingLastSentMessage()
+      default:
+        return false
+    }
+  }
+
+  private func isActiveChatRoute() -> Bool {
+    guard let route = dependencies.nav3?.currentRoute else { return false }
+    guard case let .chat(peer) = route else { return false }
+    return peer == peerId
   }
 
   private func handleGlobalPaste() {
@@ -1612,6 +1642,8 @@ class ComposeAppKit: NSView {
     keyMonitorUnsubscribe = nil
     keyMonitorPasteUnsubscribe?()
     keyMonitorPasteUnsubscribe = nil
+    keyMonitorComposeShortcutUnsubscribe?()
+    keyMonitorComposeShortcutUnsubscribe = nil
 
     // Clean up mention resources
     mentionKeyMonitorEscUnsubscribe?()
@@ -1701,7 +1733,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textViewDidPressCommandE(_ textView: NSTextView) -> Bool {
     guard !shouldDeferComposeShortcutToMenus() else { return false }
-    return beginEditingLastSentMessage(in: textView)
+    return beginEditingLastSentMessage()
   }
 
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
@@ -1720,17 +1752,13 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       return true
     }
 
-    return beginEditingLastSentMessage(in: textView)
+    return beginEditingLastSentMessage()
   }
 
   private func shouldDeferComposeShortcutToMenus() -> Bool {
     autocompleteMenu?.isVisible == true
       || commandCompletionMenu?.isVisible == true
       || mentionCompletionMenu?.isVisible == true
-  }
-
-  private func composeTextIsEmpty(_ textView: NSTextView) -> Bool {
-    textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   @discardableResult
@@ -1743,9 +1771,9 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   @discardableResult
-  private func beginEditingLastSentMessage(in textView: NSTextView) -> Bool {
+  private func beginEditingLastSentMessage() -> Bool {
     guard state.forwardContext == nil else { return false }
-    guard composeTextIsEmpty(textView) else { return false }
+    guard isEmptyTrimmed else { return false }
     guard let lastMsgId = lastEditableOutgoingMessageId() else { return false }
 
     state.setEditingMsgId(lastMsgId)

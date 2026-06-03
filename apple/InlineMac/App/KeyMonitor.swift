@@ -23,6 +23,10 @@ public class KeyMonitor: Sendable {
   private var vimNavHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   // Cmd+1...9: return true only when the handler actually acted.
   private var commandNumberHandlers: OrderedDictionary<String, (NSEvent) -> Bool> = [:]
+  // Cmd+R/E compose shortcuts: return true only when the handler actually acted.
+  private var composeShortcutHandlers: OrderedDictionary<String, (NSEvent) -> Bool> = [:]
+
+  static let chatDetailAccessibilityIdentifier = "inline.chat-detail"
 
   private var localEventMonitor: Any?
   private weak var window: NSWindow?
@@ -137,6 +141,19 @@ public class KeyMonitor: Sendable {
     }
   }
 
+  /// Cmd+R/E reply/edit shortcuts when compose is not focused. Return true only if handled.
+  func addComposeShortcutHandler(
+    key: String,
+    handler: @escaping (NSEvent) -> Bool
+  ) -> (() -> Void) {
+    log.trace("Adding compose shortcut handler with key \(key)")
+    composeShortcutHandlers[key] = handler
+    return { [weak self] in
+      self?.log.trace("Removing compose shortcut handler with key \(key)")
+      self?.composeShortcutHandlers.removeValue(forKey: key)
+    }
+  }
+
   // MARK: - Monitor
 
   private func setupKeyboardMonitoringIfNeeded() {
@@ -164,6 +181,15 @@ public class KeyMonitor: Sendable {
          "123456789".contains(char)
       {
         let handled = callCommandNumberHandler(event: event)
+        if handled { return nil }
+      }
+
+      if modifiers == [.command],
+         !isTextInputCurrentlyFocused(),
+         let char = event.charactersIgnoringModifiers?.lowercased(),
+         char == "r" || char == "e"
+      {
+        let handled = callComposeShortcutHandler(event: event)
         if handled { return nil }
       }
 
@@ -328,6 +354,39 @@ public class KeyMonitor: Sendable {
   private func callCommandNumberHandler(event: NSEvent) -> Bool {
     guard let last = commandNumberHandlers.values.last else { return false }
     return last(event)
+  }
+
+  private func callComposeShortcutHandler(event: NSEvent) -> Bool {
+    guard isFirstResponderInChatDetail() else { return false }
+    guard let last = composeShortcutHandlers.values.last else { return false }
+    return last(event)
+  }
+
+  private func isFirstResponderInChatDetail() -> Bool {
+    guard let responder = window?.firstResponder else { return true }
+    return viewHierarchyContainsAccessibilityIdentifier(
+      Self.chatDetailAccessibilityIdentifier,
+      startingAt: responder
+    )
+  }
+
+  private func viewHierarchyContainsAccessibilityIdentifier(
+    _ identifier: String,
+    startingAt responder: NSResponder
+  ) -> Bool {
+    var view: NSView? = responder as? NSView
+    if view == nil, let text = responder as? NSText, let fieldEditor = text.delegate as? NSView {
+      view = fieldEditor
+    }
+
+    var current = view
+    while let currentView = current {
+      if currentView.accessibilityIdentifier() == identifier {
+        return true
+      }
+      current = currentView.superview
+    }
+    return false
   }
 
   private func callPasteHandler(event: NSEvent) -> Bool {
