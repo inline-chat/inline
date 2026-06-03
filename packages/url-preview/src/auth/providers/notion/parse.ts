@@ -1,7 +1,7 @@
 import { trimUrlToken } from "../../../normalize.js"
 import type { NotionParsedResourceType, NotionParsedUrl } from "./types.js"
 
-const notionHosts = new Set(["notion.so", "www.notion.so"])
+const notionHosts = new Set(["notion.so", "www.notion.so", "app.notion.com"])
 const notionSiteSuffix = ".notion.site"
 const uuidPattern = /[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g
 const trackingQueryPrefixes = ["utm_"]
@@ -124,7 +124,8 @@ function stripTrackingParams(url: URL) {
     if (
       trackingQueryKeys.has(normalizedKey) ||
       trackingQueryPrefixes.some((prefix) => normalizedKey.startsWith(prefix)) ||
-      normalizedKey === "pvs"
+      normalizedKey === "pvs" ||
+      normalizedKey === "source"
     ) {
       url.searchParams.delete(key)
     }
