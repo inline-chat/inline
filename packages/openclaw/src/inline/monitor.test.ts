@@ -1374,6 +1374,7 @@ describe("inline/monitor", () => {
           ThreadLabel: "Re: deploy plan",
           Body: "can you handle this reply thread?",
           BodyForAgent: "can you handle this reply thread?",
+          GroupSystemPrompt: expect.stringContaining("do not answer unrelated questions from the parent chat or other reply threads"),
           InboundHistory: expect.arrayContaining([
             expect.objectContaining({ body: "unrelated parent chat line" }),
             expect.objectContaining({ body: "Parent thread anchor" }),
@@ -1720,7 +1721,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("inherits reply-thread anchor media when the child message has no direct media", async () => {
+  it("does not promote reply-thread anchor images to current media paths", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -1792,22 +1793,11 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
-        expect.objectContaining({
-          url: "https://cdn.inline.chat/anchor-photo.jpg",
-          filePathHint: "anchor-photo.jpg",
-        }),
-      )
+      expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: "what about this image?",
           BodyForAgent: "what about this image?",
-          MediaPath: "/tmp/anchor-photo.jpg",
-          MediaType: "image/jpeg",
-          MediaUrl: "/tmp/anchor-photo.jpg",
-          MediaPaths: ["/tmp/anchor-photo.jpg"],
-          MediaUrls: ["/tmp/anchor-photo.jpg"],
-          MediaTypes: ["image/jpeg"],
           UntrustedStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "recent_media_attachments",
@@ -1816,6 +1806,14 @@ describe("inline/monitor", () => {
               },
             }),
           ]),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          MediaPath: expect.anything(),
+          MediaUrl: expect.anything(),
+          MediaPaths: expect.anything(),
+          MediaUrls: expect.anything(),
         }),
       )
     })
@@ -7209,6 +7207,90 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("passes image documents as current media paths", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7306n,
+            date: 1_700_000_115n,
+            fromId: 51n,
+            message: "",
+            mentioned: true,
+            media: {
+              media: {
+                oneofKind: "document",
+                document: {
+                  document: {
+                    id: 904n,
+                    cdnUrl: "https://cdn.inline.chat/image-document",
+                    fileName: "image-document.png",
+                    size: 12_345,
+                  },
+                },
+              },
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "saw it",
+      },
+      mediaByUrl: {
+        "https://cdn.inline.chat/image-document": {
+          contentType: "image/png",
+          fileName: "image-document.png",
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://cdn.inline.chat/image-document",
+          filePathHint: "image-document.png",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "<media:document>",
+          BodyForAgent: "<media:document>",
+          MediaPath: "/tmp/image-document.png",
+          MediaType: "image/png",
+          MediaUrl: "/tmp/image-document.png",
+          MediaPaths: ["/tmp/image-document.png"],
+          MediaUrls: ["/tmp/image-document.png"],
+          MediaTypes: ["image/png"],
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              type: "current_media_attachments",
+              payload: { summary: "document attachment (image-document.png): https://cdn.inline.chat/image-document" },
+            }),
+          ]),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("supports flattened media oneof payloads for attachment-only images", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -7272,6 +7354,12 @@ describe("inline/monitor", () => {
           BodyForAgent: "<media:image>",
           RawBody: "<media:image>",
           CommandBody: "<media:image>",
+          MediaPath: "/tmp/flattened-photo.jpg",
+          MediaType: "image/jpeg",
+          MediaUrl: "/tmp/flattened-photo.jpg",
+          MediaPaths: ["/tmp/flattened-photo.jpg"],
+          MediaUrls: ["/tmp/flattened-photo.jpg"],
+          MediaTypes: ["image/jpeg"],
           UntrustedStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
@@ -7299,11 +7387,14 @@ describe("inline/monitor", () => {
             mentioned: true,
             media: {
               media: {
-                oneofKind: "photo",
-                photo: {
-                  photo: {
+                oneofKind: "document",
+                document: {
+                  document: {
                     id: 901n,
-                    sizes: [{ w: 400, h: 300, size: 4567, cdnUrl: "https://cdn.inline.chat/broken-photo.jpg" }],
+                    cdnUrl: "https://cdn.inline.chat/broken-spec.pdf",
+                    fileName: "broken-spec.pdf",
+                    mimeType: "application/pdf",
+                    size: 4567,
                   },
                 },
               },
@@ -7341,12 +7432,12 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "<media:image>",
-          BodyForAgent: "<media:image>",
+          Body: "<media:document>",
+          BodyForAgent: "<media:document>",
           UntrustedStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
-              payload: { summary: "image attachment: https://cdn.inline.chat/broken-photo.jpg" },
+              payload: { summary: "document attachment (broken-spec.pdf): https://cdn.inline.chat/broken-spec.pdf" },
             }),
           ]),
         }),

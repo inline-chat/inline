@@ -136,6 +136,8 @@ const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
 const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
+const INLINE_REPLY_THREAD_SYSTEM_PROMPT =
+  "Inline reply threads are scoped conversations: answer only the current reply-thread message and this thread's own history; use parent-chat context only as background, and do not answer unrelated questions from the parent chat or other reply threads."
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
@@ -1328,6 +1330,7 @@ function buildInlineSenderName(params: {
 function resolveInlineSystemPrompt(params: {
   account: ResolvedInlineAccount
   groupId?: string
+  replyThread?: boolean
 }): string {
   const groupPrompt = params.groupId
     ? resolveInlineGroupSystemPrompt({
@@ -1335,7 +1338,11 @@ function resolveInlineSystemPrompt(params: {
         groupId: params.groupId,
       })
     : undefined
-  return [buildInlineSystemPrompt(params.account.config.systemPrompt), groupPrompt]
+  return [
+    buildInlineSystemPrompt(params.account.config.systemPrompt),
+    groupPrompt,
+    params.replyThread ? INLINE_REPLY_THREAD_SYSTEM_PROMPT : undefined,
+  ]
     .filter((entry): entry is string => Boolean(entry))
     .join("\n\n")
 }
@@ -1914,12 +1921,6 @@ function buildInlineInboundBodyText(content: ReturnType<typeof summarizeInlineMe
   return textWithPlaceholder || content.text
 }
 
-function hasDownloadableInlineMedia(content: ReturnType<typeof summarizeInlineMessageContent> | null): boolean {
-  if (!content) return false
-  if (content.media?.url) return true
-  return content.attachments.some((attachment) => attachment.kind === "urlPreview" && Boolean(attachment.previewImageUrl))
-}
-
 function resolveFilePathHint(params: { sourceUrl: string; preferredName?: string | null | undefined }): string | undefined {
   const preferred = params.preferredName?.trim()
   if (preferred) return preferred
@@ -1973,14 +1974,15 @@ async function resolveInlineInboundMedia(params: {
         maxBytes: params.maxBytes,
         ...(filePathHint ? { filePathHint } : {}),
       })
+      const fetchedContentType = fetched.contentType ?? candidate.mimeType ?? undefined
       const saved = await params.core.channel.media.saveMediaBuffer(
         fetched.buffer,
-        fetched.contentType ?? candidate.mimeType ?? undefined,
+        fetchedContentType,
         "inbound",
         params.maxBytes,
         fetched.fileName ?? candidate.fileName ?? undefined,
       )
-      const contentType = saved.contentType ?? fetched.contentType ?? candidate.mimeType ?? undefined
+      const contentType = saved.contentType ?? fetchedContentType
       out.push({
         path: saved.path,
         ...(contentType ? { contentType } : {}),
@@ -3505,18 +3507,6 @@ export async function monitorInlineProvider(params: {
       maxBytes: inboundMediaMaxBytes,
       ...(log ? { log } : {}),
     })
-    const inheritedAnchorMedia =
-      deliveryReplyThreadContext?.anchorMessage != null &&
-      currentContent != null &&
-      !hasDownloadableInlineMedia(currentContent)
-        ? await resolveInlineInboundMedia({
-            core,
-            message: deliveryReplyThreadContext.anchorMessage,
-            maxBytes: inboundMediaMaxBytes,
-            ...(log ? { log } : {}),
-          })
-        : []
-    const mediaForAgent = inboundMedia.length > 0 ? inboundMedia : inheritedAnchorMedia
 
     const timestamp = messageTimestamp
     const fromLabel = resolveInlineConversationLabel({
@@ -3564,6 +3554,7 @@ export async function monitorInlineProvider(params: {
     const systemPrompt = resolveInlineSystemPrompt({
       account,
       ...(isGroup ? { groupId: String(effectiveChatId) } : {}),
+      replyThread: Boolean(deliveryReplyThreadContext),
     })
     const messageSid = buildInlineInboundMessageSid({
       msgId: msg.id,
@@ -3624,7 +3615,7 @@ export async function monitorInlineProvider(params: {
               : {}),
           }
         : {}),
-      ...buildInlineInboundMediaPayload(mediaForAgent),
+      ...buildInlineInboundMediaPayload(inboundMedia),
       Timestamp: timestamp || Date.now(),
       ...(isGroup ? { WasMentioned: mentionGate.effectiveWasMentioned } : {}),
       ...(isGroup
