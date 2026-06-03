@@ -61,7 +61,7 @@ struct ChatRouteView: View {
       )
       .ignoresSafeArea(.all, edges: .vertical)
       .id(peer.toString())
-      .frame(minWidth: 280)
+      .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
       .navigationTitle(navigationTitle.isEmpty ? fallbackTitle : navigationTitle)
       .onChange(of: peer.toString(), initial: true) { oldPeer, newPeer in
         navigationTitle = fallbackTitle

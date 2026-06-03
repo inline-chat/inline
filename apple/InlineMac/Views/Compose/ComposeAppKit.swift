@@ -368,11 +368,13 @@ class ComposeAppKit: NSView {
     // to bottom
     addSubview(sendButton)
     addSubview(silentModeButton)
-    addSubview(voiceButton)
+    if ExperimentalFeatureFlags.voiceMessagesEnabled {
+      addSubview(voiceButton)
+      addSubview(voiceInputView)
+    }
     addSubview(emojiButton)
     addSubview(menuButton)
     addSubview(textEditor)
-    addSubview(voiceInputView)
 
     setupReplyingView()
     setUpConstraints()
@@ -409,7 +411,7 @@ class ComposeAppKit: NSView {
       constant: 0
     )
 
-    NSLayoutConstraint.activate([
+    var constraints: [NSLayoutConstraint] = [
       heightConstraint,
 
       // bg
@@ -423,14 +425,6 @@ class ComposeAppKit: NSView {
         equalTo: trailingAnchor, constant: -horizontalOuterSpacing
       ),
       sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
-
-      // voice
-      voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
-      voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
-      voiceInputView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
-      voiceInputView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
-      voiceInputView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      voiceInputView.heightAnchor.constraint(equalToConstant: Theme.composeMinHeight),
 
       // send silently indicator
       silentModeButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -silentModeButtonBottomSpacing),
@@ -470,7 +464,20 @@ class ComposeAppKit: NSView {
       border.trailingAnchor.constraint(equalTo: trailingAnchor),
       border.topAnchor.constraint(equalTo: topAnchor),
       border.heightAnchor.constraint(equalToConstant: 1),
-    ])
+    ]
+
+    if ExperimentalFeatureFlags.voiceMessagesEnabled {
+      constraints.append(contentsOf: [
+        voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+        voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
+        voiceInputView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
+        voiceInputView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+        voiceInputView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        voiceInputView.heightAnchor.constraint(equalToConstant: Theme.composeMinHeight),
+      ])
+    }
+
+    NSLayoutConstraint.activate(constraints)
 
     if hasTopSeperator {
       border.isHidden = false
