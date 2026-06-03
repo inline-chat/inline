@@ -1485,7 +1485,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline reply threads: use `thread-create` to create or reuse a real reply thread under the current/target chat. On parent-chat inbound turns, omit `messageId` to anchor it to the current message, or pass `messageId`/`parentMessageId` explicitly.",
       "- Inline reply threads: use `thread-reply` to send into a real reply thread, with `threadId` set to the reply-thread chat id returned by `thread-create`. Reuse that `threadId` only for the same reply-thread session; unrelated parent-chat messages need separate parent-message anchors.",
       "- Inline reply threads: when already inside a reply-thread chat, continue in that reply thread and do not create nested reply threads.",
-      "- Inline reply-thread turns include nearby parent-chat context by default. If that context is incomplete, call `inline_parent_context` before answering.",
+      "- Inline reply-thread turns include nearby parent-chat context as background only; answer the current reply-thread conversation, not unrelated parent-chat or other-thread questions.",
     ],
   },
 

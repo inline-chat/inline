@@ -239,7 +239,7 @@ Inline reply-thread semantics:
 - `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor.
 - Automatic thread creation falls back to parent-chat delivery if the reply thread cannot be created.
 - Existing route state is reused only for the same parent-message anchor. New parent-chat messages get separate reply threads; messages already inside a reply thread stay in that thread and do not create nested threads.
-- If the current reply-thread message has no direct media, OpenClaw can inherit the anchor message media so image/file-only thread starters remain visible to the agent.
+- Inline current-message media is attached like native channels. Reply-thread anchor media is summarized as context and is not promoted to current-message media on every child-thread turn.
 
 You can gate action groups from config:
 

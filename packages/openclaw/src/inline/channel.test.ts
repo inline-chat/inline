@@ -1350,6 +1350,8 @@ describe("inline/channel", () => {
     expect(hints.join("\n")).toContain("normal `reply` for short")
     expect(hints.join("\n")).toContain("unrelated parent-chat messages need separate parent-message anchors")
     expect(hints.join("\n")).toContain("do not create nested reply threads")
+    expect(hints.join("\n")).toContain("parent-chat context as background only")
+    expect(hints.join("\n")).toContain("not unrelated parent-chat or other-thread questions")
     expect(hints.join("\n")).toContain("attachmentUrls")
   })
 
