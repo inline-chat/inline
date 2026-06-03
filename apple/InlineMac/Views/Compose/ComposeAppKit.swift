@@ -1694,6 +1694,16 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return true // handled
   }
 
+  func textViewDidPressCommandR(_ textView: NSTextView) -> Bool {
+    guard !shouldDeferComposeShortcutToMenus() else { return false }
+    return beginReplyingToLastMessage()
+  }
+
+  func textViewDidPressCommandE(_ textView: NSTextView) -> Bool {
+    guard !shouldDeferComposeShortcutToMenus() else { return false }
+    return beginEditingLastSentMessage(in: textView)
+  }
+
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
     if autocompleteMenu?.isVisible == true {
       return handleAutocompleteArrow(.previous)
@@ -1710,25 +1720,76 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       return true
     }
 
-    // only if empty
-    guard textView.string.count == 0 else { return false }
+    return beginEditingLastSentMessage(in: textView)
+  }
 
-    // fetch last message of ours in this chat that isn't sending or failed
-    let lastMsgId = try? dependencies.database.reader.read { db in
-      let lastMsg = try InlineKit.Message
+  private func shouldDeferComposeShortcutToMenus() -> Bool {
+    autocompleteMenu?.isVisible == true
+      || commandCompletionMenu?.isVisible == true
+      || mentionCompletionMenu?.isVisible == true
+  }
+
+  private func composeTextIsEmpty(_ textView: NSTextView) -> Bool {
+    textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  @discardableResult
+  private func beginReplyingToLastMessage() -> Bool {
+    guard state.forwardContext == nil else { return false }
+    guard let lastMsgId = lastReplyableMessageId() else { return false }
+
+    state.setReplyingToMsgId(lastMsgId)
+    return true
+  }
+
+  @discardableResult
+  private func beginEditingLastSentMessage(in textView: NSTextView) -> Bool {
+    guard state.forwardContext == nil else { return false }
+    guard composeTextIsEmpty(textView) else { return false }
+    guard let lastMsgId = lastEditableOutgoingMessageId() else { return false }
+
+    state.setEditingMsgId(lastMsgId)
+    return true
+  }
+
+  private func lastReplyableMessageId() -> Int64? {
+    let anchorId = viewModel?.threadAnchor?.message.messageId
+    for message in viewModel?.messages.reversed() ?? [] {
+      guard message.message.messageId != anchorId else { continue }
+      guard message.canReply else { continue }
+      return message.message.messageId
+    }
+
+    guard let chatId else { return nil }
+    return try? dependencies.database.reader.read { db in
+      try InlineKit.Message
+        .filter { $0.chatId == chatId }
+        .filter { $0.status != MessageSendingStatus.sending && $0.status != MessageSendingStatus.failed }
+        .order { $0.date.desc }
+        .limit(1)
+        .fetchOne(db)?
+        .messageId
+    }
+  }
+
+  private func lastEditableOutgoingMessageId() -> Int64? {
+    for message in viewModel?.messages.reversed() ?? [] {
+      guard message.message.out == true else { continue }
+      guard message.message.status == .sent else { continue }
+      return message.message.messageId
+    }
+
+    guard let chatId else { return nil }
+    return try? dependencies.database.reader.read { db in
+      try InlineKit.Message
         .filter { $0.chatId == chatId }
         .filter { $0.out == true }
         .filter { $0.status == MessageSendingStatus.sent }
         .order { $0.date.desc }
         .limit(1)
-        .fetchOne(db)
-      return lastMsg?.messageId
+        .fetchOne(db)?
+        .messageId
     }
-    guard let lastMsgId else { return false }
-
-    // Trigger edit mode for last message
-    state.setEditingMsgId(lastMsgId)
-    return true // handled
   }
 
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
