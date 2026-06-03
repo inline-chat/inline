@@ -3242,17 +3242,6 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  override func willOpenMenu(_: NSMenu, with _: NSEvent) {
-    // Apply selection style when menu is about to open
-    layer?.backgroundColor = NSColor.darkGray
-      .withAlphaComponent(0.05).cgColor
-  }
-
-  override func didCloseMenu(_: NSMenu, with _: NSEvent?) {
-    // Remove selection style when menu closes
-    layer?.backgroundColor = nil
-  }
-
   // MARK: - View Updates
 
   private func updatePropsAndUpdateLayout(
