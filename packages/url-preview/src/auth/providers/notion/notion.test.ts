@@ -23,6 +23,16 @@ describe("notion authenticated preview provider", () => {
       resourceType: "block",
       resourceId: "fedcba98-7654-3210-fedc-ba9876543210",
     })
+
+    const appPage = parseNotionUrl(
+      "https://app.notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa?source=copy_link",
+    )
+    expect(appPage).toMatchObject({
+      provider: "notion",
+      resourceType: "unknown",
+      resourceId: "374eaecc-f764-81d7-984d-e6c25230c9aa",
+      normalizedUrl: "https://app.notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa",
+    })
   })
 
   it("extracts protected Notion URLs without enabling public generic fetching", () => {
@@ -33,6 +43,11 @@ describe("notion authenticated preview provider", () => {
     expect(routes).toHaveLength(2)
     expect(routes[0]?.kind).toBe("authenticated")
     expect(routes[1]).toEqual({ kind: "general", url: "https://example.com/a" })
+
+    const appRoutes = extractPreviewRoutes(
+      "see https://app.notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa?source=copy_link",
+    )
+    expect(appRoutes[0]?.kind).toBe("authenticated")
   })
 
   it("fetches database names and keeps the original Notion link", async () => {
