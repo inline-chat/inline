@@ -370,7 +370,7 @@ class ChatViewAppKit: NSViewController {
     let hasUnread = (openDialog.unreadCount ?? 0) > 0
     guard hasUnread else { return nil }
 
-    return openDialog.readInboxMaxId ?? 0
+    return openDialog.readInboxMaxId
   }
 
   private func fetchChat() {
