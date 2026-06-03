@@ -6,6 +6,8 @@ import TextProcessing
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
+  func textViewDidPressCommandR(_ textView: NSTextView) -> Bool
+  func textViewDidPressCommandE(_ textView: NSTextView) -> Bool
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool
   func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool
   func textViewDidPressArrowLeft(_ textView: NSTextView) -> Bool
@@ -33,9 +35,20 @@ class ComposeNSTextView: NSTextView {
 
   override func keyDown(with event: NSEvent) {
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-    if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "b" {
-      toggleBold(self)
-      return
+    if modifiers == [.command], let char = event.charactersIgnoringModifiers?.lowercased() {
+      if char == "b" {
+        toggleBold(self)
+        return
+      }
+
+      if let delegate = delegate as? ComposeTextViewDelegate {
+        if char == "r", delegate.textViewDidPressCommandR(self) {
+          return
+        }
+        if char == "e", delegate.textViewDidPressCommandE(self) {
+          return
+        }
+      }
     }
 
     // Handle return key

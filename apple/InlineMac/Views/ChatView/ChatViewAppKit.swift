@@ -128,6 +128,7 @@ class ChatViewAppKit: NSViewController {
     view = ChatDropView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
+    view.setAccessibilityIdentifier(KeyMonitor.chatDetailAccessibilityIdentifier)
 
     transitionFromInitialState()
   }
