@@ -114,6 +114,7 @@ export async function generateAndApplyThreadTitle(input: GenerateInput): Promise
       title,
       currentUserId: input.currentUserId,
       onlyIfTitleEmpty: true,
+      isUntitled: true,
     })
 
     if (result.didUpdate) {

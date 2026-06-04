@@ -31,7 +31,8 @@ describe("messages.updateChatInfo", () => {
       .insert(schema.chats)
       .values({
         type: "thread",
-        title: null,
+        title: "Re: anchor",
+        isUntitled: true,
         publicThread: false,
         createdBy: owner.id,
         parentChatId: parentChat.id,
@@ -54,11 +55,12 @@ describe("messages.updateChatInfo", () => {
     expect(result.chat.title).toBe("Renamed reply")
 
     const [saved] = await db
-      .select({ title: schema.chats.title })
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
       .from(schema.chats)
       .where(eq(schema.chats.id, replyThread.id))
       .limit(1)
 
     expect(saved?.title).toBe("Renamed reply")
+    expect(saved?.isUntitled).toBeNull()
   })
 })

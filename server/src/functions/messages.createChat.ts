@@ -25,7 +25,7 @@ import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spa
 
 export async function createChat(
   input: {
-    title: string
+    title?: string
     spaceId?: bigint
     emoji?: string
     description?: string
@@ -115,11 +115,11 @@ export async function createChat(
     })
   }
 
-  const trimmedTitle = input.title?.trim()
+  const title = normalizeOptionalString(input.title)
   // Only enforce title uniqueness within a space.
   // Home threads are intentionally NOT unique.
-  if (trimmedTitle && hasSpaceId) {
-    const titleLower = trimmedTitle.toLowerCase()
+  if (title && hasSpaceId) {
+    const titleLower = title.toLowerCase()
     const duplicate = await db
       .select({ id: chats.id })
       .from(chats)
@@ -176,7 +176,8 @@ export async function createChat(
           id: reservedChatId,
           type: "thread",
           spaceId: hasSpaceId ? resolvedSpaceId : null,
-          title: input.title,
+          title: title ?? null,
+          isUntitled: title ? null : true,
           publicThread: isPublic,
           date: new Date(),
           threadNumber: threadNumber,
@@ -241,7 +242,8 @@ export async function createChat(
     .values({
       type: "thread",
       spaceId: hasSpaceId ? resolvedSpaceId : null,
-      title: input.title,
+      title: title ?? null,
+      isUntitled: title ? null : true,
       publicThread: isPublic,
       date: new Date(),
       threadNumber: threadNumber,
@@ -300,6 +302,11 @@ export async function createChat(
     chat: encodeChat(chat[0], { encodingForUserId: context.currentUserId }),
     dialog: encodedDialog,
   }
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : undefined
 }
 
 // ------------------------------------------------------------

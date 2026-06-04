@@ -1726,7 +1726,7 @@ class MessageListAppKit: NSViewController {
 
     do {
       return try dependencies.database.reader.read { db in
-        try ReplyThreadTitleFallback.explicitTitle(chatId: chatId, db: db)
+        try ReplyThreadTitleFallback.customTitle(chatId: chatId, db: db)
       }
     } catch {
       log.error("Failed to read reply thread title", error: error)

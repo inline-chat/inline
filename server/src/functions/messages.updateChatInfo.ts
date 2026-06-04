@@ -34,6 +34,7 @@ type UpdateThreadInfoInput = {
   currentUserId: number
   requireAccess?: boolean
   onlyIfTitleEmpty?: boolean
+  isUntitled?: boolean
 }
 
 export async function updateChatInfo(
@@ -140,6 +141,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
       chatInfo: {
         chatId: BigInt(chat.id),
         ...(shouldUpdateTitle ? { title: nextTitle } : {}),
+        ...(shouldUpdateTitle && input.isUntitled === true ? { untitled: true } : {}),
         ...(emojiProvided ? { emoji: normalizedEmoji ?? "" } : {}),
       },
     }
@@ -157,6 +159,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
 
     if (shouldUpdateTitle) {
       updateFields.title = nextTitle
+      updateFields.isUntitled = input.isUntitled === true ? true : null
     }
 
     if (shouldUpdateEmoji) {

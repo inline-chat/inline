@@ -41,9 +41,10 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
     const trimmedTitle = chat.title?.trim() ?? ""
     const hasTitle = trimmedTitle.length > 0
     const hasMessages = chat.lastMsgId != null && chat.lastMsgId !== 0
+    const isUntitled = chat.isUntitled === true || !hasTitle
 
     // Temporary: allow any participant to delete empty untitled threads until rollout is complete.
-    const canParticipantDeleteEmptyThread = !hasTitle && !hasMessages
+    const canParticipantDeleteEmptyThread = isUntitled && !hasMessages
 
     if (chat.spaceId) {
       // Check user role in space

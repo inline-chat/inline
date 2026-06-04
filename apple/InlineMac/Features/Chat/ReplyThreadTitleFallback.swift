@@ -15,15 +15,20 @@ enum ReplyThreadTitleFallback {
       return title
     }
 
-    guard chat.isReplyThread else {
+    guard needsFallback(chat) else {
       return chat.humanReadableTitle ?? "Chat"
     }
 
     return fallback(anchorText: anchorText)
   }
 
-  static func explicitTitle(chatId: Int64, db: Database) throws -> String? {
-    guard let chat = try Chat.fetchOne(db, id: chatId),
+  static func customTitle(chatId: Int64, db: Database) throws -> String? {
+    guard let chat = try Chat.fetchOne(db, id: chatId) else { return nil }
+    return customTitle(for: chat)
+  }
+
+  static func customTitle(for chat: Chat) -> String? {
+    guard chat.isUntitled != true,
           let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
           title.isEmpty == false
     else {

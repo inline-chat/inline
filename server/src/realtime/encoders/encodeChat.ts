@@ -45,5 +45,6 @@ export function encodeChat(chat: DbChat, { encodingForUserId }: { encodingForUse
     createdBy: chat.createdBy ? BigInt(chat.createdBy) : undefined,
     parentChatId: chat.parentChatId ? BigInt(chat.parentChatId) : undefined,
     parentMessageId: chat.parentMessageId ? BigInt(chat.parentMessageId) : undefined,
+    untitled: chat.isUntitled === true ? true : undefined,
   }
 }

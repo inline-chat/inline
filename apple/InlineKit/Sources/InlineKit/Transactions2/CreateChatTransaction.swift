@@ -12,7 +12,7 @@ public struct CreateChatTransaction: Transaction2 {
   public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
-    public var title: String
+    public var title: String?
     public var emoji: String?
     public var isPublic: Bool
     public var spaceId: Int64?
@@ -27,7 +27,7 @@ public struct CreateChatTransaction: Transaction2 {
   private var log = Log.scoped("Transactions/CreateChat")
 
   public init(
-    title: String,
+    title: String?,
     emoji: String?,
     isPublic: Bool,
     spaceId: Int64?,
@@ -46,7 +46,9 @@ public struct CreateChatTransaction: Transaction2 {
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .createChat(.with {
-      $0.title = context.title
+      if let title = Self.normalizedTitle(context.title) {
+        $0.title = title
+      }
       if let spaceId = context.spaceId { $0.spaceID = spaceId }
       if let emoji = context.emoji { $0.emoji = emoji }
       if let reservedChatId = context.reservedChatId { $0.reservedChatID = reservedChatId }
@@ -66,16 +68,17 @@ public struct CreateChatTransaction: Transaction2 {
   public func optimistic() async {
     guard let reservedChatId = context.reservedChatId else { return }
 
-    let trimmedTitle = context.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let title = Self.normalizedTitle(context.title)
     let chat = Chat(
       id: reservedChatId,
       date: Date(),
       type: .thread,
-      title: trimmedTitle.isEmpty ? nil : trimmedTitle,
+      title: title,
       spaceId: context.spaceId,
       emoji: context.emoji,
       isPublic: context.isPublic,
       createdBy: Auth.shared.getCurrentUserId(),
+      isUntitled: title == nil ? true : nil,
       createState: .pending
     )
     let dialog = Dialog(optimisticForChat: chat)
@@ -136,13 +139,18 @@ public struct CreateChatTransaction: Transaction2 {
       log.error("Failed to mark chat creation as failed", error: error)
     }
   }
+
+  private static func normalizedTitle(_ value: String?) -> String? {
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed?.isEmpty == false ? trimmed : nil
+  }
 }
 
 // Helper
 
 public extension Transaction2 where Self == CreateChatTransaction {
   static func createChat(
-    title: String,
+    title: String?,
     emoji: String?,
     isPublic: Bool,
     spaceId: Int64?,

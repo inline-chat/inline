@@ -49,6 +49,7 @@ public struct UpdateChatInfoTransaction: Transaction2 {
         if var chat = try Chat.fetchOne(db, id: context.chatID) {
           if let title = context.title {
             chat.title = title
+            chat.isUntitled = nil
           }
           if let emoji = context.emoji {
             chat.emoji = emoji.isEmpty ? nil : emoji

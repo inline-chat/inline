@@ -83,6 +83,38 @@ describe("messages.createChat", () => {
     expect(functionResult.chat.title).toBe("Public Chat 2")
   })
 
+  test("should create untitled public chat when title is omitted", async () => {
+    const space = await testUtils.createSpace()
+    if (!space) throw new Error("Failed to create space")
+
+    const user = await testUtils.createUser("untitled-thread-owner@example.com")
+    if (!user) throw new Error("Failed to create user")
+    await addSpaceMembers(space.id, [{ userId: user.id }])
+
+    const result = await createChat(
+      {
+        spaceId: BigInt(space.id),
+        isPublic: true,
+      },
+      {
+        ...mockFunctionContext,
+        currentUserId: user.id,
+      },
+    )
+
+    expect(result.chat.title).toBe("")
+    expect(result.chat.untitled).toBe(true)
+
+    const [saved] = await db
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(result.chat.id)))
+      .limit(1)
+
+    expect(saved?.title).toBeNull()
+    expect(saved?.isUntitled).toBe(true)
+  })
+
   test("should create private chat with participants", async () => {
     // Create a space first
     const space = await testUtils.createSpace()

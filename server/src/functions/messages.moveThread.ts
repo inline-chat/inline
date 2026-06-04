@@ -146,7 +146,7 @@ export async function moveThread(
         // v1: keep space title uniqueness behavior consistent with createChat.
         // Home threads are intentionally not unique.
         const trimmedTitle = chat.title?.trim()
-        if (trimmedTitle) {
+        if (trimmedTitle && chat.isUntitled !== true) {
           const titleLower = trimmedTitle.toLowerCase()
           const duplicate = await tx
             .select({ id: chats.id })

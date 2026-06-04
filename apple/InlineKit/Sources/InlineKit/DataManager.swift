@@ -550,7 +550,7 @@ public class DataManager: ObservableObject {
     let shouldDelete = try await database.reader.read { db in
       guard let chat = try Chat.fetchOne(db, id: threadId), chat.type == .thread else { return false }
       let trimmedTitle = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-      let isUntitled = trimmedTitle == nil || trimmedTitle?.isEmpty == true
+      let isUntitled = chat.isUntitled == true || trimmedTitle == nil || trimmedTitle?.isEmpty == true
       let hasNoMessages = chat.lastMsgId == nil || chat.lastMsgId == 0
       return isUntitled && hasNoMessages
     }

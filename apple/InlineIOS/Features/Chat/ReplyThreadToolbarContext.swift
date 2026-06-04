@@ -24,7 +24,7 @@ enum ReplyThreadToolbarContextLoader {
     } catch {
       log.error("Failed to load reply thread toolbar context", error: error)
       return ReplyThreadToolbarContext(
-        title: title(for: chat, anchorText: nil),
+        title: fallbackTitle(for: chat),
         parentTitle: nil,
         parentPeer: nil
       )
@@ -37,7 +37,6 @@ enum ReplyThreadToolbarContextLoader {
   }
 
   private static func context(for chat: Chat, db: Database) throws -> ReplyThreadToolbarContext {
-    let anchorText = try anchorText(for: chat, db: db)
     let parentChat = try chat.parentChatId.flatMap { try Chat.fetchOne(db, id: $0) }
     let parentDialog = try parentChat.flatMap { parentChat in
       try Dialog
@@ -60,10 +59,14 @@ enum ReplyThreadToolbarContextLoader {
     }
 
     return ReplyThreadToolbarContext(
-      title: title(for: chat, anchorText: anchorText),
+      title: try title(for: chat, db: db),
       parentTitle: parentTitle,
       parentPeer: parentPeer
     )
+  }
+
+  private static func title(for chat: Chat, db: Database) throws -> String {
+    try title(for: chat, anchorText: anchorText(for: chat, db: db))
   }
 
   private static func title(for chat: Chat, anchorText: String?) -> String {
@@ -73,7 +76,7 @@ enum ReplyThreadToolbarContextLoader {
       return title
     }
 
-    guard chat.isReplyThread else {
+    guard needsFallback(chat) else {
       return chat.humanReadableTitle ?? "Chat"
     }
 
@@ -88,7 +91,7 @@ enum ReplyThreadToolbarContextLoader {
       return "Direct Message"
     }
 
-    return try title(for: chat, anchorText: anchorText(for: chat, db: db))
+    return try title(for: chat, db: db)
   }
 
   private static func parentPeer(for chat: Chat, parentPeerUserId: Int64?) -> Peer {
@@ -104,7 +107,7 @@ enum ReplyThreadToolbarContextLoader {
   }
 
   private static func anchorText(for chat: Chat, db: Database) throws -> String? {
-    guard chat.isReplyThread,
+    guard needsFallback(chat),
           let parentChatId = chat.parentChatId,
           let parentMessageId = chat.parentMessageId
     else {
@@ -119,14 +122,20 @@ enum ReplyThreadToolbarContextLoader {
     return message?.stringRepresentationPlain
   }
 
+  private static func needsFallback(_ chat: Chat) -> Bool {
+    guard chat.isReplyThread else { return false }
+    let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return title == nil || title?.isEmpty == true
+  }
+
   private static func fallback(anchorText: String?) -> String {
     let excerpt = anchorText?
       .components(separatedBy: .whitespacesAndNewlines)
-      .filter { !$0.isEmpty }
+      .filter { $0.isEmpty == false }
       .joined(separator: " ")
       .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    guard let excerpt, !excerpt.isEmpty else {
+    guard let excerpt, excerpt.isEmpty == false else {
       return genericFallbackTitle
     }
 

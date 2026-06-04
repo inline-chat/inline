@@ -962,6 +962,9 @@ extension InlineProtocol.UpdateUserSettings {
 }
 
 extension InlineProtocol.UpdateChatHasNewUpdates {
+          chat.isUntitled = hasUntitled && untitled ? true : nil
+        } else if hasUntitled {
+          chat.isUntitled = untitled ? true : nil
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat has new updates \(chatID) \(updateSeq)")
 

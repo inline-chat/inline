@@ -29,7 +29,7 @@ struct CreateThreadExecutor {
 public extension RealtimeV2 {
   @discardableResult
   func createThreadLocally(
-    title: String,
+    title: String?,
     emoji: String?,
     isPublic: Bool,
     spaceId: Int64?,
