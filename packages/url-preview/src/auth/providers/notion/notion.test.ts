@@ -33,6 +33,26 @@ describe("notion authenticated preview provider", () => {
       resourceId: "374eaecc-f764-81d7-984d-e6c25230c9aa",
       normalizedUrl: "https://app.notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa",
     })
+
+    const futureHostPage = parseNotionUrl(
+      "https://future.notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa?source=copy_link",
+    )
+    expect(futureHostPage).toMatchObject({
+      provider: "notion",
+      resourceType: "unknown",
+      resourceId: "374eaecc-f764-81d7-984d-e6c25230c9aa",
+      normalizedUrl: "https://future.notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa",
+    })
+
+    const bareHostPage = parseNotionUrl(
+      "https://notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa?source=copy_link",
+    )
+    expect(bareHostPage).toMatchObject({
+      provider: "notion",
+      resourceType: "unknown",
+      resourceId: "374eaecc-f764-81d7-984d-e6c25230c9aa",
+      normalizedUrl: "https://notion.com/p/wanver/Boba-Design-System-374eaeccf76481d7984de6c25230c9aa",
+    })
   })
 
   it("extracts protected Notion URLs without enabling public generic fetching", () => {

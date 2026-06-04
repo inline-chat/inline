@@ -44,6 +44,7 @@ describe("url-preview", () => {
     expect(normalizePreviewUrl("https://inline.sentry.io/issues/123")).toBeNull()
     expect(normalizePreviewUrl("https://linear.app/inline/issue/ABC-1/private")).toBeNull()
     expect(normalizePreviewUrl("https://app.notion.com/p/workspace/Page-0123456789abcdef0123456789abcdef")).toBeNull()
+    expect(normalizePreviewUrl("https://future.notion.com/p/workspace/Page-0123456789abcdef0123456789abcdef")).toBeNull()
     expect(normalizePreviewUrl("https://www.notion.so/workspace/secret")).toBeNull()
     expect(normalizePreviewUrl("https://1password.com/signin")).toBeNull()
     expect(normalizePreviewUrl("https://example.com/oauth/callback?code=abc")).toBeNull()

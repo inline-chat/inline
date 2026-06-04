@@ -1,7 +1,8 @@
 import { trimUrlToken } from "../../../normalize.js"
 import type { NotionParsedResourceType, NotionParsedUrl } from "./types.js"
 
-const notionHosts = new Set(["notion.so", "www.notion.so", "app.notion.com"])
+const notionHosts = new Set(["notion.so", "www.notion.so"])
+const notionComSuffix = ".notion.com"
 const notionSiteSuffix = ".notion.site"
 const uuidPattern = /[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g
 const trackingQueryPrefixes = ["utm_"]
@@ -75,7 +76,12 @@ export function parseNotionUrl(input: string): NotionParsedUrl | null {
 
 export function isNotionWebHost(hostname: string): boolean {
   const host = hostname.toLowerCase()
-  return notionHosts.has(host) || host.endsWith(notionSiteSuffix)
+  return (
+    host === "notion.com" ||
+    host.endsWith(notionComSuffix) ||
+    notionHosts.has(host) ||
+    host.endsWith(notionSiteSuffix)
+  )
 }
 
 function extractNotionId(url: URL): { id: string; resourceType: NotionParsedResourceType } | null {
