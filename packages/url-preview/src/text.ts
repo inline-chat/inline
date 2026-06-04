@@ -1,5 +1,7 @@
+import { decodeHTML } from "entities"
+
 export function cleanField(value: string | undefined | null, maxLength: number): string | null {
-  const cleaned = value?.replace(/\s+/g, " ").trim()
+  const cleaned = stripUnsafeControls(decodeEntities(value ?? "")).replace(/\s+/g, " ").trim()
   if (!cleaned) {
     return null
   }
@@ -31,4 +33,23 @@ export function hostLabel(url: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function decodeEntities(value: string): string {
+  if (!value.includes("&")) {
+    return value
+  }
+  return decodeHTML(value)
+}
+
+function stripUnsafeControls(value: string): string {
+  let cleaned = ""
+  for (const char of value) {
+    const code = char.charCodeAt(0)
+    if (code === 0x7f || (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d)) {
+      continue
+    }
+    cleaned += char
+  }
+  return cleaned
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { eq } from "drizzle-orm"
 
 import { db, schema } from "@in/server/db"
+import { MessageModel } from "@in/server/db/models/messages"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { getPreviewRoutesFromMessage, processUrlPreview } from "@in/server/modules/urlPreview/processUrlPreview"
 import {
@@ -127,8 +128,9 @@ describe("URL preview cache", () => {
       metadata: {
         url: "https://example.com/cached",
         finalUrl: "https://example.com/cached",
-        siteName: "Example",
-        title: "Cached article",
+        siteName: "Facebook &amp; Video",
+        title: "&#x1f534; &#x6b63;&#x5728;&#x76f4;&#x64ad;&#xff01;Amy &#x5e36;&#x4f60;",
+        description: "Fish &amp; chips &quot;safe&quot; &#169;",
         mediaType: "video",
         provider: "generic",
       },
@@ -160,9 +162,14 @@ describe("URL preview cache", () => {
     expect(preview.cacheId).toBe(cache.id)
     expect(preview.mediaType).toBe("video")
 
-    const attachments = await db.select().from(schema.messageAttachments)
+    const attachments = await db._query.messageAttachments.findMany({ with: { linkEmbed: true } })
     expect(attachments).toHaveLength(1)
     expect(attachments[0]?.urlPreviewId).toBe(BigInt(preview.id))
+
+    const [attachment] = MessageModel.processAttachments(attachments)
+    expect(attachment?.linkEmbed?.siteName).toBe("Facebook & Video")
+    expect(attachment?.linkEmbed?.title).toBe("\u{1f534} \u6b63\u5728\u76f4\u64ad\uff01Amy \u5e36\u4f60")
+    expect(attachment?.linkEmbed?.description).toBe('Fish & chips "safe" \u00a9')
   })
 
   it("does not store authenticated Notion previews in the global cache", async () => {

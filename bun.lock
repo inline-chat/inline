@@ -196,6 +196,9 @@
     "packages/url-preview": {
       "name": "@inline-chat/url-preview",
       "version": "0.0.1",
+      "dependencies": {
+        "entities": "4.5.0",
+      },
       "devDependencies": {
         "@types/node": "20.11.30",
         "typescript": "5.8.3",

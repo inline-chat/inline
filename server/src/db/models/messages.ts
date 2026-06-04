@@ -1,4 +1,5 @@
 import { MessageActions, MessageEntities, type InputPeer } from "@inline-chat/protocol/core"
+import { cleanPreviewText } from "@inline-chat/url-preview"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -34,6 +35,10 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 
 const log = new Log("MessageModel", LogLevel.INFO)
+
+const previewTitleLength = 180
+const previewDescriptionLength = 220
+const previewSiteNameLength = 80
 
 export const MessageModel = {
   //deleteMessage: deleteMessage,
@@ -173,6 +178,10 @@ export type ProcessedAttachment = Omit<DbMessageAttachment, "externalTask" | "li
 export type ProcessedMessageAttachment = Omit<DbMessageAttachment, "externalTask" | "linkEmbed"> & {
   externalTask?: ProcessedExternalTask | null
   linkEmbed?: ProcessedLinkEmbed | null
+}
+
+function cleanStoredPreviewText(value: string | null | undefined, maxLength: number): string | null {
+  return cleanPreviewText(value, maxLength)
 }
 
 type GetMessagesMode = "latest" | "older" | "newer" | "around"
@@ -871,6 +880,7 @@ export function processAttachments(
       } = attachment.linkEmbed
       processed.linkEmbed = {
         ...rest,
+        siteName: cleanStoredPreviewText(rest.siteName, previewSiteNameLength),
         url:
           url && urlIv && urlTag
             ? decrypt({
@@ -881,27 +891,36 @@ export function processAttachments(
             : null,
         title:
           linkTitle && linkTitleIv && linkTitleTag
-            ? decrypt({
-                encrypted: linkTitle,
-                iv: linkTitleIv,
-                authTag: linkTitleTag,
-              })
+            ? cleanStoredPreviewText(
+                decrypt({
+                  encrypted: linkTitle,
+                  iv: linkTitleIv,
+                  authTag: linkTitleTag,
+                }),
+                previewTitleLength,
+              )
             : null,
         description:
           description && descriptionIv && descriptionTag
-            ? decrypt({
-                encrypted: description,
-                iv: descriptionIv,
-                authTag: descriptionTag,
-              })
+            ? cleanStoredPreviewText(
+                decrypt({
+                  encrypted: description,
+                  iv: descriptionIv,
+                  authTag: descriptionTag,
+                }),
+                previewDescriptionLength,
+              )
             : null,
         author:
           author && authorIv && authorTag
-            ? decrypt({
-                encrypted: author,
-                iv: authorIv,
-                authTag: authorTag,
-              })
+            ? cleanStoredPreviewText(
+                decrypt({
+                  encrypted: author,
+                  iv: authorIv,
+                  authTag: authorTag,
+                }),
+                previewSiteNameLength,
+              )
             : null,
         externalUrl:
           externalUrl && externalUrlIv && externalUrlTag

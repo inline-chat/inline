@@ -104,6 +104,39 @@ describe("url-preview", () => {
     expect(preview?.mediaType).toBeUndefined()
   })
 
+  it("decodes html entities in generic metadata", async () => {
+    const html = `
+      <html>
+        <head>
+          <meta property="og:site_name" content="Facebook &amp; Video">
+          <meta property="og:title" content="&#x1f534; &#x6b63;&#x5728;&#x76f4;&#x64ad;&#xff01;Amy &#x5e36;&#x4f60;">
+          <meta name="description" content="Fish &amp; chips &quot;safe&quot; &#169;">
+          <meta property="og:image" content="/preview.png?x=1&amp;y=2">
+        </head>
+      </html>
+    `
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+
+    const preview = await fetchUrlPreview("https://example.com/post", { fetchImpl, lookup: publicLookup })
+
+    expect(preview?.siteName).toBe("Facebook & Video")
+    expect(preview?.title).toBe("\u{1f534} \u6b63\u5728\u76f4\u64ad\uff01Amy \u5e36\u4f60")
+    expect(preview?.description).toBe('Fish & chips "safe" \u00a9')
+    expect(preview?.imageUrl).toBe("https://example.com/preview.png?x=1&y=2")
+  })
+
+  it("decodes html entities in fallback titles", async () => {
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response("<html><head><title>Tom &amp; Jerry &#x1f431;</title></head></html>", {
+        headers: { "content-type": "text/html" },
+      })
+
+    const preview = await fetchUrlPreview("https://example.com/title", { fetchImpl, lookup: publicLookup })
+
+    expect(preview?.title).toBe("Tom & Jerry \u{1f431}")
+  })
+
   it("detects generic articles only from explicit metadata", async () => {
     const html = `
       <html>

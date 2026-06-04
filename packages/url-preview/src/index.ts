@@ -16,6 +16,7 @@ export { normalizeMetadataUrl, normalizePreviewUrl, trimUrlToken } from "./norma
 export { isLoomUrl, isYouTubeUrl, normalizeYouTubeUrl } from "./providers/index.js"
 export { extractPreviewRoutes, routePreviewUrl } from "./router.js"
 export { extractPreviewTargets } from "./auth/index.js"
+export { cleanField as cleanPreviewText } from "./text.js"
 export {
   fetchNotionPreview,
   isNotionWebHost,
