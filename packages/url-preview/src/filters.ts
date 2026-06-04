@@ -13,7 +13,7 @@ export type UrlFilterResult = { ok: true } | { ok: false; reason: UrlBlockReason
 const protectedHostSuffixes = [
   "sentry.io",
   "linear.app",
-  "app.notion.com",
+  "notion.com",
   "notion.so",
   "notion.site",
   "1password.com",

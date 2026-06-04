@@ -33,6 +33,26 @@ describe("notion authenticated preview provider", () => {
       resourceId: "11111111-1111-4111-8111-111111111111",
       normalizedUrl: "https://app.notion.com/p/example/Example-Design-System-11111111111141118111111111111111",
     })
+
+    const futureHostPage = parseNotionUrl(
+      "https://future.notion.com/p/example/Example-Design-System-11111111111141118111111111111111?source=copy_link",
+    )
+    expect(futureHostPage).toMatchObject({
+      provider: "notion",
+      resourceType: "unknown",
+      resourceId: "11111111-1111-4111-8111-111111111111",
+      normalizedUrl: "https://future.notion.com/p/example/Example-Design-System-11111111111141118111111111111111",
+    })
+
+    const bareHostPage = parseNotionUrl(
+      "https://notion.com/p/example/Example-Design-System-11111111111141118111111111111111?source=copy_link",
+    )
+    expect(bareHostPage).toMatchObject({
+      provider: "notion",
+      resourceType: "unknown",
+      resourceId: "11111111-1111-4111-8111-111111111111",
+      normalizedUrl: "https://notion.com/p/example/Example-Design-System-11111111111141118111111111111111",
+    })
   })
 
   it("extracts protected Notion URLs without enabling public generic fetching", () => {
