@@ -19,6 +19,7 @@ final class MessagesCollectionView: UICollectionView {
   private var coordinator: Coordinator
   static var contextMenuOpen: Bool = false
   private var lastKnownNavBarHeight: CGFloat = 0
+  private var needsContentInsetUpdateAfterContextMenu = false
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId
@@ -120,11 +121,13 @@ final class MessagesCollectionView: UICollectionView {
   static let messagesBottomPadding = 12.0
   func updateContentInsets() {
     guard !MessagesCollectionView.contextMenuOpen else {
+      needsContentInsetUpdateAfterContextMenu = true
       return
     }
     guard let window else {
       return
     }
+    needsContentInsetUpdateAfterContextMenu = false
 
     // let topContentPadding: CGFloat = 10
     let topContentPadding: CGFloat = -10
@@ -167,6 +170,17 @@ final class MessagesCollectionView: UICollectionView {
     scrollIndicatorInsets = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset, right: 0)
     contentInset = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset + topContentPadding, right: 0)
     layoutIfNeeded()
+  }
+
+  private func updateContentInsetsAfterContextMenuIfNeeded(animated: Bool) {
+    guard needsContentInsetUpdateAfterContextMenu else { return }
+
+    let wasAtBottom = shouldScrollToBottom
+    updateContentInsets()
+
+    if wasAtBottom, !itemsEmpty {
+      safeScrollToTop(animated: animated)
+    }
   }
 
   var calculatedThreshold: CGFloat {
@@ -547,6 +561,18 @@ private extension MessagesCollectionView {
 
       if let identifierView = configuration.identifier as? ContextMenuIdentifierUIView {
         identifierView.removeFromSuperview()
+      }
+
+      let updateInsets: (_ animated: Bool) -> Void = { [weak collectionView] animated in
+        guard let collectionView = collectionView as? MessagesCollectionView else { return }
+        collectionView.updateContentInsetsAfterContextMenuIfNeeded(animated: animated)
+      }
+      if let animator {
+        animator.addAnimations {
+          updateInsets(true)
+        }
+      } else {
+        DispatchQueue.main.async { updateInsets(true) }
       }
     }
 
