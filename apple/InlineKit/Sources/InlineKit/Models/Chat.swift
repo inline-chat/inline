@@ -25,6 +25,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var emoji: String?
   public var publicThread: Bool?
   public var createdBy: Int64?
+  public var untitled: Bool?
   public var parentChatId: Int64?
   public var parentMessageId: Int64?
 }
@@ -40,6 +41,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var emoji: String?
   public var isPublic: Bool?
   public var createdBy: Int64?
+  public var isUntitled: Bool?
   public var parentChatId: Int64? = nil
   public var parentMessageId: Int64? = nil
   public var createState: ChatCreateState?
@@ -55,6 +57,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let emoji = Column(CodingKeys.emoji)
     static let isPublic = Column(CodingKeys.isPublic)
     static let createdBy = Column(CodingKeys.createdBy)
+    static let isUntitled = Column(CodingKeys.isUntitled)
     static let parentChatId = Column(CodingKeys.parentChatId)
     static let parentMessageId = Column(CodingKeys.parentMessageId)
     static let createState = Column(CodingKeys.createState)
@@ -96,6 +99,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
     isPublic: Bool? = nil,
     createdBy: Int64? = nil,
+    isUntitled: Bool? = nil,
     parentChatId: Int64? = nil,
     parentMessageId: Int64? = nil,
     createState: ChatCreateState? = nil
@@ -110,6 +114,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.emoji = emoji
     self.isPublic = isPublic
     self.createdBy = createdBy
+    self.isUntitled = isUntitled
     self.parentChatId = parentChatId
     self.parentMessageId = parentMessageId
     self.createState = createState
@@ -198,6 +203,7 @@ public extension Chat {
     }
     isPublic = from.publicThread
     createdBy = from.createdBy
+    isUntitled = from.untitled
     parentChatId = from.parentChatId
     parentMessageId = from.parentMessageId
     spaceId = from.spaceId
@@ -233,6 +239,7 @@ public extension Chat {
     emoji = from.hasEmoji ? from.emoji : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
     createdBy = from.hasCreatedBy ? from.createdBy : nil
+    isUntitled = from.hasUntitled ? from.untitled : nil
     parentChatId = from.hasParentChatID ? from.parentChatID : nil
     parentMessageId = from.hasParentMessageID ? from.parentMessageID : nil
     createState = nil

@@ -35,6 +35,9 @@ export const chats = pgTable(
     /** optional, creator user id (required for home threads) */
     createdBy: integer("created_by").references(() => users.id),
 
+    /** true when a thread has not been explicitly titled */
+    isUntitled: boolean("is_untitled"),
+
     /** structural parent chat for linked subthreads */
     parentChatId: integer("parent_chat_id").references((): AnyPgColumn => chats.id),
 

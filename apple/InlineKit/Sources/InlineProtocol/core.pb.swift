@@ -1365,6 +1365,16 @@ public struct Chat: Sendable {
   /// Clears the value of `parentMessageID`. Subsequent reads from it will return its default value.
   public mutating func clearParentMessageID() {self._parentMessageID = nil}
 
+  /// True when this thread has not been explicitly titled.
+  public var untitled: Bool {
+    get {return _untitled ?? false}
+    set {_untitled = newValue}
+  }
+  /// Returns true if `untitled` has been explicitly set.
+  public var hasUntitled: Bool {return self._untitled != nil}
+  /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
+  public mutating func clearUntitled() {self._untitled = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1379,6 +1389,7 @@ public struct Chat: Sendable {
   fileprivate var _createdBy: Int64? = nil
   fileprivate var _parentChatID: Int64? = nil
   fileprivate var _parentMessageID: Int64? = nil
+  fileprivate var _untitled: Bool? = nil
 }
 
 public struct MessageReplies: Sendable {
@@ -6992,8 +7003,15 @@ public struct CreateChatInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Required title
-  public var title: String = String()
+  /// Optional explicit title. Omit or send empty to create an untitled thread.
+  public var title: String {
+    get {return _title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {return self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
 
   /// Parent space ID
   public var spaceID: Int64 {
@@ -7072,6 +7090,7 @@ public struct CreateChatResult: @unchecked Sendable {
   /// Returns true if `dialog` has been explicitly set.
   public var hasDialog: Bool {return _storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
+  fileprivate var _title: String? = nil
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -7699,12 +7718,22 @@ public struct UpdatePinnedMessages: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
+  public var untitled: Bool {
+    get {return _untitled ?? false}
+    set {_untitled = newValue}
+  }
+  /// Returns true if `untitled` has been explicitly set.
+  public var hasUntitled: Bool {return self._untitled != nil}
+  /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
+  public mutating func clearUntitled() {self._untitled = nil}
+
   public init() {}
 
   fileprivate var _peerID: Peer? = nil
 }
 
 /// Update when a thread is moved between home and a space.
+  fileprivate var _untitled: Bool? = nil
 ///
 /// NOTE: v1 only supports private threads and only home <-> space moves.
 /// Keep this payload flexible for future:
@@ -10440,6 +10469,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    13: .same(proto: "untitled"),
     // https://github.com/apple/swift-protobuf/issues/1182
     if self.id != 0 {
       try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
@@ -10460,6 +10490,7 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
     } }()
     try { if let v = self._lastMsgID {
+      case 13: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
     } }()
     try { if let v = self._peerID {
@@ -10506,6 +10537,9 @@ extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     3: .standard(proto: "has_unread"),
     4: .standard(proto: "recent_replier_user_ids"),
   ]
+    try { if let v = self._untitled {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 13)
+    } }()
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -10522,6 +10556,7 @@ extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     }
   }
 
+    if lhs._untitled != rhs._untitled {return false}
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if self.chatID != 0 {
       try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
@@ -19880,7 +19915,7 @@ extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.title) }()
+      case 1: try { try decoder.decodeSingularStringField(value: &self._title) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self._spaceID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
@@ -19897,9 +19932,9 @@ extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
-    if !self.title.isEmpty {
-      try visitor.visitSingularStringField(value: self.title, fieldNumber: 1)
-    }
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    } }()
     try { if let v = self._spaceID {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
     } }()
@@ -19922,7 +19957,7 @@ extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 
   public static func ==(lhs: CreateChatInput, rhs: CreateChatInput) -> Bool {
-    if lhs.title != rhs.title {return false}
+    if lhs._title != rhs._title {return false}
     if lhs._spaceID != rhs._spaceID {return false}
     if lhs._description_p != rhs._description_p {return false}
     if lhs._emoji != rhs._emoji {return false}
@@ -21189,6 +21224,7 @@ extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
     try unknownFields.traverse(visitor: &visitor)
   }
 
+    4: .same(proto: "untitled"),
   public static func ==(lhs: UpdateChatMoved, rhs: UpdateChatMoved) -> Bool {
     if lhs._chat != rhs._chat {return false}
     if lhs._oldSpaceID != rhs._oldSpaceID {return false}
@@ -21200,6 +21236,7 @@ extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
 
 extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateNewMessageNotification"
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "message"),
     2: .same(proto: "reason"),
@@ -21219,6 +21256,9 @@ extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try { if let v = self._untitled {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -21226,6 +21266,7 @@ extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._Me
     try { if let v = self._message {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    if lhs._untitled != rhs._untitled {return false}
     if self.reason != .unspecified {
       try visitor.visitSingularEnumField(value: self.reason, fieldNumber: 2)
     }

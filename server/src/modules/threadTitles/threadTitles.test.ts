@@ -146,12 +146,13 @@ describe("thread title generation", () => {
     expect(result.didUpdate).toBe(true)
 
     const updated = await db
-      .select({ title: schema.chats.title })
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
       .from(schema.chats)
       .where(eq(schema.chats.id, chat.id))
       .then((rows) => rows[0])
 
     expect(updated?.title).toBe("Launch Checklist")
+    expect(updated?.isUntitled).toBe(true)
   })
 
   test("does not overwrite a manually titled thread", async () => {

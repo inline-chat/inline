@@ -45,13 +45,16 @@ describe("messages.createSubthread", () => {
 
     const childChatId = Number(result.chat.id)
     const childChat = await db
-      .select({ title: schema.chats.title })
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
       .from(schema.chats)
       .where(eq(schema.chats.id, childChatId))
       .limit(1)
       .then((rows) => rows[0])
 
-    expect(childChat?.title).toBeNull()
+    expect(result.chat.title).toBe("Re: anchor")
+    expect(result.chat.untitled).toBe(true)
+    expect(childChat?.title).toBe("Re: anchor")
+    expect(childChat?.isUntitled).toBe(true)
 
     const childDialogs = await db
       .select({ userId: schema.dialogs.userId, chatListHidden: schema.dialogs.chatListHidden })
@@ -88,6 +91,94 @@ describe("messages.createSubthread", () => {
     expect(parentMessages.messages[0]?.replies?.chatId).toBe(BigInt(childChatId))
     expect(parentMessages.messages[0]?.replies?.replyCount).toBe(0)
     expect(parentMessages.messages[0]?.replies?.recentReplierUserIds).toEqual([])
+  })
+
+  test("creates explicit subthread title as titled", async () => {
+    const creator = await testUtils.createUser("subthread-title-owner@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, creator.id)
+
+    const result = await createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+        title: "Design notes",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    expect(result.chat.title).toBe("Design notes")
+    expect(result.chat.untitled).toBeUndefined()
+
+    const childChat = await db
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(result.chat.id)))
+      .limit(1)
+      .then((rows) => rows[0])
+
+    expect(childChat?.title).toBe("Design notes")
+    expect(childChat?.isUntitled).toBeNull()
+  })
+
+  test("creates generic reply-thread title when anchor text is empty", async () => {
+    const creator = await testUtils.createUser("subthread-empty-anchor@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, creator.id)
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: creator.id,
+      text: "",
+    })
+
+    const result = await createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+        parentMessageId: 1n,
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    expect(result.chat.title).toBe("Re: Message")
+    expect(result.chat.untitled).toBe(true)
+  })
+
+  test("creates untitled non-reply subthread without generated display title", async () => {
+    const creator = await testUtils.createUser("subthread-untitled-owner@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, creator.id)
+
+    const result = await createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    expect(result.chat.title).toBe("")
+    expect(result.chat.untitled).toBe(true)
+
+    const childChat = await db
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(result.chat.id)))
+      .limit(1)
+      .then((rows) => rows[0])
+
+    expect(childChat?.title).toBeNull()
+    expect(childChat?.isUntitled).toBe(true)
   })
 
   test("getChat creates a hidden dialog when opening a linked subthread", async () => {

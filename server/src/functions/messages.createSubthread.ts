@@ -7,6 +7,7 @@ import {
   getAnchorMessageForChat,
   getChatById,
   getDialogForUser,
+  buildDefaultReplyThreadTitle,
   ensureLinkedSubthreadDialogs,
   isLinkedSubthread,
   persistMessageRepliesUpdate,
@@ -88,7 +89,12 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     }
   }
 
-  const title = normalizeOptionalString(input.title)
+  const explicitTitle = normalizeOptionalString(input.title)
+  const title =
+    explicitTitle ??
+    (parentMessageId !== undefined
+      ? buildDefaultReplyThreadTitle(anchorMessage)
+      : undefined)
   const description = normalizeOptionalString(input.description)
   const emoji = normalizeOptionalString(input.emoji)
 
@@ -96,6 +102,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     parentChat,
     parentMessageId,
     title,
+    isUntitled: explicitTitle === undefined,
     description,
     emoji,
     createdBy: context.currentUserId,
@@ -168,6 +175,7 @@ async function createSubthreadChat(input: {
   parentChat: DbChat
   parentMessageId?: number
   title?: string
+  isUntitled: boolean
   description?: string
   emoji?: string
   createdBy: number
@@ -181,6 +189,7 @@ async function createSubthreadChat(input: {
           type: "thread",
           spaceId: input.parentChat.spaceId ?? null,
           title: input.title ?? null,
+          isUntitled: input.isUntitled ? true : null,
           description: input.description ?? null,
           emoji: input.emoji ?? null,
           createdBy: input.createdBy,

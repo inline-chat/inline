@@ -204,6 +204,9 @@ message Chat {
 
   // Parent message anchor when this subthread is a reply thread.
   optional int64 parent_message_id = 12;
+
+  // True when this thread has not been explicitly titled.
+  optional bool untitled = 13;
 }
 
 message MessageReplies {
@@ -1710,8 +1713,8 @@ message ReservedChatId {
 message ReserveChatIdsResult { repeated ReservedChatId reservations = 1; }
 
 message CreateChatInput {
-  // Required title
-  string title = 1;
+  // Optional explicit title. Omit or send empty to create an untitled thread.
+  optional string title = 1;
 
   // Parent space ID
   optional int64 space_id = 2;
@@ -1858,6 +1861,7 @@ message UpdatePinnedMessages {
 
   // Ordered list of pinned message IDs (latest first)
   repeated int64 message_ids = 2;
+  optional bool untitled = 4;
 }
 
 // Update when a thread is moved between home and a space.

@@ -571,6 +571,12 @@ export interface Chat {
      * @generated from protobuf field: optional int64 parent_message_id = 12;
      */
     parentMessageId?: bigint;
+    /**
+     * True when this thread has not been explicitly titled.
+     *
+     * @generated from protobuf field: optional bool untitled = 13;
+     */
+    untitled?: boolean;
 }
 /**
  * @generated from protobuf message MessageReplies
@@ -4462,11 +4468,11 @@ export interface ReserveChatIdsResult {
  */
 export interface CreateChatInput {
     /**
-     * Required title
+     * Optional explicit title. Omit or send empty to create an untitled thread.
      *
-     * @generated from protobuf field: string title = 1;
+     * @generated from protobuf field: optional string title = 1;
      */
-    title: string;
+    title?: string;
     /**
      * Parent space ID
      *
@@ -4930,6 +4936,10 @@ export interface UpdatePinnedMessages {
 /**
  * Update when a thread is moved between home and a space.
  *
+    /**
+     * @generated from protobuf field: optional bool untitled = 4;
+     */
+    untitled?: boolean;
  * NOTE: v1 only supports private threads and only home <-> space moves.
  * Keep this payload flexible for future:
  * - moving across spaces
@@ -7455,7 +7465,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 9, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 10, name: "created_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 11, name: "parent_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 12, name: "parent_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 12, name: "parent_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -7530,6 +7541,9 @@ class Chat$Type extends MessageType<Chat> {
             writer.tag(3, WireType.Varint).int64(message.spaceId);
         /* optional string description = 4; */
         if (message.description !== undefined)
+                case /* optional bool untitled */ 13:
+                    message.untitled = reader.bool();
+                    break;
             writer.tag(4, WireType.LengthDelimited).string(message.description);
         /* optional string emoji = 5; */
         if (message.emoji !== undefined)
@@ -7578,6 +7592,9 @@ class MessageReplies$Type extends MessageType<MessageReplies> {
     create(value?: PartialMessage<MessageReplies>): MessageReplies {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
+        /* optional bool untitled = 13; */
+        if (message.untitled !== undefined)
+            writer.tag(13, WireType.Varint).bool(message.untitled);
         message.replyCount = 0;
         message.hasUnread = false;
         message.recentReplierUserIds = [];
@@ -17404,7 +17421,6 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
     }
     create(value?: PartialMessage<CreateChatInput>): CreateChatInput {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.title = "";
         message.isPublic = false;
         message.participants = [];
         if (value !== undefined)
@@ -17449,8 +17465,8 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
         return message;
     }
     internalBinaryWrite(message: CreateChatInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* string title = 1; */
-        if (message.title !== "")
+        /* optional string title = 1; */
+        if (message.title !== undefined)
             writer.tag(1, WireType.LengthDelimited).string(message.title);
         /* optional int64 space_id = 2; */
         if (message.spaceId !== undefined)
@@ -18397,7 +18413,8 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
         super("UpdateChatInfo", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateChatInfo>): UpdateChatInfo {
@@ -18514,6 +18531,9 @@ class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
  * @generated MessageType for protobuf message UpdatePinnedMessages
  */
 export const UpdatePinnedMessages = new UpdatePinnedMessages$Type();
+                case /* optional bool untitled */ 4:
+                    message.untitled = reader.bool();
+                    break;
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateChatMoved$Type extends MessageType<UpdateChatMoved> {
     constructor() {
@@ -18535,6 +18555,9 @@ class UpdateChatMoved$Type extends MessageType<UpdateChatMoved> {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
                 case /* Chat chat */ 1:
+        /* optional bool untitled = 4; */
+        if (message.untitled !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.untitled);
                     message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
                     break;
                 case /* optional int64 old_space_id */ 2:
