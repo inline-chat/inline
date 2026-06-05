@@ -2020,6 +2020,154 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("creates and replies in a child reply thread in auto mode when the message asks for it", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 89n,
+          message: {
+            id: 12n,
+            date: 1_700_000_012n,
+            fromId: 51n,
+            message: "@inlinebot reply in a thread with the answer",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "89": { kind: "group", title: "Auto Thread Room" },
+      },
+      historyByChat: {
+        "89": [
+          {
+            id: 12n,
+            date: 1_700_000_012n,
+            fromId: 51n,
+            message: "@inlinebot reply in a thread with the answer",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "thread reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "89": { replyThreadMode: "auto" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({
+          oneofKind: "createSubthread",
+          createSubthread: expect.objectContaining({
+            parentChatId: 89n,
+            parentMessageId: 12n,
+          }),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 8912n,
+          text: "thread reply",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SessionKey: "agent:main:inline:group:89:thread:8912",
+          ParentSessionKey: "agent:main:inline:group:89",
+          MessageThreadId: "8912",
+          ThreadLabel: "Re: @inlinebot reply in a thread with the answer",
+          BodyForAgent: "reply in a thread with the answer",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("keeps auto mode in the parent chat when the message says not to thread", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 93n,
+          message: {
+            id: 130n,
+            date: 1_700_000_013n,
+            fromId: 51n,
+            message: "@inlinebot don't reply in a thread, answer here",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "93": { kind: "group", title: "Auto Parent Room" },
+      },
+      dispatchReplyPayload: {
+        text: "parent reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "93": { replyThreadMode: "auto" },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 93n,
+          text: "parent reply",
+        }),
+      )
+    })
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ oneofKind: "createSubthread" }),
+    )
+    expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        MessageThreadId: expect.any(String),
+      }),
+    )
+
+    await handle.stop()
+  })
+
   it("creates a new reply thread for a new parent-chat message even when an older active route exists", async () => {
     const register = vi.fn(async () => {})
     const now = Date.now()
