@@ -128,6 +128,16 @@ type MonitorSetup = {
         date?: bigint
       }
     | {
+        kind: "chat.participant.add"
+        chatId: bigint
+        participant?: {
+          userId?: bigint
+          date?: bigint
+        }
+        seq?: number
+        date?: bigint
+      }
+    | {
         kind: "message.action.invoke"
         chatId: bigint
         interactionId: bigint
@@ -212,6 +222,7 @@ type MonitorSetup = {
   skipInfos?: Array<{ reason?: string }>
   dispatchErrorInfos?: Array<{ kind?: string }>
   sendMessageDelayMs?: number
+  runtimeConfig?: Record<string, unknown>
   createSubthreadError?: string
   openKeyedStore?: ReturnType<typeof vi.fn>
 }
@@ -267,7 +278,7 @@ function buildAccount(overrides?: {
       tokenFile: undefined,
       dmPolicy: overrides?.dmPolicy ?? "open",
       allowFrom: overrides?.allowFrom ?? [],
-      groupPolicy: overrides?.groupPolicy ?? "allowlist",
+      groupPolicy: overrides?.groupPolicy ?? "open",
       groupAllowFrom: overrides?.groupAllowFrom ?? [],
       systemPrompt: overrides?.systemPrompt,
       groups: overrides?.groups,
@@ -356,6 +367,13 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     entry.model = selection.model
     entry.isDefault = selection.isDefault
     return { updated: true }
+  })
+  let runtimeConfig = structuredClone(setup.runtimeConfig ?? {})
+  const mutateConfigFile = vi.fn(async ({ mutate }: any) => {
+    const draft = structuredClone(runtimeConfig)
+    await mutate(draft)
+    runtimeConfig = draft
+    return { nextConfig: runtimeConfig }
   })
 
   let nextSentMessageId = 1n
@@ -676,6 +694,17 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           continue
         }
 
+        if (event.kind === "chat.participant.add") {
+          yield {
+            kind: event.kind,
+            chatId: event.chatId,
+            participant: event.participant,
+            seq: event.seq ?? 1,
+            date: event.date ?? event.participant?.date ?? 1_700_000_000n,
+          }
+          continue
+        }
+
         yield {
           kind: event.kind,
           chatId: event.chatId,
@@ -858,6 +887,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const runtimeMod = await import("../runtime")
   runtimeMod.setInlineRuntime({
     version: "test",
+    config: {
+      current: () => runtimeConfig,
+      mutateConfigFile,
+    },
     state: {
       resolveStateDir: () => path.join(os.tmpdir(), "openclaw-inline-tests"),
       ...(setup.openKeyedStore ? { openKeyedStore: setup.openKeyedStore } : {}),
@@ -5490,6 +5523,54 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("routes native-mentioned Inline groups even when the group is not pre-allowlisted", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60018n,
+            date: 1_700_000_018n,
+            fromId: 51n,
+            message: "@inlinebot howdy",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "native mention reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "allowlist",
+        groupAllowFrom: [],
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "native mention reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("allows Inline group senders from access groups in groupAllowFrom", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -5554,7 +5635,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("drops non-allowlisted Inline groups even when another group is configured", async () => {
+  it("drops non-allowlisted Inline groups without a native mention even when another group is configured", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -5564,8 +5645,8 @@ describe("inline/monitor", () => {
             id: 60012n,
             date: 1_700_000_012n,
             fromId: 51n,
-            message: "@inlinebot not in allowlist",
-            mentioned: true,
+            message: "not in allowlist",
+            mentioned: false,
           },
         },
       ],
@@ -5593,7 +5674,7 @@ describe("inline/monitor", () => {
       account: buildAccount({
         groupPolicy: "allowlist",
         groupAllowFrom: [],
-        requireMention: false,
+        requireMention: true,
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
@@ -6606,6 +6687,155 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           CommandBody: "/threadreply",
+          CommandSource: "native",
+          WasMentioned: true,
+          CommandAuthorized: true,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("handles built-in Inline plugin commands when the host command registry is empty", async () => {
+    const hasControlCommand = vi.fn(() => false)
+    const shouldHandleTextCommands = vi.fn(({ cfg, commandSource }: any) => {
+      if (commandSource === "native") return true
+      return cfg.commands?.text !== false
+    })
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60029n,
+            date: 1_700_000_029n,
+            fromId: 51n,
+            message: "/threadreply",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      hasControlCommand,
+      shouldHandleTextCommands,
+      pluginCommands: [],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        commands: {
+          text: false,
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        allowFrom: ["51"],
+        groupAllowFrom: [],
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(shouldHandleTextCommands).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "inline",
+          commandSource: "native",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: expect.stringContaining("Thread reply mode for chat 88: auto."),
+          actions: expect.objectContaining({
+            rows: expect.any(Array),
+          }),
+          parseMarkdown: true,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("honors channels.inline.commands.native when account commands only override native skills", async () => {
+    const shouldHandleTextCommands = vi.fn(({ cfg, commandSource }: any) => {
+      if (commandSource === "native") return true
+      return cfg.commands?.text !== false
+    })
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60028n,
+            date: 1_700_000_028n,
+            fromId: 51n,
+            message: "/status",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      shouldHandleTextCommands,
+      dispatchReplyPayload: {
+        text: "command handled",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        commands: {
+          native: false,
+          text: false,
+        },
+        channels: {
+          inline: {
+            commands: { native: true },
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        allowFrom: ["51"],
+        groupAllowFrom: [],
+        commands: { nativeSkills: false },
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(shouldHandleTextCommands).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "inline",
+          commandSource: "native",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          CommandBody: "/status",
           CommandSource: "native",
           WasMentioned: true,
           CommandAuthorized: true,
@@ -7953,6 +8183,119 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("queues bot participant-add events with recent chat context", async () => {
+    const participantDate = BigInt(Math.floor(Date.now() / 1000))
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "chat.participant.add",
+          chatId: 88n,
+          participant: {
+            userId: 777n,
+            date: participantDate,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      participants: {
+        "88": [
+          { id: 51n, username: "alice", firstName: "Alice" },
+          { id: 777n, username: "inlinebot", firstName: "Inline Bot" },
+        ],
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 5001n,
+            date: participantDate - 10n,
+            fromId: 51n,
+            message: "@inlinebot can you check this after joining?",
+            out: false,
+          },
+        ],
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "allowlist",
+        requireMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.enqueueSystemEvent).toHaveBeenCalledWith(
+        expect.stringContaining("Inline bot was added as a participant in #Project Room."),
+        expect.objectContaining({
+          sessionKey: "agent:main:inline:group:88",
+          contextKey: `inline:participant:added:88:777:${String(participantDate)}`,
+          forceSenderIsOwnerFalse: true,
+          trusted: false,
+        }),
+      )
+      expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
+        "#5001 Alice (@alice) id:51: @inlinebot can you check this after joining?",
+      )
+    })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).toHaveBeenCalledWith({
+      chatId: 88n,
+      text: "I'm here and ready. Mention @inlinebot to ask me something.",
+      parseMarkdown: true,
+    })
+
+    await handle.stop()
+  })
+
+  it("ignores participant-add events for other users", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+      },
+      events: [
+        {
+          kind: "chat.participant.add",
+          chatId: 88n,
+          participant: {
+            userId: 51n,
+            date: 1_700_000_150n,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await handle.done
+    expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
 
     await handle.stop()
   })
