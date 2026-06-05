@@ -76,6 +76,8 @@ const InlineExecApprovalsSchema = z
 const InlineReactionNotificationsSchema = z.enum(["off", "own", "all", "allowlist"])
 const InlineStreamingModeSchema = z.enum(["off", "partial", "block", "progress"])
 const InlineStreamingCommandTextSchema = z.enum(["raw", "status"])
+export const INLINE_DEFAULT_GROUP_POLICY = "open" as const
+export const INLINE_DEFAULT_REQUIRE_MENTION = true
 const InlineStreamingChunkSchema = z
   .object({
     minChars: z.number().int().positive().optional(),
@@ -173,7 +175,7 @@ export const InlineAccountSchemaBase = z
     defaultTo: InlineTargetSchema.optional(),
     systemPrompt: z.string().optional(),
     groupAllowFrom: z.array(InlineAllowEntrySchema).optional(),
-    groupPolicy: GroupPolicySchema.optional().default("allowlist"),
+    groupPolicy: GroupPolicySchema.optional().default(INLINE_DEFAULT_GROUP_POLICY),
     groups: z.record(z.string(), InlineGroupSchema.optional()).optional(),
     requireMention: z.boolean().optional(),
     replyThreadMode: InlineReplyThreadModeSchema.optional(),

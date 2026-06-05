@@ -13,6 +13,10 @@ import {
   splitSetupEntries,
 } from "openclaw/plugin-sdk/setup"
 import { inspectInlineAccount, listInlineAccountIds, resolveInlineAccount } from "./accounts.js"
+import {
+  INLINE_DEFAULT_GROUP_POLICY,
+  INLINE_DEFAULT_REQUIRE_MENTION,
+} from "./config-schema.js"
 import { INLINE_TOKEN_HELP_LINES, inlineSetupAdapter, resolveInlineSetupEnvToken } from "./setup-core.js"
 
 const channel = "inline" as const
@@ -26,7 +30,8 @@ const INLINE_USER_ID_HELP_LINES = [
 ]
 
 const INLINE_GROUP_HELP_LINES = [
-  "Allowlist Inline group chats by numeric chat id.",
+  "Inline groups are open by default and require a bot mention by default.",
+  "Optionally allowlist Inline group chats by numeric chat id.",
   "Accepted forms: 123456789, chat:123456789, inline:123456789, *.",
   "Use * for every group chat; the setup keeps requireMention=true for broad group access.",
   "Use /whoami in a group and copy the Chat line to get the Inline chat id.",
@@ -212,7 +217,7 @@ function buildInlineGroupAccessWarningLines(params: {
 }): string[] {
   const resolved = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId })
   const configBase = formatInlineConfigBase(params.accountId)
-  const policy = resolved.config.groupPolicy ?? "allowlist"
+  const policy = resolved.config.groupPolicy ?? INLINE_DEFAULT_GROUP_POLICY
   const groups = resolved.config.groups ?? {}
   const hasGroups = Object.keys(groups).length > 0
   const hasGroupAllowFrom = (resolved.config.groupAllowFrom ?? []).some((entry) =>
@@ -229,7 +234,8 @@ function buildInlineGroupAccessWarningLines(params: {
   }
 
   const wildcard = groups["*"] as InlineGroupConfig | undefined
-  if (policy === "open" && wildcard?.requireMention !== true) {
+  const requireMention = wildcard?.requireMention ?? resolved.config.requireMention ?? INLINE_DEFAULT_REQUIRE_MENTION
+  if (policy === "open" && requireMention !== true) {
     return [
       "Inline groups are open to every group chat without a default mention requirement.",
       "For safer broad group access, require bot mentions or switch to an explicit group allowlist:",

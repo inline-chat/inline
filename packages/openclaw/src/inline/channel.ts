@@ -82,6 +82,7 @@ import {
   buildInlineExecApprovalPendingPayload,
   inlineApprovalCapability,
 } from "./approval-native.js"
+import { INLINE_DEFAULT_REQUIRE_MENTION } from "./config-schema.js"
 
 const activeMonitors = new Map<string, { stop: () => Promise<void>; done: Promise<void> }>()
 
@@ -1411,7 +1412,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         cfg,
         groupId,
         accountId,
-        requireMentionDefault: resolved.config.requireMention ?? false,
+        requireMentionDefault: resolved.config.requireMention ?? INLINE_DEFAULT_REQUIRE_MENTION,
       })
     },
     resolveToolPolicy: ({ cfg, accountId, groupId, senderId, senderName, senderUsername, senderE164 }) =>
