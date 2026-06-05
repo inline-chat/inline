@@ -62,6 +62,106 @@ describe("processOutgoingText", () => {
     expect(mention.entity.mention.userId).toBe(BigInt(user.id))
   })
 
+  test("converts markdown inline chat links to thread entities", async () => {
+    const result = await processOutgoingText({
+      text: "cc [Planning](inline://chat?id=42) please",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc Planning please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const thread = result.entities!.entities[0]!
+    expect(thread.type).toBe(MessageEntity_Type.THREAD)
+    expect(thread.offset).toBe(3n)
+    expect(thread.length).toBe(8n)
+    expect(thread.entity.oneofKind).toBe("thread")
+    if (thread.entity.oneofKind !== "thread") {
+      throw new Error("Expected thread entity")
+    }
+    expect(thread.entity.thread.chatId).toBe(42n)
+  })
+
+  test("converts markdown inline thread id links to thread entities", async () => {
+    const result = await processOutgoingText({
+      text: "cc [Planning](inline://thread?id=42) please",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc Planning please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const thread = result.entities!.entities[0]!
+    expect(thread.type).toBe(MessageEntity_Type.THREAD)
+    expect(thread.entity.oneofKind).toBe("thread")
+    if (thread.entity.oneofKind !== "thread") {
+      throw new Error("Expected thread entity")
+    }
+    expect(thread.entity.thread.chatId).toBe(42n)
+  })
+
+  test("converts markdown inline thread title links to thread title entities", async () => {
+    const result = await processOutgoingText({
+      text: "cc [Planning](inline://thread?space_id=7) please",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc Planning please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const thread = result.entities!.entities[0]!
+    expect(thread.type).toBe(MessageEntity_Type.THREAD_TITLE)
+    expect(thread.offset).toBe(3n)
+    expect(thread.length).toBe(8n)
+    expect(thread.entity.oneofKind).toBe("threadTitle")
+    if (thread.entity.oneofKind !== "threadTitle") {
+      throw new Error("Expected thread title entity")
+    }
+    expect(thread.entity.threadTitle.spaceId).toBe(7n)
+    expect(thread.entity.threadTitle.title).toBe("Planning")
+  })
+
+  test("uses inline thread title query when label differs", async () => {
+    const result = await processOutgoingText({
+      text: "cc [the thread](inline://thread?space_id=7&title=Planning) please",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc the thread please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const thread = result.entities!.entities[0]!
+    expect(thread.type).toBe(MessageEntity_Type.THREAD_TITLE)
+    expect(thread.entity.oneofKind).toBe("threadTitle")
+    if (thread.entity.oneofKind !== "threadTitle") {
+      throw new Error("Expected thread title entity")
+    }
+    expect(thread.entity.threadTitle.spaceId).toBe(7n)
+    expect(thread.entity.threadTitle.title).toBe("Planning")
+  })
+
+  test("keeps invalid inline thread links as text urls", async () => {
+    const result = await processOutgoingText({
+      text: "cc [Planning](inline://thread) please",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc Planning please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const link = result.entities!.entities[0]!
+    expect(link.type).toBe(MessageEntity_Type.TEXT_URL)
+    expect(link.entity).toEqual({
+      oneofKind: "textUrl",
+      textUrl: { url: "inline://thread" },
+    })
+  })
+
   test("converts explicit inline user text_url entities to mention entities", async () => {
     const user = await testUtils.createUser(nextEmail("inline-link-entity"))
 

@@ -77,6 +77,7 @@ describe("inline/channel", () => {
         "Prefer bullet lists over markdown tables.",
         "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
         "Mention Inline users with markdown links like [@FirstName](inline://user?id=123); use inline://user?username=username only when the user id is unavailable.",
+        "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",
       ]),
     })
     expect(
