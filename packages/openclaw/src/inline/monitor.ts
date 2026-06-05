@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises"
+import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
 import {
   buildCommandTextFromArgs,
@@ -67,12 +67,16 @@ import {
   recordPendingHistoryEntryIfEnabled,
   type InlineTypingCallbacks,
 } from "../sdk-runtime-compat.js"
-import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import type { OpenClawConfig, PluginCommandContext } from "openclaw/plugin-sdk/core"
 import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract"
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
 import { InlineSdkClient, JsonFileStateStore, Method, type Message, type MessageActions } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { resolveInlineMessageActionsParam } from "./actions.js"
+import {
+  INLINE_DEFAULT_GROUP_POLICY,
+  INLINE_DEFAULT_REQUIRE_MENTION,
+} from "./config-schema.js"
 import { isInlineExecApprovalHandlerConfigured } from "./exec-approvals.js"
 import { buildInlineSystemPrompt, sanitizeInlineOutgoingText } from "./message-formatting.js"
 import {
@@ -126,6 +130,10 @@ import {
   shouldSyncInlineNativeCommandsForAccount,
   shouldSyncInlineNativeSkillsForAccount,
 } from "./bot-commands-sync.js"
+import {
+  handleInlineThreadReplyCommandWithConfigRuntime,
+  listInlineBuiltinCommandSpecs,
+} from "./threadreply-command.js"
 
 const CHANNEL_ID = "inline" as const
 const INLINE_NATIVE_COMMAND_PROVIDER = CHANNEL_ID
@@ -136,6 +144,7 @@ const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
 const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
+const INLINE_PARTICIPANT_ADD_READY_MAX_EVENT_AGE_MS = 10 * 60 * 1000
 const INLINE_REPLY_THREAD_SYSTEM_PROMPT =
   "Inline reply threads are scoped conversations: answer only the current reply-thread message and this thread's own history; use parent-chat context only as background, and do not answer unrelated questions from the parent chat or other reply threads."
 
@@ -676,6 +685,29 @@ function buildInlineReactionContextKey(params: {
   return `inline:reaction:${params.action}:${String(params.chatId)}:${String(params.messageId)}:${String(params.senderId)}:${emoji}`
 }
 
+function describeInlineParticipantAddSystemEvent(params: {
+  channelLabel: string
+  recentLines: string[]
+}): string {
+  const header = `Inline bot was added as a participant in ${params.channelLabel}.`
+  if (params.recentLines.length === 0) return header
+  return `${header}\nRecent messages before join:\n${params.recentLines.join("\n")}`
+}
+
+function buildInlineParticipantAddContextKey(params: {
+  chatId: bigint
+  userId: bigint
+  participantDate?: bigint
+  seq?: number
+}): string {
+  return [
+    "inline:participant:added",
+    String(params.chatId),
+    String(params.userId),
+    params.participantDate != null ? String(params.participantDate) : String(params.seq ?? 0),
+  ].join(":")
+}
+
 function normalizeInlineUsername(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim()
   if (!trimmed) return undefined
@@ -719,6 +751,35 @@ function parseInlineNativeCommandCallbackData(raw: string | undefined): string |
   return commandText.startsWith("/") ? commandText : null
 }
 
+function listHostInlinePluginCommandSpecs(cfg: OpenClawConfig): Array<{ name: string; description: string }> {
+  return getPluginCommandSpecs("inline", { config: cfg })
+}
+
+function listInlinePluginCommandSpecs(cfg: OpenClawConfig): Array<{ name: string; description: string }> {
+  return [
+    ...listHostInlinePluginCommandSpecs(cfg),
+    ...listInlineBuiltinCommandSpecs(),
+  ]
+}
+
+function hasInlineCommandSpec(
+  specs: Array<{ name: string }>,
+  commandName: string,
+): boolean {
+  const normalized = commandName.trim().toLowerCase()
+  if (!normalized) return false
+  return specs.some((spec) => spec.name.trim().toLowerCase() === normalized)
+}
+
+function isInlineThreadReplyCommandBody(commandBody: string): boolean {
+  return resolveInlineCommandNameFromBody(commandBody) === "threadreply"
+}
+
+function parseInlineCommandArgs(commandBody: string): string {
+  const match = commandBody.trim().match(/^\/[^\s]+(?:\s+([\s\S]*))?$/)
+  return match?.[1]?.trim() ?? ""
+}
+
 function isInlineNativeCommandBody(params: {
   cfg: OpenClawConfig
   account: ResolvedInlineAccount
@@ -747,7 +808,7 @@ function isInlineNativeCommandBody(params: {
   for (const spec of commandSpecs) {
     if (spec.name.trim().toLowerCase() === commandName) return true
   }
-  for (const spec of getPluginCommandSpecs("inline", { config: params.cfg })) {
+  for (const spec of listInlinePluginCommandSpecs(params.cfg)) {
     if (spec.name.trim().toLowerCase() === commandName) return true
   }
   return false
@@ -2241,6 +2302,47 @@ async function buildHistoryContext(params: {
   }
 }
 
+function buildInlineRecentHistoryLines(params: {
+  messages: Message[]
+  senderProfilesById: Map<string, SenderProfile>
+  meId: bigint
+  maxLines: number
+}): string[] {
+  if (params.maxLines <= 0) return []
+
+  return params.messages
+    .slice()
+    .sort((a, b) => {
+      const byDate = Number(a.date - b.date)
+      if (byDate !== 0) return byDate
+      if (a.id === b.id) return 0
+      return a.id < b.id ? -1 : 1
+    })
+    .map((message) => buildInlineHistoryEntryPayload({
+      message,
+      senderProfilesById: params.senderProfilesById,
+      meId: params.meId,
+    }))
+    .map((entry) => entry.line ?? entry.attachmentLine ?? entry.entityLine)
+    .filter((line): line is string => Boolean(line))
+    .slice(-params.maxLines)
+}
+
+function buildInlineParticipantAddReadyText(botUsername: string | undefined): string {
+  const mention = botUsername ? `@${botUsername}` : "me"
+  return `I'm here and ready. Mention ${mention} to ask me something.`
+}
+
+function shouldSendInlineParticipantAddReadyMessage(
+  participantDate: bigint | undefined,
+  now = Date.now(),
+): boolean {
+  if (participantDate == null) return true
+  const eventMs = Number(participantDate) * 1000
+  if (!Number.isFinite(eventMs) || eventMs <= 0) return true
+  return now - eventMs <= INLINE_PARTICIPANT_ADD_READY_MAX_EVENT_AGE_MS
+}
+
 export async function monitorInlineProvider(params: {
   cfg: OpenClawConfig
   account: ResolvedInlineAccount
@@ -2260,6 +2362,7 @@ export async function monitorInlineProvider(params: {
 
   const stateDir = core.state.resolveStateDir()
   const statePath = path.join(stateDir, "channels", "inline", `${account.accountId}.json`)
+  const hasExistingState = await stat(statePath).then(() => true).catch(() => false)
   await mkdir(path.dirname(statePath), { recursive: true })
 
   let client: InlineSdkClient | null = null
@@ -2289,6 +2392,7 @@ export async function monitorInlineProvider(params: {
     token,
     logger: sdkLog,
     state: new JsonFileStateStore(statePath),
+    catchUpUserFromStart: hasExistingState,
   })
 
   await client.connect(abortSignal)
@@ -2404,7 +2508,7 @@ export async function monitorInlineProvider(params: {
     const senderId = params.senderId != null ? String(params.senderId) : null
     const dmPolicy = account.config.dmPolicy ?? "pairing"
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
-    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist"
+    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? INLINE_DEFAULT_GROUP_POLICY
 
     if (isGroup) {
       if (groupPolicy === "disabled") {
@@ -2422,6 +2526,7 @@ export async function monitorInlineProvider(params: {
       })
 
       if (groupPolicy === "allowlist") {
+        const shouldBypassGroupAccess = params.eventKind === "participant.add"
         const groupAccess = resolveInlineGroupAccessPolicy({
           cfg,
           accountId: account.accountId,
@@ -2429,13 +2534,13 @@ export async function monitorInlineProvider(params: {
           hasGroupAllowFrom: groupSenderAllowlist.raw.length > 0,
           groupPolicy,
         })
-        if (groupAccess.allowlistEnabled && !groupAccess.allowed) {
+        if (groupAccess.allowlistEnabled && !groupAccess.allowed && !shouldBypassGroupAccess) {
           log?.info(
             `[${account.accountId}] inline: drop ${params.eventKind} chat=${String(effectiveChatId)} (groupPolicy=allowlist)`,
           )
           return null
         }
-        if (groupSenderAllowlist.raw.length > 0) {
+        if (groupSenderAllowlist.raw.length > 0 && !shouldBypassGroupAccess) {
           if (senderId == null && !groupSenderAllowlist.raw.includes("*")) {
             log?.info(
               `[${account.accountId}] inline: drop ${params.eventKind} chat=${String(effectiveChatId)} (sender unknown)`,
@@ -2615,6 +2720,90 @@ export async function monitorInlineProvider(params: {
     )
   }
 
+  const queueInlineParticipantAddSystemEvent = async (params: {
+    chatId: bigint
+    participant?: { userId?: bigint; date?: bigint }
+    seq?: number
+  }): Promise<void> => {
+    if (params.participant?.userId !== meId) return
+
+    const inboundAt = Date.now()
+    statusSink?.({
+      lastInboundAt: inboundAt,
+      lastEventAt: inboundAt,
+      ...createTransportActivityStatusPatch(inboundAt),
+    })
+
+    const ingress = await resolveInlineSystemEventContext({
+      chatId: params.chatId,
+      senderId: null,
+      eventKind: "participant.add",
+    })
+    if (!ingress) return
+
+    await hydrateChatParticipants(params.chatId)
+    const chatInfo = chatCache.get(params.chatId)
+    const isGroup = chatInfo?.kind !== "direct"
+    const historyLimit = resolveHistoryLimit({
+      cfg,
+      isGroup,
+      historyLimit: account.config.historyLimit,
+      dmHistoryLimit: account.config.dmHistoryLimit,
+    })
+    const recentMessages =
+      historyLimit > 0
+        ? await loadChatHistoryMessages({
+            client,
+            chatId: params.chatId,
+            limit: Math.min(historyLimit, 10),
+          }).catch((err) => {
+            statusSink?.({ lastError: `getChatHistory (participant add) failed: ${String(err)}` })
+            return null
+          })
+        : null
+    const recentLines = recentMessages
+      ? buildInlineRecentHistoryLines({
+          messages: recentMessages,
+          senderProfilesById,
+          meId,
+          maxLines: Math.min(historyLimit, 10),
+        })
+      : []
+
+    const contextKey = buildInlineParticipantAddContextKey({
+      chatId: params.chatId,
+      userId: meId,
+      ...(params.participant.date != null ? { participantDate: params.participant.date } : {}),
+      ...(params.seq != null ? { seq: params.seq } : {}),
+    })
+    core.system.enqueueSystemEvent(
+      describeInlineParticipantAddSystemEvent({
+        channelLabel: ingress.channelLabel,
+        recentLines,
+      }),
+      {
+        sessionKey: ingress.sessionKey,
+        contextKey,
+        forceSenderIsOwnerFalse: true,
+        trusted: false,
+      },
+    )
+
+    if (shouldSendInlineParticipantAddReadyMessage(params.participant.date)) {
+      try {
+        await client.sendMessage({
+          chatId: params.chatId,
+          text: buildInlineParticipantAddReadyText(botUsername),
+          parseMarkdown: account.config.parseMarkdown ?? true,
+        })
+        statusSink?.({ lastOutboundAt: Date.now() })
+      } catch (err) {
+        runtime.error?.(`inline participant-add ready message failed: ${String(err)}`)
+        statusSink?.({ lastError: `participant-add ready message failed: ${String(err)}` })
+      }
+    }
+  }
+
   const shouldQueueInlineReactionSystemEvent = async (params: {
     chatId: bigint
     messageId: bigint
@@ -2765,7 +2954,7 @@ export async function monitorInlineProvider(params: {
 
     const dmPolicy = account.config.dmPolicy ?? "pairing"
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
-    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist"
+    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? INLINE_DEFAULT_GROUP_POLICY
 
     const configAllowFrom = await resolveInlineAllowlist({
       cfg,
@@ -2868,6 +3057,10 @@ export async function monitorInlineProvider(params: {
         ? "native"
         : "text"
       : undefined
+    const normalizedCommandName = resolveInlineCommandNameFromBody(normalizedCommandBody)
+    const hostInlinePluginCommandRegistered = normalizedCommandName
+      ? hasInlineCommandSpec(listHostInlinePluginCommandSpecs(cfg), normalizedCommandName)
+      : false
     const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
       cfg,
       surface: CHANNEL_ID,
@@ -2891,6 +3084,7 @@ export async function monitorInlineProvider(params: {
       commandAuthorized: commandGate.commandAuthorized,
     })
     const shouldBlockControlCommand = allowTextCommands && hasControlCommand && !commandAuthorized
+    const nativeMentioned = typeof msg.mentioned === "boolean" ? msg.mentioned : false
 
     if (isGroup) {
       if (groupPolicy === "disabled") {
@@ -2910,7 +3104,7 @@ export async function monitorInlineProvider(params: {
           hasGroupAllowFrom: groupSenderAllowlist.raw.length > 0,
           groupPolicy,
         })
-        if (groupAccess.allowlistEnabled && !groupAccess.allowed) {
+        if (groupAccess.allowlistEnabled && !groupAccess.allowed && !nativeMentioned) {
           log?.info(`[${account.accountId}] inline: drop group chat=${String(effectiveChatId)} (groupPolicy=allowlist)`)
           await answerCallbackIfNeeded().catch((error) => {
             runtime.error?.(`inline callback answer failed: ${String(error)}`)
@@ -2985,7 +3179,6 @@ export async function monitorInlineProvider(params: {
     }
 
     const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId)
-    const nativeMentioned = typeof msg.mentioned === "boolean" ? msg.mentioned : false
     const patternMentioned = mentionRegexes.length
       ? core.channel.mentions.matchesMentionPatterns(rawBody, mentionRegexes)
       : false
@@ -3066,7 +3259,7 @@ export async function monitorInlineProvider(params: {
           cfg,
           groupId: String(effectiveChatId),
           accountId: account.accountId,
-          requireMentionDefault: account.config.requireMention ?? false,
+          requireMentionDefault: account.config.requireMention ?? INLINE_DEFAULT_REQUIRE_MENTION,
         })
       : false
     const mentionGate = resolveMentionGatingWithBypass({
@@ -3123,6 +3316,97 @@ export async function monitorInlineProvider(params: {
     }
 
     const parseMarkdown = account.config.parseMarkdown ?? true
+    if (
+      isInlineThreadReplyCommandBody(normalizedCommandBody) &&
+      !hostInlinePluginCommandRegistered
+    ) {
+      const configRuntime = (core as {
+        config?: {
+          current?: unknown
+          mutateConfigFile?: unknown
+        }
+      }).config
+      if (
+        typeof configRuntime?.current !== "function" ||
+        typeof configRuntime.mutateConfigFile !== "function"
+      ) {
+        runtime.error?.("inline /threadreply fallback unavailable: runtime config API missing")
+      } else {
+        const result = await handleInlineThreadReplyCommandWithConfigRuntime(
+          configRuntime as Parameters<typeof handleInlineThreadReplyCommandWithConfigRuntime>[0],
+          {
+            senderId,
+            channel: CHANNEL_ID,
+            channelId: CHANNEL_ID,
+            isAuthorizedSender: commandAuthorized,
+            senderIsOwner: commandAuthorized,
+            sessionKey: inboundSessionKey,
+            args: parseInlineCommandArgs(normalizedCommandBody),
+            commandBody: normalizedCommandBody,
+            config: cfg,
+            from: isGroup ? `inline:chat:${String(effectiveChatId)}` : `inline:${senderId}`,
+            to: `inline:${String(effectiveChatId)}`,
+            accountId: account.accountId,
+            ...(replyThreadContext
+              ? {
+                  messageThreadId: String(replyThreadContext.childChatId),
+                  threadParentId: String(replyThreadContext.parentChatId),
+                }
+              : {}),
+            requestConversationBinding: async () => ({ ok: false }) as never,
+            detachConversationBinding: async () => ({ removed: false }),
+            getCurrentConversationBinding: async () => null,
+          } satisfies PluginCommandContext,
+        )
+        const resultRecord = result as Record<string, unknown>
+        const actions = resolveInlineReplyActions(resultRecord)
+        const text =
+          typeof result.text === "string"
+            ? sanitizeInlineDeliveryText(result.text)
+            : ""
+
+        if (text || actions) {
+          let delivered = false
+          if (shouldEditCallbackTargetInPlace && callbackActionEvent) {
+            try {
+              const editResult = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                oneofKind: "editMessage",
+                editMessage: {
+                  messageId: callbackActionEvent.targetMessageId,
+                  peerId: buildChatPeer(chatId),
+                  text,
+                  ...(actions ? { actions } : {}),
+                  parseMarkdown,
+                },
+              })
+              if (editResult.oneofKind !== "editMessage") {
+                throw new Error(
+                  `inline /threadreply edit: expected editMessage result, got ${String(editResult.oneofKind)}`,
+                )
+              }
+              delivered = true
+            } catch (error) {
+              runtime.error?.(`inline /threadreply edit failed; falling back to send (${String(error)})`)
+            }
+          }
+          if (!delivered) {
+            const sent = await client.sendMessage({
+              chatId,
+              text,
+              ...(actions ? { actions } : {}),
+              parseMarkdown,
+            })
+            rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
+          }
+          statusSink?.({ lastOutboundAt: Date.now() })
+        }
+
+        await answerCallbackIfNeeded().catch((error) => {
+          runtime.error?.(`inline callback answer failed: ${String(error)}`)
+        })
+        return
+      }
+    }
     const commandsPageCallback = callbackActionEvent
       ? parseInlineCommandsPageCallback(callbackDataToUtf8(callbackActionEvent.data))
       : null
@@ -4527,6 +4811,19 @@ export async function monitorInlineProvider(params: {
             messageId: event.messageId,
             senderId: event.userId,
             emoji: event.emoji,
+          })
+          continue
+        }
+
+        if (rawEvent["kind"] === "chat.participant.add") {
+          const eventChatId = rawEvent["chatId"] as bigint | undefined
+          if (!eventChatId) continue
+          const participant = rawEvent["participant"] as { userId?: bigint; date?: bigint } | undefined
+          const seq = rawEvent["seq"] as number | undefined
+          await queueInlineParticipantAddSystemEvent({
+            chatId: eventChatId,
+            ...(participant ? { participant } : {}),
+            ...(seq != null ? { seq } : {}),
           })
           continue
         }
