@@ -1,4 +1,5 @@
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core"
+import { INLINE_DEFAULT_GROUP_POLICY } from "./config-schema.js"
 
 type DoctorAdapter = NonNullable<ChannelPlugin["doctor"]>
 type DoctorAccount = Record<string, unknown>
@@ -37,7 +38,7 @@ function hasGroupSenders(account: DoctorAccount, parent?: DoctorAccount): boolea
 }
 
 function getGroupPolicy(account: DoctorAccount, parent?: DoctorAccount): string {
-  return String(readInherited(account, parent, "groupPolicy") ?? "allowlist")
+  return String(readInherited(account, parent, "groupPolicy") ?? INLINE_DEFAULT_GROUP_POLICY)
 }
 
 function collectInlineEmptyAllowlistWarnings(

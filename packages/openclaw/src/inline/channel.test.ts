@@ -1081,6 +1081,7 @@ describe("inline/channel", () => {
       channels: {
         inline: {
           token: "token",
+          groupPolicy: "disabled",
           reactionNotifications: "allowlist",
           reactionAllowlist: ["@alice", "user:51", "accessGroup:operators"],
         },
@@ -1211,7 +1212,7 @@ describe("inline/channel", () => {
         },
       } as OpenClawConfig,
       accountId: "default",
-    })).toBe("allowlist")
+    })).toBe("open")
     expect(inlineSetupWizard.groupAccess?.helpLines?.join("\n")).toContain(
       "Use /whoami in a group",
     )
@@ -1775,7 +1776,7 @@ describe("inline/channel", () => {
     expect(tools).toEqual({ allow: ["message"] })
   })
 
-  it("defaults group requireMention to false when unset", async () => {
+  it("defaults group requireMention to true when unset", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -1789,7 +1790,7 @@ describe("inline/channel", () => {
       groupId: "88",
     } as any)
 
-    expect(requireMention).toBe(false)
+    expect(requireMention).toBe(true)
   })
 
   it("exposes inline rpc-backed message actions", async () => {

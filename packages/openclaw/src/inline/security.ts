@@ -3,6 +3,10 @@ import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { parseAccessGroupAllowFromEntry } from "openclaw/plugin-sdk/security-runtime"
 import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from "../openclaw-compat.js"
 import type { ResolvedInlineAccount } from "./accounts.js"
+import {
+  INLINE_DEFAULT_GROUP_POLICY,
+  INLINE_DEFAULT_REQUIRE_MENTION,
+} from "./config-schema.js"
 import { normalizeInlineAllowEntry } from "./shared.js"
 
 type InlineSecurityAdapter = NonNullable<ChannelPlugin<ResolvedInlineAccount>["security"]>
@@ -48,6 +52,18 @@ function hasInlineCommandAllowFrom(cfg: OpenClawConfig): boolean {
   if (!allowFrom || typeof allowFrom !== "object") return false
   const byProvider = allowFrom as Record<string, unknown>
   return hasEntries(byProvider.inline) || hasEntries(byProvider["*"])
+}
+
+function groupDefaultRequiresMention(account: ResolvedInlineAccount): boolean {
+  const groups = account.config.groups
+  const wildcard = groups && typeof groups === "object" && !Array.isArray(groups)
+    ? groups["*"]
+    : undefined
+  const wildcardRequireMention = wildcard && typeof wildcard === "object" && !Array.isArray(wildcard)
+    ? (wildcard as { requireMention?: unknown }).requireMention
+    : undefined
+  if (typeof wildcardRequireMention === "boolean") return wildcardRequireMention
+  return account.config.requireMention ?? INLINE_DEFAULT_REQUIRE_MENTION
 }
 
 function collectInvalidAllowFromEntries(params: {
@@ -115,7 +131,7 @@ export const inlineSecurityAdapter: InlineSecurityAdapter = {
   },
   collectWarnings: ({ account, cfg }) => {
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
-    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist"
+    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? INLINE_DEFAULT_GROUP_POLICY
     const groupRulesConfigured =
       Boolean(account.config.groups) && Object.keys(account.config.groups ?? {}).length > 0
     const groupSendersConfigured = hasGroupSenderEntries(account)
@@ -127,14 +143,12 @@ export const inlineSecurityAdapter: InlineSecurityAdapter = {
     if (groupPolicy !== "open") {
       return []
     }
-    if (groupRulesConfigured) {
+    if (!groupDefaultRequiresMention(account)) {
       return [
-        "- Inline groups: groupPolicy=\"open\" allows any group message to reach the agent (subject to mention policy). Set channels.inline.groupPolicy=\"allowlist\" for stricter routing.",
+        "- Inline groups: groupPolicy=\"open\" allows every group message to trigger replies because requireMention is disabled. Set channels.inline.requireMention=true or channels.inline.groups.\"*\".requireMention=true.",
       ]
     }
-    return [
-      "- Inline groups: groupPolicy=\"open\" with no group rules means every group can trigger replies. Consider channels.inline.groupPolicy=\"allowlist\".",
-    ]
+    return []
   },
   collectAuditFindings: ({ account, cfg }) => {
     const findings: InlineSecurityFinding[] = []
@@ -160,7 +174,7 @@ export const inlineSecurityAdapter: InlineSecurityAdapter = {
     appendInvalidReactionAllowlistFinding(findings, invalidReactionAllowlistEntries)
 
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
-    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist"
+    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? INLINE_DEFAULT_GROUP_POLICY
     const groupsConfigured =
       Boolean(account.config.groups) && Object.keys(account.config.groups ?? {}).length > 0
     const groupSendersConfigured = hasGroupSenderEntries(account)

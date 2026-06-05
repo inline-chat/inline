@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest"
 import { InlineAccountSchema, InlineConfigSchema, InlineRuntimeConfigSchema } from "./config-schema"
 
 describe("inline/config-schema", () => {
+  it("defaults group access to open while leaving mention overrides explicit", () => {
+    const parsed = InlineConfigSchema.parse({})
+
+    expect(parsed.groupPolicy).toBe("open")
+    expect(parsed.requireMention).toBeUndefined()
+  })
+
   it("accepts top-level reply thread capability config", () => {
     expect(
       InlineConfigSchema.safeParse({
