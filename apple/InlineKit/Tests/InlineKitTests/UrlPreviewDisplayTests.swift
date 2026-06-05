@@ -82,6 +82,28 @@ struct UrlPreviewDisplayTests {
     #expect(display.subtitle == "example.com • A long descript...")
   }
 
+  @Test("includes video duration in subtitle")
+  func includesVideoDurationInSubtitle() {
+    let preview = makePreview(
+      url: "https://example.com/video.mp4",
+      title: "Clip",
+      description: "Watch this",
+      mediaKind: "external_video",
+      externalDuration: 3_723
+    )
+    let display = preview.displayContent(maxDescriptionLength: 110)
+
+    #expect(display.subtitle == "example.com • 1:02:03 • Watch this")
+  }
+
+  @Test("does not show duration for non-video previews")
+  func doesNotShowDurationForNonVideoPreviews() {
+    let preview = makePreview(url: "https://example.com", title: "Article", duration: 42)
+    let display = preview.displayContent(maxDescriptionLength: 110)
+
+    #expect(display.subtitle == "example.com")
+  }
+
   @Test("does not repeat source when title falls back to source")
   func doesNotRepeatSourceWhenTitleFallsBackToSource() {
     let preview = makePreview(url: "https://example.com", description: "Description")
@@ -186,8 +208,10 @@ struct UrlPreviewDisplayTests {
     mediaKind: String? = nil,
     externalUrl: String? = nil,
     externalMimeType: String? = nil,
+    externalDuration: Int? = nil,
     embedUrl: String? = nil,
-    embedType: String? = nil
+    embedType: String? = nil,
+    embedDuration: Int? = nil
   ) -> UrlPreview {
     UrlPreview(
       id: 1,
@@ -203,8 +227,10 @@ struct UrlPreviewDisplayTests {
       mediaKind: mediaKind,
       externalUrl: externalUrl,
       externalMimeType: externalMimeType,
+      externalDuration: externalDuration,
       embedUrl: embedUrl,
-      embedType: embedType
+      embedType: embedType,
+      embedDuration: embedDuration
     )
   }
 }

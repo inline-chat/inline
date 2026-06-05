@@ -16,7 +16,7 @@ public extension UrlPreview {
     let title = title?.nilIfEmpty ?? source ?? url
     let description = description?.limitedDisplayText(maxLength: maxDescriptionLength)
     let subtitleSource = title.isSameDisplayText(as: source) ? nil : source
-    let subtitle = [subtitleSource, description]
+    let subtitle = [subtitleSource, displayDurationText, description]
       .compactMap(\.self)
       .joined(separator: " • ")
       .nilIfEmpty
@@ -35,6 +35,27 @@ public extension UrlPreview {
 
   var isNotionPreview: Bool {
     displaySource == KnownURLPreviewProvider.notion.displayName
+  }
+
+  private var displayDurationText: String? {
+    guard isVideoPreview, let seconds = displayDurationSeconds else { return nil }
+    return Self.formatDuration(seconds)
+  }
+
+  private var displayDurationSeconds: Int? {
+    if let externalDuration, externalDuration > 0 {
+      return externalDuration
+    }
+
+    if let embedDuration, embedDuration > 0 {
+      return embedDuration
+    }
+
+    if let duration, duration > 0, duration <= Int64(Int.max) {
+      return Int(duration)
+    }
+
+    return nil
   }
 
   private static func normalizedHost(for url: String) -> String? {
@@ -73,6 +94,18 @@ public extension UrlPreview {
     }
 
     return components.url
+  }
+
+  private static func formatDuration(_ totalSeconds: Int) -> String {
+    let hours = totalSeconds / 3_600
+    let minutes = (totalSeconds / 60) % 60
+    let seconds = totalSeconds % 60
+
+    if hours > 0 {
+      return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    return String(format: "%d:%02d", minutes, seconds)
   }
 
   private func knownProviderName(provider: String?, siteName: String?, host: String?) -> String? {

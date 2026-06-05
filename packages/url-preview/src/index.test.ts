@@ -192,6 +192,63 @@ describe("url-preview", () => {
     })
   })
 
+  it("detects direct video files and reads bounded mp4 duration metadata", async () => {
+    const moov = mp4Box("moov", mp4MvhdBox({ timescale: 1_000, duration: 3_723_000 }))
+    const fetchedRanges: string[] = []
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (_url, init) => {
+      const range = new Headers(init?.headers).get("Range")
+      if (!range) {
+        return new Response(new Uint8Array(), {
+          headers: {
+            "content-type": "video/mp4",
+            "content-length": String(8 * 1024 * 1024),
+          },
+        })
+      }
+
+      fetchedRanges.push(range)
+      if (range.startsWith("bytes=0-")) {
+        return new Response(mp4Box("ftyp", new Uint8Array([1, 2, 3, 4])), {
+          status: 206,
+          headers: {
+            "content-type": "video/mp4",
+            "content-range": "bytes 0-11/8388608",
+          },
+        })
+      }
+
+      return new Response(moov, {
+        status: 206,
+        headers: {
+          "content-type": "video/mp4",
+          "content-range": `bytes ${8 * 1024 * 1024 - moov.length}-${8 * 1024 * 1024 - 1}/8388608`,
+        },
+      })
+    }
+
+    const preview = await fetchUrlPreview("https://example.com/video.mp4", { fetchImpl, lookup: publicLookup })
+
+    expect(fetchedRanges).toEqual(["bytes=0-262143", "bytes=-4194304"])
+    expect(preview).toMatchObject({
+      provider: "generic",
+      siteName: "example.com",
+      title: "video.mp4",
+      duration: 3_723,
+      mediaType: "video",
+      media: {
+        kind: "external_video",
+        url: "https://example.com/video.mp4",
+        mimeType: "video/mp4",
+        duration: 3_723,
+      },
+      layout: {
+        hasLargeMedia: true,
+        showLargeMedia: true,
+      },
+    })
+    expect(preview?.imageUrl).toBeUndefined()
+  })
+
   it("follows safe redirects and records the final url", async () => {
     const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
       if (String(url) === "https://example.com/start") {
@@ -474,3 +531,28 @@ describe("url-preview", () => {
     expect(html).toBeNull()
   })
 })
+
+function mp4MvhdBox(input: { timescale: number; duration: number }): Uint8Array {
+  const payload = new Uint8Array(100)
+  writeUint32(payload, 12, input.timescale)
+  writeUint32(payload, 16, input.duration)
+  return mp4Box("mvhd", payload)
+}
+
+function mp4Box(type: string, payload: Uint8Array): Uint8Array {
+  const bytes = new Uint8Array(payload.length + 8)
+  writeUint32(bytes, 0, bytes.length)
+  bytes[4] = type.charCodeAt(0)
+  bytes[5] = type.charCodeAt(1)
+  bytes[6] = type.charCodeAt(2)
+  bytes[7] = type.charCodeAt(3)
+  bytes.set(payload, 8)
+  return bytes
+}
+
+function writeUint32(bytes: Uint8Array, offset: number, value: number) {
+  bytes[offset] = (value >>> 24) & 0xff
+  bytes[offset + 1] = (value >>> 16) & 0xff
+  bytes[offset + 2] = (value >>> 8) & 0xff
+  bytes[offset + 3] = value & 0xff
+}

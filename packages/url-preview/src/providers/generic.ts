@@ -12,6 +12,7 @@ import { defaultLookup, fetchWithRedirects, readResponseTextPrefix } from "../ne
 import { normalizeMetadataUrl } from "../normalize.js"
 import { cleanField, hostLabel } from "../text.js"
 import type { FetchUrlPreviewOptions, PreviewMedia, UrlPreviewResult } from "../types.js"
+import { fetchVideoMetadata, type VideoMetadata } from "../videoMetadata.js"
 
 export async function fetchGenericPreview(
   originalUrl: string,
@@ -86,17 +87,18 @@ function buildGenericPreview(
   }
 }
 
-function buildContentTypePreview(
+async function buildContentTypePreview(
   originalUrl: string,
   finalUrl: string,
   contentType: string,
   options: FetchUrlPreviewOptions,
-): UrlPreviewResult | null {
+): Promise<UrlPreviewResult | null> {
   const mediaType = detectMediaTypeFromContentType(contentType)
   if (!mediaType) {
     return null
   }
-  const media = mediaFromContentType(finalUrl, contentType)
+  const videoMetadata = await fetchVideoMetadata(finalUrl, contentType, options).catch(() => null)
+  const media = mediaFromContentType(finalUrl, contentType, videoMetadata ?? undefined)
 
   return {
     url: originalUrl,
@@ -104,6 +106,7 @@ function buildContentTypePreview(
     siteName: cleanField(hostLabel(finalUrl), options.maxSiteNameLength ?? DEFAULT_SITE_NAME_LENGTH) ?? undefined,
     title: cleanField(fileTitle(finalUrl), options.maxTitleLength ?? DEFAULT_TITLE_LENGTH) ?? undefined,
     imageUrl: media?.kind === "photo" ? media.url : undefined,
+    duration: mediaDuration(media),
     mediaType,
     media,
     layout: media ? previewLayout(media) : undefined,
@@ -211,7 +214,11 @@ function detectMediaTypeFromContentType(contentType: string): UrlPreviewResult["
   return null
 }
 
-function mediaFromContentType(finalUrl: string, contentType: string): PreviewMedia | undefined {
+function mediaFromContentType(
+  finalUrl: string,
+  contentType: string,
+  videoMetadata?: VideoMetadata,
+): PreviewMedia | undefined {
   const base = baseContentType(contentType)
   if (!base) {
     return undefined
@@ -222,6 +229,7 @@ function mediaFromContentType(finalUrl: string, contentType: string): PreviewMed
       kind: "external_video",
       url: finalUrl,
       mimeType: base,
+      duration: videoMetadata?.duration,
     }
   }
 

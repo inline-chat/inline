@@ -11,6 +11,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
   private enum Metrics {
     static let compactImageSize = CGSize(width: 32, height: 32)
     static let largeImageWidth: CGFloat = 240
+    static let playIconSize: CGFloat = 14
     static let providerPlaceholderSize: CGFloat = 24
     static let pressedScale: CGFloat = 0.97
   }
@@ -102,8 +103,8 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
       playIconView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
       playIconView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
-      playIconView.widthAnchor.constraint(equalToConstant: 22),
-      playIconView.heightAnchor.constraint(equalToConstant: 22),
+      playIconView.widthAnchor.constraint(equalToConstant: Metrics.playIconSize),
+      playIconView.heightAnchor.constraint(equalToConstant: Metrics.playIconSize),
     ])
   }
 
@@ -162,6 +163,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
     let isVideo = preview.isVideoPreview
     let display = preview.displayContent(maxDescriptionLength: mode == .large ? 420 : 110)
+    playIconView.tintColor = photoInfo == nil ? secondaryTextColor : .white
 
     titleLabel.text = display.title
     titleLabel.font = UIFont.systemFont(ofSize: mode == .large ? 15 : 13, weight: .medium)
@@ -291,8 +293,8 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     }
   }
 
-  static func preferredMode(for preview: UrlPreview) -> Mode {
-    preview.isVideoPreview ? .large : .compact
+  static func preferredMode(for preview: UrlPreview, photoInfo: PhotoInfo?) -> Mode {
+    preview.isVideoPreview && photoInfo != nil ? .large : .compact
   }
 
   private func configureImage(
@@ -310,8 +312,8 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     providerPlaceholderView.isHidden = !showsProviderPlaceholder
 
     guard let photoInfo else {
-      imageView.isHidden = showsProviderPlaceholder
-      imageView.showsLoadingPlaceholder = isVideo && !showsProviderPlaceholder
+      imageView.isHidden = showsProviderPlaceholder || isVideo
+      imageView.showsLoadingPlaceholder = false
       imageView.setPhoto(nil)
       return
     }

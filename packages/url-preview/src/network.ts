@@ -20,6 +20,24 @@ export type FetchWithRedirectsOptions = {
   maxRedirects: number
   userAgent: string
   accept: string
+  headers?: Record<string, string>
+}
+
+export type FetchByteRangeOptions = {
+  fetchImpl?: FetchImpl
+  lookup?: LookupFn
+  timeoutMs?: number
+  maxRedirects?: number
+  maxBytes?: number
+  userAgent?: string
+  accept?: string
+}
+
+export type FetchByteRangeResult = {
+  bytes: Uint8Array
+  contentType: string
+  finalUrl: string
+  contentRange?: string
 }
 
 export async function fetchBinary(url: string, options: FetchBinaryOptions = {}): Promise<FetchBinaryResult | null> {
@@ -49,6 +67,41 @@ export async function fetchBinary(url: string, options: FetchBinaryOptions = {})
 
   const bytes = await readResponseBytes(response.response, options.maxBytes ?? DEFAULT_MAX_BINARY_BYTES)
   return { bytes, contentType, finalUrl: response.finalUrl }
+}
+
+export async function fetchByteRange(
+  url: string,
+  range: string,
+  options: FetchByteRangeOptions = {},
+): Promise<FetchByteRangeResult | null> {
+  const normalized = normalizePreviewUrl(url)
+  if (!normalized) {
+    return null
+  }
+
+  const response = await fetchWithRedirects(normalized, {
+    fetchImpl: options.fetchImpl ?? fetch,
+    lookup: options.lookup ?? defaultLookup,
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxRedirects: options.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+    userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+    accept: options.accept ?? "video/*,application/octet-stream;q=0.8,*/*;q=0.1",
+    headers: {
+      Range: range,
+    },
+  })
+
+  if (!response.response.ok && response.response.status !== 206) {
+    return null
+  }
+
+  const bytes = await readResponseBytes(response.response, options.maxBytes ?? DEFAULT_MAX_BINARY_BYTES)
+  return {
+    bytes,
+    contentType: baseContentType(response.response.headers.get("content-type")),
+    finalUrl: response.finalUrl,
+    contentRange: response.response.headers.get("content-range") ?? undefined,
+  }
 }
 
 export async function fetchWithRedirects(
@@ -97,6 +150,7 @@ async function fetchOnce(url: string, options: FetchWithRedirectsOptions): Promi
       headers: {
         Accept: options.accept,
         "User-Agent": options.userAgent,
+        ...options.headers,
       },
     })
   } finally {
@@ -219,6 +273,6 @@ function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
 }
 
-function baseContentType(contentType: string | null): string {
+export function baseContentType(contentType: string | null): string {
   return contentType?.split(";")[0]?.trim().toLowerCase() ?? ""
 }
