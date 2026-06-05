@@ -96,7 +96,7 @@
             "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
           },
           "groupPolicy": {
-            "default": "allowlist",
+            "default": "open",
             "type": "string",
             "enum": ["open", "disabled", "allowlist"]
           },
@@ -442,7 +442,7 @@
                     }
                   },
                   "groupPolicy": {
-                    "default": "allowlist",
+                    "default": "open",
                     "type": "string",
                     "enum": [
                       "open",
@@ -982,7 +982,7 @@
         },
         "groupPolicy": {
           "label": "Inline Group Policy",
-          "help": "Controls group chat access: allowlist, open, or disabled."
+          "help": "Controls group chat access: open by default with mention gating, allowlist, or disabled."
         },
         "groupAllowFrom": {
           "label": "Inline Group Sender Allowlist",
