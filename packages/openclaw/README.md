@@ -20,6 +20,7 @@ Supports:
 Reply-thread behavior:
 
 - Small/new parent-chat conversations stay in the parent chat by default.
+- `replyThreadMode: "auto"` also creates a child reply thread when the triggering parent-chat message explicitly asks OpenClaw to reply in a thread.
 - `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery once `replyThreadAutoCreateMinMessages` is reached; each triggering parent-chat message gets its own child reply thread.
 - `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
 - `thread-create` creates a real Inline reply thread. `thread-reply` sends into the child reply-thread chat id returned by `thread-create`.
@@ -237,6 +238,7 @@ Inline reply-thread semantics:
 
 - `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id.
 - `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor.
+- In `replyThreadMode: "auto"`, explicit user requests such as "reply in a thread" create and answer in a child reply thread automatically; the `thread-create` and `thread-reply` message-tool actions remain available for manual tool use.
 - Automatic thread creation falls back to parent-chat delivery if the reply thread cannot be created.
 - Existing route state is reused only for the same parent-message anchor. New parent-chat messages get separate reply threads; messages already inside a reply thread stay in that thread and do not create nested threads.
 - Inline current-message media is attached like native channels. Reply-thread anchor media is summarized as context and is not promoted to current-message media on every child-thread turn.

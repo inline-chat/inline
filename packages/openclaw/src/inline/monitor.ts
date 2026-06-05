@@ -147,6 +147,10 @@ const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
 const INLINE_PARTICIPANT_ADD_READY_MAX_EVENT_AGE_MS = 10 * 60 * 1000
 const INLINE_REPLY_THREAD_SYSTEM_PROMPT =
   "Inline reply threads are scoped conversations: answer only the current reply-thread message and this thread's own history; use parent-chat context only as background, and do not answer unrelated questions from the parent chat or other reply threads."
+const INLINE_REPLY_THREAD_NEGATION_RE =
+  /\b(?:do\s+not|don't|dont|please\s+don't|please\s+dont|no\s+need\s+to)\s+(?:create|start|open|make|use|move|take|reply|respond|answer|send|thread)\b[^.!?\n]*\bthread\b|\b(?:reply|respond|answer|keep)\s+(?:here|in\s+the\s+main\s+chat|in\s+main\s+chat|in\s+the\s+parent\s+chat|in\s+parent\s+chat)\b/u
+const INLINE_REPLY_THREAD_INTENT_RE =
+  /\b(?:reply|respond|answer|send)\s+(?:in|inside|into|to)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\b(?:create|start|open|make|use)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\b(?:move|take)\s+(?:(?:this|it|the\s+answer|the\s+reply|the\s+response)\s+)?(?:to|into)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\bthread\s+(?:this|the\s+answer|the\s+reply|the\s+response)\b|\b(?:threaded\s+(?:reply|response)|(?:reply|respond|answer)\s+threaded)\b/u
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
@@ -1406,6 +1410,30 @@ function resolveInlineSystemPrompt(params: {
   ]
     .filter((entry): entry is string => Boolean(entry))
     .join("\n\n")
+}
+
+function hasExplicitInlineReplyThreadIntent(raw: string): boolean {
+  const text = normalizeLowercaseStringOrEmpty(raw).replace(/\s+/g, " ").trim()
+  if (!text) return false
+  if (INLINE_REPLY_THREAD_NEGATION_RE.test(text)) return false
+  return INLINE_REPLY_THREAD_INTENT_RE.test(text)
+}
+
+function shouldCreateInlineReplyThreadDelivery(params: {
+  mode: InlineReplyThreadMode
+  explicitThreadIntent: boolean
+  messageId: bigint
+  minMessages: number
+}): boolean {
+  if (params.mode === "main") return false
+  if (params.explicitThreadIntent) return true
+  return (
+    params.mode === "thread" &&
+    shouldAutoCreateInlineReplyThread({
+      messageId: params.messageId,
+      minMessages: params.minMessages,
+    })
+  )
 }
 
 function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: Map<string, SenderProfile>): string {
@@ -3634,12 +3662,18 @@ export async function monitorInlineProvider(params: {
     }
 
     let deliveryReplyThreadContext = replyThreadContext
+    const explicitReplyThreadIntent =
+      isGroup &&
+      replyThreadsEnabled &&
+      !deliveryReplyThreadContext &&
+      hasExplicitInlineReplyThreadIntent(rawBody)
     const shouldCreateDeliveryThread =
       isGroup &&
       replyThreadsEnabled &&
-      replyThreadMode === "thread" &&
       !deliveryReplyThreadContext &&
-      shouldAutoCreateInlineReplyThread({
+      shouldCreateInlineReplyThreadDelivery({
+        mode: replyThreadMode,
+        explicitThreadIntent: explicitReplyThreadIntent,
         messageId: msg.id,
         minMessages: replyThreadAutoCreateMinMessages,
       }) &&
