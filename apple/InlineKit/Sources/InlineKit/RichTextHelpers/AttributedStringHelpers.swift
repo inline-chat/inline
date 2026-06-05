@@ -64,7 +64,71 @@ public class AttributedStringHelpers {
   }
 
   public static func createThreadLinkAttributedString(_ text: String, target: ThreadLinkTarget) -> NSAttributedString {
-    NSAttributedString(string: text, attributes: threadLinkAttributes(target: target))
+    let attributedString = NSMutableAttributedString(string: text, attributes: threadLinkAttributes(target: target))
+    styleThreadLinkSyntax(in: attributedString, range: NSRange(location: 0, length: attributedString.length))
+    return attributedString
+  }
+
+  #if os(macOS)
+  public static func styleThreadLinkSyntax(
+    in attributedString: NSMutableAttributedString,
+    range: NSRange,
+    linkColor: NSColor = .systemBlue,
+    bracketColor: NSColor = .secondaryLabelColor
+  ) {
+    styleThreadLinkSyntax(
+      in: attributedString,
+      range: range,
+      linkColorValue: linkColor,
+      bracketColorValue: bracketColor
+    )
+  }
+  #elseif os(iOS)
+  public static func styleThreadLinkSyntax(
+    in attributedString: NSMutableAttributedString,
+    range: NSRange,
+    linkColor: UIColor = .systemBlue,
+    bracketColor: UIColor = .secondaryLabel
+  ) {
+    styleThreadLinkSyntax(
+      in: attributedString,
+      range: range,
+      linkColorValue: linkColor,
+      bracketColorValue: bracketColor
+    )
+  }
+  #endif
+
+  private static func styleThreadLinkSyntax(
+    in attributedString: NSMutableAttributedString,
+    range: NSRange,
+    linkColorValue: Any,
+    bracketColorValue: Any
+  ) {
+    let fullRange = NSRange(location: 0, length: attributedString.length)
+    let safeRange = NSIntersectionRange(range, fullRange)
+    guard safeRange.location != NSNotFound, safeRange.length > 0 else { return }
+
+    attributedString.addAttribute(.foregroundColor, value: linkColorValue, range: safeRange)
+
+    let text = attributedString.string as NSString
+    guard safeRange.length >= 4,
+          text.substring(with: NSRange(location: safeRange.location, length: 2)) == "[[",
+          text.substring(with: NSRange(location: NSMaxRange(safeRange) - 2, length: 2)) == "]]"
+    else {
+      return
+    }
+
+    attributedString.addAttribute(
+      .foregroundColor,
+      value: bracketColorValue,
+      range: NSRange(location: safeRange.location, length: 2)
+    )
+    attributedString.addAttribute(
+      .foregroundColor,
+      value: bracketColorValue,
+      range: NSRange(location: NSMaxRange(safeRange) - 2, length: 2)
+    )
   }
 
   // MARK: - Mention Manipulation

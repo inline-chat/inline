@@ -27,6 +27,17 @@ type InlineMentionLink = {
   username?: string
 }
 
+type InlineThreadLinkTarget =
+  | {
+      kind: "chat"
+      chatId: number
+    }
+  | {
+      kind: "title"
+      spaceId: number
+      title: string
+    }
+
 const isMentionChar = (char: string): boolean => {
   const code = char.charCodeAt(0)
   return (
@@ -147,6 +158,64 @@ const parseInlineUserLink = (rawUrl: string): { userId?: number; username?: stri
   return null
 }
 
+const trimTitle = (value: string | null | undefined): string | null => {
+  const title = value?.trim()
+  return title ? title : null
+}
+
+const parseInlineThreadLink = (rawUrl: string, visibleText: string): InlineThreadLinkTarget | null => {
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return null
+  }
+
+  if (url.protocol.toLowerCase() !== "inline:") {
+    return null
+  }
+
+  const host = url.hostname.toLowerCase()
+  if (host !== "chat" && host !== "thread") {
+    return null
+  }
+
+  const queryChatId = parsePositiveSafeInt(url.searchParams.get("id") ?? url.searchParams.get("chat_id"))
+  const pathChatId = parsePositiveSafeInt(url.pathname.replace(/^\/+/, ""))
+  const chatId = queryChatId ?? pathChatId
+  if (chatId) {
+    return { kind: "chat", chatId }
+  }
+
+  if (host !== "thread") {
+    return null
+  }
+
+  const spaceId = parsePositiveSafeInt(url.searchParams.get("space_id"))
+  const title = trimTitle(url.searchParams.get("title")) ?? trimTitle(visibleText)
+  if (!spaceId || !title) {
+    return null
+  }
+
+  return { kind: "title", spaceId, title }
+}
+
+const entityText = (text: string, entity: MessageEntity): string => {
+  const start = Number(entity.offset)
+  const length = Number(entity.length)
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(length) ||
+    start < 0 ||
+    length <= 0 ||
+    start + length > text.length
+  ) {
+    return ""
+  }
+
+  return text.slice(start, start + length)
+}
+
 const resolveInlineMentionLinks = async (
   entities: MessageEntities | undefined,
 ): Promise<MessageEntities | undefined> => {
@@ -247,6 +316,65 @@ const resolveInlineMentionLinks = async (
         oneofKind: "mention" as const,
         mention: {
           userId: BigInt(userId),
+        },
+      },
+    }
+  })
+
+  if (!changed) {
+    return entities
+  }
+
+  return {
+    entities: resolvedEntities,
+  }
+}
+
+const resolveInlineThreadLinks = (
+  text: string,
+  entities: MessageEntities | undefined,
+): MessageEntities | undefined => {
+  if (!entities || entities.entities.length === 0) {
+    return entities
+  }
+
+  let changed = false
+  const resolvedEntities = entities.entities.map((entity) => {
+    if (
+      entity?.type !== MessageEntity_Type.TEXT_URL ||
+      entity.entity.oneofKind !== "textUrl" ||
+      !entity.entity.textUrl.url
+    ) {
+      return entity
+    }
+
+    const target = parseInlineThreadLink(entity.entity.textUrl.url, entityText(text, entity))
+    if (!target) {
+      return entity
+    }
+
+    changed = true
+    if (target.kind === "chat") {
+      return {
+        ...entity,
+        type: MessageEntity_Type.THREAD,
+        entity: {
+          oneofKind: "thread" as const,
+          thread: {
+            chatId: BigInt(target.chatId),
+          },
+        },
+      }
+    }
+
+    return {
+      ...entity,
+      type: MessageEntity_Type.THREAD_TITLE,
+      entity: {
+        oneofKind: "threadTitle" as const,
+        threadTitle: {
+          spaceId: BigInt(target.spaceId),
+          title: target.title,
         },
       },
     }
@@ -368,6 +496,7 @@ export const processOutgoingText = async (
   }
 
   entities = await resolveInlineMentionLinks(entities)
+  entities = resolveInlineThreadLinks(text, entities)
   entities = await parseMissingMentionEntitiesByUsername({
     text,
     entities,

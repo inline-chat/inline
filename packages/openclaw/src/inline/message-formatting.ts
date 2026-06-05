@@ -4,6 +4,7 @@ const INLINE_FORMATTING_RULES = [
   "If a table is necessary, render it inside a fenced code block.",
   "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
   "Mention Inline users with markdown links like [@FirstName](inline://user?id=123); use inline://user?username=username only when the user id is unavailable.",
+  "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",
   "Use inline code only for actual code, commands, file paths, env vars, or identifiers.",
 ]
 

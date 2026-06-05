@@ -136,6 +136,11 @@ public class ProcessEntities {
     let blockCodeBackground = configuration.codeBlockBackgroundColor
       ?? configuration.textColor.withAlphaComponent(0.08)
     let codeBlockStyle = CodeBlockStyle.block
+    #if os(macOS)
+    let secondaryTextColor = NSColor.secondaryLabelColor
+    #else
+    let secondaryTextColor = UIColor.secondaryLabel
+    #endif
 
     let attributedString = NSMutableAttributedString(
       string: text,
@@ -194,6 +199,7 @@ public class ProcessEntities {
 
         case .textURL:
           if case let .textURL(textURL) = entity.entity {
+            let rangeText = (text as NSString).substring(with: range)
             if let userId = inlineUserId(from: textURL.url) {
               var attributes: [NSAttributedString.Key: Any] = [
                 .mentionUserId: userId,
@@ -209,6 +215,17 @@ public class ProcessEntities {
               #endif
 
               attributedString.addAttributes(attributes, range: range)
+            } else if let target = inlineThreadLink(from: textURL.url, visibleText: rangeText) {
+              attributedString.addAttributes(
+                threadLinkAttributes(target, configuration: configuration),
+                range: range
+              )
+              AttributedStringHelpers.styleThreadLinkSyntax(
+                in: attributedString,
+                range: range,
+                linkColor: configuration.linkColor,
+                bracketColor: secondaryTextColor
+              )
             } else if let emailAddress = emailAddress(from: textURL.url) {
               var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: configuration.linkColor,
@@ -300,6 +317,12 @@ public class ProcessEntities {
             threadLinkAttributes(.chatId(thread.chatID), configuration: configuration),
             range: range
           )
+          AttributedStringHelpers.styleThreadLinkSyntax(
+            in: attributedString,
+            range: range,
+            linkColor: configuration.linkColor,
+            bracketColor: secondaryTextColor
+          )
 
         case .threadTitle:
           guard case let .threadTitle(threadTitle) = entity.entity,
@@ -314,6 +337,12 @@ public class ProcessEntities {
               configuration: configuration
             ),
             range: range
+          )
+          AttributedStringHelpers.styleThreadLinkSyntax(
+            in: attributedString,
+            range: range,
+            linkColor: configuration.linkColor,
+            bracketColor: secondaryTextColor
           )
 
         case .bold:
@@ -565,6 +594,8 @@ public class ProcessEntities {
 
       guard let urlString, !urlString.isEmpty else { return }
 
+      let rangeText = (attributedString.string as NSString).substring(with: range)
+
       if let userId = inlineUserId(from: urlString) {
         var entity = MessageEntity()
         entity.type = .mention
@@ -573,6 +604,13 @@ public class ProcessEntities {
         entity.mention = MessageEntity.MessageEntityMention.with {
           $0.userID = userId
         }
+        entities.append(entity)
+        return
+      }
+
+      if let target = inlineThreadLink(from: urlString, visibleText: rangeText),
+         let entity = threadEntity(target: target, offset: Int64(range.location), length: Int64(range.length))
+      {
         entities.append(entity)
         return
       }
@@ -597,8 +635,6 @@ public class ProcessEntities {
 
       // Ignore data-detector / non-web link targets (we only support actual URLs as entities).
       guard isAllowedExternalLink(urlString) else { return }
-
-      let rangeText = (attributedString.string as NSString).substring(with: range)
 
       // Prefer URL entity when the visible text is the URL itself; otherwise use text_url.
       if rangeText == urlString {
@@ -779,11 +815,89 @@ public class ProcessEntities {
     return positiveInt64(pathId)
   }
 
+  private static func inlineThreadLink(from urlString: String, visibleText: String? = nil) -> ThreadLinkTarget? {
+    guard let components = URLComponents(string: urlString),
+          components.scheme?.lowercased() == "inline",
+          let host = components.host?.lowercased(),
+          host == "chat" || host == "thread"
+    else { return nil }
+
+    let queryChatId = positiveInt64(queryValue(in: components, names: ["id", "chat_id"]))
+    let pathChatId = positiveInt64(components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+    if let chatId = queryChatId ?? pathChatId {
+      return .chatId(chatId)
+    }
+
+    guard host == "thread" else { return nil }
+    guard let spaceId = positiveInt64(queryValue(in: components, names: ["space_id"])) else {
+      return nil
+    }
+
+    let explicitTitle = trimmedTitle(queryValue(in: components, names: ["title"]))
+    let labelTitle = visibleText.flatMap { strippedInlineMarkdownTitle($0) }
+    guard let title = explicitTitle ?? labelTitle else {
+      return nil
+    }
+
+    return .title(spaceId: spaceId, title: title)
+  }
+
+  private static func queryValue(in components: URLComponents, names: Set<String>) -> String? {
+    components.queryItems?.first { names.contains($0.name.lowercased()) }?.value
+  }
+
+  private static func trimmedTitle(_ value: String?) -> String? {
+    let title = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return title?.isEmpty == false ? title : nil
+  }
+
+  private static func strippedInlineMarkdownTitle(_ value: String) -> String? {
+    var title = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let replacements: [(String, String)] = [
+      ("`([^`\\n]+)`", "$1"),
+      ("\\*\\*([^\\n]+?)\\*\\*", "$1"),
+      ("__([^\\n]+?)__", "$1"),
+      ("(^|\\s)_([^_\\n]+?)_(?=\\s|$)", "$1$2"),
+    ]
+
+    for replacement in replacements {
+      guard let regex = try? NSRegularExpression(pattern: replacement.0) else { continue }
+      let range = NSRange(location: 0, length: (title as NSString).length)
+      title = regex.stringByReplacingMatches(in: title, range: range, withTemplate: replacement.1)
+    }
+
+    return trimmedTitle(title)
+  }
+
   private static func positiveInt64(_ value: String?) -> Int64? {
     guard let value, !value.isEmpty, value.allSatisfy(\.isNumber), let id = Int64(value), id > 0 else {
       return nil
     }
     return id
+  }
+
+  private static func threadEntity(target: ThreadLinkTarget, offset: Int64, length: Int64) -> MessageEntity? {
+    var entity = MessageEntity()
+    entity.offset = offset
+    entity.length = length
+
+    switch target {
+      case let .chatId(chatId):
+        guard chatId > 0 else { return nil }
+        entity.type = .thread
+        entity.thread = MessageEntity.MessageEntityThread.with {
+          $0.chatID = chatId
+        }
+      case let .title(spaceId, title):
+        guard spaceId > 0, !title.isEmpty else { return nil }
+        entity.type = .threadTitle
+        entity.threadTitle = MessageEntity.MessageEntityThreadTitle.with {
+          $0.spaceID = spaceId
+          $0.title = title
+        }
+    }
+
+    return entity
   }
 
   private static func emailAddress(from urlString: String) -> String? {
@@ -1452,14 +1566,24 @@ public class ProcessEntities {
         removals.append(OffsetRemoval(position: suffixStart, length: suffixLength))
       }
 
-      var entity = MessageEntity()
-      entity.type = .textURL
-      entity.offset = Int64(match.textRange.location)
-      entity.length = Int64(match.textRange.length)
-      entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-        $0.url = match.url
+      if let target = inlineThreadLink(from: match.url, visibleText: linkText),
+         let entity = threadEntity(
+           target: target,
+           offset: Int64(match.textRange.location),
+           length: Int64(match.textRange.length)
+         )
+      {
+        textUrlEntities.append(entity)
+      } else {
+        var entity = MessageEntity()
+        entity.type = .textURL
+        entity.offset = Int64(match.textRange.location)
+        entity.length = Int64(match.textRange.length)
+        entity.textURL = MessageEntity.MessageEntityTextUrl.with {
+          $0.url = match.url
+        }
+        textUrlEntities.append(entity)
       }
-      textUrlEntities.append(entity)
     }
 
     applyOffsetRemovals(&allEntities, removals: removals)
@@ -1479,8 +1603,6 @@ public class ProcessEntities {
 
     guard !matches.isEmpty else { return allEntities }
 
-    var removals: [OffsetRemoval] = []
-
     for match in matches.reversed() {
       if isPositionWithinCodeBlock(position: match.fullRange.location, entities: allEntities) {
         continue
@@ -1490,28 +1612,10 @@ public class ProcessEntities {
         continue
       }
 
-      guard let swiftFullRange = Range(match.fullRange, in: text) else {
-        continue
-      }
-
-      text.replaceSubrange(swiftFullRange, with: match.title)
-
-      let prefixLength = match.titleRange.location - match.fullRange.location
-      if prefixLength > 0 {
-        removals.append(OffsetRemoval(position: match.fullRange.location, length: prefixLength))
-      }
-
-      let suffixStart = match.titleRange.location + match.titleRange.length
-      let fullEnd = match.fullRange.location + match.fullRange.length
-      let suffixLength = fullEnd - suffixStart
-      if suffixLength > 0 {
-        removals.append(OffsetRemoval(position: suffixStart, length: suffixLength))
-      }
-
       var entity = MessageEntity()
       entity.type = .threadTitle
-      entity.offset = Int64(match.titleRange.location)
-      entity.length = Int64(match.titleRange.length)
+      entity.offset = Int64(match.fullRange.location)
+      entity.length = Int64(match.fullRange.length)
       entity.threadTitle = MessageEntity.MessageEntityThreadTitle.with {
         $0.spaceID = spaceId
         $0.title = match.title
@@ -1519,8 +1623,6 @@ public class ProcessEntities {
       threadEntities.append(entity)
     }
 
-    applyOffsetRemovals(&allEntities, removals: removals)
-    applyOffsetRemovals(&threadEntities, removals: removals)
     allEntities.append(contentsOf: threadEntities)
     return allEntities
   }
