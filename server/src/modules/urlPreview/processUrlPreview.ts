@@ -201,6 +201,7 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
       return
     }
 
+    // TODO: Generate and cache poster thumbnails for direct video previews once capture can be safely bounded.
     const photoId = metadata.imageUrl ? await getOrSavePreviewImage(metadata.imageUrl, input.currentUserId) : null
     const cache = await upsertPreviewCache({ metadata, photoId }).catch((error) => {
       log.warn("Failed to write URL preview cache", {

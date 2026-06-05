@@ -558,7 +558,7 @@ class UIMessageView: UIView {
       photoInfo: attachment.photoInfo,
       parentViewController: findViewController(),
       outgoing: outgoing,
-      mode: URLPreviewView.preferredMode(for: attachment.urlPreview!),
+      mode: URLPreviewView.preferredMode(for: attachment.urlPreview!, photoInfo: attachment.photoInfo),
       reloadMessageOnFinish: message,
       canRemove: outgoing && attachment.attachment.attachmentId != nil,
       onRemove: { [weak self] in

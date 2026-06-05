@@ -5,33 +5,8 @@ import Logger
 import Quartz
 
 final class URLPreviewAttachmentView: NSView, AttachmentView {
-  private enum Mode {
-    case compact
-    case large
-
-    var height: CGFloat {
-      switch self {
-        case .compact:
-          return Theme.urlPreviewCompactHeight
-        case .large:
-          return Theme.urlPreviewLargeHeight
-      }
-    }
-  }
-
-  private enum Constants {
-    static let cornerRadius: CGFloat = 8
-    static let compactVerticalPadding: CGFloat = 4
-    static let compactLeadingPadding: CGFloat = 6
-    static let compactTrailingPadding: CGFloat = 2
-    static let largePadding: CGFloat = 4
-    static let spacing: CGFloat = 7
-    static let largeSpacing: CGFloat = 6
-    static let accentWidth: CGFloat = 3
-    static let playIconSize: CGFloat = 18
-    static let providerPlaceholderSize: CGFloat = 24
-    static let largeMediaHeight: CGFloat = 134
-  }
+  private typealias Layout = URLPreviewAttachmentLayout
+  private typealias Mode = URLPreviewAttachmentLayout.Mode
 
   private(set) var fullAttachment: FullAttachment
   private var message: Message
@@ -64,6 +39,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   private var previewImageURL: URL?
   private var tempPreviewImageURL: URL?
   private var pressed = false
+  private var largeMediaHeightConstraint: NSLayoutConstraint?
 
   private lazy var accentView: NSView = {
     let view = NSView()
@@ -76,7 +52,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
-    view.layer?.cornerRadius = Constants.cornerRadius
+    view.layer?.cornerRadius = Layout.cornerRadius
     view.layer?.masksToBounds = true
     return view
   }()
@@ -85,7 +61,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     let stack = NSStackView()
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = mode == .large ? .vertical : .horizontal
-    stack.spacing = mode == .large ? Constants.largeSpacing : Constants.spacing
+    stack.spacing = mode == .large ? Layout.largeSpacing : Layout.spacing
     stack.alignment = mode == .large ? .leading : .centerY
     stack.detachesHiddenViews = true
     return stack
@@ -116,7 +92,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   private lazy var playIconView: NSImageView = {
     let view = NSImageView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.symbolConfiguration = .init(pointSize: Constants.playIconSize, weight: .medium)
+    view.symbolConfiguration = .init(pointSize: Layout.playIconSize, weight: .medium)
     view.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Play")
     view.imageScaling = .scaleProportionallyUpOrDown
     return view
@@ -134,7 +110,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     let stack = NSStackView()
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .vertical
-    stack.spacing = 2
+    stack.spacing = Layout.textSpacing
     stack.alignment = .leading
     stack.detachesHiddenViews = true
     stack.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -144,7 +120,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var titleLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: 13, weight: .medium)
+    label.font = Layout.titleFont
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -154,7 +130,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
   private lazy var descriptionLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: 12)
+    label.font = mode == .large ? Layout.largeDescriptionFont : Layout.compactDescriptionFont
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -181,26 +157,24 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   }
 
   private static func mode(for fullAttachment: FullAttachment) -> Mode {
-    fullAttachment.urlPreview?.isVideoPreview == true ? .large : .compact
+    Layout.mode(for: fullAttachment)
   }
 
   private func setup() {
     wantsLayer = true
-    layer?.cornerRadius = Constants.cornerRadius
+    layer?.cornerRadius = Layout.cornerRadius
     layer?.masksToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
     PressScaleAnimator.prepare(self)
-    let verticalPadding = mode == .large ? Constants.largePadding : Constants.compactVerticalPadding
-    let leadingPadding = mode == .large ? Constants.largePadding : Constants.compactLeadingPadding
-    let trailingPadding = mode == .large ? Constants.largePadding : Constants.compactTrailingPadding
+    let verticalPadding = mode == .large ? Layout.largePadding : Layout.compactVerticalPadding
+    let leadingPadding = mode == .large ? Layout.largePadding : Layout.compactLeadingPadding
+    let trailingPadding = mode == .large ? Layout.largePadding : Layout.compactTrailingPadding
 
     addSubview(backgroundView)
     addSubview(accentView)
     addSubview(contentStack)
 
     NSLayoutConstraint.activate([
-      heightAnchor.constraint(equalToConstant: mode.height),
-
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
       backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -209,7 +183,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       accentView.leadingAnchor.constraint(equalTo: leadingAnchor),
       accentView.topAnchor.constraint(equalTo: topAnchor),
       accentView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      accentView.widthAnchor.constraint(equalToConstant: Constants.accentWidth),
+      accentView.widthAnchor.constraint(equalToConstant: Layout.accentWidth),
 
       contentStack.leadingAnchor.constraint(equalTo: accentView.trailingAnchor, constant: leadingPadding),
       contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingPadding),
@@ -227,9 +201,12 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
           imageContainer.widthAnchor.constraint(equalTo: imageContainer.heightAnchor),
         ])
       case .large:
+        largeMediaHeightConstraint = imageContainer.heightAnchor.constraint(
+          equalToConstant: 0
+        )
         NSLayoutConstraint.activate([
           imageContainer.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
-          imageContainer.heightAnchor.constraint(equalToConstant: Constants.largeMediaHeight),
+          largeMediaHeightConstraint!,
           textStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
         ])
     }
@@ -249,13 +226,13 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
       providerPlaceholderView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
       providerPlaceholderView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
-      providerPlaceholderView.widthAnchor.constraint(equalToConstant: Constants.providerPlaceholderSize),
-      providerPlaceholderView.heightAnchor.constraint(equalToConstant: Constants.providerPlaceholderSize),
+      providerPlaceholderView.widthAnchor.constraint(equalToConstant: Layout.providerPlaceholderSize),
+      providerPlaceholderView.heightAnchor.constraint(equalToConstant: Layout.providerPlaceholderSize),
 
       playIconView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
       playIconView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
-      playIconView.widthAnchor.constraint(equalToConstant: Constants.playIconSize),
-      playIconView.heightAnchor.constraint(equalToConstant: Constants.playIconSize),
+      playIconView.widthAnchor.constraint(equalToConstant: Layout.playIconSize),
+      playIconView.heightAnchor.constraint(equalToConstant: Layout.playIconSize),
     ])
 
     textStack.addArrangedSubview(titleLabel)
@@ -271,13 +248,13 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     guard let preview = fullAttachment.urlPreview else { return }
 
     let isVideo = preview.isVideoPreview
-    let display = preview.displayContent(maxDescriptionLength: mode == .large ? 420 : 110)
+    let display = Layout.displayContent(for: preview, mode: mode)
     previewURL = preview.openURL
     toolTip = preview.title ?? preview.url
 
     titleLabel.stringValue = display.title
-    descriptionLabel.lineBreakMode = .byTruncatingTail
-    descriptionLabel.maximumNumberOfLines = 1
+    descriptionLabel.lineBreakMode = mode == .large ? .byWordWrapping : .byTruncatingTail
+    descriptionLabel.maximumNumberOfLines = mode == .large ? 0 : 1
     descriptionLabel.stringValue = display.subtitle ?? ""
     descriptionLabel.isHidden = descriptionLabel.stringValue.isEmpty
 
@@ -285,16 +262,26 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     setAccessibilityRole(.group)
 
     playIconView.isHidden = !isVideo
+    let hasPhoto = fullAttachment.photoInfo != nil
     let showsProviderPlaceholder = !isVideo && fullAttachment.photoInfo == nil && preview.isNotionPreview
     configureImage(
-      showLoadingPlaceholder: isVideo,
+      showLoadingPlaceholder: isVideo && hasPhoto,
+      showIconPlaceholder: isVideo && !hasPhoto,
       opensLinkOnImage: isVideo,
       providerPlaceholderImage: showsProviderPlaceholder ? NSImage(named: "notion-logo") : nil
     )
   }
 
+  func apply(layout: URLPreviewAttachmentLayout.Plan) {
+    guard let mediaSize = layout.mediaSize else { return }
+    if largeMediaHeightConstraint?.constant != mediaSize.height {
+      largeMediaHeightConstraint?.constant = mediaSize.height
+    }
+  }
+
   private func configureImage(
     showLoadingPlaceholder: Bool,
+    showIconPlaceholder: Bool,
     opensLinkOnImage: Bool,
     providerPlaceholderImage: NSImage?
   ) {
@@ -307,8 +294,8 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
     guard let photoInfo = fullAttachment.photoInfo else {
       clearPreviewImageURL()
-      imageContainer.isHidden = !showLoadingPlaceholder && providerPlaceholderImage == nil
-      photoView.isHidden = providerPlaceholderImage != nil
+      imageContainer.isHidden = !showLoadingPlaceholder && !showIconPlaceholder && providerPlaceholderImage == nil
+      photoView.isHidden = providerPlaceholderImage != nil || showIconPlaceholder
       photoView.showsLoadingPlaceholder = showLoadingPlaceholder && providerPlaceholderImage == nil
       photoView.setPhoto(nil)
       if !imageContainer.isHidden, opensLinkOnImage {
