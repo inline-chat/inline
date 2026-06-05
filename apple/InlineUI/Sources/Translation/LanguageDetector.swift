@@ -12,6 +12,38 @@ actor LanguageDetector {
     .persian,
   ]
 
+  private static let linkTLDs = [
+    "com", "net", "org", "edu", "gov", "io", "ai", "app", "dev", "chat",
+    "co", "me", "us", "uk", "ca", "de", "fr", "es", "it", "nl", "se",
+    "no", "fi", "dk", "jp", "kr", "cn", "tw", "hk", "sg", "in", "ir",
+    "ru", "br", "au", "nz", "xyz", "shop", "site", "online", "cloud",
+    "tech", "live", "news", "blog", "page", "store", "to", "ly", "fm", "tv",
+  ]
+
+  private static let emailRegex = makeRegex(
+    pattern: #"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}\b"#,
+    options: [.caseInsensitive]
+  )
+
+  private static let linkRegex: NSRegularExpression = {
+    let tlds = linkTLDs.joined(separator: "|")
+    let hostLabel = #"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"#
+    let terminators = #"\s<>()\[\]{}"'"#
+    let fullURL = #"https?://[^\#(terminators)]+"#
+    let wwwURL = #"www\.[^\#(terminators)]+"#
+    let bareDomainPrefix = #"(?<![@\w-])(?:\#(hostLabel)\.)+(?:\#(tlds))\b"#
+    let bareDomainPath = #"(?:[/:?#][^\#(terminators)]*)?"#
+    let bareDomain = "\(bareDomainPrefix)\(bareDomainPath)"
+    return makeRegex(
+      pattern: "\(fullURL)|\(wwwURL)|\(bareDomain)",
+      options: [.caseInsensitive]
+    )
+  }()
+
+  private static let mentionRegex = makeRegex(pattern: #"@\S+"#)
+  private static let emojiRegex = makeRegex(pattern: #"[\p{Emoji}]"#)
+  private static let whitespaceRegex = makeRegex(pattern: #"\s+"#)
+
   // Define major script groups
   private static let latinScripts: Set<String> = ["Latin"]
   private static let arabicScripts: Set<String> = ["Arabic"]
@@ -32,18 +64,11 @@ actor LanguageDetector {
   }
 
   public static func cleanText(_ text: String) -> String {
-    // Remove URLs
-    let urlPattern = "https?://\\S+"
-    let withoutUrls = text.replacingOccurrences(of: urlPattern, with: "", options: .regularExpression)
-
-    // Remove @mentions
-    let mentionPattern = "@\\S+"
-    let withoutMentions = withoutUrls.replacingOccurrences(of: mentionPattern, with: "", options: .regularExpression)
-
-    // remove emojis
-    let withoutEmojis = withoutMentions.replacingOccurrences(of: "[\\p{Emoji}]", with: "", options: .regularExpression)
-
-    return withoutEmojis.trimmingCharacters(in: .whitespacesAndNewlines)
+    let withoutEmails = replacingMatches(of: emailRegex, in: text)
+    let withoutLinks = replacingMatches(of: linkRegex, in: withoutEmails)
+    let withoutMentions = replacingMatches(of: mentionRegex, in: withoutLinks)
+    let withoutEmojis = replacingMatches(of: emojiRegex, in: withoutMentions)
+    return replacingMatches(of: whitespaceRegex, in: withoutEmojis).trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   /// Detects the top 2 dominant languages from supported languages
@@ -179,5 +204,21 @@ actor LanguageDetector {
 
     // Only return languages with sufficient confidence
     return confidence >= 0.1 ? language : nil
+  }
+
+  private static func replacingMatches(of regex: NSRegularExpression, in text: String) -> String {
+    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+    return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: " ")
+  }
+
+  private static func makeRegex(
+    pattern: String,
+    options: NSRegularExpression.Options = []
+  ) -> NSRegularExpression {
+    do {
+      return try NSRegularExpression(pattern: pattern, options: options)
+    } catch {
+      preconditionFailure("Invalid language detector regex: \(error)")
+    }
   }
 }

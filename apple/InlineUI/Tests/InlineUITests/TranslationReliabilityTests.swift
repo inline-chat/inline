@@ -40,6 +40,21 @@ struct TranslationReliabilityTests {
     )
   }
 
+  @Test("language detector strips links before detection")
+  func languageDetectorStripsLinks() {
+    let cleaned = LanguageDetector.cleanText(
+      "Check https://inline.chat/docs inline.chat/help www.example.com/path mo@inline.chat @mo"
+    )
+
+    #expect(cleaned == "Check")
+  }
+
+  @Test("link-only messages do not produce detected languages")
+  func linkOnlyMessagesDoNotProduceDetectedLanguages() {
+    #expect(LanguageDetector.advancedDetect("inline.chat/help") == [])
+    #expect(LanguageDetector.advancedDetect("www.example.com/path") == [])
+  }
+
   @MainActor
   @Test("translation state subscriptions only fire for the subscribed peer")
   func translationStateSubscriptionsArePeerScoped() {
