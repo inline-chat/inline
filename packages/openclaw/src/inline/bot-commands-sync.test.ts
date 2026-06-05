@@ -63,6 +63,7 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("model")
     expect(names).toContain("exec")
     expect(names).toContain("tools")
+    expect(names).toContain("threadreply")
     expect(names.indexOf("tools")).toBeLessThan(names.indexOf("model"))
     expect(setBody.commands).toContainEqual({
       command: "reasoning",
@@ -182,6 +183,46 @@ describe("inline/bot-commands-sync", () => {
     expect(logger.info).toHaveBeenCalledWith(
       '[inline] bot commands cleared for account "default"',
     )
+  })
+
+  it("inherits channel native command enablement when account commands only override native skills", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, result: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+    globalThis.fetch = fetchMock as typeof fetch
+
+    const { syncInlineNativeCommands } = await import("./bot-commands-sync")
+    const result = await syncInlineNativeCommands({
+      cfg: {
+        commands: { native: false },
+        channels: {
+          inline: {
+            commands: { native: true },
+            accounts: {
+              work: {
+                token: "work-token",
+                commands: { nativeSkills: false },
+              },
+            },
+          },
+        },
+      } satisfies OpenClawConfig,
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+      },
+    })
+
+    expect(result).toEqual({
+      attempted: 1,
+      synced: 1,
+      failed: 0,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://api.inline.chat/bot/setMyCommands")
   })
 
   it("includes config/debug commands only when enabled", async () => {
@@ -341,8 +382,8 @@ describe("inline/bot-commands-sync", () => {
       commands: Array<{ command: string }>
     })
     expect(bodies.map((body) => body.commands.map((entry) => entry.command))).toEqual([
-      ["main_skill"],
-      ["ops_skill"],
+      ["main_skill", "threadreply"],
+      ["ops_skill", "threadreply"],
     ])
   })
 
@@ -485,6 +526,7 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("status")
     expect(names).toContain("weather_skill")
     expect(names).toContain("plugin_cmd")
+    expect(names).toContain("threadreply")
     expect(names).not.toContain("bad-cmd")
     expect(setBody.commands.find((entry) => entry.command === "long_desc")?.description).toHaveLength(256)
     expect(logger.warn).toHaveBeenCalledWith(

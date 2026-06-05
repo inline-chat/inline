@@ -13,16 +13,29 @@ import {
 } from "./accounts.js"
 import { callInlineBotApi, type InlineBotCommand } from "./bot-commands-api.js"
 import { adaptInlineVisibleCopy } from "./message-formatting.js"
+import { listInlineBuiltinCommandSpecs } from "./threadreply-command.js"
 
 type InlineCommandsSyncLogger = {
   info?: (message: string) => void
   warn?: (message: string) => void
 }
 
+type InlineCommandsConfig = {
+  native?: boolean | "auto"
+  nativeSkills?: boolean | "auto"
+}
+
 const INLINE_COMMAND_NAME_RE = /^[a-z0-9_]{1,32}$/
 const INLINE_COMMAND_LIMIT = 100
 const INLINE_COMMAND_DESCRIPTION_LIMIT = 256
 const INLINE_NATIVE_COMMAND_PROVIDER = "inline"
+
+function resolveInlineChannelCommands(cfg: OpenClawConfig): InlineCommandsConfig | undefined {
+  const inline = cfg.channels?.inline
+  if (typeof inline !== "object" || inline === null || Array.isArray(inline)) return undefined
+  const commands = (inline as { commands?: InlineCommandsConfig }).commands
+  return typeof commands === "object" && commands !== null && !Array.isArray(commands) ? commands : undefined
+}
 
 function normalizeDynamicCommandName(raw: string): string {
   const trimmed = raw.trim().toLowerCase()
@@ -55,9 +68,7 @@ function appendUniqueCommand(
 }
 
 export function shouldSyncInlineNativeCommands(cfg: OpenClawConfig): boolean {
-  const inlineNativeSetting = (
-    cfg.channels?.inline as { commands?: { native?: boolean | "auto"; nativeSkills?: boolean | "auto" } } | undefined
-  )?.commands?.native
+  const inlineNativeSetting = resolveInlineChannelCommands(cfg)?.native
   const effective = inlineNativeSetting ?? cfg.commands?.native ?? "auto"
   return effective !== false
 }
@@ -66,7 +77,11 @@ export function shouldSyncInlineNativeCommandsForAccount(params: {
   cfg: OpenClawConfig
   account: ResolvedInlineAccount
 }): boolean {
-  const effective = params.account.config.commands?.native ?? params.cfg.commands?.native ?? "auto"
+  const effective =
+    params.account.config.commands?.native ??
+    resolveInlineChannelCommands(params.cfg)?.native ??
+    params.cfg.commands?.native ??
+    "auto"
   return effective !== false
 }
 
@@ -74,7 +89,11 @@ export function shouldSyncInlineNativeSkillsForAccount(params: {
   cfg: OpenClawConfig
   account: ResolvedInlineAccount
 }): boolean {
-  const effective = params.account.config.commands?.nativeSkills ?? params.cfg.commands?.nativeSkills ?? "auto"
+  const effective =
+    params.account.config.commands?.nativeSkills ??
+    resolveInlineChannelCommands(params.cfg)?.nativeSkills ??
+    params.cfg.commands?.nativeSkills ??
+    "auto"
   return effective !== false
 }
 
@@ -101,7 +120,10 @@ async function buildInlineNativeCommandsForConfig(params: {
     skillCommands,
     provider: INLINE_NATIVE_COMMAND_PROVIDER,
   })
-  const pluginSpecs = getPluginCommandSpecs("inline", { config: params.cfg })
+  const pluginSpecs = [
+    ...getPluginCommandSpecs("inline", { config: params.cfg }),
+    ...listInlineBuiltinCommandSpecs(),
+  ]
   const seen = new Set<string>()
 
   const resolved: InlineBotCommand[] = []
