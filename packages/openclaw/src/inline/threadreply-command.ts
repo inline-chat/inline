@@ -35,6 +35,39 @@ const MODE_LABELS: Record<InlineReplyThreadMode, string> = {
   main: "main",
 }
 const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
+const INLINE_THREADREPLY_NATIVE_NAME = "threadreply"
+
+type InlineThreadReplyCommandConfigRuntime = Pick<
+  OpenClawPluginApi["runtime"]["config"],
+  "current" | "mutateConfigFile"
+>
+
+type InlineBuiltinCommandSpec = {
+  name: string
+  description: string
+  acceptsArgs: boolean
+}
+
+export const INLINE_THREADREPLY_COMMAND_SPEC = {
+  name: "threadreply",
+  nativeNames: { inline: INLINE_THREADREPLY_NATIVE_NAME },
+  description: "Set Inline reply-thread mode for this chat.",
+  channels: ["inline"],
+  acceptsArgs: true,
+} satisfies Pick<
+  OpenClawPluginCommandDefinition,
+  "name" | "nativeNames" | "description" | "channels" | "acceptsArgs"
+>
+
+export function listInlineBuiltinCommandSpecs(): InlineBuiltinCommandSpec[] {
+  return [
+    {
+      name: INLINE_THREADREPLY_COMMAND_SPEC.nativeNames.inline ?? INLINE_THREADREPLY_COMMAND_SPEC.name,
+      description: INLINE_THREADREPLY_COMMAND_SPEC.description,
+      acceptsArgs: INLINE_THREADREPLY_COMMAND_SPEC.acceptsArgs,
+    },
+  ]
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -310,6 +343,13 @@ export async function handleInlineThreadReplyCommand(
   api: OpenClawPluginApi,
   ctx: PluginCommandContext,
 ) {
+  return await handleInlineThreadReplyCommandWithConfigRuntime(api.runtime.config, ctx)
+}
+
+export async function handleInlineThreadReplyCommandWithConfigRuntime(
+  configRuntime: InlineThreadReplyCommandConfigRuntime,
+  ctx: PluginCommandContext,
+) {
   if (!ctx.isAuthorizedSender) {
     return { text: "This command requires authorization." }
   }
@@ -319,7 +359,7 @@ export async function handleInlineThreadReplyCommand(
     return { text: "/threadreply is only available in Inline group chats." }
   }
 
-  const currentConfig = api.runtime.config.current() as OpenClawConfig
+  const currentConfig = configRuntime.current() as OpenClawConfig
   const args = ctx.args?.trim() ?? ""
   const [first = "", second, ...rest] = args.split(/\s+/).filter(Boolean)
   if (["min", "minimum", "threshold", "limit"].includes(first.trim().toLowerCase())) {
@@ -327,7 +367,7 @@ export async function handleInlineThreadReplyCommand(
     if (minMessages == null || rest.length > 0) {
       return { text: "Usage: /threadreply min <0-or-greater>|inherit" }
     }
-    const committed = await api.runtime.config.mutateConfigFile({
+    const committed = await configRuntime.mutateConfigFile({
       afterWrite: { mode: "auto" },
       mutate: (draft) => {
         setGroupMinMessages({
@@ -383,7 +423,7 @@ export async function handleInlineThreadReplyCommand(
     }
   }
 
-  const committed = await api.runtime.config.mutateConfigFile({
+  const committed = await configRuntime.mutateConfigFile({
     afterWrite: { mode: "auto" },
     mutate: (draft) => {
       setGroupMode({
@@ -408,11 +448,7 @@ export function createInlineThreadReplyCommand(
   api: OpenClawPluginApi,
 ): OpenClawPluginCommandDefinition {
   return {
-    name: "threadreply",
-    nativeNames: { inline: "threadreply" },
-    description: "Set Inline reply-thread mode for this chat.",
-    channels: ["inline"],
-    acceptsArgs: true,
+    ...INLINE_THREADREPLY_COMMAND_SPEC,
     handler: async (ctx) => await handleInlineThreadReplyCommand(api, ctx),
   }
 }
