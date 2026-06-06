@@ -3,46 +3,18 @@ import {
   API_BASE_URL,
   INLINE_ALERTS_BOT_TOKEN,
   INLINE_ALERTS_CHAT_ID,
-  TELEGRAM_ALERTS_CHAT_ID,
-  TELEGRAM_TOKEN,
   isDev,
 } from "@in/server/env"
 
 const shouldSendAlerts = () => !isDev
 
-export const sendBotEvent = (text: string) => {
+export const sendBotEvent = sendInlineAlert
+export const sendInlineOnlyBotEvent = sendInlineAlert
+
+function sendInlineAlert(text: string) {
   if (!shouldSendAlerts()) return
   // Fire-and-forget. These notifications are best-effort and should never affect the caller.
-  void sendTelegramBotEvent(text)
   void sendInlineBotEvent(text)
-}
-
-export const sendInlineOnlyBotEvent = (text: string) => {
-  if (!shouldSendAlerts()) return
-  // Internal alerts path: avoid forwarding sensitive admin details to third-party channels.
-  void sendInlineBotEvent(text)
-}
-
-const DEFAULT_TELEGRAM_ALERTS_CHAT_ID = "-1002262866594"
-
-async function sendTelegramBotEvent(text: string) {
-  const telegramToken = TELEGRAM_TOKEN
-  if (!telegramToken) return
-
-  const chatId = TELEGRAM_ALERTS_CHAT_ID ?? DEFAULT_TELEGRAM_ALERTS_CHAT_ID
-
-  try {
-    await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-      }),
-    })
-  } catch (error) {
-    Log.shared.error("Failed to send Telegram bot event", { error })
-  }
 }
 
 async function sendInlineBotEvent(text: string) {

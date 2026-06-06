@@ -84,8 +84,6 @@ export const PRELUDE_API_TOKEN = process.env["PRELUDE_API_TOKEN"] as string
 export const IPINFO_TOKEN = process.env["IPINFO_TOKEN"]
 export const OPENAI_API_KEY = process.env["OPENAI_API_KEY"]
 export const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"]
-export const TELEGRAM_TOKEN = process.env["TELEGRAM_TOKEN"]
-export const TELEGRAM_ALERTS_CHAT_ID = process.env["TELEGRAM_ALERTS_CHAT_ID"]
 export const INLINE_ALERTS_BOT_TOKEN = process.env["INLINE_ALERTS_BOT_TOKEN"]
 export const INLINE_ALERTS_CHAT_ID = process.env["INLINE_ALERTS_CHAT_ID"]
 export const ADMIN_PUBLIC_API_ORIGIN = process.env["ADMIN_PUBLIC_API_ORIGIN"]
@@ -153,8 +151,6 @@ const optionalVariables = [
   "IPINFO_TOKEN",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
-  "TELEGRAM_TOKEN",
-  "TELEGRAM_ALERTS_CHAT_ID",
   "INLINE_ALERTS_BOT_TOKEN",
   "INLINE_ALERTS_CHAT_ID",
   "LINEAR_CLIENT_ID",
