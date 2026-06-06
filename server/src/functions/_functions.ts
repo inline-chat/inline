@@ -22,6 +22,7 @@ import { updateChatInfo } from "./messages.updateChatInfo"
 import { moveThread } from "./messages.moveThread"
 import { pinMessage } from "./messages.pinMessage"
 import { updateDialogNotificationSettings } from "./messages.updateDialogNotificationSettings"
+import { updateDialogFollowMode } from "./messages.updateDialogFollowMode"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
@@ -72,6 +73,7 @@ export const Functions = {
     moveThread: moveThread,
     pinMessage: pinMessage,
     updateDialogNotificationSettings: updateDialogNotificationSettings,
+    updateDialogFollowMode: updateDialogFollowMode,
     forwardMessages: forwardMessages,
     createSubthread: createSubthread,
     showInChatList: showInChatList,

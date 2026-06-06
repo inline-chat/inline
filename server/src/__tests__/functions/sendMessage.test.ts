@@ -31,15 +31,6 @@ let userIndex = 0
 const runId = Date.now()
 const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
 
-async function waitForTrue(check: () => boolean | Promise<boolean>, timeoutMs = 5_000, intervalMs = 20): Promise<void> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await check()) return
-    await Bun.sleep(intervalMs)
-  }
-  throw new Error("Timed out waiting for async condition")
-}
-
 // Helpers
 function extractMessage(result: SendMessageResult): Message | null {
   const update = result.updates[1]
@@ -577,6 +568,7 @@ describe("sendMessage", () => {
     expect(recipientDialog?.chatListHidden).toBeNull()
     expect(recipientDialog?.open).toBe(true)
     expect(recipientDialog?.order).toBeTruthy()
+    expect(recipientDialog?.followMode).toBeNull()
 
     const userUpdates = await db.query.updates.findMany({
       where: {
@@ -592,7 +584,7 @@ describe("sendMessage", () => {
     expect(hasChatOpenUpdate).toBe(true)
   })
 
-  test("opens explicit all-notification dialogs for any new thread message", async () => {
+  test("does not open explicit all-notification dialogs for plain thread messages", async () => {
     const owner = await testUtils.createUser(nextEmail("thread-all-owner"))
     const recipient = await testUtils.createUser(nextEmail("thread-all-recipient"))
 
@@ -623,24 +615,16 @@ describe("sendMessage", () => {
       testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
     )
 
-    let [recipientDialog] = await db
+    const [recipientDialog] = await db
       .select()
       .from(dialogs)
       .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, recipient.id)))
       .limit(1)
-    await waitForTrue(async () => {
-      const [row] = await db
-        .select()
-        .from(dialogs)
-        .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, recipient.id)))
-        .limit(1)
-      recipientDialog = row
-      return recipientDialog?.open === true
-    })
 
-    expect(recipientDialog?.chatListHidden).toBeNull()
-    expect(recipientDialog?.open).toBe(true)
-    expect(recipientDialog?.order).toBeTruthy()
+    expect(recipientDialog?.chatListHidden).toBe(true)
+    expect(recipientDialog?.open).toBe(false)
+    expect(recipientDialog?.order).toBeNull()
+    expect(recipientDialog?.followMode).toBeNull()
   })
 
   test("opens reply-thread anchor authors' dialogs for the sidebar inbox", async () => {
@@ -693,6 +677,7 @@ describe("sendMessage", () => {
     expect(anchorAuthorDialog?.chatListHidden).toBeNull()
     expect(anchorAuthorDialog?.open).toBe(true)
     expect(anchorAuthorDialog?.order).toBeTruthy()
+    expect(anchorAuthorDialog?.followMode).toBe("following")
 
     const [senderDialog] = await db
       .select()
@@ -700,7 +685,10 @@ describe("sendMessage", () => {
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, owner.id)))
       .limit(1)
 
-    expect(senderDialog).toBeUndefined()
+    expect(senderDialog?.chatListHidden).toBe(true)
+    expect(senderDialog?.open).toBeNull()
+    expect(senderDialog?.order).toBeNull()
+    expect(senderDialog?.followMode).toBe("following")
 
     const userUpdates = await db.query.updates.findMany({
       where: {
@@ -849,5 +837,6 @@ describe("sendMessage", () => {
       .limit(1)
 
     expect(senderDialog?.chatListHidden).toBe(true)
+    expect(senderDialog?.followMode).toBe("following")
   })
 })

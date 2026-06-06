@@ -575,6 +575,13 @@
       "when": 1780673241196,
       "tag": "0081_bot-avatar-assets",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1780785278874,
+      "tag": "0082_reply-thread-follow-mode",
+      "breakpoints": true
     }
   ]
 }

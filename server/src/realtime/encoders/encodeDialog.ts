@@ -3,6 +3,7 @@ import type { DbDialog } from "@in/server/db/schema"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { decodeDialogNotificationSettings } from "@in/server/modules/notifications/dialogNotificationSettings"
 import { encodedDialogOpen } from "@in/server/modules/dialogOpen"
+import { encodeDialogFollowMode } from "@in/server/modules/dialogFollow"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("encodeDialog")
@@ -48,6 +49,7 @@ export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: n
     openedDate: encodeDate(dialog.openedDate ?? undefined),
     order: dialog.order ?? undefined,
     pinnedOrder: dialog.pinnedOrder ?? undefined,
+    followMode: encodeDialogFollowMode(dialog.followMode),
     sidebarVisible: dialog.chatListHidden !== true,
     chatListHidden: dialog.chatListHidden === true ? true : undefined,
   }

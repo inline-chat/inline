@@ -1,0 +1,1 @@
+ALTER TABLE "dialogs" ADD COLUMN "follow_mode" text;

@@ -947,6 +947,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         },
       }
 
+    case "userDialogFollowMode":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "dialogFollowMode",
+          dialogFollowMode: {
+            peerId: payload.userDialogFollowMode.peerId,
+            followMode: payload.userDialogFollowMode.followMode,
+          },
+        },
+      }
+
     case "userChatOpen":
       return {
         seq,

@@ -1,5 +1,4 @@
 import {
-  DialogNotificationSettings_Mode,
   InputPeer,
   MessageActions,
   MessageAttachment,
@@ -64,6 +63,11 @@ import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 import { maybeScheduleThreadTitleGeneration } from "@in/server/modules/threadTitles"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { VoiceTranscriptionModule } from "@in/server/modules/voiceTranscription"
+import {
+  DIALOG_FOLLOWING,
+  getFollowingDialogUserIds,
+  setDialogFollowModeForUsers,
+} from "@in/server/modules/dialogFollow"
 
 type Input = {
   peerId: InputPeer
@@ -288,6 +292,14 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+  if (isReplyThread(chat)) {
+    await autoFollowReplyThread({
+      chat,
+      currentUserId,
+      updateGroup,
+    })
+  }
+
   const sidebarOpenUserIds = await getSidebarOpenUserIds({
     chat,
     currentUserId,
@@ -312,16 +324,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       dialogs: changedDialogs,
     })
   }
-  scheduleExplicitAllNotificationSidebarOpen({
-    chat,
-    currentUserId,
-    updateGroup,
-    excludeUserIds: sidebarOpenUserIds,
-  })
   const { updates: unarchiveUpdates } = await unarchiveIfNeeded({
     chat,
     updateGroup,
     senderUserId: currentUserId,
+    userIds: isReplyThread(chat) ? sidebarOpenUserIds : undefined,
   })
 
   unarchiveUpdates.forEach(({ userId, update }) => {
@@ -497,101 +504,40 @@ const getSidebarOpenUserIds = async ({
     }
   }
 
-  const replyThreadAnchorSenderId = await getReplyThreadAnchorSenderId(chat)
-  if (replyThreadAnchorSenderId !== undefined && eligibleUserIds.has(replyThreadAnchorSenderId)) {
-    openUserIds.add(replyThreadAnchorSenderId)
+  if (isReplyThread(chat)) {
+    const followingUserIds = await getFollowingDialogUserIds({
+      chatId: chat.id,
+      userIds: Array.from(eligibleUserIds),
+    })
+
+    followingUserIds.forEach((userId) => openUserIds.add(userId))
   }
 
   return Array.from(openUserIds)
 }
 
-const scheduleExplicitAllNotificationSidebarOpen = ({
+const autoFollowReplyThread = async ({
   chat,
   currentUserId,
   updateGroup,
-  excludeUserIds,
 }: {
   chat: DbChat
   currentUserId: number
   updateGroup: UpdateGroup
-  excludeUserIds: number[]
 }) => {
-  void openExplicitAllNotificationDialogs({
-    chat,
-    currentUserId,
-    updateGroup,
-    excludeUserIds,
-  }).catch((error) => {
-    log.error("Failed to open explicit all-notification dialogs", {
-      error,
-      chatId: chat.id,
-    })
-  })
-}
+  const followUserIds = new Set<number>([currentUserId])
+  const eligibleUserIds = new Set(updateGroup.userIds)
+  const anchorSenderId = await getReplyThreadAnchorSenderId(chat)
 
-const openExplicitAllNotificationDialogs = async ({
-  chat,
-  currentUserId,
-  updateGroup,
-  excludeUserIds,
-}: {
-  chat: DbChat
-  currentUserId: number
-  updateGroup: UpdateGroup
-  excludeUserIds: number[]
-}) => {
-  const excludedUserIds = new Set(excludeUserIds)
-  const userIds = updateGroup.userIds.filter((userId) => userId !== currentUserId && !excludedUserIds.has(userId))
-  const allNotificationUserIds = await getExplicitAllNotificationUserIds({
-    chatId: chat.id,
-    userIds,
-  })
-
-  if (allNotificationUserIds.length === 0) {
-    return
+  if (anchorSenderId !== undefined && eligibleUserIds.has(anchorSenderId)) {
+    followUserIds.add(anchorSenderId)
   }
 
-  const { changedDialogs } = isLinkedSubthread(chat)
-    ? await showAndOpenLinkedSubthreadDialogs({
-        chat,
-        userIds: allNotificationUserIds,
-      })
-    : await setDialogOpenForUsers({
-        chat,
-        userIds: allNotificationUserIds,
-        open: true,
-      })
-
-  await emitChatListOpenUpdates({
+  await setDialogFollowModeForUsers({
     chat,
-    dialogs: changedDialogs,
+    userIds: Array.from(followUserIds),
+    followMode: DIALOG_FOLLOWING,
   })
-}
-
-const getExplicitAllNotificationUserIds = async ({
-  chatId,
-  userIds,
-}: {
-  chatId: number
-  userIds: number[]
-}): Promise<number[]> => {
-  if (userIds.length === 0) {
-    return []
-  }
-
-  const rows = await db
-    .select({
-      userId: dialogs.userId,
-      notificationSettings: dialogs.notificationSettings,
-    })
-    .from(dialogs)
-    .where(and(eq(dialogs.chatId, chatId), inArray(dialogs.userId, userIds)))
-
-  return rows
-    .filter(
-      (row) => decodeDialogNotificationSettings(row.notificationSettings)?.mode === DialogNotificationSettings_Mode.ALL,
-    )
-    .map((row) => row.userId)
 }
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]
