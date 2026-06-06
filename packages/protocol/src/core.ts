@@ -594,6 +594,12 @@ export interface Dialog {
      * @generated from protobuf field: optional string pinned_order = 15;
      */
     pinnedOrder?: string;
+    /**
+     * Reply-thread automatic surfacing policy.
+     *
+     * @generated from protobuf field: optional DialogFollowMode follow_mode = 16;
+     */
+    followMode?: DialogFollowMode;
 }
 /**
  * A thread
@@ -2520,6 +2526,12 @@ export interface RpcCall {
          */
         setBotPresenceState: SetBotPresenceStateInput;
     } | {
+        oneofKind: "updateDialogFollowMode";
+        /**
+         * @generated from protobuf field: UpdateDialogFollowModeInput updateDialogFollowMode = 61;
+         */
+        updateDialogFollowMode: UpdateDialogFollowModeInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2888,6 +2900,12 @@ export interface RpcResult {
          * @generated from protobuf field: SetBotPresenceStateResult setBotPresenceState = 60;
          */
         setBotPresenceState: SetBotPresenceStateResult;
+    } | {
+        oneofKind: "updateDialogFollowMode";
+        /**
+         * @generated from protobuf field: UpdateDialogFollowModeResult updateDialogFollowMode = 61;
+         */
+        updateDialogFollowMode: UpdateDialogFollowModeResult;
     } | {
         oneofKind: undefined;
     };
@@ -3287,6 +3305,32 @@ export interface UpdateDialogOrderResult {
      * @generated from protobuf field: optional User user = 3;
      */
     user?: User;
+}
+/**
+ * @generated from protobuf message UpdateDialogFollowModeInput
+ */
+export interface UpdateDialogFollowModeInput {
+    /**
+     * Peer to update follow mode for.
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * If unset, reply thread uses default relevance mode.
+     *
+     * @generated from protobuf field: optional DialogFollowMode follow_mode = 2;
+     */
+    followMode?: DialogFollowMode;
+}
+/**
+ * @generated from protobuf message UpdateDialogFollowModeResult
+ */
+export interface UpdateDialogFollowModeResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
 }
 /**
  * Mark dialog as unread
@@ -5113,6 +5157,12 @@ export interface Update {
          */
         botPresence: UpdateBotPresence;
     } | {
+        oneofKind: "dialogFollowMode";
+        /**
+         * @generated from protobuf field: UpdateDialogFollowMode dialog_follow_mode = 39;
+         */
+        dialogFollowMode: UpdateDialogFollowMode;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5200,6 +5250,10 @@ export interface UpdateChatInfo {
      * @generated from protobuf field: optional string emoji = 3;
      */
     emoji?: string;
+    /**
+     * @generated from protobuf field: optional bool untitled = 4;
+     */
+    untitled?: boolean;
 }
 /**
  * Update when pinned messages change for a chat
@@ -5219,10 +5273,6 @@ export interface UpdatePinnedMessages {
      * @generated from protobuf field: repeated int64 message_ids = 2;
      */
     messageIds: bigint[];
-    /**
-     * @generated from protobuf field: optional bool untitled = 4;
-     */
-    untitled?: boolean;
 }
 /**
  * Update when a thread is moved between home and a space.
@@ -5440,6 +5490,25 @@ export interface UpdateDialogNotificationSettings {
      * @generated from protobuf field: optional DialogNotificationSettings notification_settings = 2;
      */
     notificationSettings?: DialogNotificationSettings;
+}
+/**
+ * Update when reply-thread follow mode changes.
+ *
+ * @generated from protobuf message UpdateDialogFollowMode
+ */
+export interface UpdateDialogFollowMode {
+    /**
+     * Peer ID of the dialog that changed.
+     *
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * If unset, the reply thread uses default relevance mode.
+     *
+     * @generated from protobuf field: optional DialogFollowMode follow_mode = 2;
+     */
+    followMode?: DialogFollowMode;
 }
 /**
  * Update when a new chat is created either in space or a private chat
@@ -6173,6 +6242,19 @@ export interface DraftMessage {
     entities?: MessageEntities;
 }
 /**
+ * @generated from protobuf enum DialogFollowMode
+ */
+export enum DialogFollowMode {
+    /**
+     * @generated from protobuf enum value: DIALOG_FOLLOW_MODE_UNSPECIFIED = 0;
+     */
+    DIALOG_FOLLOW_MODE_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: FOLLOWING = 1;
+     */
+    FOLLOWING = 1
+}
+/**
  * @generated from protobuf enum MessageSendMode
  */
 export enum MessageSendMode {
@@ -6428,7 +6510,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SET_BOT_PRESENCE_STATE = 59;
      */
-    SET_BOT_PRESENCE_STATE = 59
+    SET_BOT_PRESENCE_STATE = 59,
+    /**
+     * @generated from protobuf enum value: UPDATE_DIALOG_FOLLOW_MODE = 60;
+     */
+    UPDATE_DIALOG_FOLLOW_MODE = 60
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -7789,7 +7875,8 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 11, name: "open", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 12, name: "opened_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 14, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 15, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 15, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 16, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -7848,6 +7935,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional string pinned_order */ 15:
                     message.pinnedOrder = reader.string();
                     break;
+                case /* optional DialogFollowMode follow_mode */ 16:
+                    message.followMode = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7905,6 +7995,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional string pinned_order = 15; */
         if (message.pinnedOrder !== undefined)
             writer.tag(15, WireType.LengthDelimited).string(message.pinnedOrder);
+        /* optional DialogFollowMode follow_mode = 16; */
+        if (message.followMode !== undefined)
+            writer.tag(16, WireType.Varint).int32(message.followMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11202,7 +11295,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 57, name: "setBotAvatar", kind: "message", oneof: "input", T: () => SetBotAvatarInput },
             { no: 58, name: "clearBotAvatar", kind: "message", oneof: "input", T: () => ClearBotAvatarInput },
             { no: 59, name: "getBotPresence", kind: "message", oneof: "input", T: () => GetBotPresenceInput },
-            { no: 60, name: "setBotPresenceState", kind: "message", oneof: "input", T: () => SetBotPresenceStateInput }
+            { no: 60, name: "setBotPresenceState", kind: "message", oneof: "input", T: () => SetBotPresenceStateInput },
+            { no: 61, name: "updateDialogFollowMode", kind: "message", oneof: "input", T: () => UpdateDialogFollowModeInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -11575,6 +11669,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         setBotPresenceState: SetBotPresenceStateInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setBotPresenceState)
                     };
                     break;
+                case /* UpdateDialogFollowModeInput updateDialogFollowMode */ 61:
+                    message.input = {
+                        oneofKind: "updateDialogFollowMode",
+                        updateDialogFollowMode: UpdateDialogFollowModeInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogFollowMode)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11767,6 +11867,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SetBotPresenceStateInput setBotPresenceState = 60; */
         if (message.input.oneofKind === "setBotPresenceState")
             SetBotPresenceStateInput.internalBinaryWrite(message.input.setBotPresenceState, writer.tag(60, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogFollowModeInput updateDialogFollowMode = 61; */
+        if (message.input.oneofKind === "updateDialogFollowMode")
+            UpdateDialogFollowModeInput.internalBinaryWrite(message.input.updateDialogFollowMode, writer.tag(61, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11840,7 +11943,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 57, name: "setBotAvatar", kind: "message", oneof: "result", T: () => SetBotAvatarResult },
             { no: 58, name: "clearBotAvatar", kind: "message", oneof: "result", T: () => ClearBotAvatarResult },
             { no: 59, name: "getBotPresence", kind: "message", oneof: "result", T: () => GetBotPresenceResult },
-            { no: 60, name: "setBotPresenceState", kind: "message", oneof: "result", T: () => SetBotPresenceStateResult }
+            { no: 60, name: "setBotPresenceState", kind: "message", oneof: "result", T: () => SetBotPresenceStateResult },
+            { no: 61, name: "updateDialogFollowMode", kind: "message", oneof: "result", T: () => UpdateDialogFollowModeResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -12213,6 +12317,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         setBotPresenceState: SetBotPresenceStateResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setBotPresenceState)
                     };
                     break;
+                case /* UpdateDialogFollowModeResult updateDialogFollowMode */ 61:
+                    message.result = {
+                        oneofKind: "updateDialogFollowMode",
+                        updateDialogFollowMode: UpdateDialogFollowModeResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogFollowMode)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12405,6 +12515,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SetBotPresenceStateResult setBotPresenceState = 60; */
         if (message.result.oneofKind === "setBotPresenceState")
             SetBotPresenceStateResult.internalBinaryWrite(message.result.setBotPresenceState, writer.tag(60, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogFollowModeResult updateDialogFollowMode = 61; */
+        if (message.result.oneofKind === "updateDialogFollowMode")
+            UpdateDialogFollowModeResult.internalBinaryWrite(message.result.updateDialogFollowMode, writer.tag(61, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13611,6 +13724,106 @@ class UpdateDialogOrderResult$Type extends MessageType<UpdateDialogOrderResult> 
  * @generated MessageType for protobuf message UpdateDialogOrderResult
  */
 export const UpdateDialogOrderResult = new UpdateDialogOrderResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogFollowModeInput$Type extends MessageType<UpdateDialogFollowModeInput> {
+    constructor() {
+        super("UpdateDialogFollowModeInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogFollowModeInput>): UpdateDialogFollowModeInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogFollowModeInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogFollowModeInput): UpdateDialogFollowModeInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional DialogFollowMode follow_mode */ 2:
+                    message.followMode = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogFollowModeInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional DialogFollowMode follow_mode = 2; */
+        if (message.followMode !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.followMode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogFollowModeInput
+ */
+export const UpdateDialogFollowModeInput = new UpdateDialogFollowModeInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogFollowModeResult$Type extends MessageType<UpdateDialogFollowModeResult> {
+    constructor() {
+        super("UpdateDialogFollowModeResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogFollowModeResult>): UpdateDialogFollowModeResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogFollowModeResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogFollowModeResult): UpdateDialogFollowModeResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogFollowModeResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogFollowModeResult
+ */
+export const UpdateDialogFollowModeResult = new UpdateDialogFollowModeResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MarkAsUnreadInput$Type extends MessageType<MarkAsUnreadInput> {
     constructor() {
@@ -18872,7 +19085,8 @@ class Update$Type extends MessageType<Update> {
             { no: 35, name: "message_action_invoked", kind: "message", oneof: "update", T: () => UpdateMessageActionInvoked },
             { no: 36, name: "message_action_answered", kind: "message", oneof: "update", T: () => UpdateMessageActionAnswered },
             { no: 37, name: "clear_chat_history", kind: "message", oneof: "update", T: () => UpdateClearChatHistory },
-            { no: 38, name: "bot_presence", kind: "message", oneof: "update", T: () => UpdateBotPresence }
+            { no: 38, name: "bot_presence", kind: "message", oneof: "update", T: () => UpdateBotPresence },
+            { no: 39, name: "dialog_follow_mode", kind: "message", oneof: "update", T: () => UpdateDialogFollowMode }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -19103,6 +19317,12 @@ class Update$Type extends MessageType<Update> {
                         botPresence: UpdateBotPresence.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).botPresence)
                     };
                     break;
+                case /* UpdateDialogFollowMode dialog_follow_mode */ 39:
+                    message.update = {
+                        oneofKind: "dialogFollowMode",
+                        dialogFollowMode: UpdateDialogFollowMode.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogFollowMode)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19226,6 +19446,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateBotPresence bot_presence = 38; */
         if (message.update.oneofKind === "botPresence")
             UpdateBotPresence.internalBinaryWrite(message.update.botPresence, writer.tag(38, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogFollowMode dialog_follow_mode = 39; */
+        if (message.update.oneofKind === "dialogFollowMode")
+            UpdateDialogFollowMode.internalBinaryWrite(message.update.dialogFollowMode, writer.tag(39, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -19461,7 +19684,8 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
         super("UpdateChatInfo", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateChatInfo>): UpdateChatInfo {
@@ -19485,6 +19709,9 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
                 case /* optional string emoji */ 3:
                     message.emoji = reader.string();
                     break;
+                case /* optional bool untitled */ 4:
+                    message.untitled = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19506,6 +19733,9 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
         /* optional string emoji = 3; */
         if (message.emoji !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.emoji);
+        /* optional bool untitled = 4; */
+        if (message.untitled !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.untitled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -19521,8 +19751,7 @@ class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
     constructor() {
         super("UpdatePinnedMessages", [
             { no: 1, name: "peer_id", kind: "message", T: () => Peer },
-            { no: 2, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 4, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdatePinnedMessages>): UpdatePinnedMessages {
@@ -19547,9 +19776,6 @@ class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
                     else
                         message.messageIds.push(reader.int64().toBigInt());
                     break;
-                case /* optional bool untitled */ 4:
-                    message.untitled = reader.bool();
-                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19572,9 +19798,6 @@ class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
                 writer.int64(message.messageIds[i]);
             writer.join();
         }
-        /* optional bool untitled = 4; */
-        if (message.untitled !== undefined)
-            writer.tag(4, WireType.Varint).bool(message.untitled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20175,6 +20398,59 @@ class UpdateDialogNotificationSettings$Type extends MessageType<UpdateDialogNoti
  * @generated MessageType for protobuf message UpdateDialogNotificationSettings
  */
 export const UpdateDialogNotificationSettings = new UpdateDialogNotificationSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogFollowMode$Type extends MessageType<UpdateDialogFollowMode> {
+    constructor() {
+        super("UpdateDialogFollowMode", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogFollowMode>): UpdateDialogFollowMode {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogFollowMode>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogFollowMode): UpdateDialogFollowMode {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional DialogFollowMode follow_mode */ 2:
+                    message.followMode = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogFollowMode, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional DialogFollowMode follow_mode = 2; */
+        if (message.followMode !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.followMode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogFollowMode
+ */
+export const UpdateDialogFollowMode = new UpdateDialogFollowMode$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewChat$Type extends MessageType<UpdateNewChat> {
     constructor() {

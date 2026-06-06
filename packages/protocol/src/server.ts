@@ -13,11 +13,13 @@ import { MessageType } from "@protobuf-ts/runtime";
 import { MessageActionResponseUi } from "./core.js";
 import { Dialog } from "./core.js";
 import { Chat } from "./core.js";
+import { DialogFollowMode } from "./core.js";
 import { DialogNotificationSettings } from "./core.js";
 import { Space } from "./core.js";
 import { Peer } from "./core.js";
 import { User } from "./core.js";
 import { Member } from "./core.js";
+import { ChatParticipant } from "./core.js";
 /**
  * @generated from protobuf message server.ServerUpdate
  */
@@ -63,6 +65,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerChatUpdateParticipantDelete participant_delete = 8;
          */
         participantDelete: ServerChatUpdateParticipantDelete;
+    } | {
+        oneofKind: "participantAdd";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateParticipantAdd participant_add = 30;
+         */
+        participantAdd: ServerChatUpdateParticipantAdd;
     } | {
         oneofKind: "newChat";
         /**
@@ -134,6 +142,12 @@ export interface ServerUpdate {
          */
         userChatParticipantDelete: ServerUserUpdateChatParticipantDelete;
     } | {
+        oneofKind: "userChatParticipantAdd";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateChatParticipantAdd user_chat_participant_add = 31;
+         */
+        userChatParticipantAdd: ServerUserUpdateChatParticipantAdd;
+    } | {
         oneofKind: "userDialogArchived";
         /**
          * @generated from protobuf field: server.ServerUserUpdateDialogArchived user_dialog_archived = 14;
@@ -193,6 +207,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerChatUpdateMessageAttachment message_attachment = 29;
          */
         messageAttachment: ServerChatUpdateMessageAttachment;
+    } | {
+        oneofKind: "userDialogFollowMode";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateDialogFollowMode user_dialog_follow_mode = 32;
+         */
+        userDialogFollowMode: ServerUserUpdateDialogFollowMode;
     } | {
         oneofKind: undefined;
     };
@@ -321,6 +341,21 @@ export interface ServerChatUpdateParticipantDelete {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+}
+/**
+ * Update for a chat when a participant is added
+ *
+ * @generated from protobuf message server.ServerChatUpdateParticipantAdd
+ */
+export interface ServerChatUpdateParticipantAdd {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatParticipant participant = 2;
+     */
+    participant?: ChatParticipant;
 }
 /**
  * Update for a chat when visibility changes
@@ -523,6 +558,21 @@ export interface ServerUserUpdateChatParticipantDelete {
     chatId: bigint;
 }
 /**
+ * Update for a user when they were added to a chat
+ *
+ * @generated from protobuf message server.ServerUserUpdateChatParticipantAdd
+ */
+export interface ServerUserUpdateChatParticipantAdd {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatParticipant participant = 2;
+     */
+    participant?: ChatParticipant;
+}
+/**
  * Update for a user when a dialog is archived or unarchived
  *
  * @generated from protobuf message server.ServerUserUpdateDialogArchived
@@ -604,6 +654,21 @@ export interface ServerUserUpdateDialogNotificationSettings {
     notificationSettings?: DialogNotificationSettings;
 }
 /**
+ * Update for a user when reply-thread follow mode changes.
+ *
+ * @generated from protobuf message server.ServerUserUpdateDialogFollowMode
+ */
+export interface ServerUserUpdateDialogFollowMode {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: optional DialogFollowMode follow_mode = 2;
+     */
+    followMode?: DialogFollowMode;
+}
+/**
  * Update for a user when a chat becomes chat-list-visible for them.
  *
  * @generated from protobuf message server.ServerUserUpdateChatOpen
@@ -675,6 +740,7 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 6, name: "delete_messages", kind: "message", oneof: "update", T: () => ServerChatUpdateDeleteMessages },
             { no: 7, name: "delete_chat", kind: "message", oneof: "update", T: () => ServerChatUpdateDeleteChat },
             { no: 8, name: "participant_delete", kind: "message", oneof: "update", T: () => ServerChatUpdateParticipantDelete },
+            { no: 30, name: "participant_add", kind: "message", oneof: "update", T: () => ServerChatUpdateParticipantAdd },
             { no: 18, name: "new_chat", kind: "message", oneof: "update", T: () => ServerChatUpdateNewChat },
             { no: 13, name: "chat_visibility", kind: "message", oneof: "update", T: () => ServerChatUpdateVisibility },
             { no: 15, name: "chat_info", kind: "message", oneof: "update", T: () => ServerChatUpdateInfo },
@@ -686,6 +752,7 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 28, name: "space_clear_history", kind: "message", oneof: "update", T: () => ServerSpaceUpdateClearHistory },
             { no: 10, name: "user_space_member_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateSpaceMemberDelete },
             { no: 11, name: "user_chat_participant_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantDelete },
+            { no: 31, name: "user_chat_participant_add", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantAdd },
             { no: 14, name: "user_dialog_archived", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogArchived },
             { no: 17, name: "user_join_space", kind: "message", oneof: "update", T: () => ServerUserUpdateJoinSpace },
             { no: 20, name: "user_read_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateReadMaxId },
@@ -695,7 +762,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 25, name: "user_message_action_invoked", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionInvoked },
             { no: 26, name: "user_message_action_answered", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionAnswered },
             { no: 27, name: "clear_chat_history", kind: "message", oneof: "update", T: () => ServerChatUpdateClearHistory },
-            { no: 29, name: "message_attachment", kind: "message", oneof: "update", T: () => ServerChatUpdateMessageAttachment }
+            { no: 29, name: "message_attachment", kind: "message", oneof: "update", T: () => ServerChatUpdateMessageAttachment },
+            { no: 32, name: "user_dialog_follow_mode", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFollowMode }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -746,6 +814,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                     message.update = {
                         oneofKind: "participantDelete",
                         participantDelete: ServerChatUpdateParticipantDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).participantDelete)
+                    };
+                    break;
+                case /* server.ServerChatUpdateParticipantAdd participant_add */ 30:
+                    message.update = {
+                        oneofKind: "participantAdd",
+                        participantAdd: ServerChatUpdateParticipantAdd.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).participantAdd)
                     };
                     break;
                 case /* server.ServerChatUpdateNewChat new_chat */ 18:
@@ -814,6 +888,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userChatParticipantDelete: ServerUserUpdateChatParticipantDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatParticipantDelete)
                     };
                     break;
+                case /* server.ServerUserUpdateChatParticipantAdd user_chat_participant_add */ 31:
+                    message.update = {
+                        oneofKind: "userChatParticipantAdd",
+                        userChatParticipantAdd: ServerUserUpdateChatParticipantAdd.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatParticipantAdd)
+                    };
+                    break;
                 case /* server.ServerUserUpdateDialogArchived user_dialog_archived */ 14:
                     message.update = {
                         oneofKind: "userDialogArchived",
@@ -874,6 +954,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         messageAttachment: ServerChatUpdateMessageAttachment.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).messageAttachment)
                     };
                     break;
+                case /* server.ServerUserUpdateDialogFollowMode user_dialog_follow_mode */ 32:
+                    message.update = {
+                        oneofKind: "userDialogFollowMode",
+                        userDialogFollowMode: ServerUserUpdateDialogFollowMode.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogFollowMode)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -907,6 +993,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerChatUpdateParticipantDelete participant_delete = 8; */
         if (message.update.oneofKind === "participantDelete")
             ServerChatUpdateParticipantDelete.internalBinaryWrite(message.update.participantDelete, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateParticipantAdd participant_add = 30; */
+        if (message.update.oneofKind === "participantAdd")
+            ServerChatUpdateParticipantAdd.internalBinaryWrite(message.update.participantAdd, writer.tag(30, WireType.LengthDelimited).fork(), options).join();
         /* server.ServerChatUpdateNewChat new_chat = 18; */
         if (message.update.oneofKind === "newChat")
             ServerChatUpdateNewChat.internalBinaryWrite(message.update.newChat, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
@@ -940,6 +1029,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11; */
         if (message.update.oneofKind === "userChatParticipantDelete")
             ServerUserUpdateChatParticipantDelete.internalBinaryWrite(message.update.userChatParticipantDelete, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateChatParticipantAdd user_chat_participant_add = 31; */
+        if (message.update.oneofKind === "userChatParticipantAdd")
+            ServerUserUpdateChatParticipantAdd.internalBinaryWrite(message.update.userChatParticipantAdd, writer.tag(31, WireType.LengthDelimited).fork(), options).join();
         /* server.ServerUserUpdateDialogArchived user_dialog_archived = 14; */
         if (message.update.oneofKind === "userDialogArchived")
             ServerUserUpdateDialogArchived.internalBinaryWrite(message.update.userDialogArchived, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
@@ -970,6 +1062,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerChatUpdateMessageAttachment message_attachment = 29; */
         if (message.update.oneofKind === "messageAttachment")
             ServerChatUpdateMessageAttachment.internalBinaryWrite(message.update.messageAttachment, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateDialogFollowMode user_dialog_follow_mode = 32; */
+        if (message.update.oneofKind === "userDialogFollowMode")
+            ServerUserUpdateDialogFollowMode.internalBinaryWrite(message.update.userDialogFollowMode, writer.tag(32, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1412,6 +1507,60 @@ class ServerChatUpdateParticipantDelete$Type extends MessageType<ServerChatUpdat
  * @generated MessageType for protobuf message server.ServerChatUpdateParticipantDelete
  */
 export const ServerChatUpdateParticipantDelete = new ServerChatUpdateParticipantDelete$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateParticipantAdd$Type extends MessageType<ServerChatUpdateParticipantAdd> {
+    constructor() {
+        super("server.ServerChatUpdateParticipantAdd", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "participant", kind: "message", T: () => ChatParticipant }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateParticipantAdd>): ServerChatUpdateParticipantAdd {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateParticipantAdd>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateParticipantAdd): ServerChatUpdateParticipantAdd {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatParticipant participant */ 2:
+                    message.participant = ChatParticipant.internalBinaryRead(reader, reader.uint32(), options, message.participant);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateParticipantAdd, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatParticipant participant = 2; */
+        if (message.participant)
+            ChatParticipant.internalBinaryWrite(message.participant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateParticipantAdd
+ */
+export const ServerChatUpdateParticipantAdd = new ServerChatUpdateParticipantAdd$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerChatUpdateVisibility$Type extends MessageType<ServerChatUpdateVisibility> {
     constructor() {
@@ -2074,6 +2223,60 @@ class ServerUserUpdateChatParticipantDelete$Type extends MessageType<ServerUserU
  */
 export const ServerUserUpdateChatParticipantDelete = new ServerUserUpdateChatParticipantDelete$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateChatParticipantAdd$Type extends MessageType<ServerUserUpdateChatParticipantAdd> {
+    constructor() {
+        super("server.ServerUserUpdateChatParticipantAdd", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "participant", kind: "message", T: () => ChatParticipant }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateChatParticipantAdd>): ServerUserUpdateChatParticipantAdd {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateChatParticipantAdd>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateChatParticipantAdd): ServerUserUpdateChatParticipantAdd {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatParticipant participant */ 2:
+                    message.participant = ChatParticipant.internalBinaryRead(reader, reader.uint32(), options, message.participant);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateChatParticipantAdd, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatParticipant participant = 2; */
+        if (message.participant)
+            ChatParticipant.internalBinaryWrite(message.participant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateChatParticipantAdd
+ */
+export const ServerUserUpdateChatParticipantAdd = new ServerUserUpdateChatParticipantAdd$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateDialogArchived$Type extends MessageType<ServerUserUpdateDialogArchived> {
     constructor() {
         super("server.ServerUserUpdateDialogArchived", [
@@ -2349,6 +2552,59 @@ class ServerUserUpdateDialogNotificationSettings$Type extends MessageType<Server
  * @generated MessageType for protobuf message server.ServerUserUpdateDialogNotificationSettings
  */
 export const ServerUserUpdateDialogNotificationSettings = new ServerUserUpdateDialogNotificationSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateDialogFollowMode$Type extends MessageType<ServerUserUpdateDialogFollowMode> {
+    constructor() {
+        super("server.ServerUserUpdateDialogFollowMode", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateDialogFollowMode>): ServerUserUpdateDialogFollowMode {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateDialogFollowMode>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateDialogFollowMode): ServerUserUpdateDialogFollowMode {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional DialogFollowMode follow_mode */ 2:
+                    message.followMode = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateDialogFollowMode, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional DialogFollowMode follow_mode = 2; */
+        if (message.followMode !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.followMode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateDialogFollowMode
+ */
+export const ServerUserUpdateDialogFollowMode = new ServerUserUpdateDialogFollowMode$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateChatOpen$Type extends MessageType<ServerUserUpdateChatOpen> {
     constructor() {
