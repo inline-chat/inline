@@ -44,6 +44,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var pinnedOrder: String?
   /// True when this dialog should not be shown as its own chat row in chat lists.
   public var chatListHidden: Bool? = nil
+  /// Reply-thread automatic surfacing policy; nil means relevance-only default.
+  public var followMode: DialogFollowMode? = nil
 
   private enum CodingKeys: String, CodingKey {
     case id
@@ -64,6 +66,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case order
     case pinnedOrder
     case chatListHidden
+    case followMode
   }
 
   public enum Columns {
@@ -85,6 +88,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let order = Column(CodingKeys.order)
     public static let pinnedOrder = Column(CodingKeys.pinnedOrder)
     public static let chatListHidden = Column(CodingKeys.chatListHidden)
+    public static let followMode = Column(CodingKeys.followMode)
   }
 
   public static let space = belongsTo(Space.self)
@@ -147,6 +151,7 @@ public extension Dialog {
     order = from.order
     pinnedOrder = from.pinnedOrder
     chatListHidden = Self.chatListHidden(from: from.chatListHidden, sidebarVisible: from.sidebarVisible)
+    followMode = nil
   }
 
   // Called when user clicks a user for the first time
@@ -172,6 +177,7 @@ public extension Dialog {
     order = nil
     pinnedOrder = nil
     chatListHidden = nil
+    followMode = nil
   }
 
   init(optimisticForChat chat: Chat) {
@@ -199,6 +205,7 @@ public extension Dialog {
     order = nil
     pinnedOrder = nil
     chatListHidden = nil
+    followMode = nil
   }
 
   init(from: InlineProtocol.Dialog) {
@@ -236,6 +243,7 @@ public extension Dialog {
     } else {
       chatListHidden = nil
     }
+    followMode = from.hasFollowMode ? from.followMode : nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
@@ -290,7 +298,8 @@ public extension Dialog {
       openedDate: nil,
       order: nil,
       pinnedOrder: nil,
-      chatListHidden: nil
+      chatListHidden: nil,
+      followMode: nil
     )
   }
 
@@ -313,7 +322,8 @@ public extension Dialog {
       openedDate: nil,
       order: nil,
       pinnedOrder: nil,
-      chatListHidden: nil
+      chatListHidden: nil,
+      followMode: nil
     )
   }
 }
@@ -354,6 +364,7 @@ public extension ApiDialog {
       if chatListHidden == nil, sidebarVisible == nil {
         dialog.chatListHidden = existing.chatListHidden
       }
+      dialog.followMode = existing.followMode
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -395,6 +406,9 @@ public extension InlineProtocol.Dialog {
       }
       if !hasChatListHidden, !hasSidebarVisible {
         newDialog.chatListHidden = existing.chatListHidden
+      }
+      if !hasFollowMode {
+        newDialog.followMode = existing.followMode
       }
       try newDialog.save(db, onConflict: .replace)
       return newDialog

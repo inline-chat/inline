@@ -294,6 +294,81 @@ struct DialogChatListVisibilityTests {
     }
   }
 
+  @Test("protocol dialog omission preserves follow mode")
+  func protocolDialogOmissionPreservesFollowMode() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, chatId: 22, chatListHidden: true, followMode: .following)
+
+      var dialog = InlineProtocol.Dialog()
+      dialog.peer = makeChatPeer(chatId: 22)
+      dialog.chatID = 22
+
+      _ = try dialog.saveFull(db)
+
+      let saved = try #require(try Dialog.get(peerId: .thread(id: 22)).fetchOne(db))
+      #expect(saved.followMode == .following)
+      #expect(saved.isFollowingReplyThread)
+    }
+  }
+
+  @Test("dialog follow mode update applies and clears")
+  func dialogFollowModeUpdateAppliesAndClears() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, chatId: 23, chatListHidden: true)
+
+      var follow = InlineProtocol.UpdateDialogFollowMode()
+      follow.peerID = makeChatPeer(chatId: 23)
+      follow.followMode = .following
+      try follow.apply(db)
+
+      var saved = try #require(try Dialog.get(peerId: .thread(id: 23)).fetchOne(db))
+      #expect(saved.followMode == .following)
+
+      var clear = InlineProtocol.UpdateDialogFollowMode()
+      clear.peerID = makeChatPeer(chatId: 23)
+      try clear.apply(db)
+
+      saved = try #require(try Dialog.get(peerId: .thread(id: 23)).fetchOne(db))
+      #expect(saved.followMode == nil)
+    }
+  }
+
+  @Test("dialog follow local state opens on manual follow")
+  func dialogFollowLocalStateOpensOnManualFollow() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, chatId: 24, chatListHidden: true)
+
+      var saved = try #require(try Dialog.get(peerId: .thread(id: 24)).fetchOne(db))
+      saved.followMode = .following
+      try UpdateDialogFollowModeTransaction.applyManualFollowOpenState(&saved, db: db)
+      try saved.save(db)
+
+      saved = try #require(try Dialog.get(peerId: .thread(id: 24)).fetchOne(db))
+      #expect(saved.followMode == .following)
+      #expect(saved.open == true)
+      #expect(saved.archived == false)
+      #expect(saved.chatListHidden == nil)
+      #expect(saved.order != nil)
+
+      let order = saved.order
+      saved.followMode = nil
+      try saved.save(db)
+
+      saved = try #require(try Dialog.get(peerId: .thread(id: 24)).fetchOne(db))
+
+      #expect(saved.followMode == nil)
+      #expect(saved.open == true)
+      #expect(saved.chatListHidden == nil)
+      #expect(saved.order == order)
+    }
+  }
+
   @Test("legacy sidebar visible true heals stale hidden state")
   func legacySidebarVisibleTrueHealsHiddenState() throws {
     let dbQueue = try makeInMemoryDB()
@@ -357,7 +432,8 @@ struct DialogChatListVisibilityTests {
     chatId: Int64,
     chatListHidden: Bool?,
     pinned: Bool = false,
-    open: Bool = false
+    open: Bool = false,
+    followMode: InlineProtocol.DialogFollowMode? = nil
   ) throws {
     try Chat(
       id: chatId,
@@ -383,7 +459,8 @@ struct DialogChatListVisibilityTests {
       notificationSettings: nil,
       open: open,
       openedDate: open ? Date(timeIntervalSince1970: TimeInterval(chatId)) : nil,
-      chatListHidden: chatListHidden
+      chatListHidden: chatListHidden,
+      followMode: followMode
     ).insert(db)
   }
 

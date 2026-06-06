@@ -142,6 +142,9 @@ public actor UpdatesEngine: Sendable {
         case let .dialogNotificationSettings(dialogNotificationSettings):
           try dialogNotificationSettings.apply(db)
 
+        case let .dialogFollowMode(dialogFollowMode):
+          try dialogFollowMode.apply(db)
+
         case let .chatOpen(chatOpen):
           try chatOpen.apply(db)
 
@@ -1216,6 +1219,20 @@ extension InlineProtocol.UpdateDialogNotificationSettings {
       Log.shared.debug("Updated dialog notification settings")
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update notification settings")
+    }
+  }
+}
+
+extension InlineProtocol.UpdateDialogFollowMode {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update dialog follow mode for peer \(peerID.toPeer())")
+
+    if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
+      dialog.followMode = hasFollowMode ? followMode : nil
+      try dialog.update(db)
+      Log.shared.debug("Updated dialog follow mode")
+    } else {
+      Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update follow mode")
     }
   }
 }
