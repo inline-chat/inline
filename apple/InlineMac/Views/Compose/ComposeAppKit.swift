@@ -17,6 +17,7 @@ class ComposeAppKit: NSView {
 
   private var peerId: InlineKit.Peer
   private var chat: InlineKit.Chat?
+  private var peerUser: InlineKit.User?
   private var chatId: Int64? { chat?.id }
   private var dependencies: AppDependencies
   private let mentionedParticipants: MentionedParticipantsAutoAddManager
@@ -58,6 +59,19 @@ class ComposeAppKit: NSView {
     voiceControlsInstalled && ExperimentalFeatureFlags.voiceMessagesEnabled
   }
 
+  private var placeholderText: String {
+    guard let peerUser,
+          peerId.asUserId() == peerUser.id,
+          !peerUser.isCurrentUser(),
+          let firstName = peerUser.firstName?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !firstName.isEmpty
+    else {
+      return "Message"
+    }
+
+    return "Message \(firstName)"
+  }
+
   private func isVoiceRecordingAvailable(isVoiceActive: Bool) -> Bool {
     voiceControlsAvailable &&
       !isVoiceActive &&
@@ -66,6 +80,7 @@ class ComposeAppKit: NSView {
       state.editingMsgId == nil &&
       state.forwardContext == nil
   }
+
   private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: peerId)
   private var voiceEscapeKeyUnsubscribe: (() -> Void)?
   private var voiceSpaceKeyUnsubscribe: (() -> Void)?
@@ -182,6 +197,7 @@ class ComposeAppKit: NSView {
 
   private lazy var textEditor: ComposeTextEditor = {
     let textEditor = ComposeTextEditor(initiallySingleLine: false)
+    textEditor.placeholderText = placeholderText
     textEditor.translatesAutoresizingMaskIntoConstraints = false
     return textEditor
   }()
@@ -335,6 +351,7 @@ class ComposeAppKit: NSView {
     peerId: InlineKit.Peer,
     messageList: MessageListAppKit,
     chat: InlineKit.Chat?,
+    peerUser: InlineKit.User?,
     dependencies: AppDependencies,
     toolbarState: ChatToolbarState? = nil,
     parentChatView: ChatViewAppKit? = nil,
@@ -343,6 +360,7 @@ class ComposeAppKit: NSView {
     self.peerId = peerId
     self.messageList = messageList
     self.chat = chat
+    self.peerUser = peerUser
     self.dependencies = dependencies
     self.mentionedParticipants = MentionedParticipantsAutoAddManager(
       dependencies: dependencies,
@@ -355,6 +373,12 @@ class ComposeAppKit: NSView {
     setupView()
     setupObservers()
     setupKeyDownHandler()
+  }
+
+  func setPeerUser(_ user: InlineKit.User?) {
+    guard peerUser != user else { return }
+    peerUser = user
+    textEditor.placeholderText = placeholderText
   }
 
   @available(*, unavailable)
