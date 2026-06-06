@@ -406,7 +406,8 @@ class MessageViewAppKit: NSView {
 
     let view = NSHostingView(rootView: VoiceMessageBubble(
       message: fullMessage.message,
-      outgoing: usesOutgoingBubbleStyle
+      outgoing: usesOutgoingBubbleStyle,
+      maxWidth: Theme.voiceMessageViewWidth
     ))
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -625,7 +626,8 @@ class MessageViewAppKit: NSView {
     if hasVoiceInDocumentSlot {
       voiceMessageView?.rootView = VoiceMessageBubble(
         message: fullMessage.message,
-        outgoing: usesOutgoingBubbleStyle
+        outgoing: usesOutgoingBubbleStyle,
+        maxWidth: Theme.voiceMessageViewWidth
       )
       desiredView = voiceMessageView
     } else {
