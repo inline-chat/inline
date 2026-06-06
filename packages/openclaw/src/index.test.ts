@@ -99,9 +99,11 @@ describe("plugin entry", () => {
     expect(registeredToolNames).toEqual([
       "inline_members",
       "inline_update_profile",
+      "inline_bot_avatar",
       "inline_bot_commands",
       "inline_nudge",
       "inline_forward",
+      "inline_bot_presence",
       "inline_parent_context",
     ])
     expect(registeredCommandNames).toEqual(["threadreply"])

@@ -4,6 +4,7 @@ import { createInlineMembersTool } from "./inline/members-tool.js"
 import { createInlineParentContextTool } from "./inline/parent-context-tool.js"
 import { sanitizeInlineOutgoingText } from "./inline/message-formatting.js"
 import { sanitizeInlineVisibleText } from "./inline/outbound-sanitize.js"
+import { createInlineBotAvatarTool } from "./inline/bot-avatar-tool.js"
 import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
@@ -16,11 +17,14 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   api.registerTool((ctx) => createInlineProfileTool(ctx) as AnyAgentTool, {
     names: ["inline_update_profile"],
   })
+  api.registerTool((ctx) => createInlineBotAvatarTool(ctx) as AnyAgentTool, {
+    names: ["inline_bot_avatar"],
+  })
   api.registerTool((ctx) => createInlineBotCommandsTool(ctx) as AnyAgentTool, {
     names: ["inline_bot_commands"],
   })
   api.registerTool((ctx) => createInlineMessageTools(ctx) as AnyAgentTool[], {
-    names: ["inline_nudge", "inline_forward"],
+    names: ["inline_nudge", "inline_forward", "inline_bot_presence"],
   })
   api.registerTool((ctx) => createInlineParentContextTool(ctx) as AnyAgentTool, {
     names: ["inline_parent_context"],

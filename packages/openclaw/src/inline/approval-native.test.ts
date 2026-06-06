@@ -8,6 +8,10 @@ import {
   isInlineExecApprovalClientEnabled,
 } from "./exec-approvals"
 
+const SET_BOT_PRESENCE_STATE = 59
+const BOT_PRESENCE_IDLE = 2
+const BOT_PRESENCE_WAITING = 7
+
 function buildExecRequest(overrides?: Partial<ExecApprovalRequest["request"]>): ExecApprovalRequest {
   return {
     id: "approval-123456",
@@ -218,6 +222,21 @@ describe("inline/native approvals", () => {
     })
     expect(sendTyping).toHaveBeenCalledWith({ chatId: 8n, typing: true })
     expect(sendTyping).toHaveBeenCalledWith({ chatId: 8n, typing: false })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      SET_BOT_PRESENCE_STATE,
+      expect.objectContaining({
+        oneofKind: "setBotPresenceState",
+        setBotPresenceState: expect.objectContaining({
+          peerId: expect.objectContaining({
+            type: expect.objectContaining({
+              oneofKind: "chat",
+              chat: { chatId: 8n },
+            }),
+          }),
+          state: { kind: BOT_PRESENCE_WAITING },
+        }),
+      }),
+    )
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: 8n,
@@ -243,6 +262,21 @@ describe("inline/native approvals", () => {
           messageId: 9001n,
           actions: { rows: [] },
           parseMarkdown: false,
+        }),
+      }),
+    )
+    expect(invokeRaw).toHaveBeenCalledWith(
+      SET_BOT_PRESENCE_STATE,
+      expect.objectContaining({
+        oneofKind: "setBotPresenceState",
+        setBotPresenceState: expect.objectContaining({
+          peerId: expect.objectContaining({
+            type: expect.objectContaining({
+              oneofKind: "chat",
+              chat: { chatId: 8n },
+            }),
+          }),
+          state: { kind: BOT_PRESENCE_IDLE },
         }),
       }),
     )

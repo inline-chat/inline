@@ -137,6 +137,8 @@ describe("inline/channel", () => {
     expect(messageToolHints).toContain("Inline markdown links")
     expect(messageToolHints).toContain("inline://thread")
     expect(messageToolHints).toContain("Use `target` values only for tool calls.")
+    expect(messageToolHints).toContain("channelData.inline.botPresence")
+    expect(messageToolHints).toContain("inline_bot_presence")
     expect(inlineChannelPlugin.commands?.buildModelsMenuChannelData?.({
       providers: [{ id: "openai", count: 2 }],
     })).toEqual({
@@ -537,6 +539,7 @@ describe("inline/channel", () => {
 
     const connect = vi.fn(async () => {})
     const sendTyping = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async () => {})
     const close = vi.fn(async () => {})
 
     mockRealtimeSdk({
@@ -544,6 +547,7 @@ describe("inline/channel", () => {
         constructor(_opts: unknown) {}
         connect = connect
         sendTyping = sendTyping
+        invokeRaw = invokeRaw
         close = close
       },
     })
@@ -580,6 +584,7 @@ describe("inline/channel", () => {
     expect(sendTyping).toHaveBeenNthCalledWith(1, { chatId: 8n, typing: true })
     expect(sendTyping).toHaveBeenNthCalledWith(2, { chatId: 8n, typing: false })
     expect(sendTyping).toHaveBeenCalledTimes(2)
+    expect(invokeRaw).not.toHaveBeenCalled()
     expect(connect).toHaveBeenCalledTimes(2)
     expect(close).toHaveBeenCalledTimes(2)
   })
