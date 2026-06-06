@@ -85,22 +85,19 @@ struct ChatView: View {
           }
           ToolbarSpacer(.fixed, placement: .primaryAction)
           ToolbarItem(placement: .primaryAction) {
-            TranslationButton(peer: peerId)
-              .tint(ThemeManager.shared.accentColor)
+            TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
           }
         } else {
           ToolbarItem(placement: .topBarTrailing) {
             NudgeButton(peer: peerId, chatId: fullChatViewModel.chat?.id)
           }
           ToolbarItem(placement: .primaryAction) {
-            TranslationButton(peer: peerId)
-              .tint(ThemeManager.shared.accentColor)
+            TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
           }
         }
       } else {
         ToolbarItem(placement: .primaryAction) {
-          TranslationButton(peer: peerId)
-            .tint(ThemeManager.shared.accentColor)
+          TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
         }
       }
 

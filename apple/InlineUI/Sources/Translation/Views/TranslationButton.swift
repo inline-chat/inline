@@ -11,6 +11,7 @@ extension Color {
 public struct TranslationButton: View {
   /// Peer
   var peer: Peer
+  private let activeColor: Color
 
   /// Whether to show a popover for toggling translation
   @State var showPopover: Bool = false
@@ -23,15 +24,16 @@ public struct TranslationButton: View {
 
   @State var isTranslationEnabled: Bool
 
-  public init(peer: Peer) {
+  public init(peer: Peer, activeColor: Color = .accentColor) {
     self.peer = peer
+    self.activeColor = activeColor
     _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peer))
   }
 
   /// Button shown in nav bar/toolbar
   @ViewBuilder
   public var button: some View {
-    TranslationToolbarButton(peer: peer, action: pressed)
+    TranslationToolbarButton(peer: peer, activeColor: activeColor, action: pressed)
   }
 
   /// Popover when button is pressed
@@ -113,12 +115,14 @@ public struct TranslationButton: View {
 /// Button-only translation toolbar item. Presentation is owned by the caller.
 public struct TranslationToolbarButton: View {
   private let peer: Peer
+  private let activeColor: Color
   private let action: () -> Void
 
   @State private var isTranslationEnabled: Bool
 
-  public init(peer: Peer, action: @escaping () -> Void) {
+  public init(peer: Peer, activeColor: Color = .accentColor, action: @escaping () -> Void) {
     self.peer = peer
+    self.activeColor = activeColor
     self.action = action
     _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peer))
   }
@@ -130,7 +134,8 @@ public struct TranslationToolbarButton: View {
     #if os(macOS)
     .foregroundStyle(isTranslationEnabled ? Color.macOSAccent : .secondary)
     #else
-    .foregroundStyle(isTranslationEnabled ? Color.accentColor : .secondary)
+    .foregroundStyle(isTranslationEnabled ? activeColor : Color.primary)
+    .tint(isTranslationEnabled ? activeColor : Color.primary)
     #endif
     .onReceive(TranslationState.shared.subject) { event in
       let (eventPeer, enabled) = event
