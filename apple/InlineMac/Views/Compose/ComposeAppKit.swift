@@ -11,6 +11,7 @@ class ComposeAppKit: NSView {
   // MARK: - Internals
 
   private var log = Log.scoped("Compose", enableTracing: false)
+  private let voiceControlsInstalled = ExperimentalFeatureFlags.voiceMessagesEnabled
 
   // MARK: - Props
 
@@ -45,15 +46,29 @@ class ComposeAppKit: NSView {
   }
 
   private var canStartVoiceRecording: Bool {
-    ExperimentalFeatureFlags.voiceMessagesEnabled &&
-      voiceViewModel.isActive == false &&
+    guard voiceControlsAvailable else { return false }
+    return isVoiceRecordingAvailable(isVoiceActive: voiceViewModel.isActive)
+  }
+
+  private var currentVoiceActive: Bool {
+    voiceControlsAvailable && voiceViewModel.isActive
+  }
+
+  private var voiceControlsAvailable: Bool {
+    voiceControlsInstalled && ExperimentalFeatureFlags.voiceMessagesEnabled
+  }
+
+  private func isVoiceRecordingAvailable(isVoiceActive: Bool) -> Bool {
+    voiceControlsAvailable &&
+      !isVoiceActive &&
       isEmptyTrimmed &&
       attachmentItems.isEmpty &&
       state.editingMsgId == nil &&
       state.forwardContext == nil
   }
-
   private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: peerId)
+  private var voiceEscapeKeyUnsubscribe: (() -> Void)?
+  private var voiceSpaceKeyUnsubscribe: (() -> Void)?
 
   // [uniqueId: FileMediaItem]
   private var attachmentItems: [String: FileMediaItem] = [:] {
@@ -206,13 +221,13 @@ class ComposeAppKit: NSView {
     let view = NSHostingView(rootView: ComposeVoiceInputView(
       viewModel: voiceViewModel,
       onPause: { [weak self] in
-        self?.voiceViewModel.pauseRecording()
+        self?.pauseVoiceRecording()
       },
       onPlay: { [weak self] in
-        self?.voiceViewModel.togglePlayback()
+        self?.toggleVoicePlayback()
       },
       onCancel: { [weak self] in
-        self?.voiceViewModel.cancel()
+        self?.cancelVoiceRecording()
       },
       onSend: { [weak self] in
         self?.sendVoiceRecording()
@@ -368,7 +383,7 @@ class ComposeAppKit: NSView {
     // to bottom
     addSubview(sendButton)
     addSubview(silentModeButton)
-    if ExperimentalFeatureFlags.voiceMessagesEnabled {
+    if voiceControlsInstalled {
       addSubview(voiceButton)
       addSubview(voiceInputView)
     }
@@ -466,7 +481,7 @@ class ComposeAppKit: NSView {
       border.heightAnchor.constraint(equalToConstant: 1),
     ]
 
-    if ExperimentalFeatureFlags.voiceMessagesEnabled {
+    if voiceControlsInstalled {
       constraints.append(contentsOf: [
         voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
         voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
@@ -531,13 +546,16 @@ class ComposeAppKit: NSView {
         )
       }.store(in: &cancellables)
 
-    voiceViewModel.$phase
-      .sink { [weak self] _ in
-        guard let self else { return }
-        updateVoiceAvailability()
-        updateHeight(animate: true)
-      }
-      .store(in: &cancellables)
+    if voiceControlsInstalled {
+      voiceViewModel.$phase
+        .sink { [weak self] phase in
+          guard let self else { return }
+          updateVoiceAvailability(phase: phase)
+          updateVoiceKeyHandlers(phase: phase)
+          updateHeight(animate: true, voicePhase: phase)
+        }
+        .store(in: &cancellables)
+    }
 
     Publishers.CombineLatest3(
       autocompleteViewModel.$items,
@@ -550,9 +568,14 @@ class ComposeAppKit: NSView {
     .store(in: &cancellables)
   }
 
-  private func updateSilentModeUI(animated: Bool = true, forceLayout: Bool = true) {
+  private func updateSilentModeUI(
+    animated: Bool = true,
+    forceLayout: Bool = true,
+    isVoiceActive: Bool? = nil
+  ) {
     let isEnabled = state.sendSilently
-    let shouldShow = isEnabled && !voiceViewModel.isActive && canSend
+    let voiceActive = isVoiceActive ?? currentVoiceActive
+    let shouldShow = isEnabled && !voiceActive && canSend
     sendButton.updateSendSilently(isEnabled)
     silentModeButton.isHidden = !shouldShow
     silentModeButtonWidthConstraint?.constant = shouldShow ? ComposeSilentModeButton.controlSize : 0
@@ -572,9 +595,27 @@ class ComposeAppKit: NSView {
     }
   }
 
-  private func updateVoiceAvailability() {
-    let isVoiceActive = voiceViewModel.isActive
-    let shouldShowVoiceButton = canStartVoiceRecording
+  private func updateVoiceAvailability(phase: ComposeVoiceRecordingPhase? = nil) {
+    guard voiceControlsAvailable else {
+      if voiceControlsInstalled {
+        voiceInputView.isHidden = true
+        voiceButton.isHidden = true
+      }
+      textEditor.isHidden = false
+      menuButton.isHidden = false
+      emojiButton.isHidden = false
+      attachments.isHidden = false
+      sendButton.isHidden = false
+      updateSilentModeUI(animated: false, forceLayout: false, isVoiceActive: false)
+      return
+    }
+
+    let isVoiceActive = phase.map { $0 != .idle } ?? voiceViewModel.isActive
+    let shouldShowVoiceButton = isVoiceRecordingAvailable(isVoiceActive: isVoiceActive)
+
+    if isVoiceActive {
+      emojiButton.resignEmojiFocus()
+    }
 
     voiceInputView.isHidden = !isVoiceActive
     textEditor.isHidden = isVoiceActive
@@ -584,22 +625,85 @@ class ComposeAppKit: NSView {
     voiceButton.isHidden = isVoiceActive || !shouldShowVoiceButton
     sendButton.isHidden = isVoiceActive || shouldShowVoiceButton
 
-    updateSilentModeUI(animated: false, forceLayout: false)
+    updateSilentModeUI(animated: false, forceLayout: false, isVoiceActive: isVoiceActive)
   }
 
   private func startVoiceRecording() {
     guard canStartVoiceRecording else { return }
     focusWindowIfNeeded()
 
-    Task { [weak self] in
+    Task { @MainActor [weak self] in
       guard let self else { return }
       await voiceViewModel.start()
     }
   }
 
+  private func pauseVoiceRecording() {
+    voiceViewModel.pauseRecording()
+  }
+
+  private func toggleVoicePlayback() {
+    voiceViewModel.togglePlayback()
+  }
+
+  private func cancelVoiceRecording() {
+    voiceViewModel.cancel()
+  }
+
+  private func updateVoiceKeyHandlers(phase: ComposeVoiceRecordingPhase) {
+    guard voiceControlsAvailable, phase != .idle else {
+      removeVoiceKeyHandlers()
+      return
+    }
+
+    guard voiceEscapeKeyUnsubscribe == nil, voiceSpaceKeyUnsubscribe == nil else { return }
+
+    voiceEscapeKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .escape,
+      key: "compose_voice_escape_\(peerId)",
+      handler: { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.cancelVoiceRecording()
+        }
+      }
+    )
+
+    voiceSpaceKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .spaceKey,
+      key: "compose_voice_space_\(peerId)",
+      handler: { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.handleVoiceSpaceKey()
+        }
+      }
+    )
+  }
+
+  private func removeVoiceKeyHandlers() {
+    voiceEscapeKeyUnsubscribe?()
+    voiceEscapeKeyUnsubscribe = nil
+    voiceSpaceKeyUnsubscribe?()
+    voiceSpaceKeyUnsubscribe = nil
+  }
+
+  private func handleVoiceSpaceKey() {
+    guard voiceControlsAvailable else { return }
+
+    switch voiceViewModel.phase {
+      case .recording:
+        voiceViewModel.pauseRecording()
+      case .review:
+        voiceViewModel.togglePlayback()
+      case .idle:
+        break
+    }
+  }
+
   private func sendVoiceRecording() {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      voiceViewModel.cancel()
+    guard voiceControlsAvailable else {
+      if voiceControlsInstalled {
+        voiceViewModel.cancel()
+      }
       return
     }
 
@@ -1013,8 +1117,8 @@ class ComposeAppKit: NSView {
 
   // MARK: - Height
 
-  private func getTextViewHeight() -> CGFloat {
-    if voiceViewModel.isActive {
+  private func getTextViewHeight(isVoiceActive: Bool? = nil) -> CGFloat {
+    if isVoiceActive ?? currentVoiceActive {
       textViewHeight = Theme.composeMinHeight
       return textViewHeight
     }
@@ -1028,24 +1132,26 @@ class ComposeAppKit: NSView {
   }
 
   // Get compose wrapper height
-  private func getHeight() -> CGFloat {
-    var height = getTextViewHeight()
+  private func getHeight(isVoiceActive: Bool? = nil) -> CGFloat {
+    let voiceActive = isVoiceActive ?? currentVoiceActive
+    var height = getTextViewHeight(isVoiceActive: voiceActive)
 
     // Reply view
     if state.replyingToMsgId != nil || state.editingMsgId != nil || state.forwardContext != nil {
       height += Theme.embeddedMessageHeight
     }
 
-    if !voiceViewModel.isActive {
+    if !voiceActive {
       height += attachments.getHeight()
     }
 
     return height
   }
 
-  func updateHeight(animate: Bool = false) {
-    let textEditorHeight = getTextViewHeight()
-    let wrapperHeight = getHeight()
+  func updateHeight(animate: Bool = false, voicePhase: ComposeVoiceRecordingPhase? = nil) {
+    let isVoiceActive = voicePhase.map { $0 != .idle }
+    let textEditorHeight = getTextViewHeight(isVoiceActive: isVoiceActive)
+    let wrapperHeight = getHeight(isVoiceActive: isVoiceActive)
 
     log.trace("updating height wrapper=\(wrapperHeight), textEditor=\(textEditorHeight)")
 
@@ -1402,7 +1508,9 @@ class ComposeAppKit: NSView {
 
   // Clear, reset height
   func clear() {
-    voiceViewModel.cancel()
+    if voiceControlsInstalled {
+      voiceViewModel.cancel()
+    }
 
     // State
     attachmentItems.removeAll()
@@ -1762,6 +1870,7 @@ class ComposeAppKit: NSView {
     keyMonitorUnsubscribe = nil
     keyMonitorPasteUnsubscribe?()
     keyMonitorPasteUnsubscribe = nil
+    removeVoiceKeyHandlers()
 
     // Clean up mention resources
     mentionKeyMonitorEscUnsubscribe?()

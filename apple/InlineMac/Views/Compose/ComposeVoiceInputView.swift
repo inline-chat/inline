@@ -1,13 +1,15 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
+@MainActor
 struct ComposeVoiceInputView: View {
   @ObservedObject var viewModel: ComposeVoiceRecordingViewModel
 
-  let onPause: () -> Void
-  let onPlay: () -> Void
-  let onCancel: () -> Void
-  let onSend: () -> Void
+  let onPause: @MainActor () -> Void
+  let onPlay: @MainActor () -> Void
+  let onCancel: @MainActor () -> Void
+  let onSend: @MainActor () -> Void
 
   var body: some View {
     if ExperimentalFeatureFlags.voiceMessagesEnabled {
@@ -25,7 +27,9 @@ struct ComposeVoiceInputView: View {
             title: viewModel.isPlaying ? "Pause" : "Play",
             action: onPlay
           )
-          waveform(progress: viewModel.playbackProgress)
+          waveform(progress: viewModel.playbackProgress) { progress in
+            viewModel.seekPlayback(to: progress)
+          }
           durationLabel
           iconButton("xmark", title: "Cancel", action: onCancel)
           iconButton("arrow.up", title: "Send", isPrimary: true, action: onSend)
@@ -53,14 +57,19 @@ struct ComposeVoiceInputView: View {
       .frame(minWidth: 38, alignment: .trailing)
   }
 
-  private func waveform(progress: Double) -> some View {
-    ComposeVoiceWaveformView(
+  private func waveform(progress: Double, onSeek: (@MainActor @Sendable (Double) -> Void)? = nil) -> some View {
+    AudioWaveformView(
       samples: viewModel.samples,
       progress: progress,
       foreground: .accentColor,
-      background: Color(nsColor: .tertiaryLabelColor).opacity(0.35)
+      background: Color(nsColor: .tertiaryLabelColor).opacity(0.35),
+      targetBarCount: 160,
+      barWidth: 2,
+      barSpacing: 2,
+      minBarHeight: 3,
+      onSeek: onSeek
     )
-    .frame(height: 22)
+    .frame(height: 20)
     .frame(maxWidth: .infinity)
   }
 
@@ -68,21 +77,14 @@ struct ComposeVoiceInputView: View {
     _ systemName: String,
     title: String,
     isPrimary: Bool = false,
-    action: @escaping () -> Void
+    action: @escaping @MainActor () -> Void
   ) -> some View {
-    Button(action: action) {
-      Image(systemName: systemName)
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(isPrimary ? Color.white : Color.primary)
-        .frame(width: Theme.composeButtonSize, height: Theme.composeButtonSize)
-        .background(
-          Circle()
-            .fill(isPrimary ? Color.accentColor : Color(nsColor: .quinaryLabel))
-        )
-    }
-    .buttonStyle(.plain)
-    .help(title)
-    .accessibilityLabel(title)
+    VoiceIconControl(
+      systemName: systemName,
+      title: title,
+      isPrimary: isPrimary,
+      action: action
+    )
   }
 
   private static func format(duration: TimeInterval) -> String {
@@ -93,50 +95,41 @@ struct ComposeVoiceInputView: View {
   }
 }
 
-private struct ComposeVoiceWaveformView: View {
-  let samples: [UInt8]
-  let progress: Double
-  let foreground: Color
-  let background: Color
+@MainActor
+private struct VoiceIconControl: View {
+  let systemName: String
+  let title: String
+  let isPrimary: Bool
+  let action: @MainActor () -> Void
 
-  private var bars: [CGFloat] {
-    let raw = samples.map { byte -> CGFloat in
-      max(0.16, CGFloat(byte) / 255)
-    }
-
-    guard !raw.isEmpty else {
-      return Array(repeating: 0.32, count: 36)
-    }
-
-    let targetCount = min(48, max(24, raw.count))
-    if raw.count <= targetCount {
-      return raw
-    }
-
-    let chunkSize = max(1, raw.count / targetCount)
-    return stride(from: 0, to: raw.count, by: chunkSize).map { index in
-      let upperBound = min(index + chunkSize, raw.count)
-      let chunk = raw[index ..< upperBound]
-      return chunk.max() ?? 0.32
-    }
-  }
+  @State private var isHovering = false
 
   var body: some View {
-    GeometryReader { geometry in
-      let clampedProgress = min(max(progress, 0), 1)
-      let progressIndex = Int((Double(bars.count) * clampedProgress).rounded(.down))
-
-      HStack(alignment: .center, spacing: 2) {
-        ForEach(Array(bars.enumerated()), id: \.offset) { index, value in
-          Capsule(style: .continuous)
-            .fill(index < progressIndex ? foreground : background)
-            .frame(
-              maxWidth: .infinity,
-              maxHeight: max(5, geometry.size.height * value)
-            )
-        }
+    Image(systemName: systemName)
+      .font(.system(size: 13, weight: .semibold))
+      .foregroundStyle(isPrimary ? Color.white : Color.primary)
+      .frame(width: Theme.composeButtonSize, height: Theme.composeButtonSize)
+      .background(
+        Circle()
+          .fill(backgroundColor)
+      )
+      .contentShape(Circle())
+      .scaleEffect(isHovering ? 0.96 : 1)
+      .onTapGesture(perform: action)
+      .onHover { hovering in
+        isHovering = hovering
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+      .help(title)
+      .accessibilityLabel(title)
+      .accessibilityAddTraits(.isButton)
+  }
+
+  private var backgroundColor: Color {
+    if isPrimary {
+      return .accentColor
     }
+
+    let opacity = isHovering ? 0.82 : 1
+    return Color(nsColor: .quinaryLabel).opacity(opacity)
   }
 }

@@ -11,6 +11,7 @@ struct ComposeVoiceRecording {
   let fileExtension: String
 }
 
+@MainActor
 final class ComposeVoiceRecorder: NSObject {
   private let log = Log.scoped("ComposeVoiceRecorder")
   private var recorder: AVAudioRecorder?

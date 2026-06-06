@@ -40,11 +40,15 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   deinit {
     playbackTimer?.invalidate()
     player?.stop()
-    recorder?.cancel()
     stopRecordingAction?()
 
-    if let recording {
-      try? FileManager.default.removeItem(at: recording.fileURL)
+    let recorder = recorder
+    let recordingURL = recording?.fileURL
+    Task { @MainActor in
+      recorder?.cancel()
+      if let recordingURL {
+        try? FileManager.default.removeItem(at: recordingURL)
+      }
     }
   }
 
@@ -150,6 +154,31 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     } catch {
       log.error("Failed to play voice recording", error: error)
       ToastCenter.shared.showError("Failed to play voice message")
+      stopPlayback(resetProgress: true)
+    }
+  }
+
+  func seekPlayback(to progress: Double) {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
+    guard phase == .review, let recording else { return }
+
+    do {
+      let player = try player ?? AVAudioPlayer(contentsOf: recording.fileURL)
+      player.prepareToPlay()
+
+      let duration = max(player.duration, recording.duration)
+      let clampedProgress = min(max(progress, 0), 1)
+      player.currentTime = duration * clampedProgress
+
+      self.player = player
+      playbackProgress = clampedProgress
+      if player.isPlaying {
+        isPlaying = true
+        startPlaybackTimer()
+      }
+    } catch {
+      log.error("Failed to seek voice recording", error: error)
+      ToastCenter.shared.showError("Failed to seek voice message")
       stopPlayback(resetProgress: true)
     }
   }
