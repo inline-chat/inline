@@ -20,6 +20,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var type: String
   public var spaceId: Int64?
   public var threadNumber: Int?
+  public var number: Int?
   public var peer: Peer?
   public var lastMsgId: Int64?
   public var emoji: String?
@@ -36,6 +37,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var type: ChatType
   public var title: String?
   public var spaceId: Int64?
+  public var number: Int?
   public var peerUserId: Int64?
   public var lastMsgId: Int64?
   public var emoji: String?
@@ -52,6 +54,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let type = Column(CodingKeys.type)
     static let title = Column(CodingKeys.title)
     static let spaceId = Column(CodingKeys.spaceId)
+    static let number = Column(CodingKeys.number)
     static let peerUserId = Column(CodingKeys.peerUserId)
     static let lastMsgId = Column(CodingKeys.lastMsgId)
     static let emoji = Column(CodingKeys.emoji)
@@ -96,7 +99,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 50_000), date: Date, type: ChatType, title: String?,
-    spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
+    spaceId: Int64?, number: Int? = nil, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
     isPublic: Bool? = nil,
     createdBy: Int64? = nil,
     isUntitled: Bool? = nil,
@@ -109,6 +112,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.type = type
     self.title = title
     self.spaceId = spaceId
+    self.number = number
     self.peerUserId = peerUserId
     self.lastMsgId = lastMsgId
     self.emoji = emoji
@@ -207,6 +211,7 @@ public extension Chat {
     parentChatId = from.parentChatId
     parentMessageId = from.parentMessageId
     spaceId = from.spaceId
+    number = from.number ?? from.threadNumber
     type = from.type == "private" ? .privateChat : .thread
     peerUserId =
       if let peer = from.peer {
@@ -235,6 +240,7 @@ public extension Chat {
     date = from.hasDate ? Date(timeIntervalSince1970: Double(from.date)) : Date(timeIntervalSince1970: Double(0))
     title = from.title.isEmpty ? nil : from.title
     spaceId = from.hasSpaceID ? from.spaceID : nil
+    number = from.hasNumber ? Int(from.number) : nil
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
     emoji = from.hasEmoji ? from.emoji : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil

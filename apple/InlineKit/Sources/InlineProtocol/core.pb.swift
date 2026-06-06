@@ -1375,6 +1375,16 @@ public struct Chat: Sendable {
   /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
   public mutating func clearUntitled() {self._untitled = nil}
 
+  /// Per-space thread number. Unset for home threads and pre-backfill space threads.
+  public var number: Int32 {
+    get {return _number ?? 0}
+    set {_number = newValue}
+  }
+  /// Returns true if `number` has been explicitly set.
+  public var hasNumber: Bool {return self._number != nil}
+  /// Clears the value of `number`. Subsequent reads from it will return its default value.
+  public mutating func clearNumber() {self._number = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1390,6 +1400,7 @@ public struct Chat: Sendable {
   fileprivate var _parentChatID: Int64? = nil
   fileprivate var _parentMessageID: Int64? = nil
   fileprivate var _untitled: Bool? = nil
+  fileprivate var _number: Int32? = nil
 }
 
 public struct MessageReplies: Sendable {
@@ -7716,8 +7727,6 @@ public struct UpdatePinnedMessages: Sendable {
   /// Ordered list of pinned message IDs (latest first)
   public var messageIds: [Int64] = []
 
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
   public var untitled: Bool {
     get {return _untitled ?? false}
     set {_untitled = newValue}
@@ -7727,13 +7736,15 @@ public struct UpdatePinnedMessages: Sendable {
   /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
   public mutating func clearUntitled() {self._untitled = nil}
 
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
   public init() {}
 
   fileprivate var _peerID: Peer? = nil
+  fileprivate var _untitled: Bool? = nil
 }
 
 /// Update when a thread is moved between home and a space.
-  fileprivate var _untitled: Bool? = nil
 ///
 /// NOTE: v1 only supports private threads and only home <-> space moves.
 /// Keep this payload flexible for future:
@@ -10440,6 +10451,8 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     10: .standard(proto: "created_by"),
     11: .standard(proto: "parent_chat_id"),
     12: .standard(proto: "parent_message_id"),
+    13: .same(proto: "untitled"),
+    14: .same(proto: "number"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10460,6 +10473,8 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 10: try { try decoder.decodeSingularInt64Field(value: &self._createdBy) }()
       case 11: try { try decoder.decodeSingularInt64Field(value: &self._parentChatID) }()
       case 12: try { try decoder.decodeSingularInt64Field(value: &self._parentMessageID) }()
+      case 13: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
+      case 14: try { try decoder.decodeSingularInt32Field(value: &self._number) }()
       default: break
       }
     }
@@ -10469,7 +10484,6 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    13: .same(proto: "untitled"),
     // https://github.com/apple/swift-protobuf/issues/1182
     if self.id != 0 {
       try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
@@ -10490,7 +10504,6 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
     } }()
     try { if let v = self._lastMsgID {
-      case 13: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
     } }()
     try { if let v = self._peerID {
@@ -10508,6 +10521,12 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._parentMessageID {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 12)
     } }()
+    try { if let v = self._untitled {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 13)
+    } }()
+    try { if let v = self._number {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 14)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -10524,6 +10543,8 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._createdBy != rhs._createdBy {return false}
     if lhs._parentChatID != rhs._parentChatID {return false}
     if lhs._parentMessageID != rhs._parentMessageID {return false}
+    if lhs._untitled != rhs._untitled {return false}
+    if lhs._number != rhs._number {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -10537,9 +10558,6 @@ extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     3: .standard(proto: "has_unread"),
     4: .standard(proto: "recent_replier_user_ids"),
   ]
-    try { if let v = self._untitled {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 13)
-    } }()
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -10556,7 +10574,6 @@ extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     }
   }
 
-    if lhs._untitled != rhs._untitled {return false}
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if self.chatID != 0 {
       try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
@@ -21148,6 +21165,7 @@ extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "peer_id"),
     2: .standard(proto: "message_ids"),
+    4: .same(proto: "untitled"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -21158,6 +21176,7 @@ extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
       default: break
       }
     }
@@ -21174,12 +21193,16 @@ extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if !self.messageIds.isEmpty {
       try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 2)
     }
+    try { if let v = self._untitled {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdatePinnedMessages, rhs: UpdatePinnedMessages) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
     if lhs.messageIds != rhs.messageIds {return false}
+    if lhs._untitled != rhs._untitled {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -21224,7 +21247,6 @@ extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
     try unknownFields.traverse(visitor: &visitor)
   }
 
-    4: .same(proto: "untitled"),
   public static func ==(lhs: UpdateChatMoved, rhs: UpdateChatMoved) -> Bool {
     if lhs._chat != rhs._chat {return false}
     if lhs._oldSpaceID != rhs._oldSpaceID {return false}
@@ -21236,7 +21258,6 @@ extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
 
 extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateNewMessageNotification"
-      case 4: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "message"),
     2: .same(proto: "reason"),
@@ -21256,9 +21277,6 @@ extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try { if let v = self._untitled {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
-    } }()
     // The use of inline closures is to circumvent an issue where the compiler
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
@@ -21266,7 +21284,6 @@ extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._Me
     try { if let v = self._message {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    if lhs._untitled != rhs._untitled {return false}
     if self.reason != .unspecified {
       try visitor.visitSingularEnumField(value: self.reason, fieldNumber: 2)
     }

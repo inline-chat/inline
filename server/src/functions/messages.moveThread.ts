@@ -11,6 +11,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
+import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
 
 const log = new Log("functions.moveThread")
 
@@ -135,13 +136,7 @@ export async function moveThread(
 
       let nextThreadNumber: number | null = null
       if (targetSpaceId !== null) {
-        const maxThreadNumber: number = await tx
-          .select({ maxThreadNumber: sql<number>`MAX(${chats.threadNumber})` })
-          .from(chats)
-          .where(eq(chats.spaceId, targetSpaceId))
-          .then((result) => result[0]?.maxThreadNumber ?? 0)
-
-        nextThreadNumber = maxThreadNumber + 1
+        nextThreadNumber = await allocateSpaceThreadNumber(tx, targetSpaceId)
 
         // v1: keep space title uniqueness behavior consistent with createChat.
         // Home threads are intentionally not unique.

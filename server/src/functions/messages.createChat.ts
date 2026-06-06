@@ -1,6 +1,5 @@
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
-import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
 import { Chat, Dialog } from "@inline-chat/protocol/core"
 import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
@@ -13,7 +12,7 @@ import { getUpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { UpdateGroup } from "@in/server/modules/updates"
-import type { DbChat, DbDialog } from "@in/server/db/schema"
+import type { DbChat } from "@in/server/db/schema"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UsersModel } from "@in/server/db/models/users"
@@ -22,6 +21,7 @@ import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"
+import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
 
 export async function createChat(
   input: {
@@ -141,19 +141,10 @@ export async function createChat(
     }
   }
 
-  let threadNumber: number | null = null
-  if (hasSpaceId) {
-    const maxThreadNumber: number = await db
-      .select({ maxThreadNumber: sql<number>`MAX(${chats.threadNumber})` })
-      .from(chats)
-      .where(eq(chats.spaceId, resolvedSpaceId))
-      .then((result) => result[0]?.maxThreadNumber ?? 0)
-
-    threadNumber = maxThreadNumber + 1
-  }
-
   if (reservedChatId !== undefined) {
     const { chat: createdChat, dialog: createdDialog } = await db.transaction(async (tx) => {
+      const threadNumber = hasSpaceId ? await allocateSpaceThreadNumber(tx, resolvedSpaceId) : null
+
       const [reservation] = await tx
         .select()
         .from(chatIdReservations)
@@ -237,69 +228,68 @@ export async function createChat(
     }
   }
 
-  const chat = await db
-    .insert(chats)
-    .values({
-      type: "thread",
-      spaceId: hasSpaceId ? resolvedSpaceId : null,
-      title: title ?? null,
-      isUntitled: title ? null : true,
-      publicThread: isPublic,
-      date: new Date(),
-      threadNumber: threadNumber,
-      emoji: input.emoji ?? null,
-      description: input.description ?? null,
-      createdBy: context.currentUserId,
-    })
-    .returning()
+  const { chat: createdChat, dialog: createdDialog } = await db.transaction(async (tx) => {
+    const threadNumber = hasSpaceId ? await allocateSpaceThreadNumber(tx, resolvedSpaceId) : null
 
-  if (!chat[0]) {
-    throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
-  }
+    const [chat] = await tx
+      .insert(chats)
+      .values({
+        type: "thread",
+        spaceId: hasSpaceId ? resolvedSpaceId : null,
+        title: title ?? null,
+        isUntitled: title ? null : true,
+        publicThread: isPublic,
+        date: new Date(),
+        threadNumber: threadNumber,
+        emoji: input.emoji ?? null,
+        description: input.description ?? null,
+        createdBy: context.currentUserId,
+      })
+      .returning()
 
-  // If it's a private space thread, add participants
-  if (isPublic === false && input.participants) {
-    const participants = input.participants.map((p) => ({
-      chatId: chat[0]!.id,
-      userId: Number(p.userId),
-      date: new Date(),
-    }))
+    if (!chat) {
+      throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
+    }
 
-    await db.insert(chatParticipants).values(participants)
-    participants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
-  }
+    // If it's a private space thread, add participants
+    if (isPublic === false && input.participants) {
+      const participants = input.participants.map((p) => ({
+        chatId: chat.id,
+        userId: Number(p.userId),
+        date: new Date(),
+      }))
 
-  let dialog: DbDialog | undefined
-  try {
-    // Create a dialog for the chat
-    ;[dialog] = await db
+      await tx.insert(chatParticipants).values(participants)
+      participants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
+    }
+
+    const [dialog] = await tx
       .insert(dialogs)
       .values({
-        chatId: chat[0].id,
+        chatId: chat.id,
         userId: context.currentUserId,
         spaceId: hasSpaceId ? resolvedSpaceId : null,
         date: new Date(),
-        ...dialogOpenDefaultsForChat(chat[0]),
+        ...dialogOpenDefaultsForChat(chat),
       })
       .returning()
 
     if (!dialog) {
       throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
     }
-  } catch (error) {
-    Log.shared.error(`Failed to create dialog for chat ${chat[0].id}: ${error}`)
-    throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
-  }
 
-  let encodedDialog: Dialog = Encoders.dialog(dialog, { unreadCount: 0 })
+    return { chat, dialog }
+  })
 
-  const persisted = await persistNewChatUpdate(chat[0].id)
+  const encodedDialog: Dialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
+
+  const persisted = await persistNewChatUpdate(createdChat.id)
 
   // Broadcast the new chat update
-  await pushUpdates({ chat: chat[0], currentUserId: context.currentUserId, update: persisted })
+  await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
 
   return {
-    chat: encodeChat(chat[0], { encodingForUserId: context.currentUserId }),
+    chat: encodeChat(createdChat, { encodingForUserId: context.currentUserId }),
     dialog: encodedDialog,
   }
 }

@@ -217,6 +217,7 @@ export const TChatInfo = Type.Object({
   spaceId: Optional(Type.Integer()),
   publicThread: Optional(Type.Boolean()),
   threadNumber: Optional(Type.Integer()),
+  number: Optional(Type.Integer()),
   emoji: Optional(Type.String()),
   // peerUserId: Optional(Type.Integer()),
   // Maybe if we count threads as channels in telegram, we need to have :
@@ -228,6 +229,7 @@ export type TChatInfo = StaticEncode<typeof TChatInfo>
 export const encodeChatInfo = (chat: DbChat, { currentUserId }: { currentUserId: number }): TChatInfo => {
   return Value.Encode(TChatInfo, {
     ...chat,
+    number: chat.threadNumber ?? undefined,
     peer: chat.spaceId
       ? { threadId: chat.id }
       : { userId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId },

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { and, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import * as schema from "@in/server/db/schema"
+import { createChat } from "@in/server/functions/messages.createChat"
 import { createSubthread } from "@in/server/functions/messages.createSubthread"
 import { getChat } from "@in/server/functions/messages.getChat"
 import { getMessages } from "@in/server/functions/messages.getMessages"
@@ -45,7 +46,7 @@ describe("messages.createSubthread", () => {
 
     const childChatId = Number(result.chat.id)
     const childChat = await db
-      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled, threadNumber: schema.chats.threadNumber })
       .from(schema.chats)
       .where(eq(schema.chats.id, childChatId))
       .limit(1)
@@ -53,8 +54,10 @@ describe("messages.createSubthread", () => {
 
     expect(result.chat.title).toBe("Re: anchor")
     expect(result.chat.untitled).toBe(true)
+    expect(result.chat.number).toBeUndefined()
     expect(childChat?.title).toBe("Re: anchor")
     expect(childChat?.isUntitled).toBe(true)
+    expect(childChat?.threadNumber).toBeNull()
 
     const childDialogs = await db
       .select({ userId: schema.dialogs.userId, chatListHidden: schema.dialogs.chatListHidden })
@@ -91,6 +94,68 @@ describe("messages.createSubthread", () => {
     expect(parentMessages.messages[0]?.replies?.chatId).toBe(BigInt(childChatId))
     expect(parentMessages.messages[0]?.replies?.replyCount).toBe(0)
     expect(parentMessages.messages[0]?.replies?.recentReplierUserIds).toEqual([])
+  })
+
+  test("assigns the next space thread number to linked subthreads", async () => {
+    const space = await testUtils.createSpace("Numbered Subthreads")
+    if (!space) {
+      throw new Error("Space not created")
+    }
+
+    const creator = await testUtils.createUser("numbered-subthread-owner@example.com")
+    await db.insert(schema.members).values({ spaceId: space.id, userId: creator.id, role: "member" })
+
+    const parent = await createChat(
+      {
+        title: "Parent",
+        spaceId: BigInt(space.id),
+        isPublic: true,
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    const parentChatId = Number(parent.chat.id)
+    await db.insert(schema.messages).values({
+      chatId: parentChatId,
+      messageId: 1,
+      fromId: creator.id,
+      text: "anchor",
+    })
+
+    const replyThread = await createSubthread(
+      {
+        parentChatId: BigInt(parentChatId),
+        parentMessageId: 1n,
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    const subthread = await createSubthread(
+      {
+        parentChatId: BigInt(parentChatId),
+        title: "Nested plan",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    expect(parent.chat.number).toBe(1)
+    expect(replyThread.chat.spaceId).toBe(BigInt(space.id))
+    expect(replyThread.chat.number).toBe(2)
+    expect(subthread.chat.spaceId).toBe(BigInt(space.id))
+    expect(subthread.chat.number).toBe(3)
+
+    const rows = await db
+      .select({ id: schema.chats.id, threadNumber: schema.chats.threadNumber })
+      .from(schema.chats)
+      .where(eq(schema.chats.spaceId, space.id))
+
+    expect(new Map(rows.map((row) => [row.id, row.threadNumber]))).toEqual(
+      new Map([
+        [parentChatId, 1],
+        [Number(replyThread.chat.id), 2],
+        [Number(subthread.chat.id), 3],
+      ]),
+    )
   })
 
   test("creates explicit subthread title as titled", async () => {
