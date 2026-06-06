@@ -17,6 +17,7 @@ message ServerUpdate {
     ServerChatUpdateDeleteMessages delete_messages = 6;
     ServerChatUpdateDeleteChat delete_chat = 7;
     ServerChatUpdateParticipantDelete participant_delete = 8;
+    ServerChatUpdateParticipantAdd participant_add = 30;
     ServerChatUpdateNewChat new_chat = 18;
     ServerChatUpdateVisibility chat_visibility = 13;
     ServerChatUpdateInfo chat_info = 15;
@@ -32,6 +33,7 @@ message ServerUpdate {
     // User bucket updates
     ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10;
     ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11;
+    ServerUserUpdateChatParticipantAdd user_chat_participant_add = 31;
     ServerUserUpdateDialogArchived user_dialog_archived = 14;
     ServerUserUpdateJoinSpace user_join_space = 17;
     ServerUserUpdateReadMaxId user_read_max_id = 20;
@@ -42,6 +44,7 @@ message ServerUpdate {
     ServerUserUpdateMessageActionAnswered user_message_action_answered = 26;
     ServerChatUpdateClearHistory clear_chat_history = 27;
     ServerChatUpdateMessageAttachment message_attachment = 29;
+    ServerUserUpdateDialogFollowMode user_dialog_follow_mode = 32;
   }
 }
 
@@ -96,6 +99,12 @@ message ServerChatUpdateNewChat { int64 chat_id = 1; }
 message ServerChatUpdateParticipantDelete {
   int64 chat_id = 1;
   int64 user_id = 2;
+}
+
+// Update for a chat when a participant is added
+message ServerChatUpdateParticipantAdd {
+  int64 chat_id = 1;
+  ChatParticipant participant = 2;
 }
 
 // Update for a chat when visibility changes
@@ -182,6 +191,12 @@ message ServerUserUpdateSpaceMemberDelete { int64 space_id = 1; }
 // Update for a user when they were removed from a chat
 message ServerUserUpdateChatParticipantDelete { int64 chat_id = 1; }
 
+// Update for a user when they were added to a chat
+message ServerUserUpdateChatParticipantAdd {
+  int64 chat_id = 1;
+  ChatParticipant participant = 2;
+}
+
 // Update for a user when a dialog is archived or unarchived
 message ServerUserUpdateDialogArchived {
   Peer peer_id = 1;
@@ -213,6 +228,12 @@ message ServerUserUpdateMarkAsUnread {
 message ServerUserUpdateDialogNotificationSettings {
   Peer peer_id = 1;
   optional DialogNotificationSettings notification_settings = 2;
+}
+
+// Update for a user when reply-thread follow mode changes.
+message ServerUserUpdateDialogFollowMode {
+  Peer peer_id = 1;
+  optional DialogFollowMode follow_mode = 2;
 }
 
 // Update for a user when a chat becomes chat-list-visible for them.

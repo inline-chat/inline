@@ -21,6 +21,40 @@ fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAP
   typealias Version = _2
 }
 
+public enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case following // = 1
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .following
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .following: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [DialogFollowMode] = [
+    .unspecified,
+    .following,
+  ]
+
+}
+
 public enum MessageSendMode: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case modeUnspecified // = 0
@@ -117,6 +151,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case clearBotAvatar // = 57
   case getBotPresence // = 58
   case setBotPresenceState // = 59
+  case updateDialogFollowMode // = 60
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -185,6 +220,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 57: self = .clearBotAvatar
     case 58: self = .getBotPresence
     case 59: self = .setBotPresenceState
+    case 60: self = .updateDialogFollowMode
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -251,6 +287,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .clearBotAvatar: return 57
     case .getBotPresence: return 58
     case .setBotPresenceState: return 59
+    case .updateDialogFollowMode: return 60
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -317,6 +354,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .clearBotAvatar,
     .getBotPresence,
     .setBotPresenceState,
+    .updateDialogFollowMode,
   ]
 
 }
@@ -1419,6 +1457,16 @@ public struct Dialog: Sendable {
   /// Clears the value of `pinnedOrder`. Subsequent reads from it will return its default value.
   public mutating func clearPinnedOrder() {self._pinnedOrder = nil}
 
+  /// Reply-thread automatic surfacing policy.
+  public var followMode: DialogFollowMode {
+    get {return _followMode ?? .unspecified}
+    set {_followMode = newValue}
+  }
+  /// Returns true if `followMode` has been explicitly set.
+  public var hasFollowMode: Bool {return self._followMode != nil}
+  /// Clears the value of `followMode`. Subsequent reads from it will return its default value.
+  public mutating func clearFollowMode() {self._followMode = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1438,6 +1486,7 @@ public struct Dialog: Sendable {
   fileprivate var _openedDate: Int64? = nil
   fileprivate var _order: String? = nil
   fileprivate var _pinnedOrder: String? = nil
+  fileprivate var _followMode: DialogFollowMode? = nil
 }
 
 /// A thread
@@ -3977,6 +4026,14 @@ public struct RpcCall: Sendable {
     set {input = .setBotPresenceState(newValue)}
   }
 
+  public var updateDialogFollowMode: UpdateDialogFollowModeInput {
+    get {
+      if case .updateDialogFollowMode(let v)? = input {return v}
+      return UpdateDialogFollowModeInput()
+    }
+    set {input = .updateDialogFollowMode(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -4039,6 +4096,7 @@ public struct RpcCall: Sendable {
     case clearBotAvatar_p(ClearBotAvatarInput)
     case getBotPresence(GetBotPresenceInput)
     case setBotPresenceState(SetBotPresenceStateInput)
+    case updateDialogFollowMode(UpdateDialogFollowModeInput)
 
   }
 
@@ -4526,6 +4584,14 @@ public struct RpcResult: Sendable {
     set {result = .setBotPresenceState(newValue)}
   }
 
+  public var updateDialogFollowMode: UpdateDialogFollowModeResult {
+    get {
+      if case .updateDialogFollowMode(let v)? = result {return v}
+      return UpdateDialogFollowModeResult()
+    }
+    set {result = .updateDialogFollowMode(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -4588,6 +4654,7 @@ public struct RpcResult: Sendable {
     case clearBotAvatar_p(ClearBotAvatarResult)
     case getBotPresence(GetBotPresenceResult)
     case setBotPresenceState(SetBotPresenceStateResult)
+    case updateDialogFollowMode(UpdateDialogFollowModeResult)
 
   }
 
@@ -5199,6 +5266,51 @@ public struct UpdateDialogOrderResult: @unchecked Sendable {
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct UpdateDialogFollowModeInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer to update follow mode for.
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// If unset, reply thread uses default relevance mode.
+  public var followMode: DialogFollowMode {
+    get {return _followMode ?? .unspecified}
+    set {_followMode = newValue}
+  }
+  /// Returns true if `followMode` has been explicitly set.
+  public var hasFollowMode: Bool {return self._followMode != nil}
+  /// Clears the value of `followMode`. Subsequent reads from it will return its default value.
+  public mutating func clearFollowMode() {self._followMode = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _followMode: DialogFollowMode? = nil
+}
+
+public struct UpdateDialogFollowModeResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 /// Mark dialog as unread
@@ -8026,6 +8138,14 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .botPresence(newValue)}
   }
 
+  public var dialogFollowMode: UpdateDialogFollowMode {
+    get {
+      if case .dialogFollowMode(let v)? = _storage._update {return v}
+      return UpdateDialogFollowMode()
+    }
+    set {_uniqueStorage()._update = .dialogFollowMode(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -8074,6 +8194,7 @@ public struct Update: @unchecked Sendable {
     case messageActionAnswered(UpdateMessageActionAnswered)
     case clearChatHistory_p(UpdateClearChatHistory)
     case botPresence(UpdateBotPresence)
+    case dialogFollowMode(UpdateDialogFollowMode)
 
   }
 
@@ -8180,12 +8301,22 @@ public struct UpdateChatInfo: Sendable {
   /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
   public mutating func clearEmoji() {self._emoji = nil}
 
+  public var untitled: Bool {
+    get {return _untitled ?? false}
+    set {_untitled = newValue}
+  }
+  /// Returns true if `untitled` has been explicitly set.
+  public var hasUntitled: Bool {return self._untitled != nil}
+  /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
+  public mutating func clearUntitled() {self._untitled = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _title: String? = nil
   fileprivate var _emoji: String? = nil
+  fileprivate var _untitled: Bool? = nil
 }
 
 /// Update when pinned messages change for a chat
@@ -8207,21 +8338,11 @@ public struct UpdatePinnedMessages: Sendable {
   /// Ordered list of pinned message IDs (latest first)
   public var messageIds: [Int64] = []
 
-  public var untitled: Bool {
-    get {return _untitled ?? false}
-    set {_untitled = newValue}
-  }
-  /// Returns true if `untitled` has been explicitly set.
-  public var hasUntitled: Bool {return self._untitled != nil}
-  /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
-  public mutating func clearUntitled() {self._untitled = nil}
-
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: Peer? = nil
-  fileprivate var _untitled: Bool? = nil
 }
 
 /// Update when a thread is moved between home and a space.
@@ -8574,6 +8695,40 @@ public struct UpdateDialogNotificationSettings: Sendable {
 
   fileprivate var _peerID: Peer? = nil
   fileprivate var _notificationSettings: DialogNotificationSettings? = nil
+}
+
+/// Update when reply-thread follow mode changes.
+public struct UpdateDialogFollowMode: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer ID of the dialog that changed.
+  public var peerID: Peer {
+    get {return _peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// If unset, the reply thread uses default relevance mode.
+  public var followMode: DialogFollowMode {
+    get {return _followMode ?? .unspecified}
+    set {_followMode = newValue}
+  }
+  /// Returns true if `followMode` has been explicitly set.
+  public var hasFollowMode: Bool {return self._followMode != nil}
+  /// Clears the value of `followMode`. Subsequent reads from it will return its default value.
+  public mutating func clearFollowMode() {self._followMode = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: Peer? = nil
+  fileprivate var _followMode: DialogFollowMode? = nil
 }
 
 /// Update when a new chat is created either in space or a private chat
@@ -9705,6 +9860,13 @@ public struct DraftMessage: Sendable {
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
+extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "DIALOG_FOLLOW_MODE_UNSPECIFIED"),
+    1: .same(proto: "FOLLOWING"),
+  ]
+}
+
 extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     0: .same(proto: "MODE_UNSPECIFIED"),
@@ -9774,6 +9936,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     57: .same(proto: "CLEAR_BOT_AVATAR"),
     58: .same(proto: "GET_BOT_PRESENCE"),
     59: .same(proto: "SET_BOT_PRESENCE_STATE"),
+    60: .same(proto: "UPDATE_DIALOG_FOLLOW_MODE"),
   ]
 }
 
@@ -11059,6 +11222,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     12: .standard(proto: "opened_date"),
     14: .same(proto: "order"),
     15: .standard(proto: "pinned_order"),
+    16: .standard(proto: "follow_mode"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11082,6 +11246,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case 13: try { try decoder.decodeSingularBoolField(value: &self._chatListHidden) }()
       case 14: try { try decoder.decodeSingularStringField(value: &self._order) }()
       case 15: try { try decoder.decodeSingularStringField(value: &self._pinnedOrder) }()
+      case 16: try { try decoder.decodeSingularEnumField(value: &self._followMode) }()
       default: break
       }
     }
@@ -11137,6 +11302,9 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     try { if let v = self._pinnedOrder {
       try visitor.visitSingularStringField(value: v, fieldNumber: 15)
     } }()
+    try { if let v = self._followMode {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 16)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -11156,6 +11324,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     if lhs._openedDate != rhs._openedDate {return false}
     if lhs._order != rhs._order {return false}
     if lhs._pinnedOrder != rhs._pinnedOrder {return false}
+    if lhs._followMode != rhs._followMode {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -14087,6 +14256,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     58: .same(proto: "clearBotAvatar"),
     59: .same(proto: "getBotPresence"),
     60: .same(proto: "setBotPresenceState"),
+    61: .same(proto: "updateDialogFollowMode"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -14863,6 +15033,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .setBotPresenceState(v)
         }
       }()
+      case 61: try {
+        var v: UpdateDialogFollowModeInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateDialogFollowMode(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateDialogFollowMode(v)
+        }
+      }()
       default: break
       }
     }
@@ -15113,6 +15296,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .setBotPresenceState(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 60)
     }()
+    case .updateDialogFollowMode?: try {
+      guard case .updateDialogFollowMode(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 61)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -15189,6 +15376,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     58: .same(proto: "clearBotAvatar"),
     59: .same(proto: "getBotPresence"),
     60: .same(proto: "setBotPresenceState"),
+    61: .same(proto: "updateDialogFollowMode"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -15965,6 +16153,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           self.result = .setBotPresenceState(v)
         }
       }()
+      case 61: try {
+        var v: UpdateDialogFollowModeResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .updateDialogFollowMode(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .updateDialogFollowMode(v)
+        }
+      }()
       default: break
       }
     }
@@ -16214,6 +16415,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     case .setBotPresenceState?: try {
       guard case .setBotPresenceState(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 60)
+    }()
+    case .updateDialogFollowMode?: try {
+      guard case .updateDialogFollowMode(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 61)
     }()
     case nil: break
     }
@@ -17339,6 +17544,80 @@ extension UpdateDialogOrderResult: SwiftProtobuf.Message, SwiftProtobuf._Message
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateDialogFollowModeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogFollowModeInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .standard(proto: "follow_mode"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self._followMode) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._followMode {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogFollowModeInput, rhs: UpdateDialogFollowModeInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs._followMode != rhs._followMode {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateDialogFollowModeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogFollowModeResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogFollowModeResult, rhs: UpdateDialogFollowModeResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -21452,6 +21731,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     36: .standard(proto: "message_action_answered"),
     37: .standard(proto: "clear_chat_history"),
     38: .standard(proto: "bot_presence"),
+    39: .standard(proto: "dialog_follow_mode"),
   ]
 
   fileprivate class _StorageClass {
@@ -21950,6 +22230,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .botPresence(v)
           }
         }()
+        case 39: try {
+          var v: UpdateDialogFollowMode?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .dialogFollowMode(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .dialogFollowMode(v)
+          }
+        }()
         default: break
         }
       }
@@ -22108,6 +22401,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .botPresence?: try {
         guard case .botPresence(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 38)
+      }()
+      case .dialogFollowMode?: try {
+        guard case .dialogFollowMode(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 39)
       }()
       case nil: break
       }
@@ -22294,6 +22591,7 @@ extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     1: .standard(proto: "chat_id"),
     2: .same(proto: "title"),
     3: .same(proto: "emoji"),
+    4: .same(proto: "untitled"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -22305,6 +22603,7 @@ extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
       default: break
       }
     }
@@ -22324,6 +22623,9 @@ extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     try { if let v = self._emoji {
       try visitor.visitSingularStringField(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._untitled {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -22331,6 +22633,7 @@ extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     if lhs.chatID != rhs.chatID {return false}
     if lhs._title != rhs._title {return false}
     if lhs._emoji != rhs._emoji {return false}
+    if lhs._untitled != rhs._untitled {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -22341,7 +22644,6 @@ extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "peer_id"),
     2: .standard(proto: "message_ids"),
-    4: .same(proto: "untitled"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -22352,7 +22654,6 @@ extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
-      case 4: try { try decoder.decodeSingularBoolField(value: &self._untitled) }()
       default: break
       }
     }
@@ -22369,16 +22670,12 @@ extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if !self.messageIds.isEmpty {
       try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 2)
     }
-    try { if let v = self._untitled {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
-    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdatePinnedMessages, rhs: UpdatePinnedMessages) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
     if lhs.messageIds != rhs.messageIds {return false}
-    if lhs._untitled != rhs._untitled {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -22845,6 +23142,48 @@ extension UpdateDialogNotificationSettings: SwiftProtobuf.Message, SwiftProtobuf
   public static func ==(lhs: UpdateDialogNotificationSettings, rhs: UpdateDialogNotificationSettings) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
     if lhs._notificationSettings != rhs._notificationSettings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateDialogFollowMode: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogFollowMode"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .standard(proto: "follow_mode"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self._followMode) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._followMode {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogFollowMode, rhs: UpdateDialogFollowMode) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs._followMode != rhs._followMode {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

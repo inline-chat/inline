@@ -135,7 +135,6 @@ message BotPresenceState {
   optional string comment = 2;
 }
 
-
 message User {
   int64 id = 1;
   optional string first_name = 2;
@@ -200,6 +199,13 @@ message Dialog {
   optional string order = 14;
   // Stable fractional order for pinned sidebar rows.
   optional string pinned_order = 15;
+  // Reply-thread automatic surfacing policy.
+  optional DialogFollowMode follow_mode = 16;
+}
+
+enum DialogFollowMode {
+  DIALOG_FOLLOW_MODE_UNSPECIFIED = 0;
+  FOLLOWING = 1;
 }
 
 // A thread
@@ -919,6 +925,7 @@ enum Method {
   CLEAR_BOT_AVATAR = 57;
   GET_BOT_PRESENCE = 58;
   SET_BOT_PRESENCE_STATE = 59;
+  UPDATE_DIALOG_FOLLOW_MODE = 60;
 }
 
 message RpcCall {
@@ -983,6 +990,7 @@ message RpcCall {
     ClearBotAvatarInput clearBotAvatar = 58;
     GetBotPresenceInput getBotPresence = 59;
     SetBotPresenceStateInput setBotPresenceState = 60;
+    UpdateDialogFollowModeInput updateDialogFollowMode = 61;
   }
 }
 
@@ -1049,6 +1057,7 @@ message RpcResult {
     ClearBotAvatarResult clearBotAvatar = 58;
     GetBotPresenceResult getBotPresence = 59;
     SetBotPresenceStateResult setBotPresenceState = 60;
+    UpdateDialogFollowModeResult updateDialogFollowMode = 61;
   }
 }
 
@@ -1216,6 +1225,16 @@ message UpdateDialogOrderResult {
   optional User user = 3;
 }
 
+message UpdateDialogFollowModeInput {
+  // Peer to update follow mode for.
+  InputPeer peer_id = 1;
+
+  // If unset, reply thread uses default relevance mode.
+  optional DialogFollowMode follow_mode = 2;
+}
+
+message UpdateDialogFollowModeResult { repeated Update updates = 1; }
+
 // Mark dialog as unread
 message MarkAsUnreadInput {
   // Peer ID to mark as unread
@@ -1365,7 +1384,6 @@ message SetBotPresenceStateInput {
 }
 
 message SetBotPresenceStateResult {}
-
 
 message GetUserSettingsInput {}
 
@@ -1907,6 +1925,7 @@ message Update {
     UpdateMessageActionAnswered message_action_answered = 36;
     UpdateClearChatHistory clear_chat_history = 37;
     UpdateBotPresence bot_presence = 38;
+    UpdateDialogFollowMode dialog_follow_mode = 39;
   }
 }
 
@@ -1943,6 +1962,7 @@ message UpdateChatInfo {
   int64 chat_id = 1;
   optional string title = 2;
   optional string emoji = 3;
+  optional bool untitled = 4;
 }
 
 // Update when pinned messages change for a chat
@@ -1952,7 +1972,6 @@ message UpdatePinnedMessages {
 
   // Ordered list of pinned message IDs (latest first)
   repeated int64 message_ids = 2;
-  optional bool untitled = 4;
 }
 
 // Update when a thread is moved between home and a space.
@@ -2051,6 +2070,15 @@ message UpdateDialogNotificationSettings {
 
   // If unset, chat follows global notification settings
   optional DialogNotificationSettings notification_settings = 2;
+}
+
+// Update when reply-thread follow mode changes.
+message UpdateDialogFollowMode {
+  // Peer ID of the dialog that changed.
+  Peer peer_id = 1;
+
+  // If unset, the reply thread uses default relevance mode.
+  optional DialogFollowMode follow_mode = 2;
 }
 
 // Update when a new chat is created either in space or a private chat
