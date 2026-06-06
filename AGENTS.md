@@ -56,6 +56,7 @@
 - When commiting file(s) with multiple changes/fixes, add a concise bullet list of specific items in the commit description; if fixing regressions or tricky bugs in non-conventional ways, add a very short explaination in commit description. Keep it under ~300 characters.
 - Do not remove comments explaining code or left by authors of code.
 - Preserve intentional comments, including inline documentation, bug-fix references, explanations for commented-out code, reasons for tricky code, and future TODO/FIXME notes. Only remove comments when they are clearly stale or incorrect and the change requires it.
+- Always explain in technical terms what was the issue and how you fixed it. 
 
 ## Style Guide
 - Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required. Don't use weird abbreviations like `idxes`; `msg`, `id`, `ctx` and alike are fine.
