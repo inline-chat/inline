@@ -28,6 +28,7 @@ public enum TransactionTypeRegistry {
       case is UpdateChatVisibilityTransaction: "update_chat_visibility"
       case is UpdateChatInfoTransaction: "update_chat_info"
       case is UpdateDialogNotificationSettingsTransaction: "update_dialog_notification_settings"
+      case is UpdateDialogFollowModeTransaction: "update_dialog_follow_mode"
       case is MoveThreadTransaction: "move_thread"
       case is PinMessageTransaction: "pin_message"
       case is TranslateMessagesTransaction: "translate_messages"
@@ -82,6 +83,8 @@ public enum TransactionTypeRegistry {
       case "update_chat_info": return try decoder.decode(UpdateChatInfoTransaction.self, from: data)
       case "update_dialog_notification_settings":
         return try decoder.decode(UpdateDialogNotificationSettingsTransaction.self, from: data)
+      case "update_dialog_follow_mode":
+        return try decoder.decode(UpdateDialogFollowModeTransaction.self, from: data)
       case "move_thread": return try decoder.decode(MoveThreadTransaction.self, from: data)
       case "pin_message": return try decoder.decode(PinMessageTransaction.self, from: data)
       case "translate_messages": return try decoder.decode(TranslateMessagesTransaction.self, from: data)

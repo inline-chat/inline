@@ -127,7 +127,6 @@ struct ChatRouteView: View {
           ToolbarSpacer(.flexible)
         }
 
-
         if botPresenceController.toolbarItem(for: peer) != nil {
           ToolbarItem {
             BotPresenceToolbarButton(
@@ -149,6 +148,16 @@ struct ChatRouteView: View {
             toolbarState: chatToolbarState
           )
           .id(peer.id)
+        }
+
+        if peer.isThread {
+          ToolbarItem {
+            ChatToolbarFollowButton(
+              peer: peer,
+              db: dependencies.database
+            )
+            .id("follow-\(peer.toString())")
+          }
         }
 
         if #available(macOS 26.0, *) {
