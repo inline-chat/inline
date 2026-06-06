@@ -40,6 +40,7 @@ final class UserAvatarView: UIView {
   private func setupViews() {
     backgroundColor = .clear
     isOpaque = false
+    clipsToBounds = true
   }
 
   override func layoutSubviews() {
@@ -83,8 +84,7 @@ final class UserAvatarView: UIView {
   private func updateAvatar(with userInfo: UserInfo) {
     let rootView = UserAvatar(
       userInfo: userInfo,
-      size: size,
-      ignoresSafeArea: true
+      size: size
     )
 
     if let hostingController {
@@ -93,8 +93,10 @@ final class UserAvatarView: UIView {
     }
 
     let controller = UIHostingController(rootView: rootView)
+    controller.safeAreaRegions = []
     controller.view.translatesAutoresizingMaskIntoConstraints = false
     controller.view.backgroundColor = .clear
+    controller.view.clipsToBounds = true
     controller.view.isUserInteractionEnabled = false
 
     addSubview(controller.view)
