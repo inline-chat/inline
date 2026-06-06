@@ -125,6 +125,18 @@ describe("inline/channel", () => {
         } as OpenClawConfig,
       }) ?? []).join("\n"),
     ).toContain("Prefer Inline buttons/selects")
+    const messageToolHints = (inlineChannelPlugin.agentPrompt?.messageToolHints?.({
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+          },
+        },
+      } as OpenClawConfig,
+    }) ?? []).join("\n")
+    expect(messageToolHints).toContain("Inline markdown links")
+    expect(messageToolHints).toContain("inline://thread")
+    expect(messageToolHints).toContain("Use `target` values only for tool calls.")
     expect(inlineChannelPlugin.commands?.buildModelsMenuChannelData?.({
       providers: [{ id: "openai", count: 2 }],
     })).toEqual({

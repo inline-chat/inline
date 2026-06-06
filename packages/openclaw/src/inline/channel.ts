@@ -1470,6 +1470,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline targeting: omit `target` to reply in the current chat.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
       "- Inline discovery: use `channel-list` to discover available chats and users. Use `scope: groups|peers|all` when helpful, and reuse returned `target` values.",
+      "- Inline markdown links: in visible replies, link returned users as `[@name](inline://user?id=<userId>)` and returned chats/threads as `[title](inline://chat?id=<chatId>)` or `[title](inline://thread?id=<chatId>)`. Use `target` values only for tool calls.",
       ...(supportsInlineMessageButtonsForConfig(cfg, accountId ?? null)
         ? [
             "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows for simple callback buttons.",
