@@ -142,6 +142,10 @@ class MessageViewAppKit: NSView {
     ExperimentalFeatureFlags.voiceMessagesEnabled && message.hasVoice
   }
 
+  private var canSaveLoadedVoice: Bool {
+    hasVoiceInDocumentSlot && VoiceMessageAudioSaver.canSave(message)
+  }
+
   private var hasActualDocument: Bool {
     fullMessage.documentInfo != nil
   }
@@ -642,6 +646,8 @@ class MessageViewAppKit: NSView {
     }
 
     guard let desiredView else { return }
+    documentContainerView.menu = menu
+    desiredView.menu = menu
 
     if desiredView.superview !== documentContainerView {
       desiredView.removeFromSuperview()
@@ -2751,6 +2757,12 @@ class MessageViewAppKit: NSView {
     let newMenu = NSMenu()
     newMenu.delegate = self
     menu = newMenu
+    if hasDocument {
+      documentContainerView.menu = newMenu
+      if hasVoiceInDocumentSlot {
+        voiceMessageView?.menu = newMenu
+      }
+    }
   }
 
   @objc private func addReaction() {
@@ -3242,6 +3254,21 @@ class MessageViewAppKit: NSView {
         }
       }
     }
+  }
+
+  @objc private func saveAudio() {
+    VoiceMessageAudioSaver.save(message: message, window: window)
+  }
+
+  override func willOpenMenu(_: NSMenu, with _: NSEvent) {
+    // Apply selection style when menu is about to open
+    layer?.backgroundColor = NSColor.darkGray
+      .withAlphaComponent(0.05).cgColor
+  }
+
+  override func didCloseMenu(_: NSMenu, with _: NSEvent?) {
+    // Remove selection style when menu closes
+    layer?.backgroundColor = nil
   }
 
   // MARK: - View Updates
@@ -4227,6 +4254,14 @@ extension MessageViewAppKit: NSMenuDelegate {
       menu.addItem(NSMenuItem.separator())
       let saveItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Document")
+      menu.addItem(saveItem)
+    }
+
+    if canSaveLoadedVoice {
+      menu.addItem(NSMenuItem.separator())
+      let saveItem = NSMenuItem(title: "Save Audio", action: #selector(saveAudio), keyEquivalent: "s")
+      saveItem.target = self
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Audio")
       menu.addItem(saveItem)
     }
 
