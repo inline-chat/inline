@@ -31,6 +31,11 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   var fromOtherSender: Bool = false
   var message: FullMessage!
   var spaceId: Int64 = 0
+  var displayMode: MessageDisplayMode = .normal
+
+  private var usesThreadLayout: Bool {
+    isThread || displayMode == .threadAnchor
+  }
 
   // MARK: - Sizes
 
@@ -71,13 +76,18 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     fatalError("init(coder:) has not been implemented")
   }
 
-  func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
+  func configure(
+    with message: FullMessage,
+    fromOtherSender: Bool,
+    spaceId: Int64,
+    displayMode: MessageDisplayMode = .normal
+  ) {
     let newOutgoing = message.message.out == true
 
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
          self.fromOtherSender == fromOtherSender, self.spaceId == spaceId,
-         outgoing == newOutgoing
+         outgoing == newOutgoing, self.displayMode == displayMode
       {
         // skip only if everything is exact match including outgoing state
         return
@@ -89,9 +99,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     self.message = message
     self.fromOtherSender = fromOtherSender
     self.spaceId = spaceId
+    self.displayMode = displayMode
     isThread = message.peerId.isThread
     outgoing = newOutgoing
-    canReply = message.canReply
+    canReply = message.canReply && displayMode != .threadAnchor
 
     resetCell()
 
@@ -111,8 +122,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     // Reset swipe state
     resetSwipeState()
+    resetCell()
     panGesture?.isEnabled = true
     canReply = true
+    displayMode = .normal
+    isThread = false
+    outgoing = false
+    fromOtherSender = false
 
     // Clear cached values to force reconfiguration
     prevText = nil
@@ -357,7 +373,7 @@ extension MessageCollectionViewCell {
   }
 
   func setupThreadHeaderViewsIfNeeded(fromOtherSender: Bool) {
-    guard isThread, !outgoing else { return }
+    guard usesThreadLayout, !outgoing else { return }
 
     let avatarOrSpacer: UIView
     if fromOtherSender, let from = message.senderInfo {
@@ -403,7 +419,7 @@ extension MessageCollectionViewCell {
 
   /// Space between bubble's top to contentView's top (includes name height)
   private var topBubblePadding: CGFloat {
-    if isThread, fromOtherSender, !outgoing {
+    if usesThreadLayout, fromOtherSender, !outgoing {
       nameLabelHeight + nameLabelTop
     } else {
       fromOtherSender ? 6 : 1
@@ -411,7 +427,7 @@ extension MessageCollectionViewCell {
   }
 
   func setupBaseMessageConstraints() {
-    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId)
+    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId, displayMode: displayMode)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
       self?.onPhotoTap?(message, sourceView, sourceImage, url)
@@ -428,42 +444,14 @@ extension MessageCollectionViewCell {
     // Sync reply view
     replyViewCenterYConstraint.constant = topBubblePadding / 2
 
-    if isThread, fromOtherSender, !outgoing {
-      // For thread incoming messages, keep original spacing between avatar and bubble
-      if let avatarOrSpacer = avatarSpacerView {
-        leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 3)
-      } else {
-        leadingConstraint = newMessageView.leadingAnchor
-          .constraint(equalTo: contentView.leadingAnchor, constant: 32)
-      }
+    if usesThreadLayout, !outgoing, let avatarOrSpacer = avatarSpacerView {
+      leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 3)
       trailingConstraint = newMessageView.trailingAnchor.constraint(
         equalTo: contentView.trailingAnchor,
-        constant: -(10 + horizontalPadding)
+        constant: fromOtherSender ? -(10 + horizontalPadding) : -horizontalPadding
       )
     } else {
-      var leadingAnchor = contentView.leadingAnchor
-      var leadingConstant: CGFloat = horizontalPadding
-      // Add spacer for incoming messages that are not fromOtherSender
-      if isThread, !outgoing, !fromOtherSender {
-        let avatarSize: CGFloat = 28
-        let avatarLeading: CGFloat = 0
-        let spacer = UIView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(spacer)
-        NSLayoutConstraint.activate([
-          spacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
-          spacer.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: avatarLeading + horizontalPadding
-          ),
-          spacer.widthAnchor.constraint(equalToConstant: avatarSize),
-          spacer.heightAnchor.constraint(equalToConstant: avatarSize),
-        ])
-        leadingAnchor = spacer.trailingAnchor
-        leadingConstant = 3
-      }
-      leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingConstant)
-
+      leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding)
       trailingConstraint = newMessageView.trailingAnchor.constraint(
         equalTo: contentView.trailingAnchor,
         constant: -horizontalPadding
@@ -486,13 +474,11 @@ extension MessageCollectionViewCell {
     messageView?.removeFromSuperview()
     messageView = nil
 
-    if isThread {
-      nameLabel.removeFromSuperview()
-      avatarView?.removeFromSuperview()
-      avatarView = nil
-      avatarSpacerView?.removeFromSuperview()
-      avatarSpacerView = nil
-    }
+    nameLabel.removeFromSuperview()
+    avatarView?.removeFromSuperview()
+    avatarView = nil
+    avatarSpacerView?.removeFromSuperview()
+    avatarSpacerView = nil
   }
 }
 

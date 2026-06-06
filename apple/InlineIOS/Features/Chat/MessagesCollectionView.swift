@@ -25,8 +25,11 @@ final class MessagesCollectionView: UICollectionView {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
-    let layout = MessagesCollectionView.createLayout()
-    coordinator = Coordinator(peerId: peerId, chatId: chatId, spaceId: spaceId)
+    let coordinator = Coordinator(peerId: peerId, chatId: chatId, spaceId: spaceId)
+    self.coordinator = coordinator
+    let layout = MessagesCollectionView.createLayout { [weak coordinator] sectionIndex in
+      coordinator?.sectionId(at: sectionIndex)
+    }
 
     super.init(frame: .zero, collectionViewLayout: layout)
 
@@ -190,17 +193,38 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   var shouldScrollToBottom: Bool { contentOffset.y < calculatedThreshold }
-  var itemsEmpty: Bool { coordinator.messages.isEmpty }
+  var itemsEmpty: Bool { coordinator.items.isEmpty }
 
-  private func findIndexPath(for messageId: Int64) -> IndexPath? {
-    for (sectionIndex, section) in coordinator.viewModel.sections.enumerated() {
-      for (itemIndex, message) in section.messages.enumerated() {
-        if message.message.messageId == messageId {
-          let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
-          // Validate the index path before returning
-          if isValidIndexPath(indexPath) {
-            return indexPath
-          }
+  private func findIndexPath(
+    forMessageId messageId: Int64,
+    chatId: Int64? = nil,
+    includeThreadAnchor: Bool = true
+  ) -> IndexPath? {
+    for (sectionIndex, section) in coordinator.listSections.enumerated() {
+      for (itemIndex, item) in section.items.enumerated() {
+        if item.isThreadAnchor, !includeThreadAnchor { continue }
+        guard let message = coordinator.message(for: item) else { continue }
+        guard message.message.messageId == messageId else { continue }
+        if let chatId, message.message.chatId != chatId { continue }
+
+        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+        // Validate the index path before returning
+        if isValidIndexPath(indexPath) {
+          return indexPath
+        }
+      }
+    }
+    return nil
+  }
+
+  private func findIndexPath(forStableMessageId stableId: Int64) -> IndexPath? {
+    for (sectionIndex, section) in coordinator.listSections.enumerated() {
+      for (itemIndex, item) in section.items.enumerated() {
+        guard item.messageStableId == stableId else { continue }
+
+        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+        if isValidIndexPath(indexPath) {
+          return indexPath
         }
       }
     }
@@ -210,9 +234,9 @@ final class MessagesCollectionView: UICollectionView {
   private func isValidIndexPath(_ indexPath: IndexPath) -> Bool {
     // Check both view model and collection view data source to avoid race conditions
     guard indexPath.section >= 0,
-          indexPath.section < coordinator.viewModel.numberOfSections(),
+          indexPath.section < coordinator.numberOfSections(),
           indexPath.item >= 0,
-          indexPath.item < coordinator.viewModel.numberOfItems(in: indexPath.section),
+          indexPath.item < coordinator.numberOfItems(in: indexPath.section),
           indexPath.section < numberOfSections,
           indexPath.item < numberOfItems(inSection: indexPath.section)
     else {
@@ -221,8 +245,8 @@ final class MessagesCollectionView: UICollectionView {
     return true
   }
 
-  func sourceViewForMessageId(_ messageId: Int64) -> UIView? {
-    guard let indexPath = findIndexPath(for: messageId),
+  func sourceViewForMessageStableId(_ stableId: Int64) -> UIView? {
+    guard let indexPath = findIndexPath(forStableMessageId: stableId),
           let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell
     else {
       return nil
@@ -233,8 +257,8 @@ final class MessagesCollectionView: UICollectionView {
 
   private func safeScrollToTop(animated: Bool = true) {
     // Check both view model and data source to avoid race conditions
-    guard coordinator.viewModel.numberOfSections() > 0,
-          coordinator.viewModel.numberOfItems(in: 0) > 0,
+    guard coordinator.numberOfSections() > 0,
+          coordinator.numberOfItems(in: 0) > 0,
           numberOfSections > 0,
           numberOfItems(inSection: 0) > 0
     else {
@@ -403,8 +427,8 @@ final class MessagesCollectionView: UICollectionView {
 
   private func animateScrollToBottom(duration: TimeInterval) {
     // Check both view model and data source to avoid race conditions
-    guard coordinator.viewModel.numberOfSections() > 0,
-          coordinator.viewModel.numberOfItems(in: 0) > 0,
+    guard coordinator.numberOfSections() > 0,
+          coordinator.numberOfItems(in: 0) > 0,
           numberOfSections > 0,
           numberOfItems(inSection: 0) > 0 else { return }
 
@@ -422,8 +446,10 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
-  private static func createLayout() -> UICollectionViewLayout {
-    AnimatedCompositionalLayout.createSectionedLayout()
+  private static func createLayout(
+    sectionIdProvider: @escaping (Int) -> MessageListSectionID?
+  ) -> UICollectionViewLayout {
+    AnimatedCompositionalLayout.createSectionedLayout(sectionIdProvider: sectionIdProvider)
   }
 
   // TODO: Handle far reply scroll
@@ -434,7 +460,11 @@ final class MessagesCollectionView: UICollectionView {
           let chatId = userInfo["chatId"] as? Int64,
           chatId == self.chatId else { return }
     // Find the index path of the message with this messageId
-    if let indexPath = findIndexPath(for: repliedToMessageId), isValidIndexPath(indexPath) {
+    if let indexPath = findIndexPath(
+      forMessageId: repliedToMessageId,
+      chatId: chatId,
+      includeThreadAnchor: false
+    ), isValidIndexPath(indexPath) {
       scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
       // Highlight the cell after scrolling
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -460,7 +490,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
     // Get messages on main actor, then move heavy work to background
     let messagesToPrefetch: [FullMessage] = indexPaths.compactMap { indexPath in
-      coordinator.viewModel.message(at: indexPath)
+      coordinator.message(at: indexPath)
     }.filter { $0.photoInfo != nil }
 
     if !messagesToPrefetch.isEmpty {
@@ -474,7 +504,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
     // Get messages on main actor, then move heavy work to background
     let messagesToCancel: [FullMessage] = indexPaths.compactMap { indexPath in
-      coordinator.viewModel.message(at: indexPath)
+      coordinator.message(at: indexPath)
     }.filter { $0.photoInfo != nil }
 
     if !messagesToCancel.isEmpty {
@@ -528,6 +558,9 @@ private extension MessagesCollectionView {
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
+    private var olderLoadTask: Task<Void, Never>?
+    private var threadAnchorFetchTask: Task<Void, Never>?
+    private var didExhaustThreadAnchorFetch = false
     private var isPresentingImageViewer = false
 
     // MARK: - Date Separator Visibility Handling
@@ -580,9 +613,101 @@ private extension MessagesCollectionView {
       collectionContextMenu?.dismissMenu()
     }
 
-    private var dataSource: UICollectionViewDiffableDataSource<Date, FullMessage.ID>!
+    private var dataSource: UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>!
+    private(set) var listSections: [MessageListSection] = []
+
     var messages: [FullMessage] {
       viewModel.sections.flatMap(\.messages)
+    }
+
+    var items: [MessageListItem] {
+      listSections.flatMap(\.items)
+    }
+
+    private func rebuildListSections() {
+      listSections = makeListSections()
+    }
+
+    private func makeListSections() -> [MessageListSection] {
+      var sections = viewModel.sections.map { section in
+        MessageListSection(
+          id: .messages(dayStart: section.date),
+          dayString: section.dayString,
+          items: section.messages.map { .message(id: $0.id) }
+        )
+      }
+
+      if let anchor = viewModel.threadAnchor {
+        // The collection view is inverted, so the last section is the visual top.
+        sections.append(MessageListSection(
+          id: .threadContext,
+          dayString: nil,
+          items: [.threadAnchor(id: anchor.id)]
+        ))
+      }
+
+      return sections
+    }
+
+    func sectionId(at index: Int) -> MessageListSectionID? {
+      listSection(at: index)?.id
+    }
+
+    private func listSection(at index: Int) -> MessageListSection? {
+      let sections = listSections
+      guard index >= 0, index < sections.count else { return nil }
+      return sections[index]
+    }
+
+    private func item(at indexPath: IndexPath) -> MessageListItem? {
+      guard let section = listSection(at: indexPath.section),
+            indexPath.item >= 0,
+            indexPath.item < section.items.count
+      else {
+        return nil
+      }
+      return section.items[indexPath.item]
+    }
+
+    func message(at indexPath: IndexPath) -> FullMessage? {
+      guard let item = item(at: indexPath) else { return nil }
+      return message(for: item)
+    }
+
+    func message(for item: MessageListItem) -> FullMessage? {
+      switch item {
+        case let .message(id):
+          viewModel.messagesByID[id]
+        case let .threadAnchor(id):
+          if viewModel.threadAnchor?.id == id {
+            viewModel.threadAnchor
+          } else {
+            nil
+          }
+        case .unreadSeparator:
+          nil
+      }
+    }
+
+    private func model(for item: MessageListItem) -> MessageListItemModel? {
+      switch item {
+        case .message:
+          guard let message = message(for: item) else { return nil }
+          return MessageListItemModel(content: .message(message, displayMode: .normal))
+        case .threadAnchor:
+          guard let message = message(for: item) else { return nil }
+          return MessageListItemModel(content: .message(message, displayMode: .threadAnchor))
+        case .unreadSeparator:
+          return MessageListItemModel(content: .unreadSeparator(title: "Unread messages"))
+      }
+    }
+
+    func numberOfSections() -> Int {
+      listSections.count
+    }
+
+    func numberOfItems(in section: Int) -> Int {
+      listSection(at: section)?.items.count ?? 0
     }
 
     init(peerId: Peer, chatId: Int64, spaceId: Int64) {
@@ -593,10 +718,12 @@ private extension MessagesCollectionView {
       translationViewModel = TranslationViewModel(peerId: peerId)
 
       super.init()
+      rebuildListSections()
 
       viewModel.observe { [weak self] update in
         self?.applyUpdate(update)
         self?.handleTranslationForUpdate(update)
+        self?.ensureThreadAnchorCachedIfNeeded()
       }
 
       // Subscribe to translation state changes
@@ -606,7 +733,7 @@ private extension MessagesCollectionView {
 
           guard let self, peer == self.peerId else { return }
           var snapshot = dataSource.snapshot()
-          let ids = messages.map(\.id)
+          let ids = messages.map { MessageListItem.message(id: $0.id) }
           // Safety check: only reconfigure items that actually exist in the snapshot
           let existingIds = ids.filter { snapshot.itemIdentifiers.contains($0) }
           if !existingIds.isEmpty {
@@ -618,9 +745,14 @@ private extension MessagesCollectionView {
 
       // Setup NotionTaskManager delegate
       setupNotionTaskManager()
+      ensureThreadAnchorCachedIfNeeded()
     }
 
     func dispose() {
+      olderLoadTask?.cancel()
+      olderLoadTask = nil
+      threadAnchorFetchTask?.cancel()
+      threadAnchorFetchTask = nil
       viewModel.dispose()
       cancellables.forEach { $0.cancel() }
       cancellables.removeAll()
@@ -659,21 +791,87 @@ private extension MessagesCollectionView {
       }
     }
 
+    private struct ThreadAnchorFetchRequest {
+      let parentPeer: Peer
+      let parentMessageId: Int64
+    }
+
+    private func ensureThreadAnchorCachedIfNeeded() {
+      guard threadAnchorFetchTask == nil else { return }
+      guard !didExhaustThreadAnchorFetch else { return }
+      guard viewModel.threadAnchor == nil else { return }
+      guard case .thread = peerId else { return }
+
+      threadAnchorFetchTask = Task { @MainActor [weak self] in
+        guard let self else { return }
+        defer { self.threadAnchorFetchTask = nil }
+
+        for attempt in 1 ... 3 {
+          guard !Task.isCancelled else { return }
+          guard viewModel.threadAnchor == nil else { return }
+          guard let request = await Self.threadAnchorFetchRequest(peer: peerId) else {
+            await Self.sleepBeforeThreadAnchorRetry(attempt: attempt)
+            continue
+          }
+
+          do {
+            _ = try await Api.realtime.send(.getMessages(
+              peer: request.parentPeer,
+              messageIds: [request.parentMessageId]
+            ))
+          } catch {
+            Log.shared.error("Failed to fetch reply thread anchor message", error: error)
+            await Self.sleepBeforeThreadAnchorRetry(attempt: attempt)
+            continue
+          }
+
+          guard !Task.isCancelled else { return }
+          if viewModel.reloadThreadAnchorFromLocal() {
+            setInitialData(animated: false)
+            return
+          }
+
+          await Self.sleepBeforeThreadAnchorRetry(attempt: attempt)
+        }
+
+        didExhaustThreadAnchorFetch = true
+      }
+    }
+
+    private static func sleepBeforeThreadAnchorRetry(attempt: Int) async {
+      guard attempt < 3 else { return }
+      try? await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
+    }
+
+    private static func threadAnchorFetchRequest(peer: Peer) async -> ThreadAnchorFetchRequest? {
+      guard case let .thread(threadId) = peer else { return nil }
+
+      do {
+        return try await AppDatabase.shared.reader.read { db in
+          guard let chat = try Chat.fetchOne(db, id: threadId),
+                let parentChatId = chat.parentChatId,
+                let parentMessageId = chat.parentMessageId,
+                let parentChat = try Chat.fetchOne(db, id: parentChatId)
+          else {
+            return nil
+          }
+
+          return ThreadAnchorFetchRequest(
+            parentPeer: parentChat.peerId.toPeer(),
+            parentMessageId: parentMessageId
+          )
+        }
+      } catch {
+        Log.shared.error("Failed to load reply thread anchor metadata", error: error)
+        return nil
+      }
+    }
+
     private var hasLinearConnected: Bool = false
     private var linearTeamId: String?
 
     private func isMessagePinned(_ message: Message) -> Bool {
-      do {
-        return try AppDatabase.shared.reader.read { db in
-          try PinnedMessage
-            .filter(Column("chatId") == message.chatId)
-            .filter(Column("messageId") == message.messageId)
-            .fetchCount(db) > 0
-        }
-      } catch {
-        Log.shared.error("Failed to read pinned message state", error: error)
-        return message.pinned == true
-      }
+      message.pinned == true
     }
 
     private func togglePinMessage(_ message: Message, unpin: Bool) {
@@ -688,14 +886,7 @@ private extension MessagesCollectionView {
     }
 
     private func chatPeerId(for message: Message) -> Peer {
-      do {
-        if let chat = try AppDatabase.shared.reader.read({ db in try Chat.fetchOne(db, id: message.chatId) }) {
-          return chat.peerId.toPeer()
-        }
-      } catch {
-        Log.shared.error("Failed to resolve chat peer for pin", error: error)
-      }
-      return message.peerId
+      message.peerId
     }
 
     func setupDataSource(_ collectionView: UICollectionView) {
@@ -703,19 +894,26 @@ private extension MessagesCollectionView {
 
       let cellRegistration = UICollectionView.CellRegistration<
         MessageCollectionViewCell,
-        FullMessage.ID
-      > { [weak self] cell, indexPath, messageId in
-        guard let self, let message = viewModel.messagesByID[messageId] else { return }
-        let isFromDifferentSender = isMessageFromDifferentSender(at: indexPath)
+        MessageListItem
+      > { [weak self] cell, indexPath, item in
+        guard let self, let model = model(for: item)
+        else {
+          return
+        }
+
+        guard case let .message(message, displayMode) = model.content else {
+          return
+        }
+        let isFromDifferentSender = item.isThreadAnchor ? true : isMessageFromDifferentSender(at: indexPath)
 
         cell.configure(
           with: message,
           fromOtherSender: isFromDifferentSender,
-          spaceId: spaceId
+          spaceId: spaceId,
+          displayMode: displayMode
         )
 
-        cell.onUserTap = { [weak self] userId in
-          guard let self else { return }
+        cell.onUserTap = { userId in
           // Navigate to user chat using notification center to bridge back to SwiftUI
           NotificationCenter.default.post(
             name: Notification.Name("NavigateToUser"),
@@ -734,14 +932,37 @@ private extension MessagesCollectionView {
         }
       }
 
-      dataSource = UICollectionViewDiffableDataSource<Date, FullMessage.ID>(
+      let separatorRegistration = UICollectionView.CellRegistration<
+        MessageListSeparatorCell,
+        MessageListItem
+      > { [weak self] cell, _, item in
+        guard let self,
+              let model = model(for: item),
+              case let .unreadSeparator(title) = model.content
+        else {
+          return
+        }
+
+        cell.configure(title: title)
+      }
+
+      dataSource = UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>(
         collectionView: collectionView
-      ) { collectionView, indexPath, messageId in
-        collectionView.dequeueConfiguredReusableCell(
-          using: cellRegistration,
-          for: indexPath,
-          item: messageId
-        )
+      ) { collectionView, indexPath, item in
+        switch item {
+          case .message, .threadAnchor:
+            collectionView.dequeueConfiguredReusableCell(
+              using: cellRegistration,
+              for: indexPath,
+              item: item
+            )
+          case .unreadSeparator:
+            collectionView.dequeueConfiguredReusableCell(
+              using: separatorRegistration,
+              for: indexPath,
+              item: item
+            )
+        }
       }
 
       // Configure supplementary view provider for date separators
@@ -758,8 +979,8 @@ private extension MessagesCollectionView {
           }
 
           // Safely get section with bounds checking
-          if let section = viewModel.section(at: indexPath.section) {
-            footerView.configure(with: section.dayString)
+          if let section = listSection(at: indexPath.section) {
+            footerView.configure(with: section.dayString ?? "")
           } else {
             // Fallback for invalid section
             footerView.configure(with: "")
@@ -776,14 +997,14 @@ private extension MessagesCollectionView {
     }
 
     private func isMessageFromDifferentSender(at indexPath: IndexPath) -> Bool {
-      guard let currentMessage = viewModel.message(at: indexPath) else { return true }
+      guard let currentMessage = message(at: indexPath) else { return true }
 
       // Check previous message within the same section
       let previousIndexPath = IndexPath(item: indexPath.item + 1, section: indexPath.section)
 
       // Ensure the previous index path is valid before checking
-      if previousIndexPath.item < viewModel.numberOfItems(in: indexPath.section),
-         let previousMessage = viewModel.message(at: previousIndexPath)
+      if previousIndexPath.item < numberOfItems(in: indexPath.section),
+         let previousMessage = message(at: previousIndexPath)
       {
         return currentMessage.message.fromId != previousMessage.message.fromId
       }
@@ -791,10 +1012,10 @@ private extension MessagesCollectionView {
       // If no previous message in this section, check last message of previous section
       if indexPath.section > 0 {
         let previousSection = indexPath.section - 1
-        let previousSectionItemCount = viewModel.numberOfItems(in: previousSection)
+        let previousSectionItemCount = numberOfItems(in: previousSection)
         if previousSectionItemCount > 0 {
           let lastMessageInPreviousSection = IndexPath(item: 0, section: previousSection)
-          if let lastMessage = viewModel.message(at: lastMessageInPreviousSection) {
+          if let lastMessage = message(at: lastMessageInPreviousSection) {
             return currentMessage.message.fromId != lastMessage.message.fromId
           }
         }
@@ -803,24 +1024,55 @@ private extension MessagesCollectionView {
       return true
     }
 
-    private func setInitialData(animated: Bool? = false) {
-      var snapshot = NSDiffableDataSourceSnapshot<Date, FullMessage.ID>()
+    private func setInitialData(animated: Bool? = false, reconfigureExisting: Bool = true) {
+      let startedAt = Date()
+      rebuildListSections()
+      let sections = listSections
+      let span = PerformanceTrace.begin(
+        "IOSMessagesSnapshotBuild",
+        category: .messages,
+        "sections=\(sections.count) reconfigure=\(reconfigureExisting)"
+      )
+      var snapshot = NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>()
 
       // Add sections and their messages using dates as stable identifiers
-      for section in viewModel.sections {
-        snapshot.appendSections([section.date])
-        let messageIds = section.messages.map(\.id)
-        snapshot.appendItems(messageIds, toSection: section.date)
+      for section in sections {
+        snapshot.appendSections([section.id])
+        snapshot.appendItems(section.items, toSection: section.id)
       }
 
       // Reconfigure only items that already exist in both snapshots so reused cells
       // rebuild their content when underlying data changes (e.g., replies load later).
       let currentIds = Set(dataSource.snapshot().itemIdentifiers)
       let nextIds = Set(snapshot.itemIdentifiers)
-      let idsToReconfigure = Array(currentIds.intersection(nextIds))
+      var idsToReconfigure: [MessageListItem] = []
+      if reconfigureExisting {
+        idsToReconfigure = Array(currentIds.intersection(nextIds))
+      } else if let anchor = viewModel.threadAnchor {
+        let anchorItem = MessageListItem.threadAnchor(id: anchor.id)
+        if currentIds.contains(anchorItem), nextIds.contains(anchorItem) {
+          idsToReconfigure = [anchorItem]
+        }
+      }
       if !idsToReconfigure.isEmpty {
         snapshot.reconfigureItems(idsToReconfigure)
       }
+
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end(
+        "sections=\(snapshot.sectionIdentifiers.count) items=\(snapshot.itemIdentifiers.count) duration_ms=\(durationMs)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow iOS messages snapshot build",
+        category: "messages.ios",
+        durationMs: durationMs,
+        thresholdMs: 120,
+        data: [
+          "sections": snapshot.sectionIdentifiers.count,
+          "items": snapshot.itemIdentifiers.count,
+          "reconfigure": reconfigureExisting,
+        ]
+      )
 
       safeApplySnapshot(snapshot, animatingDifferences: animated ?? false) { [weak self] in
         // Kick-off the auto-hide timer on first load as well (after layout pass)
@@ -831,12 +1083,17 @@ private extension MessagesCollectionView {
     }
 
     private func safeApplySnapshot(
-      _ snapshot: NSDiffableDataSourceSnapshot<Date, FullMessage.ID>,
+      _ snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>,
       animatingDifferences: Bool,
       withCustomTiming: Bool = false,
       completion: (() -> Void)? = nil
     ) {
       guard Thread.isMainThread else {
+        PerformanceTrace.event(
+          "IOSMessagesSnapshotApplyScheduled",
+          category: .messages,
+          "sections=\(snapshot.sectionIdentifiers.count) items=\(snapshot.itemIdentifiers.count)"
+        )
         DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
           self?.safeApplySnapshot(
             snapshot,
@@ -848,6 +1105,15 @@ private extension MessagesCollectionView {
         return
       }
 
+      let startedAt = Date()
+      let sectionCount = snapshot.sectionIdentifiers.count
+      let itemCount = snapshot.itemIdentifiers.count
+      let span = PerformanceTrace.begin(
+        "IOSMessagesSnapshotApply",
+        category: .messages,
+        "sections=\(sectionCount) items=\(itemCount) animated=\(animatingDifferences)"
+      )
+
       if withCustomTiming, animatingDifferences {
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.33)
@@ -855,6 +1121,21 @@ private extension MessagesCollectionView {
       }
 
       dataSource.apply(snapshot, animatingDifferences: animatingDifferences) {
+        let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+        span.end(
+          "sections=\(sectionCount) items=\(itemCount) animated=\(animatingDifferences) duration_ms=\(durationMs)"
+        )
+        PerformanceTrace.slowBreadcrumb(
+          "slow iOS messages snapshot apply",
+          category: "messages.ios",
+          durationMs: durationMs,
+          thresholdMs: 150,
+          data: [
+            "sections": sectionCount,
+            "items": itemCount,
+            "animated": animatingDifferences,
+          ]
+        )
         completion?()
       }
 
@@ -864,18 +1145,21 @@ private extension MessagesCollectionView {
     }
 
     func applyUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
+      rebuildListSections()
+
       switch update {
         case let .reload(animated):
           setInitialData(animated: animated)
 
-        case let .sectionsChanged(sections):
-          setInitialData(animated: true)
+        case .sectionsChanged:
+          setInitialData(animated: false, reconfigureExisting: false)
 
         case let .messagesAdded(sectionIndex, messageIds):
           var snapshot = dataSource.snapshot()
+          let items = messageIds.map { MessageListItem.message(id: $0) }
 
           // Validate section index
-          guard sectionIndex >= 0, sectionIndex < viewModel.numberOfSections() else {
+          guard sectionIndex >= 0, sectionIndex < viewModel.sections.count else {
             setInitialData(animated: true)
             return
           }
@@ -889,12 +1173,16 @@ private extension MessagesCollectionView {
             setInitialData(animated: true)
             return
           }
-          let sectionDate = section.date
+          let sectionId = MessageListSectionID.messages(dayStart: section.date)
+          guard snapshot.sectionIdentifiers.contains(sectionId) else {
+            setInitialData(animated: true)
+            return
+          }
 
-          if let firstItemInSection = snapshot.itemIdentifiers(inSection: sectionDate).first {
-            snapshot.insertItems(messageIds, beforeItem: firstItemInSection)
+          if let firstItemInSection = snapshot.itemIdentifiers(inSection: sectionId).first {
+            snapshot.insertItems(items, beforeItem: firstItemInSection)
           } else {
-            snapshot.appendItems(messageIds, toSection: sectionDate)
+            snapshot.appendItems(items, toSection: sectionId)
           }
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
@@ -912,21 +1200,32 @@ private extension MessagesCollectionView {
 
         case let .messagesDeleted(_, messageIds):
           var snapshot = dataSource.snapshot()
-          snapshot.deleteItems(messageIds)
+          let deletedItems = messageIds.flatMap { id in
+            [
+              MessageListItem.message(id: id),
+              MessageListItem.threadAnchor(id: id),
+            ]
+          }.filter { snapshot.itemIdentifiers.contains($0) }
+          snapshot.deleteItems(deletedItems)
           safeApplySnapshot(snapshot, animatingDifferences: true)
 
         case let .messagesUpdated(_, messageIds, animated):
           var snapshot = dataSource.snapshot()
           // Safety check: only reconfigure items that actually exist in the snapshot
-          let existingIds = messageIds.filter { snapshot.itemIdentifiers.contains($0) }
-          if !existingIds.isEmpty {
-            snapshot.reconfigureItems(existingIds)
+          let existingItems = messageIds.flatMap { id in
+            [
+              MessageListItem.message(id: id),
+              MessageListItem.threadAnchor(id: id),
+            ]
+          }.filter { snapshot.itemIdentifiers.contains($0) }
+          if !existingItems.isEmpty {
+            snapshot.reconfigureItems(existingItems)
             safeApplySnapshot(snapshot, animatingDifferences: animated ?? false)
           }
 
         case .multiSectionUpdate:
           // Multiple sections affected - do a full data reload for simplicity
-          setInitialData(animated: true)
+          setInitialData(animated: false, reconfigureExisting: false)
       }
     }
 
@@ -993,11 +1292,11 @@ private extension MessagesCollectionView {
       }
 
       var items = buildImageItems()
-      let messageId = message.message.messageId
-      if !items.contains(where: { $0.id == messageId }) {
-        items.append(ImageViewerItem(id: messageId, url: imageURL))
+      let stableId = message.id
+      if !items.contains(where: { $0.id == stableId }) {
+        items.append(ImageViewerItem(id: stableId, url: imageURL))
       }
-      let initialIndex = items.firstIndex(where: { $0.id == messageId }) ?? 0
+      let initialIndex = items.firstIndex(where: { $0.id == stableId }) ?? 0
 
       let viewer = ImageViewerController(
         imageItems: items,
@@ -1005,7 +1304,7 @@ private extension MessagesCollectionView {
         sourceView: sourceView,
         sourceImage: sourceImage,
         sourceViewProvider: { [weak collectionView] id in
-          collectionView?.sourceViewForMessageId(id)
+          collectionView?.sourceViewForMessageStableId(id)
         }
       )
       viewer.onDismiss = { [weak self] in
@@ -1033,7 +1332,7 @@ private extension MessagesCollectionView {
 
       for message in sortedMessages {
         guard let url = photoURL(for: message) else { continue }
-        items.append(ImageViewerItem(id: message.message.messageId, url: url))
+        items.append(ImageViewerItem(id: message.id, url: url))
       }
 
       return items
@@ -1057,7 +1356,7 @@ private extension MessagesCollectionView {
       return nil
     }
 
-    private var sizeCache: [FullMessage.ID: CGSize] = [:]
+    private var sizeCache: [MessageListItem: CGSize] = [:]
     private let maxCacheSize = 1_000
 
     func createReactionPickerView(for message: Message, at indexPath: IndexPath) -> UIView {
@@ -1255,13 +1554,17 @@ private extension MessagesCollectionView {
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
-      guard let message = viewModel.message(at: indexPath) else {
-        return .zero
+      guard let item = item(at: indexPath) else { return .zero }
+
+      if case .unreadSeparator = item {
+        return CGSize(width: collectionView.bounds.width, height: 34)
       }
 
-      if let cachedSize = sizeCache[message.id] {
+      if let cachedSize = sizeCache[item] {
         return cachedSize
       }
+
+      guard let message = message(for: item) else { return .zero }
 
       let availableWidth = collectionView.bounds.width - 16
       let textWidth = availableWidth - 32
@@ -1285,7 +1588,7 @@ private extension MessagesCollectionView {
           sizeCache.removeValue(forKey: key)
         }
       }
-      sizeCache[message.id] = size
+      sizeCache[item] = size
 
       return size
     }
@@ -1324,7 +1627,9 @@ private extension MessagesCollectionView {
       point: CGPoint
     ) -> UIContextMenuConfiguration? {
       guard let indexPath = indexPaths.first,
-            let fullMessage = viewModel.message(at: indexPath) else { return nil }
+            let item = item(at: indexPath),
+            !item.isThreadAnchor,
+            let fullMessage = message(for: item) else { return nil }
       let message = fullMessage.message
       let cell = currentCollectionView?.cellForItem(at: indexPath) as! MessageCollectionViewCell
 
@@ -1915,9 +2220,20 @@ private extension MessagesCollectionView {
         let isNearTop = scrollView.contentOffset.y >= (maxOffset - threshold)
 
         if isNearTop, isWithinBounds, maxOffset > 0 {
-          viewModel.loadBatch(at: .older)
-          scheduleUpdateItems()
+          loadOlderMessagesIfNeeded()
         }
+      }
+    }
+
+    private func loadOlderMessagesIfNeeded() {
+      guard olderLoadTask == nil, viewModel.canLoadOlderFromLocal else { return }
+
+      olderLoadTask = Task { @MainActor [weak self] in
+        guard let self else { return }
+        defer { self.olderLoadTask = nil }
+        guard !Task.isCancelled else { return }
+
+        _ = await self.viewModel.loadBatchAsync(at: .older)
       }
     }
 
@@ -1928,7 +2244,7 @@ private extension MessagesCollectionView {
     private func updateItemsSafely() {
       let currentSnapshot = dataSource.snapshot()
       let currentIds = Set(currentSnapshot.itemIdentifiers)
-      let availableIds = Set(messages.map(\.id))
+      let availableIds = Set(items)
       let missingIds = availableIds.subtracting(currentIds)
 
       if !missingIds.isEmpty {
@@ -2291,7 +2607,7 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
     switch update {
       case .reload:
         // For reload, trigger translation on all current messages
-        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+        translationViewModel.messagesDisplayed(messages: viewModel.messages)
 
         // Also analyze for translation detection on initial load
         if !hasAnalyzedInitialMessages, !viewModel.messages.isEmpty {
@@ -2305,7 +2621,7 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
           viewModel.messagesByID[messageId]
         }
         if !addedMessages.isEmpty {
-          await translationViewModel.messagesDisplayed(messages: addedMessages)
+          translationViewModel.messagesDisplayed(messages: addedMessages)
 
           // Also analyze new messages for translation detection if we haven't done initial analysis
           if !hasAnalyzedInitialMessages {
@@ -2320,16 +2636,20 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
           viewModel.messagesByID[messageId]
         }
         if !updatedMessages.isEmpty {
-          await translationViewModel.messagesDisplayed(messages: updatedMessages)
+          translationViewModel.messagesDisplayed(messages: updatedMessages)
         }
 
-      case .sectionsChanged:
-        // For section changes, trigger translation on all current messages
-        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+      case let .sectionsChanged(sections):
+        let changedMessages = sections.flatMap(\.messages)
+        if !changedMessages.isEmpty {
+          translationViewModel.messagesDisplayed(messages: changedMessages)
+        }
 
-      case let .multiSectionUpdate(sections: sections):
-        // For section changes, trigger translation on all current messages
-        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+      case let .multiSectionUpdate(sections):
+        let changedMessages = sections.flatMap(\.messages)
+        if !changedMessages.isEmpty {
+          translationViewModel.messagesDisplayed(messages: changedMessages)
+        }
 
       case .messagesDeleted:
         // No action needed for deletes

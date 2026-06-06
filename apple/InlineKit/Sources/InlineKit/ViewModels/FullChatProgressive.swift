@@ -168,7 +168,7 @@ public class MessagesProgressiveViewModel {
     self.callback = callback
   }
 
-  public enum MessagesLoadDirection {
+  public enum MessagesLoadDirection: Sendable {
     case older
     case newer
   }
@@ -181,8 +181,27 @@ public class MessagesProgressiveViewModel {
     loadAdditionalMessages(request: request, publish: publish)
   }
 
+  @discardableResult
+  public func loadBatchAsync(at direction: MessagesLoadDirection, publish: Bool = true) async -> Bool {
+    if direction == .older, !canLoadOlderFromLocal { return false }
+    if direction == .newer, !canLoadNewerFromLocal { return false }
+
+    let request = buildAdditionalLoadRequest(direction: direction)
+    log.trace(
+      "Loading batch async direction=\(request.direction.logLabel) limit=\(request.limit) prepend=\(request.prepend)"
+    )
+    return await loadAdditionalMessagesAsync(request: request, publish: publish)
+  }
+
   public func setAtBottom(_ atBottom: Bool) {
     self.atBottom = atBottom
+  }
+
+  @discardableResult
+  public func reloadThreadAnchorFromLocal() -> Bool {
+    let previousAnchor = threadAnchor
+    loadThreadAnchorFromLocalIfNeeded()
+    return previousAnchor != threadAnchor
   }
 
   func setGapRanges(_ ranges: [MessageGapRange]) {
@@ -208,6 +227,32 @@ public class MessagesProgressiveViewModel {
   }
 
   private func applyChanges(update: MessagesPublisher.UpdateType) -> MessagesChangeSet? {
+    let updateLabel = update.traceLabel
+    let beforeCount = messages.count
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesApplyChanges",
+      category: .messages,
+      "type=\(updateLabel) before=\(beforeCount)"
+    )
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end(
+        "type=\(updateLabel) before=\(beforeCount) after=\(messages.count) duration_ms=\(durationMs)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow message change apply",
+        category: "messages.reload",
+        durationMs: durationMs,
+        thresholdMs: 150,
+        data: [
+          "type": updateLabel,
+          "before": beforeCount,
+          "after": messages.count,
+        ]
+      )
+    }
+
     //    log.trace("Applying changes: \(update)")
     switch update {
       case let .add(messageAdd):
@@ -319,11 +364,19 @@ public class MessagesProgressiveViewModel {
     stableSorted(batch)
   }
 
-  struct AdditionalLoadRequest {
+  struct AdditionalLoadRequest: Sendable {
     let direction: MessagesLoadDirection
     let limit: Int
     let cursor: Date
+    let cursorMessageId: Int64
     let prepend: Bool
+  }
+
+  struct LoadedWindowBounds: Sendable {
+    let oldestDate: Date
+    let oldestMessageId: Int64
+    let newestDate: Date
+    let newestMessageId: Int64
   }
 
   struct MessageSortKey: Hashable {
@@ -379,6 +432,50 @@ public class MessagesProgressiveViewModel {
       existingMessages.filter { $0.message.date == cursor }.map(\.id)
     )
     return batch.filter { !existingMessagesAtCursor.contains($0.id) }
+  }
+
+  static func batchDeduped(
+    _ batch: [FullMessage],
+    existingByID: [Int64: FullMessage]
+  ) -> [FullMessage] {
+    batch.filter { existingByID[$0.id] == nil }
+  }
+
+  static func loadedWindowBounds(for messages: [FullMessage]) -> LoadedWindowBounds? {
+    guard let first = messages.first else { return nil }
+
+    var oldest = first
+    var newest = first
+
+    for message in messages.dropFirst() {
+      if isOlderByDateAndMessageId(message, than: oldest) {
+        oldest = message
+      }
+      if isNewerByDateAndMessageId(message, than: newest) {
+        newest = message
+      }
+    }
+
+    return LoadedWindowBounds(
+      oldestDate: oldest.message.date,
+      oldestMessageId: oldest.message.messageId,
+      newestDate: newest.message.date,
+      newestMessageId: newest.message.messageId
+    )
+  }
+
+  private static func isOlderByDateAndMessageId(_ lhs: FullMessage, than rhs: FullMessage) -> Bool {
+    if lhs.message.date != rhs.message.date {
+      return lhs.message.date < rhs.message.date
+    }
+    return lhs.message.messageId < rhs.message.messageId
+  }
+
+  private static func isNewerByDateAndMessageId(_ lhs: FullMessage, than rhs: FullMessage) -> Bool {
+    if lhs.message.date != rhs.message.date {
+      return lhs.message.date > rhs.message.date
+    }
+    return lhs.message.messageId > rhs.message.messageId
   }
 
   static func mergedMessages(
@@ -448,8 +545,7 @@ public class MessagesProgressiveViewModel {
   }
 
   private func updateLoadedWindowMetadata() {
-    let messageIds = messages.map(\.message.messageId)
-    guard let oldest = messageIds.min(), let newest = messageIds.max() else {
+    guard let bounds = Self.loadedWindowBounds(for: messages) else {
       oldestLoadedMessageId = nil
       newestLoadedMessageId = nil
       canLoadOlderFromLocal = false
@@ -457,21 +553,42 @@ public class MessagesProgressiveViewModel {
       return
     }
 
-    oldestLoadedMessageId = oldest
-    newestLoadedMessageId = newest
+    oldestLoadedMessageId = bounds.oldestMessageId
+    newestLoadedMessageId = bounds.newestMessageId
 
     do {
       let availability = try db.reader.read { db -> (Bool, Bool) in
-        let olderExists = try baseQuery()
-          .filter(Column("messageId") < oldest)
-          .limit(1)
-          .fetchCount(db) > 0
-        let newerExists = try baseQuery()
-          .filter(Column("messageId") > newest)
-          .limit(1)
-          .fetchCount(db) > 0
-        return (olderExists, newerExists)
+        try Self.loadedWindowAvailability(db, peer: peer, bounds: bounds)
       }
+
+      canLoadOlderFromLocal = availability.0
+      canLoadNewerFromLocal = availability.1
+    } catch {
+      Log.shared.error("Failed to update loaded window metadata", error: error)
+      canLoadOlderFromLocal = false
+      canLoadNewerFromLocal = false
+    }
+  }
+
+  private func updateLoadedWindowMetadataAsync() async {
+    guard let bounds = Self.loadedWindowBounds(for: messages) else {
+      oldestLoadedMessageId = nil
+      newestLoadedMessageId = nil
+      canLoadOlderFromLocal = false
+      canLoadNewerFromLocal = false
+      return
+    }
+
+    oldestLoadedMessageId = bounds.oldestMessageId
+    newestLoadedMessageId = bounds.newestMessageId
+
+    do {
+      let availability = try await Self.loadedWindowAvailability(
+        db: db,
+        peer: peer,
+        bounds: bounds
+      )
+      guard !Task.isCancelled else { return }
 
       canLoadOlderFromLocal = availability.0
       canLoadNewerFromLocal = availability.1
@@ -504,8 +621,8 @@ public class MessagesProgressiveViewModel {
 
         let olderOrTarget = try baseQuery()
           .filter(
-            sql: "(date < ?) OR (date = ? AND messageId <= ?)",
-            arguments: [targetDate, targetDate, targetMessageId]
+            (Column("date") < targetDate)
+              || ((Column("date") == targetDate) && (Column("messageId") <= targetMessageId))
           )
           .order(Column("date").desc, Column("messageId").desc)
           .limit(beforeLimit + 1)
@@ -513,8 +630,8 @@ public class MessagesProgressiveViewModel {
 
         let newer = try baseQuery()
           .filter(
-            sql: "(date > ?) OR (date = ? AND messageId > ?)",
-            arguments: [targetDate, targetDate, targetMessageId]
+            (Column("date") > targetDate)
+              || ((Column("date") == targetDate) && (Column("messageId") > targetMessageId))
           )
           .order(Column("date").asc, Column("messageId").asc)
           .limit(afterLimit)
@@ -550,18 +667,25 @@ public class MessagesProgressiveViewModel {
 
   private func buildAdditionalLoadRequest(direction: MessagesLoadDirection) -> AdditionalLoadRequest {
     let cursor = direction == .older ? minDate : maxDate
+    let cursorMessageId = direction == .older ? (oldestLoadedMessageId ?? 0) : (newestLoadedMessageId ?? 0)
     let limit = messages.count > 200 ? 200 : 100
     let prepend = direction == (reversed ? .newer : .older)
     return AdditionalLoadRequest(
       direction: direction,
       limit: limit,
       cursor: cursor,
+      cursorMessageId: cursorMessageId,
       prepend: prepend
     )
   }
 
   private func buildBaseOrderedQuery() -> QueryInterfaceRequest<FullMessage> {
     baseQuery()
+      .order(Column("date").desc, Column("messageId").desc)
+  }
+
+  private nonisolated static func buildBaseOrderedQuery(for peer: Peer) -> QueryInterfaceRequest<FullMessage> {
+    baseQuery(for: peer)
       .order(Column("date").desc, Column("messageId").desc)
   }
 
@@ -584,9 +708,37 @@ public class MessagesProgressiveViewModel {
   }
 
   private func fetchMessages(loadMode: LoadMode, previousCount: Int) throws -> [FullMessage] {
-    try db.reader.read { db in
+    let label = loadModeLogLabel(loadMode)
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesFetch",
+      category: .messages,
+      "mode=\(label) previous=\(previousCount)"
+    )
+    var fetchedCount = 0
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end(
+        "mode=\(label) previous=\(previousCount) fetched=\(fetchedCount) duration_ms=\(durationMs)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow message fetch",
+        category: "messages.db",
+        durationMs: durationMs,
+        thresholdMs: 200,
+        data: [
+          "mode": label,
+          "previous": previousCount,
+          "fetched": fetchedCount,
+        ]
+      )
+    }
+
+    let result = try db.reader.read { db in
       try buildQueryForLoad(loadMode: loadMode, previousCount: previousCount).fetchAll(db)
     }
+    fetchedCount = result.count
+    return result
   }
 
   private func normalizedMessagesForDisplay(_ batch: [FullMessage]) -> [FullMessage] {
@@ -600,12 +752,120 @@ public class MessagesProgressiveViewModel {
   }
 
   private func fetchAdditionalMessages(request: AdditionalLoadRequest) throws -> [FullMessage] {
-    try db.reader.read { db in
-      var query = buildBaseOrderedQuery()
-      query = query.filter(Column("date") <= request.cursor)
-      query = query.limit(request.limit)
-      return try query.fetchAll(db)
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesFetchAdditional",
+      category: .messages,
+      "direction=\(request.direction.logLabel) limit=\(request.limit)"
+    )
+    var fetchedCount = 0
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end(
+        "direction=\(request.direction.logLabel) limit=\(request.limit) fetched=\(fetchedCount) duration_ms=\(durationMs)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow additional message fetch",
+        category: "messages.db",
+        durationMs: durationMs,
+        thresholdMs: 200,
+        data: [
+          "direction": request.direction.logLabel,
+          "limit": request.limit,
+          "fetched": fetchedCount,
+        ]
+      )
     }
+
+    let result = try db.reader.read { db in
+      try Self.buildAdditionalMessagesQuery(peer: peer, request: request).fetchAll(db)
+    }
+    fetchedCount = result.count
+    return result
+  }
+
+  private nonisolated static func fetchAdditionalMessages(
+    db appDatabase: AppDatabase,
+    peer: Peer,
+    request: AdditionalLoadRequest
+  ) async throws -> [FullMessage] {
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesFetchAdditionalAsync",
+      category: .messages,
+      "direction=\(request.direction.logLabel) limit=\(request.limit)"
+    )
+    var fetchedCount = 0
+    defer {
+      span.end(
+        "direction=\(request.direction.logLabel) limit=\(request.limit) fetched=\(fetchedCount) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: startedAt))"
+      )
+    }
+
+    let result = try await appDatabase.reader.read { db in
+      try buildAdditionalMessagesQuery(peer: peer, request: request).fetchAll(db)
+    }
+    fetchedCount = result.count
+    return result
+  }
+
+  private nonisolated static func buildAdditionalMessagesQuery(
+    peer: Peer,
+    request: AdditionalLoadRequest
+  ) -> QueryInterfaceRequest<FullMessage> {
+    let query = baseQuery(for: peer)
+
+    switch request.direction {
+      case .older:
+        return query
+          .filter(
+            (Column("date") < request.cursor)
+              || ((Column("date") == request.cursor) && (Column("messageId") < request.cursorMessageId))
+          )
+          .order(Column("date").desc, Column("messageId").desc)
+          .limit(request.limit)
+
+      case .newer:
+        return query
+          .filter(
+            (Column("date") > request.cursor)
+              || ((Column("date") == request.cursor) && (Column("messageId") > request.cursorMessageId))
+          )
+          .order(Column("date").asc, Column("messageId").asc)
+          .limit(request.limit)
+    }
+  }
+
+  private nonisolated static func loadedWindowAvailability(
+    db appDatabase: AppDatabase,
+    peer: Peer,
+    bounds: LoadedWindowBounds
+  ) async throws -> (Bool, Bool) {
+    try await appDatabase.reader.read { db in
+      try loadedWindowAvailability(db, peer: peer, bounds: bounds)
+    }
+  }
+
+  private nonisolated static func loadedWindowAvailability(
+    _ db: Database,
+    peer: Peer,
+    bounds: LoadedWindowBounds
+  ) throws -> (Bool, Bool) {
+    let olderExists = try baseQuery(for: peer)
+      .filter(
+        (Column("date") < bounds.oldestDate)
+          || ((Column("date") == bounds.oldestDate) && (Column("messageId") < bounds.oldestMessageId))
+      )
+      .limit(1)
+      .fetchCount(db) > 0
+    let newerExists = try baseQuery(for: peer)
+      .filter(
+        (Column("date") > bounds.newestDate)
+          || ((Column("date") == bounds.newestDate) && (Column("messageId") > bounds.newestMessageId))
+      )
+      .limit(1)
+      .fetchCount(db) > 0
+    return (olderExists, newerExists)
   }
 
   private func loadModeLogLabel(_ loadMode: LoadMode) -> String {
@@ -619,6 +879,30 @@ public class MessagesProgressiveViewModel {
 
   private func loadMessages(_ loadMode: LoadMode) {
     let prevCount = messages.count
+    let label = loadModeLogLabel(loadMode)
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesLoad",
+      category: .messages,
+      "mode=\(label) previous=\(prevCount)"
+    )
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end(
+        "mode=\(label) previous=\(prevCount) after=\(messages.count) duration_ms=\(durationMs)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow message load",
+        category: "messages.reload",
+        durationMs: durationMs,
+        thresholdMs: 250,
+        data: [
+          "mode": label,
+          "previous": prevCount,
+          "after": messages.count,
+        ]
+      )
+    }
     log.trace("Loading messages mode=\(loadModeLogLabel(loadMode)) previousCount=\(prevCount)")
 
     do {
@@ -653,7 +937,7 @@ public class MessagesProgressiveViewModel {
       log.trace("loaded additional messages: \(rawCount)")
 
       messagesBatch = sort(batch: messagesBatch)
-      messagesBatch = Self.batchDedupedAtCursor(messagesBatch, existingMessages: messages, cursor: request.cursor)
+      messagesBatch = Self.batchDeduped(messagesBatch, existingByID: messagesByID)
       log.trace(
         "Batch dedupe direction=\(request.direction.logLabel) raw=\(rawCount) deduped=\(messagesBatch.count)"
       )
@@ -670,7 +954,49 @@ public class MessagesProgressiveViewModel {
     }
   }
 
+  private func loadAdditionalMessagesAsync(request: AdditionalLoadRequest, publish: Bool) async -> Bool {
+    let peer = peer
+
+    log
+      .debug(
+        "Loading additional messages for \(peer)"
+      )
+
+    do {
+      var messagesBatch = try await Self.fetchAdditionalMessages(db: db, peer: peer, request: request)
+      let rawCount = messagesBatch.count
+      guard !Task.isCancelled else { return false }
+
+      log.trace("loaded additional messages async: \(rawCount)")
+
+      messagesBatch = sort(batch: messagesBatch)
+      messagesBatch = Self.batchDeduped(messagesBatch, existingByID: messagesByID)
+      log.trace(
+        "Batch dedupe direction=\(request.direction.logLabel) raw=\(rawCount) deduped=\(messagesBatch.count)"
+      )
+
+      guard !messagesBatch.isEmpty else {
+        await updateLoadedWindowMetadataAsync()
+        return false
+      }
+
+      messages = Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
+
+      updateRange()
+      await updateLoadedWindowMetadataAsync()
+      guard !Task.isCancelled else { return false }
+      return true
+    } catch {
+      Log.shared.error("Failed to get messages \(error)")
+      return false
+    }
+  }
+
   private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
+    Self.baseQuery(for: peer)
+  }
+
+  private nonisolated static func baseQuery(for peer: Peer) -> QueryInterfaceRequest<FullMessage> {
     var query = FullMessage.queryRequest()
 
     switch peer {
@@ -785,6 +1111,26 @@ public final class MessagesPublisher {
 //    Log.shared.debug("Message added: \(message)")
     guard shouldPublish(peer: peer) else { return }
 
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesPublisherFetchMessage",
+      category: .messages,
+      "event=add"
+    )
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("event=add duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "slow publisher message fetch",
+        category: "messages.publisher",
+        durationMs: durationMs,
+        thresholdMs: 150,
+        data: [
+          "event": "add",
+        ]
+      )
+    }
+
     do {
       let fullMessage = try await db.reader.read { db in
         try FullMessage.queryRequest()
@@ -822,6 +1168,26 @@ public final class MessagesPublisher {
     //    Log.shared.debug("Message updated: \(message.messageId)")
     guard shouldPublish(peer: peer) else { return }
 
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesPublisherFetchMessage",
+      category: .messages,
+      "event=update"
+    )
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("event=update duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "slow publisher message fetch",
+        category: "messages.publisher",
+        durationMs: durationMs,
+        thresholdMs: 150,
+        data: [
+          "event": "update",
+        ]
+      )
+    }
+
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
@@ -849,6 +1215,27 @@ public final class MessagesPublisher {
 
     Log.shared.trace("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
+
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesPublisherFetchMessageSync",
+      category: .messages,
+      "event=update"
+    )
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("event=update duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "slow sync publisher message fetch",
+        category: "messages.publisher",
+        durationMs: durationMs,
+        thresholdMs: 100,
+        data: [
+          "event": "update",
+        ]
+      )
+    }
+
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
@@ -874,11 +1261,36 @@ public final class MessagesPublisher {
   public func messagesReload(peer: Peer, animated: Bool?) {
     guard shouldPublish(peer: peer) else { return }
 
+    PerformanceTrace.event(
+      "MessagesPublisherReload",
+      category: .messages,
+      "animated=\(animated ?? false)"
+    )
     publisher.send(.reload(peer: peer, animated: animated))
   }
 
   public func messageUpdatedWithId(messageId: Int64, chatId: Int64, peer: Peer, animated: Bool?) {
     guard shouldPublish(peer: peer) else { return }
+
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MessagesPublisherFetchMessageSync",
+      category: .messages,
+      "event=updateById"
+    )
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("event=updateById duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "slow sync publisher message fetch",
+        category: "messages.publisher",
+        durationMs: durationMs,
+        thresholdMs: 100,
+        data: [
+          "event": "updateById",
+        ]
+      )
+    }
 
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()
@@ -900,5 +1312,20 @@ public extension MessagesProgressiveViewModel {
   func dispose() {
     callback = nil
     cancellable.removeAll()
+  }
+}
+
+private extension MessagesPublisher.UpdateType {
+  var traceLabel: String {
+    switch self {
+      case .add:
+        "add"
+      case .update:
+        "update"
+      case .delete:
+        "delete"
+      case .reload:
+        "reload"
+    }
   }
 }
