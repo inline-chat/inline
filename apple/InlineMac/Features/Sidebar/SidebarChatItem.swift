@@ -30,6 +30,8 @@ struct SidebarChatItemView: Equatable, View {
   @State private var pendingDestructiveAction: ChatDestructiveAction?
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
+  private static let replyThreadTitleFont: Font = .system(size: 12, weight: .regular)
+  private static let parentTitleFont: Font = .system(size: 10, weight: .regular)
   private static let subtitleFont: Font = .system(size: 11)
   private static let innerPaddingHorizontal = 6.0
   private static let outerPaddingVertical = 0.0
@@ -85,7 +87,7 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsPreview: Bool {
-    size == .large && item.preview.isEmpty == false
+    size == .large && item.preview.isEmpty == false && item.parentTitle == nil
   }
 
   private var titleAccessory: SidebarChatItemAccessory? {
@@ -121,15 +123,7 @@ struct SidebarChatItemView: Equatable, View {
         .padding(.trailing, 8)
 
       VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 8) {
-          titleView
-
-          if showsCloseControl {
-            closeButton
-          } else if let titleAccessory {
-            accessoryView(titleAccessory)
-          }
-        }
+        titleBlock
 
         if showsPreview {
           HStack(spacing: 5) {
@@ -171,7 +165,7 @@ struct SidebarChatItemView: Equatable, View {
       open: open
     ))
     .accessibilityElement(children: .combine)
-    .accessibilityLabel(item.title)
+    .accessibilityLabel(accessibilityTitle)
     .accessibilityAddTraits(.isButton)
     .accessibilityAddTraits(selected ? .isSelected : [])
     .accessibilityAction {
@@ -279,7 +273,7 @@ struct SidebarChatItemView: Equatable, View {
   @ViewBuilder
   private var titleView: some View {
     let title = Text(item.title)
-      .font(Self.titleFont)
+      .font(rowTitleFont)
       .foregroundStyle(titleColor)
       .lineLimit(1)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,6 +283,33 @@ struct SidebarChatItemView: Equatable, View {
     } else {
       title
     }
+  }
+
+  private var titleBlock: some View {
+    HStack(alignment: .center, spacing: 8) {
+      VStack(alignment: .leading, spacing: 0) {
+        if let parentTitle = item.parentTitle {
+          parentTitleView(parentTitle)
+        }
+
+        titleView
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if showsCloseControl {
+        closeButton
+      } else if let titleAccessory {
+        accessoryView(titleAccessory)
+      }
+    }
+  }
+
+  private func parentTitleView(_ title: String) -> some View {
+    Text(title)
+      .font(Self.parentTitleFont)
+      .foregroundStyle(.tertiary)
+      .lineLimit(1)
+      .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var closeButton: some View {
@@ -357,6 +378,17 @@ struct SidebarChatItemView: Equatable, View {
 
   private var titleColor: Color {
     titleDimmed ? Color.secondary : Color.primary
+  }
+
+  private var rowTitleFont: Font {
+    item.parentTitle == nil ? Self.titleFont : Self.replyThreadTitleFont
+  }
+
+  private var accessibilityTitle: String {
+    if let parentTitle = item.parentTitle {
+      return "\(parentTitle), \(item.title)"
+    }
+    return item.title
   }
 
   private var showsCloseControl: Bool {

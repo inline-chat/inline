@@ -72,12 +72,15 @@ final class SidebarEphemeralChatModel {
         let chat = try Self.request(scope: scope)
           .fetchOne(db)
         let title: String?
+        let parentTitle: String?
         if let itemChat = chat?.chat {
           title = try ReplyThreadTitleFallback.title(for: itemChat, db: db)
+          parentTitle = try ReplyThreadTitleFallback.parentTitlesByChatId(for: [itemChat], db: db)[itemChat.id]
         } else {
           title = nil
+          parentTitle = nil
         }
-        return chat.map { ChatListItem(chatItem: $0, titleOverride: title) }
+        return chat.map { ChatListItem(chatItem: $0, titleOverride: title, parentTitle: parentTitle) }
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(

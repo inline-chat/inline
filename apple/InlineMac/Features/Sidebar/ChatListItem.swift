@@ -28,6 +28,7 @@ struct ChatListItem: Hashable, Identifiable {
   let lastMessage: EmbeddedMessage?
   let spaceId: Int64?
   let titleOverride: String?
+  let parentTitle: String?
 
   var id: Identifier
 
@@ -72,7 +73,7 @@ struct ChatListItem: Hashable, Identifiable {
     return .none
   }
 
-  init(chatItem: HomeChatItem, titleOverride: String? = nil) {
+  init(chatItem: HomeChatItem, titleOverride: String? = nil, parentTitle: String? = nil) {
     kind = .thread
     dialog = chatItem.dialog
     chat = chatItem.chat
@@ -81,6 +82,7 @@ struct ChatListItem: Hashable, Identifiable {
     lastMessage = chatItem.lastMessage
     spaceId = chatItem.dialog.spaceId ?? chatItem.chat?.spaceId ?? chatItem.space?.id
     self.titleOverride = titleOverride
+    self.parentTitle = parentTitle
     id = Identifier(kind: .thread, rawValue: chatItem.id)
   }
 
@@ -93,10 +95,11 @@ struct ChatListItem: Hashable, Identifiable {
     lastMessage = nil
     spaceId = member.spaceId
     titleOverride = nil
+    parentTitle = nil
     id = Identifier(kind: .contact, rawValue: member.id)
   }
 
-  init(spaceContactItem: SpaceChatItem, titleOverride: String? = nil) {
+  init(spaceContactItem: SpaceChatItem, titleOverride: String? = nil, parentTitle: String? = nil) {
     kind = .contact
     dialog = spaceContactItem.dialog
     chat = spaceContactItem.chat
@@ -116,10 +119,11 @@ struct ChatListItem: Hashable, Identifiable {
     }
     spaceId = spaceContactItem.dialog.spaceId
     self.titleOverride = titleOverride
+    self.parentTitle = parentTitle
     id = Identifier(kind: .contact, rawValue: spaceContactItem.id)
   }
 
-  init(spaceChatItem: SpaceChatItem, titleOverride: String? = nil) {
+  init(spaceChatItem: SpaceChatItem, titleOverride: String? = nil, parentTitle: String? = nil) {
     kind = .thread
     dialog = spaceChatItem.dialog
     chat = spaceChatItem.chat
@@ -139,6 +143,7 @@ struct ChatListItem: Hashable, Identifiable {
     }
     spaceId = spaceChatItem.dialog.spaceId
     self.titleOverride = titleOverride
+    self.parentTitle = parentTitle
     id = Identifier(kind: .thread, rawValue: spaceChatItem.id)
   }
 }

@@ -9,6 +9,8 @@ struct SidebarDragPreviewView: View {
   @Environment(\.colorScheme) private var colorScheme
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
+  private static let replyThreadTitleFont: Font = .system(size: 12, weight: .regular)
+  private static let parentTitleFont: Font = .system(size: 10, weight: .regular)
   private static let subtitleFont: Font = .system(size: 11)
   private static let innerPaddingHorizontal = 6.0
   private static let unreadDotSize = 6.0
@@ -22,7 +24,7 @@ struct SidebarDragPreviewView: View {
   }
 
   private var showsPreview: Bool {
-    !isCompact && item.preview.isEmpty == false
+    !isCompact && item.preview.isEmpty == false && item.parentTitle == nil
   }
 
   var body: some View {
@@ -32,17 +34,7 @@ struct SidebarDragPreviewView: View {
         .padding(.trailing, 8)
 
       VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 8) {
-          Text(item.title)
-            .font(Self.titleFont)
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-          if item.unread && showsPreview == false {
-            unreadDot
-          }
-        }
+        titleBlock
 
         if showsPreview {
           HStack(spacing: 5) {
@@ -67,6 +59,31 @@ struct SidebarDragPreviewView: View {
         .fill(backgroundColor)
     }
     .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 5)
+  }
+
+  private var titleBlock: some View {
+    HStack(alignment: .center, spacing: 8) {
+      VStack(alignment: .leading, spacing: 0) {
+        if let parentTitle = item.parentTitle {
+          Text(parentTitle)
+            .font(Self.parentTitleFont)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        Text(item.title)
+          .font(rowTitleFont)
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if item.unread && showsPreview == false {
+        unreadDot
+      }
+    }
   }
 
   @ViewBuilder
@@ -98,5 +115,9 @@ struct SidebarDragPreviewView: View {
 
   private var backgroundColor: Color {
     colorScheme == .dark ? Color(nsColor: .windowBackgroundColor).opacity(0.96) : .white.opacity(0.96)
+  }
+
+  private var rowTitleFont: Font {
+    item.parentTitle == nil ? Self.titleFont : Self.replyThreadTitleFont
   }
 }

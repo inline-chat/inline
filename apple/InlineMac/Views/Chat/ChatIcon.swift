@@ -2,6 +2,12 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+enum ThreadIconSymbol {
+  static func name(isReplyThread: Bool) -> String {
+    isReplyThread ? "arrow.turn.down.right" : "bubble.left.fill"
+  }
+}
+
 struct ChatIcon: View {
   enum PeerType: Equatable {
     case chat(Chat)
@@ -62,7 +68,7 @@ struct ChatIcon: View {
         InitialsCircle(
           name: thread.title ?? "",
           size: size,
-          symbol: thread.isReplyThread ? "arrowshape.turn.up.left" : "bubble.left.fill",
+          symbol: ThreadIconSymbol.name(isReplyThread: thread.isReplyThread),
           symbolWeight: .medium,
           emoji: thread.emoji,
           backgroundOpacity: backgroundOpacity

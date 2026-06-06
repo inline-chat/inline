@@ -19,6 +19,7 @@ final class SidebarViewModel {
     let chatId: Int64
     let spaceId: Int64?
     let title: String
+    let parentTitle: String?
     let preview: String
     let unread: Bool
     let pinned: Bool
@@ -37,6 +38,7 @@ final class SidebarViewModel {
       spaceId = listItem.spaceId
       let isCurrentUser = listItem.user?.user.isCurrentUser() == true
       title = isCurrentUser ? "Saved Messages" : listItem.displayTitle
+      parentTitle = listItem.parentTitle
       preview = listItem.sidebarBasePreviewText
       unread = listItem.hasUnread
       pinned = listItem.dialog?.pinned == true
@@ -330,24 +332,30 @@ final class SidebarViewModel {
   }
 
   private nonisolated static func chatListItems(_ chats: [HomeChatItem], db: Database) throws -> [ChatListItem] {
-    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
-    return HomeViewModel
-      .filterEmptyChats(chats)
-      .map { chat in
-        ChatListItem(chatItem: chat, titleOverride: chat.chat.flatMap { titles[$0.id] })
-      }
+    let filteredChats = HomeViewModel.filterEmptyChats(chats)
+    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: filteredChats, db: db)
+    let parentTitles = try ReplyThreadTitleFallback.parentTitlesByChatId(for: filteredChats, db: db)
+    return filteredChats.map { chat in
+      ChatListItem(
+        chatItem: chat,
+        titleOverride: chat.chat.flatMap { titles[$0.id] },
+        parentTitle: chat.chat.flatMap { parentTitles[$0.id] }
+      )
+    }
   }
 
   private nonisolated static func chatListItems(_ items: [SpaceChatItem], db: Database) throws -> [ChatListItem] {
     let chats = items.compactMap(\.chat)
     let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
+    let parentTitles = try ReplyThreadTitleFallback.parentTitlesByChatId(for: chats, db: db)
 
     return items.map { item in
       let titleOverride = item.chat.flatMap { titles[$0.id] }
+      let parentTitle = item.chat.flatMap { parentTitles[$0.id] }
       if item.userInfo != nil {
-        return ChatListItem(spaceContactItem: item, titleOverride: titleOverride)
+        return ChatListItem(spaceContactItem: item, titleOverride: titleOverride, parentTitle: parentTitle)
       }
-      return ChatListItem(spaceChatItem: item, titleOverride: titleOverride)
+      return ChatListItem(spaceChatItem: item, titleOverride: titleOverride, parentTitle: parentTitle)
     }
   }
 
