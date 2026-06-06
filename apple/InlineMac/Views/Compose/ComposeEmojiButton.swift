@@ -16,6 +16,10 @@ final class ComposeEmojiButton: NSView {
   private var isHovering = false
   weak var delegate: ComposeEmojiButtonDelegate?
 
+  private var canShowEmojiPanel: Bool {
+    !isHidden && alphaValue > 0 && window != nil
+  }
+
   override init(frame frameRect: NSRect) {
     let image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: nil)?
       .withSymbolConfiguration(.init(pointSize: size * 0.6, weight: .semibold))
@@ -57,6 +61,7 @@ final class ComposeEmojiButton: NSView {
     textView.onFocus = { [weak self] in
       self?.focusWindowIfNeeded()
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        guard self?.canShowEmojiPanel == true else { return }
         self?.showEmojiPanel()
       }
     }
@@ -97,6 +102,7 @@ final class ComposeEmojiButton: NSView {
     super.mouseDown(with: event)
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
+      guard self.canShowEmojiPanel else { return }
       if self.textView.window?.firstResponder === self.textView {
         self.showEmojiPanel()
       } else {
@@ -163,11 +169,17 @@ final class ComposeEmojiButton: NSView {
   }
 
   private func showEmojiPanel() {
+    guard canShowEmojiPanel else { return }
     _ = window?.makeFirstResponder(textView)
     let showSelector = Selector(("showEmojiAndSymbols:"))
     if NSApplication.shared.sendAction(showSelector, to: nil, from: textView) == false {
       NSApplication.shared.orderFrontCharacterPalette(nil)
     }
+  }
+
+  func resignEmojiFocus() {
+    guard window?.firstResponder === textView else { return }
+    window?.makeFirstResponder(nil)
   }
 }
 

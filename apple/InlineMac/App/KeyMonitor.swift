@@ -8,6 +8,7 @@ import OrderedCollections
 @MainActor
 public class KeyMonitor: Sendable {
   private let ESCAPE_KEY_CODE: UInt16 = 53
+  private let SPACE_KEY_CODE: UInt16 = 49
   private let V_KEY_CODE: UInt16 = 9
   private static let traceDefaultsKey = "keyMonitorTraceEnabled"
   private let log = Log.scoped(
@@ -15,6 +16,7 @@ public class KeyMonitor: Sendable {
     enableTracing: UserDefaults.standard.bool(forKey: traceDefaultsKey)
   )
   private var escapeHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
+  private var spaceHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var textInputCatchAllHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var pasteHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var arrowKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
@@ -37,6 +39,7 @@ public class KeyMonitor: Sendable {
 
   enum HandlerType {
     case escape
+    case spaceKey
     case textInputCatchAll
     case paste
     case arrowKeys
@@ -65,6 +68,8 @@ public class KeyMonitor: Sendable {
       case .escape:
         escapeHandlers[key] = handler
         log.trace("Escape handlers after add: \(handlerKeys(escapeHandlers))")
+      case .spaceKey:
+        spaceHandlers[key] = handler
       case .textInputCatchAll:
         textInputCatchAllHandlers[key] = handler
       case .paste:
@@ -85,6 +90,8 @@ public class KeyMonitor: Sendable {
         case .escape:
           self?.escapeHandlers.removeValue(forKey: key)
           self?.log.trace("Escape handlers after remove: \(self?.handlerKeys(self?.escapeHandlers ?? [:]) ?? "")")
+        case .spaceKey:
+          self?.spaceHandlers.removeValue(forKey: key)
         case .textInputCatchAll:
           self?.textInputCatchAllHandlers.removeValue(forKey: key)
         case .paste:
@@ -107,6 +114,8 @@ public class KeyMonitor: Sendable {
       case .escape:
         escapeHandlers.removeValue(forKey: key)
         log.trace("Escape handlers after explicit remove: \(handlerKeys(escapeHandlers))")
+      case .spaceKey:
+        spaceHandlers.removeValue(forKey: key)
       case .textInputCatchAll:
         textInputCatchAllHandlers.removeValue(forKey: key)
       case .paste:
@@ -171,6 +180,11 @@ public class KeyMonitor: Sendable {
         log.trace("Escape keydown; handlers=\(handlerKeys(escapeHandlers))")
         let handled = callHandler(for: .escape, event: event)
         log.trace("Escape keydown handled=\(handled)")
+        if handled { return nil }
+      }
+
+      if event.keyCode == SPACE_KEY_CODE, modifiers.isEmpty {
+        let handled = callHandler(for: .spaceKey, event: event)
         if handled { return nil }
       }
 
@@ -279,6 +293,13 @@ public class KeyMonitor: Sendable {
           return true
         } else {
           log.trace("No escape handler registered")
+          return false
+        }
+      case .spaceKey:
+        if let last = spaceHandlers.values.last {
+          last(event)
+          return true
+        } else {
           return false
         }
       case .textInputCatchAll:
