@@ -1,15 +1,20 @@
-import type { DbFile, DbUser } from "@in/server/db/schema"
+import type { DbBotAvatarAsset, DbFile, DbUser } from "@in/server/db/schema"
 import { User, UserStatus_Status } from "@inline-chat/protocol/core"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
+import { encodeBotAvatar } from "@in/server/realtime/encoders/encodeBotAvatar"
 
 export const encodeUser = ({
   user,
   photoFile,
+  botAvatar,
+  botAvatarFile,
   min = false,
 }: {
   user: DbUser
   photoFile?: DbFile
+  botAvatar?: DbBotAvatarAsset
+  botAvatarFile?: DbFile
   min?: boolean
 }): User => {
   let cdnUrl: string | undefined = undefined
@@ -40,5 +45,9 @@ export const encodeUser = ({
           fileUniqueId: photoFile?.fileUniqueId,
         }
       : undefined,
+    botAvatar:
+      !min && botAvatar && botAvatarFile
+        ? encodeBotAvatar({ avatar: botAvatar, file: botAvatarFile })
+        : undefined,
   }
 }

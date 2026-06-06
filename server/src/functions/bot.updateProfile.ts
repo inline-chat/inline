@@ -1,36 +1,18 @@
 import { db } from "@in/server/db"
-import { userNotDeleted, users } from "@in/server/db/schema/users"
-import { files } from "@in/server/db/schema/files"
+import { users } from "@in/server/db/schema/users"
 import { getFileByUniqueId } from "@in/server/db/models/files"
-import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { and, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { UpdateBotProfileInput, UpdateBotProfileResult } from "@inline-chat/protocol/core"
+import { encodeBotWithAvatar, parseBotUserId, requireManageableBot } from "./bot.avatarHelpers"
 
 export const updateBotProfile = async (
   input: UpdateBotProfileInput,
   context: FunctionContext,
 ): Promise<UpdateBotProfileResult> => {
-  const botUserId = Number(input.botUserId)
-
-  if (!Number.isFinite(botUserId) || botUserId <= 0) {
-    throw RealtimeRpcError.BadRequest()
-  }
-
-  const [bot] = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
-    .limit(1)
-
-  const currentUserId = context.currentUserId
-  const canUpdateAsCreator = bot?.botCreatorId === currentUserId
-  const canUpdateAsBotSelf = bot?.id === currentUserId
-
-  if (!bot || (!canUpdateAsCreator && !canUpdateAsBotSelf)) {
-    throw RealtimeRpcError.UserIdInvalid()
-  }
+  const botUserId = parseBotUserId(input.botUserId)
+  await requireManageableBot(botUserId, context)
 
   const updates: Partial<typeof users.$inferInsert> = {}
 
@@ -61,22 +43,7 @@ export const updateBotProfile = async (
     await db.update(users).set(updates).where(eq(users.id, botUserId))
   }
 
-  const [row] = await db
-    .select({ bot: users, photo: files })
-    .from(users)
-    .leftJoin(files, eq(users.photoFileId, files.id))
-    .where(eq(users.id, botUserId))
-    .limit(1)
-
-  if (!row) {
-    throw RealtimeRpcError.InternalError()
-  }
-
   return {
-    bot: Encoders.user({
-      user: row.bot,
-      photoFile: row.photo ?? undefined,
-      min: false,
-    }),
+    bot: await encodeBotWithAvatar(botUserId),
   }
 }

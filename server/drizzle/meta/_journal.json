@@ -568,6 +568,13 @@
       "when": 1780497124806,
       "tag": "0080_is_untitled",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1780673241196,
+      "tag": "0081_bot-avatar-assets",
+      "breakpoints": true
     }
   ]
 }

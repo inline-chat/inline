@@ -3,8 +3,8 @@ import { Log } from "@in/server/utils/log"
 import sharp from "sharp"
 
 const log = new Log("modules/files/metadata")
-const validPhotoMimeTypes = ["image/jpeg", "image/png", "image/gif"]
-const validPhotoExtensions = ["jpg", "jpeg", "png", "gif"]
+const validPhotoMimeTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+const validPhotoExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 const maxFileSize = 40_000_000 // 40MB
 const maxPhotoDimensionSum = 15_000
 const maxPhotoAspectRatio = 20

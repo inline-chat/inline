@@ -33,6 +33,10 @@ import { getPeerBotCommands } from "./bot.getPeerCommands"
 import { revealBotToken } from "./bot.revealToken"
 import { rotateBotToken } from "./bot.rotateToken"
 import { updateBotProfile } from "./bot.updateProfile"
+import { setBotAvatar } from "./bot.setAvatar"
+import { clearBotAvatar } from "./bot.clearAvatar"
+import { getBotPresence } from "./bot.getPresence"
+import { setBotPresenceStateFn } from "./bot.setPresenceState"
 import { deleteMember } from "@in/server/functions/space.deleteMember"
 import { getUpdatesState } from "./updates.getUpdatesState"
 import { getUpdates } from "./updates.getUpdates"
@@ -99,6 +103,10 @@ export const Functions = {
     revealBotToken: revealBotToken,
     rotateBotToken: rotateBotToken,
     updateBotProfile: updateBotProfile,
+    setBotAvatar: setBotAvatar,
+    clearBotAvatar: clearBotAvatar,
+    getPresence: getBotPresence,
+    setPresenceState: setBotPresenceStateFn,
   },
   updates: {
     getUpdatesState: getUpdatesState,

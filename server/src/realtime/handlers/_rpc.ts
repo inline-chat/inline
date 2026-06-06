@@ -35,6 +35,10 @@ import { getPeerBotCommandsHandler } from "./getPeerBotCommands"
 import { revealBotTokenHandler } from "./revealBotToken"
 import { rotateBotTokenHandler } from "./rotateBotToken"
 import { updateBotProfileHandler } from "./updateBotProfile"
+import { setBotAvatarHandler } from "./setBotAvatar"
+import { clearBotAvatarHandler } from "./clearBotAvatar"
+import { getBotPresenceHandler } from "./getBotPresence"
+import { setBotPresenceStateHandler } from "./setBotPresenceState"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
 import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.updateMemberAccess"
 import { markAsUnread } from "./messages.markAsUnread"
@@ -329,6 +333,38 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await updateBotProfileHandler(call.input.updateBotProfile, handlerContext)
       return { oneofKind: "updateBotProfile", updateBotProfile: result }
+    }
+
+    case Method.SET_BOT_AVATAR: {
+      if (call.input.oneofKind !== "setBotAvatar") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await setBotAvatarHandler(call.input.setBotAvatar, handlerContext)
+      return { oneofKind: "setBotAvatar", setBotAvatar: result }
+    }
+
+    case Method.CLEAR_BOT_AVATAR: {
+      if (call.input.oneofKind !== "clearBotAvatar") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await clearBotAvatarHandler(call.input.clearBotAvatar, handlerContext)
+      return { oneofKind: "clearBotAvatar", clearBotAvatar: result }
+    }
+
+    case Method.GET_BOT_PRESENCE: {
+      if (call.input.oneofKind !== "getBotPresence") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getBotPresenceHandler(call.input.getBotPresence, handlerContext)
+      return { oneofKind: "getBotPresence", getBotPresence: result }
+    }
+
+    case Method.SET_BOT_PRESENCE_STATE: {
+      if (call.input.oneofKind !== "setBotPresenceState") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await setBotPresenceStateHandler(call.input.setBotPresenceState, handlerContext)
+      return { oneofKind: "setBotPresenceState", setBotPresenceState: result }
     }
 
     case Method.DELETE_MEMBER: {
