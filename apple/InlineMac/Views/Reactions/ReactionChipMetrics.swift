@@ -4,6 +4,8 @@ import InlineKit
 enum ReactionChipMetrics {
   static let padding: CGFloat = 4
   static let spacing: CGFloat = 4
+  static let countSpacing: CGFloat = spacing / 2
+  static let countTrailingPadding: CGFloat = padding + spacing / 2
   static let height: CGFloat = 26
   static let emojiFontSize: CGFloat = 14
   static let textFontSize: CGFloat = 12
@@ -33,10 +35,13 @@ enum ReactionChipMetrics {
     let emojiFont = NSFont.systemFont(ofSize: emojiFontSize)
     let emojiWidth = ceil(group.emoji.size(withAttributes: [.font: emojiFont]).width)
     let count = group.reactions.count
-    let accessoryWidth = showsAvatars(for: count)
+    let showAvatars = showsAvatars(for: count)
+    let accessoryWidth = showAvatars
       ? avatarStackWidth(for: count)
       : countWidth(for: count)
-    let finalWidth = emojiWidth + spacing + accessoryWidth + padding * 2
+    let contentSpacing = showAvatars ? spacing : countSpacing
+    let trailingPadding = showAvatars ? padding : countTrailingPadding
+    let finalWidth = padding + emojiWidth + contentSpacing + accessoryWidth + trailingPadding
     return CGSize(width: ceil(finalWidth), height: height)
   }
 }

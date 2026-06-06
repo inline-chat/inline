@@ -124,6 +124,8 @@ struct ReactionItem: View {
 
   static let padding: CGFloat = ReactionChipMetrics.padding
   static let spacing: CGFloat = ReactionChipMetrics.spacing
+  static let countSpacing: CGFloat = ReactionChipMetrics.countSpacing
+  static let countTrailingPadding: CGFloat = ReactionChipMetrics.countTrailingPadding
   static let height: CGFloat = ReactionChipMetrics.height
   static let emojiFontSize: CGFloat = ReactionChipMetrics.emojiFontSize
   static let textFontSize: CGFloat = ReactionChipMetrics.textFontSize
@@ -148,11 +150,13 @@ struct ReactionItem: View {
 
   @ViewBuilder
   private var item: some View {
-    HStack(spacing: Self.spacing) {
+    let showAvatars = Self.shouldShowAvatars(group)
+
+    HStack(spacing: showAvatars ? Self.spacing : Self.countSpacing) {
       Text(emoji)
         .font(.system(size: Self.emojiFontSize))
 
-      if Self.shouldShowAvatars(group) {
+      if showAvatars {
         HStack(spacing: -Self.avatarOverlap) {
           ForEach(usersToShow, id: \.id) { user in
             UserAvatar(user: user, size: Self.avatarSize)
@@ -164,7 +168,8 @@ struct ReactionItem: View {
           .foregroundColor(foregroundColor)
       }
     }
-    .padding(.horizontal, Self.padding)
+    .padding(.leading, Self.padding)
+    .padding(.trailing, showAvatars ? Self.padding : Self.countTrailingPadding)
     .frame(width: Self.size(group: group).width, height: Self.height)
     .background(backgroundColor)
     .cornerRadius(Self.height / 2)

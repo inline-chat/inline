@@ -120,9 +120,9 @@ final class ReactionChipButton: NSButton {
       height: ceil(emojiSize.height)
     )
 
-    let x = ReactionChipMetrics.padding + ceil(emojiSize.width) + ReactionChipMetrics.spacing
-
     if countLabel.isHidden {
+      let x = ReactionChipMetrics.padding + ceil(emojiSize.width) + ReactionChipMetrics.spacing
+
       for (index, avatarView) in avatarViews.enumerated() {
         let avatarX = x + CGFloat(index) * (ReactionChipMetrics.avatarSize - ReactionChipMetrics.avatarOverlap)
         let avatarY = floor((bounds.height - ReactionChipMetrics.avatarSize) / 2)
@@ -139,8 +139,9 @@ final class ReactionChipButton: NSButton {
       let count = group?.reactions.count ?? Int(countLabel.stringValue) ?? 0
       let countWidth = max(ceil(countSize.width), ReactionChipMetrics.countWidth(for: count))
       let countY = floor((bounds.height - countSize.height) / 2)
+      let countX = ReactionChipMetrics.padding + ceil(emojiSize.width) + ReactionChipMetrics.countSpacing
       countLabel.frame = CGRect(
-        x: x,
+        x: countX,
         y: countY,
         width: countWidth,
         height: ceil(countSize.height)
