@@ -7,6 +7,7 @@ import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThum
 import { uploadFile } from "./uploadAFile"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import sharp from "sharp"
 
 const log = new Log("modules/files/uploadPhoto")
 
@@ -36,14 +37,15 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
       throw new Error("Invalid photo file", { cause: error as Error })
     }
 
-    const { dbFile, fileUniqueId } = await uploadFile(file, FileTypes.PHOTO, metadata, context)
+    const normalized = await normalizePhotoUpload(file, metadata)
+    const { dbFile, fileUniqueId } = await uploadFile(normalized.file, FileTypes.PHOTO, normalized.metadata, context)
 
-    const strippedThumbnail = await generateStrippedThumbnail(file).catch((error) => {
+    const strippedThumbnail = await generateStrippedThumbnail(normalized.file).catch((error) => {
       log.warn("Failed to generate stripped thumbnail", {
         error,
         fileUniqueId,
         userId: context.userId,
-        fileName: file.name,
+        fileName: normalized.file.name,
       })
       return null
     })
@@ -51,15 +53,15 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
     const encryptedStrippedThumbnail = strippedThumbnail ? encryptBinary(strippedThumbnail.bytes) : null
 
     // Save photo metadata
-    const format = metadata.mimeType === "image/jpeg" ? "jpeg" : "png"
+    const format = normalized.metadata.mimeType === "image/jpeg" ? "jpeg" : "png"
     let photo
     try {
       ;[photo] = await db
         .insert(photos)
         .values({
           format,
-          width: metadata.width,
-          height: metadata.height,
+          width: normalized.metadata.width,
+          height: normalized.metadata.height,
           stripped: encryptedStrippedThumbnail?.encrypted ?? null,
           strippedIv: encryptedStrippedThumbnail?.iv ?? null,
           strippedTag: encryptedStrippedThumbnail?.authTag ?? null,
@@ -84,8 +86,8 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
           fileId: dbFile.id,
           photoId: photo.id,
           size: "f",
-          width: metadata.width,
-          height: metadata.height,
+          width: normalized.metadata.width,
+          height: normalized.metadata.height,
         })
         .returning()
 
@@ -114,4 +116,29 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
     })
     throw error
   }
+}
+
+async function normalizePhotoUpload(
+  file: File,
+  metadata: Awaited<ReturnType<typeof getPhotoMetadataAndValidate>>,
+): Promise<{
+  file: File
+  metadata: Awaited<ReturnType<typeof getPhotoMetadataAndValidate>>
+}> {
+  if (metadata.mimeType !== "image/webp") {
+    return { file, metadata }
+  }
+
+  const png = await sharp(await file.arrayBuffer()).png().toBuffer()
+  const normalizedFile = new File([png], pngFileName(metadata.fileName), { type: "image/png" })
+  const normalizedMetadata = await getPhotoMetadataAndValidate(normalizedFile)
+  return { file: normalizedFile, metadata: normalizedMetadata }
+}
+
+function pngFileName(fileName: string): string {
+  const trimmed = fileName.trim() || "photo.webp"
+  if (trimmed.includes(".")) {
+    return trimmed.replace(/\.[^.]+$/, ".png")
+  }
+  return `${trimmed}.png`
 }

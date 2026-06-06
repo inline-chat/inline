@@ -10,6 +10,7 @@ import { encodeTranslation, encodeUnencryptedTranslation } from "@in/server/real
 import { encodeChatParticipant } from "./encodeChatParticipant"
 import { encodeUserSettings } from "./encodeUserSettings"
 import { encodeVoice } from "./encodeVoice"
+import { encodeBotAvatar } from "./encodeBotAvatar"
 export const Encoders = {
   photoLegacy: encodePhotoLegacy,
   message: encodeMessage,
@@ -28,4 +29,5 @@ export const Encoders = {
   unencryptedTranslation: encodeUnencryptedTranslation,
   chatParticipant: encodeChatParticipant,
   userSettings: encodeUserSettings,
+  botAvatar: encodeBotAvatar,
 }
