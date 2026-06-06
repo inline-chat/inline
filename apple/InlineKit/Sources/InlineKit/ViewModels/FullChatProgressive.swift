@@ -702,6 +702,13 @@ private extension MessagesProgressiveViewModel.MessagesLoadDirection {
 public final class MessagesPublisher {
   public static let shared = MessagesPublisher()
 
+#if os(iOS)
+  public struct ActiveChatToken: Sendable {
+    fileprivate let id: UUID
+    public let peer: Peer
+  }
+#endif
+
   public struct MessageUpdate {
     public let message: FullMessage
     public let animated: Bool?
@@ -731,9 +738,53 @@ public final class MessagesPublisher {
   private let db = AppDatabase.shared
   let publisher = PassthroughSubject<UpdateType, Never>()
 
+#if os(iOS)
+  private var activeChatTokens: [UUID: Peer] = [:]
+  private var activePeerCounts: [Peer: Int] = [:]
+
+  public func activateChat(peer: Peer) -> ActiveChatToken {
+    let wasInactive = activePeerCounts[peer] == nil
+    let token = ActiveChatToken(id: UUID(), peer: peer)
+
+    activeChatTokens[token.id] = peer
+    activePeerCounts[peer, default: 0] += 1
+
+    if wasInactive {
+      publisher.send(.reload(peer: peer, animated: false))
+    }
+
+    return token
+  }
+
+  public func deactivateChat(_ token: ActiveChatToken) {
+    guard let peer = activeChatTokens.removeValue(forKey: token.id) else { return }
+
+    let count = (activePeerCounts[peer] ?? 1) - 1
+    if count > 0 {
+      activePeerCounts[peer] = count
+    } else {
+      activePeerCounts.removeValue(forKey: peer)
+    }
+  }
+
+  public func isChatActive(peer: Peer) -> Bool {
+    activePeerCounts[peer] != nil
+  }
+
+  private func shouldPublish(peer: Peer) -> Bool {
+    isChatActive(peer: peer)
+  }
+#else
+  private func shouldPublish(peer _: Peer) -> Bool {
+    true
+  }
+#endif
+
   // Static methods to publish update
   func messageAdded(message: Message, peer: Peer) async {
 //    Log.shared.debug("Message added: \(message)")
+    guard shouldPublish(peer: peer) else { return }
+
     do {
       let fullMessage = try await db.reader.read { db in
         try FullMessage.queryRequest()
@@ -754,17 +805,23 @@ public final class MessagesPublisher {
 
   // Static methods to publish update
   func messageAddedSync(fullMessage: FullMessage, peer: Peer) {
+    guard shouldPublish(peer: peer) else { return }
+
     publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
   }
 
   // Message IDs not Global IDs
   public func messagesDeleted(messageIds: [Int64], peer: Peer) {
+    guard shouldPublish(peer: peer) else { return }
+
     publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
   }
 
   public func messageUpdated(message: Message, peer: Peer, animated: Bool?) async {
     //    Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
+    guard shouldPublish(peer: peer) else { return }
+
     let fullMessage = try? await db.reader.read { db in
       let query = FullMessage.queryRequest()
       let base =
@@ -788,6 +845,8 @@ public final class MessagesPublisher {
   }
 
   public func messageUpdatedSync(message: Message, peer: Peer, animated: Bool?) {
+    guard shouldPublish(peer: peer) else { return }
+
     Log.shared.trace("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
@@ -813,10 +872,14 @@ public final class MessagesPublisher {
   }
 
   public func messagesReload(peer: Peer, animated: Bool?) {
+    guard shouldPublish(peer: peer) else { return }
+
     publisher.send(.reload(peer: peer, animated: animated))
   }
 
   public func messageUpdatedWithId(messageId: Int64, chatId: Int64, peer: Peer, animated: Bool?) {
+    guard shouldPublish(peer: peer) else { return }
+
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()
       return try query
