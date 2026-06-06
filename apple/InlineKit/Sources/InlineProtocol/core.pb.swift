@@ -4713,6 +4713,24 @@ public struct GetUpdatesInput: Sendable {
   fileprivate var _bucket: UpdateBucket? = nil
 }
 
+public struct UpdateSidecars: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var users: [User] = []
+
+  public var chats: [Chat] = []
+
+  public var dialogs: [Dialog] = []
+
+  public var spaces: [Space] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public struct GetUpdatesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -4738,6 +4756,16 @@ public struct GetUpdatesResult: Sendable {
 
   /// Type of the result
   public var resultType: GetUpdatesResult.ResultType = .unspecified
+
+  /// Entities required to apply this update slice.
+  public var sidecars: UpdateSidecars {
+    get {return _sidecars ?? UpdateSidecars()}
+    set {_sidecars = newValue}
+  }
+  /// Returns true if `sidecars` has been explicitly set.
+  public var hasSidecars: Bool {return self._sidecars != nil}
+  /// Clears the value of `sidecars`. Subsequent reads from it will return its default value.
+  public mutating func clearSidecars() {self._sidecars = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4786,6 +4814,7 @@ public struct GetUpdatesResult: Sendable {
   public init() {}
 
   fileprivate var _final: Bool? = nil
+  fileprivate var _sidecars: UpdateSidecars? = nil
 }
 
 /// Remove member from space
@@ -16434,6 +16463,56 @@ extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
+extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateSidecars"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "users"),
+    2: .same(proto: "chats"),
+    3: .same(proto: "dialogs"),
+    4: .same(proto: "spaces"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.chats) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.dialogs) }()
+      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.spaces) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.users.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.users, fieldNumber: 1)
+    }
+    if !self.chats.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.chats, fieldNumber: 2)
+    }
+    if !self.dialogs.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 3)
+    }
+    if !self.spaces.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.spaces, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateSidecars, rhs: UpdateSidecars) -> Bool {
+    if lhs.users != rhs.users {return false}
+    if lhs.chats != rhs.chats {return false}
+    if lhs.dialogs != rhs.dialogs {return false}
+    if lhs.spaces != rhs.spaces {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesResult"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
@@ -16442,6 +16521,7 @@ extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     3: .same(proto: "date"),
     4: .same(proto: "final"),
     5: .standard(proto: "result_type"),
+    6: .same(proto: "sidecars"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -16455,6 +16535,7 @@ extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self._final) }()
       case 5: try { try decoder.decodeSingularEnumField(value: &self.resultType) }()
+      case 6: try { try decoder.decodeSingularMessageField(value: &self._sidecars) }()
       default: break
       }
     }
@@ -16480,6 +16561,9 @@ extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if self.resultType != .unspecified {
       try visitor.visitSingularEnumField(value: self.resultType, fieldNumber: 5)
     }
+    try { if let v = self._sidecars {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -16489,6 +16573,7 @@ extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs.date != rhs.date {return false}
     if lhs._final != rhs._final {return false}
     if lhs.resultType != rhs.resultType {return false}
+    if lhs._sidecars != rhs._sidecars {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

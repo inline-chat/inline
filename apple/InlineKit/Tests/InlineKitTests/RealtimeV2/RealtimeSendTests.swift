@@ -1189,7 +1189,11 @@ private enum SendTestTimeoutError: Error {
 }
 
 private actor SendTestApplyUpdates: ApplyUpdates {
-  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult {
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?
+  ) async -> UpdateApplyResult {
     .success(count: updates.count)
   }
 }

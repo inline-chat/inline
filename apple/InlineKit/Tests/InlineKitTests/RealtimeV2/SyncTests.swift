@@ -920,6 +920,83 @@ final class SyncTests {
     #expect(bucketState.date == 100)
   }
 
+  @Test("non-retryable fetch clears buffered realtime failure")
+  func testNonRetryableFetchClearsBufferedRealtimeFailure() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
+
+    let peer = makeChatPeer(chatId: 1)
+    let invalidPeer = ProtocolSessionError.rpcError(
+      errorCode: "peerIDInvalid",
+      message: "Peer ID is invalid",
+      code: 400
+    )
+    let client = FakeProtocolClient(
+      responses: [],
+      methodErrors: [
+        .getUpdates: Array(repeating: invalidPeer, count: 5),
+      ]
+    )
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let update = makeNewMessageUpdate(seq: 1, date: 100)
+    await sync.process(updates: [update])
+
+    _ = await waitForCondition {
+      await client.getCallCount() == 1
+    }
+
+    let refetched = await waitForCondition(timeout: .milliseconds(250)) {
+      await client.getCallCount() > 1
+    }
+    #expect(refetched == false)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.count == 1)
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 0)
+    #expect(bucketState.date == 0)
+  }
+
+  @Test("non-retryable fetch invalidates queued bucket actor work")
+  func testNonRetryableFetchInvalidatesQueuedBucketActorWork() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
+
+    let invalidPeer = ProtocolSessionError.rpcError(
+      errorCode: "peerIDInvalid",
+      message: "Peer ID is invalid",
+      code: 400
+    )
+    let client = FakeProtocolClient(
+      responses: [],
+      gateFirstCall: true,
+      methodErrors: [
+        .getUpdates: Array(repeating: invalidPeer, count: 5),
+      ]
+    )
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let first = makeNewMessageUpdate(seq: 1, date: 100)
+    await sync.process(updates: [first])
+    await client.waitForFirstCallStarted()
+
+    let second = makeNewMessageUpdate(seq: 2, date: 101)
+    await sync.process(updates: [second])
+
+    await client.releaseFirstCall()
+
+    let refetched = await waitForCondition(timeout: .milliseconds(250)) {
+      await client.getCallCount() > 1
+    }
+    #expect(refetched == false)
+  }
+
   @Test("sequenced updateReadMaxId realtime update advances user bucket state")
   func testRealtimeUpdateReadMaxIdAdvancesUserBucketState() async throws {
     let storage = InMemorySyncStorage()
@@ -979,6 +1056,57 @@ final class SyncTests {
     let peer = makeChatPeer(chatId: 1)
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
     #expect(bucketState.seq == 2)
+  }
+
+  @Test("catch-up forwards sidecars with fetched updates")
+  func testCatchupForwardsSidecarsWithFetchedUpdates() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let update = makeNewMessageUpdate(seq: 1, date: 80)
+    var user = InlineProtocol.User()
+    user.id = 100
+    user.min = true
+
+    var chat = InlineProtocol.Chat()
+    chat.id = 1
+    chat.peerID = makeChatPeer(chatId: 1)
+
+    var space = InlineProtocol.Space()
+    space.id = 10
+    space.name = "Sidecar Space"
+
+    var sidecars = InlineProtocol.UpdateSidecars()
+    sidecars.users = [user]
+    sidecars.chats = [chat]
+    sidecars.spaces = [space]
+
+    let getUpdates = makeGetUpdatesResult(
+      seq: 1,
+      date: 80,
+      updates: [update],
+      final: true,
+      resultType: .slice,
+      sidecars: sidecars
+    )
+
+    let client = FakeProtocolClient(responses: [getUpdates])
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let signal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)
+    await sync.process(updates: [signal])
+
+    _ = await waitForCondition {
+      await apply.appliedSidecars.count == 1
+    }
+
+    let appliedSidecars = await apply.appliedSidecars
+    #expect(appliedSidecars.count == 1)
+    let firstSidecar = try #require(appliedSidecars.first)
+    #expect(firstSidecar.users.map(\.id) == [100])
+    #expect(firstSidecar.chats.map(\.id) == [1])
+    #expect(firstSidecar.spaces.map(\.id) == [10])
   }
 
   @Test("realtime updates do not overtake pending catch-up batch")
@@ -1535,14 +1663,22 @@ final actor FakeProtocolClient: ProtocolClientType {
 
 actor RecordingApplyUpdates: ApplyUpdates {
   private(set) var appliedUpdates: [InlineProtocol.Update] = []
+  private(set) var appliedSidecars: [InlineProtocol.UpdateSidecars] = []
   var result = UpdateApplyResult.success(count: 0)
 
   func setResult(_ result: UpdateApplyResult) {
     self.result = result
   }
 
-  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult {
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?
+  ) async -> UpdateApplyResult {
     appliedUpdates.append(contentsOf: updates)
+    if let sidecars {
+      appliedSidecars.append(sidecars)
+    }
     guard result.failedCount > 0 else {
       return .success(count: updates.count)
     }
@@ -1621,7 +1757,8 @@ private func makeGetUpdatesResult(
   date: Int64,
   updates: [InlineProtocol.Update],
   final: Bool,
-  resultType: InlineProtocol.GetUpdatesResult.ResultType
+  resultType: InlineProtocol.GetUpdatesResult.ResultType,
+  sidecars: InlineProtocol.UpdateSidecars? = nil
 ) -> InlineProtocol.RpcResult.OneOf_Result {
   var result = InlineProtocol.GetUpdatesResult()
   result.updates = updates
@@ -1629,6 +1766,9 @@ private func makeGetUpdatesResult(
   result.date = date
   result.final = final
   result.resultType = resultType
+  if let sidecars {
+    result.sidecars = sidecars
+  }
   return .getUpdates(result)
 }
 

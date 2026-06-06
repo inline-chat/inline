@@ -25,7 +25,12 @@ public actor UpdatesEngine: Sendable {
         case let .newMessage(newMessageUpdate):
           log.trace("apply new message update")
           if source == .syncCatchup {
-            try newMessageUpdate.apply(db, publishChanges: false, suppressNotifications: true)
+            try newMessageUpdate.apply(
+              db,
+              publishChanges: false,
+              suppressNotifications: true,
+              materializeMissingReferences: true
+            )
             reloadPeers.insert(newMessageUpdate.message.peerID.toPeer())
           } else {
             try newMessageUpdate.apply(db, publishChanges: true, suppressNotifications: false)
@@ -71,7 +76,7 @@ public actor UpdatesEngine: Sendable {
 
         case let .editMessage(editMessage):
           if source == .syncCatchup {
-            try editMessage.apply(db, publishChanges: false)
+            try editMessage.apply(db, publishChanges: false, materializeMissingReferences: true)
             reloadPeers.insert(editMessage.message.peerID.toPeer())
           } else {
             try editMessage.apply(db, publishChanges: true)
@@ -119,6 +124,9 @@ public actor UpdatesEngine: Sendable {
         case let .updateUserSettings(userSettings):
           userSettings.apply()
 
+        case .chatSkipPts:
+          break
+
         case let .chatHasNewUpdates(chatHasNewUpdates):
           try chatHasNewUpdates.apply(db)
 
@@ -159,7 +167,17 @@ public actor UpdatesEngine: Sendable {
   }
 
   @discardableResult
-  public func applyBatch(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult {
+  public func applyBatch(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars? = nil
+  ) async -> UpdateApplyResult {
+    let batchStartedAt = Date()
+    let batchSpan = PerformanceTrace.begin(
+      "UpdateApplyBatch",
+      category: .updates,
+      "source=\(source.traceLabel) updates=\(updates.count) sidecars=\(sidecars?.traceCount ?? 0)"
+    )
     log.debug("applying \(updates.count) updates (source=\(source))")
     // Keep catch-up writes bounded so a very large reconnect batch does not monopolize
     // the writer lock long enough to visibly stall chat UI reads.
@@ -167,33 +185,81 @@ public actor UpdatesEngine: Sendable {
     var reloadPeers = Set<Peer>()
     var appliedCount = 0
     var failedCount = 0
+    var didApplySidecars = false
+    var chunkIndex = 0
 
     var start = updates.startIndex
     while start < updates.endIndex {
       let end = updates.index(start, offsetBy: chunkSize, limitedBy: updates.endIndex) ?? updates.endIndex
       let chunk = updates[start ..< end]
+      let applySidecarsInChunk = !didApplySidecars
+      chunkIndex += 1
+      let chunkStartedAt = Date()
+      let chunkSpan = PerformanceTrace.begin(
+        "UpdateApplyChunk",
+        category: .updates,
+        "source=\(source.traceLabel) chunk=\(chunkIndex) updates=\(chunk.count) sidecars=\(applySidecarsInChunk ? sidecars?.traceCount ?? 0 : 0)"
+      )
+      var chunkApplied = 0
+      var chunkFailed = 0
 
       do {
         let chunkResult = try await database.dbWriter.write { db in
+          if applySidecarsInChunk, let sidecars, hasSidecars(sidecars) {
+            let sidecarSpan = PerformanceTrace.begin(
+              "UpdateApplySidecars",
+              category: .updates,
+              "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count)"
+            )
+            defer {
+              sidecarSpan.end(
+                "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count)"
+              )
+            }
+            try self.apply(sidecars: sidecars, db: db)
+          }
+
           var chunkReloadPeers = Set<Peer>()
-          var chunkApplied = 0
-          var chunkFailed = 0
+          var writeApplied = 0
+          var writeFailed = 0
           for update in chunk {
             if self.apply(update: update, db: db, source: source, reloadPeers: &chunkReloadPeers) {
-              chunkApplied += 1
+              writeApplied += 1
             } else {
-              chunkFailed += 1
+              writeFailed += 1
             }
           }
-          return (chunkReloadPeers, chunkApplied, chunkFailed)
+          return (chunkReloadPeers, writeApplied, writeFailed)
+        }
+        if applySidecarsInChunk {
+          didApplySidecars = true
         }
         reloadPeers.formUnion(chunkResult.0)
-        appliedCount += chunkResult.1
-        failedCount += chunkResult.2
+        chunkApplied = chunkResult.1
+        chunkFailed = chunkResult.2
+        appliedCount += chunkApplied
+        failedCount += chunkFailed
       } catch {
         log.error("Failed to apply updates chunk", error: error)
-        failedCount += chunk.count
+        chunkFailed = chunk.count
+        failedCount += chunkFailed
       }
+      let chunkDurationMs = PerformanceTrace.elapsedMilliseconds(since: chunkStartedAt)
+      chunkSpan.end(
+        "source=\(source.traceLabel) chunk=\(chunkIndex) applied=\(chunkApplied) failed=\(chunkFailed) reload_peers=\(reloadPeers.count) duration_ms=\(chunkDurationMs)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow update apply chunk",
+        category: "updates.apply",
+        durationMs: chunkDurationMs,
+        thresholdMs: 250,
+        data: [
+          "source": source.traceLabel,
+          "updates": chunk.count,
+          "applied": chunkApplied,
+          "failed": chunkFailed,
+        ]
+      )
 
       if source == .syncCatchup, end < updates.endIndex {
         await Task.yield()
@@ -202,18 +268,137 @@ public actor UpdatesEngine: Sendable {
     }
 
     if source == .syncCatchup, !reloadPeers.isEmpty {
+      let reloadStartedAt = Date()
+      let reloadSpan = PerformanceTrace.begin(
+        "UpdateApplyReloadPublish",
+        category: .updates,
+        "peers=\(reloadPeers.count)"
+      )
       await MainActor.run {
         for peer in reloadPeers {
           MessagesPublisher.shared.messagesReload(peer: peer, animated: false)
         }
       }
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: reloadStartedAt)
+      reloadSpan.end("peers=\(reloadPeers.count) duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "slow sync reload publish",
+        category: "updates.apply",
+        durationMs: durationMs,
+        thresholdMs: 150,
+        data: [
+          "peers": reloadPeers.count,
+        ]
+      )
     }
 
+    let batchDurationMs = PerformanceTrace.elapsedMilliseconds(since: batchStartedAt)
+    batchSpan.end(
+      "source=\(source.traceLabel) updates=\(updates.count) chunks=\(chunkIndex) applied=\(appliedCount) failed=\(failedCount) reload_peers=\(reloadPeers.count) duration_ms=\(batchDurationMs)"
+    )
+    PerformanceTrace.slowBreadcrumb(
+      "slow update apply batch",
+      category: "updates.apply",
+      durationMs: batchDurationMs,
+      thresholdMs: source == .syncCatchup ? 750 : 300,
+      data: [
+        "source": source.traceLabel,
+        "updates": updates.count,
+        "chunks": chunkIndex,
+        "applied": appliedCount,
+        "failed": failedCount,
+        "reload_peers": reloadPeers.count,
+      ]
+    )
+
     return UpdateApplyResult(appliedCount: appliedCount, failedCount: failedCount)
+  }
+
+  private nonisolated func apply(sidecars: InlineProtocol.UpdateSidecars, db: Database) throws {
+    for user in sidecars.users {
+      _ = try User.save(db, user: user)
+    }
+
+    for protoSpace in sidecars.spaces {
+      let space = Space(from: protoSpace)
+      try space.save(db)
+    }
+
+    for var chat in try preparedSidecarChats(sidecars.chats, db: db) {
+      try chat.saveWithValidLastMsg(db)
+    }
+
+    for dialog in sidecars.dialogs {
+      _ = try dialog.saveFull(db)
+    }
   }
 }
 
 // MARK: Extensions
+
+private func hasSidecars(_ sidecars: InlineProtocol.UpdateSidecars) -> Bool {
+  !sidecars.users.isEmpty || !sidecars.chats.isEmpty || !sidecars.dialogs.isEmpty || !sidecars.spaces.isEmpty
+}
+
+func preparedSidecarChats(_ protoChats: [InlineProtocol.Chat], db: Database) throws -> [Chat] {
+  let sidecarChatIds = Set(protoChats.map(\.id))
+  return try orderedSidecarChats(protoChats.map(Chat.init)).map { chat in
+    var chat = chat
+    if let parentChatId = chat.parentChatId,
+       !sidecarChatIds.contains(parentChatId),
+       try Chat.fetchOne(db, id: parentChatId) == nil {
+      chat.parentChatId = nil
+      chat.parentMessageId = nil
+    }
+    return chat
+  }
+}
+
+private func orderedSidecarChats(_ chats: [Chat]) -> [Chat] {
+  var byId: [Int64: Chat] = [:]
+  for chat in chats {
+    byId[chat.id] = chat
+  }
+  var sorted: [Chat] = []
+  var visiting = Set<Int64>()
+  var visited = Set<Int64>()
+
+  func visit(_ chat: Chat) {
+    guard !visited.contains(chat.id) else { return }
+    guard !visiting.contains(chat.id) else { return }
+
+    visiting.insert(chat.id)
+    if let parentChatId = chat.parentChatId, let parent = byId[parentChatId] {
+      visit(parent)
+    }
+    visiting.remove(chat.id)
+    visited.insert(chat.id)
+    sorted.append(chat)
+  }
+
+  for chat in chats {
+    visit(chat)
+  }
+
+  return sorted
+}
+
+private extension UpdateApplySource {
+  var traceLabel: String {
+    switch self {
+      case .realtime:
+        "realtime"
+      case .syncCatchup:
+        "syncCatchup"
+    }
+  }
+}
+
+private extension InlineProtocol.UpdateSidecars {
+  var traceCount: Int {
+    users.count + chats.count + dialogs.count + spaces.count
+  }
+}
 
 func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
   try DbBucketState
@@ -269,6 +454,20 @@ extension InlineProtocol.UpdateNewMessage {
   }
 
   func apply(_ db: Database, publishChanges: Bool, suppressNotifications: Bool) throws {
+    try apply(
+      db,
+      publishChanges: publishChanges,
+      suppressNotifications: suppressNotifications,
+      materializeMissingReferences: false
+    )
+  }
+
+  func apply(
+    _ db: Database,
+    publishChanges: Bool,
+    suppressNotifications: Bool,
+    materializeMissingReferences: Bool
+  ) throws {
     // Avoid double-applying side effects when the same message is replayed (eg. sync catch-up,
     // duplicate delivery, history prefill).
     let hadMessage =
@@ -277,7 +476,8 @@ extension InlineProtocol.UpdateNewMessage {
     let msg = try Message.save(
       db,
       protocolMessage: message,
-      publishChanges: publishChanges
+      publishChanges: publishChanges,
+      materializeMissingReferences: materializeMissingReferences
     )
 
     try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
@@ -590,14 +790,19 @@ extension InlineProtocol.UpdateEditMessage {
     try apply(db, publishChanges: true)
   }
 
-  func apply(_ db: Database, publishChanges: Bool) throws {
+  func apply(_ db: Database, publishChanges: Bool, materializeMissingReferences: Bool = false) throws {
     // Delete stale translations for this message since the text has changed
     try Translation
       .filter(Column("messageId") == message.id)
       .filter(Column("chatId") == message.chatID)
       .deleteAll(db)
 
-    _ = try Message.save(db, protocolMessage: message, publishChanges: publishChanges)
+    _ = try Message.save(
+      db,
+      protocolMessage: message,
+      publishChanges: publishChanges,
+      materializeMissingReferences: materializeMissingReferences
+    )
 
     if publishChanges {
       db.afterNextTransaction { _ in
@@ -965,9 +1170,6 @@ extension InlineProtocol.UpdateUserSettings {
 }
 
 extension InlineProtocol.UpdateChatHasNewUpdates {
-          chat.isUntitled = hasUntitled && untitled ? true : nil
-        } else if hasUntitled {
-          chat.isUntitled = untitled ? true : nil
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat has new updates \(chatID) \(updateSeq)")
 

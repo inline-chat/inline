@@ -1085,6 +1085,13 @@ message GetUpdatesInput {
   int32 limit = 5;
 }
 
+message UpdateSidecars {
+  repeated User users = 1;
+  repeated Chat chats = 2;
+  repeated Dialog dialogs = 3;
+  repeated Space spaces = 4;
+}
+
 message GetUpdatesResult {
 
   repeated Update updates = 1;
@@ -1107,6 +1114,9 @@ message GetUpdatesResult {
 
   // Type of the result
   ResultType result_type = 5;
+
+  // Entities required to apply this update slice.
+  UpdateSidecars sidecars = 6;
 }
 
 // Remove member from space

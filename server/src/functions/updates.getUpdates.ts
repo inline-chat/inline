@@ -12,8 +12,10 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
+import { Log } from "@in/server/utils/log"
 
 const MAX_TOTAL_LIMIT = 1000
+const log = new Log("updates.getUpdates")
 
 type BucketDescriptor =
   | {
@@ -34,7 +36,10 @@ type BucketDescriptor =
     }
 
 export const getUpdates = async (input: GetUpdatesInput, context: FunctionContext): Promise<GetUpdatesResult> => {
+  const startedAt = performance.now()
+  const resolveStartedAt = performance.now()
   const descriptor = await resolveBucket(input.bucket, context)
+  const resolveMs = elapsedMs(resolveStartedAt)
 
   const seqStartBigInt = input.startSeq ?? 0n
   if (seqStartBigInt < 0n) {
@@ -69,16 +74,20 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   const requestedPageLimit = input.limit !== undefined && input.limit > 0 ? Number(input.limit) : totalLimit
   const pageLimit = Math.min(requestedPageLimit, totalLimit)
 
+  const fetchTiming = await timed(async () =>
+    Sync.getUpdates({
+      bucket: descriptor.box,
+      seqStart,
+      seqEnd,
+      limit: pageLimit,
+    })
+  )
   const {
     updates: dbUpdates,
     latestSeq,
     latestDate,
-  } = await Sync.getUpdates({
-    bucket: descriptor.box,
-    seqStart,
-    seqEnd,
-    limit: pageLimit,
-  })
+  } = fetchTiming.value
+  const fetchMs = fetchTiming.ms
 
   let sliceDate = latestDate
   if (dbUpdates.length > 0) {
@@ -88,6 +97,20 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
 
   const seqDifference = latestSeq - seqStart
   if (seqDifference > totalLimit) {
+    logGetUpdatesTiming({
+      scope: descriptor.scope,
+      result: "too_long",
+      totalMs: elapsedMs(startedAt),
+      resolveMs,
+      fetchMs,
+      inflateMs: 0,
+      sidecarsMs: 0,
+      dbUpdates: dbUpdates.length,
+      updates: 0,
+      pageLimit,
+      totalLimit,
+      seqDifference,
+    })
     return {
       updates: [],
       seq: BigInt(latestSeq),
@@ -97,7 +120,8 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     }
   }
 
-  let updates: GetUpdatesResult["updates"] = []
+  let inflatedUpdates: GetUpdatesResult["updates"] = []
+  const inflateStartedAt = performance.now()
 
   switch (descriptor.scope) {
     case "chat": {
@@ -107,38 +131,56 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
         updates: dbUpdates,
         userId: context.currentUserId,
       })
-      updates = result.updates
+      inflatedUpdates = result.updates
       break
     }
 
     case "space": {
-      updates = Sync.inflateSpaceUpdates(dbUpdates, { sanitizeUsers: descriptor.sanitizeUsers })
+      inflatedUpdates = Sync.inflateSpaceUpdates(dbUpdates, { sanitizeUsers: descriptor.sanitizeUsers })
       break
     }
 
     case "user": {
-      updates = Sync.inflateUserUpdates(dbUpdates)
+      inflatedUpdates = Sync.inflateUserUpdates(dbUpdates)
       break
     }
   }
+  const inflateMs = elapsedMs(inflateStartedAt)
 
-  let deliveredSeqNumber = seqStart
-  let deliveredDate = sliceDate
-  if (updates.length > 0) {
-    const lastDelivered = updates[updates.length - 1]
-    deliveredSeqNumber = Number(lastDelivered?.seq ?? seqStart)
-    deliveredDate = findDateForSeq(dbUpdates, deliveredSeqNumber) ?? sliceDate
-  }
-
-  const lastDbRecord = dbUpdates.length > 0 ? dbUpdates[dbUpdates.length - 1] : undefined
-  if (lastDbRecord && deliveredSeqNumber < lastDbRecord.seq) {
-    // Advance past updates we couldn't inflate to avoid infinite fetch loops.
-    deliveredSeqNumber = lastDbRecord.seq
-    deliveredDate = lastDbRecord.date
-  }
+  // Only deliver the contiguous inflated prefix. If seq N fails to inflate but
+  // seq N+1 succeeds, returning N+1 would let the client advance over the failed
+  // update and permanently lose it.
+  const delivery = selectContiguousDelivery(dbUpdates, inflatedUpdates, seqStart, sliceDate)
+  const updates = delivery.updates
+  const deliveredSeqNumber = delivery.seq
+  const deliveredDate = delivery.date
   const final = latestSeq <= deliveredSeqNumber
+  const sidecarsStartedAt = performance.now()
+  const sidecars = descriptor.scope === "chat"
+    ? await Sync.buildChatSidecarsForUpdates({
+        chatId: descriptor.chatId,
+        updates,
+        userId: context.currentUserId,
+      })
+    : undefined
+  const sidecarsMs = elapsedMs(sidecarsStartedAt)
 
   let resultType = updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE
+
+  logGetUpdatesTiming({
+    scope: descriptor.scope,
+    result: updates.length === 0 ? "empty" : "slice",
+    totalMs: elapsedMs(startedAt),
+    resolveMs,
+    fetchMs,
+    inflateMs,
+    sidecarsMs,
+    dbUpdates: dbUpdates.length,
+    updates: updates.length,
+    pageLimit,
+    totalLimit,
+    seqDifference,
+  })
 
   return {
     updates,
@@ -146,6 +188,43 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     date: encodeOptionalDate(deliveredDate),
     final,
     resultType,
+    sidecars: updates.length > 0 && hasSidecars(sidecars) ? sidecars : undefined,
+  }
+}
+
+const elapsedMs = (startedAt: number): number =>
+  Math.round((performance.now() - startedAt) * 10) / 10
+
+const timed = async <T>(fn: () => Promise<T>): Promise<{ value: T; ms: number }> => {
+  const startedAt = performance.now()
+  const value = await fn()
+  return {
+    value,
+    ms: elapsedMs(startedAt),
+  }
+}
+
+type GetUpdatesTiming = {
+  scope: BucketDescriptor["scope"]
+  result: "too_long" | "empty" | "slice"
+  totalMs: number
+  resolveMs: number
+  fetchMs: number
+  inflateMs: number
+  sidecarsMs: number
+  dbUpdates: number
+  updates: number
+  pageLimit: number
+  totalLimit: number
+  seqDifference: number
+}
+
+const logGetUpdatesTiming = (timing: GetUpdatesTiming): void => {
+  const message = "getUpdates timing"
+  if (timing.totalMs >= 500) {
+    log.warn(message, timing)
+  } else {
+    log.debug(message, timing)
   }
 }
 
@@ -156,14 +235,53 @@ const encodeOptionalDate = (date: Date | null | undefined): bigint => {
   return encodeDateStrict(date)
 }
 
-const findDateForSeq = (dbUpdates: { seq: number; date: Date }[], seq: number): Date | null => {
-  for (let i = dbUpdates.length - 1; i >= 0; i -= 1) {
-    const record = dbUpdates[i]!
-    if (record.seq === seq) {
-      return record.date
+const selectContiguousDelivery = (
+  dbUpdates: { seq: number; date: Date }[],
+  updates: GetUpdatesResult["updates"],
+  seqStart: number,
+  fallbackDate: Date | null,
+): { updates: GetUpdatesResult["updates"]; seq: number; date: Date | null } => {
+  const updateBySeq = new Map<number, GetUpdatesResult["updates"][number]>()
+  for (const update of updates) {
+    const seq = Number(update.seq)
+    if (Number.isSafeInteger(seq)) {
+      updateBySeq.set(seq, update)
     }
   }
-  return null
+
+  const contiguousUpdates: GetUpdatesResult["updates"] = []
+  let seq = seqStart
+  let date = fallbackDate
+
+  for (const record of dbUpdates) {
+    if (record.seq !== seq + 1) {
+      break
+    }
+
+    const update = updateBySeq.get(record.seq)
+    if (!update) {
+      break
+    }
+
+    contiguousUpdates.push(update)
+    seq = record.seq
+    date = record.date
+  }
+
+  return { updates: contiguousUpdates, seq, date }
+}
+
+const hasSidecars = (sidecars: GetUpdatesResult["sidecars"]): boolean => {
+  if (!sidecars) {
+    return false
+  }
+
+  return (
+    sidecars.users.length > 0 ||
+    sidecars.chats.length > 0 ||
+    sidecars.dialogs.length > 0 ||
+    sidecars.spaces.length > 0
+  )
 }
 
 const resolveBucket = async (

@@ -26,5 +26,15 @@ public struct UpdateApplyResult: Sendable {
 /// Protocol for applying updates within the Sync actor context
 public protocol ApplyUpdates: Sendable {
   /// Apply a batch of updates to the database
-  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?
+  ) async -> UpdateApplyResult
+}
+
+public extension ApplyUpdates {
+  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult {
+    await apply(updates: updates, source: source, sidecars: nil)
+  }
 }
