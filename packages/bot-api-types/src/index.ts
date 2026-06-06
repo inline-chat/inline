@@ -25,14 +25,17 @@ export type BotMessageEntityType =
   | "code"
   | "pre"
   | "phone_number"
+  | "thread"
+  | "thread_title"
 
 export type BotTargetInput = {
-  // Canonical target fields.
   chat_id?: BotInputId
   user_id?: BotInputId
-
-  // Alpha compatibility aliases.
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `chat_id`.
+  // Remove after confirming no production use in the previous month.
   peer_thread_id?: BotInputId
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `user_id`.
+  // Remove after confirming no production use in the previous month.
   peer_user_id?: BotInputId
 }
 
@@ -46,17 +49,25 @@ export type BotUser = {
 
 export type BotPeer = {
   user_id?: number
+  // 2026-06-03: Deprecated output shape kept for production bot clients.
+  // Prefer `message.chat_id`; remove after confirming no production use in the previous month.
   thread_id?: number
 }
 
 export type BotMessageEntityInput = {
+  // 2026-06-03: Deprecated compatibility accepts legacy strings and enum numbers for existing entity types.
+  // New thread-link entities should use canonical names only. Remove after production usage audit.
   type: BotMessageEntityType | string | number
   offset: BotInputId
   length: BotInputId
   user_id?: BotInputId
   url?: string
   language?: string
-  // Compatibility input accepted by server.
+  chat_id?: BotInputId
+  space_id?: BotInputId
+  title?: string
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `user_id`.
+  // Remove after confirming no production use in the previous month.
   user?: { id: BotInputId }
 }
 
@@ -67,6 +78,9 @@ export type BotMessageEntityOutput = {
   user?: BotUser
   url?: string
   language?: string
+  chat_id?: number
+  space_id?: number
+  title?: string
 }
 
 export type BotChatLastMessage = {
@@ -123,6 +137,8 @@ export type SendMessageParams = BotTargetInput & {
   reply_to_message_id?: BotInputId
   entities?: BotMessageEntityInput[]
   parse_markdown?: boolean
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
+  // Remove after confirming no production use in the previous month.
   parseMarkdown?: boolean
 }
 
@@ -131,6 +147,8 @@ export type EditMessageTextParams = BotTargetInput & {
   text: string
   entities?: BotMessageEntityInput[]
   parse_markdown?: boolean
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
+  // Remove after confirming no production use in the previous month.
   parseMarkdown?: boolean
 }
 

@@ -453,11 +453,24 @@ extension NSTextView {
     return attributes[.mentionUserId] != nil
   }
 
+  var isCursorAfterThreadLink: Bool {
+    let selectedRange = selectedRange()
+    guard selectedRange.length == 0, selectedRange.location > 0 else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
+    return attributes[.threadLink] != nil
+  }
+
   /// Check if current typing attributes have mention styling
   var hasTypingAttributesMentionStyling: Bool {
     let currentTypingAttributes = typingAttributes
     return currentTypingAttributes[.mentionUserId] != nil ||
       (currentTypingAttributes[.foregroundColor] as? NSColor) == NSColor.systemBlue
+  }
+
+  var hasTypingAttributesThreadLinkStyling: Bool {
+    typingAttributes[.threadLink] != nil
   }
 
   /// Reset typing attributes to default to prevent mention style leakage
@@ -478,8 +491,11 @@ extension NSTextView {
   func updateTypingAttributesIfNeeded() {
     let selectedRange = selectedRange()
 
-    // If cursor is after a mention or typing attributes have mention styling, reset to default
-    if selectedRange.length == 0, isCursorAfterMention || hasTypingAttributesMentionStyling {
+    // If cursor is after an entity or typing attributes have entity styling, reset to default.
+    if selectedRange.length == 0,
+       isCursorAfterMention || isCursorAfterThreadLink ||
+       hasTypingAttributesMentionStyling || hasTypingAttributesThreadLinkStyling
+    {
       resetTypingAttributesToDefault()
     }
 

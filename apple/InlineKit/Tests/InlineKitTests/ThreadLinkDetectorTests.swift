@@ -18,6 +18,20 @@ struct ThreadLinkDetectorTests {
     #expect(result?.query == "Plan")
   }
 
+  @Test("detects bare thread opener")
+  func detectsBareThreadOpener() {
+    let detector = ThreadLinkDetector()
+    let text = "Open [["
+    let attributed = NSAttributedString(string: text)
+    let nsText = text as NSString
+
+    let result = detector.detectThreadLinkAt(cursorPosition: nsText.length, in: attributed)
+
+    #expect(result != nil)
+    #expect(result?.range == nsText.range(of: "[["))
+    #expect(result?.query == "")
+  }
+
   @Test("does not detect after closing brackets")
   func doesNotDetectAfterClosingBrackets() {
     let detector = ThreadLinkDetector()
@@ -52,8 +66,8 @@ struct ThreadLinkDetectorTests {
       chatId: 42
     )
 
-    #expect(result.newAttributedText.string == "Planning ")
-    #expect(result.newCursorPosition == 9)
+    #expect(result.newAttributedText.string == "[[Planning]] ")
+    #expect(result.newCursorPosition == 13)
 
     let target = result.newAttributedText.attribute(
       .threadLink,
@@ -62,9 +76,16 @@ struct ThreadLinkDetectorTests {
     ) as? ThreadLinkTarget
     #expect(target == .chatId(42))
 
+    let titleTarget = result.newAttributedText.attribute(
+      .threadLink,
+      at: 2,
+      effectiveRange: nil
+    ) as? ThreadLinkTarget
+    #expect(titleTarget == .chatId(42))
+
     let trailingTarget = result.newAttributedText.attribute(
       .threadLink,
-      at: 8,
+      at: 12,
       effectiveRange: nil
     ) as? ThreadLinkTarget
     #expect(trailingTarget == nil)

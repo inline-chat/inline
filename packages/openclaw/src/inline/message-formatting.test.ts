@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest"
 import {
   adaptInlineVisibleCopy,
   buildInlineInboundFormattingHints,
+  buildInlineChatMarkdownLink,
   buildInlineSystemPrompt,
+  buildInlineThreadMarkdownLink,
+  buildInlineThreadTitleMarkdownLink,
+  buildInlineUserMarkdownLink,
   sanitizeInlineOutgoingText,
 } from "./message-formatting"
 
@@ -24,6 +28,28 @@ describe("inline/message-formatting", () => {
         "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",
       ]),
     })
+  })
+
+  it("builds Inline markdown links for users, chats, and threads", () => {
+    expect(buildInlineUserMarkdownLink({ userId: "99", label: "Alice" })).toBe(
+      "[@Alice](inline://user?id=99)",
+    )
+    expect(buildInlineChatMarkdownLink({ chatId: "7", title: "Alice DM" })).toBe(
+      "[Alice DM](inline://chat?id=7)",
+    )
+    expect(buildInlineThreadMarkdownLink({ threadId: "8", title: "Eng Group" })).toBe(
+      "[Eng Group](inline://thread?id=8)",
+    )
+    expect(buildInlineThreadTitleMarkdownLink({ spaceId: "22", title: "Eng Group" })).toBe(
+      "[Eng Group](inline://thread?space_id=22)",
+    )
+    expect(
+      buildInlineThreadTitleMarkdownLink({
+        spaceId: "22",
+        title: "Project Plan",
+        label: "the thread",
+      }),
+    ).toBe("[the thread](inline://thread?space_id=22&title=Project%20Plan)")
   })
 
   it("strips inline code formatting from bare URLs only", () => {

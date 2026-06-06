@@ -68,15 +68,15 @@ final class ComposeAutocompleteManager: NSObject {
       case "Enter", "Tab":
         return completionView.selectCurrentItem()
       case "Escape":
-        dismissCompletion()
+        dismissCompletion(suppressCurrentMatch: true)
         return true
       default:
         return false
     }
   }
 
-  func dismissCompletion() {
-    viewModel.hide()
+  func dismissCompletion(suppressCurrentMatch: Bool = false) {
+    viewModel.hide(suppressCurrentMatch: suppressCurrentMatch)
     completionView?.hide()
     delegate?.composeAutocompleteManagerDidDismiss(self)
   }
@@ -177,14 +177,14 @@ final class ComposeAutocompleteManager: NSObject {
   }
 
   private func positionCompletionView(above textView: UITextView) {
-    guard let completionView, let parentView else { return }
+    guard let completionView else { return }
 
     NSLayoutConstraint.deactivate(completionConstraints)
     completionConstraints.removeAll()
 
     completionConstraints = [
-      completionView.leadingAnchor.constraint(equalTo: parentView.leadingAnchor, constant: 7),
-      completionView.trailingAnchor.constraint(equalTo: parentView.trailingAnchor, constant: -7),
+      completionView.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
+      completionView.trailingAnchor.constraint(equalTo: textView.trailingAnchor),
       completionView.bottomAnchor.constraint(equalTo: textView.topAnchor, constant: -12),
       completionView.heightAnchor.constraint(lessThanOrEqualToConstant: ComposeAutocompleteCompletionView.maxHeight),
     ]
@@ -224,7 +224,7 @@ extension ComposeAutocompleteManager: ComposeAutocompleteCompletionDelegate {
   }
 
   func autocompleteCompletionDidRequestClose(_ view: ComposeAutocompleteCompletionView) {
-    dismissCompletion()
+    dismissCompletion(suppressCurrentMatch: true)
   }
 }
 

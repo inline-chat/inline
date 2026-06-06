@@ -864,6 +864,7 @@ class MessageViewAppKit: NSView {
   // The second mouse-down event is a reliable double-click boundary even when
   // AppKit admits NSClickGestureRecognizer but never calls its target action.
   private var handledDoubleClickEventNumber: Int?
+  private var handledEntityClickEventNumber: Int?
 
   // MARK: - Link Detection
 
@@ -1107,8 +1108,8 @@ class MessageViewAppKit: NSView {
     }
     // Keep entity ownership in the message view, but start from NSTextView's
     // mouseDown because recognizers attached to text views can be swallowed.
-    messageTextView.onEntityClick = { [weak self] location in
-      self?.handleEntityClick(at: location) ?? false
+    messageTextView.onEntityClick = { [weak self] location, event in
+      self?.handleEntityClick(at: location, event: event) ?? false
     }
     MessageGestureTrace.debug("MessageView.setupEntityClickHandling messageId=\(message.messageId) mode=mouseDownCallback")
   }
@@ -1151,7 +1152,14 @@ class MessageViewAppKit: NSView {
   }
 
   @discardableResult
-  private func handleEntityClick(at location: NSPoint) -> Bool {
+  private func handleEntityClick(at location: NSPoint, event: NSEvent? = nil) -> Bool {
+    if let event, handledEntityClickEventNumber == event.eventNumber {
+      MessageGestureTrace.debug(
+        "MessageView.handleEntityClick messageId=\(message.messageId) point=\(MessageGestureTrace.point(location)) result=alreadyHandled eventNumber=\(event.eventNumber)"
+      )
+      return true
+    }
+
     guard let hit = textEntityHit(at: location) else {
       MessageGestureTrace.debug(
         "MessageView.handleEntityClick messageId=\(message.messageId) point=\(MessageGestureTrace.point(location)) result=noHit"
@@ -1159,6 +1167,9 @@ class MessageViewAppKit: NSView {
       return false
     }
     let handled = handleTextEntityClick(hit, attributedString: textView.attributedString())
+    if handled, let event {
+      handledEntityClickEventNumber = event.eventNumber
+    }
     MessageGestureTrace.debug(
       "MessageView.handleEntityClick messageId=\(message.messageId) point=\(MessageGestureTrace.point(location)) hit=\(hit) handled=\(handled)"
     )
@@ -1272,6 +1283,28 @@ class MessageViewAppKit: NSView {
     return hit
   }
 
+  private func handleEntityClick(from event: NSEvent, source: String) -> Bool {
+    guard event.type == .leftMouseDown, event.clickCount == 1 else { return false }
+    if handledEntityClickEventNumber == event.eventNumber {
+      MessageGestureTrace.debug(
+        "MessageView.handleEntityClickFromEvent messageId=\(message.messageId) source=\(source) result=alreadyHandled eventNumber=\(event.eventNumber)"
+      )
+      return true
+    }
+
+    guard textView.superview != nil, !textView.isHidden else { return false }
+
+    let locationInSelf = convert(event.locationInWindow, from: nil)
+    let locationInText = textView.convert(locationInSelf, from: self)
+    guard textView.bounds.contains(locationInText) else { return false }
+
+    let handled = handleEntityClick(at: locationInText, event: event)
+    MessageGestureTrace.debug(
+      "MessageView.handleEntityClickFromEvent messageId=\(message.messageId) source=\(source) point=\(MessageGestureTrace.point(locationInText)) handled=\(handled)"
+    )
+    return handled
+  }
+
   private func openThreadLink(_ target: ThreadLinkTarget) {
     if let peer = target.directPeer {
       openChat(peer: peer)
@@ -1280,15 +1313,24 @@ class MessageViewAppKit: NSView {
     }
 
     let database = dependencies?.database ?? AppDatabase.shared
+    let currentUserId = dependencies?.auth.getCurrentUserId() ?? Auth.shared.getCurrentUserId()
+    let realtimeV2 = dependencies?.realtimeV2 ?? Api.realtime
     Task { @MainActor in
       do {
-        guard let peer = try await ThreadLinkResolver.resolve(target, database: database) else {
+        guard let peer = try await ThreadLinkResolver.resolveOrCreate(
+          target,
+          currentUserId: currentUserId,
+          database: database,
+          realtimeV2: realtimeV2
+        ) else {
           ToastCenter.shared.showError("Thread not found")
           return
         }
 
         openChat(peer: peer)
         performProgressiveHaptic()
+      } catch ThreadLinkResolver.Error.missingCurrentUser {
+        ToastCenter.shared.showError("You're signed out. Please log in again.")
       } catch {
         ToastCenter.shared.showError("Failed to open thread")
         log.error("Failed to resolve thread link", error: error)
@@ -3851,6 +3893,15 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
     if gestureRecognizer === longPressGesture, event.clickCount > 1 {
       MessageGestureTrace.debug(
         "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=multiClick"
+      )
+      return false
+    }
+
+    if (gestureRecognizer === longPressGesture || gestureRecognizer === doubleClickGesture),
+       handleEntityClick(from: event, source: recognizerName(gestureRecognizer))
+    {
+      MessageGestureTrace.debug(
+        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=entityClick"
       )
       return false
     }

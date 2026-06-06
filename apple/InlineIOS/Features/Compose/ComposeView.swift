@@ -596,9 +596,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       return
     }
 
-    let rawText = (textView.text ?? "")
-      .replacingOccurrences(of: "\u{FFFC}", with: "")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let attributedText = attributedStringForSend()
+    let (rawText, extractedEntities) = ProcessEntities.fromAttributedString(
+      attributedText,
+      threadLinkSpaceId: spaceId
+    )
     let hasText = !rawText.isEmpty
     let attachmentItemsSnapshot = attachmentItems
     let hasAttachmentItems = !attachmentItemsSnapshot.isEmpty
@@ -622,13 +624,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     // Can't send if no text, no attachments, and not forwarding
     guard hasText || hasAttachments || forwardContext != nil else { return }
 
-    // Extract all entities using TextProcessing module
-    let attributedText = textView.attributedText ?? NSAttributedString()
-    let (textFromAttributedString, extractedEntities) = ProcessEntities.fromAttributedString(
-      attributedText,
-      threadLinkSpaceId: spaceId
-    )
-
     let hasEntities = !extractedEntities.entities.isEmpty
     let entities: MessageEntities? = hasEntities ? extractedEntities : nil
     let editEntities: MessageEntities? = hasEntities ? extractedEntities : MessageEntities()
@@ -644,7 +639,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       if attachmentItemsToSend.isEmpty {
         if queueOnly {
           _ = await Api.realtime.sendQueued(.sendMessage(
-            text: textFromAttributedString ?? text ?? "",
+            text: text ?? "",
             peerId: peerId,
             chatId: chatId,
             replyToMsgId: replyToMessageId,
@@ -655,7 +650,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         } else {
           do {
             try await Api.realtime.send(.sendMessage(
-              text: textFromAttributedString ?? text ?? "",
+              text: text ?? "",
               peerId: peerId,
               chatId: chatId,
               replyToMsgId: replyToMessageId,
@@ -679,7 +674,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           }
 
           Transactions.shared.mutate(transaction: .sendMessage(.init(
-            text: isFirst ? textFromAttributedString ?? text ?? "" : nil,
+            text: isFirst ? text : nil,
             peerId: peerId,
             chatId: chatId,
             mediaItems: [attachment],
@@ -696,7 +691,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       Task(priority: .userInitiated) { @MainActor in
         try await Api.realtime.send(.editMessage(
           messageId: state.editingMessageId ?? 0,
-          text: textFromAttributedString ?? text ?? "",
+          text: text ?? "",
           chatId: chatId,
           peerId: peerId,
           entities: editEntities
@@ -744,6 +739,52 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       // Clear everything
       resetComposeState()
     }
+  }
+
+  private func attributedStringForSend() -> NSAttributedString {
+    let attributedString = NSMutableAttributedString(
+      attributedString: textView.attributedText ?? NSAttributedString()
+    )
+
+    removeAttachmentMarkers(from: attributedString)
+    return trimmedAttributedString(attributedString)
+  }
+
+  private func removeAttachmentMarkers(from attributedString: NSMutableAttributedString) {
+    let text = attributedString.string as NSString
+    var ranges: [NSRange] = []
+    var searchRange = NSRange(location: 0, length: text.length)
+
+    while searchRange.length > 0 {
+      let range = text.range(of: "\u{FFFC}", options: [], range: searchRange)
+      if range.location == NSNotFound {
+        break
+      }
+
+      ranges.append(range)
+      let nextLocation = NSMaxRange(range)
+      searchRange = NSRange(location: nextLocation, length: text.length - nextLocation)
+    }
+
+    for range in ranges.reversed() {
+      attributedString.deleteCharacters(in: range)
+    }
+  }
+
+  private func trimmedAttributedString(_ attributedString: NSAttributedString) -> NSAttributedString {
+    let whitespaceSet = CharacterSet.whitespacesAndNewlines
+    let text = attributedString.string as NSString
+    let startRange = text.rangeOfCharacter(from: whitespaceSet.inverted)
+    if startRange.location == NSNotFound {
+      return NSAttributedString()
+    }
+
+    let endRange = text.rangeOfCharacter(from: whitespaceSet.inverted, options: .backwards)
+    let trimmedRange = NSRange(
+      location: startRange.location,
+      length: NSMaxRange(endRange) - startRange.location
+    )
+    return attributedString.attributedSubstring(from: trimmedRange)
   }
 
   func updateSendButtonForEditing(_ isEditing: Bool) {

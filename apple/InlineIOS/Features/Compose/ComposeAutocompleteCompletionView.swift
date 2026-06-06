@@ -245,7 +245,7 @@ final class ComposeAutocompleteCompletionView: UIView {
   private func updateSelection() {
     for (index, view) in stackView.arrangedSubviews.enumerated() {
       view.backgroundColor = index == selectedIndex
-        ? ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.16)
+        ? UIColor.tertiarySystemFill
         : .clear
       view.layer.cornerRadius = 10
       view.clipsToBounds = true

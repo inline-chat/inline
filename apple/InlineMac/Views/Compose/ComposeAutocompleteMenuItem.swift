@@ -184,8 +184,8 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
     let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
 
     if isSelected {
-      containerView.layer?.backgroundColor = NSColor.controlAccentColor
-        .withAlphaComponent(isDark ? 0.52 : 0.34)
+      containerView.layer?.backgroundColor = NSColor.tertiaryLabelColor
+        .withAlphaComponent(isDark ? 0.22 : 0.10)
         .resolvedColor(with: effectiveAppearance)
         .cgColor
       iconContainer.layer?.backgroundColor = NSColor.clear.cgColor

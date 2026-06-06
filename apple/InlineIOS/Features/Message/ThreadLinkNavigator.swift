@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import Logger
 import UIKit
@@ -18,7 +19,10 @@ enum ThreadLinkNavigator {
 
     Task { @MainActor in
       do {
-        guard let peer = try await ThreadLinkResolver.resolve(target) else {
+        guard let peer = try await ThreadLinkResolver.resolveOrCreate(
+          target,
+          currentUserId: Auth.shared.getCurrentUserId()
+        ) else {
           ToastManager.shared.showToast(
             "Thread not found",
             type: .error,
@@ -28,6 +32,12 @@ enum ThreadLinkNavigator {
         }
 
         navigate(to: peer)
+      } catch ThreadLinkResolver.Error.missingCurrentUser {
+        ToastManager.shared.showToast(
+          "You're signed out. Please log in again.",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
       } catch {
         ToastManager.shared.showToast(
           "Failed to open thread",

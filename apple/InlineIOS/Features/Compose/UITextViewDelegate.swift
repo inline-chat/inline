@@ -89,6 +89,21 @@ extension ComposeView: UITextViewDelegate {
       return false
     }
 
+    let threadLinkRanges = ComposeThreadLinkEditing.affectedThreadLinkRanges(
+      in: textView.attributedText ?? NSAttributedString(),
+      changeRange: range
+    )
+    if !threadLinkRanges.isEmpty {
+      textView.textStorage.beginEditing()
+      ComposeThreadLinkEditing.stripThreadLinks(
+        in: textView.textStorage,
+        ranges: threadLinkRanges,
+        textColor: UIColor.label
+      )
+      textView.textStorage.endEditing()
+      textView.resetTypingAttributesToDefault()
+    }
+
     draftManager.invalidateLoadedEntities(overlapping: range)
 
     return true

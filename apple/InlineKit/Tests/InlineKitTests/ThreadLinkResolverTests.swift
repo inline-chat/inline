@@ -6,32 +6,32 @@ import Testing
 
 @Suite("Thread Link Resolver")
 struct ThreadLinkResolverTests {
-  @Test("resolves unique title in space")
-  func resolvesUniqueTitleInSpace() throws {
+  @Test("resolves title in space case insensitively")
+  func resolvesTitleInSpaceCaseInsensitively() throws {
     let queue = try makeInMemoryDB()
 
     try queue.write { db in
       try seedSpace(db, id: 7)
       try seedThread(db, id: 1, spaceId: 7, title: "Planning", date: 1)
 
-      let peer = try ThreadLinkResolver.resolve(.title(spaceId: 7, title: "Planning"), db: db)
+      let peer = try ThreadLinkResolver.resolve(.title(spaceId: 7, title: "planning"), db: db)
 
       #expect(peer == .thread(id: 1))
     }
   }
 
-  @Test("does not resolve duplicate title in space")
-  func doesNotResolveDuplicateTitleInSpace() throws {
+  @Test("resolves newest duplicate title in space")
+  func resolvesNewestDuplicateTitleInSpace() throws {
     let queue = try makeInMemoryDB()
 
     try queue.write { db in
       try seedSpace(db, id: 7)
       try seedThread(db, id: 1, spaceId: 7, title: "Planning", date: 1)
-      try seedThread(db, id: 2, spaceId: 7, title: "Planning", date: 2)
+      try seedThread(db, id: 2, spaceId: 7, title: "planning", date: 2)
 
       let peer = try ThreadLinkResolver.resolve(.title(spaceId: 7, title: "Planning"), db: db)
 
-      #expect(peer == nil)
+      #expect(peer == .thread(id: 2))
     }
   }
 
