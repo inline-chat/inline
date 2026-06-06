@@ -6,6 +6,7 @@ import { getBotCommands } from "../../functions/bot.getCommands"
 import { getPeerBotCommands } from "../../functions/bot.getPeerCommands"
 import { setBotCommands } from "../../functions/bot.setCommands"
 import { ChatModel } from "../../db/models/chats"
+import { db, schema } from "../../db"
 
 describe("bot commands", () => {
   setupTestLifecycle()
@@ -133,5 +134,49 @@ describe("bot commands", () => {
     }
     expect(firstBot.bot?.username).toBe("peercommandstestbot")
     expect((firstBot.commands ?? []).map((command) => command?.command)).toEqual(["start"])
+  })
+
+  test("getPeerBotCommands includes directly participating bots in public space threads", async () => {
+    const space = await testUtils.createSpace("Public Bot Commands")
+    if (!space) {
+      throw new Error("Expected space")
+    }
+    await db.insert(schema.members).values({
+      userId: creator.id,
+      spaceId: space.id,
+      role: "member",
+    })
+
+    const created = await createBot({ name: "Public Thread Bot", username: "publicthreadbot" }, creatorContext)
+    const botUserId = Number(created.bot?.id ?? 0n)
+    await setBotCommands(
+      {
+        botUserId: BigInt(botUserId),
+        commands: [{ command: "threadreply", description: "Set thread reply mode" }],
+      },
+      creatorContext,
+    )
+
+    const chat = await testUtils.createChat(space.id, "Public Command Thread", "thread", true, creator.id)
+    if (!chat) {
+      throw new Error("Expected chat")
+    }
+    await testUtils.addParticipant(chat.id, botUserId)
+
+    const result = await getPeerBotCommands(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(chat.id) },
+          },
+        },
+      },
+      creatorContext,
+    )
+
+    expect(result.bots).toHaveLength(1)
+    expect(result.bots[0]?.bot?.username).toBe("publicthreadbot")
+    expect(result.bots[0]?.commands.map((command) => command.command)).toEqual(["threadreply"])
   })
 })

@@ -63,7 +63,10 @@ export const getPeerBotCommands = async (
       }
     }
   } else if (chat.spaceId && chat.publicThread) {
-    botUserIds = await getRelevantBotUserIdsForPublicSpace(chat.spaceId)
+    botUserIds = [
+      ...(await getRelevantBotUserIdsForPublicSpace(chat.spaceId)),
+      ...(await getRelevantBotUserIdsForChat(chat.id)),
+    ]
   } else {
     botUserIds = await getRelevantBotUserIdsForChat(chat.id)
   }

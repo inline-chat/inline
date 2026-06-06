@@ -312,16 +312,40 @@ describe("Bot HTTP API", () => {
     const delJson = await delRes.json()
     expect(delJson.ok).toBe(true)
 
-    // Deprecated alias remains supported for compatibility.
-    const compatRes = await app.handle(
+    // Canonical DM targeting.
+    const dmRes = await app.handle(
+      new Request(`http://localhost/bot/getChat?user_id=${human!.id}`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    )
+    expect(dmRes.status).toBe(200)
+    const dmJson = await dmRes.json()
+    expect(dmJson.ok).toBe(true)
+
+    const aliasRes = await app.handle(
       new Request(`http://localhost/bot/getChat?peer_user_id=${human!.id}`, {
         method: "GET",
         headers: { Authorization: `Bearer ${token}` },
       }),
     )
-    expect(compatRes.status).toBe(200)
-    const compatJson = await compatRes.json()
-    expect(compatJson.ok).toBe(true)
+    expect(aliasRes.status).toBe(200)
+    const aliasJson = await aliasRes.json()
+    expect(aliasJson.ok).toBe(true)
+
+    const camelMarkdownRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ user_id: human!.id, text: "camel markdown alias", parseMarkdown: false }),
+      }),
+    )
+    expect(camelMarkdownRes.status).toBe(200)
+    const camelMarkdownJson = await camelMarkdownRes.json()
+    expect(camelMarkdownJson.ok).toBe(true)
   })
 
   it("parses inline markdown mention links on sendMessage when requested", async () => {
