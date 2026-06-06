@@ -5,6 +5,7 @@ import Logger
 import SwiftUI
 
 /// Chat participants view model that falls back to space members for public threads
+/// and parent participants for linked subthreads.
 public final class ChatParticipantsWithMembersViewModel: ObservableObject {
   public enum Purpose: Sendable {
     case participantsList
@@ -13,7 +14,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
   private enum RefreshRequest {
     case none
-    case participants
+    case participants(Int64)
     case spaceMembers(Int64)
   }
 
@@ -54,6 +55,29 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
       .fetchAll(db)
   }
 
+  private static func participantsSourceChat(_ db: Database, chatId: Int64, purpose: Purpose) throws -> Chat? {
+    guard let chat = try Chat.fetchOne(db, id: chatId) else { return nil }
+    return try participantsSourceChat(db, for: chat, purpose: purpose)
+  }
+
+  private static func participantsSourceChat(_ db: Database, for chat: Chat, purpose: Purpose) throws -> Chat {
+    guard purpose == .participantsList else { return chat }
+
+    // Linked reply threads inherit access from their parent, but for now this view
+    // only displays the inherited parent participant set. TODO: expose parent +
+    // child-direct participants separately so the UI can group inherited users
+    // and safely manage direct reply-thread participants.
+    var source = chat
+    var seenIds: Set<Int64> = [chat.id]
+    while let parentChatId = source.parentChatId, !seenIds.contains(parentChatId) {
+      guard let parent = try Chat.fetchOne(db, id: parentChatId) else { break }
+      source = parent
+      seenIds.insert(parent.id)
+    }
+
+    return source
+  }
+
   private func fetchParticipants() {
     let purpose = purpose
     let log = log
@@ -66,7 +90,9 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     participantsCancellable = ValueObservation
       .tracking { db in
         // First, get the chat to check if it's a public thread
-        let chat = try Chat.fetchOne(db, id: chatId)
+        let requestedChat = try Chat.fetchOne(db, id: chatId)
+        let chat = try requestedChat.flatMap { try Self.participantsSourceChat(db, for: $0, purpose: purpose) }
+        let sourceChatId = chat?.id ?? chatId
 
         // DMs: mention candidates should only include the peer (not chat_participants).
         if let chat, chat.type == .privateChat, let peerUserId = chat.peerUserId {
@@ -110,7 +136,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
                   required: ChatParticipant.user
                     .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
                 )
-                .filter(Column("chatId") == chatId)
+                .filter(Column("chatId") == sourceChatId)
                 .asRequest(of: UserInfo.self)
                 .fetchAll(db)
             }
@@ -128,7 +154,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
               required: ChatParticipant.user
                 .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
             )
-            .filter(Column("chatId") == chatId)
+            .filter(Column("chatId") == sourceChatId)
             .asRequest(of: UserInfo.self)
             .fetchAll(db)
 
@@ -175,7 +201,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
       switch request {
       case .none:
         return
-      case .participants:
+      case let .participants(chatId):
         try await Api.realtime.send(.getChatParticipants(chatID: chatId))
       case let .spaceMembers(spaceId):
         try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
@@ -194,18 +220,19 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     log.trace("Refetching participants...")
 
     do {
+      let source = try await db.reader.read { db in
+        try participantsSourceChat(db, chatId: chatId, purpose: purpose)
+      }
+      let sourceChatId = source?.id ?? chatId
+
       // First try to get chat participants
-      try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+      try await Api.realtime.send(.getChatParticipants(chatID: sourceChatId))
 
       // Also try to get space members if this is a space thread
-      let chat = try? await db.reader.read { db in
-        try Chat.fetchOne(db, id: chatId)
-      }
-
-      if let chat,
-         let spaceId = chat.spaceId
+      if let source,
+         let spaceId = source.spaceId
       {
-        if purpose == .mentionCandidates || chat.isPublic == true {
+        if purpose == .mentionCandidates || source.isPublic == true {
           log.trace("Also fetching space members for space thread, spaceId: \(spaceId)")
           try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
         }
@@ -221,8 +248,8 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     chatId: Int64,
     purpose: Purpose
   ) throws -> RefreshRequest {
-    guard let chat = try Chat.fetchOne(db, id: chatId) else {
-      return .participants
+    guard let chat = try participantsSourceChat(db, chatId: chatId, purpose: purpose) else {
+      return .participants(chatId)
     }
 
     if let spaceId = chat.spaceId, purpose == .mentionCandidates || chat.isPublic == true {
@@ -235,10 +262,10 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     }
 
     let hasParticipants = try ChatParticipant
-      .filter(ChatParticipant.Columns.chatId == chatId)
+      .filter(ChatParticipant.Columns.chatId == chat.id)
       .limit(1)
       .fetchCount(db) > 0
 
-    return hasParticipants ? .none : .participants
+    return hasParticipants ? .none : .participants(chat.id)
   }
 }

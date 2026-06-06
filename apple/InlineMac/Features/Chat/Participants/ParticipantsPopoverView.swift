@@ -58,9 +58,19 @@ public struct ParticipantsPopoverView: View {
     participants.count >= 5
   }
 
+  private var isShowingInheritedParticipants: Bool {
+    guard case .thread = peer,
+          let chat
+    else {
+      return false
+    }
+    return chat.parentChatId != nil
+  }
+
   private var canManageParticipants: Bool {
     guard case .thread = peer,
           let chat,
+          !isShowingInheritedParticipants,
           chat.isPublic == false
     else {
       return false
@@ -75,6 +85,7 @@ public struct ParticipantsPopoverView: View {
   private var canToggleVisibility: Bool {
     guard case .thread = peer,
           let chat,
+          !isShowingInheritedParticipants,
           chat.spaceId != nil,
           (isOwnerOrAdmin || isCreator)
     else {
@@ -85,22 +96,29 @@ public struct ParticipantsPopoverView: View {
 
   public var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      // Header
-      HStack {
-        Text("Participants (\(participants.count))")
-          .font(.system(size: 13, weight: .semibold))
+      VStack(alignment: .leading, spacing: 2) {
+        HStack {
+          Text("Participants (\(participants.count))")
+            .font(.system(size: 13, weight: .semibold))
 
-        Spacer()
+          Spacer()
 
-        if canAddParticipants {
-          Button(action: {
-            onAddParticipants?()
-          }) {
-            Image(systemName: "person.fill.badge.plus")
-              .font(.system(size: 15))
-              .foregroundColor(.blue)
+          if canAddParticipants {
+            Button(action: {
+              onAddParticipants?()
+            }) {
+              Image(systemName: "person.fill.badge.plus")
+                .font(.system(size: 15))
+                .foregroundColor(.blue)
+            }
+            .buttonStyle(.plain)
           }
-          .buttonStyle(.plain)
+        }
+
+        if isShowingInheritedParticipants {
+          Text("Inherited from parent thread")
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
         }
       }
       .padding(.horizontal, 12)
