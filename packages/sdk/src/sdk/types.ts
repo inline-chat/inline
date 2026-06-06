@@ -111,6 +111,30 @@ export type InlineSdkClearChatHistoryParams =
       deleteReplyThreads?: boolean
     }
 
+export type InlineSdkBotPresenceStateKind =
+  | "idle"
+  | "happy"
+  | "waving"
+  | "jumping"
+  | "failed"
+  | "waiting"
+  | "running"
+  | "review"
+
+export type InlineSdkSetBotPresenceStateParams =
+  | {
+      chatId: InlineIdLike
+      userId?: never
+      kind: InlineSdkBotPresenceStateKind
+      comment?: string
+    }
+  | {
+      userId: InlineIdLike
+      chatId?: never
+      kind: InlineSdkBotPresenceStateKind
+      comment?: string
+    }
+
 export type InlineSdkBinaryInput =
   | Blob
   | Uint8Array
@@ -243,6 +267,10 @@ export const rpcInputKindByMethod = {
   36: "rotateBotToken",
   37: "updateBotProfile",
   38: "getMessages",
+  56: "setBotAvatar",
+  57: "clearBotAvatar",
+  58: "getBotPresence",
+  59: "setBotPresenceState",
   48: "invokeMessageAction",
   49: "answerMessageAction",
   53: "clearChatHistory",
@@ -288,6 +316,10 @@ export const rpcResultKindByMethod = {
   36: "rotateBotToken",
   37: "updateBotProfile",
   38: "getMessages",
+  56: "setBotAvatar",
+  57: "clearBotAvatar",
+  58: "getBotPresence",
+  59: "setBotPresenceState",
   48: "invokeMessageAction",
   49: "answerMessageAction",
   53: "clearChatHistory",

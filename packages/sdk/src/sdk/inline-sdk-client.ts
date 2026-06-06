@@ -1,5 +1,6 @@
 import {
   type ClearChatHistoryInput,
+  BotPresenceState_Kind,
   GetChatInput,
   GetMessagesInput,
   GetMeInput,
@@ -31,6 +32,7 @@ import type {
   InlineSdkInvokeMessageActionParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
+  InlineSdkSetBotPresenceStateParams,
   InlineSdkState,
   InlineSdkUploadFileParams,
   InlineSdkUploadFileResult,
@@ -60,6 +62,27 @@ function extractFirstMessageId(updates: Update[] | undefined): bigint | null {
     }
   }
   return null
+}
+
+function botPresenceStateKind(kind: InlineSdkSetBotPresenceStateParams["kind"]): BotPresenceState_Kind {
+  switch (kind) {
+    case "idle":
+      return BotPresenceState_Kind.IDLE
+    case "happy":
+      return BotPresenceState_Kind.HAPPY
+    case "waving":
+      return BotPresenceState_Kind.WAVING
+    case "jumping":
+      return BotPresenceState_Kind.JUMPING
+    case "failed":
+      return BotPresenceState_Kind.FAILED
+    case "waiting":
+      return BotPresenceState_Kind.WAITING
+    case "running":
+      return BotPresenceState_Kind.RUNNING
+    case "review":
+      return BotPresenceState_Kind.REVIEW
+  }
 }
 
 export class InlineSdkClient {
@@ -419,6 +442,20 @@ export class InlineSdkClient {
       sendComposeAction: {
         peerId,
         ...(params.typing ? { action: UpdateComposeAction_ComposeAction.TYPING } : {}),
+      },
+    })
+  }
+
+  async setBotPresenceState(params: InlineSdkSetBotPresenceStateParams): Promise<void> {
+    const peerId = this.inputPeerFromTarget(params, "setBotPresenceState")
+    await this.invoke(Method.SET_BOT_PRESENCE_STATE, {
+      oneofKind: "setBotPresenceState",
+      setBotPresenceState: {
+        peerId,
+        state: {
+          kind: botPresenceStateKind(params.kind),
+          ...(params.comment ? { comment: params.comment } : {}),
+        },
       },
     })
   }
