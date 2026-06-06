@@ -7,6 +7,7 @@ import { createSubthread } from "@in/server/functions/messages.createSubthread"
 import { getChat } from "@in/server/functions/messages.getChat"
 import { getMessages } from "@in/server/functions/messages.getMessages"
 import { setupTestLifecycle, testUtils } from "../setup"
+import { DialogFollowMode } from "@inline-chat/protocol/core"
 
 describe("messages.createSubthread", () => {
   setupTestLifecycle()
@@ -43,6 +44,7 @@ describe("messages.createSubthread", () => {
     expect(result.chat.parentMessageId).toBe(1n)
     expect(result.anchorMessage?.id).toBe(1n)
     expect(result.dialog).toBeDefined()
+    expect(result.dialog?.followMode).toBe(DialogFollowMode.FOLLOWING)
 
     const childChatId = Number(result.chat.id)
     const childChat = await db
@@ -60,14 +62,27 @@ describe("messages.createSubthread", () => {
     expect(childChat?.threadNumber).toBeNull()
 
     const childDialogs = await db
-      .select({ userId: schema.dialogs.userId, chatListHidden: schema.dialogs.chatListHidden })
+      .select({
+        userId: schema.dialogs.userId,
+        chatListHidden: schema.dialogs.chatListHidden,
+        followMode: schema.dialogs.followMode,
+        open: schema.dialogs.open,
+      })
       .from(schema.dialogs)
       .where(eq(schema.dialogs.chatId, childChatId))
 
-    expect(childDialogs).toEqual([
+    expect(childDialogs.sort((left, right) => left.userId - right.userId)).toEqual([
       {
-        userId: creator.id,
+        userId: Math.min(creator.id, anchorAuthor.id),
         chatListHidden: true,
+        followMode: "following",
+        open: null,
+      },
+      {
+        userId: Math.max(creator.id, anchorAuthor.id),
+        chatListHidden: true,
+        followMode: "following",
+        open: null,
       },
     ])
 

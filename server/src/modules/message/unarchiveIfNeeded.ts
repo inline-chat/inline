@@ -13,6 +13,7 @@ type UnarchiveIfNeededInput = {
   chat: DbChat
   updateGroup: UpdateGroup
   senderUserId: number
+  userIds?: number[]
 }
 
 type UnarchiveIfNeededOutput = {
@@ -21,7 +22,7 @@ type UnarchiveIfNeededOutput = {
 
 export const unarchiveIfNeeded = async (input: UnarchiveIfNeededInput): Promise<UnarchiveIfNeededOutput> => {
   const { chat, updateGroup, senderUserId } = input
-  const candidateUserIds = updateGroup.userIds.filter((userId) => userId !== senderUserId)
+  const candidateUserIds = (input.userIds ?? updateGroup.userIds).filter((userId) => userId !== senderUserId)
   if (candidateUserIds.length === 0) {
     return { updates: [] }
   }

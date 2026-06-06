@@ -51,6 +51,7 @@ import { updateChatInfoHandler } from "@in/server/realtime/handlers/messages.upd
 import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMessage"
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
+import { updateDialogFollowMode } from "@in/server/realtime/handlers/messages.updateDialogFollowMode"
 import { updatePushNotificationDetailsHandler } from "@in/server/realtime/handlers/user.updatePushNotificationDetails"
 import { reserveChatIds } from "@in/server/realtime/handlers/messages.reserveChatIds"
 import { invokeMessageAction } from "@in/server/realtime/handlers/messages.invokeMessageAction"
@@ -461,6 +462,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await updateDialogNotificationSettings(call.input.updateDialogNotificationSettings, handlerContext)
       return { oneofKind: "updateDialogNotificationSettings", updateDialogNotificationSettings: result }
+    }
+
+    case Method.UPDATE_DIALOG_FOLLOW_MODE: {
+      if (call.input.oneofKind !== "updateDialogFollowMode") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await updateDialogFollowMode(call.input.updateDialogFollowMode, handlerContext)
+      return { oneofKind: "updateDialogFollowMode", updateDialogFollowMode: result }
     }
 
     case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {

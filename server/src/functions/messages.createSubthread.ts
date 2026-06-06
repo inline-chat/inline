@@ -13,6 +13,7 @@ import {
   persistMessageRepliesUpdate,
   pushMessageRepliesUpdate,
 } from "@in/server/modules/subthreads"
+import { DIALOG_FOLLOWING, setDialogFollowModeForUsers } from "@in/server/modules/dialogFollow"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
@@ -76,16 +77,20 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     })
 
     if (existingReplyThread) {
-      const { dialogs } = await ensureLinkedSubthreadDialogs({
+      await ensureLinkedSubthreadDialogs({
         chat: existingReplyThread,
         userIds: [context.currentUserId],
         chatListHidden: true,
+      })
+      await autoFollowCreatedReplyThread({
+        chat: existingReplyThread,
+        currentUserId: context.currentUserId,
+        anchorMessage,
       })
 
       return encodeSubthreadResult({
         chat: existingReplyThread,
         currentUserId: context.currentUserId,
-        dialog: dialogs.find((dialog) => dialog.userId === context.currentUserId),
       })
     }
   }
@@ -110,11 +115,18 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     directParticipantUserIds,
   })
 
-  const { dialogs: materializedDialogs } = await ensureLinkedSubthreadDialogs({
-    chat,
-    userIds: [context.currentUserId],
-    chatListHidden: true,
-  })
+  const { dialogs: materializedDialogs } =
+    parentMessageId !== undefined
+      ? await autoFollowCreatedReplyThread({
+          chat,
+          currentUserId: context.currentUserId,
+          anchorMessage,
+        })
+      : await ensureLinkedSubthreadDialogs({
+          chat,
+          userIds: [context.currentUserId],
+          chatListHidden: true,
+        })
 
   if (!isLinkedSubthread(chat)) {
     await persistNewChatUpdate(chat.id)
@@ -140,6 +152,26 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     dialog: materializedDialogs.find((dialog) => dialog.userId === context.currentUserId),
     anchorMessage,
   })
+}
+
+async function autoFollowCreatedReplyThread(input: {
+  chat: DbChat
+  currentUserId: number
+  anchorMessage?: Awaited<ReturnType<typeof getAnchorMessageForChat>>
+}): Promise<{ dialogs: DbDialog[] }> {
+  const userIds = new Set<number>([input.currentUserId])
+
+  if (input.anchorMessage?.fromId != null) {
+    userIds.add(input.anchorMessage.fromId)
+  }
+
+  const { dialogs } = await setDialogFollowModeForUsers({
+    chat: input.chat,
+    userIds: Array.from(userIds),
+    followMode: DIALOG_FOLLOWING,
+  })
+
+  return { dialogs }
 }
 
 async function encodeSubthreadResult(input: {

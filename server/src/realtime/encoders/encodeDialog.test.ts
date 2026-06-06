@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { DialogFollowMode } from "@inline-chat/protocol/core"
 import type { DbDialog } from "@in/server/db/schema"
 import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
 
@@ -22,6 +23,7 @@ const baseDialog: DbDialog = {
   pinnedOrder: null,
   unreadMark: false,
   notificationSettings: null,
+  followMode: null,
 }
 
 const encode = (overrides: Partial<DbDialog> = {}) =>
@@ -56,5 +58,10 @@ describe("encodeDialog", () => {
     const dialog = encode({ order: "U", pinnedOrder: "j" })
     expect(dialog.order).toBe("U")
     expect(dialog.pinnedOrder).toBe("j")
+  })
+
+  test("emits reply-thread follow mode when set", () => {
+    const dialog = encode({ followMode: "following" })
+    expect(dialog.followMode).toBe(DialogFollowMode.FOLLOWING)
   })
 })

@@ -71,6 +71,9 @@ export const dialogs = pgTable(
 
     /** Per-chat notification settings override as protobuf bytes (null => inherit global settings) */
     notificationSettings: bytea("notification_settings"),
+
+    /** Reply-thread automatic surfacing policy; null means relevance-only default */
+    followMode: text("follow_mode", { enum: ["following"] }),
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),
