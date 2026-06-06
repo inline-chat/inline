@@ -104,6 +104,38 @@ message PeerChat { int64 chat_id = 1; }
 
 message PeerUser { int64 user_id = 1; }
 
+message BotAvatar {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    CODEX_ATLAS = 1;
+  }
+
+  Kind kind = 1;
+  string display_name = 2;
+  optional string description = 3;
+  optional string cdn_url = 4;
+  optional string file_unique_id = 5;
+}
+
+message BotPresenceState {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    HIDDEN = 1;
+    IDLE = 2;
+    HAPPY = 3;
+    WAVING = 4;
+    JUMPING = 5;
+    FAILED = 6;
+    WAITING = 7;
+    RUNNING = 8;
+    REVIEW = 9;
+  }
+
+  Kind kind = 1;
+  optional string comment = 2;
+}
+
+
 message User {
   int64 id = 1;
   optional string first_name = 2;
@@ -128,6 +160,8 @@ message User {
   optional string time_zone = 12;
 
   optional bool bot = 13;
+
+  optional BotAvatar bot_avatar = 14;
 }
 
 message UserProfilePhoto {
@@ -881,6 +915,10 @@ enum Method {
   CLEAR_CHAT_HISTORY = 53;
   DELETE_BOT = 54;
   DELETE_MESSAGE_ATTACHMENT = 55;
+  SET_BOT_AVATAR = 56;
+  CLEAR_BOT_AVATAR = 57;
+  GET_BOT_PRESENCE = 58;
+  SET_BOT_PRESENCE_STATE = 59;
 }
 
 message RpcCall {
@@ -941,6 +979,10 @@ message RpcCall {
     ClearChatHistoryInput clearChatHistory = 54;
     DeleteBotInput deleteBot = 55;
     DeleteMessageAttachmentInput deleteMessageAttachment = 56;
+    SetBotAvatarInput setBotAvatar = 57;
+    ClearBotAvatarInput clearBotAvatar = 58;
+    GetBotPresenceInput getBotPresence = 59;
+    SetBotPresenceStateInput setBotPresenceState = 60;
   }
 }
 
@@ -1003,6 +1045,10 @@ message RpcResult {
     ClearChatHistoryResult clearChatHistory = 54;
     DeleteBotResult deleteBot = 55;
     DeleteMessageAttachmentResult deleteMessageAttachment = 56;
+    SetBotAvatarResult setBotAvatar = 57;
+    ClearBotAvatarResult clearBotAvatar = 58;
+    GetBotPresenceResult getBotPresence = 59;
+    SetBotPresenceStateResult setBotPresenceState = 60;
   }
 }
 
@@ -1279,6 +1325,37 @@ message UpdateBotProfileInput {
 }
 
 message UpdateBotProfileResult { User bot = 1; }
+
+message SetBotAvatarInput {
+  int64 bot_user_id = 1;
+  BotAvatar.Kind kind = 2;
+  string display_name = 3;
+  optional string description = 4;
+  string file_unique_id = 5;
+}
+
+message SetBotAvatarResult { User bot = 1; }
+
+message ClearBotAvatarInput { int64 bot_user_id = 1; }
+
+message ClearBotAvatarResult { User bot = 1; }
+
+message GetBotPresenceInput { InputPeer peer_id = 1; }
+
+message GetBotPresenceResult {
+  optional int64 bot_user_id = 1;
+  optional BotAvatar avatar = 2;
+  BotPresenceState state = 3;
+  Peer peer_id = 4;
+}
+
+message SetBotPresenceStateInput {
+  InputPeer peer_id = 1;
+  BotPresenceState state = 2;
+}
+
+message SetBotPresenceStateResult {}
+
 
 message GetUserSettingsInput {}
 
@@ -1819,6 +1896,7 @@ message Update {
     UpdateMessageActionInvoked message_action_invoked = 35;
     UpdateMessageActionAnswered message_action_answered = 36;
     UpdateClearChatHistory clear_chat_history = 37;
+    UpdateBotPresence bot_presence = 38;
   }
 }
 
@@ -2041,6 +2119,14 @@ message UpdateClearChatHistory {
 
   // Reply-thread chats kept but detached from both parent chat and parent message.
   repeated int64 detached_chat_ids = 7;
+}
+
+message UpdateBotPresence {
+  int64 bot_user_id = 1;
+  Peer peer_id = 2;
+  BotPresenceState state = 3;
+  optional BotAvatar avatar = 4;
+  bool avatar_changed = 5;
 }
 
 // Update when a message ID is updated after sending
