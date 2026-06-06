@@ -15,6 +15,7 @@ import type {
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env"
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime"
 import {
+  BotPresenceState_Kind,
   InlineSdkClient,
   Method,
   type InputPeer,
@@ -46,6 +47,7 @@ type InlinePendingApproval = {
   peerId: InputPeer
   text: string
   parseMarkdown: boolean
+  typingChatId?: bigint
 }
 type InlineParsedApprovalTarget = {
   kind: "chat" | "user"
@@ -131,6 +133,27 @@ function buildUserPeer(userId: bigint): InputPeer {
       user: { userId },
     },
   }
+}
+
+async function sendInlineBotPresenceState(
+  client: Partial<Pick<InlineSdkClient, "invokeRaw">>,
+  chatId: bigint,
+  kind: BotPresenceState_Kind,
+): Promise<void> {
+  const invokeRaw = client.invokeRaw
+  if (typeof invokeRaw !== "function") return
+  await invokeRaw.call(client, Method.SET_BOT_PRESENCE_STATE, {
+    oneofKind: "setBotPresenceState",
+    setBotPresenceState: {
+      peerId: {
+        type: {
+          oneofKind: "chat",
+          chat: { chatId },
+        },
+      },
+      state: { kind },
+    },
+  }).catch(() => {})
 }
 
 function buildInlineApprovalActions(view: PendingApprovalView): MessageActions | undefined {
@@ -258,10 +281,18 @@ export const inlineApprovalNativeRuntime = createChannelApprovalNativeRuntimeAda
       if (!resolved) {
         return null
       }
+      let delivered = false
       if (preparedTarget.typingChatId != null) {
-        await resolved.context.client
-          .sendTyping({ chatId: preparedTarget.typingChatId, typing: true })
-          .catch(() => {})
+        await Promise.all([
+          resolved.context.client
+            .sendTyping({ chatId: preparedTarget.typingChatId, typing: true })
+            .catch(() => {}),
+          sendInlineBotPresenceState(
+            resolved.context.client,
+            preparedTarget.typingChatId,
+            BotPresenceState_Kind.WAITING,
+          ),
+        ])
       }
       try {
         const result = await resolved.context.client.sendMessage({
@@ -273,17 +304,26 @@ export const inlineApprovalNativeRuntime = createChannelApprovalNativeRuntimeAda
         if (result.messageId == null) {
           return null
         }
+        delivered = true
         return {
           messageId: result.messageId,
           peerId: preparedTarget.peerId,
           text: pendingPayload.text,
           parseMarkdown: resolved.context.parseMarkdown ?? true,
+          ...(preparedTarget.typingChatId != null ? { typingChatId: preparedTarget.typingChatId } : {}),
         }
       } finally {
         if (preparedTarget.typingChatId != null) {
           await resolved.context.client
             .sendTyping({ chatId: preparedTarget.typingChatId, typing: false })
             .catch(() => {})
+          if (!delivered) {
+            await sendInlineBotPresenceState(
+              resolved.context.client,
+              preparedTarget.typingChatId,
+              BotPresenceState_Kind.IDLE,
+            )
+          }
         }
       }
     },
@@ -304,6 +344,13 @@ export const inlineApprovalNativeRuntime = createChannelApprovalNativeRuntimeAda
           parseMarkdown: entry.parseMarkdown,
         },
       })
+      if (entry.typingChatId != null) {
+        await sendInlineBotPresenceState(
+          resolved.context.client,
+          entry.typingChatId,
+          BotPresenceState_Kind.IDLE,
+        )
+      }
     },
   },
   observe: {

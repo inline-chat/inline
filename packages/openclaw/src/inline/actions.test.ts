@@ -160,11 +160,34 @@ describe("inline/actions", () => {
 
     const schema = Array.isArray(discovery?.schema) ? discovery.schema[0] : discovery?.schema
     const buttonsSchema = schema?.properties?.buttons as Record<string | symbol, unknown> | undefined
+    const channelDataSchema = (Array.isArray(discovery?.schema)
+      ? discovery.schema.find((entry) => entry.properties.channelData)
+      : discovery?.schema
+    )?.properties.channelData as
+      | {
+          type?: string
+          properties?: {
+            inline?: {
+              properties?: {
+                botPresence?: {
+                  properties?: {
+                    kind?: { enum?: string[] }
+                    comment?: { maxLength?: number }
+                  }
+                }
+              }
+            }
+          }
+        }
+      | undefined
 
     expect(discovery?.capabilities).toEqual(["presentation"])
     expect(buttonsSchema).toBeDefined()
     expect(buttonsSchema?.type).toBe("array")
     expect(buttonsSchema?.description).toBe("Button rows for channels that support button-style actions.")
+    expect(channelDataSchema?.type).toBe("object")
+    expect(channelDataSchema?.properties?.inline?.properties?.botPresence?.properties?.kind?.enum).toContain("waving")
+    expect(channelDataSchema?.properties?.inline?.properties?.botPresence?.properties?.comment?.maxLength).toBe(30)
   })
 
   it("does not advertise presentation capability when message mutations are gated off", async () => {

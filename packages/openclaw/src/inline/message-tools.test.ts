@@ -308,6 +308,102 @@ describe("inline/message-tools", () => {
     )
   })
 
+  it("sets bot presence for the current Inline chat", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
+      if (method !== 59) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "setBotPresenceState",
+        setBotPresenceState: {},
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          SET_BOT_PRESENCE_STATE: 59,
+        },
+        BotPresenceState_Kind: {
+          IDLE: 2,
+          HAPPY: 3,
+          WAVING: 4,
+          JUMPING: 5,
+          FAILED: 6,
+          WAITING: 7,
+          RUNNING: 8,
+          REVIEW: 9,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_bot_presence")
+    expect(tool).toBeDefined()
+
+    const result = await tool?.execute("tool-4", {
+      kind: "jumping",
+      comment: "Done",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        target: "77",
+        usedCurrentChatDefault: true,
+        kind: "jumping",
+        comment: "Done",
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      59,
+      expect.objectContaining({
+        oneofKind: "setBotPresenceState",
+        setBotPresenceState: {
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 77n },
+            },
+          },
+          state: {
+            kind: 5,
+            comment: "Done",
+          },
+        },
+      }),
+    )
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
   it("forwards messages from an explicit source and defaults destination/account aliases correctly", async () => {
     vi.resetModules()
 

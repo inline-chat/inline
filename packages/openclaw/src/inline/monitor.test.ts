@@ -13,6 +13,16 @@ const modelRuntimeMocks = vi.hoisted(() => ({
   applyModelOverrideToSessionEntry: vi.fn(),
 }))
 
+const SET_BOT_PRESENCE_STATE = 59
+const BOT_PRESENCE_IDLE = 2
+const BOT_PRESENCE_HAPPY = 3
+const BOT_PRESENCE_WAVING = 4
+const BOT_PRESENCE_JUMPING = 5
+const BOT_PRESENCE_FAILED = 6
+const BOT_PRESENCE_WAITING = 7
+const BOT_PRESENCE_RUNNING = 8
+const BOT_PRESENCE_REVIEW = 9
+
 vi.mock("openclaw/plugin-sdk/models-provider-runtime", async () => {
   const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/models-provider-runtime")>(
     "openclaw/plugin-sdk/models-provider-runtime",
@@ -732,6 +742,17 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         GET_MESSAGES: 38,
         INVOKE_MESSAGE_ACTION: 48,
         ANSWER_MESSAGE_ACTION: 49,
+        SET_BOT_PRESENCE_STATE,
+      },
+      BotPresenceState_Kind: {
+        IDLE: BOT_PRESENCE_IDLE,
+        HAPPY: BOT_PRESENCE_HAPPY,
+        WAVING: BOT_PRESENCE_WAVING,
+        JUMPING: BOT_PRESENCE_JUMPING,
+        FAILED: BOT_PRESENCE_FAILED,
+        WAITING: BOT_PRESENCE_WAITING,
+        RUNNING: BOT_PRESENCE_RUNNING,
+        REVIEW: BOT_PRESENCE_REVIEW,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -1088,6 +1109,35 @@ describe("inline/monitor", () => {
         }),
       )
     })
+    await Promise.resolve()
+
+    const presenceCalls = harness.calls.invokeRaw.mock.calls.filter(
+      ([method]) => method === SET_BOT_PRESENCE_STATE,
+    )
+    expect(presenceCalls).not.toEqual(
+      expect.arrayContaining([
+        [
+          SET_BOT_PRESENCE_STATE,
+          expect.objectContaining({
+            setBotPresenceState: expect.objectContaining({
+              state: { kind: BOT_PRESENCE_JUMPING },
+            }),
+          }),
+        ],
+      ]),
+    )
+    expect(presenceCalls).not.toEqual(
+      expect.arrayContaining([
+        [
+          SET_BOT_PRESENCE_STATE,
+          expect.objectContaining({
+            setBotPresenceState: expect.objectContaining({
+              state: { kind: BOT_PRESENCE_IDLE },
+            }),
+          }),
+        ],
+      ]),
+    )
 
     await handle.stop()
   })
@@ -2475,6 +2525,36 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 91n, typing: false })
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 919n, typing: true })
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 919n, typing: false })
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        SET_BOT_PRESENCE_STATE,
+        expect.objectContaining({
+          oneofKind: "setBotPresenceState",
+          setBotPresenceState: expect.objectContaining({
+            peerId: expect.objectContaining({
+              type: expect.objectContaining({
+                oneofKind: "chat",
+                chat: { chatId: 91n },
+              }),
+            }),
+            state: { kind: BOT_PRESENCE_IDLE },
+          }),
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        SET_BOT_PRESENCE_STATE,
+        expect.objectContaining({
+          oneofKind: "setBotPresenceState",
+          setBotPresenceState: expect.objectContaining({
+            peerId: expect.objectContaining({
+              type: expect.objectContaining({
+                oneofKind: "chat",
+                chat: { chatId: 919n },
+              }),
+            }),
+            state: { kind: BOT_PRESENCE_RUNNING },
+          }),
+        }),
+      )
       expect(harness.calls.recordInboundSession).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionKey: "agent:main:inline:group:91:thread:919",
@@ -2484,6 +2564,176 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           chatId: 919n,
           text: "child reply",
+        }),
+      )
+    })
+
+    const childPresenceCalls = harness.calls.invokeRaw.mock.calls.filter(
+      ([method, input]) =>
+        method === SET_BOT_PRESENCE_STATE &&
+        input?.oneofKind === "setBotPresenceState" &&
+        input.setBotPresenceState?.peerId?.type?.oneofKind === "chat" &&
+        input.setBotPresenceState.peerId.type.chat?.chatId === 919n,
+    )
+    expect(childPresenceCalls).not.toEqual(
+      expect.arrayContaining([
+        [
+          SET_BOT_PRESENCE_STATE,
+          expect.objectContaining({
+            setBotPresenceState: expect.objectContaining({
+              state: { kind: BOT_PRESENCE_JUMPING },
+            }),
+          }),
+        ],
+      ]),
+    )
+
+    await handle.stop()
+  })
+
+  it("lets reply payload channelData set bot presence comment", async () => {
+    const harness = await setupMonitorHarness({
+      dispatchTypingLifecycle: true,
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "how are you feeling?",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      dispatchReplyPayload: {
+        text: "I'm focused.",
+        channelData: {
+          inline: {
+            botPresence: {
+              kind: "review",
+              comment: "Thinking it over",
+            },
+          },
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        SET_BOT_PRESENCE_STATE,
+        expect.objectContaining({
+          oneofKind: "setBotPresenceState",
+          setBotPresenceState: expect.objectContaining({
+            peerId: expect.objectContaining({
+              type: expect.objectContaining({
+                oneofKind: "chat",
+                chat: { chatId: 7n },
+              }),
+            }),
+            state: { kind: BOT_PRESENCE_REVIEW, comment: "Thinking it over" },
+          }),
+        }),
+      )
+    })
+    await Promise.resolve()
+
+    const presenceCalls = harness.calls.invokeRaw.mock.calls.filter(
+      ([method]) => method === SET_BOT_PRESENCE_STATE,
+    )
+    expect(presenceCalls).not.toEqual(
+      expect.arrayContaining([
+        [
+          SET_BOT_PRESENCE_STATE,
+          expect.objectContaining({
+            setBotPresenceState: expect.objectContaining({
+              state: { kind: BOT_PRESENCE_JUMPING },
+            }),
+          }),
+        ],
+      ]),
+    )
+    expect(presenceCalls).not.toEqual(
+      expect.arrayContaining([
+        [
+          SET_BOT_PRESENCE_STATE,
+          expect.objectContaining({
+            setBotPresenceState: expect.objectContaining({
+              state: { kind: BOT_PRESENCE_IDLE },
+            }),
+          }),
+        ],
+      ]),
+    )
+
+    await handle.stop()
+  })
+
+  it("lets reply payload channelData set emoji-only bot presence comment", async () => {
+    const emojiComment = "\u{1F44B}\u{1F4A1}"
+    const harness = await setupMonitorHarness({
+      dispatchTypingLifecycle: true,
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "say hi",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      dispatchReplyPayload: {
+        text: "Hi.",
+        channelData: {
+          inline: {
+            botPresence: {
+              kind: "waving",
+              comment: emojiComment,
+            },
+          },
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        SET_BOT_PRESENCE_STATE,
+        expect.objectContaining({
+          oneofKind: "setBotPresenceState",
+          setBotPresenceState: expect.objectContaining({
+            peerId: expect.objectContaining({
+              type: expect.objectContaining({
+                oneofKind: "chat",
+                chat: { chatId: 7n },
+              }),
+            }),
+            state: { kind: BOT_PRESENCE_WAVING, comment: emojiComment },
+          }),
         }),
       )
     })

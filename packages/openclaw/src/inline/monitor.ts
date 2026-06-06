@@ -70,7 +70,14 @@ import {
 import type { OpenClawConfig, PluginCommandContext } from "openclaw/plugin-sdk/core"
 import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract"
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
-import { InlineSdkClient, JsonFileStateStore, Method, type Message, type MessageActions } from "@inline-chat/realtime-sdk"
+import {
+  BotPresenceState_Kind,
+  InlineSdkClient,
+  JsonFileStateStore,
+  Method,
+  type Message,
+  type MessageActions,
+} from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { resolveInlineMessageActionsParam } from "./actions.js"
 import {
@@ -145,12 +152,32 @@ const INLINE_DEBOUNCE_ERROR_FALLBACK =
 const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
 const INLINE_PARTICIPANT_ADD_READY_MAX_EVENT_AGE_MS = 10 * 60 * 1000
+const INLINE_BOT_PRESENCE_IDLE_DELAY_MS = 8_000
+const INLINE_BOT_PRESENCE_FINISH_IDLE_DELAY_MS = 8_000
+const INLINE_BOT_PRESENCE_GESTURE_MS = 1_400
+const INLINE_BOT_PRESENCE_FAILED_MS = 8_000
+const INLINE_BOT_PRESENCE_COMMENT_MAX_LENGTH = 30
 const INLINE_REPLY_THREAD_SYSTEM_PROMPT =
   "Inline reply threads are scoped conversations: answer only the current reply-thread message and this thread's own history; use parent-chat context only as background, and do not answer unrelated questions from the parent chat or other reply threads."
 const INLINE_REPLY_THREAD_NEGATION_RE =
   /\b(?:do\s+not|don't|dont|please\s+don't|please\s+dont|no\s+need\s+to)\s+(?:create|start|open|make|use|move|take|reply|respond|answer|send|thread)\b[^.!?\n]*\bthread\b|\b(?:reply|respond|answer|keep)\s+(?:here|in\s+the\s+main\s+chat|in\s+main\s+chat|in\s+the\s+parent\s+chat|in\s+parent\s+chat)\b/u
 const INLINE_REPLY_THREAD_INTENT_RE =
   /\b(?:reply|respond|answer|send)\s+(?:in|inside|into|to)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\b(?:create|start|open|make|use)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\b(?:move|take)\s+(?:(?:this|it|the\s+answer|the\s+reply|the\s+response)\s+)?(?:to|into)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\bthread\s+(?:this|the\s+answer|the\s+reply|the\s+response)\b|\b(?:threaded\s+(?:reply|response)|(?:reply|respond|answer)\s+threaded)\b/u
+
+type InlineBotPresenceKind =
+  | "idle"
+  | "happy"
+  | "waving"
+  | "jumping"
+  | "failed"
+  | "waiting"
+  | "running"
+  | "review"
+
+type InlineBotPresenceSignal = {
+  kind: InlineBotPresenceKind
+  comment?: string
+}
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
@@ -307,6 +334,293 @@ async function sendInlineTypingToChats(params: {
   }
   for (const failure of failures) {
     params.onPartialError?.(failure.chatId, failure.error)
+  }
+}
+
+function inlineBotPresenceStateKind(kind: InlineBotPresenceKind): BotPresenceState_Kind {
+  switch (kind) {
+    case "idle":
+      return BotPresenceState_Kind.IDLE
+    case "happy":
+      return BotPresenceState_Kind.HAPPY
+    case "waving":
+      return BotPresenceState_Kind.WAVING
+    case "jumping":
+      return BotPresenceState_Kind.JUMPING
+    case "failed":
+      return BotPresenceState_Kind.FAILED
+    case "waiting":
+      return BotPresenceState_Kind.WAITING
+    case "running":
+      return BotPresenceState_Kind.RUNNING
+    case "review":
+      return BotPresenceState_Kind.REVIEW
+  }
+}
+
+function normalizeInlineBotPresenceKind(value: unknown): InlineBotPresenceKind | undefined {
+  if (typeof value !== "string") return undefined
+  switch (value.trim().toLowerCase()) {
+    case "idle":
+    case "happy":
+    case "waving":
+    case "jumping":
+    case "failed":
+    case "waiting":
+    case "running":
+    case "review":
+      return value.trim().toLowerCase() as InlineBotPresenceKind
+    default:
+      return undefined
+  }
+}
+
+function normalizeInlineBotPresenceComment(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const text = value.replace(/\s+/g, " ").trim()
+  if (!text) return undefined
+  return Array.from(text).slice(0, INLINE_BOT_PRESENCE_COMMENT_MAX_LENGTH).join("")
+}
+
+function resolveInlineBotPresenceSignal(payload: InlineReplyPayload): InlineBotPresenceSignal | null {
+  const channelData = isRecord(payload.channelData) ? payload.channelData : undefined
+  const inlineData = channelData && isRecord(channelData.inline) ? channelData.inline : undefined
+  const rawPresence = inlineData && isRecord(inlineData.botPresence) ? inlineData.botPresence : undefined
+  if (!rawPresence) return null
+
+  const kind = normalizeInlineBotPresenceKind(rawPresence.kind) ?? "happy"
+  const comment = normalizeInlineBotPresenceComment(rawPresence.comment)
+  return comment ? { kind, comment } : { kind }
+}
+
+async function sendInlineBotPresenceToChats(params: {
+  client: Pick<InlineSdkClient, "invokeRaw">
+  chatIds: bigint[]
+  kind: InlineBotPresenceKind
+  comment?: string
+  onPartialError?: (chatId: bigint, error: unknown) => void
+}): Promise<void> {
+  if (params.chatIds.length === 0) return
+
+  const failures: Array<{ chatId: bigint; error: unknown }> = []
+  await Promise.all(
+    params.chatIds.map(async (chatId) => {
+      try {
+        await params.client.invokeRaw(Method.SET_BOT_PRESENCE_STATE, {
+          oneofKind: "setBotPresenceState",
+          setBotPresenceState: {
+            peerId: {
+              type: {
+                oneofKind: "chat",
+                chat: { chatId },
+              },
+            },
+            state: {
+              kind: inlineBotPresenceStateKind(params.kind),
+              ...(params.comment ? { comment: params.comment } : {}),
+            },
+          },
+        })
+      } catch (error) {
+        failures.push({ chatId, error })
+      }
+    }),
+  )
+  if (failures.length === 0) return
+  if (failures.length === params.chatIds.length) {
+    throw failures[0]?.error ?? new Error("inline bot presence failed")
+  }
+  for (const failure of failures) {
+    params.onPartialError?.(failure.chatId, failure.error)
+  }
+}
+
+async function sendInlineTypingAndBotPresenceToChats(params: {
+  client: Pick<InlineSdkClient, "invokeRaw" | "sendTyping">
+  chatIds: bigint[]
+  typing: boolean
+  presenceKind: InlineBotPresenceKind
+  onTypingPartialError?: (chatId: bigint, error: unknown) => void
+  onPresencePartialError?: (chatId: bigint, error: unknown) => void
+  onPresenceError?: (error: unknown) => void
+}): Promise<void> {
+  let typingError: unknown = null
+  await Promise.all([
+    sendInlineTypingToChats({
+      client: params.client,
+      chatIds: params.chatIds,
+      typing: params.typing,
+      ...(params.onTypingPartialError ? { onPartialError: params.onTypingPartialError } : {}),
+    }).catch((error) => {
+      typingError = error
+    }),
+    sendInlineBotPresenceToChats({
+      client: params.client,
+      chatIds: params.chatIds,
+      kind: params.presenceKind,
+      ...(params.onPresencePartialError ? { onPartialError: params.onPresencePartialError } : {}),
+    }).catch((error) => {
+      params.onPresenceError?.(error)
+    }),
+  ])
+
+  if (typingError != null) {
+    throw typingError
+  }
+}
+
+function createInlineBotPresenceLifecycle(params: {
+  client: Pick<InlineSdkClient, "invokeRaw">
+  chatIds: bigint[]
+  onPartialError: (chatId: bigint, error: unknown) => void
+  onError: (error: unknown) => void
+}) {
+  let active = false
+  let finishing = false
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
+  let gestureTimer: ReturnType<typeof setTimeout> | undefined
+  let currentKind: InlineBotPresenceKind | undefined
+  let currentComment: string | undefined
+  let busyKind: InlineBotPresenceKind = "running"
+  let busyComment: string | undefined
+  let sendChain: Promise<void> = Promise.resolve()
+
+  const clearIdleTimer = () => {
+    if (!idleTimer) return
+    clearTimeout(idleTimer)
+    idleTimer = undefined
+  }
+
+  const clearGestureTimer = () => {
+    if (!gestureTimer) return
+    clearTimeout(gestureTimer)
+    gestureTimer = undefined
+  }
+
+  const send = (kind: InlineBotPresenceKind, comment?: string): Promise<void> => {
+    if (currentKind === kind && currentComment === comment) return Promise.resolve()
+    currentKind = kind
+    currentComment = comment
+    sendChain = sendChain
+      .catch(() => {})
+      .then(() =>
+        sendInlineBotPresenceToChats({
+          client: params.client,
+          chatIds: params.chatIds,
+          kind,
+          ...(comment ? { comment } : {}),
+          onPartialError: params.onPartialError,
+        }).catch(params.onError),
+      )
+    return sendChain
+  }
+
+  const scheduleIdle = (delayMs = INLINE_BOT_PRESENCE_IDLE_DELAY_MS) => {
+    clearIdleTimer()
+    idleTimer = setTimeout(() => {
+      idleTimer = undefined
+      active = false
+      finishing = false
+      busyKind = "running"
+      busyComment = undefined
+      void send("idle")
+    }, delayMs)
+    idleTimer.unref?.()
+  }
+
+  const showBusy = async (kind: InlineBotPresenceKind, comment?: string): Promise<void> => {
+    if (!active || finishing) return
+    clearIdleTimer()
+    clearGestureTimer()
+    busyKind = kind
+    busyComment = comment
+    await send(kind, comment)
+  }
+
+  const gesture = (
+    kind: InlineBotPresenceKind,
+    resumeKind = busyKind,
+    comment?: string,
+    resumeComment = busyComment,
+  ) => {
+    if (params.chatIds.length === 0) return
+    clearIdleTimer()
+    clearGestureTimer()
+    active = true
+    void send(kind, comment)
+    gestureTimer = setTimeout(() => {
+      gestureTimer = undefined
+      if (!active || finishing) return
+      void send(resumeKind, resumeComment)
+    }, INLINE_BOT_PRESENCE_GESTURE_MS)
+    gestureTimer.unref?.()
+  }
+
+  return {
+    start: async (cue?: InlineBotPresenceSignal | null) => {
+      if (params.chatIds.length === 0) return
+      clearIdleTimer()
+      if (active && !finishing) return
+      active = true
+      finishing = false
+      const cueKind = cue?.kind
+      busyKind = cueKind === "review" ? "review" : "running"
+      busyComment = undefined
+      if (cueKind === "waving") {
+        gesture("waving", busyKind)
+        return
+      }
+      await send(busyKind, busyComment)
+    },
+    busy: (kind: InlineBotPresenceKind, comment?: string) => {
+      void showBusy(kind, comment)
+    },
+    gesture: (kind: InlineBotPresenceKind, comment?: string) => {
+      gesture(kind, busyKind, comment)
+    },
+    express: (signal: InlineBotPresenceSignal) => {
+      if (signal.kind === "failed") {
+        if (params.chatIds.length === 0) return
+        clearIdleTimer()
+        clearGestureTimer()
+        active = true
+        finishing = true
+        void send("failed", signal.comment).finally(() => scheduleIdle(INLINE_BOT_PRESENCE_FAILED_MS))
+        return
+      }
+      if (params.chatIds.length === 0) return
+      clearIdleTimer()
+      clearGestureTimer()
+      active = true
+      finishing = true
+      void send(signal.kind, signal.comment).finally(() => scheduleIdle())
+    },
+    finish: () => {
+      if (!active || finishing) return
+      finishing = true
+      clearGestureTimer()
+      scheduleIdle(INLINE_BOT_PRESENCE_FINISH_IDLE_DELAY_MS)
+    },
+    fail: (comment?: string) => {
+      if (params.chatIds.length === 0) return
+      clearIdleTimer()
+      clearGestureTimer()
+      active = true
+      finishing = true
+      void send("failed", comment).finally(() => scheduleIdle(INLINE_BOT_PRESENCE_FAILED_MS))
+    },
+    cleanup: () => {
+      if (!active) return
+      if (finishing) return
+      clearIdleTimer()
+      clearGestureTimer()
+      active = false
+      void send("idle").finally(() => {
+        finishing = false
+        busyKind = "running"
+        busyComment = undefined
+      })
+    },
   }
 }
 
@@ -3682,9 +3996,18 @@ export async function monitorInlineProvider(params: {
     const setParentThreadCreationTyping = async (typing: boolean): Promise<void> => {
       if (!shouldCreateDeliveryThread || parentThreadCreationTyping === typing) return
       parentThreadCreationTyping = typing
-      await client
-        .sendTyping({ chatId: effectiveChatId, typing })
-        .catch((error) => runtime.error?.(`inline parent reply-thread typing failed: ${String(error)}`))
+      await sendInlineTypingAndBotPresenceToChats({
+        client,
+        chatIds: [effectiveChatId],
+        typing,
+        presenceKind: typing ? "running" : "idle",
+        onTypingPartialError: (chatId, error) =>
+          runtime.error?.(`inline parent reply-thread typing failed for chat ${String(chatId)}: ${String(error)}`),
+        onPresencePartialError: (chatId, error) =>
+          runtime.error?.(`inline parent reply-thread bot presence failed for chat ${String(chatId)}: ${String(error)}`),
+        onPresenceError: (error) =>
+          runtime.error?.(`inline parent reply-thread bot presence failed: ${String(error)}`),
+      }).catch((error) => runtime.error?.(`inline parent reply-thread typing failed: ${String(error)}`))
     }
 
     if (shouldCreateDeliveryThread) {
@@ -3994,7 +4317,40 @@ export async function monitorInlineProvider(params: {
       },
     })
     const onModelSelected = replyPipeline.onModelSelected
-    const typingCallbacks = replyPipeline.typingCallbacks
+    const rawTypingCallbacks = replyPipeline.typingCallbacks
+    const botPresenceLifecycle = createInlineBotPresenceLifecycle({
+      client,
+      chatIds: typingChatIds,
+      onPartialError: (chatId, error) =>
+        runtime.error?.(`inline bot presence failed for chat ${String(chatId)}: ${String(error)}`),
+      onError: (error) => runtime.error?.(`inline bot presence failed: ${String(error)}`),
+    })
+    const typingCallbacks: InlineTypingCallbacks | undefined = rawTypingCallbacks
+      ? {
+          onReplyStart: async () => {
+            await Promise.all([
+              rawTypingCallbacks.onReplyStart(),
+              botPresenceLifecycle.start(),
+            ])
+          },
+          ...(rawTypingCallbacks.onIdle
+            ? {
+                onIdle: () => {
+                  rawTypingCallbacks.onIdle?.()
+                  botPresenceLifecycle.finish()
+                },
+              }
+            : {}),
+          ...(rawTypingCallbacks.onCleanup
+            ? {
+                onCleanup: () => {
+                  rawTypingCallbacks.onCleanup?.()
+                  botPresenceLifecycle.cleanup()
+                },
+              }
+            : {}),
+        }
+      : undefined
     const dispatcherPipelineOptions = {
       ...(replyPipeline.responsePrefix !== undefined
         ? { responsePrefix: replyPipeline.responsePrefix }
@@ -4281,38 +4637,63 @@ export async function monitorInlineProvider(params: {
       ...(progressPlaceholderEnabled
         ? {
             onReasoningStream: async () => {
+              botPresenceLifecycle.busy("review")
               await pushInlineProgressPlaceholder()
             },
           }
         : {}),
-      ...(streamViaEditMessage || progressPlaceholderEnabled
-        ? {
-            onToolStart: async (payload: {
-              name?: string
-              phase?: string
-              args?: Record<string, unknown>
-              detailMode?: "explain" | "raw"
-            }) => {
-              await resetEditStreamOnBoundary()
-              const toolName = payload.name?.trim()
-              await pushInlineProgressPlaceholder(
-                buildInlineProgressLineForEntry(
-                  {
-                    event: "tool",
-                    ...(toolName ? { name: toolName } : {}),
-                    ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-                    ...(payload.args !== undefined ? { args: payload.args } : {}),
-                  },
-                  payload.detailMode ? { detailMode: payload.detailMode } : undefined,
-                ),
-                {
-                  ...(toolName ? { toolName } : {}),
-                  startImmediately: true,
-                },
-              )
+      onToolStart: async (payload: {
+        name?: string
+        phase?: string
+        args?: Record<string, unknown>
+        detailMode?: "explain" | "raw"
+      }) => {
+        const toolName = payload.name?.trim()
+        if (toolName === "inline_bot_presence") {
+          return
+        }
+
+        botPresenceLifecycle.busy("running")
+        if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
+        await resetEditStreamOnBoundary()
+        await pushInlineProgressPlaceholder(
+          buildInlineProgressLineForEntry(
+            {
+              event: "tool",
+              ...(toolName ? { name: toolName } : {}),
+              ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+              ...(payload.args !== undefined ? { args: payload.args } : {}),
             },
-          }
-        : {}),
+            payload.detailMode ? { detailMode: payload.detailMode } : undefined,
+          ),
+          {
+            ...(toolName ? { toolName } : {}),
+            startImmediately: true,
+          },
+        )
+      },
+      onApprovalEvent: async (payload: {
+        phase?: string
+        title?: string
+        command?: string
+        reason?: string
+        message?: string
+      }) => {
+        if (payload.phase !== "requested") return
+        botPresenceLifecycle.busy("waiting")
+        if (!progressPlaceholderEnabled) return
+        await pushInlineProgressPlaceholder(
+          buildChannelProgressDraftLine({
+            event: "approval",
+            ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
+            ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.command !== undefined ? { command: payload.command } : {}),
+            ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+            ...(payload.message !== undefined ? { message: payload.message } : {}),
+          }),
+          { startImmediately: true },
+        )
+      },
       ...(progressPlaceholderEnabled
         ? {
             onItemEvent: async (payload: {
@@ -4356,26 +4737,6 @@ export async function monitorInlineProvider(params: {
                   ...(payload.explanation !== undefined ? { explanation: payload.explanation } : {}),
                   ...(payload.steps !== undefined ? { steps: payload.steps } : {}),
                 }),
-              )
-            },
-            onApprovalEvent: async (payload: {
-              phase?: string
-              title?: string
-              command?: string
-              reason?: string
-              message?: string
-            }) => {
-              if (payload.phase !== "requested") return
-              await pushInlineProgressPlaceholder(
-                buildChannelProgressDraftLine({
-                  event: "approval",
-                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-                  ...(payload.title !== undefined ? { title: payload.title } : {}),
-                  ...(payload.command !== undefined ? { command: payload.command } : {}),
-                  ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
-                  ...(payload.message !== undefined ? { message: payload.message } : {}),
-                }),
-                { startImmediately: true },
               )
             },
             onCommandOutput: async (payload: {
@@ -4422,26 +4783,22 @@ export async function monitorInlineProvider(params: {
             },
           }
         : {}),
-      ...(streamViaEditMessage || progressPlaceholderEnabled
-        ? {
-            onCompactionStart: async () => {
-              await resetEditStreamOnBoundary()
-              await pushInlineProgressPlaceholder("Compacting context", {
-                startImmediately: true,
-              })
-            },
-          }
-        : {}),
-      ...(streamViaEditMessage || progressPlaceholderEnabled
-        ? {
-            onCompactionEnd: async () => {
-              await resetEditStreamOnBoundary()
-              await pushInlineProgressPlaceholder("Resuming", {
-                startImmediately: true,
-              })
-            },
-          }
-        : {}),
+      onCompactionStart: async () => {
+        botPresenceLifecycle.busy("review")
+        if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
+        await resetEditStreamOnBoundary()
+        await pushInlineProgressPlaceholder("Compacting context", {
+          startImmediately: true,
+        })
+      },
+      onCompactionEnd: async () => {
+        botPresenceLifecycle.busy("running")
+        if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
+        await resetEditStreamOnBoundary()
+        await pushInlineProgressPlaceholder("Resuming", {
+          startImmediately: true,
+        })
+      },
       ...(suppressDefaultToolProgressMessages
         ? { suppressDefaultToolProgressMessages: true }
         : {}),
@@ -4467,6 +4824,11 @@ export async function monitorInlineProvider(params: {
               payload: InlineReplyPayload,
               info?: InlineDispatchReplyInfo,
             ) => {
+              const presenceSignal = resolveInlineBotPresenceSignal(payload)
+              if (presenceSignal) {
+                botPresenceLifecycle.express(presenceSignal)
+              }
+
               const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
               if (!visiblePayload) return
               await cleanupInlineProgressPlaceholder()
@@ -4651,6 +5013,7 @@ export async function monitorInlineProvider(params: {
             },
             onError: (err, info) => {
               failedNonSilent = true
+              botPresenceLifecycle.fail()
               runtime.error?.(`inline ${info?.kind ?? "final"} reply failed: ${String(err)}`)
             },
           },
@@ -4658,6 +5021,7 @@ export async function monitorInlineProvider(params: {
         })
       } catch (error) {
         dispatchError = error
+        botPresenceLifecycle.fail()
         runtime.error?.(`inline dispatch failed: ${String(error)}`)
       }
 
@@ -4666,6 +5030,7 @@ export async function monitorInlineProvider(params: {
         delivered = true
       }
       if (!delivered && (dispatchError != null || skippedNonSilent || failedNonSilent)) {
+        botPresenceLifecycle.fail()
         const fallbackText =
           dispatchError != null
             ? INLINE_REQUEST_ERROR_FALLBACK

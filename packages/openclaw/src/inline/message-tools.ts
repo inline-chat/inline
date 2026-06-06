@@ -1,5 +1,5 @@
 import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
-import { InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
+import { BotPresenceState_Kind, InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import {
@@ -42,6 +42,30 @@ type InlineForwardToolArgs = {
   messageId?: string
   messageIds?: string[] | string
   shareForwardHeader?: boolean
+  accountId?: string
+}
+
+const INLINE_BOT_PRESENCE_COMMENT_MAX_LENGTH = 30
+const INLINE_BOT_PRESENCE_KINDS = [
+  "idle",
+  "happy",
+  "waving",
+  "jumping",
+  "failed",
+  "waiting",
+  "running",
+  "review",
+] as const
+
+type InlineBotPresenceKind = (typeof INLINE_BOT_PRESENCE_KINDS)[number]
+
+type InlineBotPresenceToolArgs = {
+  kind?: string
+  comment?: string
+  to?: string
+  target?: string
+  chatId?: string
+  userId?: string
   accountId?: string
 }
 
@@ -149,6 +173,47 @@ const InlineForwardToolParameters = {
   required: ["to"],
 } as const
 
+const InlineBotPresenceToolParameters = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    kind: {
+      type: "string",
+      enum: INLINE_BOT_PRESENCE_KINDS,
+      description:
+        "Body state for your on-screen Inline character. Use waving for greetings/attention, jumping for delight/completion, review for thinking, waiting for user input, running for active work, failed when blocked/disappointed, happy for positive settled moments, and idle only when neutral is intentionally useful.",
+    },
+    comment: {
+      type: "string",
+      maxLength: INLINE_BOT_PRESENCE_COMMENT_MAX_LENGTH,
+      description:
+        "Tiny generated thought bubble from your actual current mood, process, status, request, nudge, or aside. Keep it casual, characterful, and under 30 characters; text or one/two emojis are both fine. It supplements the chat answer and should not replace substantive content.",
+    },
+    to: {
+      type: "string",
+      description:
+        "Optional Inline target (`chat:<id>`, bare chat id, or `user:<id>`). Defaults to the current Inline chat when available.",
+    },
+    target: {
+      type: "string",
+      description: "Alias for `to`.",
+    },
+    chatId: {
+      type: "string",
+      description: "Explicit chat id target alias.",
+    },
+    userId: {
+      type: "string",
+      description: "Explicit user id target alias.",
+    },
+    accountId: {
+      type: "string",
+      description: "Optional Inline account id override.",
+    },
+  },
+  required: ["kind"],
+} as const
+
 function resolvePeerTarget(params: {
   label: string
   direct?: string | undefined
@@ -238,6 +303,49 @@ function extractFirstMessageId(updates: unknown): string | null {
   return null
 }
 
+function normalizeInlineBotPresenceKind(value: unknown): InlineBotPresenceKind {
+  if (typeof value !== "string") {
+    throw new Error("inline_bot_presence: `kind` is required")
+  }
+
+  const normalized = value.trim().toLowerCase()
+  for (const kind of INLINE_BOT_PRESENCE_KINDS) {
+    if (kind === normalized) return kind
+  }
+
+  throw new Error(`inline_bot_presence: invalid kind "${value}"`)
+}
+
+function botPresenceStateKind(kind: InlineBotPresenceKind): BotPresenceState_Kind {
+  switch (kind) {
+    case "idle":
+      return BotPresenceState_Kind.IDLE
+    case "happy":
+      return BotPresenceState_Kind.HAPPY
+    case "waving":
+      return BotPresenceState_Kind.WAVING
+    case "jumping":
+      return BotPresenceState_Kind.JUMPING
+    case "failed":
+      return BotPresenceState_Kind.FAILED
+    case "waiting":
+      return BotPresenceState_Kind.WAITING
+    case "running":
+      return BotPresenceState_Kind.RUNNING
+    case "review":
+      return BotPresenceState_Kind.REVIEW
+  }
+}
+
+function normalizeInlineBotPresenceComment(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const visible = sanitizeInlineVisibleText(value)
+  if (visible.shouldSkip) return undefined
+  const text = visible.text.replace(/\s+/g, " ").trim()
+  if (!text) return undefined
+  return Array.from(text).slice(0, INLINE_BOT_PRESENCE_COMMENT_MAX_LENGTH).join("")
+}
+
 async function withInlineClient<T>(params: {
   cfg: OpenClawConfig
   accountId?: string | null
@@ -319,6 +427,59 @@ function createInlineNudgeTool(ctx: InlineMessageToolContext): AnyAgentTool {
   } as AnyAgentTool
 }
 
+function createInlineBotPresenceTool(ctx: InlineMessageToolContext): AnyAgentTool {
+  return {
+    name: "inline_bot_presence",
+    label: "Body Cue",
+    description:
+      "Move or emote through your literal on-screen Inline character/body without sending a chat message. This is a cheap body-language/thought-bubble tool: use it during active work when your mood, thought, status, request, or final beat would help the human read you better.",
+    parameters: InlineBotPresenceToolParameters,
+    execute: async (_toolCallId, rawArgs) => {
+      if (!ctx.config) {
+        throw new Error("inline_bot_presence: missing OpenClaw config")
+      }
+
+      const args = rawArgs as InlineBotPresenceToolArgs
+      const fallbackTarget = parseCurrentInlineTarget(ctx)
+      const { target, usedFallback } = resolvePeerTarget({
+        label: "target",
+        direct: readStringCandidate(args.to, args.target),
+        chatId: args.chatId,
+        userId: args.userId,
+        fallback: fallbackTarget,
+      })
+      const kind = normalizeInlineBotPresenceKind(args.kind)
+      const comment = normalizeInlineBotPresenceComment(args.comment)
+
+      return await withInlineClient({
+        cfg: ctx.config,
+        accountId: args.accountId ?? ctx.agentAccountId ?? null,
+        fn: async (client, resolvedAccountId) => {
+          await client.invokeRaw(Method.SET_BOT_PRESENCE_STATE, {
+            oneofKind: "setBotPresenceState",
+            setBotPresenceState: {
+              peerId: target.peerId,
+              state: {
+                kind: botPresenceStateKind(kind),
+                ...(comment ? { comment } : {}),
+              },
+            },
+          })
+
+          return jsonResult({
+            ok: true,
+            accountId: resolvedAccountId,
+            target: target.normalized,
+            usedCurrentChatDefault: usedFallback,
+            kind,
+            comment: comment ?? null,
+          })
+        },
+      })
+    },
+  } as AnyAgentTool
+}
+
 function createInlineForwardTool(ctx: InlineMessageToolContext): AnyAgentTool {
   return {
     name: "inline_forward",
@@ -387,5 +548,5 @@ function createInlineForwardTool(ctx: InlineMessageToolContext): AnyAgentTool {
 
 export function createInlineMessageTools(ctx: InlineMessageToolContext): AnyAgentTool[] {
   if (!ctx.config) return []
-  return [createInlineNudgeTool(ctx), createInlineForwardTool(ctx)]
+  return [createInlineNudgeTool(ctx), createInlineForwardTool(ctx), createInlineBotPresenceTool(ctx)]
 }

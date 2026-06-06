@@ -113,6 +113,48 @@ const CREATE_SUBTHREAD_METHOD =
 
 const INLINE_ACTION_MAX_ROWS = 8
 const INLINE_ACTION_MAX_PER_ROW = 8
+const INLINE_BOT_PRESENCE_KINDS = [
+  "idle",
+  "happy",
+  "waving",
+  "jumping",
+  "failed",
+  "waiting",
+  "running",
+  "review",
+] as const
+
+const inlineBotPresenceChannelDataSchema = {
+  type: "object",
+  description: "Inline-specific metadata for a send. Use inline.botPresence for the bot's on-screen body.",
+  additionalProperties: true,
+  properties: {
+    inline: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        botPresence: {
+          type: "object",
+          description: "Optional Inline bot presence state generated from your current mood or process.",
+          additionalProperties: true,
+          properties: {
+            kind: {
+              type: "string",
+              enum: INLINE_BOT_PRESENCE_KINDS,
+              description: "Emotion/state for the on-screen bot presence.",
+            },
+            comment: {
+              type: "string",
+              maxLength: 30,
+              description:
+                "Optional short expression from your actual current thought, status, mood, request, or aside. Text or one/two emoji.",
+            },
+          },
+        },
+      },
+    },
+  },
+} as unknown as ChannelMessageToolSchemaContribution["properties"][string]
 
 type InlineReplyMarkupButton = {
   text: string
@@ -1066,16 +1108,26 @@ function describeInlineMessageTool({
   }
 
   const buttonsEnabled = supportsInlineMessageButtons(actions)
+  const sendEnabled = actions.includes("send")
   const capabilities: ChannelMessageToolDiscovery["capabilities"] = buttonsEnabled ? ["presentation"] : []
-  const schema: ChannelMessageToolSchemaContribution[] = buttonsEnabled
-    ? [
-        {
-          properties: {
-            buttons: createMessageToolButtonsSchema() as unknown as ChannelMessageToolSchemaContribution["properties"][string],
-          },
-        },
-      ]
-    : []
+  const schema: ChannelMessageToolSchemaContribution[] = []
+
+  if (buttonsEnabled) {
+    schema.push({
+      properties: {
+        buttons: createMessageToolButtonsSchema() as unknown as ChannelMessageToolSchemaContribution["properties"][string],
+      },
+    })
+  }
+
+  if (sendEnabled) {
+    schema.push({
+      actions: ["send"],
+      properties: {
+        channelData: inlineBotPresenceChannelDataSchema,
+      },
+    })
+  }
 
   return {
     actions,

@@ -47,8 +47,18 @@ describe("plugin manifest", () => {
     expect(json.id).toBe("inline")
     expect(json.description).toBe("Use OpenClaw from Inline DMs and chats with an Inline bot token.")
     expect(json.channels).toEqual(["inline"])
-    expect(json.contracts?.tools).toContain("inline_members")
-    expect(json.contracts?.tools).toContain("inline_parent_context")
+    expect(json.contracts?.tools).toEqual(
+      expect.arrayContaining([
+        "inline_members",
+        "inline_update_profile",
+        "inline_bot_avatar",
+        "inline_bot_commands",
+        "inline_nudge",
+        "inline_forward",
+        "inline_bot_presence",
+        "inline_parent_context",
+      ]),
+    )
     expect(json.channelEnvVars?.inline).toEqual(["INLINE_TOKEN", "INLINE_BOT_TOKEN"])
     const schema = json.channelConfigs?.inline?.schema
     const streaming = schema?.properties?.streaming as
