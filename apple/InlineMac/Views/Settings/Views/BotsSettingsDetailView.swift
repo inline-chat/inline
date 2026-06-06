@@ -15,6 +15,7 @@ struct BotsSettingsDetailView: View {
   @FocusState private var focusedField: Field?
 
   @State private var botToEdit: BotEditItem?
+  @State private var botToEditAvatar: BotAvatarEditItem?
   @State private var rotateConfirmBotId: Int64?
   @State private var deleteConfirmBot: BotDeleteItem?
 
@@ -128,6 +129,9 @@ struct BotsSettingsDetailView: View {
               onEditProfile: {
                 botToEdit = BotEditItem(bot: bot)
               },
+              onEditAvatar: {
+                botToEditAvatar = BotAvatarEditItem(bot: bot)
+              },
               onCopy: { token in
                 copyToken(token)
               }
@@ -147,6 +151,11 @@ struct BotsSettingsDetailView: View {
     }
     .sheet(item: $botToEdit) { item in
       BotProfileEditorSheet(bot: item.bot) { updatedBot in
+        viewModel.upsertBot(updatedBot)
+      }
+    }
+    .sheet(item: $botToEditAvatar) { item in
+      BotAvatarSettingsSheet(bot: item.bot) { updatedBot in
         viewModel.upsertBot(updatedBot)
       }
     }
@@ -241,6 +250,11 @@ struct BotsSettingsDetailView: View {
 }
 
 private struct BotEditItem: Identifiable {
+  let bot: InlineProtocol.User
+  var id: Int64 { bot.id }
+}
+
+private struct BotAvatarEditItem: Identifiable {
   let bot: InlineProtocol.User
   var id: Int64 { bot.id }
 }
@@ -460,6 +474,7 @@ private struct BotRow: View {
   let onRotateRequested: () -> Void
   let onDeleteRequested: () -> Void
   let onEditProfile: () -> Void
+  let onEditAvatar: () -> Void
   let onCopy: (String) -> Void
 
   var body: some View {
@@ -514,6 +529,10 @@ private struct BotRow: View {
 
       Button("Edit Profile...") {
         onEditProfile()
+      }
+
+      Button("Bot Avatar...") {
+        onEditAvatar()
       }
 
       Divider()
