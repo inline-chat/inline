@@ -1,7 +1,8 @@
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
+import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
-import { Chat, Dialog } from "@inline-chat/protocol/core"
+import { Chat, Dialog, type ChatParticipant } from "@inline-chat/protocol/core"
 import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -12,7 +13,7 @@ import { getUpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { UpdateGroup } from "@in/server/modules/updates"
-import type { DbChat } from "@in/server/db/schema"
+import type { DbChat, DbDialog } from "@in/server/db/schema"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UsersModel } from "@in/server/db/models/users"
@@ -21,7 +22,15 @@ import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import type { Transaction } from "@in/server/db/types"
 import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
+
+type InitialParticipant = {
+  chatId: number
+  userId: number
+  date: Date
+}
 
 export async function createChat(
   input: {
@@ -142,7 +151,7 @@ export async function createChat(
   }
 
   if (reservedChatId !== undefined) {
-    const { chat: createdChat, dialog: createdDialog } = await db.transaction(async (tx) => {
+    const { chat: createdChat, dialog: createdDialog, participants: createdParticipants } = await db.transaction(async (tx) => {
       const threadNumber = hasSpaceId ? await allocateSpaceThreadNumber(tx, resolvedSpaceId) : null
 
       const [reservation] = await tx
@@ -182,15 +191,16 @@ export async function createChat(
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
       }
 
+      let participants: InitialParticipant[] = []
       if (isPublic === false && input.participants) {
-        const participants = input.participants.map((p) => ({
+        participants = input.participants.map((p) => ({
           chatId: chat.id,
           userId: Number(p.userId),
           date: new Date(),
         }))
 
         await tx.insert(chatParticipants).values(participants)
-        participants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
+        await enqueueInitialParticipantAdds(tx, chat.id, participants, context.currentUserId)
       }
 
       const [dialog] = await tx
@@ -215,8 +225,10 @@ export async function createChat(
         })
         .where(eq(chatIdReservations.chatId, reservedChatId))
 
-      return { chat, dialog }
+      return { chat, dialog, participants }
     })
+
+    createdParticipants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
 
     const encodedDialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
     const persisted = await persistNewChatUpdate(createdChat.id)
@@ -228,60 +240,73 @@ export async function createChat(
     }
   }
 
-  const { chat: createdChat, dialog: createdDialog } = await db.transaction(async (tx) => {
-    const threadNumber = hasSpaceId ? await allocateSpaceThreadNumber(tx, resolvedSpaceId) : null
+  let createdChat: DbChat
+  let createdDialog: DbDialog
+  let createdParticipants: InitialParticipant[] = []
+  try {
+    ;({ chat: createdChat, dialog: createdDialog, participants: createdParticipants } = await db.transaction(async (tx) => {
+      const threadNumber = hasSpaceId ? await allocateSpaceThreadNumber(tx, resolvedSpaceId) : null
 
-    const [chat] = await tx
-      .insert(chats)
-      .values({
-        type: "thread",
-        spaceId: hasSpaceId ? resolvedSpaceId : null,
-        title: title ?? null,
-        isUntitled: title ? null : true,
-        publicThread: isPublic,
-        date: new Date(),
-        threadNumber: threadNumber,
-        emoji: input.emoji ?? null,
-        description: input.description ?? null,
-        createdBy: context.currentUserId,
-      })
-      .returning()
+      const [chat] = await tx
+        .insert(chats)
+        .values({
+          type: "thread",
+          spaceId: hasSpaceId ? resolvedSpaceId : null,
+          title: title ?? null,
+          isUntitled: title ? null : true,
+          publicThread: isPublic,
+          date: new Date(),
+          threadNumber: threadNumber,
+          emoji: input.emoji ?? null,
+          description: input.description ?? null,
+          createdBy: context.currentUserId,
+        })
+        .returning()
 
-    if (!chat) {
-      throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
+      if (!chat) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
+      }
+
+      let participants: InitialParticipant[] = []
+      if (isPublic === false && input.participants) {
+        participants = input.participants.map((p) => ({
+          chatId: chat.id,
+          userId: Number(p.userId),
+          date: new Date(),
+        }))
+
+        await tx.insert(chatParticipants).values(participants)
+        await enqueueInitialParticipantAdds(tx, chat.id, participants, context.currentUserId)
+      }
+
+      const [dialog] = await tx
+        .insert(dialogs)
+        .values({
+          chatId: chat.id,
+          userId: context.currentUserId,
+          spaceId: hasSpaceId ? resolvedSpaceId : null,
+          date: new Date(),
+          ...dialogOpenDefaultsForChat(chat),
+        })
+        .returning()
+
+      if (!dialog) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
+      }
+
+      return { chat, dialog, participants }
+    }))
+  } catch (error) {
+    Log.shared.error(`Failed to create chat: ${error}`)
+    if (error instanceof RealtimeRpcError) {
+      throw error
     }
+    throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
+  }
 
-    // If it's a private space thread, add participants
-    if (isPublic === false && input.participants) {
-      const participants = input.participants.map((p) => ({
-        chatId: chat.id,
-        userId: Number(p.userId),
-        date: new Date(),
-      }))
+  createdParticipants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
 
-      await tx.insert(chatParticipants).values(participants)
-      participants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
-    }
-
-    const [dialog] = await tx
-      .insert(dialogs)
-      .values({
-        chatId: chat.id,
-        userId: context.currentUserId,
-        spaceId: hasSpaceId ? resolvedSpaceId : null,
-        date: new Date(),
-        ...dialogOpenDefaultsForChat(chat),
-      })
-      .returning()
-
-    if (!dialog) {
-      throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
-    }
-
-    return { chat, dialog }
-  })
-
-  const encodedDialog: Dialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
+  let encodedDialog: Dialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
 
   const persisted = await persistNewChatUpdate(createdChat.id)
 
@@ -297,6 +322,36 @@ export async function createChat(
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed && trimmed.length > 0 ? trimmed : undefined
+}
+
+async function enqueueInitialParticipantAdds(
+  tx: Transaction,
+  chatId: number,
+  participants: InitialParticipant[],
+  currentUserId: number,
+): Promise<void> {
+  await UserBucketUpdates.enqueueMany(
+    participants
+      .filter((participant) => participant.userId !== currentUserId)
+      .map((participant) => ({
+        userId: participant.userId,
+        update: {
+          oneofKind: "userChatParticipantAdd" as const,
+          userChatParticipantAdd: {
+            chatId: BigInt(chatId),
+            participant: encodeParticipant(participant),
+          },
+        },
+      })),
+    { tx },
+  )
+}
+
+function encodeParticipant(participant: InitialParticipant): ChatParticipant {
+  return {
+    userId: BigInt(participant.userId),
+    date: encodeDateStrict(participant.date),
+  }
 }
 
 // ------------------------------------------------------------
