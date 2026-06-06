@@ -155,6 +155,10 @@ class MinimalMessageViewAppKit: NSView {
     ExperimentalFeatureFlags.voiceMessagesEnabled && message.hasVoice
   }
 
+  private var canSaveLoadedVoice: Bool {
+    hasVoiceInDocumentSlot && VoiceMessageAudioSaver.canSave(message)
+  }
+
   private var hasActualDocument: Bool {
     fullMessage.documentInfo != nil
   }
@@ -643,6 +647,8 @@ class MinimalMessageViewAppKit: NSView {
     }
 
     guard let desiredView else { return }
+    documentContainerView.menu = menu
+    desiredView.menu = menu
 
     if desiredView.superview !== documentContainerView {
       desiredView.removeFromSuperview()
@@ -2773,6 +2779,12 @@ class MinimalMessageViewAppKit: NSView {
     let newMenu = NSMenu()
     newMenu.delegate = self
     menu = newMenu
+    if hasDocument {
+      documentContainerView.menu = newMenu
+      if hasVoiceInDocumentSlot {
+        voiceMessageView?.menu = newMenu
+      }
+    }
   }
 
   @objc private func addReaction() {
@@ -3264,6 +3276,10 @@ class MinimalMessageViewAppKit: NSView {
         }
       }
     }
+  }
+
+  @objc private func saveAudio() {
+    VoiceMessageAudioSaver.save(message: message, window: window)
   }
 
   // MARK: - View Updates
@@ -4305,6 +4321,14 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
       menu.addItem(NSMenuItem.separator())
       let saveItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Document")
+      menu.addItem(saveItem)
+    }
+
+    if canSaveLoadedVoice {
+      menu.addItem(NSMenuItem.separator())
+      let saveItem = NSMenuItem(title: "Save Audio", action: #selector(saveAudio), keyEquivalent: "s")
+      saveItem.target = self
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Audio")
       menu.addItem(saveItem)
     }
 
