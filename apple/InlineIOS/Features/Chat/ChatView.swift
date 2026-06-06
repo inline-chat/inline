@@ -15,6 +15,8 @@ struct ChatView: View {
   @State var isChatHeaderPressed = false
   @State private var pageState: PageState = .initial
   @State private var attemptedUntitledCleanupOnExit = false
+  @State private var activeChatToken: MessagesPublisher.ActiveChatToken?
+  @State private var isVisible = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -116,14 +118,24 @@ struct ChatView: View {
     .task {
       await fetchChatIfNeeded()
     }
+    .onAppear {
+      isVisible = true
+      updateMessageUpdateActivation()
+    }
+    .onChange(of: peerId) { _, _ in
+      updateMessageUpdateActivation()
+    }
     .onChange(of: fullChatViewModel.chat?.id) { _, chatId in
       guard chatId != nil else { return }
       pageState = .loaded
     }
     .onDisappear {
+      isVisible = false
+      updateMessageUpdateActivation()
       scheduleUntitledThreadCleanupIfNeeded()
     }
     .onChange(of: scenePhase) { _, newPhase in
+      updateMessageUpdateActivation()
       if newPhase == .active, fullChatViewModel.chat != nil, case .loaded = pageState {
         fullChatViewModel.refetchHistoryOnly()
       }
@@ -292,6 +304,29 @@ struct ChatView: View {
     }
     .environmentObject(fullChatViewModel)
     .environment(router)
+  }
+
+  @MainActor
+  private func updateMessageUpdateActivation() {
+    if isVisible, scenePhase == .active {
+      activateMessageUpdates()
+    } else {
+      deactivateMessageUpdates()
+    }
+  }
+
+  @MainActor
+  private func activateMessageUpdates() {
+    if let activeChatToken, activeChatToken.peer == peerId { return }
+    deactivateMessageUpdates()
+    activeChatToken = MessagesPublisher.shared.activateChat(peer: peerId)
+  }
+
+  @MainActor
+  private func deactivateMessageUpdates() {
+    guard let token = activeChatToken else { return }
+    MessagesPublisher.shared.deactivateChat(token)
+    activeChatToken = nil
   }
 
   @MainActor
