@@ -41,6 +41,8 @@ public class MessagesSectionedViewModel {
   public var sections: [MessageSection] = []
   public var messages: [FullMessage] { progressiveViewModel.messages }
   public var messagesByID: [Int64: FullMessage] { progressiveViewModel.messagesByID }
+  public var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
+  public var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
 
   // MARK: - Private Properties
 
@@ -80,19 +82,28 @@ public class MessagesSectionedViewModel {
     progressiveViewModel.loadBatch(at: direction)
     // rebuild sections
     rebuildSections()
-    // check if sections changed
-    let newSectionsSet = Set(sections.map(\.date))
-    if previousSectionsSet != newSectionsSet {
-      let changedSections = sections.filter { !previousSectionsSet.contains($0.date) }
-      // sections changed
-      callback?(.sectionsChanged(sections: changedSections))
-    } else {
-      callback?(.sectionsChanged(sections: [sections[sections.count - 1]]))
-    }
+    publishBatchSectionChange(previousSectionsSet: previousSectionsSet)
+  }
+
+  @discardableResult
+  public func loadBatchAsync(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) async -> Bool {
+    let previousSectionsSet = Set(sections.map(\.date))
+    let didLoad = await progressiveViewModel.loadBatchAsync(at: direction)
+    guard didLoad else { return false }
+    guard !Task.isCancelled else { return false }
+
+    rebuildSections()
+    publishBatchSectionChange(previousSectionsSet: previousSectionsSet)
+    return true
   }
 
   public func setAtBottom(_ atBottom: Bool) {
     progressiveViewModel.setAtBottom(atBottom)
+  }
+
+  @discardableResult
+  public func reloadThreadAnchorFromLocal() -> Bool {
+    progressiveViewModel.reloadThreadAnchorFromLocal()
   }
 
   public func dispose() {
@@ -105,6 +116,18 @@ public class MessagesSectionedViewModel {
   private func rebuildSections() {
     let messages = progressiveViewModel.messages
     sections = groupMessagesByDay(messages)
+  }
+
+  private func publishBatchSectionChange(previousSectionsSet: Set<Date>) {
+    let newSectionsSet = Set(sections.map(\.date))
+    if previousSectionsSet != newSectionsSet {
+      let changedSections = sections.filter { !previousSectionsSet.contains($0.date) }
+      callback?(.sectionsChanged(sections: changedSections))
+    } else if let section = sections.last {
+      callback?(.sectionsChanged(sections: [section]))
+    } else {
+      callback?(.reload(animated: false))
+    }
   }
 
   // Keep section sorting aligned with MessagesProgressiveViewModel so same-second

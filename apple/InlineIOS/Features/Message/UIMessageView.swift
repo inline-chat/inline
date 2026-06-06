@@ -16,11 +16,17 @@ private enum MessageActionInvokeError: Error {
   case invalidResponse
 }
 
+enum MessageDisplayMode: Equatable {
+  case normal
+  case threadAnchor
+}
+
 class UIMessageView: UIView {
   // MARK: - Properties
 
   let fullMessage: FullMessage
   let spaceId: Int64
+  let displayMode: MessageDisplayMode
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
@@ -217,7 +223,7 @@ class UIMessageView: UIView {
   }
 
   private var shouldShowReplyThreadSummary: Bool {
-    message.hasReplyThreadSummary
+    displayMode != .threadAnchor && message.hasReplyThreadSummary
   }
 
   private var shouldUseWhiteReplyThreadSummary: Bool {
@@ -378,9 +384,10 @@ class UIMessageView: UIView {
     messageActionAnsweredCancellable?.cancel()
   }
 
-  init(fullMessage: FullMessage, spaceId: Int64) {
+  init(fullMessage: FullMessage, spaceId: Int64, displayMode: MessageDisplayMode = .normal) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
+    self.displayMode = displayMode
 
     super.init(frame: .zero)
 

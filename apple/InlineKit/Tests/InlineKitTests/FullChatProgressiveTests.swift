@@ -49,6 +49,47 @@ struct MessagesProgressiveViewModelOrderingTests {
     #expect(deduped.map(\.id) == [330, 440, 550])
   }
 
+  @Test("batch dedupe removes already loaded messages regardless of cursor date")
+  func testBatchDedupeRemovesAnyLoadedMessage() async throws {
+    let cursor = Date(timeIntervalSince1970: 1_700_000_000)
+    let older = Date(timeIntervalSince1970: 1_699_999_900)
+
+    let existingAtCursor = makeFullMessage(messageId: 10, globalId: 110, date: cursor)
+    let existingOlder = makeFullMessage(messageId: 20, globalId: 220, date: older)
+    let duplicateAtCursor = makeFullMessage(messageId: 10, globalId: 110, date: cursor)
+    let duplicateOlder = makeFullMessage(messageId: 20, globalId: 220, date: older)
+    let newOlder = makeFullMessage(messageId: 30, globalId: 330, date: older)
+
+    let deduped = await MainActor.run {
+      MessagesProgressiveViewModel.batchDeduped(
+        [duplicateAtCursor, duplicateOlder, newOlder],
+        existingByID: [
+          existingAtCursor.id: existingAtCursor,
+          existingOlder.id: existingOlder,
+        ]
+      )
+    }
+
+    #expect(deduped.map(\.id) == [330])
+  }
+
+  @Test("loaded window bounds use date and message id cursor order")
+  func testLoadedWindowBoundsUseDateAndMessageId() async throws {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let newest = makeFullMessage(messageId: 30, globalId: 300, date: date.addingTimeInterval(10))
+    let sameDateHigherId = makeFullMessage(messageId: 20, globalId: 200, date: date)
+    let sameDateLowerId = makeFullMessage(messageId: 10, globalId: 100, date: date)
+
+    let bounds = await MainActor.run {
+      MessagesProgressiveViewModel.loadedWindowBounds(for: [sameDateHigherId, newest, sameDateLowerId])
+    }
+
+    #expect(bounds?.oldestMessageId == 10)
+    #expect(bounds?.oldestDate == date)
+    #expect(bounds?.newestMessageId == 30)
+    #expect(bounds?.newestDate == date.addingTimeInterval(10))
+  }
+
   @Test("merge helper keeps deterministic prepend and append ordering")
   func testMergeMessagesDeterministicOrder() async throws {
     let date = Date(timeIntervalSince1970: 1_700_000_000)

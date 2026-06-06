@@ -34,11 +34,13 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
     return attributes
   }
 
-  static func createSectionedLayout() -> UICollectionViewCompositionalLayout {
+  static func createSectionedLayout(
+    sectionIdProvider: @escaping (Int) -> MessageListSectionID? = { _ in nil }
+  ) -> UICollectionViewCompositionalLayout {
     let configuration = UICollectionViewCompositionalLayoutConfiguration()
     configuration.scrollDirection = .vertical
 
-    let layout = AnimatedCompositionalLayout(sectionProvider: { _, _ in
+    let layout = AnimatedCompositionalLayout(sectionProvider: { sectionIndex, _ in
       // Message item
       let itemSize = NSCollectionLayoutSize(
         widthDimension: .fractionalWidth(1.0),
@@ -56,6 +58,9 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
       // Section
       let section = NSCollectionLayoutSection(group: group)
       section.interGroupSpacing = 0
+      guard sectionIdProvider(sectionIndex)?.showsDateSeparator != false else {
+        return section
+      }
 
       // Footer for date separator (appears at bottom because collection view is inverted)
       let footerSize = NSCollectionLayoutSize(
