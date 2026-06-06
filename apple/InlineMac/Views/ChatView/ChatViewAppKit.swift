@@ -257,10 +257,12 @@ class ChatViewAppKit: NSViewController {
   private func observeChatItem() {
     chatItemCancellable = viewModel.$chatItem
       .dropFirst()
-      .compactMap { $0?.chat }
-      .sink { [weak self] chat in
+      .sink { [weak self] item in
         Task { @MainActor [weak self] in
-          self?.showLoadedChat(chat)
+          guard let self, !isDisposed else { return }
+          compose?.setPeerUser(item?.user)
+          guard let chat = item?.chat else { return }
+          showLoadedChat(chat)
         }
       }
   }
@@ -330,6 +332,7 @@ class ChatViewAppKit: NSViewController {
         peerId: peerId,
         messageList: messageListVC!,
         chat: chat,
+        peerUser: viewModel.peerUser,
         dependencies: dependencies,
         toolbarState: toolbarState,
         parentChatView: self,
