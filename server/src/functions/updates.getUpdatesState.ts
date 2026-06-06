@@ -8,6 +8,9 @@ import { decodeDate, encodeDate, encodeDateStrict } from "@in/server/realtime/en
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { Log } from "@in/server/utils/log"
+
+const log = new Log("updates.getUpdatesState")
 
 type GetUpdatesStateFnResult = {
   date: bigint
@@ -17,11 +20,19 @@ export const getUpdatesState = async (
   input: GetUpdatesStateInput,
   context: FunctionContext,
 ): Promise<GetUpdatesStateFnResult> => {
+  const startedAt = performance.now()
   const nowEncoded = encodeDateStrict(new Date())
 
   // Safeguard: If client sends 0 (uninitialized), just return current date
   // to avoid pushing all updates ever.
   if (input.date === 0n) {
+    logGetUpdatesStateTiming({
+      result: "zero_date",
+      totalMs: elapsedMs(startedAt),
+      chats: 0,
+      spaces: 0,
+      pushed: 0,
+    })
     return {
       date: nowEncoded,
     }
@@ -31,6 +42,7 @@ export const getUpdatesState = async (
 
   // check latest changes of chats from this user's dialogs for changes compared to date
   // get a list of dialogs for this user
+  const chatsStartedAt = performance.now()
   let { chats } = await ChatModel.getUserChats({
     userId: context.currentUserId,
     where: {
@@ -38,12 +50,15 @@ export const getUpdatesState = async (
     },
   })
   chats = await filterAccessibleChats(chats, context.currentUserId)
+  const chatsMs = elapsedMs(chatsStartedAt)
 
   // Get spaces that have been updated
+  const spacesStartedAt = performance.now()
   let spaces = await SpaceModel.getSpacesAfterUpdateDate({
     userId: context.currentUserId,
     lastUpdateDateGreaterThanEqual: userLocalDate,
   })
+  const spacesMs = elapsedMs(spacesStartedAt)
 
   // Find latest update date for chats
   let latestChatUpdateTs = chats.reduce((max, chat) => {
@@ -59,6 +74,15 @@ export const getUpdatesState = async (
   // If there are no updates, advance the cursor to (at least) "now" to avoid
   // repeatedly re-scanning from an old date on every reconnect.
   if (latestUpdateTs === 0) {
+    logGetUpdatesStateTiming({
+      result: "empty",
+      totalMs: elapsedMs(startedAt),
+      chatsMs,
+      spacesMs,
+      chats: chats.length,
+      spaces: spaces.length,
+      pushed: 0,
+    })
     return {
       date: nowEncoded > input.date ? nowEncoded : input.date,
     }
@@ -112,8 +136,40 @@ export const getUpdatesState = async (
     RealtimeUpdates.pushToUser(context.currentUserId, updatesToPush)
   }
 
+  logGetUpdatesStateTiming({
+    result: "updates",
+    totalMs: elapsedMs(startedAt),
+    chatsMs,
+    spacesMs,
+    chats: chats.length,
+    spaces: spaces.length,
+    pushed: updatesToPush.length,
+  })
+
   return {
     date: latestUpdateDateEncoded,
+  }
+}
+
+type GetUpdatesStateTiming = {
+  result: "zero_date" | "empty" | "updates"
+  totalMs: number
+  chatsMs?: number
+  spacesMs?: number
+  chats: number
+  spaces: number
+  pushed: number
+}
+
+const elapsedMs = (startedAt: number): number =>
+  Math.round((performance.now() - startedAt) * 10) / 10
+
+const logGetUpdatesStateTiming = (timing: GetUpdatesStateTiming): void => {
+  const message = "getUpdatesState timing"
+  if (timing.totalMs >= 500) {
+    log.warn(message, timing)
+  } else {
+    log.debug(message, timing)
   }
 }
 

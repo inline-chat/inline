@@ -40,6 +40,19 @@ public struct SyncBucketSnapshot: Sendable {
   }
 }
 
+private extension BucketKey {
+  var traceKind: String {
+    switch self {
+      case .chat:
+        "chat"
+      case .space:
+        "space"
+      case .user:
+        "user"
+    }
+  }
+}
+
 public struct SyncStats: Sendable {
   public var directUpdatesApplied: Int64
   public var bucketUpdatesApplied: Int64
@@ -138,6 +151,18 @@ actor Sync {
 
   /// Process incoming updates (pushed from server)
   func process(updates: [InlineProtocol.Update]) async {
+    let span = PerformanceTrace.begin(
+      "SyncProcessRealtimePush",
+      category: .sync,
+      "updates=\(updates.count)"
+    )
+    let startedAt = Date()
+    defer {
+      span.end(
+        "updates=\(updates.count) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: startedAt))"
+      )
+    }
+
     log.trace("applying \(updates.count) updates")
 
     var applyingUpdates: [InlineProtocol.Update] = []
@@ -229,8 +254,11 @@ actor Sync {
   }
 
   /// Apply updates from bucket actor
-  func applyUpdatesFromBucket(_ updates: [InlineProtocol.Update]) async -> UpdateApplyResult {
-    await applyUpdates.apply(updates: updates, source: .syncCatchup)
+  func applyUpdatesFromBucket(
+    _ updates: [InlineProtocol.Update],
+    sidecars: InlineProtocol.UpdateSidecars? = nil
+  ) async -> UpdateApplyResult {
+    await applyUpdates.apply(updates: updates, source: .syncCatchup, sidecars: sidecars)
   }
 
   /// Apply sequenced realtime updates through the same engine, but with realtime side effects.
@@ -324,8 +352,23 @@ actor Sync {
 
     let state = await preparedSyncState()
     let maxAttempts = Self.getUpdatesStateRetryDelays.count + 1
+    let totalStartedAt = Date()
+    PerformanceTrace.breadcrumb(
+      "sync state check started",
+      category: "sync.lifecycle",
+      data: [
+        "last_sync_age_sec": max(0, nowSeconds() - state.lastSyncDate),
+        "max_attempts": maxAttempts,
+      ]
+    )
 
     for attempt in 1 ... maxAttempts {
+      let attemptStartedAt = Date()
+      let span = PerformanceTrace.begin(
+        "SyncGetUpdatesState",
+        category: .sync,
+        "attempt=\(attempt) last_sync_age_sec=\(max(0, nowSeconds() - state.lastSyncDate))"
+      )
       do {
         // Note: We use callRpc to ensure we wait for the server's acknowledgement,
         // but the primary mechanism for sync is the server pushing 'hasNewUpdates'
@@ -333,14 +376,39 @@ actor Sync {
         let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
           $0.date = state.lastSyncDate
         }), timeout: Self.getUpdatesStateTimeout)
+        span.end(
+          "attempt=\(attempt) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
+        )
         log.trace("sent get updates state request with date: \(state.lastSyncDate)")
         if case let .getUpdatesState(payload) = result {
           await updateLastSyncDate(maxAppliedDate: payload.date, source: "getUpdatesState")
         }
+        PerformanceTrace.breadcrumb(
+          "sync state check completed",
+          category: "sync.lifecycle",
+          data: [
+            "attempt": attempt,
+            "duration_ms": PerformanceTrace.elapsedMilliseconds(since: totalStartedAt),
+          ]
+        )
         return
       } catch {
+        span.end(
+          "attempt=\(attempt) success=false duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
+        )
         log.error("failed to get updates state (attempt \(attempt)/\(maxAttempts)): \(error)")
-        guard attempt < maxAttempts else { return }
+        guard attempt < maxAttempts else {
+          PerformanceTrace.breadcrumb(
+            "sync state check failed",
+            category: "sync.lifecycle",
+            level: .warning,
+            data: [
+              "attempts": attempt,
+              "duration_ms": PerformanceTrace.elapsedMilliseconds(since: totalStartedAt),
+            ]
+          )
+          return
+        }
         let delay = Self.getUpdatesStateRetryDelays[attempt - 1]
         do {
           try await Task.sleep(for: delay)
@@ -639,9 +707,15 @@ actor BucketActor {
 
   private var retryTask: Task<Void, Never>?
   private var retryAttempt: Int = 0
+  private var isInvalidated: Bool = false
 
   /// Buffer to accumulate updates during fetch loop before applying them all at once
   private var pendingUpdates: [InlineProtocol.Update] = []
+  private var pendingSidecars = InlineProtocol.UpdateSidecars()
+  private var pendingSidecarUserIds = Set<Int64>()
+  private var pendingSidecarChatIds = Set<Int64>()
+  private var pendingSidecarDialogKeys = Set<String>()
+  private var pendingSidecarSpaceIds = Set<Int64>()
 
   /// Buffer for out-of-order realtime updates. We only apply contiguous seqs starting at (seq + 1).
   private var bufferedRealtimeUpdates: [Int64: InlineProtocol.Update] = [:]
@@ -724,6 +798,8 @@ actor BucketActor {
   /// - Buffer out-of-order updates.
   /// - Trigger a catch-up fetch to fill gaps.
   func processRealtimeUpdates(_ updates: [InlineProtocol.Update]) async {
+    guard !isInvalidated else { return }
+
     // Buffer incoming updates
     for update in updates {
       guard update.hasSeq, update.seq > 0 else { continue }
@@ -763,6 +839,8 @@ actor BucketActor {
   /// We use this as an upper bound so catch-up fetches don't chase a moving target while the
   /// connection is live and new realtime updates keep arriving.
   func noteHasNewUpdates(upToSeq: Int64) -> Bool {
+    guard !isInvalidated else { return false }
+
     // If the server didn't provide a meaningful seq, fetch anyway to be safe.
     guard upToSeq > 0 else { return true }
     // Ignore stale hints.
@@ -778,6 +856,8 @@ actor BucketActor {
   }
 
   private func drainBufferedRealtimeUpdates() async {
+    guard !isInvalidated else { return }
+
     guard let sync else {
       log.error("sync reference is nil, cannot apply realtime updates")
       return
@@ -804,8 +884,41 @@ actor BucketActor {
     guard !contiguous.isEmpty else { return }
 
     log.debug("applying \(contiguous.count) realtime updates for bucket \(key) (new seq=\(nextSeq))")
+    let span = PerformanceTrace.begin(
+      "SyncRealtimeDrain",
+      category: .sync,
+      "bucket=\(key.traceKind) updates=\(contiguous.count) start_seq=\(seq) end_seq=\(nextSeq)"
+    )
+    let startedAt = Date()
     let result = await sync.applyUpdatesFromRealtime(contiguous)
+    let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+    span.end(
+      "bucket=\(key.traceKind) updates=\(contiguous.count) applied=\(result.appliedCount) failed=\(result.failedCount) duration_ms=\(durationMs)"
+    )
+    PerformanceTrace.slowBreadcrumb(
+      "slow realtime drain apply",
+      category: "sync.realtime",
+      durationMs: durationMs,
+      thresholdMs: 500,
+      data: [
+        "bucket": key.traceKind,
+        "updates": contiguous.count,
+        "applied": result.appliedCount,
+        "failed": result.failedCount,
+      ]
+    )
     guard result.succeeded else {
+      PerformanceTrace.breadcrumb(
+        "realtime drain apply failed",
+        category: "sync.realtime",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+          "updates": contiguous.count,
+          "applied": result.appliedCount,
+          "failed": result.failedCount,
+        ]
+      )
       log.error(
         "failed to apply \(result.failedCount) realtime updates for bucket \(key); keeping seq=\(seq) and scheduling catch-up"
       )
@@ -825,6 +938,8 @@ actor BucketActor {
   }
 
   func fetchNewUpdates() async {
+    guard !isInvalidated else { return }
+
     // Guard against concurrent fetch operations
     if isFetching {
       needsFetch = true
@@ -845,18 +960,52 @@ actor BucketActor {
       return
     }
 
+    let fetchStartedAt = Date()
+    let fetchSpan = PerformanceTrace.begin(
+      "SyncBucketFetch",
+      category: .sync,
+      "bucket=\(key.traceKind) start_seq=\(seq) target_seq=\(fetchSeqEnd ?? 0)"
+    )
+    var completed = false
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt)
+      fetchSpan.end(
+        "bucket=\(key.traceKind) success=\(completed) duration_ms=\(durationMs) end_seq=\(seq) buffered=\(bufferedRealtimeUpdates.count)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow sync bucket fetch",
+        category: "sync.catchup",
+        durationMs: durationMs,
+        thresholdMs: 1_500,
+        data: [
+          "bucket": key.traceKind,
+          "success": completed,
+          "buffered": bufferedRealtimeUpdates.count,
+        ]
+      )
+    }
+    PerformanceTrace.breadcrumb(
+      "sync bucket fetch started",
+      category: "sync.catchup",
+      data: [
+        "bucket": key.traceKind,
+      ]
+    )
+
     await sync.bucketFetchActivityStarted()
 
     // If we had a scheduled retry, cancel it since we're actively attempting a fetch now.
     retryTask?.cancel()
     retryTask = nil
 
+    var finishedWithoutRetry = true
     while true {
       needsFetch = false
       let ok = await fetchNewUpdatesOnce()
       if ok {
         resetRetryState()
       } else {
+        finishedWithoutRetry = false
         scheduleRetry()
         break
       }
@@ -868,6 +1017,28 @@ actor BucketActor {
       log.trace("follow-up fetch requested for bucket \(key)")
     }
 
+    completed = finishedWithoutRetry
+    if completed {
+      PerformanceTrace.breadcrumb(
+        "sync bucket fetch completed",
+        category: "sync.catchup",
+        data: [
+          "bucket": key.traceKind,
+          "duration_ms": PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt),
+          "seq": seq,
+        ]
+      )
+    } else {
+      PerformanceTrace.breadcrumb(
+        "sync bucket fetch scheduled retry",
+        category: "sync.catchup",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+          "duration_ms": PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt),
+        ]
+      )
+    }
     await sync.bucketFetchActivityEnded()
   }
 
@@ -884,7 +1055,16 @@ actor BucketActor {
 
     await sync.recordBucketFetchStart()
 
-    pendingUpdates.removeAll()
+    clearPendingCatchupBatch()
+
+    let fetchStartedAt = Date()
+    let fetchSpan = PerformanceTrace.begin(
+      "SyncBucketFetchOnce",
+      category: .sync,
+      "bucket=\(key.traceKind) start_seq=\(seq)"
+    )
+    var pageCount = 0
+    var resultLabel = "unknown"
 
     // Local state tracking for the loop
     var currentSeq = seq
@@ -894,6 +1074,11 @@ actor BucketActor {
     var totalSkipped = 0
     var totalDuplicateSkipped = 0
     var isFinal = false
+    defer {
+      fetchSpan.end(
+        "bucket=\(key.traceKind) result=\(resultLabel) pages=\(pageCount) fetched=\(totalFetched) skipped=\(totalSkipped) duplicates=\(totalDuplicateSkipped) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt))"
+      )
+    }
 
     // Snapshot an optional upper bound so a live connection doesn't keep chasing a moving target.
     var hardEndSeq: Int64? = fetchSeqEnd
@@ -924,8 +1109,24 @@ actor BucketActor {
 
         let requestSeqEnd: Int64? = sliceEndSeq ?? hardEndSeq
 
+        let queueStartedAt = Date()
+        let queueSpan = PerformanceTrace.begin(
+          "SyncBucketQueueWait",
+          category: .sync,
+          "bucket=\(key.traceKind)"
+        )
         await fetchLimiter.acquire()
+        queueSpan.end(
+          "bucket=\(key.traceKind) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: queueStartedAt))"
+        )
+
         let result: InlineProtocol.RpcResult.OneOf_Result?
+        let rpcStartedAt = Date()
+        let rpcSpan = PerformanceTrace.begin(
+          "SyncBucketRPC",
+          category: .sync,
+          "bucket=\(key.traceKind) start_seq=\(currentSeq) seq_end=\(requestSeqEnd ?? 0)"
+        )
         do {
           result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
           $0.bucket = key.toProtocolBucket()
@@ -940,14 +1141,22 @@ actor BucketActor {
             $0.seqEnd = requestSeqEnd
           }
           }), timeout: Self.getUpdatesTimeout)
+          rpcSpan.end(
+            "bucket=\(key.traceKind) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
+          )
         } catch {
+          rpcSpan.end(
+            "bucket=\(key.traceKind) success=false duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
+          )
           await fetchLimiter.release()
           throw error
         }
         await fetchLimiter.release()
+        pageCount += 1
 
         guard case let .getUpdates(payload) = result else {
           log.error("failed to parse getUpdates result")
+          resultLabel = "parse_failed"
           return false
         }
 
@@ -960,6 +1169,17 @@ actor BucketActor {
             "non-progress getUpdates response for bucket \(key) (seq=\(payload.seq), total=\(totalCount), result=\(payload.resultType)); aborting fetch loop"
           )
           // Treat as transient and let outer loop schedule backoff retry.
+          resultLabel = "non_progress"
+          PerformanceTrace.breadcrumb(
+            "sync bucket fetch non-progress response",
+            category: "sync.catchup",
+            level: .warning,
+            data: [
+              "bucket": key.traceKind,
+              "seq": payload.seq,
+              "updates": totalCount,
+            ]
+          )
           return false
         }
 
@@ -967,6 +1187,21 @@ actor BucketActor {
         if payload.resultType == .tooLong {
           log.warning(
             "getUpdates TOO_LONG for bucket \(key) (startSeq=\(currentSeq), seq=\(payload.seq), date=\(payload.date))"
+          )
+          PerformanceTrace.event(
+            "SyncBucketTooLong",
+            category: .sync,
+            "bucket=\(key.traceKind) start_seq=\(currentSeq) seq=\(payload.seq)"
+          )
+          PerformanceTrace.breadcrumb(
+            "sync bucket fetch too long",
+            category: "sync.catchup",
+            level: .warning,
+            data: [
+              "bucket": key.traceKind,
+              "start_seq": currentSeq,
+              "seq": payload.seq,
+            ]
           )
           await sync.recordBucketFetchTooLong()
           if isColdStart {
@@ -976,7 +1211,7 @@ actor BucketActor {
             finalSeq = hardEndSeq ?? payload.seq
             finalDate = payload.date
             isFinal = true // Stop fetching
-            pendingUpdates.removeAll() // Discard pending
+            clearPendingCatchupBatch() // Discard pending
             break
           }
 
@@ -989,6 +1224,7 @@ actor BucketActor {
           let serverSeq = Int64(payload.seq)
           if serverSeq <= currentSeq {
             log.error("TOO_LONG seq \(serverSeq) is not ahead of currentSeq \(currentSeq) for bucket \(key)")
+            resultLabel = "too_long_invalid_seq"
             return true
           }
           let seqGap = serverSeq - currentSeq
@@ -1012,7 +1248,12 @@ actor BucketActor {
           // Treat this as a non-retryable stop condition. We can't make progress if the server
           // reports a seq behind our cursor.
           bufferedRealtimeUpdates.removeAll()
+          resultLabel = "server_behind"
           return true
+        }
+
+        if payload.hasSidecars {
+          mergeSidecars(payload.sidecars)
         }
 
         // Filter and accumulate updates
@@ -1068,20 +1309,58 @@ actor BucketActor {
         // monotonic per-bucket ordering.
         let orderedUpdates = orderUpdatesBySeq(pendingUpdates)
         log.debug("applying \(orderedUpdates.count) updates for bucket \(key)")
-        let result = await sync.applyUpdatesFromBucket(orderedUpdates)
+        let applyStartedAt = Date()
+        let applySpan = PerformanceTrace.begin(
+          "SyncBucketApply",
+          category: .sync,
+          "bucket=\(key.traceKind) updates=\(orderedUpdates.count) sidecars=\(hasPendingSidecars)"
+        )
+        let result = await sync.applyUpdatesFromBucket(
+          orderedUpdates,
+          sidecars: hasPendingSidecars ? pendingSidecars : nil
+        )
+        let durationMs = PerformanceTrace.elapsedMilliseconds(since: applyStartedAt)
+        applySpan.end(
+          "bucket=\(key.traceKind) updates=\(orderedUpdates.count) applied=\(result.appliedCount) failed=\(result.failedCount) duration_ms=\(durationMs)"
+        )
+        PerformanceTrace.slowBreadcrumb(
+          "slow sync catch-up apply",
+          category: "sync.catchup",
+          durationMs: durationMs,
+          thresholdMs: 750,
+          data: [
+            "bucket": key.traceKind,
+            "updates": orderedUpdates.count,
+            "applied": result.appliedCount,
+            "failed": result.failedCount,
+          ]
+        )
         guard result.succeeded else {
           log.error(
             "failed to apply \(result.failedCount) catch-up updates for bucket \(key); keeping seq=\(seq)"
+          )
+          PerformanceTrace.breadcrumb(
+            "sync catch-up apply failed",
+            category: "sync.catchup",
+            level: .warning,
+            data: [
+              "bucket": key.traceKind,
+              "updates": orderedUpdates.count,
+              "applied": result.appliedCount,
+              "failed": result.failedCount,
+            ]
           )
           await sync.recordBucketUpdatesApplied(
             applied: result.appliedCount,
             skipped: totalSkipped,
             duplicates: totalDuplicateSkipped
           )
+          resultLabel = "apply_failed"
           return false
         }
         let maxAppliedDate = maxUpdateDate(in: orderedUpdates)
         await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "bucket:\(key)")
+        clearPendingCatchupBatch()
       }
       if totalFetched > 0 || totalSkipped > 0 || totalDuplicateSkipped > 0 {
         await sync.recordBucketUpdatesApplied(
@@ -1114,20 +1393,94 @@ actor BucketActor {
       log.debug(
         "completed fetch for bucket \(key): applied \(totalFetched) updates, skipped \(totalSkipped), new seq=\(committedSeq)"
       )
+      resultLabel = "success"
 
     } catch {
       if isNonRetryableBucketError(error) {
         log.warning("non-retryable getUpdates error for bucket \(key): \(error)")
+        PerformanceTrace.breadcrumb(
+          "sync bucket fetch non-retryable error",
+          category: "sync.catchup",
+          level: .warning,
+          data: [
+            "bucket": key.traceKind,
+          ]
+        )
+        isInvalidated = true
+        bufferedRealtimeUpdates.removeAll()
+        clearPendingCatchupBatch()
+        needsFetch = false
+        fetchSeqEnd = nil
+        seq = 0
+        date = 0
         await sync.discardBucketState(for: key)
+        resultLabel = "non_retryable_error"
         return true
       }
       log.error("failed to fetch updates for bucket \(key): \(error)")
+      PerformanceTrace.breadcrumb(
+        "sync bucket fetch failed",
+        category: "sync.catchup",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+        ]
+      )
       await sync.recordBucketFetchFailure()
       // We exit; next sync attempt will retry from the last saved seq
+      resultLabel = "error"
       return false
     }
 
+    resultLabel = "success"
     return true
+  }
+
+  private var hasPendingSidecars: Bool {
+    !pendingSidecars.users.isEmpty ||
+      !pendingSidecars.chats.isEmpty ||
+      !pendingSidecars.dialogs.isEmpty ||
+      !pendingSidecars.spaces.isEmpty
+  }
+
+  private func clearPendingCatchupBatch() {
+    pendingUpdates.removeAll()
+    pendingSidecars = InlineProtocol.UpdateSidecars()
+    pendingSidecarUserIds.removeAll()
+    pendingSidecarChatIds.removeAll()
+    pendingSidecarDialogKeys.removeAll()
+    pendingSidecarSpaceIds.removeAll()
+  }
+
+  private func mergeSidecars(_ sidecars: InlineProtocol.UpdateSidecars) {
+    for user in sidecars.users where pendingSidecarUserIds.insert(user.id).inserted {
+      pendingSidecars.users.append(user)
+    }
+
+    for chat in sidecars.chats where pendingSidecarChatIds.insert(chat.id).inserted {
+      pendingSidecars.chats.append(chat)
+    }
+
+    for space in sidecars.spaces where pendingSidecarSpaceIds.insert(space.id).inserted {
+      pendingSidecars.spaces.append(space)
+    }
+
+    for dialog in sidecars.dialogs {
+      guard let key = sidecarDialogKey(dialog) else { continue }
+      guard pendingSidecarDialogKeys.insert(key).inserted else { continue }
+      pendingSidecars.dialogs.append(dialog)
+    }
+  }
+
+  private func sidecarDialogKey(_ dialog: InlineProtocol.Dialog) -> String? {
+    switch dialog.peer.type {
+      case let .user(user):
+        "user:\(user.userID)"
+      case let .chat(chat):
+        "chat:\(chat.chatID)"
+      case nil:
+        nil
+    }
   }
 
   private func isNonRetryableBucketError(_ error: Error) -> Bool {

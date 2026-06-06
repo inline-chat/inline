@@ -900,8 +900,15 @@ public extension ApiMessage {
 
 public extension Message {
   static func save(
-    _ db: Database, protocolMessage: InlineProtocol.Message, publishChanges: Bool = false
+    _ db: Database,
+    protocolMessage: InlineProtocol.Message,
+    publishChanges: Bool = false,
+    materializeMissingReferences: Bool = false
   ) throws -> Message {
+    if materializeMissingReferences {
+      try ensureLocalReferences(db, protocolMessage: protocolMessage)
+    }
+
     let id = protocolMessage.id
     let chatId = protocolMessage.chatID
     let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
@@ -997,6 +1004,91 @@ public extension Message {
     }
 
     return message
+  }
+
+  private static func ensureLocalReferences(_ db: Database, protocolMessage: InlineProtocol.Message) throws {
+    try ensureUserExists(db, userId: protocolMessage.fromID)
+    let date = Date(timeIntervalSince1970: TimeInterval(protocolMessage.date))
+
+    switch protocolMessage.peerID.toPeer() {
+      case let .user(userId):
+        try ensureUserExists(db, userId: userId)
+        try ensurePrivateChatExists(
+          db,
+          chatId: protocolMessage.chatID,
+          peerUserId: userId,
+          date: date
+        )
+
+      case let .thread(threadId):
+        try ensureThreadChatExists(
+          db,
+          chatId: protocolMessage.chatID,
+          date: date
+        )
+        if threadId != protocolMessage.chatID {
+          try ensureThreadChatExists(
+            db,
+            chatId: threadId,
+            date: date
+          )
+        }
+    }
+
+    guard protocolMessage.hasFwdFrom else { return }
+
+    let forwardHeader = protocolMessage.fwdFrom
+    try ensureUserExists(db, userId: forwardHeader.fromID)
+
+    guard forwardHeader.hasFromPeerID else { return }
+
+    switch forwardHeader.fromPeerID.toPeer() {
+      case let .user(userId):
+        try ensureUserExists(db, userId: userId)
+      case let .thread(threadId):
+        try ensureThreadChatExists(db, chatId: threadId, date: date)
+    }
+  }
+
+  private static func ensureUserExists(_ db: Database, userId: Int64) throws {
+    guard userId > 0 else { return }
+    guard try User.fetchOne(db, id: userId) == nil else { return }
+    try User(id: userId, email: nil, firstName: nil).insert(db)
+  }
+
+  private static func ensurePrivateChatExists(
+    _ db: Database,
+    chatId: Int64,
+    peerUserId: Int64,
+    date: Date
+  ) throws {
+    guard chatId > 0 else { return }
+    guard peerUserId > 0 else { return }
+    guard try Chat.fetchOne(db, id: chatId) == nil else { return }
+    try Chat(
+      id: chatId,
+      date: date,
+      type: .privateChat,
+      title: nil,
+      spaceId: nil,
+      peerUserId: peerUserId
+    ).insert(db)
+  }
+
+  private static func ensureThreadChatExists(
+    _ db: Database,
+    chatId: Int64,
+    date: Date
+  ) throws {
+    guard chatId > 0 else { return }
+    guard try Chat.fetchOne(db, id: chatId) == nil else { return }
+    try Chat(
+      id: chatId,
+      date: date,
+      type: .thread,
+      title: nil,
+      spaceId: nil
+    ).insert(db)
   }
 
   private static func processMediaAttachments(

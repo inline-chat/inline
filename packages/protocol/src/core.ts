@@ -2980,6 +2980,27 @@ export interface GetUpdatesInput {
     limit: number;
 }
 /**
+ * @generated from protobuf message UpdateSidecars
+ */
+export interface UpdateSidecars {
+    /**
+     * @generated from protobuf field: repeated User users = 1;
+     */
+    users: User[];
+    /**
+     * @generated from protobuf field: repeated Chat chats = 2;
+     */
+    chats: Chat[];
+    /**
+     * @generated from protobuf field: repeated Dialog dialogs = 3;
+     */
+    dialogs: Dialog[];
+    /**
+     * @generated from protobuf field: repeated Space spaces = 4;
+     */
+    spaces: Space[];
+}
+/**
  * @generated from protobuf message GetUpdatesResult
  */
 export interface GetUpdatesResult {
@@ -3011,6 +3032,12 @@ export interface GetUpdatesResult {
      * @generated from protobuf field: GetUpdatesResult.ResultType result_type = 5;
      */
     resultType: GetUpdatesResult_ResultType;
+    /**
+     * Entities required to apply this update slice.
+     *
+     * @generated from protobuf field: UpdateSidecars sidecars = 6;
+     */
+    sidecars?: UpdateSidecars;
 }
 /**
  * @generated from protobuf enum GetUpdatesResult.ResultType
@@ -12655,6 +12682,77 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
  */
 export const GetUpdatesInput = new GetUpdatesInput$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class UpdateSidecars$Type extends MessageType<UpdateSidecars> {
+    constructor() {
+        super("UpdateSidecars", [
+            { no: 1, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
+            { no: 2, name: "chats", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Chat },
+            { no: 3, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog },
+            { no: 4, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateSidecars>): UpdateSidecars {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.users = [];
+        message.chats = [];
+        message.dialogs = [];
+        message.spaces = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateSidecars>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateSidecars): UpdateSidecars {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated User users */ 1:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Chat chats */ 2:
+                    message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Dialog dialogs */ 3:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Space spaces */ 4:
+                    message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateSidecars, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated User users = 1; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Chat chats = 2; */
+        for (let i = 0; i < message.chats.length; i++)
+            Chat.internalBinaryWrite(message.chats[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Dialog dialogs = 3; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Space spaces = 4; */
+        for (let i = 0; i < message.spaces.length; i++)
+            Space.internalBinaryWrite(message.spaces[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateSidecars
+ */
+export const UpdateSidecars = new UpdateSidecars$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
     constructor() {
         super("GetUpdatesResult", [
@@ -12662,7 +12760,8 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
             { no: 2, name: "seq", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "final", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 5, name: "result_type", kind: "enum", T: () => ["GetUpdatesResult.ResultType", GetUpdatesResult_ResultType, "RESULT_TYPE_"] }
+            { no: 5, name: "result_type", kind: "enum", T: () => ["GetUpdatesResult.ResultType", GetUpdatesResult_ResultType, "RESULT_TYPE_"] },
+            { no: 6, name: "sidecars", kind: "message", T: () => UpdateSidecars }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesResult>): GetUpdatesResult {
@@ -12695,6 +12794,9 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
                 case /* GetUpdatesResult.ResultType result_type */ 5:
                     message.resultType = reader.int32();
                     break;
+                case /* UpdateSidecars sidecars */ 6:
+                    message.sidecars = UpdateSidecars.internalBinaryRead(reader, reader.uint32(), options, message.sidecars);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12722,6 +12824,9 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
         /* GetUpdatesResult.ResultType result_type = 5; */
         if (message.resultType !== 0)
             writer.tag(5, WireType.Varint).int32(message.resultType);
+        /* UpdateSidecars sidecars = 6; */
+        if (message.sidecars)
+            UpdateSidecars.internalBinaryWrite(message.sidecars, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
