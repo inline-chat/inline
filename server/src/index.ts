@@ -150,7 +150,7 @@ export const app = new Elysia()
             "  -d '{\"chat_id\": 42, \"text\": \"hello from bot\"}'",
             "```",
             "",
-            "Targeting: use `chat_id` (canonical) or `user_id` for DMs. Deprecated aliases `peer_thread_id` and `peer_user_id` are still accepted for compatibility.",
+            "Targeting: use `chat_id` for chats/threads or `user_id` for DMs.",
             "",
             "### Quick check",
             "",

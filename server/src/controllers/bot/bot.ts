@@ -134,6 +134,8 @@ const toBotPeer = (peer: any): BotPeer => {
       return { user_id: (peer as any).userId }
     }
     if ("threadId" in peer && typeof (peer as any).threadId === "number") {
+      // 2026-06-03: Deprecated output shape kept for production bot clients.
+      // Prefer top-level `chat_id`; remove after confirming no production use in the previous month.
       return { thread_id: (peer as any).threadId }
     }
   }
@@ -143,7 +145,11 @@ const toBotPeer = (peer: any): BotPeer => {
   if (!type) return {}
 
   if (type.oneofKind === "user") return { user_id: Number(type.user.userId) }
-  if (type.oneofKind === "chat") return { thread_id: Number(type.chat.chatId) }
+  if (type.oneofKind === "chat") {
+    // 2026-06-03: Deprecated output shape kept for production bot clients.
+    // Prefer top-level `chat_id`; remove after confirming no production use in the previous month.
+    return { thread_id: Number(type.chat.chatId) }
+  }
 
   return {}
 }
@@ -152,16 +158,16 @@ function minimalUnknownUser(id: number): BotUser {
   return { id, is_bot: false }
 }
 
-const makeInputPeer = (peerUserId: number | undefined, peerThreadId: number | undefined): InputPeer => {
-  if ((peerUserId ? 1 : 0) + (peerThreadId ? 1 : 0) !== 1) {
+const makeInputPeer = (userId: number | undefined, chatId: number | undefined): InputPeer => {
+  if ((userId ? 1 : 0) + (chatId ? 1 : 0) !== 1) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
-  if (peerUserId) {
+  if (userId) {
     return {
       type: {
         oneofKind: "user",
-        user: { userId: BigInt(peerUserId) },
+        user: { userId: BigInt(userId) },
       },
     }
   }
@@ -169,19 +175,23 @@ const makeInputPeer = (peerUserId: number | undefined, peerThreadId: number | un
   return {
     type: {
       oneofKind: "chat",
-      chat: { chatId: BigInt(peerThreadId!) },
+      chat: { chatId: BigInt(chatId!) },
     },
   }
 }
 
 const parseBotTarget = (input: BotTargetInput): { userId?: number; chatId?: number } => {
   const userId = normalizeInputId(input.user_id)
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `user_id`.
+  // Remove after confirming no production use in the previous month.
   const userIdAlias = normalizeInputId(input.peer_user_id)
   if (userId !== undefined && userIdAlias !== undefined && userId !== userIdAlias) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
   const chatId = normalizeInputId(input.chat_id)
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `chat_id`.
+  // Remove after confirming no production use in the previous month.
   const chatIdAlias = normalizeInputId(input.peer_thread_id)
   if (chatId !== undefined && chatIdAlias !== undefined && chatId !== chatIdAlias) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
@@ -294,6 +304,12 @@ const parseBotBoolean = (value: unknown): boolean | undefined => {
   }
 
   throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+}
+
+const parseBotParseMarkdown = (input: Record<string, unknown>): boolean | undefined => {
+  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
+  // Remove after confirming no production use in the previous month.
+  return parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
 }
 
 const mentionUserIdsFromEntities = (entities: any): number[] => {
@@ -459,7 +475,7 @@ const botMethods = (authPlugin: any): any => {
 
         const replyToMessageId = normalizeInputId(input["reply_to_message_id"] as any)
         const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
-        const parseMarkdown = parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
+        const parseMarkdown = parseBotParseMarkdown(input)
         const inputPeer = await makeInputPeerFromBotTarget(input, store.currentUserId)
         const chatResult = await getChatFn({ peerId: inputPeer }, ctxFromStore(store))
         const chatId = Number(chatResult.chat.id)
@@ -623,7 +639,7 @@ const botMethods = (authPlugin: any): any => {
         const input = mergePostInput(body, query)
         const peerId = await makeInputPeerFromBotTarget(input, store.currentUserId)
         const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
-        const parseMarkdown = parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
+        const parseMarkdown = parseBotParseMarkdown(input)
 
         const messageId = normalizeInputId(input["message_id"] as any)
         if (!messageId) {
