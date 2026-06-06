@@ -207,6 +207,9 @@ message Chat {
 
   // True when this thread has not been explicitly titled.
   optional bool untitled = 13;
+
+  // Per-space thread number. Unset for home threads and pre-backfill space threads.
+  optional int32 number = 14;
 }
 
 message MessageReplies {

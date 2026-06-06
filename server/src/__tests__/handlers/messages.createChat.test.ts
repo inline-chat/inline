@@ -65,6 +65,7 @@ describe("messages.createChat", () => {
 
     expect(handlerResult.chat?.isPublic).toBe(true)
     expect(handlerResult.chat?.title).toBe("Public Chat")
+    expect(handlerResult.chat?.number).toBe(1)
 
     // Test function directly
     const functionResult = await createChat(
@@ -81,6 +82,7 @@ describe("messages.createChat", () => {
 
     expect(functionResult.chat.isPublic).toBe(true)
     expect(functionResult.chat.title).toBe("Public Chat 2")
+    expect(functionResult.chat.number).toBe(2)
   })
 
   test("should create untitled public chat when title is omitted", async () => {
@@ -181,6 +183,7 @@ describe("messages.createChat", () => {
 
     expect(handlerResult.chat?.isPublic).toBe(false)
     expect(handlerResult.chat?.spaceId).toBeUndefined()
+    expect(handlerResult.chat?.number).toBeUndefined()
 
     const [createdChat] = await db
       .select()
@@ -190,6 +193,7 @@ describe("messages.createChat", () => {
     expect(createdChat?.spaceId).toBeNull()
     expect(createdChat?.createdBy).toBe(currentUser.id)
     expect(createdChat?.publicThread).toBe(false)
+    expect(createdChat?.threadNumber).toBeNull()
 
     const participants = await db
       .select()

@@ -3,13 +3,13 @@ import { chats } from "@in/server/db/schema"
 import { encodeChatInfo, TChatInfo } from "@in/server/api-types"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
-import { eq, sql } from "drizzle-orm"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { TInputId } from "@in/server/types/methods"
 import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
 
 export const Input = Type.Object({
   title: Type.String(),
@@ -44,28 +44,23 @@ export const handler = async (
       throw error
     }
 
-    var maxThreadNumber: number = await db
-      // MAX function returns the maximum value in a set of values
-      .select({ maxThreadNumber: sql<number>`MAX(${chats.threadNumber})` })
-      .from(chats)
-      .where(eq(chats.spaceId, spaceId))
-      .then((result) => result[0]?.maxThreadNumber ?? 0)
+    const chat = await db.transaction(async (tx) => {
+      const threadNumber = await allocateSpaceThreadNumber(tx, spaceId)
 
-    var threadNumber = maxThreadNumber + 1
-
-    const chat = await db
-      .insert(chats)
-      .values({
-        type: "thread",
-        spaceId: spaceId,
-        title: input.title,
-        publicThread: true,
-        date: new Date(),
-        threadNumber: threadNumber,
-        emoji: input.emoji ?? null,
-        createdBy: context.currentUserId,
-      })
-      .returning()
+      return tx
+        .insert(chats)
+        .values({
+          type: "thread",
+          spaceId: spaceId,
+          title: input.title,
+          publicThread: true,
+          date: new Date(),
+          threadNumber: threadNumber,
+          emoji: input.emoji ?? null,
+          createdBy: context.currentUserId,
+        })
+        .returning()
+    })
 
     if (!chat[0]) {
       throw new InlineError(InlineError.ApiError.INTERNAL)

@@ -19,6 +19,7 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { Chat, Dialog, Message } from "@inline-chat/protocol/core"
+import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
 import { and, eq, inArray } from "drizzle-orm"
 
 type Input = {
@@ -183,11 +184,14 @@ async function createSubthreadChat(input: {
 }): Promise<DbChat> {
   try {
     return await db.transaction(async (tx) => {
+      const spaceId = input.parentChat.spaceId ?? null
+      const threadNumber = spaceId !== null ? await allocateSpaceThreadNumber(tx, spaceId) : null
+
       const [chat] = await tx
         .insert(chats)
         .values({
           type: "thread",
-          spaceId: input.parentChat.spaceId ?? null,
+          spaceId,
           title: input.title ?? null,
           isUntitled: input.isUntitled ? true : null,
           description: input.description ?? null,
@@ -196,7 +200,7 @@ async function createSubthreadChat(input: {
           publicThread: input.parentChat.publicThread ?? false,
           parentChatId: input.parentChat.id,
           parentMessageId: input.parentMessageId ?? null,
-          threadNumber: null,
+          threadNumber,
         })
         .returning()
 
