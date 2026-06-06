@@ -122,6 +122,32 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
     startProgressTimer()
   }
 
+  public func prepareVoice(for message: Message, fileURLOverride: URL? = nil) throws {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
+      throw SharedAudioPlayerError.voiceMessagesDisabled
+    }
+
+    let item = try voiceItem(for: message)
+    if state.item == item, audioPlayer != nil {
+      return
+    }
+
+    let fileURL = try resolvedVoiceURL(for: message, fileURLOverride: fileURLOverride)
+    stop()
+
+    let player = try AVAudioPlayer(contentsOf: fileURL)
+    player.delegate = self
+    player.prepareToPlay()
+
+    audioPlayer = player
+    state = SharedAudioPlayerState(
+      item: item,
+      isPlaying: false,
+      currentTime: player.currentTime,
+      duration: player.duration
+    )
+  }
+
   public func pause() {
     audioPlayer?.pause()
     progressTimer?.invalidate()

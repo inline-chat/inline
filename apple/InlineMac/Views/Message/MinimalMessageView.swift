@@ -403,7 +403,12 @@ class MinimalMessageViewAppKit: NSView {
   private lazy var voiceMessageView: NSHostingView<VoiceMessageBubble>? = {
     guard hasVoiceInDocumentSlot else { return nil }
 
-    let view = NSHostingView(rootView: VoiceMessageBubble(message: fullMessage.message, outgoing: false))
+    let view = NSHostingView(rootView: VoiceMessageBubble(
+      message: fullMessage.message,
+      outgoing: false,
+      maxWidth: Theme.voiceMessageViewWidth,
+      mode: .minimal
+    ))
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -619,7 +624,12 @@ class MinimalMessageViewAppKit: NSView {
 
     let desiredView: NSView?
     if hasVoiceInDocumentSlot {
-      voiceMessageView?.rootView = VoiceMessageBubble(message: fullMessage.message, outgoing: false)
+      voiceMessageView?.rootView = VoiceMessageBubble(
+        message: fullMessage.message,
+        outgoing: false,
+        maxWidth: Theme.voiceMessageViewWidth,
+        mode: .minimal
+      )
       desiredView = voiceMessageView
     } else {
       if let documentInfo = fullMessage.documentInfo {
