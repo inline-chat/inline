@@ -141,6 +141,103 @@ describe("inline/parent-context-tool", () => {
     })
   })
 
+  it("dedupes parent context by message id and date so reused ids do not hide anchors", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 25) {
+        return {
+          oneofKind: "getChat",
+          getChat: {
+            chat: {
+              id: 88n,
+              title: "Re: reused id",
+              parentChatId: 77n,
+              parentMessageId: 20n,
+            },
+          },
+        }
+      }
+      if (method === 38) {
+        return {
+          oneofKind: "getMessages",
+          getMessages: {
+            messages: [
+              {
+                id: 20n,
+                fromId: 42n,
+                date: 1_700_000_020n,
+                message: "anchor with reused id",
+              },
+            ],
+          },
+        }
+      }
+      if (method === 5) {
+        return {
+          oneofKind: "getChatHistory",
+          getChatHistory: {
+            messages: [
+              {
+                id: 20n,
+                fromId: 41n,
+                date: 1_700_000_019n,
+                message: "older message with same id",
+              },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          GET_CHAT: 25,
+          GET_CHAT_HISTORY: 5,
+          GET_MESSAGES: 38,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = vi.fn(async () => {})
+          close = vi.fn(async () => {})
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineParentContextTool } = await import("./parent-context-tool")
+    const tool = createInlineParentContextTool({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:group:77:thread:88",
+    })
+
+    const result = await tool?.execute("tool-parent", {})
+
+    expect(result?.details.messages.map((message) => ({ id: message.id, text: message.text }))).toEqual([
+      {
+        id: "20",
+        text: "older message with same id",
+      },
+      {
+        id: "20",
+        text: "anchor with reused id",
+      },
+    ])
+  })
+
   it("accepts chat-prefixed parent targets for explicit parent history lookup", async () => {
     vi.resetModules()
 

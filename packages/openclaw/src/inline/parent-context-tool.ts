@@ -161,13 +161,17 @@ function sortMessages(messages: Message[]): Message[] {
   })
 }
 
+function messageDedupeKey(message: Message): string {
+  return `${String(message.id)}:${String(message.date)}`
+}
+
 function dedupeMessages(messages: Message[]): Message[] {
   const seen = new Set<string>()
   const out: Message[] = []
   for (const message of messages) {
-    const id = String(message.id)
-    if (seen.has(id)) continue
-    seen.add(id)
+    const key = messageDedupeKey(message)
+    if (seen.has(key)) continue
+    seen.add(key)
     out.push(message)
   }
   return out

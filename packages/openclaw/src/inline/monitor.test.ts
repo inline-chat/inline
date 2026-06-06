@@ -6276,6 +6276,85 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("keeps skipped pending context entries when Inline reuses a message id with a newer date", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 61000n,
+            date: 1_700_000_070n,
+            fromId: 51n,
+            message: "tail message before delete",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 61000n,
+            date: 1_700_000_071n,
+            fromId: 52n,
+            message: "new message reused the tail id",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 61001n,
+            date: 1_700_000_072n,
+            fromId: 51n,
+            message: "@inlinebot what did we miss?",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "summary",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "@inlinebot what did we miss?",
+          InboundHistory: [
+            expect.objectContaining({
+              sender: "user:51",
+              body: "tail message before delete",
+            }),
+            expect.objectContaining({
+              sender: "user:52",
+              body: "new message reused the tail id",
+            }),
+          ],
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("stores skipped attachment-only messages as media-aware pending context", async () => {
     const longMediaUrl = `https://cdn.inline.chat/pending-photo.jpg?token=${"a".repeat(420)}`
     const harness = await setupMonitorHarness({

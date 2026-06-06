@@ -1730,7 +1730,7 @@ function resolveHistoryLimit(params: {
 }
 
 function historyEntryDedupeKey(entry: InlinePendingHistoryEntry): string {
-  if (entry.messageId) return `id:${entry.messageId}`
+  if (entry.messageId) return `id:${entry.messageId}:ts:${entry.timestamp ?? "unknown"}`
   return `ts:${entry.timestamp ?? "unknown"}:${entry.sender}:${entry.body}`
 }
 
