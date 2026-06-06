@@ -57,7 +57,7 @@ class MessageTextView: NSTextView {
   // NSTextView can consume click recognizers before their target actions run.
   // The owning message view handles links/entities here and returns true only
   // when the click should not continue into AppKit text selection.
-  var onEntityClick: ((NSPoint) -> Bool)?
+  var onEntityClick: ((NSPoint, NSEvent) -> Bool)?
 
   override func resignFirstResponder() -> Bool {
     // Clear out selection when user clicks somewhere else
@@ -110,7 +110,7 @@ class MessageTextView: NSTextView {
     }
 
     if event.type == .leftMouseDown, event.clickCount == 1 {
-      let handled = onEntityClick?(location) ?? false
+      let handled = onEntityClick?(location, event) ?? false
       MessageGestureTrace.debug(
         "MessageTextView.mouseDown entityClickAttempt point=\(MessageGestureTrace.point(location)) handled=\(handled)"
       )
@@ -246,6 +246,7 @@ class MessageTextView: NSTextView {
     let fullRange = NSRange(location: 0, length: textStorage.length)
     let keys: [NSAttributedString.Key] = [
       .mentionUserId,
+      .threadLink,
       .emailAddress,
       .phoneNumber,
       .link,

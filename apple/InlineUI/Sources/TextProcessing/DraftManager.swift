@@ -46,6 +46,9 @@ public final class DraftManager {
 
     let overlapsLoadedEntity = loadedEntities.entities.contains { entity in
       let entityRange = NSRange(location: Int(entity.offset), length: Int(entity.length))
+      if range.length == 0 {
+        return range.location > entityRange.location && range.location < NSMaxRange(entityRange)
+      }
       return NSIntersectionRange(range, entityRange).length > 0
     }
     if overlapsLoadedEntity {

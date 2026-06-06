@@ -110,14 +110,16 @@ class ComposeTextView: UITextView {
     } else if selectedRange.length > 0, let urlString = pastedLinkURLString(from: .general) {
       applyLink(urlString, to: selectedRange)
     } else if let string = UIPasteboard.general.string {
-      // Insert plain text only
-      let pasteResult = ComposePlainTextPaste.apply(
-        currentText: text ?? "",
+      let pasteResult = ComposeThreadLinkEditing.insertPlainText(
+        string,
+        into: attributedText ?? NSAttributedString(),
         selectedRange: selectedRange,
-        pastedText: string
+        typingAttributes: typingAttributes,
+        textColor: UIColor.label
       )
-      text = pasteResult.text
+      attributedText = pasteResult.attributedString
       selectedRange = pasteResult.selectedRange
+      resetTypingAttributesToDefault()
 
       // Programmatic text assignment bypasses the normal delegate path.
       // Route paste through the same change handlers as typing so send state stays in sync.
@@ -837,6 +839,17 @@ extension UITextView {
     return attributes[.mentionUserId] != nil
   }
 
+  var isCursorAfterThreadLink: Bool {
+    let selectedRange = selectedRange
+    guard selectedRange.length == 0, selectedRange.location > 0 else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    guard checkPosition < attributedText.length else { return false }
+
+    let attributes = attributedText.attributes(at: checkPosition, effectiveRange: nil)
+    return attributes[.threadLink] != nil
+  }
+
   /// Check if cursor is positioned after bold text
   var isCursorAfterBoldText: Bool {
     let selectedRange = selectedRange
@@ -857,6 +870,10 @@ extension UITextView {
     let currentTypingAttributes = typingAttributes
     return currentTypingAttributes[.mentionUserId] != nil ||
       (currentTypingAttributes[.foregroundColor] as? UIColor) == UIColor.systemBlue
+  }
+
+  var hasTypingAttributesThreadLinkStyling: Bool {
+    typingAttributes[.threadLink] != nil
   }
 
   /// Check if current typing attributes have bold styling
@@ -906,7 +923,8 @@ extension UITextView {
 
     // If cursor is after a mention/bold text or typing attributes have special styling, reset to default
     if selectedRange.length == 0,
-       isCursorAfterMention || isCursorAfterBoldText || hasTypingAttributesMentionStyling ||
+       isCursorAfterMention || isCursorAfterThreadLink || isCursorAfterBoldText ||
+       hasTypingAttributesMentionStyling || hasTypingAttributesThreadLinkStyling ||
        hasTypingAttributesBoldStyling
     {
       resetTypingAttributesToDefault()

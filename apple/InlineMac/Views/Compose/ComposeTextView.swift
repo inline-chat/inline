@@ -6,10 +6,10 @@ import TextProcessing
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
-  func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool
-  func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool
-  func textViewDidPressArrowLeft(_ textView: NSTextView) -> Bool
-  func textViewDidPressArrowRight(_ textView: NSTextView) -> Bool
+  func textViewDidPressArrowUp(_ textView: NSTextView, event: NSEvent) -> Bool
+  func textViewDidPressArrowDown(_ textView: NSTextView, event: NSEvent) -> Bool
+  func textViewDidPressArrowLeft(_ textView: NSTextView, event: NSEvent) -> Bool
+  func textViewDidPressArrowRight(_ textView: NSTextView, event: NSEvent) -> Bool
   func textViewDidPressTab(_ textView: NSTextView) -> Bool
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool
   func textViewDidChangeFormatting(_ textView: NSTextView)
@@ -61,7 +61,7 @@ class ComposeNSTextView: NSTextView {
     // Handle arrow up key
     if event.keyCode == 126 {
       if let delegate = delegate as? ComposeTextViewDelegate {
-        if delegate.textViewDidPressArrowUp(self) {
+        if delegate.textViewDidPressArrowUp(self, event: event) {
           return
         }
       }
@@ -70,7 +70,7 @@ class ComposeNSTextView: NSTextView {
     // Handle arrow down key
     if event.keyCode == 125 {
       if let delegate = delegate as? ComposeTextViewDelegate {
-        if delegate.textViewDidPressArrowDown(self) {
+        if delegate.textViewDidPressArrowDown(self, event: event) {
           return
         }
       }
@@ -79,7 +79,7 @@ class ComposeNSTextView: NSTextView {
     // Handle arrow left key
     if event.keyCode == 123 {
       if let delegate = delegate as? ComposeTextViewDelegate {
-        if delegate.textViewDidPressArrowLeft(self) {
+        if delegate.textViewDidPressArrowLeft(self, event: event) {
           return
         }
       }
@@ -88,7 +88,7 @@ class ComposeNSTextView: NSTextView {
     // Handle arrow right key
     if event.keyCode == 124 {
       if let delegate = delegate as? ComposeTextViewDelegate {
-        if delegate.textViewDidPressArrowRight(self) {
+        if delegate.textViewDidPressArrowRight(self, event: event) {
           return
         }
       }

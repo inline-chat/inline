@@ -100,6 +100,26 @@ struct DraftManagerTests {
     #expect(entities == nil)
   }
 
+  @Test("zero length edits inside loaded entity drop stale entities")
+  func zeroLengthEditsInsideLoadedEntityDropStaleEntities() {
+    let manager = DraftManager(debounceDelay: 0)
+    manager.markLoaded(text: "hello mo", entities: mentionEntities(offset: 6, length: 2))
+    manager.invalidateLoadedEntities(overlapping: NSRange(location: 7, length: 0))
+
+    let payload = manager.makePayload(
+      peerId: .user(id: 1),
+      attributedString: NSAttributedString(string: "hello m!o")
+    )
+
+    guard case let .update(_, text, entities, _) = payload else {
+      Issue.record("Expected draft update")
+      return
+    }
+
+    #expect(text == "hello m!o")
+    #expect(entities == nil)
+  }
+
   private func mentionEntities(offset: Int64, length: Int64) -> MessageEntities {
     var entity = MessageEntity()
     entity.type = .mention

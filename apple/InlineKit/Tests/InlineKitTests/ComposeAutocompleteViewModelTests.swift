@@ -86,8 +86,8 @@ struct ComposeAutocompleteViewModelTests {
     #expect(viewModel.items.first?.payload == .thread(chatId: 42, spaceId: 7, title: "Roadmap"))
   }
 
-  @Test("thread lookup waits for three characters")
-  func threadLookupWaitsForThreeCharacters() async throws {
+  @Test("thread lookup starts on one character")
+  func threadLookupStartsOnOneCharacter() async throws {
     let db = AppDatabase.empty()
     try await db.dbWriter.write { sqlDb in
       try Chat(
@@ -103,13 +103,13 @@ struct ComposeAutocompleteViewModelTests {
     viewModel.update(
       match: ComposeAutocompleteMatch(
         kind: .thread,
-        range: NSRange(location: 0, length: 4),
-        query: "Ro"
+        range: NSRange(location: 0, length: 3),
+        query: "R"
       )
     )
 
-    await waitForItems(viewModel, count: 0)
-    #expect(viewModel.items.isEmpty)
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.items.first?.title == "Roadmap")
   }
 
   @Test("thread lookup searches all threads and uses space subtitles")
@@ -148,6 +148,102 @@ struct ComposeAutocompleteViewModelTests {
     #expect(viewModel.items.map(\.title) == ["Home Roadmap", "Roadmap"])
     #expect(viewModel.items.map(\.subtitle) == ["Thread", "Engineering"])
     #expect(viewModel.items.first { $0.title == "Roadmap" }?.emoji == "🧭")
+  }
+
+  @Test("thread lookup ignores whitespace")
+  func threadLookupIgnoresWhitespace() async throws {
+    let db = AppDatabase.empty()
+    try await db.dbWriter.write { sqlDb in
+      try Chat(
+        id: 42,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Reply Thread",
+        spaceId: nil
+      ).insert(sqlDb)
+    }
+    let viewModel = ComposeAutocompleteViewModel(db: db)
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 13),
+        query: "replythread"
+      )
+    )
+
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.items.first?.title == "Reply Thread")
+  }
+
+  @Test("thread lookup treats sql wildcards as literals")
+  func threadLookupTreatsSQLWildcardsAsLiterals() async throws {
+    let db = AppDatabase.empty()
+    try await db.dbWriter.write { sqlDb in
+      try Chat(
+        id: 1,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Alpha",
+        spaceId: nil
+      ).insert(sqlDb)
+      try Chat(
+        id: 2,
+        date: Date(timeIntervalSince1970: 2),
+        type: .thread,
+        title: "100% Plan",
+        spaceId: nil
+      ).insert(sqlDb)
+    }
+    let viewModel = ComposeAutocompleteViewModel(db: db)
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 3),
+        query: "%"
+      )
+    )
+
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.items.map(\.title) == ["100% Plan"])
+  }
+
+  @Test("escape suppresses current autocomplete match only")
+  func escapeSuppressesCurrentAutocompleteMatchOnly() async throws {
+    let db = AppDatabase.empty()
+    try await db.dbWriter.write { sqlDb in
+      try Chat(
+        id: 42,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Reply Thread",
+        spaceId: nil
+      ).insert(sqlDb)
+    }
+    let viewModel = ComposeAutocompleteViewModel(db: db)
+    let firstMatch = ComposeAutocompleteMatch(
+      kind: .thread,
+      range: NSRange(location: 0, length: 3),
+      query: "r"
+    )
+
+    viewModel.update(match: firstMatch)
+    await waitForItems(viewModel, count: 1)
+
+    viewModel.hide(suppressCurrentMatch: true)
+    viewModel.update(match: firstMatch)
+    #expect(viewModel.items.isEmpty)
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 4),
+        query: "re"
+      )
+    )
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.items.first?.title == "Reply Thread")
   }
 
   private func waitForItems(_ viewModel: ComposeAutocompleteViewModel, count: Int) async {

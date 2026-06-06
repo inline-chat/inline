@@ -1,4 +1,8 @@
 import type { Message } from "@inline-chat/realtime-sdk"
+import {
+  buildInlineThreadMarkdownLink,
+  buildInlineThreadTitleMarkdownLink,
+} from "./message-formatting.js"
 
 type InlineRawMessageEntity = NonNullable<NonNullable<Message["entities"]>["entities"]>[number]
 const INLINE_MESSAGE_ENTITY_TYPE = {
@@ -12,6 +16,8 @@ const INLINE_MESSAGE_ENTITY_TYPE = {
   CODE: 8,
   PRE: 9,
   PHONE_NUMBER: 10,
+  THREAD: 11,
+  THREAD_TITLE: 12,
 } as const
 
 export type InlineMessageMediaSummary =
@@ -87,6 +93,8 @@ export type InlineMessageEntitySummary = {
     | "code"
     | "pre"
     | "phone_number"
+    | "thread"
+    | "thread_title"
     | "unknown"
   offset: number
   length: number
@@ -94,6 +102,10 @@ export type InlineMessageEntitySummary = {
   userId?: string
   url?: string
   language?: string
+  chatId?: string
+  spaceId?: string
+  title?: string
+  markdownLink?: string
 }
 
 function compactWhitespace(raw: string | undefined): string {
@@ -292,6 +304,10 @@ function mapEntityType(type: number): InlineMessageEntitySummary["type"] {
       return "pre"
     case INLINE_MESSAGE_ENTITY_TYPE.PHONE_NUMBER:
       return "phone_number"
+    case INLINE_MESSAGE_ENTITY_TYPE.THREAD:
+      return "thread"
+    case INLINE_MESSAGE_ENTITY_TYPE.THREAD_TITLE:
+      return "thread_title"
     default:
       return "unknown"
   }
@@ -334,6 +350,25 @@ function messageEntitySummaries(message: Message): InlineMessageEntitySummary[] 
     } else if (entity.entity.oneofKind === "pre") {
       const language = compactWhitespace(entity.entity.pre.language)
       if (language) summary.language = language
+    } else if (entity.entity.oneofKind === "thread") {
+      const chatId = entity.entity.thread.chatId.toString()
+      summary.chatId = chatId
+      summary.markdownLink = buildInlineThreadMarkdownLink({
+        threadId: chatId,
+        ...(summary.text ? { title: summary.text } : {}),
+      })
+    } else if (entity.entity.oneofKind === "threadTitle") {
+      const spaceId = entity.entity.threadTitle.spaceId.toString()
+      const title = compactWhitespace(entity.entity.threadTitle.title)
+      summary.spaceId = spaceId
+      if (title) summary.title = title
+      if (title || summary.text) {
+        summary.markdownLink = buildInlineThreadTitleMarkdownLink({
+          spaceId,
+          title: title || summary.text || `space:${spaceId}`,
+          label: summary.text || title,
+        })
+      }
     }
 
     entities.push(summary)
@@ -387,6 +422,13 @@ function formatEntitySummary(entity: InlineMessageEntitySummary): string {
       return entity.userId ? `mention${quotedText} -> user:${entity.userId}` : `mention${quotedText}`
     case "text_link":
       return entity.url ? `text link${quotedText} -> ${entity.url}` : `text link${quotedText}`
+    case "thread":
+      return entity.chatId ? `thread link${quotedText} -> thread:${entity.chatId}` : `thread link${quotedText}`
+    case "thread_title":
+      if (entity.spaceId && entity.title) {
+        return `thread title link${quotedText} -> space:${entity.spaceId} title:"${entity.title}"`
+      }
+      return entity.spaceId ? `thread title link${quotedText} -> space:${entity.spaceId}` : `thread title link${quotedText}`
     case "pre":
       return entity.language
         ? `preformatted block${quotedText} (language: ${entity.language})`

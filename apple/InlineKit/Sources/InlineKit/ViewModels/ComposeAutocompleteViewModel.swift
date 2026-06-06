@@ -76,6 +76,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
   private var spaceId: Int64?
   private var loadTask: Task<Void, Never>?
   private var loadToken = UUID()
+  private var suppressedMatch: ComposeAutocompleteMatch?
   private let recentThreadLimit = 5
 
   public init(
@@ -112,13 +113,32 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
   }
 
   public func update(match: ComposeAutocompleteMatch?) {
+    if let match, match == suppressedMatch {
+      loadTask?.cancel()
+      loadToken = UUID()
+      self.match = nil
+      items = []
+      selectedIndex = 0
+      return
+    }
+
+    if match != suppressedMatch {
+      suppressedMatch = nil
+    }
+
     guard self.match != match else { return }
     self.match = match
     selectedIndex = 0
     reloadItems()
   }
 
-  public func hide() {
+  public func hide(suppressCurrentMatch: Bool = false) {
+    if suppressCurrentMatch {
+      suppressedMatch = match
+    } else {
+      suppressedMatch = nil
+    }
+
     loadTask?.cancel()
     loadToken = UUID()
     match = nil
@@ -172,22 +192,30 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     }
 
     let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard trimmedQuery.count >= 3 else {
-      items = []
-      selectedIndex = 0
+    guard !trimmedQuery.isEmpty else {
+      loadRecentThreadItems()
       return
     }
 
+    let compactQuery = Self.compactWhitespace(trimmedQuery)
+    let titlePattern = Self.likePattern(containing: trimmedQuery)
+    let compactTitlePattern = Self.likePattern(containing: compactQuery)
     let token = UUID()
     loadToken = token
 
     loadTask = Task { [db, limit] in
       do {
         let items = try await db.reader.read { db in
+          let compactTitleSQL = """
+          replace(replace(replace(replace(title, ' ', ''), char(9), ''), char(10), ''), char(13), '')
+          """
           let request = Chat
             .filter(Chat.Columns.type == ChatType.thread.rawValue)
             .filter(Chat.Columns.parentMessageId == nil)
-            .filter(sql: "title LIKE ? COLLATE NOCASE", arguments: StatementArguments(["%\(trimmedQuery)%"]))
+            .filter(
+              sql: "(title COLLATE NOCASE LIKE ? ESCAPE '\\' OR \(compactTitleSQL) COLLATE NOCASE LIKE ? ESCAPE '\\')",
+              arguments: StatementArguments([titlePattern, compactTitlePattern])
+            )
 
           let chats = try request
             .order(Chat.Columns.date.desc)
@@ -302,5 +330,22 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
         }
       }
     }
+  }
+
+  private static func compactWhitespace(_ value: String) -> String {
+    let scalars = value.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }
+    return String(String.UnicodeScalarView(scalars))
+  }
+
+  private static func likePattern(containing value: String) -> String {
+    var pattern = "%"
+    for character in value {
+      if character == "\\" || character == "%" || character == "_" {
+        pattern.append("\\")
+      }
+      pattern.append(character)
+    }
+    pattern.append("%")
+    return pattern
   }
 }

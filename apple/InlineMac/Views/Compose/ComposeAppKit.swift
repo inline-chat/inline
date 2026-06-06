@@ -915,7 +915,7 @@ class ComposeAppKit: NSView {
       for: .escape,
       key: "compose_autocomplete_\(peerId)",
       handler: { [weak self] _ in
-        self?.hideAutocomplete()
+        self?.hideAutocomplete(suppressCurrentMatch: true)
       }
     )
   }
@@ -1006,11 +1006,17 @@ class ComposeAppKit: NSView {
     commandKeyMonitorEscUnsubscribe = nil
   }
 
-  private func hideAutocomplete() {
-    autocompleteViewModel.hide()
+  private func hideAutocomplete(suppressCurrentMatch: Bool = false) {
+    autocompleteViewModel.hide(suppressCurrentMatch: suppressCurrentMatch)
     autocompleteMenu?.hide()
     autocompleteKeyMonitorEscUnsubscribe?()
     autocompleteKeyMonitorEscUnsubscribe = nil
+  }
+
+  private var hasVisibleCompletionMenu: Bool {
+    mentionCompletionMenu?.isVisible == true ||
+      commandCompletionMenu?.isVisible == true ||
+      autocompleteMenu?.isVisible == true
   }
 
   private func detectMentionAtCursor() {
@@ -1041,8 +1047,17 @@ class ComposeAppKit: NSView {
     return false
   }
 
+  private enum ComposeCompletionTrigger {
+    case textChange
+    case selectionChange
+  }
+
   @discardableResult
-  private func detectEmojiAutocompleteAtCursor() -> Bool {
+  private func detectEmojiAutocompleteAtCursor(trigger: ComposeCompletionTrigger) -> Bool {
+    if trigger == .selectionChange, autocompleteMenu?.isVisible != true {
+      return false
+    }
+
     let cursorPosition = textEditor.textView.selectedRange().location
     let attributedText = textEditor.attributedString
 
@@ -1089,12 +1104,30 @@ class ComposeAppKit: NSView {
     return false
   }
 
-  private func detectComposeCompletionsAtCursor() {
+  private func detectComposeCompletionsAtCursor(trigger: ComposeCompletionTrigger) {
+    let selectedRange = textEditor.textView.selectedRange()
+    guard selectedRange.location != NSNotFound,
+          selectedRange.length == 0,
+          !textEditor.textView.hasMarkedText()
+    else {
+      hideMentionCompletion()
+      hideCommandCompletion()
+      hideAutocomplete()
+      return
+    }
+
+    if trigger == .selectionChange, !hasVisibleCompletionMenu {
+      hideMentionCompletion()
+      hideCommandCompletion()
+      hideAutocomplete()
+      return
+    }
+
     if detectSlashCommandAtCursor() {
       hideAutocomplete()
       return
     }
-    if detectEmojiAutocompleteAtCursor() {
+    if detectEmojiAutocompleteAtCursor(trigger: trigger) {
       return
     }
     if detectThreadAutocompleteAtCursor() {
@@ -1961,7 +1994,9 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return true // handled
   }
 
-  func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
+  func textViewDidPressArrowUp(_ textView: NSTextView, event: NSEvent) -> Bool {
+    guard shouldHandlePlainComposeArrow(textView, event: event) else { return false }
+
     if autocompleteMenu?.isVisible == true {
       return handleAutocompleteArrow(.previous)
     }
@@ -2073,6 +2108,21 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     let resultingText = nsString.replacingCharacters(in: affectedCharRange, with: replacementText)
     textEditor.showPlaceholder(resultingText.isEmpty)
 
+    let threadLinkRanges = ComposeThreadLinkEditing.affectedThreadLinkRanges(
+      in: textView.attributedString(),
+      changeRange: affectedCharRange
+    )
+    if !threadLinkRanges.isEmpty, let textStorage = textView.textStorage {
+      textStorage.beginEditing()
+      ComposeThreadLinkEditing.stripThreadLinks(
+        in: textStorage,
+        ranges: threadLinkRanges,
+        textColor: NSColor.labelColor
+      )
+      textStorage.endEditing()
+      textView.resetTypingAttributesToDefault()
+    }
+
     return true
   }
 
@@ -2090,7 +2140,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       log.trace("ignore next height change")
     }
 
-    detectComposeCompletionsAtCursor()
+    detectComposeCompletionsAtCursor(trigger: .textChange)
 
     handleStickerDetectionIfNeeded(for: textView)
 
@@ -2194,10 +2244,12 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     // Reset typing attributes when cursor moves to prevent mention style leakage
     textView.updateTypingAttributesIfNeeded()
-    detectComposeCompletionsAtCursor()
+    detectComposeCompletionsAtCursor(trigger: .selectionChange)
   }
 
-  func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool {
+  func textViewDidPressArrowDown(_ textView: NSTextView, event: NSEvent) -> Bool {
+    guard shouldHandlePlainComposeArrow(textView, event: event) else { return false }
+
     if autocompleteMenu?.isVisible == true {
       return handleAutocompleteArrow(.next)
     }
@@ -2216,7 +2268,9 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return false // not handled
   }
 
-  func textViewDidPressArrowLeft(_ textView: NSTextView) -> Bool {
+  func textViewDidPressArrowLeft(_ textView: NSTextView, event: NSEvent) -> Bool {
+    guard shouldHandlePlainComposeArrow(textView, event: event) else { return false }
+
     guard let autocompleteMenu,
           autocompleteMenu.isVisible,
           autocompleteMenu.isShowingEmojiPalette
@@ -2227,7 +2281,9 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return handleAutocompleteArrow(.previous)
   }
 
-  func textViewDidPressArrowRight(_ textView: NSTextView) -> Bool {
+  func textViewDidPressArrowRight(_ textView: NSTextView, event: NSEvent) -> Bool {
+    guard shouldHandlePlainComposeArrow(textView, event: event) else { return false }
+
     guard let autocompleteMenu,
           autocompleteMenu.isVisible,
           autocompleteMenu.isShowingEmojiPalette
@@ -2236,6 +2292,27 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     return handleAutocompleteArrow(.next)
+  }
+
+  private func shouldHandlePlainComposeArrow(_ textView: NSTextView, event: NSEvent) -> Bool {
+    guard !textView.hasMarkedText() else {
+      dismissCompletionMenusForTextNavigation()
+      return false
+    }
+
+    let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+    guard modifiers.isEmpty else {
+      dismissCompletionMenusForTextNavigation()
+      return false
+    }
+
+    return true
+  }
+
+  private func dismissCompletionMenusForTextNavigation() {
+    hideMentionCompletion()
+    hideCommandCompletion()
+    hideAutocomplete()
   }
 
   private func handleAutocompleteArrow(_ direction: ComposeAutocompleteArrowDirection) -> Bool {
@@ -2289,7 +2366,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool {
     if autocompleteMenu?.isVisible == true {
-      hideAutocomplete()
+      hideAutocomplete(suppressCurrentMatch: true)
       return true
     }
 
@@ -2490,7 +2567,7 @@ extension ComposeAppKit: ComposeAutocompleteMenuDelegate {
   }
 
   func autocompleteMenuDidRequestClose(_ menu: ComposeAutocompleteMenu) {
-    hideAutocomplete()
+    hideAutocomplete(suppressCurrentMatch: true)
   }
 }
 

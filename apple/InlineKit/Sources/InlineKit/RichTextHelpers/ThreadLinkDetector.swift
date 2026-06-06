@@ -69,9 +69,10 @@ public final class ThreadLinkDetector {
     chatId: Int64,
     trailingText: String = " "
   ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
+    let text = "[[\(title)]]"
     let replacement = NSMutableAttributedString(
       attributedString: AttributedStringHelpers.createThreadLinkAttributedString(
-        title,
+        text,
         target: .chatId(chatId)
       )
     )
@@ -81,7 +82,7 @@ public final class ThreadLinkDetector {
     mutable.replaceCharacters(in: range, with: replacement)
 
     let newAttributedText = mutable.copy() as! NSAttributedString
-    let replacementLength = title.utf16.count + trailingText.utf16.count
+    let replacementLength = text.utf16.count + trailingText.utf16.count
     let newCursorPosition = range.location + replacementLength
     return (newAttributedText, newCursorPosition)
   }

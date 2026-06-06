@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import RealtimeV2
 
 public enum ThreadLinkTarget: Hashable, Sendable {
   case chatId(Int64)
@@ -16,6 +17,10 @@ public enum ThreadLinkTarget: Hashable, Sendable {
 }
 
 public enum ThreadLinkResolver {
+  public enum Error: Swift.Error {
+    case missingCurrentUser
+  }
+
   public static func resolve(
     _ target: ThreadLinkTarget,
     database: AppDatabase = .shared
@@ -42,15 +47,54 @@ public enum ThreadLinkResolver {
     let chats = try Chat
       .filter(Chat.Columns.type == ChatType.thread.rawValue)
       .filter(Chat.Columns.spaceId == spaceId)
-      .filter(Chat.Columns.title == trimmedTitle)
+      .filter(Chat.Columns.parentMessageId == nil)
+      .filter(sql: "title = ? COLLATE NOCASE", arguments: StatementArguments([trimmedTitle]))
       .order(Chat.Columns.date.desc)
-      .limit(2)
+      .limit(1)
       .fetchAll(db)
 
-    guard chats.count == 1, let chat = chats.first else {
+    guard let chat = chats.first else { return nil }
+
+    return .thread(id: chat.id)
+  }
+
+  public static func resolveOrCreate(
+    _ target: ThreadLinkTarget,
+    currentUserId: Int64?,
+    database: AppDatabase = .shared,
+    realtimeV2: RealtimeV2 = Api.realtime
+  ) async throws -> Peer? {
+    if let peer = try await resolve(target, database: database) {
+      return peer
+    }
+
+    guard case let .title(spaceId, title) = target else {
       return nil
     }
 
-    return .thread(id: chat.id)
+    let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard spaceId > 0, !trimmedTitle.isEmpty else {
+      return nil
+    }
+
+    guard currentUserId != nil else {
+      throw Error.missingCurrentUser
+    }
+
+    // TODO: Match the created thread's visibility to the parent thread once link context is available.
+    let chatId = try await realtimeV2.createThreadLocally(
+      title: trimmedTitle,
+      emoji: nil,
+      isPublic: true,
+      spaceId: spaceId,
+      participants: []
+    )
+    let peer: Peer = .thread(id: chatId)
+
+    await realtimeV2.sendQueued(
+      .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
+    )
+
+    return peer
   }
 }
