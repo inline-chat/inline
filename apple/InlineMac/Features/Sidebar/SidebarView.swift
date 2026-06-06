@@ -315,6 +315,7 @@ struct SidebarView: View {
     // side spacing visually must match the items below
     .padding(.leading, SidebarTopBarMetrics.leadingPadding)
     .padding(.trailing, Theme.sidebarItemOuterSpacing)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var homeButton: some View {
@@ -346,12 +347,6 @@ struct SidebarView: View {
           .lineLimit(1)
           .truncationMode(.tail)
           .layoutPriority(1)
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-        Image(systemName: "chevron.up.chevron.down")
-          .font(.system(size: 10, weight: .semibold))
-          .foregroundStyle(.tertiary)
-          .frame(width: SidebarTopBarMetrics.trailingAccessoryWidth, alignment: .center)
       }
       .contentShape(Rectangle())
       .padding(.horizontal, 8)
@@ -362,7 +357,6 @@ struct SidebarView: View {
     .buttonStyle(.plain)
     .focusEffectDisabled(true)
     .menuIndicator(.hidden)
-    .frame(maxWidth: .infinity, alignment: .leading)
     .onHover { isLocationHovering = $0 }
     .contextMenu {
       if let selectedSpace {
@@ -379,6 +373,14 @@ struct SidebarView: View {
 
   @ViewBuilder
   private var sidebarLocationMenuContent: some View {
+    if let selectedSpace {
+      Section("Manage \(selectedSpace.displayName)") {
+        selectedSpaceActions(selectedSpace)
+      }
+
+      Divider()
+    }
+
     if viewModel.spaces.isEmpty == false {
       Section("Spaces") {
         ForEach(viewModel.spaces) { space in
@@ -389,16 +391,7 @@ struct SidebarView: View {
           }
         }
       }
-    }
 
-    if let selectedSpace {
-      Divider()
-      Section("Manage \(selectedSpace.displayName)") {
-        selectedSpaceActions(selectedSpace)
-      }
-    }
-
-    if viewModel.spaces.isEmpty == false || selectedSpace != nil {
       Divider()
     }
 
@@ -1083,7 +1076,6 @@ private struct SidebarTopBarHoverBackground: View {
 private enum SidebarTopBarMetrics {
   static let buttonHeight: CGFloat = 30
   static let leadingPadding = Theme.sidebarItemOuterSpacing + 3
-  static let trailingAccessoryWidth: CGFloat = 14
 }
 
 private struct SidebarInboxActionRow: View {
