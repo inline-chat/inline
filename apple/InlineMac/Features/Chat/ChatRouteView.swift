@@ -11,6 +11,7 @@ struct ChatRouteView: View {
   @Environment(\.dependencies) private var dependencies
   @Environment(\.nav) private var nav
 
+  @ObservedObject private var botPresenceController = BotPresenceController.shared
   @State private var chatToolbarState = ChatToolbarState()
   @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
@@ -81,7 +82,11 @@ struct ChatRouteView: View {
         }
       }
       .task(id: peer.toString(), priority: .utility) {
+        BotPresenceController.shared.setContext(peer: peer, realtimeV2: dependencies.realtimeV2)
         await ensureToolbarParticipantsLoaded(dependencies: dependencies)
+      }
+      .onDisappear {
+        BotPresenceController.shared.clearContext(peer: peer)
       }
       .toolbar {
         let mainItem =
@@ -120,6 +125,21 @@ struct ChatRouteView: View {
 
         if #available(macOS 26.0, *) {
           ToolbarSpacer(.flexible)
+        }
+
+
+        if botPresenceController.toolbarItem(for: peer) != nil {
+          ToolbarItem {
+            BotPresenceToolbarButton(
+              peer: peer,
+              controller: botPresenceController
+            )
+            .id(peer.toString())
+          }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+          }
         }
 
         ToolbarItem {

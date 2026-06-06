@@ -140,6 +140,9 @@ public actor UpdatesEngine: Sendable {
         case let .messageActionAnswered(messageActionAnswered):
           messageActionAnswered.apply()
 
+        case let .botPresence(botPresence):
+          BotPresenceNotifications.post(botPresence)
+
         default:
           break
       }
