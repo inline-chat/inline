@@ -1547,6 +1547,75 @@ describe("InlineSdkClient", () => {
     expect(store.loaded?.lastSeqByChatId?.["10"]).toBe(5)
   })
 
+  it("emits chat participant events", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+    const iter = client.events()[Symbol.asyncIterator]()
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 10n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 2,
+                    date: 100n,
+                    update: {
+                      oneofKind: "participantAdd",
+                      participantAdd: {
+                        chatId: 10n,
+                        participant: { userId: 42n, date: 100n },
+                      },
+                    },
+                  }),
+                  Update.create({
+                    seq: 3,
+                    date: 101n,
+                    update: {
+                      oneofKind: "participantDelete",
+                      participantDelete: {
+                        chatId: 10n,
+                        userId: 42n,
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const add = await iter.next()
+    expect(add.value.kind).toBe("chat.participant.add")
+    if (add.value.kind === "chat.participant.add") {
+      expect(add.value.chatId).toBe(10n)
+      expect(add.value.participant?.userId).toBe(42n)
+    }
+
+    const del = await iter.next()
+    expect(del.value.kind).toBe("chat.participant.delete")
+    if (del.value.kind === "chat.participant.delete") {
+      expect(del.value.chatId).toBe(10n)
+      expect(del.value.userId).toBe(42n)
+    }
+
+    expect(client.exportState().lastSeqByChatId?.["10"]).toBe(3)
+    await client.close()
+  })
+
   it("performs reconnect catch-up for a DM chat without stored seq", async () => {
     const transport = new MockTransport()
     const store = new MemoryStateStore({ version: 1 })
@@ -3042,6 +3111,83 @@ describe("InlineSdkClient", () => {
     }
 
     expect(client.exportState().lastUserSeq).toBe(55)
+    await client.close()
+  })
+
+  it("replays user-bucket participant adds when existing state has no lastUserSeq", async () => {
+    const transport = new MockTransport()
+    const store = new MemoryStateStore({ version: 1, dateCursor: 701n })
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: store,
+      catchUpUserFromStart: true,
+    })
+
+    await connectAndOpen(client, transport)
+    const iter = client.events()[Symbol.asyncIterator]()
+
+    await waitFor(() =>
+      transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES),
+    )
+    const rpc = transport.sent.find(
+      (m) =>
+        m.body.oneofKind === "rpcCall" &&
+        m.body.rpcCall.method === Method.GET_UPDATES &&
+        m.body.rpcCall.input.oneofKind === "getUpdates" &&
+        m.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing user getUpdates rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing getUpdates input")
+    expect(rpc.body.rpcCall.input.getUpdates.startSeq).toBe(0n)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 303n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [
+                  Update.create({
+                    seq: 1,
+                    date: 703n,
+                    update: {
+                      oneofKind: "participantAdd",
+                      participantAdd: {
+                        chatId: 20n,
+                        participant: { userId: 777n, date: 703n },
+                      },
+                    },
+                  }),
+                ],
+                seq: 1n,
+                date: 703n,
+                resultType: GetUpdatesResult_ResultType.SLICE,
+                final: true,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const event = await iter.next()
+    expect(event.done).toBe(false)
+    if (!event.done) {
+      expect(event.value.kind).toBe("chat.participant.add")
+      if (event.value.kind === "chat.participant.add") {
+        expect(event.value.chatId).toBe(20n)
+        expect(event.value.participant?.userId).toBe(777n)
+      }
+    }
+
+    await waitFor(() => client.exportState().lastUserSeq === 1)
+    expect(client.exportState().lastSeqByChatId?.["20"]).toBeUndefined()
     await client.close()
   })
 

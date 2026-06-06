@@ -241,7 +241,6 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
     parentMessageIds: dbMessages.map((message) => message.messageId),
     userId,
   })
-
   // Store encoded messages in a map
   const msgs = new Map<bigint, Message>()
   for (const message of dbMessages) {
@@ -382,6 +381,20 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
             participantDelete: {
               chatId: serverUpdate.update.participantDelete.chatId,
               userId: serverUpdate.update.participantDelete.userId,
+            },
+          },
+        })
+        break
+
+      case "participantAdd":
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "participantAdd",
+            participantAdd: {
+              chatId: serverUpdate.update.participantAdd.chatId,
+              participant: serverUpdate.update.participantAdd.participant,
             },
           },
         })
@@ -877,6 +890,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           participantDelete: {
             chatId: payload.userChatParticipantDelete.chatId,
             userId: BigInt(userId),
+          },
+        },
+      }
+
+    case "userChatParticipantAdd":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "participantAdd",
+          participantAdd: {
+            chatId: payload.userChatParticipantAdd.chatId,
+            participant: payload.userChatParticipantAdd.participant,
           },
         },
       }

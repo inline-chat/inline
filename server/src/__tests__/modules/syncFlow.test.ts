@@ -90,6 +90,58 @@ describe("Sync core flow", () => {
     expect(firstUpdate.update.participantDelete.userId).toBe(BigInt(userB.id))
   })
 
+  it("processes chat participant additions end-to-end", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Sync Add Chat", ["add-a@sync.com", "add-b@sync.com"])
+    const userA = users[0]
+    const userB = users[1]
+    if (!space || !userA || !userB) {
+      throw new Error("Failed to set up private thread test")
+    }
+    const chat = await testUtils.createChat(space.id, "Private Thread Add", "thread", false)
+    if (!chat) {
+      throw new Error("Failed to create private thread")
+    }
+    await testUtils.addParticipant(chat.id, userA.id)
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "participantAdd",
+        participantAdd: {
+          chatId: BigInt(chat.id),
+          participant: {
+            userId: BigInt(userB.id),
+            date: 1n,
+          },
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.Chat, chatId: chat.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const peer: Peer = { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } }
+    const { updates: inflated } = await Sync.processChatUpdates({
+      chatId: chat.id,
+      peerId: peer,
+      updates: dbUpdates,
+      userId: userA.id,
+    })
+
+    expect(inflated).toHaveLength(1)
+    const [firstUpdate] = inflated
+    expect(firstUpdate?.seq).toBe(1)
+    if (!firstUpdate || firstUpdate.update.oneofKind !== "participantAdd") {
+      throw new Error("Expected participantAdd update")
+    }
+    expect(firstUpdate.update.participantAdd.participant?.userId).toBe(BigInt(userB.id))
+  })
+
   it("inflates new chat updates from chat bucket", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("New Chat Sync", ["newchat@sync.com"])
     const user = users[0]
@@ -365,6 +417,44 @@ describe("Sync core flow", () => {
       throw new Error("Expected participantDelete from user bucket")
     }
     expect(userUpdate.update.participantDelete.chatId).toBe(42n)
+  })
+
+  it("inflates user bucket updates for chat participant add", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("User Sync Add", ["user-add@sync.com"])
+    const user = users[0]
+    if (!user) {
+      throw new Error("Failed to create user")
+    }
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userChatParticipantAdd",
+        userChatParticipantAdd: {
+          chatId: 42n,
+          participant: {
+            userId: BigInt(user.id),
+            date: 1n,
+          },
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.User, userId: user.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const updates = Sync.inflateUserUpdates(dbUpdates)
+    expect(updates).toHaveLength(1)
+    const [userUpdate] = updates
+    if (!userUpdate || userUpdate.update.oneofKind !== "participantAdd") {
+      throw new Error("Expected participantAdd from user bucket")
+    }
+    expect(userUpdate.update.participantAdd.chatId).toBe(42n)
+    expect(userUpdate.update.participantAdd.participant?.userId).toBe(BigInt(user.id))
   })
 
   it("inflates user bucket chatOpen updates", async () => {

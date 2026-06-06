@@ -6,8 +6,9 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { testUtils, defaultTestContext, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import type { FunctionContext } from "../../functions/_types"
+import { UpdatesModel } from "@in/server/db/models/updates"
 
 describe("messages.createChat", () => {
   // Setup test lifecycle
@@ -202,6 +203,45 @@ describe("messages.createChat", () => {
 
     const participantIds = participants.map((p) => p.userId).sort()
     expect(participantIds).toEqual([currentUser.id, otherUser.id].sort())
+  })
+
+  test("enqueues participant-add user updates for initial private chat participants", async () => {
+    const currentUser = await testUtils.createUser("initial-participant-owner@example.com")
+    if (!currentUser) throw new Error("Failed to create current user")
+    const otherUser = await testUtils.createUser("initial-participant-bot@example.com")
+    if (!otherUser) throw new Error("Failed to create other user")
+
+    const result = await createChat(
+      {
+        title: "Initial Participant Thread",
+        isPublic: false,
+        participants: [{ userId: BigInt(otherUser.id) }],
+      },
+      {
+        ...mockFunctionContext,
+        currentUserId: currentUser.id,
+      },
+    )
+
+    const otherUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, otherUser.id)))
+
+    expect(otherUpdates).toHaveLength(1)
+    const update = UpdatesModel.decrypt(otherUpdates[0]!)
+    expect(update.payload.update.oneofKind).toBe("userChatParticipantAdd")
+    if (update.payload.update.oneofKind !== "userChatParticipantAdd") {
+      throw new Error("Expected userChatParticipantAdd update")
+    }
+    expect(update.payload.update.userChatParticipantAdd.chatId).toBe(result.chat.id)
+    expect(update.payload.update.userChatParticipantAdd.participant?.userId).toBe(BigInt(otherUser.id))
+
+    const currentUserUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, currentUser.id)))
+    expect(currentUserUpdates).toHaveLength(0)
   })
 
   test("allows duplicate home thread titles (not unique)", async () => {

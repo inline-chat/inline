@@ -15,11 +15,14 @@ import {
 } from "@in/server/modules/subthreads"
 import { DIALOG_FOLLOWING, setDialogFollowModeForUsers } from "@in/server/modules/dialogFollow"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
-import type { Chat, Dialog, Message } from "@inline-chat/protocol/core"
+import type { Chat, ChatParticipant, Dialog, Message } from "@inline-chat/protocol/core"
+import type { Transaction } from "@in/server/db/types"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
 import { and, eq, inArray } from "drizzle-orm"
 
@@ -36,6 +39,12 @@ type Output = {
   chat: Chat
   dialog?: Dialog
   anchorMessage?: Message
+}
+
+type InitialParticipant = {
+  chatId: number
+  userId: number
+  date: Date
 }
 
 export async function createSubthread(input: Input, context: FunctionContext): Promise<Output> {
@@ -215,7 +224,7 @@ async function createSubthreadChat(input: {
   directParticipantUserIds: number[]
 }): Promise<DbChat> {
   try {
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx): Promise<{ chat: DbChat; participants: InitialParticipant[] }> => {
       const spaceId = input.parentChat.spaceId ?? null
       const threadNumber = spaceId !== null ? await allocateSpaceThreadNumber(tx, spaceId) : null
 
@@ -240,21 +249,26 @@ async function createSubthreadChat(input: {
         throw RealtimeRpcError.InternalError()
       }
 
+      let participants: InitialParticipant[] = []
       if (input.directParticipantUserIds.length > 0) {
-        const participants = input.directParticipantUserIds.map((userId) => ({
+        participants = input.directParticipantUserIds.map((userId) => ({
           chatId: chat.id,
           userId,
           date: new Date(),
         }))
 
         await tx.insert(chatParticipants).values(participants).onConflictDoNothing()
-        participants.forEach((participant) => {
-          AccessGuardsCache.setChatParticipant(participant.chatId, participant.userId)
-        })
+        await enqueueInitialParticipantAdds(tx, chat.id, participants, input.createdBy)
       }
 
-      return chat
+      return { chat, participants }
     })
+
+    result.participants.forEach((participant) => {
+      AccessGuardsCache.setChatParticipant(participant.chatId, participant.userId)
+    })
+
+    return result.chat
   } catch (error) {
     if (
       input.parentMessageId !== undefined &&
@@ -309,6 +323,36 @@ function uniquePositiveUserIds(participants: { userId: bigint }[]): number[] {
   }
 
   return Array.from(result)
+}
+
+async function enqueueInitialParticipantAdds(
+  tx: Transaction,
+  chatId: number,
+  participants: InitialParticipant[],
+  currentUserId: number,
+): Promise<void> {
+  await UserBucketUpdates.enqueueMany(
+    participants
+      .filter((participant) => participant.userId !== currentUserId)
+      .map((participant) => ({
+        userId: participant.userId,
+        update: {
+          oneofKind: "userChatParticipantAdd" as const,
+          userChatParticipantAdd: {
+            chatId: BigInt(chatId),
+            participant: encodeParticipant(participant),
+          },
+        },
+      })),
+    { tx },
+  )
+}
+
+function encodeParticipant(participant: InitialParticipant): ChatParticipant {
+  return {
+    userId: BigInt(participant.userId),
+    date: encodeDateStrict(participant.date),
+  }
 }
 
 async function persistNewChatUpdate(chatId: number): Promise<UpdateSeqAndDate> {

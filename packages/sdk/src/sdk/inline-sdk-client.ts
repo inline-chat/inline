@@ -53,6 +53,7 @@ const defaultVideoDuration = 1
 const defaultCatchUpPageLimit = 200
 const defaultCatchUpTotalLimit = 1_000
 const defaultColdStartCatchUpWindow = defaultCatchUpTotalLimit
+type UpdateSource = "live" | "chat" | "space" | "user"
 
 function extractFirstMessageId(updates: Update[] | undefined): bigint | null {
   for (const update of updates ?? []) {
@@ -612,7 +613,7 @@ export class InlineSdkClient {
     }
   }
 
-  private async handleUpdate(update: Update) {
+  private async handleUpdate(update: Update, options?: { source?: UpdateSource }) {
     const seq = update.seq ?? 0
     const date = update.date ?? 0n
 
@@ -751,6 +752,36 @@ export class InlineSdkClient {
         return
       }
 
+      case "participantAdd": {
+        const payload = update.update.participantAdd
+        if (options?.source !== "user" && options?.source !== "space") {
+          this.bumpChatSeq(payload.chatId, seq)
+        }
+        await this.eventStream.send({
+          kind: "chat.participant.add",
+          chatId: payload.chatId,
+          ...(payload.participant ? { participant: payload.participant } : {}),
+          seq,
+          date,
+        })
+        return
+      }
+
+      case "participantDelete": {
+        const payload = update.update.participantDelete
+        if (options?.source !== "user" && options?.source !== "space") {
+          this.bumpChatSeq(payload.chatId, seq)
+        }
+        await this.eventStream.send({
+          kind: "chat.participant.delete",
+          chatId: payload.chatId,
+          userId: payload.userId,
+          seq,
+          date,
+        })
+        return
+      }
+
       case "messageActionInvoked": {
         const payload = update.update.messageActionInvoked
         if (this.shouldSkipUserSeq(seq)) {
@@ -854,15 +885,15 @@ export class InlineSdkClient {
   }
 
   private requestCatchUpUser() {
-    const lastUserSeq = this.state.lastUserSeq ?? 0
-    if (lastUserSeq <= 0) {
+    const lastUserSeq = this.state.lastUserSeq
+    if (lastUserSeq == null && !this.options.catchUpUserFromStart) {
       return
     }
     if (this.userCatchUpInFlight) {
       return
     }
 
-    this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq)
+    this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq ?? 0)
       .catch((error) => {
         this.log.warn?.("GET_UPDATES user catch-up failed; continuing live delivery", {
           error: extractErrorMessage(error),
@@ -910,7 +941,7 @@ export class InlineSdkClient {
       }
 
       for (const update of payload.updates) {
-        await this.handleUpdate(update)
+        await this.handleUpdate(update, { source: "user" })
       }
 
       this.bumpUserSeq(deliveredSeq)
@@ -1032,7 +1063,7 @@ export class InlineSdkClient {
       this.bumpChatSeq(chatId, deliveredSeq)
 
       for (const update of payload.updates) {
-        await this.handleUpdate(update)
+        await this.handleUpdate(update, { source: "chat" })
       }
 
       if (payload.date !== 0n) {
@@ -1152,7 +1183,7 @@ export class InlineSdkClient {
       this.bumpSpaceSeq(spaceId, deliveredSeq)
 
       for (const update of payload.updates) {
-        await this.handleUpdate(update)
+        await this.handleUpdate(update, { source: "space" })
       }
 
       if (payload.date !== 0n) {

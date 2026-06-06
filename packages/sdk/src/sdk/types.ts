@@ -1,4 +1,5 @@
 import type {
+  ChatParticipant,
   Message,
   MessageActionResponseUi,
   MessageActions,
@@ -24,6 +25,7 @@ export type InlineSdkClientOptions = {
   rpcTimeoutMs?: number | null
   logger?: InlineSdkLogger
   state?: InlineSdkStateStore
+  catchUpUserFromStart?: boolean
   transport?: Transport
   fetch?: typeof fetch
 }
@@ -190,6 +192,8 @@ export type InlineInboundEvent =
     }
   | { kind: "reaction.add"; chatId: InlineId; reaction: Reaction; seq: number; date: InlineUnixSeconds }
   | { kind: "reaction.delete"; chatId: InlineId; emoji: string; messageId: InlineId; userId: InlineId; seq: number; date: InlineUnixSeconds }
+  | { kind: "chat.participant.add"; chatId: InlineId; participant?: ChatParticipant; seq: number; date: InlineUnixSeconds }
+  | { kind: "chat.participant.delete"; chatId: InlineId; userId: InlineId; seq: number; date: InlineUnixSeconds }
   | {
       kind: "message.action.invoke"
       interactionId: InlineId
