@@ -8,6 +8,7 @@ struct SidebarThreadIcon: View, Equatable {
   }
 
   let emoji: String?
+  let isReplyThread: Bool
   var size: CGFloat = 20
   var shape: IconShape = .roundedSquare
 
@@ -15,12 +16,14 @@ struct SidebarThreadIcon: View, Equatable {
 
   init(chat: Chat, size: CGFloat = 20, shape: IconShape = .roundedSquare) {
     emoji = Self.normalizedEmoji(chat.emoji)
+    isReplyThread = chat.isReplyThread
     self.size = size
     self.shape = shape
   }
 
-  init(emoji: String?, size: CGFloat = 20, shape: IconShape = .roundedSquare) {
+  init(emoji: String?, isReplyThread: Bool = false, size: CGFloat = 20, shape: IconShape = .roundedSquare) {
     self.emoji = Self.normalizedEmoji(emoji)
+    self.isReplyThread = isReplyThread
     self.size = size
     self.shape = shape
   }
@@ -35,7 +38,7 @@ struct SidebarThreadIcon: View, Equatable {
             .lineLimit(1)
             .minimumScaleFactor(0.75)
         } else {
-          Image(systemName: "bubble.middle.bottom.fill")
+          Image(systemName: ThreadIconSymbol.name(isReplyThread: isReplyThread))
             .font(.system(size: symbolPointSize, weight: .semibold))
             .foregroundStyle(.secondary)
         }
