@@ -18,6 +18,7 @@
     "generate:proto": "cd scripts && bun run generate",
     "db:migrate": "cd server && bun run db:migrate",
     "db:generate": "cd server && bun run db:generate",
+    "macos:debug": "cd scripts && bun run macos:debug",
     "cleanup:builds": "cd scripts && bun run cleanup:builds",
     "cleanup:builds:deep": "cd scripts && bun run cleanup:builds:deep"
   },
