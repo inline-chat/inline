@@ -9,6 +9,7 @@ extension View {
     openCommandBar: @escaping @MainActor () -> Void,
     toggleCommandBar: @escaping @MainActor () -> Void,
     toggleSidebar: @escaping @MainActor () -> Void,
+    createNewThread: @escaping @MainActor () -> Void,
     goBack: @escaping @MainActor () -> Void,
     goForward: @escaping @MainActor () -> Void,
     canGoBack: @escaping @MainActor () -> Bool,
@@ -21,6 +22,7 @@ extension View {
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,
       toggleSidebar: toggleSidebar,
+      createNewThread: createNewThread,
       goBack: goBack,
       goForward: goForward,
       canGoBack: canGoBack,
@@ -36,6 +38,7 @@ private struct MainWindowRegistrationModifier: ViewModifier {
   let openCommandBar: @MainActor () -> Void
   let toggleCommandBar: @MainActor () -> Void
   let toggleSidebar: @MainActor () -> Void
+  let createNewThread: @MainActor () -> Void
   let goBack: @MainActor () -> Void
   let goForward: @MainActor () -> Void
   let canGoBack: @MainActor () -> Bool
@@ -67,6 +70,7 @@ private struct MainWindowRegistrationModifier: ViewModifier {
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,
       toggleSidebar: toggleSidebar,
+      createNewThread: createNewThread,
       goBack: goBack,
       goForward: goForward,
       canGoBack: canGoBack,
