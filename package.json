@@ -18,7 +18,8 @@
     "generate:proto": "cd scripts && bun run generate",
     "db:migrate": "cd server && bun run db:migrate",
     "db:generate": "cd server && bun run db:generate",
-    "macos:debug": "cd scripts && bun run macos:debug",
+    "ios:debug": "bash scripts/ios/open-debug-app.sh",
+    "macos:debug": "bash scripts/macos/open-debug-app.sh",
     "cleanup:builds": "cd scripts && bun run cleanup:builds",
     "cleanup:builds:deep": "cd scripts && bun run cleanup:builds:deep"
   },

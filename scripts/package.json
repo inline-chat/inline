@@ -11,6 +11,7 @@
     "release:cli": "bun run release-cli.ts release",
     "release:macos": "bun run macos:release-app",
     "build:macos:local-app": "bun run macos:build-local-app",
+    "ios:debug": "bash ios/open-debug-app.sh",
     "macos:update-version": "bun run macos/update-version.ts",
     "macos:debug": "bash macos/open-debug-app.sh",
     "macos:build-local-app": "bash macos/build-local-app.sh",

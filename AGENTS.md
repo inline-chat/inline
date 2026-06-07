@@ -76,7 +76,7 @@
 
 ## Common Commands
 
-- Root: `bun run dev`, `bun run dev:server`, `bun run generate:proto`, `bun run db:migrate`, `bun run db:generate`, `bun run macos:debug`.
+- Root: `bun run dev`, `bun run dev:server`, `bun run generate:proto`, `bun run db:migrate`, `bun run db:generate`, `bun run ios:debug`, `bun run macos:debug`.
 - Checks: run the workspace-local `typecheck` / `lint` / `test` scripts from that package instead of guessing commands or using `bun x`.
 - App workspaces: `cd server && bun run typecheck|lint|test`, `cd landing && bun run typecheck|lint|test`, `cd desktop && bun run typecheck|lint|test`, `cd web && bun run typecheck|lint|test`.
 - Package workspaces: `cd packages/openclaw && bun run typecheck|lint|test`, `cd packages/mcp && bun run typecheck|lint|test`, `cd packages/sdk && bun run typecheck|lint|test`, `cd packages/protocol && bun run typecheck|lint|test`, `cd packages/bot-api && bun run typecheck|lint|test`, `cd packages/bot-api-types && bun run typecheck|lint|test`, `cd packages/oauth-core && bun run typecheck|lint|test`.
@@ -111,6 +111,7 @@
 - Regenerate Swift protos with `bun run proto:generate-swift` (from `scripts/`) when needed.
 - For Apple docs, use `https://sosumi.ai/...` mirror of Developer docs via `curl` instead of web search.
 - Liquid Glass: gate with `#available` (iOS/macOS 26+), apply after layout/appearance, wrap related views in `GlassEffectContainer`, use `.interactive()` only for tappable elements.
+- iOS debug app: `bun run ios:debug` builds and runs the Xcode Debug `InlineIOS.app` without launching Xcode. First run asks for a preferred physical device and simulator fallback, stores it in ignored `.tmp/ios-debug-target.json`, and later runs use the simulator only if the preferred device is unavailable. Use `bun run ios:debug -- --select` to change the saved target.
 - macOS releases: `bun run release:macos -- --channel <stable|beta>` or `cd scripts && bun run macos:release-app -- --channel <stable|beta>`.
 - macOS debug app: `bun run macos:debug` builds and opens the Xcode Debug `Inline Debug.app` without launching Xcode. Run it after macOS app/UI changes to verify the app still builds and launches.
 - Local macOS direct app test build: `cd scripts && bun run macos:build-local-app -- --channel <stable|beta>`; output app: `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline-Dev.app`.
