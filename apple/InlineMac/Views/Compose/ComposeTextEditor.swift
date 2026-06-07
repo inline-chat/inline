@@ -483,10 +483,6 @@ extension NSTextView {
 
   /// Reset typing attributes to default to prevent mention style leakage
   func resetTypingAttributesToDefault() {
-    // Keep base font stable; AppKit may mutate `NSTextView.font` based on selection/paste contents.
-    font = ComposeTextEditor.font
-    textColor = NSColor.labelColor
-
     var attributes = defaultTypingAttributes
     if let paragraphStyle = typingAttributes[.paragraphStyle] {
       attributes[.paragraphStyle] = paragraphStyle
