@@ -5,6 +5,8 @@ import GRDB
 import InlineKit
 import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageActionRow
+import struct InlineProtocol.MessageEntities
+import struct InlineProtocol.MessageEntity
 import InlineUI
 import Logger
 import SwiftUI
@@ -1357,6 +1359,17 @@ class UIMessageView: UIView {
           return
         }
 
+        var commandRange = NSRange(location: 0, length: 0)
+        if let command = attributedText.attribute(.botCommand, at: characterIndex, effectiveRange: &commandRange) as? String,
+           commandRange.length > 0
+        {
+          let commandText = command.isEmpty
+            ? (attributedText.string as NSString).substring(with: commandRange)
+            : command
+          sendBotCommand(commandText)
+          return
+        }
+
         if let email = attributedText.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
           UIPasteboard.general.string = email
           ToastManager.shared.showToast(
@@ -1385,6 +1398,38 @@ class UIMessageView: UIView {
         }
       }
     }
+  }
+
+  private func sendBotCommand(_ command: String) {
+    Task {
+      do {
+        try await Api.realtime.send(.sendMessage(
+          text: command,
+          peerId: message.peerId,
+          chatId: message.chatId,
+          replyToMsgId: nil,
+          isSticker: nil,
+          entities: botCommandEntities(for: command)
+        ))
+      } catch {
+        ToastManager.shared.showToast(
+          "Failed to send command",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
+  private func botCommandEntities(for command: String) -> MessageEntities {
+    var entity = MessageEntity()
+    entity.type = .botCommand
+    entity.offset = 0
+    entity.length = Int64((command as NSString).length)
+
+    var entities = MessageEntities()
+    entities.entities = [entity]
+    return entities
   }
 
   struct LinkContextMenuTarget {

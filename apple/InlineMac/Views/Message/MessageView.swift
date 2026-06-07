@@ -7,6 +7,8 @@ import GRDB
 import InlineKit
 import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageActionRow
+import struct InlineProtocol.MessageEntities
+import struct InlineProtocol.MessageEntity
 import InlineMacUI
 import InlineUI
 import Logger
@@ -1224,6 +1226,20 @@ class MessageViewAppKit: NSView {
         return true
       }
 
+      var commandRange = NSRange(location: 0, length: 0)
+      if let command = attributedString.attribute(.botCommand, at: characterIndex, effectiveRange: &commandRange) as? String,
+         commandRange.length > 0
+      {
+        let commandText = command.isEmpty
+          ? (attributedString.string as NSString).substring(with: commandRange)
+          : command
+        sendBotCommand(commandText)
+        MessageGestureTrace.debug(
+          "MessageView.handleTextEntityClick messageId=\(message.messageId) action=sendBotCommand range=\(MessageGestureTrace.range(commandRange))"
+        )
+        return true
+      }
+
       if let email = attributedString.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(email, forType: .string)
@@ -1260,6 +1276,34 @@ class MessageViewAppKit: NSView {
       )
       return true
     }
+  }
+
+  private func sendBotCommand(_ command: String) {
+    Task {
+      do {
+        try await Api.realtime.send(.sendMessage(
+          text: command,
+          peerId: message.peerId,
+          chatId: message.chatId,
+          replyToMsgId: nil,
+          isSticker: nil,
+          entities: botCommandEntities(for: command)
+        ))
+      } catch {
+        ToastCenter.shared.showError("Failed to send command")
+      }
+    }
+  }
+
+  private func botCommandEntities(for command: String) -> MessageEntities {
+    var entity = MessageEntity()
+    entity.type = .botCommand
+    entity.offset = 0
+    entity.length = Int64((command as NSString).length)
+
+    var entities = MessageEntities()
+    entities.entities = [entity]
+    return entities
   }
 
   private func textEntityHit(at location: NSPoint) -> MessageTextEntityHit? {

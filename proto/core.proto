@@ -403,6 +403,7 @@ message MessageEntity {
     TYPE_PHONE_NUMBER = 10;
     TYPE_THREAD = 11;
     TYPE_THREAD_TITLE = 12;
+    TYPE_BOT_COMMAND = 13;
   }
 
   Type type = 1;

@@ -286,6 +286,20 @@ public class ProcessEntities {
 
           attributedString.addAttributes(attributes, range: range)
 
+        case .botCommand:
+          let commandText = (text as NSString).substring(with: range)
+          var attributes: [NSAttributedString.Key: Any] = [
+            .botCommand: commandText,
+            .foregroundColor: configuration.linkColor,
+            .underlineStyle: 0,
+          ]
+
+          #if os(macOS)
+          attributes[.cursor] = NSCursor.pointingHand
+          #endif
+
+          attributedString.addAttributes(attributes, range: range)
+
         case .mention:
           if case let .mention(mention) = entity.entity {
             if configuration.convertMentionsToLink {
@@ -530,6 +544,26 @@ public class ProcessEntities {
     }
 
     attributedString.enumerateAttribute(
+      .botCommand,
+      in: fullRange,
+      options: []
+    ) { value, range, _ in
+      guard value != nil,
+            range.location != NSNotFound,
+            range.length > 0
+      else { return }
+
+      let commandText = (attributedString.string as NSString).substring(with: range)
+      guard isBotCommandText(commandText) else { return }
+
+      var entity = MessageEntity()
+      entity.type = .botCommand
+      entity.offset = Int64(range.location)
+      entity.length = Int64(range.length)
+      entities.append(entity)
+    }
+
+    attributedString.enumerateAttribute(
       .emailAddress,
       in: fullRange,
       options: []
@@ -583,6 +617,10 @@ public class ProcessEntities {
       }
 
       if attributesAtLocation[.phoneNumber] != nil {
+        return
+      }
+
+      if attributesAtLocation[.botCommand] != nil {
         return
       }
 
@@ -776,6 +814,7 @@ public class ProcessEntities {
       }
     }
 
+    entities = extractBotCommandEntities(text: text, existingEntities: entities)
     entities = extractEmailEntities(text: text, existingEntities: entities)
     entities = extractPhoneNumberEntities(text: text, existingEntities: entities)
 
@@ -1098,6 +1137,93 @@ public class ProcessEntities {
     let pattern = "(?<!\\w)(\\+?[0-9(][0-9()\\-]{5,}[0-9])(?!\\w)"
     return try! NSRegularExpression(pattern: pattern, options: [])
   }()
+
+  private static func extractBotCommandEntities(
+    text: String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    guard !text.isEmpty else { return existingEntities }
+
+    var entities = existingEntities
+    let nsText = text as NSString
+    var index = 0
+
+    while index < nsText.length {
+      guard let commandRange = botCommandRange(in: nsText, at: index) else {
+        index += 1
+        continue
+      }
+
+      if !isPositionWithinCodeBlock(position: commandRange.location, entities: entities),
+         !entities.contains(where: { rangesOverlap(lhs: $0, rhs: commandRange) })
+      {
+        var entity = MessageEntity()
+        entity.type = .botCommand
+        entity.offset = Int64(commandRange.location)
+        entity.length = Int64(commandRange.length)
+        entities.append(entity)
+      }
+
+      index = max(index + 1, NSMaxRange(commandRange))
+    }
+
+    return entities
+  }
+
+  private static func isBotCommandText(_ text: String) -> Bool {
+    let nsText = text as NSString
+    guard let commandRange = botCommandRange(in: nsText, at: 0) else {
+      return false
+    }
+
+    return commandRange.location == 0 && commandRange.length == nsText.length
+  }
+
+  private static func botCommandRange(in nsText: NSString, at index: Int) -> NSRange? {
+    guard index >= 0, index < nsText.length, nsText.character(at: index) == 47 else {
+      return nil
+    }
+
+    if index > 0, !isBotCommandBoundary(nsText.character(at: index - 1)) {
+      return nil
+    }
+
+    var cursor = index + 1
+    while cursor < nsText.length, isBotCommandIdentifierCharacter(nsText.character(at: cursor)) {
+      cursor += 1
+    }
+
+    let commandLength = cursor - index - 1
+    guard commandLength >= 1, commandLength <= 32 else {
+      return nil
+    }
+
+    if cursor < nsText.length, nsText.character(at: cursor) == 64 {
+      let suffixStart = cursor
+      cursor += 1
+
+      while cursor < nsText.length, isBotCommandIdentifierCharacter(nsText.character(at: cursor)) {
+        cursor += 1
+      }
+
+      if cursor == suffixStart + 1 {
+        cursor = suffixStart
+      }
+    }
+
+    return NSRange(location: index, length: cursor - index)
+  }
+
+  private static func isBotCommandIdentifierCharacter(_ character: unichar) -> Bool {
+    (character >= 48 && character <= 57)
+      || (character >= 65 && character <= 90)
+      || (character >= 97 && character <= 122)
+      || character == 95
+  }
+
+  private static func isBotCommandBoundary(_ character: unichar) -> Bool {
+    character == 32 || character == 9 || character == 10 || character == 13
+  }
 
   private static func extractEmailEntities(
     text: String,

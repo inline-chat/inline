@@ -68,6 +68,17 @@ describe("bot entities", () => {
     expect(entities?.entities[0]?.type).toBe(MessageEntity_Type.TEXT_URL)
   })
 
+  test("parses bot command entities", () => {
+    const entities = parseBotEntities([
+      { type: "bot_command", offset: 0, length: 6 },
+    ])
+
+    expect(entities?.entities).toHaveLength(1)
+    const command = entities!.entities[0]!
+    expect(command.type).toBe(MessageEntity_Type.BOT_COMMAND)
+    expect(command.entity.oneofKind).toBeUndefined()
+  })
+
   test("encodes thread entities", () => {
     const encoded = encodeBotEntities({
       entities: [
@@ -105,6 +116,27 @@ describe("bot entities", () => {
         length: 12,
         space_id: 7,
         title: "Planning",
+      },
+    ])
+  })
+
+  test("encodes bot command entities", () => {
+    const encoded = encodeBotEntities({
+      entities: [
+        {
+          type: MessageEntity_Type.BOT_COMMAND,
+          offset: 0n,
+          length: 6n,
+          entity: { oneofKind: undefined },
+        },
+      ],
+    })
+
+    expect(encoded).toEqual([
+      {
+        type: "bot_command",
+        offset: 0,
+        length: 6,
       },
     ])
   })

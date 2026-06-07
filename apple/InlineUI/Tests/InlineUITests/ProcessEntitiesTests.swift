@@ -116,6 +116,14 @@ struct ProcessEntitiesTests {
     return entity
   }
 
+  private func createBotCommandEntity(offset: Int64, length: Int64) -> MessageEntity {
+    var entity = MessageEntity()
+    entity.type = .botCommand
+    entity.offset = offset
+    entity.length = length
+    return entity
+  }
+
   private func createMessageEntities(_ entities: [MessageEntity]) -> MessageEntities {
     var messageEntities = MessageEntities()
     messageEntities.entities = entities
@@ -209,6 +217,30 @@ struct ProcessEntitiesTests {
     let titleAttributes = result.attributes(at: threadRange.location + 2, effectiveRange: nil)
     #expect(titleAttributes[.threadLink] as? ThreadLinkTarget == .title(spaceId: 7, title: "Planning"))
     #expect(titleAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+  }
+
+  @Test("Bot command entity")
+  func testBotCommandEntity() {
+    let text = "Run /start"
+    let commandRange = rangeOfSubstring("/start", in: text)
+    let entities = createMessageEntities([
+      createBotCommandEntity(offset: Int64(commandRange.location), length: Int64(commandRange.length)),
+    ])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let attributes = result.attributes(at: commandRange.location, effectiveRange: nil)
+    #expect(attributes[.botCommand] as? String == "/start")
+    #expect(attributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(attributes[.link] == nil)
+    #if os(macOS)
+    let cursor = attributes[.cursor] as? NSCursor
+    #expect(cursor === NSCursor.pointingHand)
+    #endif
   }
 
   @Test("Bold text")
@@ -714,6 +746,73 @@ struct ProcessEntitiesTests {
     #expect(entity.offset == 6)
     #expect(entity.length == 5)
     #expect(entity.mention.userID == 123)
+  }
+
+  @Test("Extract bot command from attributed string")
+  func testExtractBotCommandFromAttributedString() {
+    let text = "Run /start"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let commandRange = rangeOfSubstring("/start", in: text)
+    attributedString.addAttributes([
+      .botCommand: "/start",
+      .foregroundColor: testConfiguration.linkColor,
+    ], range: commandRange)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    let entity = result.entities.entities.first { $0.type == .botCommand }
+
+    #expect(result.text == text)
+    #expect(entity != nil)
+    #expect(entity?.offset == Int64(commandRange.location))
+    #expect(entity?.length == Int64(commandRange.length))
+  }
+
+  @Test("Detect bot command from plain text")
+  func testDetectBotCommandFromPlainText() {
+    let text = "Run /start@jobs_bot now"
+    let attributedString = NSAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    let commandRange = rangeOfSubstring("/start@jobs_bot", in: text)
+    let entity = result.entities.entities.first { $0.type == .botCommand }
+
+    #expect(entity != nil)
+    #expect(entity?.offset == Int64(commandRange.location))
+    #expect(entity?.length == Int64(commandRange.length))
+  }
+
+  @Test("Do not detect bot command mid-word")
+  func testRejectBotCommandMidWord() {
+    let text = "abc/start"
+    let attributedString = NSAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    #expect(result.entities.entities.contains { $0.type == .botCommand } == false)
+  }
+
+  @Test("Do not detect bot command inside inline code")
+  func testRejectBotCommandInsideInlineCode() {
+    let text = "Use `/start` today"
+    let attributedString = NSAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "Use /start today")
+    #expect(result.entities.entities.contains { $0.type == .code })
+    #expect(result.entities.entities.contains { $0.type == .botCommand } == false)
   }
 
   @Test("Skip markdown parsing when disabled")

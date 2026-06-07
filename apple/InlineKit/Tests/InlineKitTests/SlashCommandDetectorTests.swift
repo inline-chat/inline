@@ -99,4 +99,19 @@ struct SlashCommandDetectorTests {
     #expect(result.newAttributedText.string == "/help ")
     #expect(result.newCursorPosition == 6)
   }
+
+  @Test("replace marks inserted command as bot command")
+  func replaceMarksInsertedCommand() {
+    let detector = SlashCommandDetector()
+    let original = NSAttributedString(string: "/he")
+
+    let result = detector.replaceSlashCommand(
+      in: original,
+      range: NSRange(location: 0, length: 3),
+      with: "/help"
+    )
+
+    #expect(result.newAttributedText.attribute(.botCommand, at: 0, effectiveRange: nil) as? String == "/help")
+    #expect(result.newAttributedText.attribute(.botCommand, at: 5, effectiveRange: nil) == nil)
+  }
 }

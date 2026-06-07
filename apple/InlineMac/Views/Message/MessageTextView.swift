@@ -247,6 +247,7 @@ class MessageTextView: NSTextView {
     let keys: [NSAttributedString.Key] = [
       .mentionUserId,
       .threadLink,
+      .botCommand,
       .emailAddress,
       .phoneNumber,
       .link,

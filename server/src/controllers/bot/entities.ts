@@ -144,6 +144,8 @@ const parseEntityType = (value: unknown): MessageEntity_Type => {
       return MessageEntity_Type.PRE
     case "phone_number":
       return MessageEntity_Type.PHONE_NUMBER
+    case "bot_command":
+      return MessageEntity_Type.BOT_COMMAND
     case "thread":
       rejectNonCanonicalThreadType()
       return MessageEntity_Type.THREAD
@@ -183,6 +185,8 @@ const typeToString = (type: MessageEntity_Type): BotMessageEntityOutput["type"] 
       return "pre"
     case MessageEntity_Type.PHONE_NUMBER:
       return "phone_number"
+    case MessageEntity_Type.BOT_COMMAND:
+      return "bot_command"
     case MessageEntity_Type.THREAD:
       return "thread"
     case MessageEntity_Type.THREAD_TITLE:

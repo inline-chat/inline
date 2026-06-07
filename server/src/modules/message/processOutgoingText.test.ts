@@ -248,4 +248,65 @@ describe("processOutgoingText", () => {
     expect(result.entities?.entities).toHaveLength(1)
     expect(result.entities?.entities[0]?.type).toBe(MessageEntity_Type.MENTION)
   })
+
+  test("parses bot commands from outgoing text", async () => {
+    const result = await processOutgoingText({
+      text: "/start please",
+      entities: undefined,
+    })
+
+    expect(result.entities?.entities).toHaveLength(1)
+    const command = result.entities!.entities[0]!
+    expect(command.type).toBe(MessageEntity_Type.BOT_COMMAND)
+    expect(command.offset).toBe(0n)
+    expect(command.length).toBe(6n)
+    expect(command.entity.oneofKind).toBeUndefined()
+  })
+
+  test("parses bot commands after whitespace with bot username suffix", async () => {
+    const result = await processOutgoingText({
+      text: "run /deploy@buildbot now",
+      entities: undefined,
+    })
+
+    expect(result.entities?.entities).toHaveLength(1)
+    const command = result.entities!.entities[0]!
+    expect(command.type).toBe(MessageEntity_Type.BOT_COMMAND)
+    expect(command.offset).toBe(4n)
+    expect(command.length).toBe(BigInt("/deploy@buildbot".length))
+  })
+
+  test("does not parse bot commands mid-word", async () => {
+    const result = await processOutgoingText({
+      text: "abc/start",
+      entities: undefined,
+    })
+
+    expect(result.entities).toBeUndefined()
+  })
+
+  test("keeps bot command offsets in utf16 coordinates", async () => {
+    const result = await processOutgoingText({
+      text: "😀 /start",
+      entities: undefined,
+    })
+
+    expect(result.entities?.entities).toHaveLength(1)
+    const command = result.entities!.entities[0]!
+    expect(command.type).toBe(MessageEntity_Type.BOT_COMMAND)
+    expect(command.offset).toBe(3n)
+    expect(command.length).toBe(6n)
+  })
+
+  test("does not parse bot commands covered by markdown code entities", async () => {
+    const result = await processOutgoingText({
+      text: "Use `/start` today",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("Use /start today")
+    expect(result.entities?.entities).toHaveLength(1)
+    expect(result.entities?.entities[0]?.type).toBe(MessageEntity_Type.CODE)
+  })
 })

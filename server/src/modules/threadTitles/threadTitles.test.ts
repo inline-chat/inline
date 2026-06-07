@@ -69,6 +69,12 @@ describe("thread title generation", () => {
           length: BigInt("https://inline.chat".length),
           entity: { oneofKind: undefined },
         },
+        {
+          type: MessageEntity_Type.BOT_COMMAND,
+          offset: 27n,
+          length: 6n,
+          entity: { oneofKind: undefined },
+        },
       ],
     }
 
@@ -76,7 +82,7 @@ describe("thread title generation", () => {
       getThreadTitleSourceText({
         chat: emptyThread,
         message: textMessage,
-        text: onlyEntityText,
+        text: `${onlyEntityText} /start`,
         entities,
         currentUserId: 1,
       }),

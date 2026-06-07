@@ -206,6 +206,7 @@ public class AttributedStringHelpers {
 public extension NSAttributedString.Key {
   static let mentionUserId = NSAttributedString.Key("mentionUserId")
   static let threadLink = NSAttributedString.Key("threadLink")
+  static let botCommand = NSAttributedString.Key("botCommand")
   static let emailAddress = NSAttributedString.Key("emailAddress")
   static let phoneNumber = NSAttributedString.Key("phoneNumber")
   static let inlineCode = NSAttributedString.Key("inlineCode")

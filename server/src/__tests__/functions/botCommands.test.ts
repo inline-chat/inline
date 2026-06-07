@@ -7,6 +7,8 @@ import { getPeerBotCommands } from "../../functions/bot.getPeerCommands"
 import { setBotCommands } from "../../functions/bot.setCommands"
 import { ChatModel } from "../../db/models/chats"
 import { db, schema } from "../../db"
+import { createSubthread } from "../../functions/messages.createSubthread"
+import { eq } from "drizzle-orm"
 
 describe("bot commands", () => {
   setupTestLifecycle()
@@ -178,5 +180,57 @@ describe("bot commands", () => {
     expect(result.bots).toHaveLength(1)
     expect(result.bots[0]?.bot?.username).toBe("publicthreadbot")
     expect(result.bots[0]?.commands.map((command) => command.command)).toEqual(["threadreply"])
+  })
+
+  test("getPeerBotCommands inherits parent bot commands in reply threads", async () => {
+    const created = await createBot({ name: "Reply Thread Bot", username: "replythreadbot" }, creatorContext)
+    const botUserId = Number(created.bot?.id ?? 0n)
+    await setBotCommands(
+      {
+        botUserId: BigInt(botUserId),
+        commands: [{ command: "resolve", description: "Resolve the reply thread" }],
+      },
+      creatorContext,
+    )
+
+    const parentChat = await testUtils.createChat(null, "Private Command Parent", "thread", false, creator.id)
+    if (!parentChat) {
+      throw new Error("Expected parent chat")
+    }
+
+    await testUtils.addParticipant(parentChat.id, creator.id)
+    await testUtils.addParticipant(parentChat.id, botUserId)
+
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: creator.id,
+      text: "anchor",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, parentChat.id))
+
+    const child = await createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+        parentMessageId: 1n,
+      },
+      creatorContext,
+    )
+
+    const result = await getPeerBotCommands(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: child.chat.id },
+          },
+        },
+      },
+      creatorContext,
+    )
+
+    expect(result.bots).toHaveLength(1)
+    expect(result.bots[0]?.bot?.username).toBe("replythreadbot")
+    expect(result.bots[0]?.commands.map((command) => command.command)).toEqual(["resolve"])
   })
 })

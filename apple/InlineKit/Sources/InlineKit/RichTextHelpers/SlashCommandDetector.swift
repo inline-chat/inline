@@ -83,6 +83,15 @@ public final class SlashCommandDetector {
     let mutable = NSMutableAttributedString(attributedString: attributedText)
     mutable.replaceCharacters(in: range, with: replacement)
 
+    let commandLength = (commandText as NSString).length
+    if commandLength > 0 {
+      mutable.addAttribute(
+        .botCommand,
+        value: commandText,
+        range: NSRange(location: range.location, length: commandLength)
+      )
+    }
+
     let newCursorPosition = range.location + replacement.utf16.count
     return (mutable.copy() as! NSAttributedString, newCursorPosition)
   }
