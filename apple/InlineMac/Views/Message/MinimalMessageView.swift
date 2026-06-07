@@ -427,7 +427,8 @@ class MinimalMessageViewAppKit: NSView {
     let view = MessageAttachmentsView(
       attachments: fullMessage.attachments,
       message: message,
-      usesOutgoingBubbleStyle: false
+      usesOutgoingBubbleStyle: false,
+      itemPlans: props.layout.attachmentItems
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -1486,6 +1487,66 @@ class MinimalMessageViewAppKit: NSView {
     )
   }
 
+  private func applyAttachmentsLayout(_ attachments: MessageSizeCalculator.LayoutPlan) {
+    guard let attachmentsView else { return }
+
+    attachmentsView.apply(itemPlans: props.layout.attachmentItems)
+
+    if attachmentsViewTopConstraint == nil ||
+      attachmentsViewLeadingConstraint == nil ||
+      attachmentsViewWidthConstraint == nil ||
+      attachmentsViewHeightConstraint == nil
+    {
+      clearAttachmentsViewConstraints()
+
+      attachmentsViewTopConstraint = attachmentsView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: props.layout.attachmentsContentViewTop
+      )
+      attachmentsViewLeadingConstraint = attachmentsView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor,
+        constant: attachments.spacing.left
+      )
+      attachmentsViewWidthConstraint = attachmentsView.widthAnchor.constraint(equalToConstant: attachments.size.width)
+      attachmentsViewHeightConstraint = attachmentsView.heightAnchor.constraint(equalToConstant: attachments.size.height)
+
+      NSLayoutConstraint.activate([
+        attachmentsViewTopConstraint,
+        attachmentsViewLeadingConstraint,
+        attachmentsViewWidthConstraint,
+        attachmentsViewHeightConstraint,
+      ].compactMap(\.self))
+      return
+    }
+
+    if attachmentsViewTopConstraint?.constant != props.layout.attachmentsContentViewTop {
+      attachmentsViewTopConstraint?.constant = props.layout.attachmentsContentViewTop
+    }
+    if attachmentsViewLeadingConstraint?.constant != attachments.spacing.left {
+      attachmentsViewLeadingConstraint?.constant = attachments.spacing.left
+    }
+    if attachmentsViewWidthConstraint?.constant != attachments.size.width {
+      attachmentsViewWidthConstraint?.constant = attachments.size.width
+    }
+    if attachmentsViewHeightConstraint?.constant != attachments.size.height {
+      attachmentsViewHeightConstraint?.constant = attachments.size.height
+    }
+  }
+
+  private func clearAttachmentsViewConstraints() {
+    NSLayoutConstraint.deactivate([
+      attachmentsViewTopConstraint,
+      attachmentsViewLeadingConstraint,
+      attachmentsViewWidthConstraint,
+      attachmentsViewHeightConstraint,
+    ].compactMap(\.self))
+
+    attachmentsViewTopConstraint = nil
+    attachmentsViewLeadingConstraint = nil
+    attachmentsViewWidthConstraint = nil
+    attachmentsViewHeightConstraint = nil
+  }
+
   private func clearMessageActionRowsConstraints() {
     NSLayoutConstraint.deactivate([
       messageActionRowsWidthConstraint,
@@ -2149,6 +2210,9 @@ class MinimalMessageViewAppKit: NSView {
   private var documentViewHeightConstraint: NSLayoutConstraint?
 
   private var attachmentsViewTopConstraint: NSLayoutConstraint?
+  private var attachmentsViewLeadingConstraint: NSLayoutConstraint?
+  private var attachmentsViewWidthConstraint: NSLayoutConstraint?
+  private var attachmentsViewHeightConstraint: NSLayoutConstraint?
   private var messageActionRowsWidthConstraint: NSLayoutConstraint?
   private var messageActionRowsHeightConstraint: NSLayoutConstraint?
   private var messageActionRowsTopConstraint: NSLayoutConstraint?
@@ -2216,27 +2280,9 @@ class MinimalMessageViewAppKit: NSView {
 
     // Setup/update attachments view constraints
     if let attachments = props.layout.attachments {
-      if let attachmentsViewTopConstraint {
-        if attachmentsViewTopConstraint.constant != props.layout.attachmentsContentViewTop {
-          attachmentsViewTopConstraint.constant = props.layout.attachmentsContentViewTop
-        }
-      } else if let attachmentsView {
-        attachmentsViewTopConstraint = attachmentsView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: props.layout.attachmentsContentViewTop
-        )
-        NSLayoutConstraint.activate([
-          attachmentsViewTopConstraint!,
-          attachmentsView.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: attachments.spacing.left
-          ),
-          attachmentsView.trailingAnchor.constraint(
-            equalTo: contentView.trailingAnchor,
-            constant: -attachments.spacing.right
-          ),
-        ])
-      }
+      applyAttachmentsLayout(attachments)
+    } else {
+      clearAttachmentsViewConstraints()
     }
 
     if let actionsRows = props.layout.actionsRows, let messageActionRowsView {
@@ -3464,14 +3510,15 @@ class MinimalMessageViewAppKit: NSView {
           message: fullMessage.message,
           usesOutgoingBubbleStyle: false
         )
+        attachmentsView.apply(itemPlans: props.layout.attachmentItems)
       } else {
         attachmentsView = createAttachmentsView()
         contentView.addSubview(attachmentsView!)
       }
     } else {
+      clearAttachmentsViewConstraints()
       attachmentsView?.removeFromSuperview()
       attachmentsView = nil
-      attachmentsViewTopConstraint = nil
     }
 
     // Update time and state

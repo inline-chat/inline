@@ -17,9 +17,6 @@ class MessageSizeCalculator {
     case minimal
   }
 
-  private let textStorage: NSTextStorage
-  private let layoutManager: NSLayoutManager
-  private let textContainer: NSTextContainer
   private let cache = NSCache<NSString, NSValue>()
   private let textHeightCache = NSCache<NSString, NSValue>()
   private let minTextWidthForSingleLine = NSCache<NSString, NSValue>()
@@ -31,6 +28,11 @@ class MessageSizeCalculator {
   private let emptyFallback = " "
 
   private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
+  private let messageTextMeasurer = TextMeasurer(
+    font: MessageTextConfiguration.font,
+    extraWidth: MessageSizeCalculator.extraSafeWidth,
+    extraHeight: 1
+  )
   private var heightForSingleLine: CGFloat?
 
   static let safeAreaWidth: CGFloat = Theme.messageRowSafeAreaInset
@@ -39,12 +41,12 @@ class MessageSizeCalculator {
   static let maxMessageWidth: CGFloat = Theme.messageMaxWidth
   static let minimalMaxMessageWidth: CGFloat = 700
   static let minimalAvatarSize: CGFloat = 30
-  static let minimalMediaMaxWidth: CGFloat = 400
+  static let minimalMediaMaxWidth: CGFloat = 350
   static let minimalMediaMaxHeight: CGFloat = 300
   static let stickerMaxSide: CGFloat = 120
   static let minimalStickerMaxSide: CGFloat = stickerMaxSide
   static let minimalDocumentMaxWidth: CGFloat = 420
-  static let minimalAttachmentsMaxWidth: CGFloat = 560
+  static let minimalAttachmentsMaxWidth: CGFloat = 350
   static let minimalGroupSpacing: CGFloat = 8
   static let minimalAfterDaySeparatorGroupSpacing: CGFloat = 2
   static let minimalHoverSideInset: CGFloat = 18
@@ -74,9 +76,6 @@ class MessageSizeCalculator {
   static let bubbleMessageActionRowHeight: CGFloat = 28
   static let minimalMessageActionRowHeight: CGFloat = 24
   static let replyThreadSummaryHeight: CGFloat = ReplyThreadSummaryView.height(hasTitle: false)
-  // Core Text typographic settings
-  private let typographicSettings: [NSAttributedString.Key: Any]
-
   private func hasBubbleColor(
     style: RenderStyle,
     emojiMessage: Bool,
@@ -151,30 +150,22 @@ class MessageSizeCalculator {
     }
   }
 
-  init() {
-    textStorage = NSTextStorage()
-    layoutManager = NSLayoutManager()
-    textContainer = NSTextContainer()
+  private func attachmentGroupWidth(parentAvailableWidth: CGFloat, style: RenderStyle) -> CGFloat {
+    let maxWidth = switch style {
+    case .bubble:
+      Theme.attachmentViewWidth
+    case .minimal:
+      Self.minimalAttachmentsMaxWidth
+    }
+    return min(parentAvailableWidth, maxWidth)
+  }
 
-    textStorage.addLayoutManager(layoutManager)
-    layoutManager.addTextContainer(textContainer)
-    MessageTextConfiguration.configureTextContainer(textContainer)
+  init() {
     // TODO: Use message id or a fast hash for the keys instead of text
     cache.countLimit = 5_000
     textHeightCache.countLimit = 10_000
     minTextWidthForSingleLine.countLimit = 5_000
     lastHeightForRow.countLimit = 1_000
-
-    // Initialize typographic settings for Core Text
-    typographicSettings = [
-      .font: MessageTextConfiguration.font,
-      // Add any other text attributes needed for consistent rendering
-      .paragraphStyle: {
-        let style = NSMutableParagraphStyle()
-        style.lineBreakMode = .byWordWrapping
-        return style
-      }(),
-    ]
 
     prepareForUse()
   }
@@ -262,6 +253,7 @@ class MessageSizeCalculator {
 
   struct LayoutPlan: Equatable, Codable, Hashable {
     var size: NSSize
+    var urlPreview: URLPreviewAttachmentLayout.Plan? = nil
 
     /// outer spacings
     var spacing: NSEdgeInsets
@@ -826,9 +818,10 @@ class MessageSizeCalculator {
     // Calculate attachments width first if we have attachments
     var attachmentsWidth: CGFloat?
     if hasAttachments {
-      // Attachments have minimum width but can expand up to parent available width
-      // Start with the minimum attachment width, but don't exceed parent available width
-      attachmentsWidth = min(parentAvailableWidth, Theme.attachmentViewWidth)
+      attachmentsWidth = attachmentGroupWidth(
+        parentAvailableWidth: parentAvailableWidth,
+        style: .bubble
+      )
     }
 
     // What's the available width for the text
@@ -1132,10 +1125,9 @@ class MessageSizeCalculator {
           attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
           attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
         } else if attachment.urlPreview != nil {
-          let height = attachment.urlPreview?.isVideoPreview == true
-            ? Theme.urlPreviewLargeHeight
-            : Theme.urlPreviewCompactHeight
-          attachmentPlan.size = NSSize(width: attachmentsWidth, height: height)
+          let urlPreviewPlan = URLPreviewAttachmentLayout.plan(for: attachment, width: attachmentsWidth)
+          attachmentPlan.size = urlPreviewPlan.size
+          attachmentPlan.urlPreview = urlPreviewPlan
           attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
         }
 
@@ -1584,7 +1576,10 @@ class MessageSizeCalculator {
     }
 
     if hasAttachments {
-      attachmentsWidth = min(parentAvailableWidth, Self.minimalAttachmentsMaxWidth)
+      attachmentsWidth = attachmentGroupWidth(
+        parentAvailableWidth: parentAvailableWidth,
+        style: .minimal
+      )
     }
 
     let cacheKey_ = cacheKey(for: message, width: textAvailableWidth, props: props)
@@ -1757,10 +1752,9 @@ class MessageSizeCalculator {
           attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
           attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
         } else if attachment.urlPreview != nil {
-          let height = attachment.urlPreview?.isVideoPreview == true
-            ? Theme.urlPreviewLargeHeight
-            : Theme.urlPreviewCompactHeight
-          attachmentPlan.size = NSSize(width: attachmentsWidth, height: height)
+          let urlPreviewPlan = URLPreviewAttachmentLayout.plan(for: attachment, width: attachmentsWidth)
+          attachmentPlan.size = urlPreviewPlan.size
+          attachmentPlan.urlPreview = urlPreviewPlan
           attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
         }
 
@@ -2069,41 +2063,20 @@ class MessageSizeCalculator {
   private func calculateSizeForAttributedString(
     _ attributedString: NSAttributedString,
     width: CGFloat,
-    message: FullMessage? = nil
+    message _: FullMessage? = nil
   ) -> NSSize {
-    // Create a frame setter with our attributed string
-    let frameSetter = CTFramesetterCreateWithAttributedString(attributedString)
-
-    // Calculate the frame size that would fit the text with the given constraints
-    let constraintSize = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-    let frameSize = CTFramesetterSuggestFrameSizeWithConstraints(
-      frameSetter,
-      CFRange(location: 0, length: attributedString.length),
-      nil,
-      constraintSize,
-      nil
-    )
-
-    // Add a small amount of padding to account for any rounding errors
-    let textWidth = ceil(frameSize.width) + Self.extraSafeWidth
-    let textHeight = ceil(frameSize.height) + additionalTextHeight
+    let size = messageTextMeasurer.measure(attributedString, width: width)
 
     #if DEBUG
-    log.trace("calculateSizeForText \(attributedString.string) width \(width) resulting in size \(frameSize)")
+    log.trace("calculateSizeForText \(attributedString.string) width \(width) resulting in size \(size)")
     #endif
 
-    return CGSize(width: textWidth, height: textHeight)
+    return size
   }
 
   /// This is purely used for single height text measurements so it's safe to not use the actual font here.
   private func calculateSizeForText(_ text: String, width: CGFloat) -> NSSize {
-    // Create attributed string
-    let attributedString = NSAttributedString(
-      string: text,
-      attributes: typographicSettings
-    )
-
-    return calculateSizeForAttributedString(attributedString, width: width, message: nil)
+    messageTextMeasurer.measure(text, width: width)
   }
 
   /// Fixes a bug with the text view height calculation for Chinese text that don't show last line.

@@ -4,6 +4,11 @@ import InlineKit
 import Logger
 
 class MessageAttachmentsView: NSStackView {
+  private struct ItemConstraints {
+    var width: NSLayoutConstraint
+    var height: NSLayoutConstraint
+  }
+
   // MARK: - Properties
 
   /// Message
@@ -15,10 +20,16 @@ class MessageAttachmentsView: NSStackView {
 
   /// Track attachment views by id
   var attachmentViews: [Int64: AttachmentView] = [:]
+  private var itemConstraints: [Int64: ItemConstraints] = [:]
 
   // MARK: - Lifecycle
 
-  init(attachments: [FullAttachment], message: Message, usesOutgoingBubbleStyle: Bool) {
+  init(
+    attachments: [FullAttachment],
+    message: Message,
+    usesOutgoingBubbleStyle: Bool,
+    itemPlans: [MessageSizeCalculator.LayoutPlan] = []
+  ) {
     self.message = message
     self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
     // Initialize attachments as empty array, we'll add attachments later in configure()
@@ -30,6 +41,7 @@ class MessageAttachmentsView: NSStackView {
 
     // Initial configuration
     configure(attachments: attachments)
+    apply(itemPlans: itemPlans)
   }
 
   @available(*, unavailable)
@@ -115,6 +127,42 @@ class MessageAttachmentsView: NSStackView {
     attachmentViews[attachment.id] = attachmentView
   }
 
+  func apply(itemPlans: [MessageSizeCalculator.LayoutPlan]) {
+    for (index, attachment) in attachments.enumerated() {
+      guard index < itemPlans.count,
+            let view = attachmentViews[attachment.id]
+      else {
+        continue
+      }
+
+      let itemPlan = itemPlans[index]
+      apply(size: itemPlan.size, to: view, id: attachment.id)
+
+      if let urlPreviewView = view as? URLPreviewAttachmentView,
+         let urlPreviewPlan = itemPlan.urlPreview
+      {
+        urlPreviewView.apply(layout: urlPreviewPlan)
+      }
+    }
+  }
+
+  private func apply(size: NSSize, to view: AttachmentView, id: Int64) {
+    if let constraints = itemConstraints[id] {
+      if constraints.width.constant != size.width {
+        constraints.width.constant = size.width
+      }
+      if constraints.height.constant != size.height {
+        constraints.height.constant = size.height
+      }
+      return
+    }
+
+    let width = view.widthAnchor.constraint(equalToConstant: size.width)
+    let height = view.heightAnchor.constraint(equalToConstant: size.height)
+    NSLayoutConstraint.activate([width, height])
+    itemConstraints[id] = ItemConstraints(width: width, height: height)
+  }
+
   private func updateExistingViews(with next: [FullAttachment], message: Message) -> Bool {
     guard next.count == attachments.count else { return false }
 
@@ -148,6 +196,10 @@ class MessageAttachmentsView: NSStackView {
   }
 
   private func attachmentsViewCleanup() {
+    let constraints = itemConstraints.values.flatMap { [$0.width, $0.height] }
+    NSLayoutConstraint.deactivate(constraints)
+    itemConstraints.removeAll()
+
     for view in arrangedSubviews {
       removeArrangedSubview(view)
       view.removeFromSuperview()
