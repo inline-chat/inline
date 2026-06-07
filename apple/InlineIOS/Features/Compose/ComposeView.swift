@@ -113,8 +113,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var peerId: InlineKit.Peer? {
     didSet {
       updateEmbedState(animated: false)
+      updatePlaceholderText()
     }
   }
+  private var peerUser: InlineKit.User?
   var chatId: Int64? {
     didSet {
       updateEmbedState(animated: false)
@@ -219,6 +221,29 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     stopDraftSaveTimer()
     resetMentionManager()
     super.removeFromSuperview()
+  }
+
+  func setPeerUser(_ user: InlineKit.User?) {
+    guard peerUser != user else { return }
+    peerUser = user
+    updatePlaceholderText()
+  }
+
+  private var placeholderText: String {
+    guard let peerUser,
+          peerId?.asUserId() == peerUser.id,
+          !peerUser.isCurrentUser(),
+          let firstName = peerUser.firstName?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !firstName.isEmpty
+    else {
+      return "Message"
+    }
+
+    return "Message \(firstName)"
+  }
+
+  private func updatePlaceholderText() {
+    textView.placeholderText = placeholderText
   }
 
   func resetMentionManager() {

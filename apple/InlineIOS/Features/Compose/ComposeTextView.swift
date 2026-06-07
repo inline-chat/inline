@@ -13,6 +13,14 @@ class ComposeTextView: UITextView {
   private var recentlySentImageHashes = Set<Int>()
   private let processingLock = NSLock()
 
+  var placeholderText: String = "Message" {
+    didSet {
+      guard placeholderText != oldValue else { return }
+      placeholderLabel?.text = placeholderText
+      placeholderLabel?.invalidateIntrinsicContentSize()
+    }
+  }
+
   init(composeView: ComposeView) {
     self.composeView = composeView
     super.init(frame: .zero, textContainer: nil)
@@ -43,7 +51,7 @@ class ComposeTextView: UITextView {
 
   private func setupPlaceholder() {
     let label = UILabel()
-    label.text = "Message"
+    label.text = placeholderText
     label.font = .systemFont(ofSize: 17)
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false

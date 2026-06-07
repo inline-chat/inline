@@ -6,6 +6,7 @@ public class ChatContainerView: UIView {
   let peerId: Peer
   let chatId: Int64?
   let spaceId: Int64
+  private var peerUser: User?
 
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
 
@@ -41,6 +42,7 @@ public class ChatContainerView: UIView {
     view.peerId = peerId
     view.chatId = chatId
     view.spaceId = spaceId
+    view.setPeerUser(peerUser)
     return view
   }()
 
@@ -104,10 +106,11 @@ public class ChatContainerView: UIView {
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
-  init(peerId: Peer, chatId: Int64?, spaceId: Int64) {
+  init(peerId: Peer, chatId: Int64?, spaceId: Int64, peerUser: User?) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
+    self.peerUser = peerUser
 
     super.init(frame: .zero)
     setupViews()
@@ -123,6 +126,12 @@ public class ChatContainerView: UIView {
   override public func didMoveToWindow() {
     super.didMoveToWindow()
     attachEdgePanHandlerIfNeeded()
+  }
+
+  func setPeerUser(_ user: User?) {
+    guard peerUser != user else { return }
+    peerUser = user
+    composeView.setPeerUser(user)
   }
 
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
@@ -490,7 +499,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
   func makeUIView(context _: Context) -> ChatContainerView {
-    let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId)
+    let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId, peerUser: fullChatViewModel.peerUser)
 
     if let draftMessage = fullChatViewModel.chatItem?.dialog.draftMessage {
       view.composeView.loadDraft(from: draftMessage)
@@ -502,5 +511,7 @@ struct ChatViewUIKit: UIViewRepresentable {
     return view
   }
 
-  func updateUIView(_: ChatContainerView, context _: Context) {}
+  func updateUIView(_ view: ChatContainerView, context _: Context) {
+    view.setPeerUser(fullChatViewModel.peerUser)
+  }
 }
