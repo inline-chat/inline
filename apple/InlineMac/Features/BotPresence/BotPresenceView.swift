@@ -7,7 +7,7 @@ import SwiftUI
 
 enum BotPresenceLayout {
   static let windowSize = NSSize(width: 220, height: 192)
-  static let avatarSize = CGSize(width: 108, height: 116)
+  static let avatarSize = CGSize(width: 76, height: 81)
   static let bubbleMaxWidth: CGFloat = 184
   static let bubbleBottomSpacing: CGFloat = avatarSize.height + 2
   static let commentVisibleDuration: Duration = .seconds(8)
