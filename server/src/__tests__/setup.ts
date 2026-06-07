@@ -1,7 +1,8 @@
 import { closeDb, db, initDb, schema } from "../db"
 import { migrateDb } from "../../scripts/helpers/migrate-db"
 import postgres from "postgres"
-import { beforeEach, afterEach, beforeAll, afterAll } from "bun:test"
+import { randomUUID } from "node:crypto"
+import { beforeEach, beforeAll, afterAll } from "bun:test"
 import { sql, eq } from "drizzle-orm"
 import { chats, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption"
@@ -15,11 +16,12 @@ import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 // Test database configuration
 const BASE_TEST_DB_NAME = "test_db"
 
-// Bun can execute test files concurrently within the same process. The existing per-file
-// beforeAll/afterAll setup/teardown is not concurrency-safe (it can drop/close the DB while
-// other files are still running), which surfaces as postgres.js CONNECTION_ENDED errors.
+// Bun can execute test files concurrently in isolated module graphs within the same process.
+// Those graphs do not reliably share globalThis, so a process-pid-only DB name can collide and
+// one file's teardown can drop another file's DB. Use one DB per setup module instance; the
+// ref-count still handles repeated setup calls inside that instance.
 //
-// We keep one test DB per process and reference-count all test files that call setup/teardown.
+// We keep one test DB per shared setup state and reference-count all tests that call setup/teardown.
 type GlobalTestDbState = {
   refCount: number
   setupPromise?: Promise<void>
@@ -36,10 +38,15 @@ const getGlobalTestDbState = (): GlobalTestDbState => {
   if (!globalAny[key]) {
     globalAny[key] = {
       refCount: 0,
-      testDbName: `${BASE_TEST_DB_NAME}_${process.pid}`,
+      testDbName: createTestDbName(),
     } satisfies GlobalTestDbState
   }
   return globalAny[key] as GlobalTestDbState
+}
+
+const createTestDbName = () => {
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 12)
+  return `${BASE_TEST_DB_NAME}_${process.pid}_${suffix}`
 }
 
 // Test context type
@@ -209,9 +216,6 @@ export const teardownTestDatabase = async () => {
 export const cleanDatabase = async () => {
   try {
     AccessGuardsCache.resetAll()
-    // Get all tables from the schema
-    const tables = Object.values(schema).filter((table) => typeof table === "object" && "name" in table) as any[]
-
     // Use raw SQL to truncate all tables in the correct order
     // This ensures foreign key constraints are respected
     await db.execute(sql`

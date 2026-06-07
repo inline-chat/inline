@@ -7,7 +7,7 @@
     "dev": "NODE_ENV=development bun --watch src/index.ts",
     "build": "NODE_ENV=production bun scripts/build.ts",
     "start": "NODE_ENV=production bun dist/index.js",
-    "test": "NODE_ENV=test bun test",
+    "test": "NODE_ENV=test bun test --timeout=30000",
     "typecheck": "tsc --build",
     "db:migrate": "bun scripts/migrate.ts",
     "db:dangerously-reset-db": "bun scripts/reset-db.ts",
