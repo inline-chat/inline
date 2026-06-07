@@ -46,6 +46,7 @@ class MinimalMessageViewAppKit: NSView {
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
   private var didResolveMessageSpaceId = false
+  private var isResolvingMessageSpaceId = false
   private var resolvedMessageSpaceId: Int64?
   private var from: User {
     fullMessage.from ?? User.deletedInstance
@@ -72,18 +73,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func isMessagePinned() -> Bool {
-    do {
-      let database = dependencies?.database ?? AppDatabase.shared
-      return try database.reader.read { db in
-        try PinnedMessage
-          .filter(Column("chatId") == message.chatId)
-          .filter(Column("messageId") == message.messageId)
-          .fetchCount(db) > 0
-      }
-    } catch {
-      log.error("Failed to read pinned message state", error: error)
-      return message.pinned == true
-    }
+    message.pinned == true
   }
 
   private var isDM: Bool {
@@ -3198,19 +3188,38 @@ class MinimalMessageViewAppKit: NSView {
     if didResolveMessageSpaceId {
       return resolvedMessageSpaceId
     }
-    do {
-      let database = dependencies?.database ?? AppDatabase.shared
-      guard let chat = try database.reader.read({ db in
-        try Chat.fetchOne(db, id: message.chatId)
-      }) else {
-        return nil
+    loadMessageSpaceIdIfNeeded()
+    return nil
+  }
+
+  private func loadMessageSpaceIdIfNeeded() {
+    guard message.peerId.isThread, !didResolveMessageSpaceId, !isResolvingMessageSpaceId else {
+      return
+    }
+
+    isResolvingMessageSpaceId = true
+    let database = dependencies?.database ?? AppDatabase.shared
+    let chatId = message.chatId
+    Task { [weak self] in
+      do {
+        let spaceId = try await database.reader.read { db in
+          try Chat.fetchOne(db, id: chatId)?.spaceId
+        }
+        await MainActor.run {
+          guard let self else { return }
+          guard self.message.chatId == chatId else { return }
+          self.resolvedMessageSpaceId = spaceId
+          self.didResolveMessageSpaceId = true
+          self.isResolvingMessageSpaceId = false
+        }
+      } catch {
+        Log.shared.error("Failed to resolve message chat space", error: error)
+        await MainActor.run {
+          guard let self else { return }
+          guard self.message.chatId == chatId else { return }
+          self.isResolvingMessageSpaceId = false
+        }
       }
-      resolvedMessageSpaceId = chat.spaceId
-      didResolveMessageSpaceId = true
-      return resolvedMessageSpaceId
-    } catch {
-      log.error("Failed to resolve message chat space", error: error)
-      return nil
     }
   }
 
@@ -3431,6 +3440,7 @@ class MinimalMessageViewAppKit: NSView {
     self.fullMessage = fullMessage
     if prev.message.chatId != fullMessage.message.chatId {
       didResolveMessageSpaceId = false
+      isResolvingMessageSpaceId = false
       resolvedMessageSpaceId = nil
     }
     syncForwardHeaderView(for: props)
