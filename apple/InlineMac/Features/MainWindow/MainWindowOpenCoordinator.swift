@@ -23,6 +23,7 @@ final class MainWindowOpenCoordinator {
     let openCommandBar: @MainActor () -> Void
     let toggleCommandBar: @MainActor () -> Void
     let toggleSidebar: @MainActor () -> Void
+    let createNewThread: @MainActor () -> Void
     let goBack: @MainActor () -> Void
     let goForward: @MainActor () -> Void
     let canGoBack: @MainActor () -> Bool
@@ -54,6 +55,7 @@ final class MainWindowOpenCoordinator {
     openCommandBar: @escaping @MainActor () -> Void,
     toggleCommandBar: @escaping @MainActor () -> Void,
     toggleSidebar: @escaping @MainActor () -> Void,
+    createNewThread: @escaping @MainActor () -> Void,
     goBack: @escaping @MainActor () -> Void,
     goForward: @escaping @MainActor () -> Void,
     canGoBack: @escaping @MainActor () -> Bool,
@@ -71,6 +73,7 @@ final class MainWindowOpenCoordinator {
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,
       toggleSidebar: toggleSidebar,
+      createNewThread: createNewThread,
       goBack: goBack,
       goForward: goForward,
       canGoBack: canGoBack,
@@ -143,6 +146,30 @@ final class MainWindowOpenCoordinator {
   func openTab(_ destination: MainWindowDestination) {
     pendingDestination = destination
     openTab()
+  }
+
+  @discardableResult
+  func createNewThread() -> Bool {
+    if let entry = activeEntry() {
+      focus(entry)
+      entry.createNewThread()
+      return true
+    }
+
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      openMainWindow?()
+
+      for _ in 0 ..< 5 {
+        await Task.yield()
+        guard let entry = activeEntry() else { continue }
+        focus(entry)
+        entry.createNewThread()
+        return
+      }
+    }
+
+    return false
   }
 
   func openTab() {

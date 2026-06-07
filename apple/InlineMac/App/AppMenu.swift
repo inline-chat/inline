@@ -170,11 +170,21 @@ final class AppMenu: NSObject {
     fileMenuItem.submenu = fileMenu
     mainMenu.addItem(fileMenuItem)
 
+    let newThreadItem = NSMenuItem(
+      title: "New Thread",
+      action: #selector(newThread(_:)),
+      keyEquivalent: "n"
+    )
+    newThreadItem.target = self
+    newThreadItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: nil)
+    fileMenu.addItem(newThreadItem)
+
     let newWindowItem = NSMenuItem(
       title: "New Window",
       action: #selector(newWindow(_:)),
       keyEquivalent: "n"
     )
+    newWindowItem.keyEquivalentModifierMask = [.command, .shift]
     newWindowItem.target = self
     newWindowItem.image = NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
     fileMenu.addItem(newWindowItem)
@@ -621,6 +631,10 @@ final class AppMenu: NSObject {
     (NSApp.delegate as? AppDelegate)?.openNewMainWindow(sender)
   }
 
+  @MainActor @objc private func newThread(_ sender: Any?) {
+    MainWindowOpenCoordinator.shared.createNewThread()
+  }
+
   @MainActor @objc private func newTab(_ sender: Any?) {
     MainWindowOpenCoordinator.shared.openTab()
   }
@@ -875,6 +889,10 @@ extension AppMenu: NSMenuItemValidation {
       }
       let nav = dependencies.nav
       return nav.selectedTab == .inbox || nav.selectedTab == .archive
+    }
+
+    if menuItem.action == #selector(newThread(_:)) {
+      return dependencies.auth.currentUserId != nil && dependencies.viewModel.topLevelRoute == .main
     }
 
     if menuItem.action == #selector(goBack(_:)) {

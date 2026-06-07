@@ -63,6 +63,11 @@ struct MainWindowRootView: View {
       nav3.toggleCommandBar()
     } toggleSidebar: {
       toggleSidebar()
+    } createNewThread: {
+      guard let dependencies = windowDependencies,
+            dependencies.viewModel.topLevelRoute == .main
+      else { return }
+      NewThreadAction.start(dependencies: dependencies, spaceId: nav3.selectedSpaceId)
     } goBack: {
       nav3.goBack()
     } goForward: {
