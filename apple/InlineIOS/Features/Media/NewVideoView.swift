@@ -625,7 +625,10 @@ final class NewVideoView: UIView {
     FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] result in
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
-        if case .failure = result {
+        switch result {
+        case let .success(localURL):
+          self.resolvedVideoLocalPath = localURL.lastPathComponent
+        case .failure:
           self.clearDownloadProgressBinding(resetState: true)
           self.updateDurationLabel()
           self.updateOverlay()
@@ -800,14 +803,6 @@ final class NewVideoView: UIView {
   private func videoLocalUrl() -> URL? {
     if let localPath = fullMessage.videoInfo?.video.localPath ?? resolvedVideoLocalPath {
       return FileCache.getUrl(for: .videos, localPath: localPath)
-    }
-
-    guard let videoId = fullMessage.videoInfo?.video.id else { return nil }
-    if let latestLocalPath = try? AppDatabase.shared.reader.read({ db in
-      try Video.filter(Video.Columns.id == videoId).fetchOne(db)?.localPath
-    }) {
-      resolvedVideoLocalPath = latestLocalPath
-      return FileCache.getUrl(for: .videos, localPath: latestLocalPath)
     }
     return nil
   }
