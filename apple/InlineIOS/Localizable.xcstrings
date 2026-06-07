@@ -91,6 +91,9 @@
         }
       }
     },
+    "%lld seconds remaining" : {
+
+    },
     "+1 555 555 5555" : {
       "comment" : "Phone number placeholder",
       "extractionState" : "stale",
@@ -286,7 +289,19 @@
         }
       }
     },
+    "Clear all chats in this space" : {
+
+    },
     "Clear Cache" : {
+
+    },
+    "Clear History" : {
+
+    },
+    "Clear history for everyone?" : {
+
+    },
+    "Clear History..." : {
 
     },
     "Clear Shared Data" : {
@@ -471,6 +486,9 @@
     "Debug" : {
 
     },
+    "Delete reply threads" : {
+
+    },
     "Delete Space" : {
       "localizations" : {
         "fa" : {
@@ -488,6 +506,9 @@
       }
     },
     "Direct updates applied" : {
+
+    },
+    "Disable notification sound" : {
 
     },
     "Disconnect" : {
@@ -564,9 +585,6 @@
     },
     "Enter the 8-character invite code." : {
       "comment" : "Invite code validation error"
-    },
-    "You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist." : {
-      "comment" : "Invite code signup requirement description"
     },
     "Enter the code" : {
       "comment" : "Code input title",
@@ -703,6 +721,9 @@
           }
         }
       }
+    },
+    "Keep last %lld days" : {
+
     },
     "Key" : {
       "extractionState" : "stale",
@@ -857,6 +878,9 @@
     "Open links in app" : {
 
     },
+    "Open parent chat %@" : {
+
+    },
     "Options" : {
 
     },
@@ -919,6 +943,9 @@
 
     },
     "Public" : {
+
+    },
+    "Range" : {
 
     },
     "Refresh" : {
@@ -1177,6 +1204,9 @@
           }
         }
       }
+    },
+    "You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist." : {
+      "comment" : "Invite code signup requirement description"
     },
     "Your archived chats will appear here" : {
 
