@@ -379,6 +379,7 @@ final class NewVideoView: NSView {
   private var uploadProgressLocalId: Int64?
   private var uploadProgressSnapshot: UploadProgressSnapshot?
   private var downloadProgressSnapshot: DownloadProgress?
+  private var resolvedVideoLocalPath: String?
   private var suppressNextClick = false
   private enum ActiveTransfer {
     case uploading(videoLocalId: Int64, transactionId: String?, randomId: Int64?)
@@ -414,6 +415,7 @@ final class NewVideoView: NSView {
   init(_ fullMessage: FullMessage, scrollState: MessageListScrollState, roundsAllCorners: Bool = false) {
     self.fullMessage = fullMessage
     self.roundsAllCorners = roundsAllCorners
+    resolvedVideoLocalPath = fullMessage.videoInfo?.video.localPath
     isScrolling = scrollState.isScrolling
     super.init(frame: .zero)
     updateCornerRadii()
@@ -430,6 +432,11 @@ final class NewVideoView: NSView {
   func update(with fullMessage: FullMessage) {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
+    if prev.videoInfo?.id != fullMessage.videoInfo?.id {
+      resolvedVideoLocalPath = fullMessage.videoInfo?.video.localPath
+    } else if let localPath = fullMessage.videoInfo?.video.localPath {
+      resolvedVideoLocalPath = localPath
+    }
     updateCornerRadii()
     updateMasks()
     updateTinyThumbnailBackground()
@@ -657,16 +664,8 @@ final class NewVideoView: NSView {
   }
 
   fileprivate func videoLocalUrl() -> URL? {
-    if let localPath = fullMessage.videoInfo?.video.localPath {
+    if let localPath = fullMessage.videoInfo?.video.localPath ?? resolvedVideoLocalPath {
       return FileCache.getUrl(for: .videos, localPath: localPath)
-    }
-
-    // Fallback to latest DB value (in case download finished while this view was off-screen)
-    guard let videoId = fullMessage.videoInfo?.video.id else { return nil }
-    if let latestLocalPath = try? AppDatabase.shared.reader.read({ db in
-      try Video.filter(Video.Columns.id == videoId).fetchOne(db)?.localPath
-    }) {
-      return FileCache.getUrl(for: .videos, localPath: latestLocalPath)
     }
 
     return nil
@@ -1421,11 +1420,23 @@ extension NewVideoView {
     updateOverlay()
     FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] result in
       // Capture any local file presence before hopping to main to avoid type resolution issues.
-      let localUrl = self?.videoLocalUrl()
+      let localUrl: URL?
+      let localPath: String?
+      switch result {
+      case let .success(url):
+        localUrl = url
+        localPath = url.lastPathComponent
+      case .failure:
+        localUrl = self?.videoLocalUrl()
+        localPath = localUrl?.lastPathComponent
+      }
       let localExists = localUrl.flatMap { FileManager.default.fileExists(atPath: $0.path) } ?? false
 
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
+        if let localPath {
+          self.resolvedVideoLocalPath = localPath
+        }
 
         // If the file appeared locally while the download callback queued, prefer it to avoid double triggers.
         if localExists, let local = localUrl {
@@ -1447,7 +1458,7 @@ extension NewVideoView {
   }
 
   @objc func saveVideo() {
-    guard let videoInfo = fullMessage.videoInfo else { return }
+    guard fullMessage.videoInfo != nil else { return }
     guard let window else { return }
 
     let savePanel = NSSavePanel()
