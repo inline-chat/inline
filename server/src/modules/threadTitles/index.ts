@@ -24,6 +24,7 @@ const excludedEntityTypes = new Set<MessageEntity_Type>([
   MessageEntity_Type.PHONE_NUMBER,
   MessageEntity_Type.CODE,
   MessageEntity_Type.PRE,
+  MessageEntity_Type.BOT_COMMAND,
 ])
 
 const titleSchema = z.object({

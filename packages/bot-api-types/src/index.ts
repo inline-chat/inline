@@ -27,6 +27,7 @@ export type BotMessageEntityType =
   | "phone_number"
   | "thread"
   | "thread_title"
+  | "bot_command"
 
 export type BotTargetInput = {
   chat_id?: BotInputId

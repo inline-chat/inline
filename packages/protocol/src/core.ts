@@ -1145,7 +1145,11 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_THREAD_TITLE = 12;
      */
-    THREAD_TITLE = 12
+    THREAD_TITLE = 12,
+    /**
+     * @generated from protobuf enum value: TYPE_BOT_COMMAND = 13;
+     */
+    BOT_COMMAND = 13
 }
 /**
  * @generated from protobuf message MessageReactions

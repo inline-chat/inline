@@ -21,6 +21,11 @@ type MentionCandidate = {
   username: string
 }
 
+type BotCommandCandidate = {
+  offset: number
+  length: number
+}
+
 type InlineMentionLink = {
   entity: MessageEntity
   userId?: number
@@ -46,6 +51,56 @@ const isMentionChar = (char: string): boolean => {
     (code >= 97 && code <= 122) ||
     code === 95
   )
+}
+
+const isBotCommandBoundary = (char: string | undefined): boolean => {
+  return char === undefined || /\s/.test(char)
+}
+
+const extractBotCommandCandidates = (text: string): BotCommandCandidate[] => {
+  const candidates: BotCommandCandidate[] = []
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "/") {
+      continue
+    }
+
+    if (!isBotCommandBoundary(text[i - 1])) {
+      continue
+    }
+
+    let end = i + 1
+    while (end < text.length && isMentionChar(text[end]!)) {
+      end += 1
+    }
+
+    const commandLength = end - i - 1
+    if (commandLength < 1 || commandLength > 32) {
+      continue
+    }
+
+    if (text[end] === "@") {
+      const suffixStart = end
+      end += 1
+
+      while (end < text.length && isMentionChar(text[end]!)) {
+        end += 1
+      }
+
+      if (end === suffixStart + 1) {
+        end = suffixStart
+      }
+    }
+
+    candidates.push({
+      offset: i,
+      length: end - i,
+    })
+
+    i = end - 1
+  }
+
+  return candidates
 }
 
 const extractMentionCandidates = (text: string): MentionCandidate[] => {
@@ -105,6 +160,20 @@ const isRangeOverlappingClientEntity = (
   return clientEntityRanges.some((clientRange) => {
     return range.start < clientRange.end && clientRange.start < range.end
   })
+}
+
+const sortEntities = (entities: MessageEntity[]): MessageEntity[] => {
+  entities.sort((a, b) => {
+    if (a.offset === b.offset) {
+      if (a.length === b.length) {
+        return 0
+      }
+      return a.length < b.length ? -1 : 1
+    }
+    return a.offset < b.offset ? -1 : 1
+  })
+
+  return entities
 }
 
 const parsePositiveSafeInt = (value: string | null): number | null => {
@@ -389,6 +458,47 @@ const resolveInlineThreadLinks = (
   }
 }
 
+const parseMissingBotCommandEntities = ({
+  text,
+  entities,
+}: {
+  text: string | undefined
+  entities: MessageEntities | undefined
+}): MessageEntities | undefined => {
+  if (!text || !text.includes("/")) {
+    return entities
+  }
+
+  const commandCandidates = extractBotCommandCandidates(text)
+  if (commandCandidates.length === 0) {
+    return entities
+  }
+
+  const clientEntityRanges = getClientEntityRanges(entities)
+  const parsedCommandEntities = commandCandidates
+    .filter((candidate) => {
+      return !isRangeOverlappingClientEntity(
+        { start: candidate.offset, end: candidate.offset + candidate.length },
+        clientEntityRanges,
+      )
+    })
+    .map<MessageEntity>((candidate) => ({
+      type: MessageEntity_Type.BOT_COMMAND,
+      offset: BigInt(candidate.offset),
+      length: BigInt(candidate.length),
+      entity: { oneofKind: undefined },
+    }))
+
+  if (parsedCommandEntities.length === 0) {
+    return entities
+  }
+
+  const existingEntities = (entities?.entities ?? []).filter((entity): entity is MessageEntity => entity !== undefined)
+  return {
+    entities: sortEntities([...existingEntities, ...parsedCommandEntities]),
+  }
+}
+
 const parseMissingMentionEntitiesByUsername = async ({
   text,
   entities,
@@ -467,19 +577,9 @@ const parseMissingMentionEntitiesByUsername = async ({
   }
 
   const existingEntities = (entities?.entities ?? []).filter((entity): entity is MessageEntity => entity !== undefined)
-  const combinedEntities = [...existingEntities, ...parsedMentionEntities]
-  combinedEntities.sort((a, b) => {
-    if (a.offset === b.offset) {
-      if (a.length === b.length) {
-        return 0
-      }
-      return a.length < b.length ? -1 : 1
-    }
-    return a.offset < b.offset ? -1 : 1
-  })
 
   return {
-    entities: combinedEntities,
+    entities: sortEntities([...existingEntities, ...parsedMentionEntities]),
   }
 }
 
@@ -497,6 +597,10 @@ export const processOutgoingText = async (
 
   entities = await resolveInlineMentionLinks(entities)
   entities = resolveInlineThreadLinks(text, entities)
+  entities = parseMissingBotCommandEntities({
+    text,
+    entities,
+  })
   entities = await parseMissingMentionEntitiesByUsername({
     text,
     entities,

@@ -2123,6 +2123,7 @@ public struct MessageEntity: Sendable {
     case phoneNumber // = 10
     case thread // = 11
     case threadTitle // = 12
+    case botCommand // = 13
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -2144,6 +2145,7 @@ public struct MessageEntity: Sendable {
       case 10: self = .phoneNumber
       case 11: self = .thread
       case 12: self = .threadTitle
+      case 13: self = .botCommand
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -2163,6 +2165,7 @@ public struct MessageEntity: Sendable {
       case .phoneNumber: return 10
       case .thread: return 11
       case .threadTitle: return 12
+      case .botCommand: return 13
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -2182,6 +2185,7 @@ public struct MessageEntity: Sendable {
       .phoneNumber,
       .thread,
       .threadTitle,
+      .botCommand,
     ]
 
   }
@@ -12265,6 +12269,7 @@ extension MessageEntity.TypeEnum: SwiftProtobuf._ProtoNameProviding {
     10: .same(proto: "TYPE_PHONE_NUMBER"),
     11: .same(proto: "TYPE_THREAD"),
     12: .same(proto: "TYPE_THREAD_TITLE"),
+    13: .same(proto: "TYPE_BOT_COMMAND"),
   ]
 }
 
