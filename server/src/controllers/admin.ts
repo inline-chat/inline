@@ -739,7 +739,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         return { ok: false, error: "setup_required" }
       }
 
-      const [appMetrics, errorStats, waitlistCountRow] = await Promise.all([
+      const [appMetrics, errorStats, waitlistCountRow, recentActivity] = await Promise.all([
         getAppMetrics(),
         Promise.resolve(getErrorStats()),
         db
@@ -747,6 +747,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
             count: sql<number>`count(*)::int`,
           })
           .from(waitlist),
+        getRecentOverviewActivity(request),
       ])
 
       return {
@@ -764,6 +765,10 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
             last5m: errorStats.last5m,
           },
           waitlistCount: waitlistCountRow[0]?.count ?? 0,
+          newUsersLastDay: recentActivity.newUsersLastDay,
+          newWaitlistLastDay: recentActivity.newWaitlistLastDay,
+          recentUsersLastDay: recentActivity.recentUsers,
+          recentWaitlistLastDay: recentActivity.recentWaitlist,
         },
       }
     },
@@ -909,9 +914,11 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
 
       const search = query.query?.trim()
       const pattern = search ? `%${search}%` : null
+      const userIdSearch = parseUserIdSearch(search)
 
-      const whereClause = pattern
+      const whereClause = search
         ? or(
+            ...(userIdSearch ? [eq(users.id, userIdSearch)] : []),
             sql`${users.email} ILIKE ${pattern}`,
             sql`${users.firstName} ILIKE ${pattern}`,
             sql`${users.lastName} ILIKE ${pattern}`,
@@ -929,11 +936,14 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
               emailVerified: users.emailVerified,
               username: users.username,
               phoneNumber: users.phoneNumber,
+              phoneVerified: users.phoneVerified,
               online: users.online,
               lastOnline: users.lastOnline,
               createdAt: users.date,
               deleted: users.deleted,
               bot: users.bot,
+              pendingSetup: users.pendingSetup,
+              timeZone: users.timeZone,
               photoFileId: users.photoFileId,
             })
             .from(users)
@@ -947,11 +957,14 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
               emailVerified: users.emailVerified,
               username: users.username,
               phoneNumber: users.phoneNumber,
+              phoneVerified: users.phoneVerified,
               online: users.online,
               lastOnline: users.lastOnline,
               createdAt: users.date,
               deleted: users.deleted,
               bot: users.bot,
+              pendingSetup: users.pendingSetup,
+              timeZone: users.timeZone,
               photoFileId: users.photoFileId,
             })
             .from(users)
@@ -1062,25 +1075,98 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         return { ok: false, error: "not_found" }
       }
 
-      const userSessions = await db
-        .select({
-          id: sessions.id,
-          clientType: sessions.clientType,
-          clientVersion: sessions.clientVersion,
-          osVersion: sessions.osVersion,
-          lastActive: sessions.lastActive,
-          active: sessions.active,
-          deviceId: sessions.deviceId,
-          date: sessions.date,
-          revoked: sessions.revoked,
-          personalDataEncrypted: sessions.personalDataEncrypted,
-          personalDataIv: sessions.personalDataIv,
-          personalDataTag: sessions.personalDataTag,
-        })
-        .from(sessions)
-        .where(eq(sessions.userId, userId))
-        .orderBy(desc(sessions.lastActive))
-        .limit(50)
+      const [
+        userSessions,
+        userMemberships,
+        membershipCountRow,
+        messageCountRow,
+        recentMessageCountRow,
+        threadCountRow,
+        recentThreadCountRow,
+        sessionCountRow,
+        activeSessionCountRow,
+      ] = await Promise.all([
+        db
+          .select({
+            id: sessions.id,
+            clientType: sessions.clientType,
+            clientVersion: sessions.clientVersion,
+            osVersion: sessions.osVersion,
+            lastActive: sessions.lastActive,
+            active: sessions.active,
+            deviceId: sessions.deviceId,
+            date: sessions.date,
+            revoked: sessions.revoked,
+            personalDataEncrypted: sessions.personalDataEncrypted,
+            personalDataIv: sessions.personalDataIv,
+            personalDataTag: sessions.personalDataTag,
+          })
+          .from(sessions)
+          .where(eq(sessions.userId, userId))
+          .orderBy(desc(sessions.lastActive))
+          .limit(50),
+        db
+          .select({
+            id: members.id,
+            role: members.role,
+            canAccessPublicChats: members.canAccessPublicChats,
+            invitedBy: members.invitedBy,
+            joinedAt: members.date,
+            spaceId: spaces.id,
+            spaceName: spaces.name,
+            spaceHandle: spaces.handle,
+            spaceIsPublic: spaces.isPublic,
+            spaceCreatedAt: spaces.date,
+            spaceDeleted: spaces.deleted,
+          })
+          .from(members)
+          .innerJoin(spaces, eq(members.spaceId, spaces.id))
+          .where(eq(members.userId, userId))
+          .orderBy(desc(members.date))
+          .limit(100),
+        db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(members)
+          .where(eq(members.userId, userId)),
+        db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(messages)
+          .where(eq(messages.fromId, userId)),
+        db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(messages)
+          .where(and(eq(messages.fromId, userId), gte(messages.date, getLast7DaysStart()))),
+        db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(chats)
+          .where(and(eq(chats.type, "thread"), eq(chats.createdBy, userId))),
+        db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(chats)
+          .where(and(eq(chats.type, "thread"), eq(chats.createdBy, userId), gte(chats.date, getLast7DaysStart()))),
+        db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(sessions)
+          .where(eq(sessions.userId, userId)),
+        db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(sessions)
+          .where(and(eq(sessions.userId, userId), eq(sessions.active, true), isNull(sessions.revoked))),
+      ])
 
       const connections = connectionManager.getUserConnectionSummary(userId)
 
@@ -1093,8 +1179,45 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
           firstName: user.firstName,
           lastName: user.lastName,
           emailVerified: user.emailVerified,
+          phoneNumber: user.phoneNumber,
+          phoneVerified: user.phoneVerified,
+          username: user.username,
+          online: user.online,
+          lastOnline: user.lastOnline ? user.lastOnline.toISOString() : null,
+          createdAt: user.date ? user.date.toISOString() : null,
+          deleted: user.deleted,
+          bot: user.bot,
+          botCreatorId: user.botCreatorId,
+          pendingSetup: user.pendingSetup,
+          timeZone: user.timeZone,
+          lastUpdateDate: user.lastUpdateDate ? user.lastUpdateDate.toISOString() : null,
+          updateSeq: user.updateSeq,
           avatarUrl: user.photoFileId ? `${origin}/admin/users/${user.id}/avatar` : null,
         },
+        stats: {
+          messages: messageCountRow[0]?.count ?? 0,
+          messagesLast7d: recentMessageCountRow[0]?.count ?? 0,
+          threadsCreated: threadCountRow[0]?.count ?? 0,
+          threadsCreatedLast7d: recentThreadCountRow[0]?.count ?? 0,
+          memberships: membershipCountRow[0]?.count ?? 0,
+          sessions: sessionCountRow[0]?.count ?? 0,
+          activeSessions: activeSessionCountRow[0]?.count ?? 0,
+        },
+        memberships: userMemberships.map((membership) => ({
+          id: membership.id,
+          role: membership.role,
+          canAccessPublicChats: Boolean(membership.canAccessPublicChats),
+          invitedBy: membership.invitedBy,
+          joinedAt: membership.joinedAt ? membership.joinedAt.toISOString() : null,
+          space: {
+            id: membership.spaceId,
+            name: membership.spaceName,
+            handle: membership.spaceHandle,
+            isPublic: membership.spaceIsPublic,
+            createdAt: membership.spaceCreatedAt ? membership.spaceCreatedAt.toISOString() : null,
+            deletedAt: membership.spaceDeleted ? membership.spaceDeleted.toISOString() : null,
+          },
+        })),
         sessions: userSessions.map((sessionRow) => ({
           id: sessionRow.id,
           clientType: sessionRow.clientType,
@@ -1756,6 +1879,24 @@ const getStartOfUtcDay = (date: Date) => {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
 }
 
+const getStartOfUtcWeek = (date: Date) => {
+  const day = date.getUTCDay()
+  const daysSinceMonday = (day + 6) % 7
+  const start = getStartOfUtcDay(date)
+  start.setUTCDate(start.getUTCDate() - daysSinceMonday)
+  return start
+}
+
+const getLast7DaysStart = () => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+const parseUserIdSearch = (search: string | undefined) => {
+  const match = search?.match(/^(?:(?:user(?:id)?|id)[:#\s-]*)?(\d+)$/i)
+  if (!match) return null
+
+  const value = Number(match[1])
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
 // Use the DB clock to compute the UTC day window. This avoids issues where the
 // app process timezone/clock differs across deploys/instances and subtly shifts
 // "today" boundaries when passing JS Dates as SQL params.
@@ -1775,6 +1916,130 @@ const countConnectedUsersToday = async () => {
     .where(gte(sessions.lastActive, start))
 
   return rows[0]?.count ?? 0
+}
+
+const getRecentOverviewActivity = async (request: Request) => {
+  const lastDay = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  const baseUserWhere = and(
+    gte(users.date, lastDay),
+    or(isNull(users.deleted), eq(users.deleted, false)),
+    or(isNull(users.bot), eq(users.bot, false)),
+  )
+
+  const [newUsersRow, newWaitlistRow, recentUsers, recentWaitlist] = await Promise.all([
+    db
+      .select({
+        count: sql<number>`count(*)::int`,
+      })
+      .from(users)
+      .where(baseUserWhere),
+    db
+      .select({
+        count: sql<number>`count(*)::int`,
+      })
+      .from(waitlist)
+      .where(gte(waitlist.date, lastDay)),
+    db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        username: users.username,
+        createdAt: users.date,
+        pendingSetup: users.pendingSetup,
+        photoFileId: users.photoFileId,
+      })
+      .from(users)
+      .where(baseUserWhere)
+      .orderBy(desc(users.date))
+      .limit(8),
+    db
+      .select({
+        id: waitlist.id,
+        email: waitlist.email,
+        name: waitlist.name,
+        verified: waitlist.verified,
+        date: waitlist.date,
+      })
+      .from(waitlist)
+      .where(gte(waitlist.date, lastDay))
+      .orderBy(desc(waitlist.date))
+      .limit(8),
+  ])
+
+  const origin = ADMIN_PUBLIC_API_ORIGIN ?? new URL(request.url).origin
+
+  return {
+    newUsersLastDay: newUsersRow[0]?.count ?? 0,
+    newWaitlistLastDay: newWaitlistRow[0]?.count ?? 0,
+    recentUsers: recentUsers.map((user) => ({
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      createdAt: user.createdAt ? user.createdAt.toISOString() : null,
+      pendingSetup: user.pendingSetup,
+      avatarUrl: user.photoFileId ? `${origin}/admin/users/${user.id}/avatar` : null,
+    })),
+    recentWaitlist: recentWaitlist.map((entry) => ({
+      id: entry.id,
+      email: entry.email,
+      name: entry.name,
+      verified: entry.verified,
+      date: entry.date ? entry.date.toISOString() : null,
+    })),
+  }
+}
+
+const getWeeklyActivity = async (baseUserWhere: ReturnType<typeof and>) => {
+  const currentWeekStart = getStartOfUtcWeek(new Date())
+  const firstWeekStart = new Date(currentWeekStart)
+  firstWeekStart.setUTCDate(firstWeekStart.getUTCDate() - 7 * 7)
+  const nextWeekStart = new Date(currentWeekStart)
+  nextWeekStart.setUTCDate(nextWeekStart.getUTCDate() + 7)
+
+  const messageWeek = sql<string>`to_char(date_trunc('week', timezone('utc', ${messages.date})), 'YYYY-MM-DD')`
+  const threadWeek = sql<string>`to_char(date_trunc('week', timezone('utc', ${chats.date})), 'YYYY-MM-DD')`
+
+  const [messageRows, threadRows] = await Promise.all([
+    db
+      .select({
+        week: messageWeek,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .innerJoin(users, eq(messages.fromId, users.id))
+      .where(and(gte(messages.date, firstWeekStart), lt(messages.date, nextWeekStart), baseUserWhere))
+      .groupBy(sql`date_trunc('week', timezone('utc', ${messages.date}))`),
+    db
+      .select({
+        week: threadWeek,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(chats)
+      .where(and(eq(chats.type, "thread"), gte(chats.date, firstWeekStart), lt(chats.date, nextWeekStart)))
+      .groupBy(sql`date_trunc('week', timezone('utc', ${chats.date}))`),
+  ])
+
+  const messagesByWeek = new Map(messageRows.map((row) => [row.week, row.count]))
+  const threadsByWeek = new Map(threadRows.map((row) => [row.week, row.count]))
+
+  return Array.from({ length: 8 }, (_, index) => {
+    const start = new Date(firstWeekStart)
+    start.setUTCDate(start.getUTCDate() + index * 7)
+    const end = new Date(start)
+    end.setUTCDate(end.getUTCDate() + 7)
+    const key = start.toISOString().slice(0, 10)
+
+    return {
+      weekStart: start.toISOString(),
+      weekEnd: end.toISOString(),
+      messages: messagesByWeek.get(key) ?? 0,
+      threads: threadsByWeek.get(key) ?? 0,
+    }
+  })
 }
 
 const getAppMetrics = async () => {
@@ -1852,6 +2117,8 @@ const getAppMetrics = async () => {
     .from(users)
     .where(and(baseUserWhere, eq(users.online, true)))
 
+  const weeklyActivity = await getWeeklyActivity(baseUserWhere)
+
   return {
     dau: dauRow?.count ?? 0,
     wau,
@@ -1864,5 +2131,6 @@ const getAppMetrics = async () => {
       verifiedUsers: verifiedUsersRow?.count ?? 0,
       onlineUsers: onlineUsersRow?.count ?? 0,
     },
+    weeklyActivity,
   }
 }
