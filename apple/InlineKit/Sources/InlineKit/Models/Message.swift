@@ -194,6 +194,14 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.chat)
   }
 
+  public static let replyThread = hasOne(
+    Chat.self,
+    using: ForeignKey(["parentChatId", "parentMessageId"], to: ["chatId", "messageId"])
+  )
+  public var replyThread: QueryInterfaceRequest<Chat> {
+    request(for: Message.replyThread)
+  }
+
   public static let file = belongsTo(File.self)
   public var file: QueryInterfaceRequest<File> {
     request(for: Message.file)

@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import InlineProtocol
 import Testing
 
@@ -6,6 +7,12 @@ import Testing
 
 @Suite("Message Reply Thread Summary")
 struct MessageReplyThreadSummaryTests {
+  private func makeInMemoryDB() throws -> DatabaseQueue {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    return queue
+  }
+
   @Test("protocol replies are persisted in content payload and exposed via helpers")
   func protocolRepliesPersistedAndReadable() {
     var proto = InlineProtocol.Message()
@@ -85,5 +92,60 @@ struct MessageReplyThreadSummaryTests {
     #expect(msg.replyThreadSummary != nil)
     #expect(msg.hasReplyThreadSummary == false)
     #expect(msg.replyThreadPeer == .thread(id: 88))
+  }
+
+  @Test("full message preloads reply thread chat metadata")
+  func fullMessagePreloadsReplyThreadChatMetadata() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try User(id: 1, email: "sender@example.com", firstName: "Sender", lastName: nil, username: "sender")
+        .insert(db)
+
+      try Chat(
+        id: 44,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Parent",
+        spaceId: nil
+      ).insert(db)
+
+      var message = Message(
+        messageId: 101,
+        fromId: 1,
+        date: Date(timeIntervalSince1970: 2),
+        text: "hello",
+        peerUserId: nil,
+        peerThreadId: 44,
+        chatId: 44,
+        contentPayload: .with {
+          $0.replies = .with {
+            $0.chatID = 77
+            $0.replyCount = 2
+          }
+        }
+      )
+      try message.saveMessage(db)
+
+      try Chat(
+        id: 77,
+        date: Date(timeIntervalSince1970: 3),
+        type: .thread,
+        title: "Design replies",
+        spaceId: nil,
+        isUntitled: false,
+        parentChatId: 44,
+        parentMessageId: 101
+      ).insert(db)
+
+      let fullMessage = try #require(try FullMessage.queryRequest()
+        .filter(Column("chatId") == 44)
+        .filter(Column("messageId") == 101)
+        .fetchOne(db))
+
+      #expect(fullMessage.replyThread?.id == 77)
+      #expect(fullMessage.replyThreadCustomTitle == "Design replies")
+      #expect(fullMessage.message.hasReplyThreadSummary == true)
+    }
   }
 }

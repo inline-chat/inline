@@ -70,6 +70,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var forwardFromPeerUserInfo: UserInfo?
   public var forwardFromChatInfo: Chat?
   public var message: Message
+  public var replyThread: Chat?
   public var reactions: [FullReaction]
   public var repliedToMessage: EmbeddedMessage?
   public var attachments: [FullAttachment]
@@ -110,6 +111,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     forwardFromPeerUserInfo: UserInfo? = nil,
     forwardFromChatInfo: Chat? = nil,
     message: Message,
+    replyThread: Chat? = nil,
     reactions: [FullReaction],
     repliedToMessage: EmbeddedMessage?,
     attachments: [FullAttachment],
@@ -120,6 +122,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     self.forwardFromPeerUserInfo = forwardFromPeerUserInfo
     self.forwardFromChatInfo = forwardFromChatInfo
     self.message = message
+    self.replyThread = replyThread
     self.reactions = reactions
     self.repliedToMessage = repliedToMessage
     self.attachments = attachments
@@ -141,6 +144,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     forwardFromUserInfo = nil
     forwardFromPeerUserInfo = nil
     forwardFromChatInfo = nil
+    replyThread = nil
     translations = embeddedMessage.translations
     photoInfo = embeddedMessage.photoInfo
     videoInfo = embeddedMessage.videoInfo
@@ -159,6 +163,19 @@ public extension FullMessage {
       case .sending, .failed:
         return false
     }
+  }
+}
+
+public extension FullMessage {
+  var replyThreadCustomTitle: String? {
+    guard replyThread?.isUntitled != true,
+          let title = replyThread?.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+          title.isEmpty == false
+    else {
+      return nil
+    }
+
+    return title
   }
 }
 
@@ -216,6 +233,7 @@ public extension FullMessage {
         Message.forwardFromPeerThread
           .forKey(CodingKeys.forwardFromChatInfo)
       )
+      .including(optional: Message.replyThread.forKey(CodingKeys.replyThread))
       .including(optional: Message.file)
       .including(
         all: Message.reactions

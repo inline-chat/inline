@@ -1268,11 +1268,51 @@ class MessageListAppKit: NSViewController {
   }
 
   func applyInitialData() {
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MacMessagesInitialReload",
+      category: .messages,
+      "messages=\(messages.count)"
+    )
+    defer {
+      span.end(
+        "messages=\(messages.count) rows=\(tableView.numberOfRows) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: startedAt))"
+      )
+    }
     rebuildRowItems()
     tableView.reloadData()
   }
 
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
+    let updateLabel = update.traceLabel
+    let beforeRows = tableView.numberOfRows
+    let beforeMessages = messages.count
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "MacMessagesApplyUpdate",
+      category: .messages,
+      "type=\(updateLabel) rows=\(beforeRows) messages=\(beforeMessages)"
+    )
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end(
+        "type=\(updateLabel) rows_before=\(beforeRows) rows_after=\(tableView.numberOfRows) messages_before=\(beforeMessages) messages_after=\(messages.count) duration_ms=\(durationMs)"
+      )
+      PerformanceTrace.slowBreadcrumb(
+        "slow mac messages apply update",
+        category: "messages.mac",
+        durationMs: durationMs,
+        thresholdMs: 120,
+        data: [
+          "type": updateLabel,
+          "rows_before": beforeRows,
+          "rows_after": tableView.numberOfRows,
+          "messages_before": beforeMessages,
+          "messages_after": messages.count,
+        ]
+      )
+    }
+
     isPerformingUpdate = true
 
     // using "atBottom" here might add jitter if user is scrolling slightly up and then we move it down quickly
@@ -1722,16 +1762,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func replyThreadTitle(for message: FullMessage?) -> String? {
-    guard let chatId = message?.message.replyThreadSummary?.chatID, chatId > 0 else { return nil }
-
-    do {
-      return try dependencies.database.reader.read { db in
-        try ReplyThreadTitleFallback.customTitle(chatId: chatId, db: db)
-      }
-    } catch {
-      log.error("Failed to read reply thread title", error: error)
-      return nil
-    }
+    message?.replyThreadCustomTitle
   }
 
   private func calculateSize(
@@ -2536,5 +2567,20 @@ extension MessageListAppKit {
     removeFromParent()
 
     log.trace("MessageListAppKit disposed: \(self)")
+  }
+}
+
+private extension MessagesProgressiveViewModel.MessagesChangeSet {
+  var traceLabel: String {
+    switch self {
+      case .added:
+        "added"
+      case .updated:
+        "updated"
+      case .deleted:
+        "deleted"
+      case .reload:
+        "reload"
+    }
   }
 }

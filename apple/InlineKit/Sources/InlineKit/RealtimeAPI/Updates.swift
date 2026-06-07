@@ -1116,6 +1116,9 @@ extension InlineProtocol.UpdateChatInfo {
       if var chat = try Chat.fetchOne(db, id: chatID) {
         if hasTitle {
           chat.title = title
+          chat.isUntitled = hasUntitled && untitled ? true : nil
+        } else if hasUntitled {
+          chat.isUntitled = untitled ? true : nil
         }
         if hasEmoji {
           chat.emoji = emoji.isEmpty ? nil : emoji
