@@ -49,29 +49,34 @@ enum BotPresenceRenderAnimation: Equatable {
 
 @MainActor
 final class BotPresenceSurfaceModel: ObservableObject {
+  private static let dragAnimationInactivityDuration: Duration = .milliseconds(700)
+  private static let clickJumpDuration: Duration = .milliseconds(1_100)
+
   @Published private(set) var avatar: InlineProtocol.BotAvatar
   @Published private(set) var state: InlineProtocol.BotPresenceState
   @Published private(set) var visibleComment: String?
   @Published private(set) var localAnimation: BotPresenceLocalAnimation?
 
-  private var onClick: (@MainActor () -> Void)?
+  private var onIdle: (@MainActor () -> Void)?
   private var onClose: (@MainActor () -> Void)?
   private var onJump: (@MainActor () -> Void)?
   private var onDragEnd: (@MainActor () -> Void)?
+  private var stateGeneration = 0
   private var commentHideTask: Task<Void, Never>?
   private var localAnimationTask: Task<Void, Never>?
+  private var idleAfterClickTask: Task<Void, Never>?
 
   init(
     avatar: InlineProtocol.BotAvatar,
     state: InlineProtocol.BotPresenceState,
-    onClick: (@escaping @MainActor () -> Void),
+    onIdle: (@escaping @MainActor () -> Void),
     onClose: (@escaping @MainActor () -> Void),
     onJump: (@escaping @MainActor () -> Void),
     onDragEnd: (@escaping @MainActor () -> Void)
   ) {
     self.avatar = avatar
     self.state = state
-    self.onClick = onClick
+    self.onIdle = onIdle
     self.onClose = onClose
     self.onJump = onJump
     self.onDragEnd = onDragEnd
@@ -81,20 +86,24 @@ final class BotPresenceSurfaceModel: ObservableObject {
   deinit {
     commentHideTask?.cancel()
     localAnimationTask?.cancel()
+    idleAfterClickTask?.cancel()
   }
 
   func update(
     avatar: InlineProtocol.BotAvatar,
     state: InlineProtocol.BotPresenceState,
-    onClick: (@escaping @MainActor () -> Void),
+    onIdle: (@escaping @MainActor () -> Void),
     onClose: (@escaping @MainActor () -> Void),
     onJump: (@escaping @MainActor () -> Void),
     onDragEnd: (@escaping @MainActor () -> Void)
   ) {
+    stateGeneration += 1
+    idleAfterClickTask?.cancel()
+    idleAfterClickTask = nil
     let shouldJump = state.kind == .jumping && (self.state.kind != .jumping || self.state.comment != state.comment)
     self.avatar = avatar
     self.state = state
-    self.onClick = onClick
+    self.onIdle = onIdle
     self.onClose = onClose
     self.onJump = onJump
     self.onDragEnd = onDragEnd
@@ -105,9 +114,18 @@ final class BotPresenceSurfaceModel: ObservableObject {
   }
 
   func performClick() {
-    playLocalAnimation(.jumping, duration: .milliseconds(1_100))
+    playLocalAnimation(.jumping, duration: Self.clickJumpDuration)
     onJump?()
-    onClick?()
+
+    let generation = stateGeneration
+    idleAfterClickTask?.cancel()
+    idleAfterClickTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: Self.clickJumpDuration)
+      guard let self, !Task.isCancelled, self.stateGeneration == generation else { return }
+      self.applyIdle()
+      self.onIdle?()
+      self.idleAfterClickTask = nil
+    }
   }
 
   func showDebugComment() {
@@ -126,9 +144,8 @@ final class BotPresenceSurfaceModel: ObservableObject {
 
   func updateDrag(deltaX: CGFloat) {
     guard abs(deltaX) >= 0.5 else { return }
-    localAnimationTask?.cancel()
-    localAnimationTask = nil
-    localAnimation = deltaX < 0 ? .runningLeft : .runningRight
+    let animation: BotPresenceLocalAnimation = deltaX < 0 ? .runningLeft : .runningRight
+    playLocalAnimation(animation, duration: Self.dragAnimationInactivityDuration)
   }
 
   func finishDrag() {
@@ -186,6 +203,13 @@ final class BotPresenceSurfaceModel: ObservableObject {
     }
   }
 
+  private func applyIdle() {
+    state = InlineProtocol.BotPresenceState.with {
+      $0.kind = .idle
+    }
+    dismissComment()
+  }
+
   private static func comment(from state: InlineProtocol.BotPresenceState) -> String? {
     let text = state.hasComment ? state.comment.trimmingCharacters(in: .whitespacesAndNewlines) : ""
     return text.isEmpty ? nil : text
@@ -216,8 +240,8 @@ struct BotPresenceView: View {
               onDragEnd: surface.finishDrag
             )
             .allowsWindowActivationEvents(true)
-            .help("Dismiss")
-            .accessibilityLabel("Dismiss")
+            .help("Dismiss comment")
+            .accessibilityLabel("Dismiss comment")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction {
               surface.dismissComment()
@@ -506,6 +530,13 @@ final class BotPresenceInteractionNSView: NSView {
     onClick?()
   }
 
+  override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if newWindow == nil {
+      finishDragIfNeeded()
+    }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
   override func rightMouseDown(with event: NSEvent) {
     let menu = NSMenu()
     let debugItem = NSMenuItem(title: "Show Debug Comment", action: #selector(showDebugComment), keyEquivalent: "")
@@ -524,6 +555,13 @@ final class BotPresenceInteractionNSView: NSView {
 
   @objc private func close() {
     onClose?()
+  }
+
+  private func finishDragIfNeeded() {
+    mouseOffset = nil
+    guard didDrag else { return }
+    didDrag = false
+    onDragEnd?()
   }
 }
 
@@ -581,6 +619,7 @@ private final class BotPresenceViewModel: ObservableObject {
   @Published var frame: CGImage?
 
   private var animationTask: Task<Void, Never>?
+  private var configureGeneration = 0
 
   deinit {
     animationTask?.cancel()
@@ -590,26 +629,34 @@ private final class BotPresenceViewModel: ObservableObject {
     avatar: InlineProtocol.BotAvatar,
     animation: BotPresenceRenderAnimation
   ) async {
+    configureGeneration += 1
+    let generation = configureGeneration
     animationTask?.cancel()
+    animationTask = nil
 
     do {
       let frames = try await BotAvatarAtlasCache.shared.frames(for: avatar, animation: animation)
+      guard !Task.isCancelled, configureGeneration == generation else { return }
       guard !frames.isEmpty else {
         frame = nil
         return
       }
 
-      animationTask = Task { [weak self] in
+      animationTask = Task { @MainActor [weak self] in
         guard let self else { return }
         var index = 0
         while !Task.isCancelled {
+          guard self.configureGeneration == generation else { return }
           let frameIndex = index
           self.frame = frames[frameIndex]
           index = (frameIndex + 1) % frames.count
           try? await Task.sleep(nanoseconds: BotAvatarAnimation.delay(for: animation, frameIndex: frameIndex))
         }
       }
+    } catch is CancellationError {
+      return
     } catch {
+      guard configureGeneration == generation else { return }
       frame = nil
     }
   }

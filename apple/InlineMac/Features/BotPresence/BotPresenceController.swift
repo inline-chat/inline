@@ -212,13 +212,20 @@ final class BotPresenceController: ObservableObject {
     window.show(
       avatar: avatar,
       state: state,
-      onClick: { [weak self] in
-        guard let self, let peer = self.latestPeerByBotId[botId] else { return }
-        MainWindowOpenCoordinator.shared.openWindow(.chat(peer: peer))
+      onIdle: { [weak self] in
+        self?.applyLocalIdle(botId: botId)
       },
       onClose: { [weak self] in
         self?.close()
       }
     )
+  }
+
+  private func applyLocalIdle(botId: Int64) {
+    guard currentBotId == botId else { return }
+    currentState = InlineProtocol.BotPresenceState.with {
+      $0.kind = .idle
+    }
+    refreshToolbarItem()
   }
 }

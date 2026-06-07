@@ -18,7 +18,7 @@ final class BotPresenceWindow {
   func show(
     avatar: InlineProtocol.BotAvatar,
     state: InlineProtocol.BotPresenceState,
-    onClick: @escaping @MainActor () -> Void,
+    onIdle: @escaping @MainActor () -> Void,
     onClose: @escaping @MainActor () -> Void
   ) {
     self.avatar = avatar
@@ -28,7 +28,7 @@ final class BotPresenceWindow {
     let surfaceModel = surfaceModel ?? BotPresenceSurfaceModel(
       avatar: avatar,
       state: state,
-      onClick: onClick,
+      onIdle: onIdle,
       onClose: onClose,
       onJump: { [weak self] in
         self?.jump()
@@ -40,7 +40,7 @@ final class BotPresenceWindow {
     surfaceModel.update(
       avatar: avatar,
       state: state,
-      onClick: onClick,
+      onIdle: onIdle,
       onClose: onClose,
       onJump: { [weak self] in
         self?.jump()
