@@ -1,0 +1,1102 @@
+commit bc1a5870d6d008546020beacd15f66077f3aa7a4
+Author:     Mohammad Rajabi <mo.rajbi@gmail.com>
+AuthorDate: Wed Jun 3 01:39:40 2026 +0330
+Commit:     Mohammad Rajabi <mo.rajbi@gmail.com>
+CommitDate: Wed Jun 3 01:39:40 2026 +0330
+
+    macos: add experimental voice messages mvp
+---
+ apple/InlineMac/App/AppDelegate.swift              |   1 +
+ apple/InlineMac/Info.plist                         |   2 +
+ apple/InlineMac/Views/Compose/ComposeAppKit.swift  | 180 +++++++++++++--
+ .../Views/Compose/ComposeVoiceButton.swift         |  93 ++++++++
+ .../Views/Compose/ComposeVoiceInputView.swift      | 142 ++++++++++++
+ .../Views/Compose/ComposeVoiceRecorder.swift       | 164 ++++++++++++++
+ .../Compose/ComposeVoiceRecordingViewModel.swift   | 251 +++++++++++++++++++++
+ 7 files changed, 819 insertions(+), 14 deletions(-)
+
+diff --git a/apple/InlineMac/App/AppDelegate.swift b/apple/InlineMac/App/AppDelegate.swift
+index e2524cbc..e87c2eb9 100644
+--- a/apple/InlineMac/App/AppDelegate.swift
++++ b/apple/InlineMac/App/AppDelegate.swift
+@@ -159,6 +159,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
+ 
+       "showSidebarMessagePreview": true,
+       "includeSpaceChatsInHomeSidebar": true,
++      ExperimentalFeatureFlags.voiceMessagesKey: false,
+       ExperimentalFeatureFlags.sidebarAsInboxKey: false,
+     ])
+   }
+diff --git a/apple/InlineMac/Info.plist b/apple/InlineMac/Info.plist
+index e83cdb39..fb6b4f8d 100644
+--- a/apple/InlineMac/Info.plist
++++ b/apple/InlineMac/Info.plist
+@@ -18,6 +18,8 @@
+ 	<string>$(DEV_HOST)</string>
+ 	<key>INLINE_USER_PROFILE</key>
+ 	<string>$(INLINE_USER_PROFILE)</string>
++	<key>NSMicrophoneUsageDescription</key>
++	<string>Inline needs access to your microphone to record voice messages.</string>
+ 	<key>NSObservationTrackingEnabled</key>
+ 	<true/>
+ 	<key>USE_PRODUCTION_API</key>
+diff --git a/apple/InlineMac/Views/Compose/ComposeAppKit.swift b/apple/InlineMac/Views/Compose/ComposeAppKit.swift
+index 823657d8..434e3af3 100644
+--- a/apple/InlineMac/Views/Compose/ComposeAppKit.swift
++++ b/apple/InlineMac/Views/Compose/ComposeAppKit.swift
+@@ -44,6 +44,17 @@ class ComposeAppKit: NSView {
+     !isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil
+   }
+ 
++  private var canStartVoiceRecording: Bool {
++    ExperimentalFeatureFlags.voiceMessagesEnabled &&
++      voiceViewModel.isActive == false &&
++      isEmptyTrimmed &&
++      attachmentItems.isEmpty &&
++      state.editingMsgId == nil &&
++      state.forwardContext == nil
++  }
++
++  private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: peerId)
++
+   // [uniqueId: FileMediaItem]
+   private var attachmentItems: [String: FileMediaItem] = [:] {
+     didSet {
+@@ -182,6 +193,37 @@ class ComposeAppKit: NSView {
+     return view
+   }()
+ 
++  private lazy var voiceButton: ComposeVoiceButton = {
++    let view = ComposeVoiceButton()
++    view.onClick = { [weak self] in
++      self?.startVoiceRecording()
++    }
++    view.isHidden = true
++    return view
++  }()
++
++  private lazy var voiceInputView: NSHostingView<ComposeVoiceInputView> = {
++    let view = NSHostingView(rootView: ComposeVoiceInputView(
++      viewModel: voiceViewModel,
++      onPause: { [weak self] in
++        self?.voiceViewModel.pauseRecording()
++      },
++      onPlay: { [weak self] in
++        self?.voiceViewModel.togglePlayback()
++      },
++      onCancel: { [weak self] in
++        self?.voiceViewModel.cancel()
++      },
++      onSend: { [weak self] in
++        self?.sendVoiceRecording()
++      }
++    ))
++    view.translatesAutoresizingMaskIntoConstraints = false
++    view.isHidden = true
++    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
++    return view
++  }()
++
+   private lazy var emojiButton: ComposeEmojiButton = {
+     let view = ComposeEmojiButton()
+     view.delegate = self
+@@ -326,13 +368,16 @@ class ComposeAppKit: NSView {
+     // to bottom
+     addSubview(sendButton)
+     addSubview(silentModeButton)
++    addSubview(voiceButton)
+     addSubview(emojiButton)
+     addSubview(menuButton)
+     addSubview(textEditor)
++    addSubview(voiceInputView)
+ 
+     setupReplyingView()
+     setUpConstraints()
+     updateSilentModeUI(animated: false, forceLayout: false)
++    updateVoiceAvailability()
+     setupTextEditor()
+   }
+ 
+@@ -379,6 +424,14 @@ class ComposeAppKit: NSView {
+       ),
+       sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
+ 
++      // voice
++      voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
++      voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
++      voiceInputView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
++      voiceInputView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
++      voiceInputView.bottomAnchor.constraint(equalTo: bottomAnchor),
++      voiceInputView.heightAnchor.constraint(equalToConstant: Theme.composeMinHeight),
++
+       // send silently indicator
+       silentModeButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -silentModeButtonBottomSpacing),
+       silentModeButtonWidthConstraint!,
+@@ -436,6 +489,7 @@ class ComposeAppKit: NSView {
+       .sink { [weak self] replyingToMsgId in
+         guard let self else { return }
+         updateMessageView(to: replyingToMsgId, kind: .replying, animate: true)
++        updateVoiceAvailability()
+         focus()
+       }.store(in: &cancellables)
+ 
+@@ -443,6 +497,7 @@ class ComposeAppKit: NSView {
+       .sink { [weak self] editingMsgId in
+         guard let self else { return }
+         updateMessageView(to: editingMsgId, kind: .editing, animate: true)
++        updateVoiceAvailability()
+         focus()
+       }.store(in: &cancellables)
+ 
+@@ -469,6 +524,14 @@ class ComposeAppKit: NSView {
+         )
+       }.store(in: &cancellables)
+ 
++    voiceViewModel.$phase
++      .sink { [weak self] _ in
++        guard let self else { return }
++        updateVoiceAvailability()
++        updateHeight(animate: true)
++      }
++      .store(in: &cancellables)
++
+     Publishers.CombineLatest3(
+       autocompleteViewModel.$items,
+       autocompleteViewModel.$selectedIndex,
+@@ -482,10 +545,11 @@ class ComposeAppKit: NSView {
+ 
+   private func updateSilentModeUI(animated: Bool = true, forceLayout: Bool = true) {
+     let isEnabled = state.sendSilently
++    let shouldShow = isEnabled && !voiceViewModel.isActive && canSend
+     sendButton.updateSendSilently(isEnabled)
+-    silentModeButton.isHidden = !isEnabled
+-    silentModeButtonWidthConstraint?.constant = isEnabled ? ComposeSilentModeButton.controlSize : 0
+-    silentModeToEmojiConstraint?.constant = isEnabled ? -rightButtonSpacing : 0
++    silentModeButton.isHidden = !shouldShow
++    silentModeButtonWidthConstraint?.constant = shouldShow ? ComposeSilentModeButton.controlSize : 0
++    silentModeToEmojiConstraint?.constant = shouldShow ? -rightButtonSpacing : 0
+ 
+     guard animated else {
+       if forceLayout {
+@@ -501,6 +565,69 @@ class ComposeAppKit: NSView {
+     }
+   }
+ 
++  private func updateVoiceAvailability() {
++    let isVoiceActive = voiceViewModel.isActive
++    let shouldShowVoiceButton = canStartVoiceRecording
++
++    voiceInputView.isHidden = !isVoiceActive
++    textEditor.isHidden = isVoiceActive
++    menuButton.isHidden = isVoiceActive
++    emojiButton.isHidden = isVoiceActive
++    attachments.isHidden = isVoiceActive
++    voiceButton.isHidden = isVoiceActive || !shouldShowVoiceButton
++    sendButton.isHidden = isVoiceActive || shouldShowVoiceButton
++
++    updateSilentModeUI(animated: false, forceLayout: false)
++  }
++
++  private func startVoiceRecording() {
++    guard canStartVoiceRecording else { return }
++    focusWindowIfNeeded()
++
++    Task { [weak self] in
++      guard let self else { return }
++      await voiceViewModel.start()
++    }
++  }
++
++  private func sendVoiceRecording() {
++    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
++      voiceViewModel.cancel()
++      return
++    }
++
++    do {
++      guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }
++
++      keepCurrentChatInSidebar()
++      Transactions.shared.mutate(
++        transaction: .sendMessage(
++          TransactionSendMessage(
++            text: nil,
++            peerId: peerId,
++            chatId: chatId ?? 0,
++            mediaItems: [mediaItem],
++            replyToMsgId: state.replyingToMsgId,
++            isSticker: nil,
++            entities: nil,
++            sendMode: state.sendSilently ? .modeSilent : nil
++          )
++        )
++      )
++
++      state.clearReplyingToMsgId()
++      clearDraft()
++      updateSendButtonIfNeeded()
++
++      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
++        self.state.scrollToBottom()
++      }
++    } catch {
++      log.error("Failed to send voice recording", error: error)
++      ToastCenter.shared.showError("Failed to send voice message")
++    }
++  }
++
+   private func setupTextEditor() {
+     // Set the delegate if needed
+     textEditor.delegate = self
+@@ -683,17 +810,11 @@ class ComposeAppKit: NSView {
+   }
+ 
+   private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu, match: ComposeAutocompleteMatch) {
+-    guard match.kind == .emoji, menu.isShowingEmojiPalette else {
+-      autocompleteMenuLeadingConstraint?.constant = 0
+-      return
+-    }
+-
+     layoutSubtreeIfNeeded()
+     autocompleteMenuLeadingConstraint?.constant = textEditor.frame.minX
+   }
+ 
+   private func autocompleteMenuWidth(for match: ComposeAutocompleteMatch) -> CGFloat? {
+-    guard match.kind == .emoji else { return nil }
+     layoutSubtreeIfNeeded()
+     let width = textEditor.frame.width
+     return width > 1 ? width : nil
+@@ -879,12 +1000,18 @@ class ComposeAppKit: NSView {
+   }
+ 
+   func focusEditor() {
++    guard !voiceViewModel.isActive else { return }
+     textEditor.focus()
+   }
+ 
+   // MARK: - Height
+ 
+   private func getTextViewHeight() -> CGFloat {
++    if voiceViewModel.isActive {
++      textViewHeight = Theme.composeMinHeight
++      return textViewHeight
++    }
++
+     textViewHeight = min(300.0, max(
+       textEditor.minHeight,
+       textViewContentHeight + textEditor.verticalPadding * 2
+@@ -902,8 +1029,9 @@ class ComposeAppKit: NSView {
+       height += Theme.embeddedMessageHeight
+     }
+ 
+-    // Attachments
+-    height += attachments.getHeight()
++    if !voiceViewModel.isActive {
++      height += attachments.getHeight()
++    }
+ 
+     return height
+   }
+@@ -1040,7 +1168,7 @@ class ComposeAppKit: NSView {
+           // set manually without updating height
+           textEditor.replaceAttributedString(attributedString)
+           textEditor.showPlaceholder(text.isEmpty)
+-          sendButton.updateCanSend(canSend)
++          updateSendButtonIfNeeded()
+           // calculate text height to prepare for height change
+           updateContentHeight(for: textEditor.textView)
+         }
+@@ -1267,9 +1395,10 @@ class ComposeAppKit: NSView {
+ 
+   // Clear, reset height
+   func clear() {
++    voiceViewModel.cancel()
++
+     // State
+     attachmentItems.removeAll()
+-    sendButton.updateCanSend(false)
+     state.clearReplyingToMsgId()
+     state.clearEditingMsgId()
+     state.clearForwarding()
+@@ -1282,6 +1411,7 @@ class ComposeAppKit: NSView {
+         .getTypingLineHeight() // manually for now, FIXME: make it automatic in texteditor.clear
+     textEditor.clear()
+     clearAttachments(updateHeights: false)
++    updateSendButtonIfNeeded()
+ 
+     // must be last call
+     updateHeight()
+@@ -1289,6 +1419,14 @@ class ComposeAppKit: NSView {
+ 
+   // Send the message
+   func send(sendMode: MessageSendMode? = nil) {
++    if voiceViewModel.phase == .review {
++      sendVoiceRecording()
++      return
++    }
++    if voiceViewModel.isActive {
++      return
++    }
++
+     // DispatchQueue.main.async(qos: .userInteractive) {
+     ignoreNextHeightChange = true
+     let attributedString = trimmedAttributedString(textEditor.attributedString)
+@@ -1518,6 +1656,7 @@ class ComposeAppKit: NSView {
+   }
+ 
+   func focus() {
++    guard !voiceViewModel.isActive else { return }
+     textEditor.focus()
+   }
+ 
+@@ -1541,7 +1680,7 @@ class ComposeAppKit: NSView {
+     }
+     // reevaluate placeholder
+     textEditor.showPlaceholder(text.isEmpty)
+-    sendButton.updateCanSend(canSend)
++    updateSendButtonIfNeeded()
+   }
+ 
+   private var keyMonitorUnsubscribe: (() -> Void)?
+@@ -1555,6 +1694,7 @@ class ComposeAppKit: NSView {
+       key: "compose\(peerId)",
+       handler: { [weak self] event in
+         guard let self else { return }
++        guard !voiceViewModel.isActive else { return }
+ 
+         // Only allow valid printable characters, not control/navigation keys
+         guard let characters = event.characters,
+@@ -1591,6 +1731,8 @@ class ComposeAppKit: NSView {
+   }
+ 
+   private func handleGlobalPaste() {
++    guard !voiceViewModel.isActive else { return }
++
+     let pasteboard = NSPasteboard.general
+ 
+     // If this is non-text content, route through attachments.
+@@ -1606,6 +1748,7 @@ class ComposeAppKit: NSView {
+ 
+   deinit {
+     requestImmediateDraftPersistenceIfNeeded()
++    cancellables.removeAll()
+ 
+     // Clean up
+     keyMonitorUnsubscribe?()
+@@ -1640,6 +1783,8 @@ class ComposeAppKit: NSView {
+ 
+ extension ComposeAppKit {
+   func handlePasteboardAttachments(_ attachments: [PasteboardAttachment]) {
++    guard !voiceViewModel.isActive else { return }
++
+     for attachment in attachments {
+       switch attachment {
+         case let .image(image, url):
+@@ -1657,6 +1802,8 @@ extension ComposeAppKit {
+   }
+ 
+   func handleFileDrop(_ urls: [URL]) {
++    guard !voiceViewModel.isActive else { return }
++
+     for url in urls {
+       if isVideoFile(url) {
+         Task { [weak self] in await self?.addVideo(url) }
+@@ -1667,12 +1814,16 @@ extension ComposeAppKit {
+   }
+ 
+   func handleTextDropOrPaste(_ text: String) {
++    guard !voiceViewModel.isActive else { return }
++
+     textEditor.insertText(text)
+     focusWindowIfNeeded()
+     focus()
+   }
+ 
+   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
++    guard !voiceViewModel.isActive else { return }
++
+     addImage(image, url)
+     focusWindowIfNeeded()
+     focus()
+@@ -1880,6 +2031,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
+   /// Reflect state changes in send button
+   func updateSendButtonIfNeeded() {
+     sendButton.updateCanSend(canSend)
++    updateVoiceAvailability()
+   }
+ 
+   func calculateContentHeight(for textView: NSTextView) -> CGFloat {
+diff --git a/apple/InlineMac/Views/Compose/ComposeVoiceButton.swift b/apple/InlineMac/Views/Compose/ComposeVoiceButton.swift
+new file mode 100644
+index 00000000..3428051f
+--- /dev/null
++++ b/apple/InlineMac/Views/Compose/ComposeVoiceButton.swift
+@@ -0,0 +1,93 @@
++import AppKit
++import InlineKit
++
++final class ComposeVoiceButton: NSView {
++  private let size: CGFloat = Theme.composeButtonSize
++  private let iconView: NSImageView
++  private var trackingArea: NSTrackingArea?
++  private var isHovering = false
++
++  var onClick: (() -> Void)?
++
++  override init(frame frameRect: NSRect) {
++    let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Record voice message")?
++      .withSymbolConfiguration(.init(pointSize: size * 0.56, weight: .semibold))
++    iconView = NSImageView(image: image ?? NSImage())
++    iconView.translatesAutoresizingMaskIntoConstraints = false
++    iconView.contentTintColor = .tertiaryLabelColor
++
++    super.init(frame: frameRect)
++    setupView()
++  }
++
++  convenience init() {
++    self.init(frame: .zero)
++  }
++
++  @available(*, unavailable)
++  required init?(coder: NSCoder) {
++    fatalError("init(coder:) has not been implemented")
++  }
++
++  private func setupView() {
++    translatesAutoresizingMaskIntoConstraints = false
++    wantsLayer = true
++    isHidden = !ExperimentalFeatureFlags.voiceMessagesEnabled
++    layer?.cornerRadius = size / 2
++    layer?.masksToBounds = true
++    toolTip = "Record voice message"
++
++    addSubview(iconView)
++
++    NSLayoutConstraint.activate([
++      widthAnchor.constraint(equalToConstant: size),
++      heightAnchor.constraint(equalToConstant: size),
++      iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
++      iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
++    ])
++  }
++
++  override func layout() {
++    super.layout()
++    layer?.cornerRadius = bounds.height / 2
++  }
++
++  override func mouseDown(with event: NSEvent) {
++    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
++    super.mouseDown(with: event)
++    onClick?()
++  }
++
++  override func updateTrackingAreas() {
++    super.updateTrackingAreas()
++
++    if let trackingArea {
++      removeTrackingArea(trackingArea)
++    }
++
++    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways]
++    trackingArea = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
++
++    if let trackingArea {
++      addTrackingArea(trackingArea)
++    }
++  }
++
++  override func mouseEntered(with event: NSEvent) {
++    isHovering = true
++    updateBackgroundColor()
++  }
++
++  override func mouseExited(with event: NSEvent) {
++    isHovering = false
++    updateBackgroundColor()
++  }
++
++  private func updateBackgroundColor() {
++    NSAnimationContext.runAnimationGroup { context in
++      context.duration = 0.12
++      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
++      layer?.backgroundColor = isHovering ? NSColor.gray.withAlphaComponent(0.1).cgColor : NSColor.clear.cgColor
++    }
++  }
++}
+diff --git a/apple/InlineMac/Views/Compose/ComposeVoiceInputView.swift b/apple/InlineMac/Views/Compose/ComposeVoiceInputView.swift
+new file mode 100644
+index 00000000..f1926f00
+--- /dev/null
++++ b/apple/InlineMac/Views/Compose/ComposeVoiceInputView.swift
+@@ -0,0 +1,142 @@
++import InlineKit
++import SwiftUI
++
++struct ComposeVoiceInputView: View {
++  @ObservedObject var viewModel: ComposeVoiceRecordingViewModel
++
++  let onPause: () -> Void
++  let onPlay: () -> Void
++  let onCancel: () -> Void
++  let onSend: () -> Void
++
++  var body: some View {
++    if ExperimentalFeatureFlags.voiceMessagesEnabled {
++      HStack(spacing: 10) {
++        switch viewModel.phase {
++        case .recording:
++          recordingIndicator
++          waveform(progress: 1)
++          durationLabel
++          iconButton("pause.fill", title: "Pause recording", action: onPause)
++
++        case .review:
++          iconButton(
++            viewModel.isPlaying ? "pause.fill" : "play.fill",
++            title: viewModel.isPlaying ? "Pause" : "Play",
++            action: onPlay
++          )
++          waveform(progress: viewModel.playbackProgress)
++          durationLabel
++          iconButton("xmark", title: "Cancel", action: onCancel)
++          iconButton("arrow.up", title: "Send", isPrimary: true, action: onSend)
++
++        case .idle:
++          EmptyView()
++        }
++      }
++      .padding(.horizontal, 4)
++      .frame(maxWidth: .infinity, minHeight: Theme.composeMinHeight, maxHeight: Theme.composeMinHeight)
++    }
++  }
++
++  private var recordingIndicator: some View {
++    Circle()
++      .fill(Color.red)
++      .frame(width: 8, height: 8)
++      .accessibilityLabel("Recording")
++  }
++
++  private var durationLabel: some View {
++    Text(Self.format(duration: viewModel.duration))
++      .font(.caption.monospacedDigit())
++      .foregroundStyle(.secondary)
++      .frame(minWidth: 38, alignment: .trailing)
++  }
++
++  private func waveform(progress: Double) -> some View {
++    ComposeVoiceWaveformView(
++      samples: viewModel.samples,
++      progress: progress,
++      foreground: .accentColor,
++      background: Color(nsColor: .tertiaryLabelColor).opacity(0.35)
++    )
++    .frame(height: 22)
++    .frame(maxWidth: .infinity)
++  }
++
++  private func iconButton(
++    _ systemName: String,
++    title: String,
++    isPrimary: Bool = false,
++    action: @escaping () -> Void
++  ) -> some View {
++    Button(action: action) {
++      Image(systemName: systemName)
++        .font(.system(size: 13, weight: .semibold))
++        .foregroundStyle(isPrimary ? Color.white : Color.primary)
++        .frame(width: Theme.composeButtonSize, height: Theme.composeButtonSize)
++        .background(
++          Circle()
++            .fill(isPrimary ? Color.accentColor : Color(nsColor: .quinaryLabel))
++        )
++    }
++    .buttonStyle(.plain)
++    .help(title)
++    .accessibilityLabel(title)
++  }
++
++  private static func format(duration: TimeInterval) -> String {
++    let clamped = max(Int(duration.rounded()), 0)
++    let minutes = clamped / 60
++    let seconds = clamped % 60
++    return String(format: "%d:%02d", minutes, seconds)
++  }
++}
++
++private struct ComposeVoiceWaveformView: View {
++  let samples: [UInt8]
++  let progress: Double
++  let foreground: Color
++  let background: Color
++
++  private var bars: [CGFloat] {
++    let raw = samples.map { byte -> CGFloat in
++      max(0.16, CGFloat(byte) / 255)
++    }
++
++    guard !raw.isEmpty else {
++      return Array(repeating: 0.32, count: 36)
++    }
++
++    let targetCount = min(48, max(24, raw.count))
++    if raw.count <= targetCount {
++      return raw
++    }
++
++    let chunkSize = max(1, raw.count / targetCount)
++    return stride(from: 0, to: raw.count, by: chunkSize).map { index in
++      let upperBound = min(index + chunkSize, raw.count)
++      let chunk = raw[index ..< upperBound]
++      return chunk.max() ?? 0.32
++    }
++  }
++
++  var body: some View {
++    GeometryReader { geometry in
++      let clampedProgress = min(max(progress, 0), 1)
++      let progressIndex = Int((Double(bars.count) * clampedProgress).rounded(.down))
++
++      HStack(alignment: .center, spacing: 2) {
++        ForEach(Array(bars.enumerated()), id: \.offset) { index, value in
++          Capsule(style: .continuous)
++            .fill(index < progressIndex ? foreground : background)
++            .frame(
++              maxWidth: .infinity,
++              maxHeight: max(5, geometry.size.height * value)
++            )
++        }
++      }
++      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
++    }
++  }
++}
+diff --git a/apple/InlineMac/Views/Compose/ComposeVoiceRecorder.swift b/apple/InlineMac/Views/Compose/ComposeVoiceRecorder.swift
+new file mode 100644
+index 00000000..f455cb5a
+--- /dev/null
++++ b/apple/InlineMac/Views/Compose/ComposeVoiceRecorder.swift
+@@ -0,0 +1,164 @@
++import AVFoundation
++import Foundation
++import Logger
++
++struct ComposeVoiceRecording {
++  let fileURL: URL
++  let data: Data
++  let duration: TimeInterval
++  let waveform: Data
++  let mimeType: String
++  let fileExtension: String
++}
++
++final class ComposeVoiceRecorder: NSObject {
++  private let log = Log.scoped("ComposeVoiceRecorder")
++  private var recorder: AVAudioRecorder?
++  private var meterTimer: Timer?
++  private var startedAt: Date?
++  private var samples: [UInt8] = []
++
++  var onUpdate: ((TimeInterval, [UInt8]) -> Void)?
++
++  var isRecording: Bool {
++    recorder?.isRecording == true
++  }
++
++  func start() throws {
++    stopMetering()
++    samples.removeAll()
++
++    let url = FileManager.default.temporaryDirectory
++      .appendingPathComponent("inline-voice-\(UUID().uuidString).m4a")
++
++    let settings: [String: Any] = [
++      AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
++      AVSampleRateKey: 48_000,
++      AVNumberOfChannelsKey: 1,
++      AVEncoderBitRateKey: 32_000,
++      AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
++    ]
++
++    let recorder = try AVAudioRecorder(url: url, settings: settings)
++    recorder.isMeteringEnabled = true
++    recorder.prepareToRecord()
++
++    guard recorder.record() else {
++      throw ComposeVoiceRecorderError.startFailed
++    }
++
++    self.recorder = recorder
++    startedAt = Date()
++    startMetering()
++  }
++
++  func finish() throws -> ComposeVoiceRecording {
++    guard let recorder else {
++      throw ComposeVoiceRecorderError.notRecording
++    }
++
++    let duration = max(recorder.currentTime, Date().timeIntervalSince(startedAt ?? Date()))
++    let url = recorder.url
++    recorder.stop()
++    stopMetering()
++    self.recorder = nil
++    startedAt = nil
++
++    let data = try Data(contentsOf: url)
++    if data.isEmpty {
++      try? FileManager.default.removeItem(at: url)
++      throw ComposeVoiceRecorderError.emptyRecording
++    }
++
++    return ComposeVoiceRecording(
++      fileURL: url,
++      data: data,
++      duration: duration,
++      waveform: Self.waveformData(from: samples),
++      mimeType: "audio/mp4",
++      fileExtension: "m4a"
++    )
++  }
++
++  func cancel() {
++    let url = recorder?.url
++    recorder?.stop()
++    stopMetering()
++    recorder = nil
++    startedAt = nil
++    samples.removeAll()
++
++    if let url {
++      try? FileManager.default.removeItem(at: url)
++    }
++  }
++
++  private func startMetering() {
++    meterTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
++      Task { @MainActor in
++        self?.captureMeter()
++      }
++    }
++  }
++
++  private func stopMetering() {
++    meterTimer?.invalidate()
++    meterTimer = nil
++  }
++
++  private func captureMeter() {
++    guard let recorder else { return }
++
++    recorder.updateMeters()
++    let power = recorder.averagePower(forChannel: 0)
++    let normalized = Self.normalizedPower(power)
++    let sample = UInt8(max(0, min(255, Int((normalized * 255).rounded()))))
++    samples.append(sample)
++    onUpdate?(recorder.currentTime, samples)
++  }
++
++  private static func normalizedPower(_ power: Float) -> Float {
++    guard power.isFinite else { return 0 }
++    if power <= -60 { return 0 }
++    if power >= 0 { return 1 }
++
++    return pow(10, power / 20)
++  }
++
++  private static func waveformData(from samples: [UInt8], targetCount: Int = 96) -> Data {
++    guard !samples.isEmpty else {
++      return Data(repeating: 28, count: targetCount)
++    }
++
++    if samples.count <= targetCount {
++      return Data(samples)
++    }
++
++    let bucketSize = Double(samples.count) / Double(targetCount)
++    let reduced = (0 ..< targetCount).map { index -> UInt8 in
++      let start = Int(Double(index) * bucketSize)
++      let end = min(samples.count, Int(Double(index + 1) * bucketSize))
++      guard start < end else { return 0 }
++      return samples[start ..< end].max() ?? 0
++    }
++
++    return Data(reduced)
++  }
++}
++
++enum ComposeVoiceRecorderError: LocalizedError {
++  case startFailed
++  case notRecording
++  case emptyRecording
++
++  var errorDescription: String? {
++    switch self {
++    case .startFailed:
++      "Could not start voice recording."
++    case .notRecording:
++      "No active voice recording."
++    case .emptyRecording:
++      "Voice recording is empty."
++    }
++  }
++}
+diff --git a/apple/InlineMac/Views/Compose/ComposeVoiceRecordingViewModel.swift b/apple/InlineMac/Views/Compose/ComposeVoiceRecordingViewModel.swift
+new file mode 100644
+index 00000000..edd827e3
+--- /dev/null
++++ b/apple/InlineMac/Views/Compose/ComposeVoiceRecordingViewModel.swift
+@@ -0,0 +1,251 @@
++import AVFoundation
++import Combine
++import Foundation
++import InlineKit
++import InlineProtocol
++import Logger
++
++enum ComposeVoiceRecordingPhase {
++  case idle
++  case recording
++  case review
++}
++
++@MainActor
++final class ComposeVoiceRecordingViewModel: ObservableObject {
++  @Published private(set) var phase: ComposeVoiceRecordingPhase = .idle
++  @Published private(set) var duration: TimeInterval = 0
++  @Published private(set) var samples: [UInt8] = []
++  @Published private(set) var isPlaying = false
++  @Published private(set) var playbackProgress: Double = 0
++
++  private let peerId: InlineKit.Peer
++  private let log = Log.scoped("ComposeVoiceRecordingViewModel")
++
++  private var recorder: ComposeVoiceRecorder?
++  private var recording: ComposeVoiceRecording?
++  private var player: AVAudioPlayer?
++  private var playbackTimer: Timer?
++  private var stopRecordingAction: (@Sendable () -> Void)?
++  private var isStarting = false
++
++  var isActive: Bool {
++    phase != .idle
++  }
++
++  init(peerId: InlineKit.Peer) {
++    self.peerId = peerId
++  }
++
++  deinit {
++    playbackTimer?.invalidate()
++    player?.stop()
++    recorder?.cancel()
++    stopRecordingAction?()
++
++    if let recording {
++      try? FileManager.default.removeItem(at: recording.fileURL)
++    }
++  }
++
++  func start() async {
++    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
++    guard phase == .idle, !isStarting else { return }
++    isStarting = true
++    defer {
++      isStarting = false
++    }
++
++    guard await ensureMicrophoneAccess() else { return }
++
++    do {
++      let recorder = ComposeVoiceRecorder()
++      recorder.onUpdate = { [weak self] duration, samples in
++        self?.duration = duration
++        self?.samples = samples
++      }
++      try recorder.start()
++
++      self.recorder = recorder
++      duration = 0
++      samples = []
++      playbackProgress = 0
++      isPlaying = false
++      phase = .recording
++      stopRecordingAction = ComposeActions.shared.startVoiceRecording(for: peerId)
++    } catch {
++      log.error("Failed to start voice recording", error: error)
++      ToastCenter.shared.showError(error.localizedDescription)
++      reset()
++    }
++  }
++
++  func pauseRecording() {
++    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
++      cancel()
++      return
++    }
++
++    guard phase == .recording, let recorder else { return }
++
++    do {
++      let recording = try recorder.finish()
++      self.recorder = nil
++      self.recording = recording
++      stopRecordingAction?()
++      stopRecordingAction = nil
++
++      duration = recording.duration
++      samples = Array(recording.waveform)
++      playbackProgress = 0
++      isPlaying = false
++      phase = .review
++    } catch {
++      log.error("Failed to finish voice recording", error: error)
++      ToastCenter.shared.showError(error.localizedDescription)
++      cancel()
++    }
++  }
++
++  func cancel() {
++    recorder?.cancel()
++    recorder = nil
++    stopRecordingAction?()
++    stopRecordingAction = nil
++    stopPlayback(resetProgress: true)
++
++    if let recording {
++      try? FileManager.default.removeItem(at: recording.fileURL)
++    }
++    recording = nil
++
++    reset()
++  }
++
++  func togglePlayback() {
++    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
++      stopPlayback(resetProgress: true)
++      return
++    }
++
++    guard phase == .review, let recording else { return }
++
++    if player?.isPlaying == true {
++      player?.pause()
++      isPlaying = false
++      return
++    }
++
++    do {
++      let player = try player ?? AVAudioPlayer(contentsOf: recording.fileURL)
++      player.prepareToPlay()
++      if playbackProgress >= 1 {
++        player.currentTime = 0
++        playbackProgress = 0
++      }
++      self.player = player
++      player.play()
++      isPlaying = true
++      startPlaybackTimer()
++    } catch {
++      log.error("Failed to play voice recording", error: error)
++      ToastCenter.shared.showError("Failed to play voice message")
++      stopPlayback(resetProgress: true)
++    }
++  }
++
++  func takeVoiceMediaItem() throws -> FileMediaItem? {
++    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
++      cancel()
++      return nil
++    }
++
++    guard let recording else { return nil }
++    stopPlayback(resetProgress: true)
++
++    let voice = try FileCache.saveVoice(
++      data: recording.data,
++      duration: Int(max(1, recording.duration.rounded(.up))),
++      waveform: recording.waveform,
++      mimeType: recording.mimeType,
++      fileExtension: recording.fileExtension
++    )
++
++    try? FileManager.default.removeItem(at: recording.fileURL)
++    self.recording = nil
++    reset()
++    return .voice(voice)
++  }
++
++  private func ensureMicrophoneAccess() async -> Bool {
++    switch MacPermissions.mediaStatus(for: .audio) {
++    case .authorized:
++      return true
++    case .notDetermined:
++      let granted = await MacPermissions.requestMediaAccess(for: .audio)
++      if !granted {
++        ToastCenter.shared.showError("Microphone access is required to record voice messages.")
++      }
++      return granted
++    case .denied, .restricted:
++      ToastCenter.shared.showError("Allow microphone access to record voice messages.")
++      MacPermissions.openSystemSettings(.microphone)
++      return false
++    @unknown default:
++      ToastCenter.shared.showError("Microphone access is unavailable.")
++      return false
++    }
++  }
++
++  private func startPlaybackTimer() {
++    playbackTimer?.invalidate()
++    playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
++      Task { @MainActor in
++        self?.updatePlaybackProgress()
++      }
++    }
++  }
++
++  private func updatePlaybackProgress() {
++    guard let player else {
++      stopPlayback(resetProgress: true)
++      return
++    }
++
++    if player.duration > 0 {
++      playbackProgress = min(1, max(0, player.currentTime / player.duration))
++    }
++
++    if player.isPlaying {
++      return
++    }
++
++    isPlaying = false
++    playbackTimer?.invalidate()
++    playbackTimer = nil
++
++    if player.currentTime >= player.duration {
++      player.currentTime = 0
++      playbackProgress = 0
++    }
++  }
++
++  private func stopPlayback(resetProgress: Bool) {
++    playbackTimer?.invalidate()
++    playbackTimer = nil
++    player?.stop()
++    player = nil
++    isPlaying = false
++    if resetProgress {
++      playbackProgress = 0
++    }
++  }
++
++  private func reset() {
++    duration = 0
++    samples = []
++    playbackProgress = 0
++    isPlaying = false
++    phase = .idle
++  }
++}
