@@ -184,7 +184,12 @@ final class BotPresenceController: ObservableObject {
   }
 
   private func refreshToolbarItem() {
-    guard let peer = currentPeer, let botId = currentBotId, let avatar = currentAvatar else {
+    guard
+      let peer = currentPeer,
+      let botId = currentBotId,
+      let avatar = currentAvatar,
+      peer.asUserId() == botId
+    else {
       currentToolbarItem = nil
       return
     }
