@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
+source "${ROOT_DIR}/scripts/macos/arch-utils.sh"
+
 if [[ -f "${ROOT_DIR}/scripts/.env" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -10,16 +12,17 @@ if [[ -f "${ROOT_DIR}/scripts/.env" ]]; then
   set +a
 fi
 
-SPARKLE_VERSION=${SPARKLE_VERSION:-2.7.3}
+SPARKLE_VERSION=${SPARKLE_VERSION:-2.9.3}
 SCHEME=${SCHEME:-"Inline (macOS)"}
 CHANNEL=${CHANNEL:-stable}
 APPCAST_URL=${APPCAST_URL:-"https://public-assets.inline.chat/mac/${CHANNEL}/appcast.xml"}
 SPARKLE_SCHEDULED_CHECK_INTERVAL=${SPARKLE_SCHEDULED_CHECK_INTERVAL:-3600}
-SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}
+SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle/${SPARKLE_VERSION}"}
 DERIVED_DATA=${DERIVED_DATA:-"${ROOT_DIR}/build/InlineMacDirect"}
 OUTPUT_DIR=${OUTPUT_DIR:-"${ROOT_DIR}/build/macos-direct"}
 DMG_PATH=${DMG_PATH:-"${OUTPUT_DIR}/Inline.dmg"}
 ENTITLEMENTS_PATH=${ENTITLEMENTS_PATH:-"${ROOT_DIR}/apple/InlineMac/InlineMacDirect.entitlements"}
+MACOS_RELEASE_ARCH=${MACOS_RELEASE_ARCH:-arm64}
 MACOS_PROVISIONING_PROFILE_BASE64=${MACOS_PROVISIONING_PROFILE_BASE64:-""}
 MACOS_PROVISIONING_PROFILE_PATH=${MACOS_PROVISIONING_PROFILE_PATH:-""}
 OVERWRITE_DMG=${OVERWRITE_DMG:-0}
@@ -44,6 +47,11 @@ fi
 
 if ! command -v create-dmg >/dev/null 2>&1; then
   echo "create-dmg is required (install via npm install --global create-dmg)" >&2
+  exit 1
+fi
+
+if ! command -v lipo >/dev/null 2>&1; then
+  echo "lipo is required" >&2
   exit 1
 fi
 
@@ -103,6 +111,8 @@ xcodebuild_args=(
   "SWIFT_ACTIVE_COMPILATION_CONDITIONS=${swift_conditions}"
   "FRAMEWORK_SEARCH_PATHS=${SPARKLE_FRAMEWORK_PATH}"
   "OTHER_LDFLAGS=-framework Sparkle"
+  "ARCHS=${MACOS_RELEASE_ARCH}"
+  ONLY_ACTIVE_ARCH=NO
   "CODE_SIGN_ENTITLEMENTS=InlineMac/InlineMacDirect.entitlements"
   CODE_SIGNING_ALLOWED=NO
   CODE_SIGNING_REQUIRED=NO
@@ -190,6 +200,7 @@ if [[ ! -d "${SPARKLE_FRAMEWORK}" ]]; then
   echo "Sparkle framework not found at ${SPARKLE_FRAMEWORK}" >&2
   exit 1
 fi
+macos_thin_bundle_to_arch "${APP_PATH}" "${MACOS_RELEASE_ARCH}"
 
 mkdir -p "${OUTPUT_DIR}"
 MACOS_CERTIFICATE_NAME="${MACOS_CERTIFICATE_NAME}" \

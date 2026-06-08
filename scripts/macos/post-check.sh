@@ -3,11 +3,13 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
+source "${ROOT_DIR}/scripts/macos/arch-utils.sh"
+
 OUTPUT_DIR=${OUTPUT_DIR:-"${ROOT_DIR}/build/macos-direct"}
 DMG_PATH=${DMG_PATH:-"${OUTPUT_DIR}/Inline.dmg"}
 APP_PATH=${APP_PATH:-""}
 REQUIRE_APP_STAPLE=${REQUIRE_APP_STAPLE:-0}
-REQUIRED_ARCHS=${REQUIRED_ARCHS:-""}
+REQUIRED_ARCHS=${REQUIRED_ARCHS:-"arm64"}
 
 for arg in "$@"; do
   case "${arg}" in
@@ -134,19 +136,7 @@ if ! /usr/libexec/PlistBuddy -c "Print :SUScheduledCheckInterval" "${APP_PATH}/C
 fi
 
 info "Check app architecture"
-archs=$(python3 - "${APP_PATH}/Contents/MacOS/Inline" <<'PY'
-import subprocess,sys,re
-info = subprocess.check_output(["lipo","-info",sys.argv[1]], text=True).strip()
-if "Non-fat file" in info:
-    arch = info.split()[-1]
-    print(arch)
-elif "Architectures in the fat file" in info:
-    m = re.search(r"are:\\s*(.*)$", info)
-    print(m.group(1) if m else "")
-else:
-    print("")
-PY
-)
+archs=$(macos_lipo_archs "${APP_PATH}/Contents/MacOS/Inline")
 
 if [[ -z "${archs}" ]]; then
   die "Unable to determine app architecture"
@@ -154,11 +144,8 @@ fi
 info "App architectures: ${archs}"
 
 if [[ -n "${REQUIRED_ARCHS}" ]]; then
-  for required in ${REQUIRED_ARCHS}; do
-    if ! echo " ${archs} " | grep -q " ${required} "; then
-      die "Missing required arch: ${required}"
-    fi
-  done
+  macos_require_exact_archs "${APP_PATH}/Contents/MacOS/Inline" ${REQUIRED_ARCHS} || die "App executable architecture check failed"
+  macos_check_bundle_exact_archs "${APP_PATH}" ${REQUIRED_ARCHS} || die "App bundle contains unsupported architecture slices"
 fi
 
 info "Post-checks complete"

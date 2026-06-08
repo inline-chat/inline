@@ -5,6 +5,7 @@ Checks:
   - at least one <item>
   - sparkle:version + sparkle:shortVersionString present
   - enclosure has url + sparkle:edSignature + length
+  - optional: require hardware requirements for the selected build
   - optional: require a specific build number and dmg URL
 """
 
@@ -29,11 +30,19 @@ def find_sparkle_child(item: ET.Element, name: str) -> ET.Element | None:
     return element
 
 
+def item_version(item: ET.Element) -> str:
+    version = find_sparkle_child(item, "version")
+    if version is None:
+        return ""
+    return (version.text or "").strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--appcast", required=True)
     parser.add_argument("--require-build")
     parser.add_argument("--require-url")
+    parser.add_argument("--require-hardware")
     args = parser.parse_args()
 
     appcast_path = Path(args.appcast)
@@ -73,12 +82,10 @@ def main() -> int:
         print("Appcast has no <item> entries", file=sys.stderr)
         return 1
 
+    matching_build_items = [item for item in items if item_version(item) == args.require_build] if args.require_build else []
+
     if args.require_build:
-        if not any(
-            (find_sparkle_child(item, "version") is not None)
-            and (find_sparkle_child(item, "version").text == args.require_build)
-            for item in items
-        ):
+        if not matching_build_items:
             print(f"Appcast missing build {args.require_build}", file=sys.stderr)
             return 1
 
@@ -89,6 +96,19 @@ def main() -> int:
             for item in items
         ):
             print(f"Appcast missing enclosure URL {args.require_url}", file=sys.stderr)
+            return 1
+
+    if args.require_hardware:
+        candidates = matching_build_items if args.require_build else items
+        if not candidates:
+            print("No appcast items available for hardware requirement check", file=sys.stderr)
+            return 1
+        if not any(
+            (find_sparkle_child(item, "hardwareRequirements") is not None)
+            and ((find_sparkle_child(item, "hardwareRequirements").text or "").strip() == args.require_hardware)
+            for item in candidates
+        ):
+            print(f"Appcast missing hardware requirement {args.require_hardware}", file=sys.stderr)
             return 1
 
     for item in items:

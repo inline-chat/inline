@@ -26,8 +26,9 @@ bun run macos:release-app -- --channel beta
 The command runs:
 
 1. Preflight tool checks.
-2. Build, sign, create DMG, notarize, and staple.
-3. Post-check the DMG, code signature, Gatekeeper, Sparkle keys, and archs.
+2. Build an arm64-only app, sign, create DMG, notarize, and staple.
+3. Post-check the DMG, code signature, Gatekeeper, Sparkle keys, and arm64-only
+   architecture across the app bundle.
 4. Verify the built app metadata (`CFBundleVersion`, `InlineCommit`, and
    `SUFeedURL`) matches the selected release.
 5. Upload the DMG to R2.
@@ -74,7 +75,7 @@ build/InlineMacDirectLocal/Build/Products/DevBuild/Inline-Dev.app
 ```
 
 This uses the isolated `DevBuild` flavor, enables `DEBUG_BUILD`, embeds the
-selected Sparkle channel, and signs locally by default.
+selected Sparkle channel, builds only `arm64`, and signs locally by default.
 
 ## Required Local Setup
 
@@ -84,6 +85,9 @@ Tools:
 - `create-dmg`.
 - `curl`, `unzip`, `rsync`, `python3`, `xcrun`, `codesign`, `security`,
   `hdiutil`, `spctl`, `lipo`.
+
+Release builds use Sparkle 2.9.x from `.action/sparkle/2.9.3` by default and
+publish appcast items with `sparkle:hardwareRequirements` set to `arm64`.
 
 Signing and Sparkle env vars:
 

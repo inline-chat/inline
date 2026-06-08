@@ -3,6 +3,9 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { basename, resolve } from "path";
 import { createInterface } from "node:readline";
 
+const sparkleVersion = "2.9.3";
+const macosReleaseArch = "arm64";
+
 type TaskStatus = "pending" | "running" | "success" | "failed" | "skipped";
 
 type Task = {
@@ -96,7 +99,7 @@ function usage(): string {
     "  --derived-data <path>            Xcode derived data (default: unique <root>/build/InlineMacDirect/release-*)",
     "  --app-path <path>                App path (default: <derived-data>/Build/Products/Release/Inline.app)",
     "  --dmg-path <path>                DMG path (default: <root>/build/macos-direct/Inline.dmg)",
-    "  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle)",
+    `  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle/${sparkleVersion})`,
     "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: beta->tip, stable->empty)",
     "  --skip-github-release            Skip GitHub release/tag steps",
     "  --allow-dirty                    Allow a stable build from a dirty worktree",
@@ -131,7 +134,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let derivedData = resolve(rootDir, "build/InlineMacDirect", `release-${nowIsoCompact()}-${Math.random().toString(16).slice(2, 8)}`);
   let appPath = "";
   let dmgPath = resolve(rootDir, "build/macos-direct/Inline.dmg");
-  let sparkleDir = resolve(rootDir, ".action/sparkle");
+  let sparkleDir = resolve(rootDir, ".action/sparkle", sparkleVersion);
   let releaseTag: string | undefined;
   let skipGithubRelease = false;
   let allowDirty = false;
@@ -759,7 +762,7 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
   const defaultDerivedData = resolve(ctx.rootDir, "build/InlineMacDirect");
   const defaultAppPath = resolve(defaultDerivedData, "Build/Products/Release/Inline.app");
   const defaultDmgPath = resolve(ctx.rootDir, "build/macos-direct/Inline.dmg");
-  const defaultSparkleDir = resolve(ctx.rootDir, ".action/sparkle");
+  const defaultSparkleDir = resolve(ctx.rootDir, ".action/sparkle", sparkleVersion);
   const defaultReleaseTag = ctx.rollback || ctx.dropBuild ? "" : ctx.channel === "beta" ? "tip" : "";
   const concreteSkipIds = [...ctx.skip]
     .filter((id) => !["upload", "appcast", "github"].includes(id))
@@ -881,7 +884,7 @@ async function main() {
     if (ctx.rollback || ctx.dropBuild) {
       // Appcast-only operations need feed editing + upload tooling.
     } else if (taskEnabled(opts, "build")) {
-      for (const c of ["xcodebuild", "xcrun", "codesign", "security", "create-dmg", "rsync", "unzip", "perl"]) {
+      for (const c of ["xcodebuild", "xcrun", "codesign", "security", "create-dmg", "rsync", "unzip", "perl", "lipo"]) {
         if (!commandExists(c)) missing.push(c);
       }
     }
@@ -1217,6 +1220,7 @@ async function main() {
         ui.info(`  DERIVED_DATA=${ctx.derivedData}`);
         ui.info(`  DMG_PATH=${ctx.dmgPath}`);
         ui.info(`  SPARKLE_DIR=${ctx.sparkleDir}`);
+        ui.info(`  MACOS_RELEASE_ARCH=${macosReleaseArch}`);
         ui.info(`  PAUSE_BEFORE_NOTARIZE=${ctx.pauseBeforeNotarize ? "1" : "0"}`);
         ui.info("build-direct.sh enforces signing/notarization env vars.");
       },
@@ -1230,6 +1234,7 @@ async function main() {
             DERIVED_DATA: ctx.derivedData,
             DMG_PATH: ctx.dmgPath,
             SPARKLE_DIR: ctx.sparkleDir,
+            MACOS_RELEASE_ARCH: macosReleaseArch,
             PAUSE_BEFORE_NOTARIZE: ctx.pauseBeforeNotarize ? "1" : "0",
           },
         });
@@ -1384,7 +1389,7 @@ async function main() {
 
       const signUpdateBin = resolve(ctx.sparkleDir, "bin/sign_update");
       if (!existsSync(signUpdateBin)) {
-        throw new Error(`Sparkle tool not found: ${signUpdateBin}\nExpected Sparkle tools under --sparkle-dir (default: <root>/.action/sparkle).`);
+        throw new Error(`Sparkle tool not found: ${signUpdateBin}\nExpected Sparkle tools under --sparkle-dir (default: <root>/.action/sparkle/${sparkleVersion}).`);
       }
 
       // Ensure URLs/metadata.
@@ -1445,6 +1450,7 @@ async function main() {
           INLINE_CHANNEL: ctx.channel,
           INLINE_DMG_URL: ctx.dmgUrl,
           INLINE_MIN_MACOS: "15.0",
+          INLINE_HARDWARE_REQUIREMENTS: macosReleaseArch,
           INLINE_COMMIT: ctx.commit,
           INLINE_COMMIT_LONG: ctx.commitLong,
           SIGN_UPDATE_PATH: ctx.signUpdatePath,
@@ -1462,7 +1468,7 @@ async function main() {
     skipReason: taskEnabled(opts, "validate-appcast") ? undefined : "operator requested",
     dryRun: (ctx, ui) => {
       ui.info("Would run:");
-      ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <build> --require-url <dmg-url>");
+      ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <build> --require-url <dmg-url> --require-hardware arm64");
     },
     run: async (ctx, ui) => {
       if (!ctx.buildNumber || !ctx.dmgUrl) {
@@ -1472,7 +1478,7 @@ async function main() {
         ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       }
 
-      await runStreaming(ui, ["python3", resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"), "--appcast", ctx.appcastOutputPath, "--require-build", ctx.buildNumber, "--require-url", ctx.dmgUrl], {
+      await runStreaming(ui, ["python3", resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"), "--appcast", ctx.appcastOutputPath, "--require-build", ctx.buildNumber, "--require-url", ctx.dmgUrl, "--require-hardware", macosReleaseArch], {
         cwd: ctx.rootDir,
       });
     },
