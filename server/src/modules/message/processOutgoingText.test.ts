@@ -196,6 +196,47 @@ describe("processOutgoingText", () => {
     expect(mention.entity.mention.userId).toBe(BigInt(user.id))
   })
 
+  test("trims whitespace from client-provided mention ranges", async () => {
+    const result = await processOutgoingText({
+      text: "cc @Dena  @Test2  mentions",
+      entities: {
+        entities: [
+          {
+            type: MessageEntity_Type.MENTION,
+            offset: 3n,
+            length: 6n,
+            entity: {
+              oneofKind: "mention",
+              mention: { userId: 10300n },
+            },
+          },
+          {
+            type: MessageEntity_Type.MENTION,
+            offset: 10n,
+            length: 7n,
+            entity: {
+              oneofKind: "mention",
+              mention: { userId: 10600n },
+            },
+          },
+        ],
+      },
+    })
+
+    expect(result.text).toBe("cc @Dena  @Test2  mentions")
+    expect(result.entities?.entities).toHaveLength(2)
+    expect(result.entities?.entities[0]).toMatchObject({
+      type: MessageEntity_Type.MENTION,
+      offset: 3n,
+      length: 5n,
+    })
+    expect(result.entities?.entities[1]).toMatchObject({
+      type: MessageEntity_Type.MENTION,
+      offset: 10n,
+      length: 6n,
+    })
+  })
+
   test("prefers inline user id links over username fallbacks", async () => {
     const idUser = await testUtils.createUser(nextEmail("inline-link-id-priority"))
     const usernameUser = await testUtils.createUser(nextEmail("inline-link-username-fallback"))
