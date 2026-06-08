@@ -16,6 +16,8 @@ import UserNotifications
 #endif
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+  private static let customURLSchemes: Set<String> = ["inline", "inline-dev", "inline-debug", "in"]
+
   private var didHandleInitialActivation = false
 
   @MainActor private let appBridge = AppBridge(app: NSApp)
@@ -251,8 +253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func handleCustomURL(_ url: URL) {
-    // Accept both inline:// and in:// schemes
-    guard let scheme = url.scheme, scheme == "inline" || scheme == "in" else {
+    guard let scheme = url.scheme?.lowercased(), Self.customURLSchemes.contains(scheme) else {
       log.warning("Received unsupported URL scheme: \(url.scheme ?? "nil")")
       return
     }
@@ -263,9 +264,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       setupMainWindow()
 
       // Handle different URL patterns
-      switch url.host {
+      switch url.host?.lowercased() {
       case "user":
         handleUserURL(url)
+      case "chat", "thread":
+        handleChatURL(url)
       case "integrations":
         showAndFocusMainWindow()
         NotificationCenter.default.post(name: .integrationCallback, object: url)
@@ -288,25 +291,60 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     openChat(peer: peer)
   }
 
+  @MainActor private func handleChatURL(_ url: URL) {
+    guard let chatId = inlineChatId(from: url) else {
+      log.error(
+        "Invalid chat URL format. Expected: inline://chat/<id>, inline://chat?id=<id>, inline://thread/<id>, or inline://thread?id=<id>"
+      )
+      return
+    }
+
+    log.debug("Opening chat for ID: \(chatId)")
+
+    openChat(peer: .thread(id: chatId))
+  }
+
   private func inlineUserId(from url: URL) -> Int64? {
-    guard url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" else {
+    guard Self.isInlineURL(url, host: "user") else {
       return nil
     }
 
+    return inlineId(from: url, queryNames: ["id", "user_id"])
+  }
+
+  private func inlineChatId(from url: URL) -> Int64? {
+    guard Self.isInlineURL(url), let host = url.host?.lowercased(), host == "chat" || host == "thread" else {
+      return nil
+    }
+
+    return inlineId(from: url, queryNames: ["id", "chat_id"])
+  }
+
+  private static func isInlineURL(_ url: URL, host: String? = nil) -> Bool {
+    guard let scheme = url.scheme?.lowercased(), customURLSchemes.contains(scheme) else {
+      return false
+    }
+    guard let host else { return true }
+    return url.host?.lowercased() == host
+  }
+
+  private func inlineId(from url: URL, queryNames: Set<String>) -> Int64? {
     if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-      let queryId = components.queryItems?.first {
-        let name = $0.name.lowercased()
-        return name == "id" || name == "user_id"
-      }?.value
-      if let queryId, let userId = Int64(queryId), userId > 0 {
-        return userId
+      let queryId = components.queryItems?.first { queryNames.contains($0.name.lowercased()) }?.value
+      if let id = positiveId(queryId) {
+        return id
       }
     }
 
-    guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
+    let pathId = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    return positiveId(pathId)
+  }
+
+  private func positiveId(_ value: String?) -> Int64? {
+    guard let value, !value.isEmpty, value.allSatisfy(\.isNumber), let id = Int64(value), id > 0 else {
       return nil
     }
-    return userId
+    return id
   }
 
   @MainActor private func openChat(peer: Peer) {

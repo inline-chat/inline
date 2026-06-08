@@ -1099,6 +1099,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline uses microphone when you choose to record and send audio in a chat.";
+				INLINE_URL_SCHEME = "inline-debug";
 				INLINE_USER_PROFILE = debug;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1138,6 +1139,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline uses microphone when you choose to record and send audio in a chat.";
+				INLINE_URL_SCHEME = inline;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -1363,6 +1365,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline uses microphone when you choose to record and send audio in a chat.";
+				INLINE_URL_SCHEME = "inline-debug";
 				INLINE_USER_PROFILE = debug2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1502,6 +1505,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline uses microphone when you choose to record and send audio in a chat.";
+				INLINE_URL_SCHEME = "inline-dev";
 				INLINE_USER_PROFILE = devbuild;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
