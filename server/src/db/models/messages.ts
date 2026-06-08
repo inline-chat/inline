@@ -23,6 +23,7 @@ import {
   type DbTranslation,
   type DbUser,
 } from "@in/server/db/schema"
+import type { Transaction } from "@in/server/db/types"
 import { messageAttachments, type DbMessageAttachment } from "@in/server/db/schema/attachments"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Log, LogLevel } from "@in/server/utils/log"
@@ -33,6 +34,7 @@ import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
+import { persistChatMetadataUpdates, type ChatMetadataUpdate } from "@in/server/modules/chatMetadataUpdates"
 
 const log = new Log("MessageModel", LogLevel.INFO)
 
@@ -596,17 +598,22 @@ async function deleteMessages(
   chatId: number,
 ): Promise<{
   update: UpdateSeqAndDate
+  metadataChatUpdates: ChatMetadataUpdate[]
 }> {
   log.trace("deleteMessages", { messageIds, chatId })
 
   // Use a transaction with FOR UPDATE to lock the row while we're working with it
-  let { update } = await db.transaction(async (tx) => {
+  let { update, metadataChatUpdates } = await db.transaction(async (tx) => {
     let [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update")
 
     if (!chat) throw ModelError.ChatInvalid
 
+    const messageIdsNum = messageIds.map((id) => Number(id))
+
     // Clear first to allow for deleting
     await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
+
+    const orphanedChatIds = await orphanReplyThreadsForDeletedMessages(tx, chatId, messageIdsNum)
 
     // Delete message
     let deleted = await tx
@@ -614,10 +621,7 @@ async function deleteMessages(
       .where(
         and(
           eq(messages.chatId, chatId),
-          inArray(
-            messages.messageId,
-            messageIds.map((id) => Number(id)),
-          ),
+          inArray(messages.messageId, messageIdsNum),
         ),
       )
       .returning()
@@ -660,10 +664,31 @@ async function deleteMessages(
       })
       .where(eq(chats.id, chatId))
 
-    return { update }
+    const metadataChatUpdates = await persistChatMetadataUpdates(tx, orphanedChatIds)
+
+    return { update, metadataChatUpdates }
   })
 
-  return { update }
+  return { update, metadataChatUpdates }
+}
+
+async function orphanReplyThreadsForDeletedMessages(
+  tx: Transaction,
+  chatId: number,
+  messageIds: number[],
+): Promise<number[]> {
+  const uniqueMessageIds = Array.from(new Set(messageIds))
+  if (uniqueMessageIds.length === 0) {
+    return []
+  }
+
+  const rows = await tx
+    .update(chats)
+    .set({ parentMessageId: null })
+    .where(and(eq(chats.parentChatId, chatId), inArray(chats.parentMessageId, uniqueMessageIds)))
+    .returning({ chatId: chats.id })
+
+  return rows.map((row) => row.chatId)
 }
 
 type EditMessageInput = {
