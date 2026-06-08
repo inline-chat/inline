@@ -285,6 +285,83 @@ const entityText = (text: string, entity: MessageEntity): string => {
   return text.slice(start, start + length)
 }
 
+const isEntityWhitespace = (char: string | undefined): boolean => {
+  return char !== undefined && /\s/u.test(char)
+}
+
+const trimMentionEntity = (text: string, entity: MessageEntity): MessageEntity | null => {
+  const start = Number(entity.offset)
+  const length = Number(entity.length)
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(length) ||
+    start < 0 ||
+    length <= 0 ||
+    start + length > text.length
+  ) {
+    return entity
+  }
+
+  let nextStart = start
+  let nextEnd = start + length
+  while (nextStart < nextEnd && isEntityWhitespace(text[nextStart])) {
+    nextStart += 1
+  }
+  while (nextEnd > nextStart && isEntityWhitespace(text[nextEnd - 1])) {
+    nextEnd -= 1
+  }
+
+  if (nextStart === nextEnd) {
+    return null
+  }
+  if (nextStart === start && nextEnd === start + length) {
+    return entity
+  }
+
+  return {
+    ...entity,
+    offset: BigInt(nextStart),
+    length: BigInt(nextEnd - nextStart),
+  }
+}
+
+const normalizeMentionRanges = (text: string, entities: MessageEntities | undefined): MessageEntities | undefined => {
+  if (!entities || entities.entities.length === 0) {
+    return entities
+  }
+
+  let changed = false
+  const normalized: MessageEntity[] = []
+  for (const entity of entities.entities) {
+    if (!entity) {
+      changed = true
+      continue
+    }
+
+    if (entity.type !== MessageEntity_Type.MENTION) {
+      normalized.push(entity)
+      continue
+    }
+
+    const next = trimMentionEntity(text, entity)
+    if (!next) {
+      changed = true
+      continue
+    }
+
+    if (next !== entity) {
+      changed = true
+    }
+    normalized.push(next)
+  }
+
+  if (!changed) {
+    return entities
+  }
+
+  return normalized.length > 0 ? { entities: sortEntities(normalized) } : undefined
+}
+
 const resolveInlineMentionLinks = async (
   entities: MessageEntities | undefined,
 ): Promise<MessageEntities | undefined> => {
@@ -596,6 +673,7 @@ export const processOutgoingText = async (
   }
 
   entities = await resolveInlineMentionLinks(entities)
+  entities = normalizeMentionRanges(text, entities)
   entities = resolveInlineThreadLinks(text, entities)
   entities = parseMissingBotCommandEntities({
     text,
