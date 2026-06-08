@@ -190,7 +190,7 @@ struct AllChatsRouteView: View {
   private var previousRoute: Nav3Route? {
     let index = nav.historyIndex - 1
     guard nav.history.indices.contains(index) else { return nil }
-    return nav.history[index]
+    return nav.history[index].route
   }
 }
 

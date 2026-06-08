@@ -146,8 +146,8 @@ class ComposeAppKit: NSView {
 
     if let nav3 = dependencies.nav3, nav3.historyIndex >= 0 {
       let count = min(nav3.historyIndex + 1, nav3.history.count)
-      for route in nav3.history.prefix(count).reversed() {
-        append(route.selectedPeer)
+      for state in nav3.history.prefix(count).reversed() {
+        append(state.route.selectedPeer)
       }
     }
 
