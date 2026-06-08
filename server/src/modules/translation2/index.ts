@@ -1,0 +1,1 @@
+export { TranslationModule } from "./translation"

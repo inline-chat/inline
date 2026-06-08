@@ -72,4 +72,41 @@ describe("TranslationModel.insertTranslations", () => {
 
     expect(decryptedTranslation).toBe("hola")
   })
+
+  test("stores empty translation entities as null", async () => {
+    const user = await testUtils.createUser("empty-translation-entities@test.com")
+    const chat = await testUtils.createTestChat()
+
+    await testUtils.createTestMessage({
+      messageId: 1,
+      chatId: chat.id,
+      fromId: user.id,
+      text: "hello",
+    })
+
+    const result = await TranslationModel.insertTranslations([
+      {
+        chatId: chat.id,
+        messageId: 1,
+        translation: "hola",
+        entities: { entities: [] },
+        language: "es",
+        date: new Date(),
+        msgRev: 0,
+      },
+    ])
+
+    expect(result.persistedTranslations).toHaveLength(1)
+    expect(result.skippedTranslations).toHaveLength(0)
+
+    const storedTranslation = await db._query.translations.findFirst({
+      where: and(
+        eq(schema.translations.chatId, chat.id),
+        eq(schema.translations.messageId, 1),
+        eq(schema.translations.language, "es"),
+      ),
+    })
+
+    expect(storedTranslation?.entities).toBeNull()
+  })
 })

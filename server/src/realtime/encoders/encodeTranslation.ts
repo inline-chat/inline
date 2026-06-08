@@ -18,7 +18,7 @@ export const encodeTranslation = ({ translation }: { translation: DbTranslation 
 
   const entities: MessageEntities | undefined = translation.entities
     ? MessageEntities.fromBinary(Encryption2.decryptBinary(translation.entities))
-    : undefined
+    : { entities: [] }
 
   let translationProto: MessageTranslation = {
     messageId: BigInt(translation.messageId),
@@ -43,6 +43,6 @@ export const encodeUnencryptedTranslation = ({
     translation: translation.translation ?? "",
     date: encodeDateStrict(translation.date),
     msgRev: BigInt(translation.msgRev),
-    entities: translation.entities ?? undefined,
+    entities: translation.entities ?? { entities: [] },
   }
 }

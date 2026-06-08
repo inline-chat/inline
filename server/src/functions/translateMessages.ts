@@ -1,23 +1,19 @@
 import { db } from "@in/server/db"
 import { messages, translations } from "@in/server/db/schema"
-import { eq, and, gt, desc, inArray, lt } from "drizzle-orm"
-import { decryptBinary, encrypt } from "@in/server/modules/encryption/encryption"
+import { eq, and, desc, inArray, lt } from "drizzle-orm"
+import { decryptBinary } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
 import { MessageEntities, type InputPeer, type MessageTranslation } from "@inline-chat/protocol/core"
 import {
-  MessageModel,
   type ProcessedMessage,
   type ProcessedMessageAndTranslation,
-  type ProcessedMessageTranslation,
   processMessageTranslation,
 } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { ChatModel, getChatFromPeer } from "@in/server/db/models/chats"
+import { ChatModel } from "@in/server/db/models/chats"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
-import { openaiClient } from "@in/server/libs/openAI"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import type { Translation } from "openai/resources/audio/translations.mjs"
-import { TranslationModule } from "@in/server/modules/translation/translation"
+import { TranslationModule } from "@in/server/modules/translation2/translation"
 import { TranslationModel } from "@in/server/db/models/translations"
 
 const log = new Log("functions/translateMessages")
