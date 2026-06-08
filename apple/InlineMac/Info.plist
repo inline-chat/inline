@@ -9,7 +9,7 @@
 			<string>com.inline.mac.url</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>inline</string>
+				<string>$(INLINE_URL_SCHEME)</string>
 				<string>in</string>
 			</array>
 		</dict>
