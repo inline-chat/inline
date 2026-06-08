@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import MacDevtools
 import SwiftUI
 
 struct DebugSettingsDetailView: View {
@@ -23,6 +24,11 @@ struct DebugSettingsDetailView: View {
       Section("Permissions") {
         Button("Open Permissions") {
           showPermissions = true
+        }
+      }
+      Section("MacDevtools") {
+        Button("Open MacDevtools") {
+          MacDevtoolsWindowController.show()
         }
       }
 #if DEBUG || DEBUG_BUILD

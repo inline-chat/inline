@@ -25,6 +25,7 @@ let package = Package(
     .library(name: "InlineMacTabStrip", targets: ["InlineMacTabStrip"]),
     .library(name: "InlineMacHotkeys", targets: ["InlineMacHotkeys"]),
     .library(name: "InlineMacWindow", targets: ["InlineMacWindow"]),
+    .library(name: "MacDevtools", targets: ["MacDevtools"]),
     .library(name: "MacTheme", targets: ["MacTheme"]),
   ],
 
@@ -56,6 +57,15 @@ let package = Package(
     .target(
       name: "InlineMacWindow",
       dependencies: [],
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
+      name: "MacDevtools",
+      dependencies: [
+        .product(name: "InlineConfig", package: "InlineKit"),
+        .product(name: "Logger", package: "InlineKit"),
+      ],
       swiftSettings: swiftSettings
     ),
 

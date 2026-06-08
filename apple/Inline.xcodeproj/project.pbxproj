@@ -48,6 +48,7 @@
 		CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FEF2E493C8E00F7BFFE /* Translation */; };
 		CD735FF22E493C9400F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FF12E493C9400F7BFFE /* Translation */; };
 		CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */ = {isa = PBXBuildFile; productRef = CD7C6F122E5847CD00C89032 /* RealtimeV2 */; };
+		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
@@ -267,6 +268,7 @@
 				CD0240C62EA439DA00976FDE /* Invite in Frameworks */,
 				CD4CAEF02E5E14AA00698C43 /* Sentry in Frameworks */,
 				CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */,
+				D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				CD092C4F2EDC6F4A00E867E5 /* MacTheme in Frameworks */,
 				CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */,
@@ -468,6 +470,7 @@
 				CD0240C52EA439DA00976FDE /* Invite */,
 				CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */,
 				7BABF642C785B35DB0C34BF2 /* InlineMacWindow */,
+				D4ACD0022F1B000000000001 /* MacDevtools */,
 				CD092C4E2EDC6F4A00E867E5 /* MacTheme */,
 			);
 			productName = InlineMac;
@@ -1837,6 +1840,10 @@
 		CD7C6F122E5847CD00C89032 /* RealtimeV2 */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RealtimeV2;
+		};
+		D4ACD0022F1B000000000001 /* MacDevtools */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MacDevtools;
 		};
 		CDB123D42D3E8066001AFC1A /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;

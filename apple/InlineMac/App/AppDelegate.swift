@@ -5,6 +5,7 @@ import InlineConfig
 import InlineKit
 import InlineMacUI
 import Logger
+import MacDevtools
 import RealtimeV2
 import Sentry
 import SwiftUI
@@ -49,6 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillFinishLaunching(_: Notification) {
     NSWindow.allowsAutomaticWindowTabbing = true
 
+    MacDevtools.bootstrap()
     registerMacGlobalSettings()
 
     // Setup Notifications Delegate

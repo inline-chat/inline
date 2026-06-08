@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import MacDevtools
 import Translation
 #if SPARKLE
 import Combine
@@ -539,6 +540,18 @@ final class AppMenu: NSObject {
 
     windowMenu.addItem(NSMenuItem.separator())
 
+    let macDevtoolsItem = NSMenuItem(
+      title: "Open Devtools",
+      action: #selector(openMacDevtools(_:)),
+      keyEquivalent: "d"
+    )
+    macDevtoolsItem.keyEquivalentModifierMask = [.command, .option]
+    macDevtoolsItem.target = self
+    macDevtoolsItem.image = NSImage(systemSymbolName: "ladybug", accessibilityDescription: nil)
+    windowMenu.addItem(macDevtoolsItem)
+
+    windowMenu.addItem(NSMenuItem.separator())
+
     windowMenu.addItem(
       withTitle: "Bring All to Front",
       action: #selector(NSApplication.arrangeInFront(_:)),
@@ -740,6 +753,10 @@ final class AppMenu: NSObject {
       window.level = .floating
       sender.state = .on
     }
+  }
+
+  @objc private func openMacDevtools(_ sender: Any?) {
+    MacDevtoolsWindowController.show(sender: sender)
   }
 
   @objc private func showAllTabs(_ sender: Any?) {
