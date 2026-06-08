@@ -4980,9 +4980,21 @@ public struct GetUpdatesStateResult: Sendable {
   /// Current date of the state
   public var date: Int64 = 0
 
+  /// Set by newer servers to tell clients whether discovery found any bucket work.
+  public var updatesFound: Bool {
+    get {return _updatesFound ?? false}
+    set {_updatesFound = newValue}
+  }
+  /// Returns true if `updatesFound` has been explicitly set.
+  public var hasUpdatesFound: Bool {return self._updatesFound != nil}
+  /// Clears the value of `updatesFound`. Subsequent reads from it will return its default value.
+  public mutating func clearUpdatesFound() {self._updatesFound = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _updatesFound: Bool? = nil
 }
 
 public struct GetChatInput: Sendable {
@@ -16984,6 +16996,7 @@ extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   public static let protoMessageName: String = "GetUpdatesStateResult"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "date"),
+    2: .standard(proto: "updates_found"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -16993,20 +17006,29 @@ extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._updatesFound) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.date != 0 {
       try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 1)
     }
+    try { if let v = self._updatesFound {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetUpdatesStateResult, rhs: GetUpdatesStateResult) -> Bool {
     if lhs.date != rhs.date {return false}
+    if lhs._updatesFound != rhs._updatesFound {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

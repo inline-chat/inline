@@ -9,12 +9,13 @@ export const getUpdatesState = async (
   input: GetUpdatesStateInput,
   handlerContext: HandlerContext,
 ): Promise<GetUpdatesStateResult> => {
-  const { date } = await Functions.updates.getUpdatesState(input, {
+  const { date, updatesFound } = await Functions.updates.getUpdatesState(input, {
     currentSessionId: handlerContext.sessionId,
     currentUserId: handlerContext.userId,
   })
 
   return {
     date,
+    updatesFound,
   }
 }

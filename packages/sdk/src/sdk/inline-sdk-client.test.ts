@@ -1972,7 +1972,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  it("supports sendTyping, updates dateCursor when GET_UPDATES_STATE succeeds, and skips deleteMessages without chat peer", async () => {
+  it("supports sendTyping, updates dateCursor when GET_UPDATES_STATE is empty, and skips deleteMessages without chat peer", async () => {
     const transport = new MockTransport()
     const store = new MemoryStateStore({ version: 2 as any })
     const client = new InlineSdkClient({
@@ -2000,7 +2000,10 @@ describe("InlineSdkClient", () => {
           oneofKind: "rpcResult",
           rpcResult: {
             reqMsgId: getUpdatesStateCall.id,
-            result: { oneofKind: "getUpdatesState", getUpdatesState: { date: 500n } },
+            result: {
+              oneofKind: "getUpdatesState",
+              getUpdatesState: { date: 500n, updatesFound: false } as any,
+            },
           },
         },
       }),
@@ -2238,6 +2241,47 @@ describe("InlineSdkClient", () => {
     )
 
     await waitFor(() => warned > 0)
+    await client.close()
+  })
+
+  it("does not advance dateCursor when GET_UPDATES_STATE found bucket work", async () => {
+    const transport = new MockTransport()
+    const store = new MemoryStateStore({ version: 1, dateCursor: 100n })
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: store,
+    })
+
+    await connectAndOpen(client, transport)
+
+    await waitFor(() =>
+      transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES_STATE),
+    )
+    const getUpdatesStateCall = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES_STATE,
+    )
+    if (!getUpdatesStateCall || getUpdatesStateCall.body.oneofKind !== "rpcCall") throw new Error("missing getUpdatesState")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 101n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: getUpdatesStateCall.id,
+            result: {
+              oneofKind: "getUpdatesState",
+              getUpdatesState: { date: 500n, updatesFound: true } as any,
+            },
+          },
+        },
+      }),
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(client.exportState().dateCursor).toBe(100n)
     await client.close()
   })
 

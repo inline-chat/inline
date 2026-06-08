@@ -7,17 +7,19 @@ import type {
   Update,
   UpdateSidecars,
   User,
+  Dialog,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateBoxInput, type DecryptedUpdate } from "@in/server/db/models/updates"
-import { UpdateBucket, chats, messageAttachments, spaces, type DbUpdate } from "@in/server/db/schema"
+import { UpdateBucket, chats, dialogs, messageAttachments, spaces, type DbUpdate } from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { eq, inArray } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 
 const log = new Log("Sync", LogLevel.DEBUG)
@@ -297,6 +299,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
             msgId: String(serverUpdate.update.editMessage.msgId),
             seq: update.seq,
           })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
           break
         }
 
@@ -495,22 +498,24 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
 
       default:
         log.warn("Unhandled chat update", { type: serverUpdate.update.oneofKind })
-        inflatedUpdates.push({
-          seq: update.seq,
-          date: encodeDateStrict(update.date),
-          update: {
-            oneofKind: "chatSkipPts",
-            chatSkipPts: {
-              chatId: BigInt(chatId),
-            },
-          },
-        })
+        inflatedUpdates.push(chatSkipPts(update, chatId))
         break
     }
   }
 
   return { updates: inflatedUpdates }
 }
+
+const chatSkipPts = (update: DecryptedUpdate, chatId: number): Update => ({
+  seq: update.seq,
+  date: encodeDateStrict(update.date),
+  update: {
+    oneofKind: "chatSkipPts",
+    chatSkipPts: {
+      chatId: BigInt(chatId),
+    },
+  },
+})
 
 const emptySidecars = (): UpdateSidecars => ({
   users: [],
@@ -528,6 +533,7 @@ type ChatSidecarsForUpdatesInput = {
 async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): Promise<UpdateSidecars> {
   const users = new Map<string, User>()
   const chatMap = new Map<string, ProtocolChat>()
+  const dialogMap = new Map<string, Dialog>()
   const spaceMap = new Map<string, ProtocolSpace>()
   const userIds = new Set<number>()
   const chatIds = new Set<number>()
@@ -574,6 +580,24 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
     chatMap.set(String(encoded.id), encoded)
   }
 
+  const sidecarChatIds = chatRows.map((chat) => chat.id)
+  if (sidecarChatIds.length > 0) {
+    const dialogRows = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.userId, input.userId), inArray(dialogs.chatId, sidecarChatIds)))
+    const unreadCounts = await DialogsModel.getBatchUnreadCounts({
+      userId: input.userId,
+      chatIds: dialogRows.map((dialog) => dialog.chatId),
+    })
+    const unreadCountByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount]))
+
+    for (const dialog of dialogRows) {
+      const encoded = Encoders.dialog(dialog, { unreadCount: unreadCountByChatId.get(dialog.chatId) ?? 0 })
+      dialogMap.set(String(encoded.chatId), encoded)
+    }
+  }
+
   if (userIds.size > 0) {
     const rows = await UsersModel.getUsersWithPhotos(Array.from(userIds))
     for (const row of rows) {
@@ -593,7 +617,7 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
   return {
     users: Array.from(users.values()),
     chats: Array.from(chatMap.values()),
-    dialogs: [],
+    dialogs: Array.from(dialogMap.values()),
     spaces: Array.from(spaceMap.values()),
   }
 }

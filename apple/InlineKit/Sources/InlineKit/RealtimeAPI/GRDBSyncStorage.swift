@@ -54,14 +54,17 @@ public struct GRDBSyncStorage: SyncStorage {
     }
   }
 
-  public func setState(_ state: SyncState) async {
+  @discardableResult
+  public func setState(_ state: SyncState) async -> Bool {
     do {
       try await db.dbWriter.write { db in
         let dbState = DbGlobalSyncState(lastSyncDate: state.lastSyncDate)
         try dbState.save(db)
       }
+      return true
     } catch {
       AppDatabase.log.error("Failed to save global sync state: \(error)")
+      return false
     }
   }
 
@@ -85,7 +88,8 @@ public struct GRDBSyncStorage: SyncStorage {
     }
   }
 
-  public func setBucketState(for key: BucketKey, state: BucketState) async {
+  @discardableResult
+  public func setBucketState(for key: BucketKey, state: BucketState) async -> Bool {
     do {
       try await db.dbWriter.write { db in
         let dbState = DbBucketState(
@@ -96,12 +100,15 @@ public struct GRDBSyncStorage: SyncStorage {
         )
         try dbState.save(db)
       }
+      return true
     } catch {
       AppDatabase.log.error("Failed to save bucket state for \(key): \(error)")
+      return false
     }
   }
 
-  public func removeBucketState(for key: BucketKey) async {
+  @discardableResult
+  public func removeBucketState(for key: BucketKey) async -> Bool {
     do {
       try await db.dbWriter.write { db in
         _ = try DbBucketState
@@ -111,12 +118,15 @@ public struct GRDBSyncStorage: SyncStorage {
           )
           .deleteAll(db)
       }
+      return true
     } catch {
       AppDatabase.log.error("Failed to remove bucket state for \(key): \(error)")
+      return false
     }
   }
 
-  public func setBucketStates(states: [BucketKey: BucketState]) async {
+  @discardableResult
+  public func setBucketStates(states: [BucketKey: BucketState]) async -> Bool {
     do {
       try await db.dbWriter.write { db in
         for (key, state) in states {
@@ -129,19 +139,24 @@ public struct GRDBSyncStorage: SyncStorage {
           try dbState.save(db)
         }
       }
+      return true
     } catch {
       AppDatabase.log.error("Failed to save bucket states batch: \(error)")
+      return false
     }
   }
 
-  public func clearSyncState() async {
+  @discardableResult
+  public func clearSyncState() async -> Bool {
     do {
       try await db.dbWriter.write { db in
         _ = try DbBucketState.deleteAll(db)
         _ = try DbGlobalSyncState.deleteAll(db)
       }
+      return true
     } catch {
       AppDatabase.log.error("Failed to clear sync state: \(error)")
+      return false
     }
   }
 }

@@ -71,15 +71,20 @@ public enum BucketKey: Sendable, Hashable {
 
 public protocol SyncStorage: Sendable {
   func getState() async -> SyncState
-  func setState(_ state: SyncState) async
+  @discardableResult
+  func setState(_ state: SyncState) async -> Bool
 
   func getBucketState(for key: BucketKey) async -> BucketState
-  func setBucketState(for key: BucketKey, state: BucketState) async
-  func removeBucketState(for key: BucketKey) async
+  @discardableResult
+  func setBucketState(for key: BucketKey, state: BucketState) async -> Bool
+  @discardableResult
+  func removeBucketState(for key: BucketKey) async -> Bool
 
   /// Uses a single transaction
-  func setBucketStates(states: [BucketKey: BucketState]) async
+  @discardableResult
+  func setBucketStates(states: [BucketKey: BucketState]) async -> Bool
 
   /// Clears global sync state and all bucket states.
-  func clearSyncState() async
+  @discardableResult
+  func clearSyncState() async -> Bool
 }

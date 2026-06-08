@@ -469,15 +469,6 @@ public actor RealtimeV2 {
     Task { await sync.updateConfig(config) }
   }
 
-  public nonisolated func getEnableSyncMessageUpdates() -> Bool {
-    RealtimeConfigStore.getEnableSyncMessageUpdates()
-  }
-
-  public func setEnableSyncMessageUpdates(_: Bool) {
-    RealtimeConfigStore.setEnableSyncMessageUpdates(true)
-    Task { await sync.updateConfig(SyncConfig.default) }
-  }
-
   public func getSyncStats() async -> SyncStats {
     await sync.getStats()
   }
@@ -485,6 +476,12 @@ public actor RealtimeV2 {
   public func clearSyncState() async {
     await sync.clearSyncState()
   }
+
+#if DEBUG || DEBUG_BUILD
+  public func runSyncDebugScenario(_ scenario: SyncDebugScenario) async -> SyncDebugScenarioResult {
+    await sync.runDebugScenario(scenario)
+  }
+#endif
 
   // MARK: - Helpers
 

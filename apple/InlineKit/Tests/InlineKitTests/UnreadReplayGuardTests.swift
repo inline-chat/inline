@@ -163,6 +163,32 @@ struct UnreadReplayGuardTests {
     }
   }
 
+  @Test("updates engine live message materializes missing chat references")
+  func updatesEngineLiveMessageMaterializesMissingChatReferences() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      var update = InlineProtocol.Update()
+      update.update = .newMessage(makeNewMessageUpdate(messageId: 1))
+      var reloadPeers = Set<InlineKit.Peer>()
+
+      let didApply = UpdatesEngine.shared.apply(
+        update: update,
+        db: db,
+        source: .realtime,
+        reloadPeers: &reloadPeers
+      )
+
+      #expect(didApply)
+      let chat = try #require(try Chat.fetchOne(db, id: chatId))
+      #expect(chat.type == .thread)
+      let sender = try User.fetchOne(db, id: senderId)
+      #expect(sender != nil)
+      let message = try Message.fetchOne(db, key: ["messageId": 1, "chatId": chatId])
+      #expect(message != nil)
+    }
+  }
+
   @Test("catch-up message materializes missing forwarded references")
   func catchupMessageMaterializesMissingForwardedReferences() throws {
     let dbQueue = try makeInMemoryDB()

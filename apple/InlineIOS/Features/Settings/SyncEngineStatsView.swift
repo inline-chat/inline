@@ -6,9 +6,35 @@ struct SyncEngineStatsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @State private var syncStats: SyncStats?
   @State private var isLoadingStats = false
+#if DEBUG || DEBUG_BUILD
+  @State private var runningScenario: SyncDebugScenario?
+  @State private var scenarioResult: SyncDebugScenarioResult?
+#endif
 
   var body: some View {
     List {
+#if DEBUG || DEBUG_BUILD
+      Section("Scenarios") {
+        ForEach(SyncDebugScenario.allCases) { scenario in
+          Button {
+            runScenario(scenario)
+          } label: {
+            SyncDebugScenarioRow(
+              scenario: scenario,
+              isRunning: runningScenario == scenario
+            )
+          }
+          .disabled(runningScenario != nil)
+        }
+
+        if let scenarioResult {
+          Text(scenarioResult.summary)
+            .font(.caption)
+            .foregroundStyle(scenarioResult.succeeded ? Color.secondary : Color.red)
+        }
+      }
+#endif
+
       Section("Sync") {
         Button {
           refreshSyncStats()
@@ -62,7 +88,7 @@ struct SyncEngineStatsView: View {
       }
     }
     .listStyle(.insetGrouped)
-    .navigationTitle("Sync Engine Stats")
+    .navigationTitle("Sync Engine")
     .navigationBarTitleDisplayMode(.inline)
     .onAppear {
       refreshSyncStats()
@@ -79,6 +105,21 @@ struct SyncEngineStatsView: View {
       }
     }
   }
+
+#if DEBUG || DEBUG_BUILD
+  private func runScenario(_ scenario: SyncDebugScenario) {
+    runningScenario = scenario
+    Task {
+      let result = await realtimeV2.runSyncDebugScenario(scenario)
+      let snapshot = await realtimeV2.getSyncStats()
+      await MainActor.run {
+        scenarioResult = result
+        syncStats = snapshot
+        runningScenario = nil
+      }
+    }
+  }
+#endif
 
   private func bucketLabel(_ key: BucketKey) -> String {
     switch key {
@@ -111,6 +152,40 @@ struct SyncEngineStatsView: View {
     return formatter
   }()
 }
+
+#if DEBUG || DEBUG_BUILD
+private struct SyncDebugScenarioRow: View {
+  let scenario: SyncDebugScenario
+  let isRunning: Bool
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 12) {
+      Image(systemName: scenario.systemImage)
+        .font(.callout)
+        .foregroundStyle(.white)
+        .frame(width: 25, height: 25)
+        .background(.purple)
+        .clipShape(.rect(cornerRadius: 6))
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text(scenario.title)
+          .foregroundStyle(.primary)
+        Text(scenario.detail)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Spacer(minLength: 8)
+
+      if isRunning {
+        ProgressView()
+      }
+    }
+    .padding(.vertical, 2)
+  }
+}
+#endif
 
 #Preview("Sync Engine Stats") {
   NavigationView {
