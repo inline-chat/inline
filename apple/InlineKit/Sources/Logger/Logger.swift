@@ -1,8 +1,9 @@
 import Foundation
 import OSLog
 import Sentry
+import Darwin
 
-public enum LogLevel: String, Sendable {
+public enum LogLevel: String, Codable, Sendable {
   case error = "❌ ERROR"
   case warning = "⚠️ WARNING"
   case info = "ℹ️ INFO"
@@ -30,6 +31,78 @@ public enum LogLevel: String, Sendable {
   }
 }
 
+public struct LogEntry: Codable, Identifiable, Sendable, Equatable {
+  public let id: UUID
+  public let timestamp: Date
+  public let level: LogLevel
+  public let scope: String
+  public let message: String
+  public let error: String?
+  public let file: String
+  public let fileName: String
+  public let function: String
+  public let line: Int
+  public let processIdentifier: Int32
+  public let threadIdentifier: UInt64
+
+  public init(
+    id: UUID = UUID(),
+    timestamp: Date = Date(),
+    level: LogLevel,
+    scope: String,
+    message: String,
+    error: String?,
+    file: String,
+    fileName: String,
+    function: String,
+    line: Int,
+    processIdentifier: Int32 = ProcessInfo.processInfo.processIdentifier,
+    threadIdentifier: UInt64? = nil
+  ) {
+    self.id = id
+    self.timestamp = timestamp
+    self.level = level
+    self.scope = scope
+    self.message = message
+    self.error = error
+    self.file = file
+    self.fileName = fileName
+    self.function = function
+    self.line = line
+    self.processIdentifier = processIdentifier
+    self.threadIdentifier = threadIdentifier ?? Self.currentThreadIdentifier()
+  }
+
+  public var consoleMessage: String {
+    "\(level.rawValue) |  \(scope) | \(message)"
+  }
+
+  private static func currentThreadIdentifier() -> UInt64 {
+    var id: UInt64 = 0
+    pthread_threadid_np(nil, &id)
+    return id
+  }
+}
+
+public struct LogEvent: @unchecked Sendable {
+  public let entry: LogEntry
+  public let error: Error?
+
+  public init(entry: LogEntry, error: Error?) {
+    self.entry = entry
+    self.error = error
+  }
+}
+
+public protocol LogSink: AnyObject, Sendable {
+  func write(_ event: LogEvent)
+}
+
+public enum DefaultLogSinkID {
+  public static let console = "logger.console"
+  public static let sentry = "logger.sentry"
+}
+
 public protocol Logging {
   func error(_ message: String, error: Error?, file: String, function: String, line: Int)
   func warning(_ message: String, file: String, function: String, line: Int)
@@ -38,25 +111,96 @@ public protocol Logging {
   func trace(_ message: @autoclosure () -> String, file: String, function: String, line: Int)
 }
 
+public final class ConsoleLogSink: LogSink, @unchecked Sendable {
+  private let subsystem: String
+  private let lock = NSLock()
+  private var loggers: [String: Logger] = [:]
+
+  public init(subsystem: String = Bundle.main.bundleIdentifier ?? "chat.inline") {
+    self.subsystem = subsystem
+  }
+
+  public func write(_ event: LogEvent) {
+    let entry = event.entry
+    logger(for: entry.scope).log(
+      level: entry.level.osLogType,
+      "\(entry.consoleMessage, privacy: .public)"
+    )
+  }
+
+  private func logger(for scope: String) -> Logger {
+    lock.lock()
+    defer { lock.unlock() }
+
+    if let logger = loggers[scope] {
+      return logger
+    }
+
+    let logger = Logger(subsystem: subsystem, category: scope)
+    loggers[scope] = logger
+    return logger
+  }
+}
+
+public final class SentryLogSink: LogSink, @unchecked Sendable {
+  public init() {}
+
+  public func write(_ event: LogEvent) {
+    let entry = event.entry
+
+    if entry.level == .info {
+      SentrySDK.logger.info(entry.message)
+    }
+
+    guard entry.level == .error else { return }
+
+    Task {
+      if let error = event.error {
+        await SentryReporter.shared.reportError(
+          error,
+          entry: entry
+        )
+      } else {
+        await SentryReporter.shared.reportMessage(
+          entry
+        )
+      }
+    }
+  }
+}
+
+private final class LogSinkRegistry: @unchecked Sendable {
+  private let lock = NSLock()
+  private var sinks: [String: any LogSink] = [
+    DefaultLogSinkID.console: ConsoleLogSink(),
+    DefaultLogSinkID.sentry: SentryLogSink(),
+  ]
+
+  func set(_ sink: (any LogSink)?, id: String) {
+    lock.lock()
+    defer { lock.unlock() }
+
+    sinks[id] = sink
+  }
+
+  func snapshot() -> [any LogSink] {
+    lock.lock()
+    defer { lock.unlock() }
+
+    return Array(sinks.values)
+  }
+}
+
 public final class Log: @unchecked Sendable {
   public static let shared = Log(scope: "shared")
+  private static let registry = LogSinkRegistry()
 
   private let scope: String
   private let level: LogLevel
-//  #if DEBUG
-//  private let logger: String // Using String as identifier for debug builds
-//  #else
-  private let logger: Logger
-//  #endif
 
   private init(scope: String, level: LogLevel = .debug) {
     self.scope = scope
     self.level = level
-//    #if DEBUG
-//    logger = scope
-//    #else
-    logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "chat.inline", category: scope)
-//    #endif
   }
 
   public static func scoped(_ scope: String, enableTracing: Bool = false) -> Log {
@@ -69,6 +213,14 @@ public final class Log: @unchecked Sendable {
 
   public static func scoped(_ scope: String) -> Log {
     Log(scope: scope)
+  }
+
+  public static func addSink(_ sink: any LogSink, id: String) {
+    registry.set(sink, id: id)
+  }
+
+  public static func removeSink(id: String) {
+    registry.set(nil, id: id)
   }
 
   private func log(
@@ -86,49 +238,26 @@ public final class Log: @unchecked Sendable {
     guard level.priority >= self.level.priority else { return }
 
     let logMessage: String
-    let scope_ = scope
     if scope == "shared" || level == .error {
       logMessage = "[\(fileName):\(line) \(function)] \(message) \(errorDescription)"
     } else {
       logMessage = "\(message) \(errorDescription)"
     }
 
-//    #if DEBUG
-//    print("\(level.rawValue) |  \(scope_) | \(logMessage)")
-//    #else
-    logger.log(
-      level: level.osLogType,
-      "\(level.rawValue, privacy: .public) |  \(scope_, privacy: .public) | \(logMessage, privacy: .public)"
+    let entry = LogEntry(
+      level: level,
+      scope: scope,
+      message: logMessage,
+      error: errorDescription.isEmpty ? nil : errorDescription,
+      file: file,
+      fileName: fileName,
+      function: function,
+      line: line
     )
-    // #endif
 
-    if level == .info {
-      SentrySDK.logger.info(logMessage)
-    }
-
-    // Handle Sentry reporting with proper isolation
-    if level == .error {
-      Task {
-        if level == .error, let error {
-          await SentryReporter.shared.reportError(
-            error,
-            message: message,
-            scope: scope_,
-            file: file,
-            function: function,
-            line: line
-          )
-        } else {
-          await SentryReporter.shared.reportMessage(
-            message,
-            scope: scope_,
-            error: error,
-            file: file,
-            function: function,
-            line: line
-          )
-        }
-      }
+    let event = LogEvent(entry: entry, error: error)
+    for sink in Self.registry.snapshot() {
+      sink.write(event)
     }
   }
 }
@@ -212,41 +341,32 @@ private actor SentryReporter {
 
   func reportError(
     _ error: Error,
-    message: String,
-    scope: String,
-    file: String = #file,
-    function: String = #function,
-    line: Int = #line
+    entry: LogEntry
   ) async {
     guard shouldReport(error) else { return }
 
     await MainActor.run {
       _ = SentrySDK.capture(error: error) { sentryScope in
-        sentryScope.setTag(value: scope, key: "scope")
-        sentryScope.setExtra(value: message, key: "message")
-        sentryScope.setExtra(value: file, key: "file")
-        sentryScope.setExtra(value: function, key: "function")
-        sentryScope.setExtra(value: line, key: "line")
+        sentryScope.setTag(value: entry.scope, key: "scope")
+        sentryScope.setExtra(value: entry.message, key: "message")
+        sentryScope.setExtra(value: entry.file, key: "file")
+        sentryScope.setExtra(value: entry.function, key: "function")
+        sentryScope.setExtra(value: entry.line, key: "line")
       }
     }
   }
 
   func reportMessage(
-    _ message: String,
-    scope: String,
-    error: Error?,
-    file: String = #file,
-    function: String = #function,
-    line: Int = #line
+    _ entry: LogEntry
   ) async {
     await MainActor.run {
-      _ = SentrySDK.capture(message: message) { sentryScope in
-        sentryScope.setTag(value: scope, key: "scope")
-        sentryScope.setExtra(value: file, key: "file")
-        sentryScope.setExtra(value: function, key: "function")
-        sentryScope.setExtra(value: line, key: "line")
-        if let error {
-          sentryScope.setExtra(value: error.localizedDescription, key: "error")
+      _ = SentrySDK.capture(message: entry.message) { sentryScope in
+        sentryScope.setTag(value: entry.scope, key: "scope")
+        sentryScope.setExtra(value: entry.file, key: "file")
+        sentryScope.setExtra(value: entry.function, key: "function")
+        sentryScope.setExtra(value: entry.line, key: "line")
+        if let error = entry.error {
+          sentryScope.setExtra(value: error, key: "error")
         }
       }
     }
