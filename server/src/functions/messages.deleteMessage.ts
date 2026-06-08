@@ -12,6 +12,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { Log } from "@in/server/utils/log"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePush"
 
 type Input = {
   messageIds: bigint[]
@@ -38,13 +39,18 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     throw error
   }
 
-  let { update } = await MessageModel.deleteMessages(input.messageIds, chat.id)
+  let { update, metadataChatUpdates } = await MessageModel.deleteMessages(input.messageIds, chat.id)
 
   const { selfUpdates, updateGroup } = await pushUpdates({
     inputPeer: input.peer,
     messageIds: input.messageIds,
     currentUserId: context.currentUserId,
     update,
+  })
+
+  const { selfUpdates: metadataSelfUpdates } = await pushChatMetadataUpdates({
+    currentUserId: context.currentUserId,
+    chatUpdates: metadataChatUpdates,
   })
 
   await emitReplyThreadParentRepliesUpdateIfNeeded({
@@ -65,7 +71,7 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     }),
   )
 
-  return { updates: selfUpdates }
+  return { updates: [...selfUpdates, ...metadataSelfUpdates] }
 }
 
 // ------------------------------------------------------------
