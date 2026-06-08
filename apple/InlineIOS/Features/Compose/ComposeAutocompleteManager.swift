@@ -203,17 +203,39 @@ final class ComposeAutocompleteManager: NSObject {
           in: currentAttributedText,
           range: match.range,
           with: title,
-          chatId: chatId
+          chatId: chatId,
+          linkAttributes: threadLinkAttributes(for: textView),
+          trailingAttributes: baseTextAttributes(for: textView)
         )
 
         textView.attributedText = result.newAttributedText
         textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
+        textView.resetTypingAttributesToDefault()
         dismissCompletion()
         delegate?.composeAutocompleteManager(self, didInsert: item, for: replacedRange)
 
       case .emoji:
         dismissCompletion()
     }
+  }
+
+  private func threadLinkAttributes(for textView: UITextView) -> [NSAttributedString.Key: Any] {
+    var attributes = baseTextAttributes(for: textView)
+    attributes[.foregroundColor] = linkColor(for: textView)
+    return attributes
+  }
+
+  private func baseTextAttributes(for textView: UITextView) -> [NSAttributedString.Key: Any] {
+    [
+      .font: textView.font ?? UIFont.systemFont(ofSize: 17),
+      .foregroundColor: UIColor.label,
+    ]
+  }
+
+  private func linkColor(for textView: UITextView) -> UIColor {
+    (textView as? ComposeTextView)?.composeView?.linkColor
+      ?? textView.tintColor
+      ?? ThemeManager.shared.selected.accent
   }
 }
 

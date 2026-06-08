@@ -2562,12 +2562,15 @@ extension ComposeAppKit: ComposeAutocompleteMenuDelegate {
           in: textEditor.attributedString,
           range: match.range,
           with: title,
-          chatId: chatId
+          chatId: chatId,
+          linkAttributes: composeThreadLinkAttributes,
+          trailingAttributes: composeBaseTextAttributes
         )
 
         ignoreNextHeightChange = true
         textEditor.setAttributedString(result.newAttributedText)
         textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+        textEditor.textView.resetTypingAttributesToDefault()
         ignoreNextHeightChange = false
 
         hideAutocomplete()
@@ -2588,6 +2591,16 @@ extension ComposeAppKit: ComposeAutocompleteMenuDelegate {
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
     }
+  }
+
+  private var composeThreadLinkAttributes: [NSAttributedString.Key: Any] {
+    var attributes = composeBaseTextAttributes
+    attributes[.foregroundColor] = ComposeTextEditor.linkColor
+    return attributes
+  }
+
+  private var composeBaseTextAttributes: [NSAttributedString.Key: Any] {
+    textEditor.textView.defaultTypingAttributes
   }
 
   func autocompleteMenuDidRequestClose(_ menu: ComposeAutocompleteMenu) {
