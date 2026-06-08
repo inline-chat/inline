@@ -67,16 +67,14 @@ public final class ThreadLinkDetector {
     range: NSRange,
     with title: String,
     chatId: Int64,
-    trailingText: String = " "
+    trailingText: String = " ",
+    linkAttributes: [NSAttributedString.Key: Any]? = nil,
+    trailingAttributes: [NSAttributedString.Key: Any]? = nil
   ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
     let text = "[[\(title)]]"
-    let replacement = NSMutableAttributedString(
-      attributedString: AttributedStringHelpers.createThreadLinkAttributedString(
-        text,
-        target: .chatId(chatId)
-      )
-    )
-    replacement.append(NSAttributedString(string: trailingText))
+    let target = ThreadLinkTarget.chatId(chatId)
+    let replacement = threadLinkText(text, target: target, attributes: linkAttributes)
+    replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
 
     let mutable = attributedText.mutableCopy() as! NSMutableAttributedString
     mutable.replaceCharacters(in: range, with: replacement)
@@ -85,6 +83,33 @@ public final class ThreadLinkDetector {
     let replacementLength = text.utf16.count + trailingText.utf16.count
     let newCursorPosition = range.location + replacementLength
     return (newAttributedText, newCursorPosition)
+  }
+
+  private func threadLinkText(
+    _ text: String,
+    target: ThreadLinkTarget,
+    attributes: [NSAttributedString.Key: Any]?
+  ) -> NSMutableAttributedString {
+    guard var attributes else {
+      return NSMutableAttributedString(
+        attributedString: AttributedStringHelpers.createThreadLinkAttributedString(text, target: target)
+      )
+    }
+
+    attributes[.threadLink] = target
+    let attributed = NSMutableAttributedString(string: text, attributes: attributes)
+    AttributedStringHelpers.styleThreadLinkSyntax(
+      in: attributed,
+      range: NSRange(location: 0, length: attributed.length)
+    )
+    if let linkColor = attributes[.foregroundColor], attributed.length > 4 {
+      attributed.addAttribute(
+        .foregroundColor,
+        value: linkColor,
+        range: NSRange(location: 2, length: attributed.length - 4)
+      )
+    }
+    return attributed
   }
 
   private func isLineBreak(_ character: unichar) -> Bool {
