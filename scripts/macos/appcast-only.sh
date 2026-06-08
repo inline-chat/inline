@@ -11,10 +11,11 @@ if [[ -f "${ROOT_DIR}/scripts/.env" ]]; then
 fi
 
 CHANNEL="stable"
+SPARKLE_VERSION=${SPARKLE_VERSION:-2.9.3}
 DERIVED_DATA="${DERIVED_DATA:-"${ROOT_DIR}/build/InlineMacDirect"}"
 APP_PATH="${APP_PATH:-""}"
 DMG_PATH="${DMG_PATH:-""}"
-SPARKLE_DIR="${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}"
+SPARKLE_DIR="${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle/${SPARKLE_VERSION}"}"
 TEMP_ROOT="${ROOT_DIR}/build/macos-release-tmp"
 
 usage() {
@@ -150,6 +151,7 @@ INLINE_VERSION="${VERSION}" \
 INLINE_CHANNEL="${CHANNEL}" \
 INLINE_DMG_URL="${DMG_URL}" \
 INLINE_MIN_MACOS="15.0" \
+INLINE_HARDWARE_REQUIREMENTS="arm64" \
 INLINE_COMMIT="${COMMIT}" \
 INLINE_COMMIT_LONG="${COMMIT_LONG}" \
 SIGN_UPDATE_PATH="${SIGN_UPDATE_PATH}" \
@@ -161,7 +163,8 @@ echo "• Validate appcast"
 python3 "${ROOT_DIR}/scripts/macos/validate_appcast.py" \
   --appcast "${APPCAST_OUTPUT_PATH}" \
   --require-build "${BUILD_NUMBER}" \
-  --require-url "${DMG_URL}"
+  --require-url "${DMG_URL}" \
+  --require-hardware arm64
 
 echo "• Upload appcast to R2"
 UPLOAD_MODE="appcast" CHANNEL="${CHANNEL}" APPCAST_PATH="${APPCAST_OUTPUT_PATH}" \

@@ -11,6 +11,7 @@ Environment:
   - INLINE_CHANNEL
   - INLINE_DMG_URL
   - INLINE_MIN_MACOS (optional, default: 15.0)
+  - INLINE_HARDWARE_REQUIREMENTS (optional, default: arm64)
   - INLINE_COMMIT (optional)
   - INLINE_COMMIT_LONG (optional)
 
@@ -29,6 +30,7 @@ version = os.environ.get("INLINE_VERSION", build)
 channel = os.environ.get("INLINE_CHANNEL", "stable")
 dmg_url = os.environ["INLINE_DMG_URL"]
 min_macos = os.environ.get("INLINE_MIN_MACOS", "15.0")
+hardware_requirements = os.environ.get("INLINE_HARDWARE_REQUIREMENTS", "arm64").strip()
 commit = os.environ.get("INLINE_COMMIT", "")
 commit_long = os.environ.get("INLINE_COMMIT_LONG", "")
 
@@ -108,6 +110,10 @@ sparkle_short.text = version
 
 sparkle_min = ET.SubElement(item, sparkle_tag("minimumSystemVersion"))
 sparkle_min.text = min_macos
+
+if hardware_requirements:
+    sparkle_hardware = ET.SubElement(item, sparkle_tag("hardwareRequirements"))
+    sparkle_hardware.text = hardware_requirements
 
 if commit:
     description = ET.SubElement(item, "description")

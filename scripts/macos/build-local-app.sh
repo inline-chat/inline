@@ -3,18 +3,21 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-SPARKLE_VERSION=${SPARKLE_VERSION:-2.7.3}
+source "${ROOT_DIR}/scripts/macos/arch-utils.sh"
+
+SPARKLE_VERSION=${SPARKLE_VERSION:-2.9.3}
 SCHEME=${SCHEME:-"Inline (macOS)"}
 CONFIGURATION=${CONFIGURATION:-DevBuild}
 CHANNEL=${CHANNEL:-stable}
 SIGN_BUILD=${SIGN_BUILD:-always}
 APPCAST_URL=${APPCAST_URL:-"https://public-assets.inline.chat/mac/${CHANNEL}/appcast.xml"}
 SPARKLE_SCHEDULED_CHECK_INTERVAL=${SPARKLE_SCHEDULED_CHECK_INTERVAL:-3600}
-SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}
+SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle/${SPARKLE_VERSION}"}
 DERIVED_DATA=${DERIVED_DATA:-"${ROOT_DIR}/build/InlineMacDirectLocal"}
 APP_PATH=${APP_PATH:-"${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline-Dev.app"}
 OUTPUT_DIR=${OUTPUT_DIR:-"${ROOT_DIR}/build/macos-local-app"}
 BUILD_LOG_PATH="${OUTPUT_DIR}/xcodebuild.log"
+MACOS_RELEASE_ARCH=${MACOS_RELEASE_ARCH:-arm64}
 
 if [[ -z "${SPARKLE_PUBLIC_KEY:-}" && -n "${MACOS_SPARKLE_PUBLIC_KEY:-}" ]]; then
   SPARKLE_PUBLIC_KEY="${MACOS_SPARKLE_PUBLIC_KEY}"
@@ -126,7 +129,7 @@ if [[ "${CONFIGURATION}" != "DevBuild" ]]; then
   exit 1
 fi
 
-for cmd in xcodebuild curl unzip rsync git; do
+for cmd in xcodebuild curl unzip rsync git lipo; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     echo "Missing required command: ${cmd}" >&2
     exit 1
@@ -158,6 +161,8 @@ xcodebuild_args=(
   "SWIFT_ACTIVE_COMPILATION_CONDITIONS=${swift_conditions}"
   "FRAMEWORK_SEARCH_PATHS=${SPARKLE_FRAMEWORK_PATH}"
   "OTHER_LDFLAGS=-framework Sparkle"
+  "ARCHS=${MACOS_RELEASE_ARCH}"
+  ONLY_ACTIVE_ARCH=NO
   "CODE_SIGN_ENTITLEMENTS=InlineMac/InlineMacDirect.entitlements"
   CODE_SIGNING_ALLOWED=NO
   CODE_SIGNING_REQUIRED=NO
@@ -243,6 +248,7 @@ if [[ ! -d "${FRAMEWORKS_DIR}/Sparkle.framework" ]]; then
   echo "Sparkle framework not found at ${FRAMEWORKS_DIR}/Sparkle.framework" >&2
   exit 1
 fi
+macos_thin_bundle_to_arch "${APP_PATH}" "${MACOS_RELEASE_ARCH}"
 
 sign_local_app() {
   MACOS_CERTIFICATE_NAME="${MACOS_CERTIFICATE_NAME:-}" \
