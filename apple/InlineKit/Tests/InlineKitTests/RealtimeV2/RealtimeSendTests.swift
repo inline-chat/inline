@@ -1206,31 +1206,41 @@ private actor SendTestSyncStorage: SyncStorage {
     state
   }
 
-  func setState(_ state: SyncState) async {
+  @discardableResult
+  func setState(_ state: SyncState) async -> Bool {
     self.state = state
+    return true
   }
 
   func getBucketState(for key: BucketKey) async -> BucketState {
     bucketStates[key] ?? BucketState(date: 0, seq: 0)
   }
 
-  func setBucketState(for key: BucketKey, state: BucketState) async {
+  @discardableResult
+  func setBucketState(for key: BucketKey, state: BucketState) async -> Bool {
     bucketStates[key] = state
+    return true
   }
 
-  func removeBucketState(for key: BucketKey) async {
+  @discardableResult
+  func removeBucketState(for key: BucketKey) async -> Bool {
     bucketStates.removeValue(forKey: key)
+    return true
   }
 
-  func setBucketStates(states: [BucketKey: BucketState]) async {
+  @discardableResult
+  func setBucketStates(states: [BucketKey: BucketState]) async -> Bool {
     for (key, state) in states {
       bucketStates[key] = state
     }
+    return true
   }
 
-  func clearSyncState() async {
+  @discardableResult
+  func clearSyncState() async -> Bool {
     state = SyncState(lastSyncDate: 0)
     bucketStates.removeAll()
+    return true
   }
 }
 

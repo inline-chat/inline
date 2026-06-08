@@ -599,8 +599,11 @@ export class InlineSdkClient {
         oneofKind: "getUpdatesState",
         getUpdatesState: GetUpdatesStateInput.create({ date }),
       }, { timeoutMs: 1500 })
-      this.state.dateCursor = result.getUpdatesState.date
-      this.scheduleStateSave()
+      const state = result.getUpdatesState as typeof result.getUpdatesState & { updatesFound?: boolean }
+      if (state.updatesFound === false) {
+        this.state.dateCursor = state.date
+        this.scheduleStateSave()
+      }
     } catch (error) {
       // Not all deployments may support this yet; treat as best-effort.
       this.log.warn?.("GET_UPDATES_STATE failed (continuing without date cursor)", error)

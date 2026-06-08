@@ -9,13 +9,30 @@ import { and, eq } from "drizzle-orm"
 describe("getUpdatesState", () => {
   setupTestLifecycle()
 
-  test("returns now when input date is 0 (uninitialized)", async () => {
-    const user = await testUtils.createUser("updates-state-zero@example.com")
+  test("scans bounded recent state when input date is 0", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Updates State Zero", [
+      "updates-state-zero@example.com",
+    ])
+    const user = users[0]
+    if (!user) throw new Error("Fixture creation failed")
 
-    const before = encodeDateStrict(new Date(Date.now() - 5_000))
+    const chat = await testUtils.createChat(space.id, "Zero Date Updated Chat", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    const chatUpdateDate = new Date(Date.now() + 30 * 1000)
+    await db
+      .update(chats)
+      .set({
+        lastUpdateDate: chatUpdateDate,
+        updateSeq: 9,
+      })
+      .where(eq(chats.id, chat.id))
+      .execute()
+
     const result = await getUpdatesState({ date: 0n }, testUtils.functionContext({ userId: user.id }))
 
-    expect(result.date >= before).toBe(true)
+    expect(result.date).toBe(encodeDateStrict(chatUpdateDate))
+    expect(result.updatesFound).toBe(true)
   })
 
   test("advances date when there are no updates", async () => {
@@ -30,6 +47,7 @@ describe("getUpdatesState", () => {
     // The function should not regress the cursor. If there are no updates, it should
     // advance it to at least now (or preserve input if it's already ahead).
     expect(result.date >= inputDate).toBe(true)
+    expect(result.updatesFound).toBe(false)
   })
 
   test("preserves input date when it's already ahead (no updates)", async () => {
@@ -39,6 +57,7 @@ describe("getUpdatesState", () => {
     const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
 
     expect(result.date).toBe(inputDate)
+    expect(result.updatesFound).toBe(false)
   })
 
   test("returns latest chat lastUpdateDate when chats changed since input", async () => {
@@ -62,6 +81,7 @@ describe("getUpdatesState", () => {
 
     const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
     expect(result.date).toBe(encodeDateStrict(chatUpdateDate))
+    expect(result.updatesFound).toBe(true)
   })
 
   test("returns latest space lastUpdateDate when spaces changed since input", async () => {
@@ -82,6 +102,7 @@ describe("getUpdatesState", () => {
 
     const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
     expect(result.date).toBe(encodeDateStrict(spaceUpdateDate))
+    expect(result.updatesFound).toBe(true)
   })
 
   test("returns max(chat, space) lastUpdateDate when both changed since input", async () => {
@@ -116,6 +137,7 @@ describe("getUpdatesState", () => {
 
     const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
     expect(result.date).toBe(encodeDateStrict(spaceUpdateDate))
+    expect(result.updatesFound).toBe(true)
   })
 
   test("skips changed public chats when member no longer has public chat access", async () => {
@@ -148,5 +170,6 @@ describe("getUpdatesState", () => {
     const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
     expect(result.date).toBeGreaterThanOrEqual(inputDate)
     expect(result.date).not.toBe(encodeDateStrict(chatUpdateDate))
+    expect(result.updatesFound).toBe(false)
   })
 })

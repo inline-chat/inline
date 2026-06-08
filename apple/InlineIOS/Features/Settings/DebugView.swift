@@ -13,7 +13,7 @@ struct DebugView: View {
           SettingsItem(
             icon: "waveform.path.ecg",
             iconColor: .blue,
-            title: "Sync Engine Stats"
+            title: "Sync Engine"
           )
         }
       }

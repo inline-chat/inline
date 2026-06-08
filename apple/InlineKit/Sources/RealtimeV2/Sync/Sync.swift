@@ -3,7 +3,6 @@ import InlineProtocol
 import Logger
 
 public struct SyncConfig: Sendable {
-  public var enableMessageUpdates: Bool
   public var lastSyncSafetyGapSeconds: Int64
   /// Caps concurrent `getUpdates` RPCs across buckets to avoid thundering herds on reconnect.
   ///
@@ -12,16 +11,14 @@ public struct SyncConfig: Sendable {
   public var maxConcurrentBucketFetches: Int
 
   public init(
-    enableMessageUpdates: Bool,
     lastSyncSafetyGapSeconds: Int64,
     maxConcurrentBucketFetches: Int = 4
   ) {
-    self.enableMessageUpdates = enableMessageUpdates
     self.lastSyncSafetyGapSeconds = lastSyncSafetyGapSeconds
     self.maxConcurrentBucketFetches = max(1, maxConcurrentBucketFetches)
   }
 
-  public static let `default` = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+  public static let `default` = SyncConfig(lastSyncSafetyGapSeconds: 15)
 }
 
 public struct SyncBucketSnapshot: Sendable {
@@ -119,9 +116,82 @@ public struct SyncStats: Sendable {
   )
 }
 
+#if DEBUG || DEBUG_BUILD
+public enum SyncDebugScenario: String, CaseIterable, Identifiable, Sendable {
+  case forceDiscovery
+  case clearStateAndFetch
+  case seedZeroDateAndFetch
+  case seedStaleDateAndFetch
+  case rewindTrackedBucketsAndFetch
+
+  public var id: String { rawValue }
+
+  public var title: String {
+    switch self {
+      case .forceDiscovery:
+        "Force Discovery"
+      case .clearStateAndFetch:
+        "Clear Cursors + Fetch"
+      case .seedZeroDateAndFetch:
+        "Seed Zero Date + Fetch"
+      case .seedStaleDateAndFetch:
+        "Seed Stale Date + Fetch"
+      case .rewindTrackedBucketsAndFetch:
+        "Rewind Tracked Buckets"
+    }
+  }
+
+  public var detail: String {
+    switch self {
+      case .forceDiscovery:
+        "Queues getUpdatesState and the user bucket without changing local cursors."
+      case .clearStateAndFetch:
+        "Clears global and bucket cursors, then runs normal discovery from a cold local state."
+      case .seedZeroDateAndFetch:
+        "Stores lastSyncDate=0 so the next discovery exercises bounded cold-start lookback."
+      case .seedStaleDateAndFetch:
+        "Stores a 15-day-old global cursor so discovery exercises stale-state repair."
+      case .rewindTrackedBucketsAndFetch:
+        "Moves currently tracked bucket cursors back and queues catch-up for those buckets."
+    }
+  }
+
+  public var systemImage: String {
+    switch self {
+      case .forceDiscovery:
+        "arrow.clockwise"
+      case .clearStateAndFetch:
+        "trash.circle.fill"
+      case .seedZeroDateAndFetch:
+        "0.circle.fill"
+      case .seedStaleDateAndFetch:
+        "calendar.badge.clock"
+      case .rewindTrackedBucketsAndFetch:
+        "backward.end.circle.fill"
+    }
+  }
+}
+
+public struct SyncDebugScenarioResult: Sendable {
+  public let scenario: SyncDebugScenario
+  public let succeeded: Bool
+  public let summary: String
+
+  public init(scenario: SyncDebugScenario, succeeded: Bool, summary: String) {
+    self.scenario = scenario
+    self.succeeded = succeeded
+    self.summary = summary
+  }
+}
+#endif
+
 actor Sync {
   private static let getUpdatesStateTimeout: Duration = .seconds(15)
   private static let getUpdatesStateRetryDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(5)]
+  private static let initialSyncStateLookbackSeconds: Int64 = 5 * 24 * 60 * 60
+  private static let staleSyncStateMaxAgeSeconds: Int64 = 14 * 24 * 60 * 60
+  private static let chatRepairTimeout: Duration = .seconds(20)
+  private static let chatRepairHistoryLimit: Int32 = 50
 
   private var log = Log.scoped("RealtimeV2.Sync")
 
@@ -242,9 +312,14 @@ actor Sync {
   }
 
   /// Save bucket state to storage after successful update application
-  func saveBucketState(for key: BucketKey, seq: Int64, date: Int64) async {
+  @discardableResult
+  func saveBucketState(for key: BucketKey, seq: Int64, date: Int64) async -> Bool {
     log.trace("saving bucket state for \(key): seq=\(seq), date=\(date)")
-    await syncStorage.setBucketState(for: key, state: BucketState(date: date, seq: seq))
+    let saved = await syncStorage.setBucketState(for: key, state: BucketState(date: date, seq: seq))
+    if !saved {
+      log.error("failed to save bucket state for \(key): seq=\(seq), date=\(date)")
+    }
+    return saved
   }
 
   func discardBucketState(for key: BucketKey) async {
@@ -266,13 +341,64 @@ actor Sync {
     await applyUpdates.apply(updates: updates, source: .realtime)
   }
 
+  /// Fetch and apply a bounded current-state snapshot for a chat bucket.
+  func repairChatBucket(peer: InlineProtocol.Peer, reason: String) async -> Bool {
+    guard let client else {
+      log.error("client is nil, cannot repair chat bucket")
+      return false
+    }
+
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "SyncChatRepair",
+      category: .sync,
+      "reason=\(reason)"
+    )
+    defer {
+      span.end(
+        "reason=\(reason) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: startedAt))"
+      )
+    }
+
+    do {
+      let chatResult = try await client.callRpc(method: .getChat, input: .getChat(.with {
+        $0.peerID = peer.toInputPeer()
+      }), timeout: Self.chatRepairTimeout)
+      guard case let .getChat(chat) = chatResult else {
+        log.error("failed to parse getChat result during chat repair")
+        return false
+      }
+
+      let historyResult = try await client.callRpc(method: .getChatHistory, input: .getChatHistory(.with {
+        $0.peerID = peer.toInputPeer()
+        $0.mode = .historyModeLatest
+        $0.limit = Self.chatRepairHistoryLimit
+      }), timeout: Self.chatRepairTimeout)
+      guard case let .getChatHistory(history) = historyResult else {
+        log.error("failed to parse getChatHistory result during chat repair")
+        return false
+      }
+
+      let repaired = await applyUpdates.repairChat(ChatRepairSnapshot(
+        peer: peer,
+        chat: chat,
+        history: history,
+        reason: reason
+      ))
+      if !repaired {
+        log.error("failed to apply chat repair snapshot")
+      }
+      return repaired
+    } catch {
+      log.error("failed to repair chat bucket", error: error)
+      return false
+    }
+  }
+
   func updateConfig(_ config: SyncConfig) async {
     self.config = config
     await bucketFetchLimiter.setLimit(config.maxConcurrentBucketFetches)
-    for (_, actor) in buckets {
-      await actor.updateConfig(config)
-    }
-    log.debug("updated sync config: enableMessageUpdates=\(config.enableMessageUpdates), gap=\(config.lastSyncSafetyGapSeconds)s")
+    log.debug("updated sync config: messageUpdates=true, gap=\(config.lastSyncSafetyGapSeconds)s")
     await publishSyncActivityIfNeeded()
   }
 
@@ -294,6 +420,116 @@ actor Sync {
     snapshot.bucketsTracked = bucketSnapshots.count
     return snapshot
   }
+
+#if DEBUG || DEBUG_BUILD
+  func runDebugScenario(_ scenario: SyncDebugScenario) async -> SyncDebugScenarioResult {
+    switch scenario {
+      case .forceDiscovery:
+        queueDebugDiscovery()
+        return SyncDebugScenarioResult(
+          scenario: scenario,
+          succeeded: true,
+          summary: "Queued discovery and user bucket catch-up."
+        )
+
+      case .clearStateAndFetch:
+        stats = .empty
+        buckets.removeAll()
+        activeBucketFetches = 0
+        let saved = await syncStorage.clearSyncState()
+        await publishSyncActivityIfNeeded()
+        guard saved else {
+          return SyncDebugScenarioResult(
+            scenario: scenario,
+            succeeded: false,
+            summary: "Failed to clear sync state."
+          )
+        }
+        queueDebugDiscovery()
+        return SyncDebugScenarioResult(
+          scenario: scenario,
+          succeeded: true,
+          summary: "Cleared sync cursors and queued discovery."
+        )
+
+      case .seedZeroDateAndFetch:
+        let saved = await syncStorage.setState(SyncState(lastSyncDate: 0))
+        stats.lastSyncDate = 0
+        guard saved else {
+          return SyncDebugScenarioResult(
+            scenario: scenario,
+            succeeded: false,
+            summary: "Failed to save zero global sync date."
+          )
+        }
+        queueDebugDiscovery()
+        return SyncDebugScenarioResult(
+          scenario: scenario,
+          succeeded: true,
+          summary: "Stored lastSyncDate=0 and queued discovery."
+        )
+
+      case .seedStaleDateAndFetch:
+        let day: Int64 = 24 * 60 * 60
+        let staleDate = max(0, nowSeconds() - 15 * day)
+        let saved = await syncStorage.setState(SyncState(lastSyncDate: staleDate))
+        stats.lastSyncDate = staleDate
+        guard saved else {
+          return SyncDebugScenarioResult(
+            scenario: scenario,
+            succeeded: false,
+            summary: "Failed to save stale global sync date."
+          )
+        }
+        queueDebugDiscovery()
+        return SyncDebugScenarioResult(
+          scenario: scenario,
+          succeeded: true,
+          summary: "Stored 15-day-old lastSyncDate and queued discovery."
+        )
+
+      case .rewindTrackedBucketsAndFetch:
+        let snapshots = await getBucketSnapshots()
+        guard !snapshots.isEmpty else {
+          return SyncDebugScenarioResult(
+            scenario: scenario,
+            succeeded: false,
+            summary: "No tracked buckets yet. Open a chat or wait for sync hints first."
+          )
+        }
+
+        var rewound = 0
+        for snapshot in snapshots {
+          guard let actor = buckets[snapshot.key] else { continue }
+          let newSeq = max(0, snapshot.seq - 25)
+          let newDate = max(0, snapshot.date - 60 * 60)
+          let saved = await saveBucketState(for: snapshot.key, seq: newSeq, date: newDate)
+          guard saved else { continue }
+          await actor.debugRewindState(seq: newSeq, date: newDate)
+          rewound += 1
+        }
+
+        guard rewound > 0 else {
+          return SyncDebugScenarioResult(
+            scenario: scenario,
+            succeeded: false,
+            summary: "Failed to save rewound bucket state."
+          )
+        }
+
+        return SyncDebugScenarioResult(
+          scenario: scenario,
+          succeeded: true,
+          summary: "Rewound \(rewound) tracked bucket(s) and queued catch-up."
+        )
+    }
+  }
+
+  private func queueDebugDiscovery() {
+    fetchUserBucket()
+    getStateFromServer()
+  }
+#endif
 
   // MARK: - Private Helpers
 
@@ -332,8 +568,7 @@ actor Sync {
       date: bucketState.date,
       client: client,
       sync: self,
-      fetchLimiter: bucketFetchLimiter,
-      enableMessageUpdates: config.enableMessageUpdates
+      fetchLimiter: bucketFetchLimiter
     )
     buckets[key] = bucketActor
     return bucketActor
@@ -381,7 +616,12 @@ actor Sync {
         )
         log.trace("sent get updates state request with date: \(state.lastSyncDate)")
         if case let .getUpdatesState(payload) = result {
-          await updateLastSyncDate(maxAppliedDate: payload.date, source: "getUpdatesState")
+          log.trace(
+            "received get updates state date: \(payload.date), updatesFound=\(payload.hasUpdatesFound ? String(payload.updatesFound) : "unknown")"
+          )
+          if payload.hasUpdatesFound, !payload.updatesFound {
+            await updateLastSyncDate(maxAppliedDate: payload.date, source: "getUpdatesState:empty")
+          }
         }
         PerformanceTrace.breadcrumb(
           "sync state check completed",
@@ -424,25 +664,24 @@ actor Sync {
 
     // Handle uninitialized or too old state
     let now = Int64(Date().timeIntervalSince1970)
-    // 14 days in seconds
-    let maxSyncAge: Int64 = 14 * 24 * 60 * 60
 
     if state.lastSyncDate == 0 {
       // Temporary rollout safety: when sync state is missing, ask the server for the past 5 days so
       // we re-trigger buckets that may have changed while clients upgrade. Once all clients run the
       // new sync engine we can narrow or remove this lookback window.
-      let fiveDays: Int64 = 5 * 24 * 60 * 60
-      let seedDate = max(0, now - fiveDays)
+      let seedDate = max(0, now - Self.initialSyncStateLookbackSeconds)
       log.info("Sync state uninitialized (date=0). Seeding lookback to \(seedDate) (5 days ago)")
       state = SyncState(lastSyncDate: seedDate)
-      await syncStorage.setState(state)
-    } else if now - state.lastSyncDate > maxSyncAge {
-      log.warning("Sync state too old (> 14 days). Resetting to now: \(now)")
-      // TODO: We should clear the client cache and refetch everything here because
-      // we might have missed too many updates and the gap is too large to sync reliably
-      // or efficiently. For now, we just reset the cursor to avoid a massive fetch storm.
-      state = SyncState(lastSyncDate: now)
-      await syncStorage.setState(state)
+      if await syncStorage.setState(state) == false {
+        log.error("failed to persist initialized sync lookback state: \(seedDate)")
+      }
+    } else if now - state.lastSyncDate > Self.staleSyncStateMaxAgeSeconds {
+      let seedDate = max(0, now - Self.initialSyncStateLookbackSeconds)
+      log.warning("Sync state too old (> 14 days). Seeding bounded lookback to \(seedDate) (5 days ago)")
+      state = SyncState(lastSyncDate: seedDate)
+      if await syncStorage.setState(state) == false {
+        log.error("failed to persist stale sync lookback state: \(seedDate)")
+      }
     }
 
     return state
@@ -467,18 +706,22 @@ actor Sync {
     var statesToSave: [BucketKey: BucketState] = [:]
 
     for (key, state) in maxStates {
-      // Prepare for batch storage update
       statesToSave[key] = BucketState(date: state.date, seq: state.seq)
-
-      // Also update in-memory BucketActor if it exists
-      if let actor = buckets[key] {
-        await actor.updateState(seq: state.seq, date: state.date)
-      }
     }
 
     if !statesToSave.isEmpty {
       log.trace("saving batch bucket states: \(statesToSave.count)")
-      await syncStorage.setBucketStates(states: statesToSave)
+      let saved = await syncStorage.setBucketStates(states: statesToSave)
+      guard saved else {
+        log.error("failed to save batch bucket states: \(statesToSave.count)")
+        return
+      }
+    }
+
+    for (key, state) in maxStates {
+      if let actor = buckets[key] {
+        await actor.updateState(seq: state.seq, date: state.date)
+      }
     }
   }
 
@@ -558,7 +801,13 @@ actor Sync {
     }
 
     let newState = SyncState(lastSyncDate: proposed)
-    await syncStorage.setState(newState)
+    let saved = await syncStorage.setState(newState)
+    guard saved else {
+      log.error(
+        "failed to update lastSyncDate from \(currentState.lastSyncDate) to \(proposed) (source=\(source))"
+      )
+      return
+    }
     stats.lastSyncDate = proposed
     log.debug(
       "updated lastSyncDate from \(currentState.lastSyncDate) to \(proposed) (maxAppliedDate=\(maxAppliedDate), gap=\(gap)s, source=\(source))"
@@ -626,7 +875,7 @@ actor Sync {
   }
 
   private func publishSyncActivityIfNeeded() async {
-    let isActive = config.enableMessageUpdates && activeBucketFetches > 0
+    let isActive = activeBucketFetches > 0
     guard isActive != isSyncActivityActive else { return }
     isSyncActivityActive = isActive
     if let syncActivityListener {
@@ -698,7 +947,6 @@ actor BucketActor {
   var key: BucketKey
   var seq: Int64
   var date: Int64
-  private var enableMessageUpdates: Bool
   private var fetchSeqEnd: Int64? = nil
 
   /// Prevents concurrent fetch operations
@@ -708,6 +956,7 @@ actor BucketActor {
   private var retryTask: Task<Void, Never>?
   private var retryAttempt: Int = 0
   private var isInvalidated: Bool = false
+  private var lastNonProgressRepairTargetSeq: Int64?
 
   /// Buffer to accumulate updates during fetch loop before applying them all at once
   private var pendingUpdates: [InlineProtocol.Update] = []
@@ -726,8 +975,7 @@ actor BucketActor {
     date: Int64,
     client: ProtocolClientType?,
     sync: Sync?,
-    fetchLimiter: FetchLimiter,
-    enableMessageUpdates: Bool
+    fetchLimiter: FetchLimiter
   ) {
     self.key = key
     self.seq = seq
@@ -735,7 +983,6 @@ actor BucketActor {
     self.client = client
     self.sync = sync
     self.fetchLimiter = fetchLimiter
-    self.enableMessageUpdates = enableMessageUpdates
   }
 
   /// Determines if an update should be processed based on its type during sync catch-up.
@@ -781,7 +1028,9 @@ actor BucketActor {
       case .chatOpen:
         true
       case .newMessage, .editMessage, .messageAttachment:
-        enableMessageUpdates
+        true
+      case .chatSkipPts:
+        true
       default:
         // Note: We explicitly skip other updates (like messages) during catch-up for now
         // to keep the initial implementation focused on structural consistency.
@@ -930,11 +1179,25 @@ actor BucketActor {
     for update in contiguous where update.hasSeq {
       bufferedRealtimeUpdates.removeValue(forKey: Int64(update.seq))
     }
+    let saved = await sync.saveBucketState(for: key, seq: nextSeq, date: nextDate)
+    guard saved else {
+      PerformanceTrace.breadcrumb(
+        "realtime drain bucket state save failed",
+        category: "sync.realtime",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+          "seq": nextSeq,
+        ]
+      )
+      needsFetch = true
+      return
+    }
+
     seq = nextSeq
     date = nextDate
     let maxAppliedDate = maxUpdateDate(in: contiguous)
     await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "realtime:\(key)")
-    await sync.saveBucketState(for: key, seq: seq, date: date)
   }
 
   func fetchNewUpdates() async {
@@ -1074,6 +1337,7 @@ actor BucketActor {
     var totalSkipped = 0
     var totalDuplicateSkipped = 0
     var isFinal = false
+    var maxAppliedDate: Int64 = 0
     defer {
       fetchSpan.end(
         "bucket=\(key.traceKind) result=\(resultLabel) pages=\(pageCount) fetched=\(totalFetched) skipped=\(totalSkipped) duplicates=\(totalDuplicateSkipped) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: fetchStartedAt))"
@@ -1095,8 +1359,8 @@ actor BucketActor {
     var sliceEndSeq: Int64? = nil
 
     // On a cold start (no seq/date), attempt a small catch-up instead of immediately fast-forwarding.
-    // We cap totalLimit to 50 to avoid pulling large history; if the server still reports TOO_LONG we
-    // fall back to fast-forward behavior.
+    // We cap the first request to avoid pulling large history. If a chat bucket reports TOO_LONG,
+    // continue with bounded slices rather than marking stale history as caught up.
     let isColdStart = seq == 0 || date == 0
     let coldStartTotalLimit: Int32 = 50
 
@@ -1131,7 +1395,7 @@ actor BucketActor {
           result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
           $0.bucket = key.toProtocolBucket()
           $0.startSeq = currentSeq
-          if isColdStart {
+          if isColdStart, sliceEndSeq == nil {
             $0.totalLimit = coldStartTotalLimit
           } else {
             $0.totalLimit = Int32(Self.maxTotalUpdates)
@@ -1180,6 +1444,13 @@ actor BucketActor {
               "updates": totalCount,
             ]
           )
+          let repairTargetSeq = max(hardEndSeq ?? 0, Int64(payload.seq))
+          _ = await repairChatSnapshotIfNeeded(
+            targetSeq: repairTargetSeq,
+            targetDate: payload.date,
+            reason: "non_progress",
+            advanceCursor: false
+          )
           return false
         }
 
@@ -1204,7 +1475,19 @@ actor BucketActor {
             ]
           )
           await sync.recordBucketFetchTooLong()
-          if isColdStart {
+          if isColdStart, shouldRepairColdChatTooLong {
+            let repairedSeq = hardEndSeq ?? Int64(payload.seq)
+            if await repairChatSnapshotIfNeeded(
+              targetSeq: repairedSeq,
+              targetDate: payload.date,
+              reason: "cold_too_long",
+              advanceCursor: true
+            ) {
+              resultLabel = "repaired_too_long"
+              return true
+            }
+          }
+          if isColdStart, shouldFastForwardColdTooLong {
             // On cold start, prefer fast-forwarding to a known upper bound (e.g. updateSeq from
             // chatHasNewUpdates). This prevents huge catch-up costs on first-run and avoids getting
             // stuck behind if the server only returns a slice boundary for TOO_LONG.
@@ -1358,8 +1641,7 @@ actor BucketActor {
           resultLabel = "apply_failed"
           return false
         }
-        let maxAppliedDate = maxUpdateDate(in: orderedUpdates)
-        await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "bucket:\(key)")
+        maxAppliedDate = max(maxAppliedDate, maxUpdateDate(in: orderedUpdates))
         clearPendingCatchupBatch()
       }
       if totalFetched > 0 || totalSkipped > 0 || totalDuplicateSkipped > 0 {
@@ -1380,11 +1662,27 @@ actor BucketActor {
         committedSeq = seq
         committedDate = date
       }
+      let saved = await sync.saveBucketState(for: key, seq: committedSeq, date: committedDate)
+      guard saved else {
+        PerformanceTrace.breadcrumb(
+          "sync bucket state save failed",
+          category: "sync.catchup",
+          level: .warning,
+          data: [
+            "bucket": key.traceKind,
+            "seq": committedSeq,
+          ]
+        )
+        resultLabel = "state_save_failed"
+        return false
+      }
+
       seq = committedSeq
       date = committedDate
 
-      // Persist state to storage
-      await sync.saveBucketState(for: key, seq: committedSeq, date: committedDate)
+      if maxAppliedDate > 0 {
+        await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "bucket:\(key)")
+      }
 
       if let fetchSeqEnd, committedSeq >= fetchSeqEnd {
         self.fetchSeqEnd = nil
@@ -1528,6 +1826,61 @@ actor BucketActor {
     retryTask = nil
   }
 
+  private var shouldFastForwardColdTooLong: Bool {
+    switch key {
+      case .chat:
+        false
+      case .space, .user:
+        true
+    }
+  }
+
+  private var shouldRepairColdChatTooLong: Bool {
+    switch key {
+      case .chat:
+        true
+      case .space, .user:
+        false
+    }
+  }
+
+  private func repairChatSnapshotIfNeeded(
+    targetSeq: Int64,
+    targetDate: Int64,
+    reason: String,
+    advanceCursor: Bool
+  ) async -> Bool {
+    guard case let .chat(peer) = key, let sync else { return false }
+    guard targetSeq > seq else { return false }
+
+    if !advanceCursor {
+      guard lastNonProgressRepairTargetSeq != targetSeq else { return false }
+      lastNonProgressRepairTargetSeq = targetSeq
+    }
+
+    let repaired = await sync.repairChatBucket(peer: peer, reason: reason)
+    guard repaired else { return false }
+    guard advanceCursor else { return true }
+
+    let saved = await sync.saveBucketState(for: key, seq: targetSeq, date: targetDate)
+    guard saved else {
+      log.error("failed to save bucket state after chat repair for \(key): seq=\(targetSeq), date=\(targetDate)")
+      return false
+    }
+
+    seq = targetSeq
+    date = targetDate
+    clearPendingCatchupBatch()
+    bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > targetSeq }
+    if let fetchSeqEnd, targetSeq >= fetchSeqEnd {
+      self.fetchSeqEnd = nil
+    }
+    if targetDate > 0 {
+      await sync.updateLastSyncDate(maxAppliedDate: targetDate, source: "repair:\(key)")
+    }
+    return true
+  }
+
   private func maxUpdateDate(in updates: [InlineProtocol.Update]) -> Int64 {
     var maxDate: Int64 = 0
     for update in updates where update.date > 0 {
@@ -1576,9 +1929,15 @@ actor BucketActor {
     }
   }
 
-  func updateConfig(_ config: SyncConfig) {
-    enableMessageUpdates = config.enableMessageUpdates
+#if DEBUG || DEBUG_BUILD
+  func debugRewindState(seq: Int64, date: Int64) async {
+    self.seq = seq
+    self.date = date
+    fetchSeqEnd = nil
+    needsFetch = true
+    await fetchNewUpdates()
   }
+#endif
 
   func snapshot() -> SyncBucketSnapshot {
     SyncBucketSnapshot(

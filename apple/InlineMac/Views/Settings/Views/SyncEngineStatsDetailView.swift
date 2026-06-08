@@ -6,9 +6,46 @@ struct SyncEngineStatsDetailView: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @State private var stats: SyncStats?
   @State private var isLoading = false
+#if DEBUG || DEBUG_BUILD
+  @State private var runningScenario: SyncDebugScenario?
+  @State private var scenarioResult: SyncDebugScenarioResult?
+#endif
 
   var body: some View {
     Form {
+#if DEBUG || DEBUG_BUILD
+      Section("Scenarios") {
+        ForEach(SyncDebugScenario.allCases) { scenario in
+          Button {
+            runScenario(scenario)
+          } label: {
+            HStack {
+              VStack(alignment: .leading, spacing: 3) {
+                Label(scenario.title, systemImage: scenario.systemImage)
+                Text(scenario.detail)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+              Spacer()
+              if runningScenario == scenario {
+                ProgressView()
+                  .controlSize(.small)
+              }
+            }
+          }
+          .buttonStyle(.plain)
+          .disabled(runningScenario != nil)
+        }
+
+        if let scenarioResult {
+          Text(scenarioResult.summary)
+            .font(.caption)
+            .foregroundStyle(scenarioResult.succeeded ? Color.secondary : Color.red)
+        }
+      }
+#endif
+
       Section("Sync") {
         HStack {
           Button("Refresh Sync Stats") {
@@ -60,11 +97,26 @@ struct SyncEngineStatsDetailView: View {
     .scrollContentBackground(.hidden)
     .padding()
     .frame(minWidth: 520, minHeight: 520)
-    .navigationTitle("Sync Engine Stats")
+    .navigationTitle("Sync Engine")
     .onAppear {
       refreshStats()
     }
   }
+
+#if DEBUG || DEBUG_BUILD
+  private func runScenario(_ scenario: SyncDebugScenario) {
+    runningScenario = scenario
+    Task {
+      let result = await realtimeV2.runSyncDebugScenario(scenario)
+      let snapshot = await realtimeV2.getSyncStats()
+      await MainActor.run {
+        scenarioResult = result
+        stats = snapshot
+        runningScenario = nil
+      }
+    }
+  }
+#endif
 
   private func refreshStats() {
     isLoading = true

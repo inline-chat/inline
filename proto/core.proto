@@ -1165,6 +1165,9 @@ message GetUpdatesStateInput {
 message GetUpdatesStateResult {
   // Current date of the state
   int64 date = 1;
+
+  // Set by newer servers to tell clients whether discovery found any bucket work.
+  optional bool updates_found = 2;
 }
 
 message GetChatInput {

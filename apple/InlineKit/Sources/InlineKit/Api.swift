@@ -8,28 +8,38 @@ struct StubSyncStorage: SyncStorage {
     SyncState(lastSyncDate: 0)
   }
 
-  func setState(_ state: SyncState) async {
+  @discardableResult
+  func setState(_ state: SyncState) async -> Bool {
     // TODO: Persist to database
+    true
   }
 
   func getBucketState(for key: BucketKey) async -> BucketState {
     BucketState(date: 0, seq: 0)
   }
 
-  func setBucketState(for key: BucketKey, state: BucketState) async {
+  @discardableResult
+  func setBucketState(for key: BucketKey, state: BucketState) async -> Bool {
     // TODO: Persist to database
+    true
   }
 
-  func removeBucketState(for key: BucketKey) async {
+  @discardableResult
+  func removeBucketState(for key: BucketKey) async -> Bool {
     // TODO: Persist to database
+    true
   }
 
-  func setBucketStates(states: [BucketKey: BucketState]) async {
+  @discardableResult
+  func setBucketStates(states: [BucketKey: BucketState]) async -> Bool {
     // TODO: Persist to database in single transaction
+    true
   }
 
-  func clearSyncState() async {
+  @discardableResult
+  func clearSyncState() async -> Bool {
     // TODO: Persist to database
+    true
   }
 }
 

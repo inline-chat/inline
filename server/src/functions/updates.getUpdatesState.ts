@@ -1,44 +1,31 @@
-import type { GetUpdatesStateInput } from "@inline-chat/protocol/core"
+import type { GetUpdatesStateInput, GetUpdatesStateResult } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { DbChat } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { decodeDate, encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { decodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("updates.getUpdatesState")
-
-type GetUpdatesStateFnResult = {
-  date: bigint
-}
+const INITIAL_STATE_LOOKBACK_MS = 5 * 24 * 60 * 60 * 1000
 
 export const getUpdatesState = async (
   input: GetUpdatesStateInput,
   context: FunctionContext,
-): Promise<GetUpdatesStateFnResult> => {
+): Promise<GetUpdatesStateResult> => {
   const startedAt = performance.now()
   const nowEncoded = encodeDateStrict(new Date())
 
-  // Safeguard: If client sends 0 (uninitialized), just return current date
-  // to avoid pushing all updates ever.
-  if (input.date === 0n) {
-    logGetUpdatesStateTiming({
-      result: "zero_date",
-      totalMs: elapsedMs(startedAt),
-      chats: 0,
-      spaces: 0,
-      pushed: 0,
-    })
-    return {
-      date: nowEncoded,
-    }
-  }
-
-  let userLocalDate = decodeDate(input.date)
+  // If client sends 0 (uninitialized), scan a bounded recent window instead of
+  // returning "now". Unknown local state should trigger repair hints, but not an
+  // unbounded all-history scan.
+  let userLocalDate = input.date === 0n
+    ? new Date(Date.now() - INITIAL_STATE_LOOKBACK_MS)
+    : decodeDate(input.date)
 
   // check latest changes of chats from this user's dialogs for changes compared to date
   // get a list of dialogs for this user
@@ -85,6 +72,7 @@ export const getUpdatesState = async (
     })
     return {
       date: nowEncoded > input.date ? nowEncoded : input.date,
+      updatesFound: false,
     }
   }
   let latestUpdateDate = new Date(latestUpdateTs)
@@ -148,11 +136,12 @@ export const getUpdatesState = async (
 
   return {
     date: latestUpdateDateEncoded,
+    updatesFound: true,
   }
 }
 
 type GetUpdatesStateTiming = {
-  result: "zero_date" | "empty" | "updates"
+  result: "empty" | "updates"
   totalMs: number
   chatsMs?: number
   spacesMs?: number

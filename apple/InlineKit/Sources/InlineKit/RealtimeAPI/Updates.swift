@@ -33,7 +33,12 @@ public actor UpdatesEngine: Sendable {
             )
             reloadPeers.insert(newMessageUpdate.message.peerID.toPeer())
           } else {
-            try newMessageUpdate.apply(db, publishChanges: true, suppressNotifications: false)
+            try newMessageUpdate.apply(
+              db,
+              publishChanges: true,
+              suppressNotifications: false,
+              materializeMissingReferences: true
+            )
           }
 
         case let .updateMessageID(updateMessageId):
@@ -79,7 +84,7 @@ public actor UpdatesEngine: Sendable {
             try editMessage.apply(db, publishChanges: false, materializeMissingReferences: true)
             reloadPeers.insert(editMessage.message.peerID.toPeer())
           } else {
-            try editMessage.apply(db, publishChanges: true)
+            try editMessage.apply(db, publishChanges: true, materializeMissingReferences: true)
           }
 
         case let .newChat(newChat):
@@ -317,6 +322,101 @@ public actor UpdatesEngine: Sendable {
     return UpdateApplyResult(appliedCount: appliedCount, failedCount: failedCount)
   }
 
+  @discardableResult
+  public func applyChatRepair(_ snapshot: ChatRepairSnapshot) async -> Bool {
+    guard snapshot.chat.hasChat, snapshot.chat.hasDialog else {
+      log.error("Chat repair missing chat or dialog")
+      return false
+    }
+
+    let peer = snapshot.peer.toPeer()
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "UpdateApplyChatRepair",
+      category: .updates,
+      "reason=\(snapshot.reason) messages=\(snapshot.history.messages.count)"
+    )
+
+    do {
+      try await database.dbWriter.write { db in
+        var chat = Chat(from: snapshot.chat.chat)
+        try self.clearMissingOptionalReferences(in: &chat, db: db)
+        try chat.saveWithValidLastMsg(db)
+
+        _ = try snapshot.chat.dialog.saveFull(db)
+
+        if snapshot.chat.hasAnchorMessage {
+          _ = try Message.save(
+            db,
+            protocolMessage: snapshot.chat.anchorMessage,
+            publishChanges: false,
+            materializeMissingReferences: true
+          )
+        }
+
+        var savedMessages: [Message] = []
+        savedMessages.reserveCapacity(snapshot.history.messages.count)
+        for message in snapshot.history.messages {
+          let saved = try Message.save(
+            db,
+            protocolMessage: message,
+            publishChanges: false,
+            materializeMissingReferences: true
+          )
+          savedMessages.append(saved)
+        }
+        try Chat.updateLastMsgIds(db, messages: savedMessages)
+
+        let knownPinnedIds = try self.knownPinnedMessageIds(
+          db,
+          chatId: snapshot.chat.chat.id,
+          messageIds: snapshot.chat.pinnedMessageIds
+        )
+        try PinnedMessage.replaceAll(db, chatId: snapshot.chat.chat.id, messageIds: knownPinnedIds)
+      }
+
+      let reloadStartedAt = Date()
+      let reloadSpan = PerformanceTrace.begin(
+        "UpdateApplyChatRepairReload",
+        category: .updates,
+        "reason=\(snapshot.reason)"
+      )
+      await MainActor.run {
+        MessagesPublisher.shared.messagesReload(peer: peer, animated: false)
+      }
+      let reloadDurationMs = PerformanceTrace.elapsedMilliseconds(since: reloadStartedAt)
+      reloadSpan.end("duration_ms=\(reloadDurationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "slow chat repair reload publish",
+        category: "updates.apply",
+        durationMs: reloadDurationMs,
+        thresholdMs: 150,
+        data: [
+          "reason": snapshot.reason,
+        ]
+      )
+
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("success=true duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "slow chat repair apply",
+        category: "updates.apply",
+        durationMs: durationMs,
+        thresholdMs: 400,
+        data: [
+          "reason": snapshot.reason,
+          "messages": snapshot.history.messages.count,
+        ]
+      )
+      return true
+    } catch {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("success=false duration_ms=\(durationMs)")
+      log.error("Failed to apply chat repair", error: error)
+      return false
+    }
+  }
+
   private nonisolated func apply(sidecars: InlineProtocol.UpdateSidecars, db: Database) throws {
     for user in sidecars.users {
       _ = try User.save(db, user: user)
@@ -334,6 +434,42 @@ public actor UpdatesEngine: Sendable {
     for dialog in sidecars.dialogs {
       _ = try dialog.saveFull(db)
     }
+  }
+
+  private nonisolated func clearMissingOptionalReferences(in chat: inout Chat, db: Database) throws {
+    if let spaceId = chat.spaceId, try Space.fetchOne(db, id: spaceId) == nil {
+      log.warning("Dropping missing space reference while applying chat repair for chat \(chat.id)")
+      chat.spaceId = nil
+    }
+
+    if let createdBy = chat.createdBy, try User.fetchOne(db, id: createdBy) == nil {
+      log.warning("Dropping missing creator reference while applying chat repair for chat \(chat.id)")
+      chat.createdBy = nil
+    }
+
+    if let parentChatId = chat.parentChatId, try Chat.fetchOne(db, id: parentChatId) == nil {
+      log.warning("Dropping missing parent chat reference while applying chat repair for chat \(chat.id)")
+      chat.parentChatId = nil
+      chat.parentMessageId = nil
+    }
+  }
+
+  private nonisolated func knownPinnedMessageIds(
+    _ db: Database,
+    chatId: Int64,
+    messageIds: [Int64]
+  ) throws -> [Int64] {
+    guard !messageIds.isEmpty else { return [] }
+
+    let known = try Message
+      .filter(Message.Columns.chatId == chatId)
+      .filter(messageIds.contains(Message.Columns.messageId))
+      .fetchAll(db)
+    let knownIds = Set(known.map(\.messageId))
+    if knownIds.count < messageIds.count {
+      log.warning("Skipping unknown pinned message ids while applying chat repair for chat \(chatId)")
+    }
+    return messageIds.filter(knownIds.contains)
   }
 }
 
@@ -403,6 +539,10 @@ private extension InlineProtocol.UpdateSidecars {
   }
 }
 
+private enum RealtimeUpdateApplyError: Error {
+  case missingChat(Peer)
+}
+
 func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
   try DbBucketState
     .filter(DbBucketState.Columns.bucketType == 1 && DbBucketState.Columns.entityId == -chatId)
@@ -416,29 +556,10 @@ extension InlineProtocol.UpdateDeleteChat {
     let peer = peerID.toPeer()
     guard case let .thread(chatId) = peer else { return }
 
-    do {
-      try Message.filter(Column("chatId") == chatId).deleteAll(db)
-    } catch {
-      Log.shared.error("Failed to delete chat", error: error)
-    }
-
-    do {
-      try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
-    } catch {
-      Log.shared.error("Failed to delete dialog", error: error)
-    }
-
-    do {
-      try Chat.filter(Column("id") == chatId).deleteAll(db)
-    } catch {
-      Log.shared.error("Failed to delete chat", error: error)
-    }
-
-    do {
-      try deleteChatSyncBucket(db, chatId: chatId)
-    } catch {
-      Log.shared.error("Failed to delete chat sync bucket", error: error)
-    }
+    try Message.filter(Column("chatId") == chatId).deleteAll(db)
+    try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
+    try Chat.filter(Column("id") == chatId).deleteAll(db)
+    try deleteChatSyncBucket(db, chatId: chatId)
 
     // Post notification to pop chat route
     Task.detached {
@@ -621,48 +742,43 @@ extension InlineProtocol.UpdateDeleteMessages {
   func apply(_ db: Database, publishChanges: Bool) throws {
     guard let chat = try Chat.getByPeerId(db: db, peerId: peerID.toPeer()) else {
       Log.shared.error("Failed to find chat for peer \(peerID.toPeer())")
-      return
+      throw RealtimeUpdateApplyError.missingChat(peerID.toPeer())
     }
 
-    do {
-      // let chat = try Chat.fetchOne(db, id: chatId)
-      let chatId = chat.id
-      var prevChatLastMsgId = chat.lastMsgId
+    // let chat = try Chat.fetchOne(db, id: chatId)
+    let chatId = chat.id
+    var prevChatLastMsgId = chat.lastMsgId
 
-      // Delete messages
-      for messageId in messageIds {
-        // Update last message first
-        if prevChatLastMsgId == messageId {
-          let previousMessage = try Message
-            .filter(Column("chatId") == chat.id)
-            .order(Column("date").desc, Column("messageId").desc)
-            .limit(1, offset: 1)
-            .fetchOne(db)
+    // Delete messages
+    for messageId in messageIds {
+      // Update last message first
+      if prevChatLastMsgId == messageId {
+        let previousMessage = try Message
+          .filter(Column("chatId") == chat.id)
+          .order(Column("date").desc, Column("messageId").desc)
+          .limit(1, offset: 1)
+          .fetchOne(db)
 
-          var updatedChat = chat
-          updatedChat.lastMsgId = previousMessage?.messageId
-          try updatedChat.save(db)
+        var updatedChat = chat
+        updatedChat.lastMsgId = previousMessage?.messageId
+        try updatedChat.save(db)
 
-          // Track the newly promoted last message so consecutive deletions
-          // keep advancing the chat tail correctly.
-          prevChatLastMsgId = previousMessage?.messageId
-        }
-
-        // TODO: Optimize this to use keys
-        try Message
-          .filter(Column("messageId") == messageId)
-          .filter(Column("chatId") == chatId)
-          .deleteAll(db)
+        // Track the newly promoted last message so consecutive deletions
+        // keep advancing the chat tail correctly.
+        prevChatLastMsgId = previousMessage?.messageId
       }
 
-      if publishChanges {
-        Task(priority: .userInitiated) { @MainActor in
-          MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
-        }
-      }
+      // TODO: Optimize this to use keys
+      try Message
+        .filter(Column("messageId") == messageId)
+        .filter(Column("chatId") == chatId)
+        .deleteAll(db)
+    }
 
-    } catch {
-      Log.shared.error("Failed to delete messages", error: error)
+    if publishChanges {
+      Task(priority: .userInitiated) { @MainActor in
+        MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+      }
     }
   }
 }
@@ -828,31 +944,19 @@ extension InlineProtocol.UpdateNewChat {
 
     if hasUser {
       Log.shared.debug("saving user \(user)")
-      do {
-        // Save user if it's a private chat
-        _ = try User.save(db, user: user)
-      } catch {
-        Log.shared.error("Failed to save user", error: error)
-      }
+      // Save user if it's a private chat
+      _ = try User.save(db, user: user)
     }
 
     Log.shared.debug("saving chat \(chat)")
-    do {
-      try chat.saveWithValidLastMsg(db)
-    } catch {
-      Log.shared.error("Failed to save chat", error: error)
-    }
+    try chat.saveWithValidLastMsg(db)
 
-    do {
-      var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: chat.peerId.toPeer()))
-        ?? Dialog(optimisticForChat: chat)
-      dialog.chatId = chat.id
-      dialog.spaceId = chat.spaceId
-      Log.shared.debug("saving dialog \(dialog)")
-      try dialog.save(db, onConflict: .replace)
-    } catch {
-      Log.shared.error("Failed to save dialog", error: error)
-    }
+    var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: chat.peerId.toPeer()))
+      ?? Dialog(optimisticForChat: chat)
+    dialog.chatId = chat.id
+    dialog.spaceId = chat.spaceId
+    Log.shared.debug("saving dialog \(dialog)")
+    try dialog.save(db, onConflict: .replace)
   }
 }
 
@@ -1049,36 +1153,13 @@ extension InlineProtocol.UpdateChatParticipantDelete {
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat participant delete \(chatID) \(userID)")
 
-    do {
-      try ChatParticipant.filter(Column("chatId") == chatID).filter(Column("userId") == userID).deleteAll(db)
-    } catch {
-      Log.shared.error("Failed to delete chat participant", error: error)
-    }
+    try ChatParticipant.filter(Column("chatId") == chatID).filter(Column("userId") == userID).deleteAll(db)
 
     if userID == Auth.shared.getCurrentUserId() {
-      do {
-        try Message.filter(Column("chatId") == chatID).deleteAll(db)
-      } catch {
-        Log.shared.error("Failed to delete chat", error: error)
-      }
-
-      do {
-        try Dialog.filter(Column("peerThreadId") == chatID).deleteAll(db)
-      } catch {
-        Log.shared.error("Failed to delete dialog", error: error)
-      }
-
-      do {
-        try Chat.filter(Column("id") == chatID).deleteAll(db)
-      } catch {
-        Log.shared.error("Failed to delete chat", error: error)
-      }
-
-      do {
-        try deleteChatSyncBucket(db, chatId: chatID)
-      } catch {
-        Log.shared.error("Failed to delete chat sync bucket", error: error)
-      }
+      try Message.filter(Column("chatId") == chatID).deleteAll(db)
+      try Dialog.filter(Column("peerThreadId") == chatID).deleteAll(db)
+      try Chat.filter(Column("id") == chatID).deleteAll(db)
+      try deleteChatSyncBucket(db, chatId: chatID)
 
       // Post notification to pop chat route
       Task.detached {
@@ -1096,15 +1177,10 @@ extension InlineProtocol.UpdateChatVisibility {
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat visibility \(chatID) public=\(isPublic)")
 
-    do {
-      if var chat = try Chat.fetchOne(db, id: chatID) {
-        chat.isPublic = isPublic
-        try chat.save(db)
-      }
-    } catch {
-      Log.shared.error("Failed to update chat visibility", error: error)
+    if var chat = try Chat.fetchOne(db, id: chatID) {
+      chat.isPublic = isPublic
+      try chat.save(db)
     }
-
   }
 }
 
@@ -1112,41 +1188,33 @@ extension InlineProtocol.UpdateChatInfo {
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat info \(chatID)")
 
-    do {
-      if var chat = try Chat.fetchOne(db, id: chatID) {
-        if hasTitle {
-          chat.title = title
-          chat.isUntitled = hasUntitled && untitled ? true : nil
-        } else if hasUntitled {
-          chat.isUntitled = untitled ? true : nil
-        }
-        if hasEmoji {
-          chat.emoji = emoji.isEmpty ? nil : emoji
-        }
-        try chat.save(db)
+    if var chat = try Chat.fetchOne(db, id: chatID) {
+      if hasTitle {
+        chat.title = title
+        chat.isUntitled = hasUntitled && untitled ? true : nil
+      } else if hasUntitled {
+        chat.isUntitled = untitled ? true : nil
       }
-    } catch {
-      Log.shared.error("Failed to update chat info", error: error)
+      if hasEmoji {
+        chat.emoji = emoji.isEmpty ? nil : emoji
+      }
+      try chat.save(db)
     }
   }
 }
 
 extension InlineProtocol.UpdateChatMoved {
   func apply(_ db: Database) throws {
-    do {
-      var updatedChat = Chat(from: chat)
-      try updatedChat.saveWithValidLastMsg(db)
+    var updatedChat = Chat(from: chat)
+    try updatedChat.saveWithValidLastMsg(db)
 
-      let peer: Peer = .thread(id: updatedChat.id)
-      if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer)) {
-        dialog.spaceId = updatedChat.spaceId
-        try dialog.save(db)
-      } else {
-        let newDialog = Dialog(optimisticForChat: updatedChat)
-        try newDialog.save(db, onConflict: .replace)
-      }
-    } catch {
-      Log.shared.error("Failed to apply chat moved update", error: error)
+    let peer: Peer = .thread(id: updatedChat.id)
+    if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer)) {
+      dialog.spaceId = updatedChat.spaceId
+      try dialog.save(db)
+    } else {
+      let newDialog = Dialog(optimisticForChat: updatedChat)
+      try newDialog.save(db, onConflict: .replace)
     }
   }
 }
@@ -1244,17 +1312,13 @@ extension InlineProtocol.UpdateChatOpen {
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat open for chat \(chat.id)")
 
-    do {
-      if hasUser {
-        _ = try User.save(db, user: user)
-      }
-
-      var updatedChat = Chat(from: chat)
-      try updatedChat.saveWithValidLastMsg(db)
-      _ = try dialog.saveFull(db)
-    } catch {
-      Log.shared.error("Failed to apply chat open update", error: error)
+    if hasUser {
+      _ = try User.save(db, user: user)
     }
+
+    var updatedChat = Chat(from: chat)
+    try updatedChat.saveWithValidLastMsg(db)
+    _ = try dialog.saveFull(db)
   }
 }
 

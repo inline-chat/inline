@@ -308,6 +308,74 @@ describe("getUpdates", () => {
     expect(result.sidecars).toBeUndefined()
   })
 
+  test("advances over missing editMessage targets with chatSkipPts", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Missing Edit Update", ["missing-edit@example.com"])
+    const user = users[0]
+    if (!user || !space) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Missing Edit Chat", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "editMessage",
+        editMessage: {
+          chatId: BigInt(chat.id),
+          msgId: 1n,
+        },
+      },
+    })
+    await db.insert(messages).values({
+      chatId: chat.id,
+      messageId: 2,
+      fromId: user.id,
+      text: "valid after missing edit",
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 2,
+      payload: {
+        oneofKind: "newMessage",
+        newMessage: {
+          chatId: BigInt(chat.id),
+          msgId: 2n,
+        },
+      },
+    })
+
+    const inputPeer: InputPeer = {
+      type: {
+        oneofKind: "chat",
+        chat: { chatId: BigInt(chat.id) },
+      },
+    }
+
+    const result = await getUpdates(
+      {
+        bucket: {
+          type: {
+            oneofKind: "chat",
+            chat: { peerId: inputPeer },
+          },
+        },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 0,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.seq).toBe(2n)
+    expect(result.final).toBe(true)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["chatSkipPts", "newMessage"])
+  })
+
   test("advances over skippable chat updates with chatSkipPts", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Skippable Chat Update", ["skip@example.com"])
     const user = users[0]
@@ -402,6 +470,12 @@ describe("getUpdates", () => {
     if (!forwardedChat) throw new Error("Forwarded chat creation failed")
     await testUtils.addParticipant(chat.id, sender.id)
     await testUtils.addParticipant(chat.id, viewer.id)
+    await db.insert(dialogs).values({
+      userId: viewer.id,
+      chatId: chat.id,
+      spaceId: space.id,
+      readInboxMaxId: 0,
+    })
 
     await db.insert(messages).values({
       chatId: chat.id,
@@ -465,7 +539,10 @@ describe("getUpdates", () => {
     expect(senderSidecar).toBeDefined()
     expect(senderSidecar?.min).toBe(true)
     expect(senderSidecar?.email).toBeUndefined()
-    expect(result.sidecars?.dialogs).toEqual([])
+    const dialogSidecar = result.sidecars?.dialogs.find((dialog) => dialog.chatId === BigInt(chat.id))
+    expect(dialogSidecar).toBeDefined()
+    expect(dialogSidecar?.unreadCount).toBe(1)
+    expect(result.sidecars?.dialogs.map((dialog) => dialog.chatId)).not.toContain(BigInt(parentChat.id))
   })
 
   test("returns sidecars only for the delivered contiguous prefix", async () => {

@@ -3167,6 +3167,12 @@ export interface GetUpdatesStateResult {
      * @generated from protobuf field: int64 date = 1;
      */
     date: bigint;
+    /**
+     * Set by newer servers to tell clients whether discovery found any bucket work.
+     *
+     * @generated from protobuf field: optional bool updates_found = 2;
+     */
+    updatesFound?: boolean;
 }
 /**
  * @generated from protobuf message GetChatInput
@@ -13216,7 +13222,8 @@ export const GetUpdatesStateInput = new GetUpdatesStateInput$Type();
 class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
     constructor() {
         super("GetUpdatesStateResult", [
-            { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "updates_found", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateResult>): GetUpdatesStateResult {
@@ -13234,6 +13241,9 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
                 case /* int64 date */ 1:
                     message.date = reader.int64().toBigInt();
                     break;
+                case /* optional bool updates_found */ 2:
+                    message.updatesFound = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13249,6 +13259,9 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         /* int64 date = 1; */
         if (message.date !== 0n)
             writer.tag(1, WireType.Varint).int64(message.date);
+        /* optional bool updates_found = 2; */
+        if (message.updatesFound !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.updatesFound);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
