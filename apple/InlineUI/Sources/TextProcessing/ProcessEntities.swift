@@ -490,6 +490,7 @@ public class ProcessEntities {
     threadLinkSpaceId: Int64? = nil
   ) -> (text: String, entities: MessageEntities) {
     var text = attributedString.string
+    let nsText = attributedString.string as NSString
     var entities: [MessageEntity] = []
     let fullRange = NSRange(location: 0, length: attributedString.length)
 
@@ -500,6 +501,7 @@ public class ProcessEntities {
       options: []
     ) { value, range, _ in
       if let userId = value as? Int64 {
+        guard let range = trimmedEntityRange(in: nsText, range: range) else { return }
         var entity = MessageEntity()
         entity.type = .mention
         entity.offset = Int64(range.location)
@@ -635,6 +637,7 @@ public class ProcessEntities {
       let rangeText = (attributedString.string as NSString).substring(with: range)
 
       if let userId = inlineUserId(from: urlString) {
+        guard let range = trimmedEntityRange(in: nsText, range: range) else { return }
         var entity = MessageEntity()
         entity.type = .mention
         entity.offset = Int64(range.location)
@@ -825,6 +828,35 @@ public class ProcessEntities {
     messageEntities.entities = entities
 
     return (text: text, entities: messageEntities)
+  }
+
+  private static func trimmedEntityRange(in text: NSString, range: NSRange) -> NSRange? {
+    guard range.location != NSNotFound,
+          range.location >= 0,
+          range.length > 0,
+          NSMaxRange(range) <= text.length
+    else {
+      return nil
+    }
+
+    var start = range.location
+    var end = NSMaxRange(range)
+
+    while start < end, isEntityWhitespace(text.character(at: start)) {
+      start += 1
+    }
+
+    while end > start, isEntityWhitespace(text.character(at: end - 1)) {
+      end -= 1
+    }
+
+    guard end > start else { return nil }
+    return NSRange(location: start, length: end - start)
+  }
+
+  private static func isEntityWhitespace(_ character: unichar) -> Bool {
+    guard let scalar = UnicodeScalar(character) else { return false }
+    return CharacterSet.whitespacesAndNewlines.contains(scalar)
   }
 
   private static let allowedExternalLinkSchemes: Set<String> = ["http", "https"]

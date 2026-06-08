@@ -748,6 +748,31 @@ struct ProcessEntitiesTests {
     #expect(entity.mention.userID == 123)
   }
 
+  @Test("Extract mention trims styled trailing whitespace")
+  func testExtractMentionTrimsStyledTrailingWhitespace() {
+    let text = "Hi @Dena  @Test2  mentions"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let denaRange = NSRange(location: 3, length: 6)
+    let testRange = NSRange(location: 10, length: 7)
+    attributedString.addAttribute(.mentionUserId, value: Int64(10300), range: denaRange)
+    attributedString.addAttribute(.mentionUserId, value: Int64(10600), range: testRange)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 2)
+    #expect(result.entities.entities[0].offset == 3)
+    #expect(result.entities.entities[0].length == 5)
+    #expect(result.entities.entities[0].mention.userID == 10300)
+    #expect(result.entities.entities[1].offset == 10)
+    #expect(result.entities.entities[1].length == 6)
+    #expect(result.entities.entities[1].mention.userID == 10600)
+  }
+
   @Test("Extract bot command from attributed string")
   func testExtractBotCommandFromAttributedString() {
     let text = "Run /start"

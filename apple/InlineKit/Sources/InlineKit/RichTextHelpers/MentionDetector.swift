@@ -116,21 +116,37 @@ public class MentionDetector {
     range: NSRange,
     with mentionText: String,
     userId: Int64,
-    trailingText: String = " "
+    trailingText: String = " ",
+    mentionAttributes: [NSAttributedString.Key: Any]? = nil,
+    trailingAttributes: [NSAttributedString.Key: Any]? = nil
   ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
-    let mentionString = mentionText + trailingText
-    let newAttributedText = AttributedStringHelpers.replaceMentionInAttributedString(
-      attributedText,
-      range: range,
-      with: mentionString,
-      userId: userId
-    )
+    let replacement = NSMutableAttributedString()
+    replacement.append(mentionString(mentionText, userId: userId, attributes: mentionAttributes))
+    if !trailingText.isEmpty {
+      replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
+    }
 
-    let newCursorPosition = range.location + mentionString.count
+    let mutable = attributedText.mutableCopy() as! NSMutableAttributedString
+    mutable.replaceCharacters(in: range, with: replacement)
+
+    let newCursorPosition = range.location + mentionText.utf16.count + trailingText.utf16.count
 
     log.trace("Replaced mention at \(range) with '\(mentionText)' for user \(userId), new cursor: \(newCursorPosition)")
 
-    return (newAttributedText, newCursorPosition)
+    return (mutable.copy() as! NSAttributedString, newCursorPosition)
+  }
+
+  private func mentionString(
+    _ text: String,
+    userId: Int64,
+    attributes: [NSAttributedString.Key: Any]?
+  ) -> NSAttributedString {
+    guard var attributes else {
+      return AttributedStringHelpers.createMentionAttributedString(text, userId: userId)
+    }
+
+    attributes[.mentionUserId] = userId
+    return NSAttributedString(string: text, attributes: attributes)
   }
 
   /// Extract mention entities from attributed text for sending

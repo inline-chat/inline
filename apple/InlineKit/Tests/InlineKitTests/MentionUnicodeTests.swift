@@ -36,4 +36,22 @@ struct MentionUnicodeOffsetTests {
     #expect(entities[0].offset == Int64(mentionRange.location))
     #expect(entities[0].length == Int64(max(0, mentionRange.length - 1)))
   }
+
+  @Test("replaceMention keeps trailing delimiter outside mention attributes")
+  func testReplaceMentionDoesNotStyleTrailingDelimiter() {
+    let detector = MentionDetector()
+    let original = NSAttributedString(string: "@de")
+
+    let result = detector.replaceMention(
+      in: original,
+      range: NSRange(location: 0, length: 3),
+      with: "@Dena",
+      userId: 123
+    )
+
+    #expect(result.newAttributedText.string == "@Dena ")
+    #expect(result.newCursorPosition == 6)
+    #expect(result.newAttributedText.attribute(.mentionUserId, at: 0, effectiveRange: nil) as? Int64 == 123)
+    #expect(result.newAttributedText.attribute(.mentionUserId, at: 5, effectiveRange: nil) == nil)
+  }
 }
