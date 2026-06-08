@@ -159,16 +159,18 @@ public class AttributedStringHelpers {
 
   public static func extractMentionEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
     var entities: [MessageEntity] = []
+    let text = attributedString.string as NSString
     attributedString.enumerateAttribute(
       .mentionUserId,
       in: NSRange(location: 0, length: attributedString.length),
       options: []
     ) { value, range, _ in
       if let userId = value as? Int64 {
+        guard let range = trimmedEntityRange(in: text, range: range) else { return }
         var entity = MessageEntity()
         entity.type = .mention
         entity.offset = Int64(range.location)
-        entity.length = Int64(range.length - 1) // Subtract 1 for trailing space
+        entity.length = Int64(range.length)
         entity.mention = MessageEntity.MessageEntityMention.with {
           $0.userID = userId
         }
@@ -177,6 +179,34 @@ public class AttributedStringHelpers {
     }
 
     return entities
+  }
+
+  private static func trimmedEntityRange(in text: NSString, range: NSRange) -> NSRange? {
+    guard range.location != NSNotFound,
+          range.location >= 0,
+          range.length > 0,
+          NSMaxRange(range) <= text.length
+    else {
+      return nil
+    }
+
+    var start = range.location
+    var end = NSMaxRange(range)
+
+    while start < end, isEntityWhitespace(text.character(at: start)) {
+      start += 1
+    }
+    while end > start, isEntityWhitespace(text.character(at: end - 1)) {
+      end -= 1
+    }
+
+    guard end > start else { return nil }
+    return NSRange(location: start, length: end - start)
+  }
+
+  private static func isEntityWhitespace(_ character: unichar) -> Bool {
+    guard let scalar = UnicodeScalar(character) else { return false }
+    return CharacterSet.whitespacesAndNewlines.contains(scalar)
   }
 
   // MARK: - Bold Text Processing

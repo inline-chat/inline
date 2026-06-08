@@ -174,11 +174,14 @@ class MentionManager: NSObject {
       range: mentionRange.range,
       with: mentionText,
       userId: user.user.id,
-      trailingText: String(text)
+      trailingText: String(text),
+      mentionAttributes: mentionAttributes(for: textView),
+      trailingAttributes: baseTextAttributes(for: textView)
     )
 
     textView.attributedText = result.newAttributedText
     textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
+    (textView as? ComposeTextView)?.resetTypingAttributesToDefault()
     hideMentionCompletion()
     delegate?.mentionManager(self, didSelectMention: mentionText, userId: user.user.id, for: mentionRange.range)
     return true
@@ -327,12 +330,15 @@ class MentionManager: NSObject {
       in: currentAttributedText,
       range: mentionRange.range,
       with: mentionText,
-      userId: userId
+      userId: userId,
+      mentionAttributes: mentionAttributes(for: textView),
+      trailingAttributes: baseTextAttributes(for: textView)
     )
 
     // Update attributed text and cursor position
     textView.attributedText = result.newAttributedText
     textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
+    (textView as? ComposeTextView)?.resetTypingAttributesToDefault()
 
     // Hide the menu
     hideMentionCompletion()
@@ -368,6 +374,25 @@ class MentionManager: NSObject {
       $0.folding(options: .diacriticInsensitive, locale: .current)
         .lowercased() == normalizedQuery
     }
+  }
+
+  private func mentionAttributes(for textView: UITextView) -> [NSAttributedString.Key: Any] {
+    var attributes = baseTextAttributes(for: textView)
+    attributes[.foregroundColor] = linkColor(for: textView)
+    return attributes
+  }
+
+  private func baseTextAttributes(for textView: UITextView) -> [NSAttributedString.Key: Any] {
+    [
+      .font: textView.font ?? UIFont.systemFont(ofSize: 17),
+      .foregroundColor: UIColor.label,
+    ]
+  }
+
+  private func linkColor(for textView: UITextView) -> UIColor {
+    (textView as? ComposeTextView)?.composeView?.linkColor
+      ?? textView.tintColor
+      ?? UIColor.systemBlue
   }
 }
 

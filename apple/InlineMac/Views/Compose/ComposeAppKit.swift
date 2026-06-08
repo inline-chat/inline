@@ -2505,13 +2505,16 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
       in: currentAttributedText,
       range: mentionRange.range,
       with: text,
-      userId: userId
+      userId: userId,
+      mentionAttributes: composeMentionAttributes,
+      trailingAttributes: composeBaseTextAttributes
     )
 
     // Update attributed text and cursor position
     ignoreNextHeightChange = true
     textEditor.setAttributedString(result.newAttributedText)
     textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+    textEditor.textView.resetTypingAttributesToDefault()
     ignoreNextHeightChange = false
 
     // Hide the menu
@@ -2594,6 +2597,12 @@ extension ComposeAppKit: ComposeAutocompleteMenuDelegate {
   }
 
   private var composeThreadLinkAttributes: [NSAttributedString.Key: Any] {
+    var attributes = composeBaseTextAttributes
+    attributes[.foregroundColor] = ComposeTextEditor.linkColor
+    return attributes
+  }
+
+  private var composeMentionAttributes: [NSAttributedString.Key: Any] {
     var attributes = composeBaseTextAttributes
     attributes[.foregroundColor] = ComposeTextEditor.linkColor
     return attributes
