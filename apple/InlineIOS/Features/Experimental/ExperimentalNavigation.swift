@@ -98,7 +98,11 @@ struct ExperimentalDestinationView: View {
     case let .space(id):
       SpaceView(spaceId: id)
     case let .chat(peer):
-      ChatView(peer: peer, autoCleanupUntitledEmptyThreadOnBack: true)
+      ChatView(
+        peer: peer,
+        contextSpaceId: nav.activeSpaceId,
+        autoCleanupUntitledEmptyThreadOnBack: true
+      )
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
     case let .spaceSettings(spaceId):
