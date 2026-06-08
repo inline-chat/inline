@@ -30,7 +30,8 @@ async function insertTranslations(inputTranslations: InputTranslation[]): Promis
   // encrypt translations
   const dbNewTranslations: DbNewTranslation[] = inputTranslations.map((t) => {
     let encryptedTranslation = t.translation ? encrypt(t.translation) : null
-    let encryptedEntities = t.entities ? Encryption2.encrypt(MessageEntities.toBinary(t.entities)) : null
+    const entityBytes = t.entities ? MessageEntities.toBinary(t.entities) : null
+    let encryptedEntities = entityBytes && entityBytes.byteLength > 0 ? Encryption2.encrypt(entityBytes) : null
 
     return {
       ...t,
