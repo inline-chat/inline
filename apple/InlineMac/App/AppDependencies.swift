@@ -158,6 +158,27 @@ extension AppDependencies {
     nav.open(.chat(peer: peer))
   }
 
+  @MainActor
+  func openSpaceContext(id spaceId: Int64, name: String, keeping peer: Peer?) {
+    if let nav2 {
+      nav2.openSpace(Space(id: spaceId, name: name, date: Date()))
+      if let peer {
+        nav2.requestOpenChat(peer: peer, database: database)
+      }
+      return
+    }
+
+    if let nav3 {
+      nav3.selectSpace(spaceId)
+      return
+    }
+
+    nav.openSpace(spaceId)
+    if let peer {
+      nav.open(.chat(peer: peer))
+    }
+  }
+
   @discardableResult
   func removeChatFromNavigation(peer: Peer) -> Bool {
     var didRemove = nav.removeChat(peer: peer)

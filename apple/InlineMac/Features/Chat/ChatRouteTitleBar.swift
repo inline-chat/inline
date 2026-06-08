@@ -44,8 +44,8 @@ struct ChatRouteTitleBar: View {
 
         if let subtitle = model.status.text {
           statusText(subtitle)
-        } else if let parentThread = model.parentThread {
-          parentThreadPill(parentThread)
+        } else if let breadcrumb = model.breadcrumb {
+          breadcrumbView(breadcrumb)
         }
       }
       .frame(minWidth: 0, alignment: .leading)
@@ -167,10 +167,37 @@ struct ChatRouteTitleBar: View {
     }
   }
 
-  private func parentThreadPill(_ parentThread: ChatRouteToolbarTitleModel.ParentThread) -> some View {
-    ParentThreadPill(title: parentThread.title) {
-      openParentThread(parentThread)
+  private func breadcrumbView(_ breadcrumb: ChatRouteToolbarTitleModel.Breadcrumb) -> some View {
+    HStack(spacing: 4) {
+      if let space = breadcrumb.space {
+        BreadcrumbSegmentButton(
+          title: space.title,
+          help: "Open Space",
+          accessibilityLabel: "Open Space \(space.title)"
+        ) {
+          openSpace(space)
+        }
+
+        if breadcrumb.parentThread != nil {
+          Text("/")
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+        }
+      }
+
+      if let parentThread = breadcrumb.parentThread {
+        BreadcrumbSegmentButton(
+          title: parentThread.title,
+          help: "Open Parent Chat",
+          accessibilityLabel: "Open Parent Chat \(parentThread.title)"
+        ) {
+          openParentThread(parentThread)
+        }
+        .layoutPriority(1)
+      }
     }
+    .lineLimit(1)
+    .offset(x: -5)
   }
 
   private func statusText(_ subtitle: String) -> some View {
@@ -203,6 +230,16 @@ struct ChatRouteTitleBar: View {
       dependencies.requestOpenChat(peer: parentThread.peer)
     } else {
       nav.open(.chat(peer: parentThread.peer))
+    }
+  }
+
+  private func openSpace(_ space: ChatRouteToolbarTitleModel.SpaceLink) {
+    guard !suppressClick else { return }
+    if let dependencies {
+      dependencies.openSpaceContext(id: space.id, name: space.title, keeping: peer)
+    } else {
+      nav.selectSpace(space.id)
+      nav.open(.chat(peer: peer))
     }
   }
 
@@ -248,8 +285,10 @@ struct ChatRouteTitleBar: View {
   }
 }
 
-private struct ParentThreadPill: View {
+private struct BreadcrumbSegmentButton: View {
   let title: String
+  let help: String
+  let accessibilityLabel: String
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -267,11 +306,10 @@ private struct ParentThreadPill: View {
           RoundedRectangle(cornerRadius: 5, style: .continuous)
             .fill(backgroundColor)
         )
-        .offset(x: -5)
     }
     .buttonStyle(.plain)
-    .help("Open Parent Chat")
-    .accessibilityLabel("Open Parent Chat")
+    .help(help)
+    .accessibilityLabel(accessibilityLabel)
     .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     .onHover { isHovered = $0 }
   }

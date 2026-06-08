@@ -37,6 +37,20 @@ final class ChatRouteToolbarTitleModel {
     let title: String
   }
 
+  struct SpaceLink: Equatable {
+    let id: Int64
+    let title: String
+  }
+
+  struct Breadcrumb: Equatable {
+    let space: SpaceLink?
+    let parentThread: ParentThread?
+
+    var isEmpty: Bool {
+      space == nil && parentThread == nil
+    }
+  }
+
   private struct Snapshot {
     let chat: Chat?
     let userInfo: UserInfo?
@@ -51,7 +65,7 @@ final class ChatRouteToolbarTitleModel {
   var title: String
   var windowTitle: String
   var iconPeer: ChatIcon.PeerType?
-  var parentThread: ParentThread?
+  var breadcrumb: Breadcrumb?
   var status: Status = .none
   var canRename = false
   var isEditingTitle = false
@@ -180,6 +194,7 @@ final class ChatRouteToolbarTitleModel {
     guard self.contextSpaceId != contextSpaceId else { return }
     self.contextSpaceId = contextSpaceId
     updateSpaceSubscription()
+    breadcrumb = resolvedBreadcrumb()
     refreshWindowTitle()
   }
 
@@ -231,9 +246,9 @@ final class ChatRouteToolbarTitleModel {
       emojiDraft = resolvedEmoji() ?? ""
     }
     iconPeer = resolvedIconPeer()
-    parentThread = resolvedParentThread()
     updateParentChatSubscription()
     updateSpaceSubscription()
+    breadcrumb = resolvedBreadcrumb()
     refreshWindowTitle()
     refreshStatus()
   }
@@ -356,6 +371,21 @@ final class ChatRouteToolbarTitleModel {
     return ParentThread(peer: peer, title: title)
   }
 
+  private func resolvedBreadcrumb() -> Breadcrumb? {
+    let breadcrumb = Breadcrumb(
+      space: resolvedSpaceLink(),
+      parentThread: resolvedParentThread()
+    )
+    return breadcrumb.isEmpty ? nil : breadcrumb
+  }
+
+  private func resolvedSpaceLink() -> SpaceLink? {
+    guard let chatSpaceId = resolvedChat()?.spaceId else { return nil }
+    guard chatSpaceId != contextSpaceId else { return nil }
+    guard let space = loadedSpace, space.id == chatSpaceId else { return nil }
+    return SpaceLink(id: chatSpaceId, title: space.displayName)
+  }
+
   private func parentTitle(for chat: Chat) -> String {
     if chat.type == .privateChat {
       if let userInfo = parentUserInfo(for: chat) {
@@ -413,7 +443,7 @@ final class ChatRouteToolbarTitleModel {
     parentChatCancellable = ObjectCache.shared.getChatPublisher(id: parentChatId)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
-        self?.parentThread = self?.resolvedParentThread()
+        self?.breadcrumb = self?.resolvedBreadcrumb()
       }
   }
 
@@ -436,6 +466,7 @@ final class ChatRouteToolbarTitleModel {
       self?.observedSpaceId = nil
     }, onChange: { [weak self] space in
       self?.loadedSpace = space
+      self?.breadcrumb = self?.resolvedBreadcrumb()
       self?.refreshWindowTitle()
     })
   }

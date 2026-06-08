@@ -8,6 +8,7 @@ import Translation
 
 struct ChatView: View {
   var peerId: Peer
+  var contextSpaceId: Int64?
   var preview: Bool
   private let autoCleanupUntitledEmptyThreadOnBack: Bool
 
@@ -55,10 +56,12 @@ struct ChatView: View {
 
   init(
     peer: Peer,
+    contextSpaceId: Int64? = nil,
     preview: Bool = false,
     autoCleanupUntitledEmptyThreadOnBack: Bool = false
   ) {
     peerId = peer
+    self.contextSpaceId = contextSpaceId
     self.preview = preview
     self.autoCleanupUntitledEmptyThreadOnBack = autoCleanupUntitledEmptyThreadOnBack
     _fullChatViewModel = EnvironmentStateObject { env in
@@ -103,12 +106,20 @@ struct ChatView: View {
 
       if #available(iOS 26.0, *) {
         ToolbarItem(placement: .principal) {
-          ChatToolbarLeadingView(peerId: peerId, isChatHeaderPressed: $isChatHeaderPressed)
+          ChatToolbarLeadingView(
+            peerId: peerId,
+            contextSpaceId: contextSpaceId,
+            isChatHeaderPressed: $isChatHeaderPressed
+          )
         }
         .sharedBackgroundVisibility(.hidden)
       } else {
         ToolbarItem(placement: .topBarLeading) {
-          ChatToolbarLeadingView(peerId: peerId, isChatHeaderPressed: $isChatHeaderPressed)
+          ChatToolbarLeadingView(
+            peerId: peerId,
+            contextSpaceId: contextSpaceId,
+            isChatHeaderPressed: $isChatHeaderPressed
+          )
         }
       }
     }

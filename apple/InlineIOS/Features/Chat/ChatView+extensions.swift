@@ -6,6 +6,7 @@ import SwiftUI
 
 struct ChatToolbarLeadingView: View {
   let peerId: Peer
+  let contextSpaceId: Int64?
   @Binding private var isChatHeaderPressed: Bool
 
   @EnvironmentObject private var fullChatViewModel: FullChatViewModel
@@ -14,14 +15,16 @@ struct ChatToolbarLeadingView: View {
   @Environment(\.colorScheme) private var colorScheme
 
   @ObservedObject private var composeActions: ComposeActions
-  @State private var replyThreadContext: ReplyThreadToolbarContext?
+  @State private var toolbarContext: ReplyThreadToolbarContext?
 
   init(
     peerId: Peer,
+    contextSpaceId: Int64? = nil,
     isChatHeaderPressed: Binding<Bool>,
     composeActions: ComposeActions = .shared
   ) {
     self.peerId = peerId
+    self.contextSpaceId = contextSpaceId
     _isChatHeaderPressed = isChatHeaderPressed
     _composeActions = ObservedObject(initialValue: composeActions)
   }
@@ -45,7 +48,7 @@ struct ChatToolbarLeadingView: View {
       } ?? "Loading..."
     } else if let chat = fullChatViewModel.chat {
       if chat.isReplyThread {
-        return replyThreadContext?.title ?? ReplyThreadToolbarContextLoader.fallbackTitle(for: chat)
+        return toolbarContext?.title ?? ReplyThreadToolbarContextLoader.fallbackTitle(for: chat)
       }
       return chat.humanReadableTitle ?? "Not Loaded Title"
     }
@@ -69,9 +72,32 @@ struct ChatToolbarLeadingView: View {
     ]
   }
 
-  private var replyThreadContextKey: String {
-    guard let chat = fullChatViewModel.chat, chat.isReplyThread else { return "none" }
-    return "\(chat.id):\(chat.parentChatId ?? 0):\(chat.parentMessageId ?? 0):\(chat.title ?? "")"
+  private var activeContextSpaceId: Int64? {
+    if let contextSpaceId {
+      return contextSpaceId
+    }
+
+    return router.selectedTabPath.reversed().dropFirst().compactMap { destination in
+      if case let .space(id) = destination {
+        return id
+      }
+      return nil
+    }.first
+  }
+
+  private var toolbarContextKey: String {
+    guard let chat = fullChatViewModel.chat else {
+      return "none:\(activeContextSpaceId ?? 0)"
+    }
+
+    return [
+      "\(chat.id)",
+      "\(chat.spaceId ?? 0)",
+      "\(chat.parentChatId ?? 0)",
+      "\(chat.parentMessageId ?? 0)",
+      chat.title ?? "",
+      "\(activeContextSpaceId ?? 0)",
+    ].joined(separator: ":")
   }
 
   private var threadEmoji: String {
@@ -114,8 +140,6 @@ struct ChatToolbarLeadingView: View {
         } else {
           return .composeAction(composeAction)
         }
-      } else if let parentTitle = replyThreadContext?.parentTitle {
-        return .parentThread(parentTitle)
       }
     }
     return .empty
@@ -125,15 +149,9 @@ struct ChatToolbarLeadingView: View {
   private var subtitleView: some View {
     let subtitle = getCurrentSubtitle()
     if !subtitle.text.isEmpty {
-      if subtitle.isParentThread {
-        Button(action: openParentThread) {
-          subtitleContent(subtitle)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Open parent chat \(subtitle.text)")
-      } else {
-        subtitleContent(subtitle)
-      }
+      subtitleContent(subtitle)
+    } else if let toolbarContext, toolbarContext.hasBreadcrumb {
+      breadcrumbView(toolbarContext)
     }
   }
 
@@ -149,6 +167,48 @@ struct ChatToolbarLeadingView: View {
         .allowsTightening(true)
     }
     .padding(.top, -2)
+  }
+
+  private func breadcrumbView(_ context: ReplyThreadToolbarContext) -> some View {
+    HStack(alignment: .center, spacing: 4) {
+      if let space = context.space {
+        breadcrumbButton(title: space.title, accessibilityLabel: "Open space \(space.title)") {
+          openSpace(space)
+        }
+
+        if context.parent != nil {
+          Text("/")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+      }
+
+      if let parent = context.parent {
+        breadcrumbButton(title: parent.title, accessibilityLabel: "Open parent chat \(parent.title)") {
+          openParentThread(parent)
+        }
+        .layoutPriority(1)
+      }
+    }
+    .lineLimit(1)
+    .padding(.top, -2)
+  }
+
+  private func breadcrumbButton(
+    title: String,
+    accessibilityLabel: String,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Text(title)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .allowsTightening(true)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(accessibilityLabel)
   }
 
   var body: some View {
@@ -206,27 +266,39 @@ struct ChatToolbarLeadingView: View {
         isChatHeaderPressed = pressing
       }
     }, perform: {})
-    .task(id: replyThreadContextKey) {
-      await loadReplyThreadContext()
+    .task(id: toolbarContextKey) {
+      await loadToolbarContext()
     }
   }
 
   @MainActor
-  private func loadReplyThreadContext() async {
-    guard let chat = fullChatViewModel.chat, chat.isReplyThread else {
-      replyThreadContext = nil
+  private func loadToolbarContext() async {
+    guard let chat = fullChatViewModel.chat,
+          chat.isReplyThread || shouldShowSpaceBreadcrumb(for: chat)
+    else {
+      toolbarContext = nil
       return
     }
 
     let chatId = chat.id
-    let context = await ReplyThreadToolbarContextLoader.load(for: chat)
+    let spaceId = activeContextSpaceId
+    let context = await ReplyThreadToolbarContextLoader.load(for: chat, contextSpaceId: spaceId)
     guard !Task.isCancelled, fullChatViewModel.chat?.id == chatId else { return }
-    replyThreadContext = context
+    toolbarContext = context
   }
 
-  private func openParentThread() {
-    guard let parentPeer = replyThreadContext?.parentPeer, parentPeer != peerId else { return }
-    router.push(.chat(peer: parentPeer))
+  private func shouldShowSpaceBreadcrumb(for chat: Chat) -> Bool {
+    guard let spaceId = chat.spaceId else { return false }
+    return spaceId != activeContextSpaceId
+  }
+
+  private func openParentThread(_ parent: ReplyThreadToolbarContext.ParentLink) {
+    guard parent.peer != peerId else { return }
+    router.push(.chat(peer: parent.peer))
+  }
+
+  private func openSpace(_ space: ReplyThreadToolbarContext.SpaceLink) {
+    router.push(.space(id: space.id))
   }
 
   private func openChatInfo() {
