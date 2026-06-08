@@ -106,14 +106,21 @@ class Nav3 {
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
   @ObservationIgnored var onRouteChange: (() -> Void)?
 
-  var history: [Nav3Route] = []
+  var history: [Nav3RouteState] = []
   var historyIndex: Int = -1
   var cmdKVisible = false
-  var selectedSpaceId: Int64?
 
-  var currentRoute: Nav3Route {
+  var selectedSpaceId: Int64? {
+    currentState.selectedSpaceId
+  }
+
+  var currentState: Nav3RouteState {
     guard history.indices.contains(historyIndex) else { return .empty }
     return history[historyIndex]
+  }
+
+  var currentRoute: Nav3Route {
+    currentState.route
   }
 
   var canGoBack: Bool {
@@ -132,54 +139,24 @@ class Nav3 {
   }
 
   func open(_ route: Nav3Route, tracksChatNavigation: Bool = true) {
-    var didChange = false
-    if let spaceId = route.selectedSpaceId {
-      didChange = selectedSpaceId != spaceId
-      selectedSpaceId = spaceId
-    }
-
-    if currentRoute == route {
-      if didChange {
-        notifyRouteChange()
-      }
-      return
-    }
-    if tracksChatNavigation, case let .chat(peer) = route {
-      beginChatNavigationSignpost(peer: peer)
-    }
-    if canGoForward {
-      history.removeSubrange((historyIndex + 1)...)
-    }
-    history.append(route)
-    historyIndex = history.count - 1
-
-    if case let .chat(peer) = route {
-      os_signpost(
-        .event,
-        log: navigationSignpostLog,
-        name: "ChatRouteCommit",
-        "%{public}s",
-        String(describing: peer)
-      )
-    }
-
-    notifyRouteChange()
+    open(state(for: route), tracksChatNavigation: tracksChatNavigation)
   }
 
   func replace(_ route: Nav3Route) {
+    let state = state(for: route)
     guard history.indices.contains(historyIndex) else {
-      open(route)
+      open(state)
       return
     }
-    guard history[historyIndex] != route else { return }
-    history[historyIndex] = route
+    guard history[historyIndex] != state else { return }
+    history[historyIndex] = state
     notifyRouteChange()
   }
 
   @discardableResult
   func removeChat(peer: Peer) -> Bool {
-    let indexedRoutes = history.enumerated().filter { _, route in
-      route.selectedPeer != peer
+    let indexedRoutes = history.enumerated().filter { _, state in
+      state.route.selectedPeer != peer
     }
     guard indexedRoutes.count != history.count else { return false }
 
@@ -206,20 +183,17 @@ class Nav3 {
     history = []
     historyIndex = -1
     cmdKVisible = false
-    selectedSpaceId = nil
     notifyRouteChange()
   }
 
   func selectHome() {
     guard selectedSpaceId != nil else { return }
-    selectedSpaceId = nil
-    notifyRouteChange()
+    openContextState(selectedSpaceId: nil)
   }
 
   func selectSpace(_ spaceId: Int64) {
     guard selectedSpaceId != spaceId else { return }
-    selectedSpaceId = spaceId
-    notifyRouteChange()
+    openContextState(selectedSpaceId: spaceId)
   }
 
   func goBack() {
@@ -232,7 +206,7 @@ class Nav3 {
     guard case .chat = currentRoute else { return false }
     guard canGoBack else { return false }
 
-    let previousRoute = history[historyIndex - 1]
+    let previousRoute = history[historyIndex - 1].route
     guard previousRoute.isAllChatsRoute else { return false }
 
     goBack()
@@ -259,6 +233,55 @@ class Nav3 {
 
   private func notifyRouteChange() {
     onRouteChange?()
+  }
+
+  private func state(for route: Nav3Route) -> Nav3RouteState {
+    Nav3RouteState(
+      route: route,
+      selectedSpaceId: route.selectedSpaceId ?? selectedSpaceId
+    )
+  }
+
+  private func openContextState(selectedSpaceId: Int64?) {
+    open(
+      Nav3RouteState(route: currentRoute, selectedSpaceId: selectedSpaceId),
+      tracksChatNavigation: false,
+      recordsImplicitBase: true
+    )
+  }
+
+  private func open(
+    _ state: Nav3RouteState,
+    tracksChatNavigation: Bool = true,
+    recordsImplicitBase: Bool = false
+  ) {
+    guard currentState != state else { return }
+
+    if recordsImplicitBase, historyIndex < 0 {
+      history.append(currentState)
+      historyIndex = history.count - 1
+    }
+
+    if tracksChatNavigation, case let .chat(peer) = state.route {
+      beginChatNavigationSignpost(peer: peer)
+    }
+    if canGoForward {
+      history.removeSubrange((historyIndex + 1)...)
+    }
+    history.append(state)
+    historyIndex = history.count - 1
+
+    if case let .chat(peer) = state.route {
+      os_signpost(
+        .event,
+        log: navigationSignpostLog,
+        name: "ChatRouteCommit",
+        "%{public}s",
+        String(describing: peer)
+      )
+    }
+
+    notifyRouteChange()
   }
 
   func beginChatNavigationSignpost(peer: Peer) {
@@ -307,12 +330,11 @@ class Nav3 {
     }
 
     guard let state = Self.decodeRouteState(routeState) else { return }
-    selectedSpaceId = state.selectedSpaceId
-    open(state.route)
+    open(state)
   }
 
   func encodedRouteState() -> String? {
-    Nav3RouteState(nav: self).rawValue
+    currentState.rawValue
   }
 
   private static func decodeRouteState(_ routeState: String) -> Nav3RouteState? {
