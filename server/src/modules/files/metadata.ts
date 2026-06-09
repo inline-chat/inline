@@ -1,5 +1,9 @@
 import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import {
+  resolveVoiceMimeType,
+  validVoiceExtensions,
+} from "@in/server/modules/files/voiceMime"
 import sharp from "sharp"
 
 const log = new Log("modules/files/metadata")
@@ -197,8 +201,6 @@ export const getDocumentMetadataAndValidate = async (
   return { mimeType, fileName, extension }
 }
 
-const validVoiceMimeTypes = ["audio/ogg", "audio/mp4", "audio/x-m4a"]
-const validVoiceExtensions = ["ogg", "oga", "m4a", "mp4"]
 const maxVoiceFileSize = 20_000_000 // 20MB
 const maxVoiceWaveformBytes = 2048
 const documentMimeTypesByExtension: Record<string, string> = {
@@ -233,7 +235,7 @@ export const getVoiceMetadataAndValidate = async (
 }> => {
   const fileName = decodeFileName(file.name, "voice")
   const size = file.size
-  const mimeType = file.type.trim()
+  const mimeType = file.type.trim().toLowerCase()
   let extension = fileName.split(".").pop()?.toLowerCase()
 
   if (size === 0) {
@@ -264,16 +266,19 @@ export const getVoiceMetadataAndValidate = async (
     throw new InlineError(InlineError.ApiError.FILE_TOO_LARGE)
   }
 
-  if (!validVoiceMimeTypes.includes(mimeType)) {
+  const voiceMime = resolveVoiceMimeType({ mimeType, extension })
+  if (!voiceMime.ok && voiceMime.reason === "unsupported-mime") {
     throw badRequest("Voice upload requires audio/ogg, audio/mp4, or audio/x-m4a MIME type")
   }
 
-  extension = extension ?? "ogg"
+  if (!voiceMime.ok) {
+    throw badRequest("Voice upload MIME type does not match file extension")
+  }
 
   return {
     duration,
     waveform,
-    mimeType,
+    mimeType: voiceMime.mimeType,
     fileName,
     extension,
   }
