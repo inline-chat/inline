@@ -214,6 +214,68 @@ describe("encode voice", () => {
     expect(encodedVoice?.duration).toBe(12)
   })
 
+  it("derives voice MIME from storage extension when an old row is missing MIME", () => {
+    const result = encodeMessage({
+      message: buildMessage({ mediaType: "voice", voiceId: 9 }),
+      voice: {
+        ...voice,
+        file: {
+          ...voice.file,
+          mimeType: null,
+          path: "voices/voice-9.m4a",
+        },
+      },
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.media?.media.oneofKind).toBe("voice")
+    if (result.media?.media.oneofKind !== "voice") {
+      throw new Error("Expected voice media")
+    }
+    expect(result.media.media.voice.voice?.mimeType).toBe("audio/mp4")
+  })
+
+  it("derives voice MIME from storage extension when an old row has unsupported MIME", () => {
+    const result = encodeMessage({
+      message: buildMessage({ mediaType: "voice", voiceId: 9 }),
+      voice: {
+        ...voice,
+        file: {
+          ...voice.file,
+          mimeType: "application/octet-stream",
+          path: "voices/voice-9.m4a",
+        },
+      },
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.media?.media.oneofKind).toBe("voice")
+    if (result.media?.media.oneofKind !== "voice") {
+      throw new Error("Expected voice media")
+    }
+    expect(result.media.media.voice.voice?.mimeType).toBe("audio/mp4")
+  })
+
+  it("does not encode mislabelled voice media", () => {
+    const result = encodeMessage({
+      message: buildMessage({ mediaType: "voice", voiceId: 9 }),
+      voice: {
+        ...voice,
+        file: {
+          ...voice.file,
+          mimeType: "audio/ogg",
+          path: "voices/voice-9.m4a",
+        },
+      },
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.media).toBeUndefined()
+  })
+
   it("encodes full voice media when full message has a voice relation", () => {
     const result = encodeFullMessage({
       message: buildFullMessage({ mediaType: "voice", voiceId: 9, voice }),

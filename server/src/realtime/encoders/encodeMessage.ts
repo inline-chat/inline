@@ -137,12 +137,15 @@ export const encodeMessage = ({
       },
     }
   } else if (voice) {
-    media = {
-      media: {
-        oneofKind: "voice",
-        voice: { voice: encodeVoice({ voice }) },
-      },
-    }
+    const encodedVoice = encodeVoice({ voice })
+    media = encodedVoice
+      ? {
+          media: {
+            oneofKind: "voice",
+            voice: { voice: encodedVoice },
+          },
+        }
+      : undefined
   }
 
   let fwdFrom: MessageFwdHeader | undefined = undefined
@@ -246,12 +249,15 @@ export const encodeFullMessage = ({
       },
     }
   } else if (message.voice) {
-    media = {
-      media: {
-        oneofKind: "voice",
-        voice: { voice: encodeVoice({ voice: message.voice }) },
-      },
-    }
+    const encodedVoice = encodeVoice({ voice: message.voice })
+    media = encodedVoice
+      ? {
+          media: {
+            oneofKind: "voice",
+            voice: { voice: encodedVoice },
+          },
+        }
+      : undefined
   }
 
   // Process attachments if they exist
