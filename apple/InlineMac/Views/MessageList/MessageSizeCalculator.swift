@@ -707,7 +707,7 @@ class MessageSizeCalculator {
     let hasText = message.message.text != nil
     let text = message.displayText ?? emptyFallback
     let hasMedia = message.hasMedia
-    let hasVoice = ExperimentalFeatureFlags.voiceMessagesEnabled && message.message.hasVoice
+    let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
     let hasForwardHeader = message.message.hasForwardHeader
@@ -1492,7 +1492,7 @@ class MessageSizeCalculator {
     let hasText = message.message.text != nil
     let text = message.displayText ?? emptyFallback
     let hasMedia = message.hasMedia
-    let hasVoice = ExperimentalFeatureFlags.voiceMessagesEnabled && message.message.hasVoice
+    let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
     let hasForwardHeader = message.message.hasForwardHeader

@@ -135,9 +135,7 @@ public struct VoiceMessageBubble: View {
   }
 
   public var body: some View {
-    if ExperimentalFeatureFlags.voiceMessagesEnabled {
-      content
-    }
+    content
   }
 
   private var content: some View {

@@ -242,11 +242,6 @@ public final class FileDownloader: NSObject, Sendable {
     message: Message,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      completion(.failure(FileCacheError.failedToFetch))
-      return
-    }
-
     guard let voice = message.voiceContent else {
       completion(.failure(FileCacheError.failedToSave))
       return

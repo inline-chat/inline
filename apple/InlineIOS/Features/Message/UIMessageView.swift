@@ -176,7 +176,7 @@ class UIMessageView: UIView {
   }
 
   private var shouldShowVoiceMessage: Bool {
-    ExperimentalFeatureFlags.voiceMessagesEnabled && message.hasVoice
+    message.hasVoice
   }
 
   private var isMediaOnlyMessage: Bool {
@@ -255,9 +255,6 @@ class UIMessageView: UIView {
       return true
     }
 
-    if message.hasUnsupportedTypes {
-      return false
-    }
     if shouldShowVoiceMessage {
       return true
     }
@@ -1231,11 +1228,7 @@ class UIMessageView: UIView {
   }
 
   func setupSingleLineMessage() {
-    if message.hasUnsupportedTypes {
-      singleLineContainer.addArrangedSubview(unsupportedLabel)
-    } else {
-      singleLineContainer.addArrangedSubview(messageLabel)
-    }
+    singleLineContainer.addArrangedSubview(messageLabel)
     singleLineContainer.addArrangedSubview(metadataView)
     containerStack.addArrangedSubview(singleLineContainer)
   }

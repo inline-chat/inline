@@ -36,7 +36,7 @@ public extension FullMessage {
       translationText
     } else if let text = message.text {
       text
-    } else if message.hasVoice, !ExperimentalFeatureFlags.voiceMessagesEnabled {
+    } else if message.hasVoice {
       message.stringRepresentationPlain
     } else {
       nil
@@ -74,7 +74,7 @@ public extension EmbeddedMessage {
       translationText
     } else if let text = message.text {
       text
-    } else if message.hasVoice, !ExperimentalFeatureFlags.voiceMessagesEnabled {
+    } else if message.hasVoice {
       message.stringRepresentationPlain
     } else {
       nil

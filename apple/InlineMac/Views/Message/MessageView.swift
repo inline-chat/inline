@@ -131,7 +131,7 @@ class MessageViewAppKit: NSView {
   }
 
   private var hasVoiceInDocumentSlot: Bool {
-    ExperimentalFeatureFlags.voiceMessagesEnabled && message.hasVoice
+    message.hasVoice
   }
 
   private var canSaveLoadedVoice: Bool {

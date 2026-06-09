@@ -6,14 +6,13 @@ import UniformTypeIdentifiers
 
 enum VoiceMessageAudioSaver {
   static func canSave(_ message: InlineKit.Message) -> Bool {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return false }
     guard message.hasVoice, let sourceURL = message.voiceLocalURL else { return false }
     return FileManager.default.fileExists(atPath: sourceURL.path)
   }
 
   @MainActor
   static func save(message: InlineKit.Message, window: NSWindow?) {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled, message.hasVoice else { return }
+    guard message.hasVoice else { return }
     guard let window else { return }
 
     let fileManager = FileManager.default
@@ -28,8 +27,13 @@ enum VoiceMessageAudioSaver {
     }
 
     let savePanel = NSSavePanel()
-    savePanel.allowedContentTypes = allowedContentTypes(for: message.voiceContent, sourceURL: sourceURL)
-    savePanel.nameFieldStringValue = defaultFileName(for: message, sourceURL: sourceURL)
+    guard let fileExtension = fileExtension(for: message.voiceContent, sourceURL: sourceURL) else {
+      ToastCenter.shared.showError("Unsupported audio type")
+      return
+    }
+
+    savePanel.allowedContentTypes = allowedContentTypes(forExtension: fileExtension)
+    savePanel.nameFieldStringValue = defaultFileName(for: message, fileExtension: fileExtension)
     savePanel.directoryURL = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first
     savePanel.canCreateDirectories = true
 
@@ -39,16 +43,15 @@ enum VoiceMessageAudioSaver {
     }
   }
 
-  private static func defaultFileName(for message: InlineKit.Message, sourceURL: URL) -> String {
-    let ext = fileExtension(for: message.voiceContent, sourceURL: sourceURL)
+  private static func defaultFileName(for message: InlineKit.Message, fileExtension: String) -> String {
     let id = message.voiceRemoteId ?? message.messageId
-    return "voice_\(id).\(ext)"
+    return "voice_\(id).\(fileExtension)"
   }
 
-  private static func fileExtension(for voice: Client_MessageVoiceContent?, sourceURL: URL) -> String {
-    let sourceExtension = sourceURL.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !sourceExtension.isEmpty {
-      return sourceExtension.lowercased()
+  private static func fileExtension(for voice: Client_MessageVoiceContent?, sourceURL: URL) -> String? {
+    let sourceExtension = sourceURL.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if ["m4a", "mp4", "ogg", "oga"].contains(sourceExtension) {
+      return sourceExtension
     }
 
     switch voice?.mimeType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
@@ -57,16 +60,12 @@ enum VoiceMessageAudioSaver {
     case "audio/ogg":
       return "ogg"
     default:
-      return "m4a"
+      return nil
     }
   }
 
-  private static func allowedContentTypes(
-    for voice: Client_MessageVoiceContent?,
-    sourceURL: URL
-  ) -> [UTType] {
-    let ext = fileExtension(for: voice, sourceURL: sourceURL)
-    if let type = UTType(filenameExtension: ext) {
+  private static func allowedContentTypes(forExtension fileExtension: String) -> [UTType] {
+    if let type = UTType(filenameExtension: fileExtension) {
       return [type, .audio]
     }
     return [.audio]
