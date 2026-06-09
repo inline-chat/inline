@@ -3,10 +3,7 @@ import {
   DialogNotificationSettings_Mode,
   type DialogNotificationSettings as DialogNotificationSettingsMessage,
 } from "@inline-chat/protocol/core"
-import {
-  UserSettingsNotificationsMode,
-  type UserSettingsGeneral,
-} from "@in/server/db/models/userSettings/types"
+import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 
 export const decodeDialogNotificationSettings = (
   binary: Uint8Array | null | undefined,
@@ -38,20 +35,6 @@ export const isValidDialogNotificationMode = (mode: DialogNotificationSettings_M
     mode === DialogNotificationSettings_Mode.MENTIONS ||
     mode === DialogNotificationSettings_Mode.NONE
   )
-}
-
-export const normalizeGlobalNotificationMode = (
-  userSettings: UserSettingsGeneral | null | undefined,
-): UserSettingsNotificationsMode | undefined => {
-  const rawMode = userSettings?.notifications.mode
-  if (!rawMode) {
-    return undefined
-  }
-
-  const legacyOnlyMentions =
-    rawMode === UserSettingsNotificationsMode.OnlyMentions ||
-    (rawMode === UserSettingsNotificationsMode.Mentions && userSettings?.notifications.disableDmNotifications)
-  return legacyOnlyMentions ? UserSettingsNotificationsMode.OnlyMentions : rawMode
 }
 
 export const resolveEffectiveNotificationMode = ({

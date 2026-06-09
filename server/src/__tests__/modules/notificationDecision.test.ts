@@ -20,7 +20,6 @@ describe("notification decision", () => {
       isDM: false,
       isReplyToUser: false,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(true)
@@ -41,7 +40,6 @@ describe("notification decision", () => {
       isDM: true,
       isReplyToUser: false,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(false)
@@ -62,7 +60,6 @@ describe("notification decision", () => {
       isDM: true,
       isReplyToUser: false,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(true)
@@ -77,7 +74,6 @@ describe("notification decision", () => {
       isDM: true,
       isReplyToUser: false,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(false)
@@ -91,7 +87,6 @@ describe("notification decision", () => {
       isDM: false,
       isReplyToUser: false,
       isExplicitlyMentioned: true,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(true)
@@ -106,7 +101,6 @@ describe("notification decision", () => {
       isDM: false,
       isReplyToUser: true,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(true)
@@ -121,7 +115,6 @@ describe("notification decision", () => {
       isDM: false,
       isReplyToUser: false,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(true)
@@ -135,38 +128,36 @@ describe("notification decision", () => {
       isDM: false,
       isReplyToUser: false,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
     expect(decision.shouldNotify).toBe(true)
     expect(decision.needsExplicitMacNotification).toBe(false)
   })
 
-  test("important only requires both mention context and AI/nudge signal", () => {
-    const noSignal = decideNotification({
+  test("legacy important only behaves like messages to you", () => {
+    const dm = decideNotification({
+      mode: UserSettingsNotificationsMode.ImportantOnly,
+      isUrgentNudge: false,
+      isNudge: false,
+      isDM: true,
+      isReplyToUser: false,
+      isExplicitlyMentioned: false,
+    })
+
+    expect(dm.shouldNotify).toBe(true)
+    expect(dm.needsExplicitMacNotification).toBe(true)
+
+    const threadReply = decideNotification({
       mode: UserSettingsNotificationsMode.ImportantOnly,
       isUrgentNudge: false,
       isNudge: false,
       isDM: false,
       isReplyToUser: true,
       isExplicitlyMentioned: false,
-      aiRequiresNotification: false,
     })
 
-    expect(noSignal.shouldNotify).toBe(false)
-
-    const withSignal = decideNotification({
-      mode: UserSettingsNotificationsMode.ImportantOnly,
-      isUrgentNudge: false,
-      isNudge: false,
-      isDM: false,
-      isReplyToUser: true,
-      isExplicitlyMentioned: false,
-      aiRequiresNotification: true,
-    })
-
-    expect(withSignal.shouldNotify).toBe(true)
-    expect(withSignal.needsExplicitMacNotification).toBe(true)
+    expect(threadReply.shouldNotify).toBe(true)
+    expect(threadReply.needsExplicitMacNotification).toBe(true)
   })
 
   test("unspecified per-chat mode falls back to global mode", () => {

@@ -48,7 +48,6 @@ describe("User Settings RPC", () => {
         notificationSettings: {
           mode: NotificationSettings_Mode.MENTIONS,
           silent: true,
-          importantOnly: false,
         },
       },
     }
@@ -120,5 +119,34 @@ describe("User Settings RPC", () => {
     const getResult = await getUserSettingsHandler({}, context)
     expect(getResult.userSettings?.notificationSettings?.mode).toBe(NotificationSettings_Mode.MENTIONS)
     expect(getResult.userSettings?.notificationSettings?.disableDmNotifications).toBe(true)
+  })
+
+  test("updateUserSettings should map legacy important-only to mentions", async () => {
+    const context = {
+      userId,
+      sessionId: 1,
+      connectionId: "test",
+      sendRaw: () => {},
+      sendRpcReply: () => {},
+    }
+
+    const updateInput = {
+      userSettings: {
+        notificationSettings: {
+          mode: NotificationSettings_Mode.IMPORTANT_ONLY,
+          disableDmNotifications: true,
+        },
+      },
+    }
+
+    await updateUserSettingsHandler(updateInput, context)
+
+    const stored = await UserSettingsModel.getGeneral(userId)
+    expect(stored?.notifications.mode).toBe(UserSettingsNotificationsMode.Mentions)
+    expect(stored?.notifications.disableDmNotifications).toBe(false)
+
+    const getResult = await getUserSettingsHandler({}, context)
+    expect(getResult.userSettings?.notificationSettings?.mode).toBe(NotificationSettings_Mode.MENTIONS)
+    expect(getResult.userSettings?.notificationSettings?.disableDmNotifications).toBe(false)
   })
 })

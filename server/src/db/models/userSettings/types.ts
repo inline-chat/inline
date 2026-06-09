@@ -8,27 +8,27 @@ export enum UserSettingsNotificationsMode {
   OnlyMentions = "5",
 }
 
+export const defaultNotificationSettings = {
+  mode: UserSettingsNotificationsMode.All,
+  silent: false,
+  disableDmNotifications: false,
+} as const
+
 export const UserSettingsGeneralSchema = z.object({
   /** Default notifications for all of your chats */
-  notifications: z.object({
-    /** Default mode for notifications */
-    mode: z.enum(UserSettingsNotificationsMode),
+  notifications: z
+    .object({
+      /** Default mode for notifications */
+      mode: z.enum(UserSettingsNotificationsMode).optional().default(defaultNotificationSettings.mode),
 
-    /** If true, no sound will be played for notifications */
-    silent: z.boolean(),
+      /** If true, no sound will be played for notifications */
+      silent: z.boolean().optional().default(defaultNotificationSettings.silent),
 
-    /** If true, direct message notifications are disabled */
-    disableDmNotifications: z.boolean().optional().default(false),
-
-    /** If true, the notification requires mentioning the user */
-    zenModeRequiresMention: z.boolean().optional().default(true),
-
-    /** If true, the default rules will be used */
-    zenModeUsesDefaultRules: z.boolean().optional().default(true),
-
-    /** Custom rules for notifications */
-    zenModeCustomRules: z.string().optional().default(""),
-  }),
+      /** If true, direct message notifications are disabled */
+      disableDmNotifications: z.boolean().optional().default(defaultNotificationSettings.disableDmNotifications),
+    })
+    .optional()
+    .default(defaultNotificationSettings),
 })
 
 export type UserSettingsGeneralInput = z.input<typeof UserSettingsGeneralSchema>
