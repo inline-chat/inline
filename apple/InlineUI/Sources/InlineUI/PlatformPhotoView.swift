@@ -499,10 +499,10 @@ public final class PlatformPhotoView: PlatformView {
     currentLoadingSize = targetSize
     currentLoadingScale = scale
 
+    // TODO: Show photos faster without blocking the main thread by using small server-generated thumbnails.
     let options: KingfisherOptionsInfo = [
       .processor(DownsamplingImageProcessor(size: targetSize)),
       .scaleFactor(scale),
-      .loadDiskFileSynchronously,
       .cacheMemoryOnly,
     ]
 
