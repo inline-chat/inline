@@ -691,9 +691,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 public extension Message {
   /// Returns a string representation of the message, including emojis for different media types.
   var stringRepresentationWithEmoji: String {
-    if hasUnsupportedTypes {
-      "Unsupported message"
-    } else if let text, !text.isEmpty {
+    if let text, !text.isEmpty {
       text
     } else if isSticker == true {
       "🖼️ Sticker"
@@ -705,7 +703,7 @@ public extension Message {
       "🎥 Video"
     } else if let _ = documentId {
       "📄 Document"
-    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && hasVoice {
+    } else if hasVoice {
       "🎤 Voice message"
     } else {
       "Message"
@@ -714,9 +712,7 @@ public extension Message {
 
   /// Returns a string representation of the message without emoji prefixes.
   var stringRepresentationPlain: String {
-    if hasUnsupportedTypes {
-      "Unsupported message"
-    } else if let text, !text.isEmpty {
+    if let text, !text.isEmpty {
       text
     } else if isSticker == true {
       "Sticker"
@@ -728,7 +724,7 @@ public extension Message {
       "Video"
     } else if let _ = documentId {
       "Document"
-    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && hasVoice {
+    } else if hasVoice {
       "Voice message"
     } else {
       "Message"
@@ -742,9 +738,7 @@ public extension Message {
 
 public extension InlineProtocol.Message {
   var stringRepresentationWithEmoji: String {
-    if media.voice.hasVoice && !ExperimentalFeatureFlags.voiceMessagesEnabled {
-      "Unsupported message"
-    } else if hasMessage {
+    if hasMessage {
       message
     } else if isSticker == true {
       "🖼️ Sticker"
@@ -756,7 +750,7 @@ public extension InlineProtocol.Message {
       "🎥 Video"
     } else if media.document.hasDocument {
       "📄 Document"
-    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && media.voice.hasVoice {
+    } else if media.voice.hasVoice {
       "🎤 Voice message"
     } else {
       "Message"
@@ -764,9 +758,7 @@ public extension InlineProtocol.Message {
   }
 
   var stringRepresentationPlain: String {
-    if media.voice.hasVoice && !ExperimentalFeatureFlags.voiceMessagesEnabled {
-      "Unsupported message"
-    } else if hasMessage {
+    if hasMessage {
       message
     } else if isSticker == true {
       "Sticker"
@@ -778,7 +770,7 @@ public extension InlineProtocol.Message {
       "Video"
     } else if media.document.hasDocument {
       "Document"
-    } else if ExperimentalFeatureFlags.voiceMessagesEnabled && media.voice.hasVoice {
+    } else if media.voice.hasVoice {
       "Voice message"
     } else {
       "Message"
@@ -1227,10 +1219,6 @@ public extension Message {
   var hasText: Bool {
     guard let text else { return false }
     return !text.isEmpty
-  }
-
-  var hasUnsupportedTypes: Bool {
-    hasVoice && !ExperimentalFeatureFlags.voiceMessagesEnabled
   }
 
   mutating func setVoiceContent(_ voiceContent: Client_MessageVoiceContent?) {

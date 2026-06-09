@@ -426,9 +426,7 @@ private extension EmbedMessageView {
   ) -> String {
     let resolvedText = (displayText ?? message.text)?.replacingOccurrences(of: "\n", with: " ")
 
-    let baseContent: String = if message.hasUnsupportedTypes {
-      "Unsupported message"
-    } else if message.isSticker == true {
+    let baseContent: String = if message.isSticker == true {
       "Sticker"
     } else if message.hasVideo {
       if message.hasText, let resolvedText {
@@ -447,6 +445,12 @@ private extension EmbedMessageView {
         resolvedText
       } else {
         "Photo"
+      }
+    } else if message.hasVoice {
+      if message.hasText, let resolvedText {
+        resolvedText
+      } else {
+        "Voice message"
       }
     } else if message.hasText, let resolvedText {
       resolvedText
@@ -468,11 +472,6 @@ private extension EmbedMessageView {
   }
 
   func updateIcon(for message: Message, document: Document?) {
-    if message.hasUnsupportedTypes {
-      imageIconView.isHidden = true
-      return
-    }
-
     let config = UIImage.SymbolConfiguration(pointSize: iconPointSize, weight: .medium)
 
     if message.isSticker == true {

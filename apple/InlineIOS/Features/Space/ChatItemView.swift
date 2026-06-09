@@ -254,12 +254,6 @@ struct ChatItemView: View {
         .truncationMode(.tail)
       }
 
-    } else if message?.message.hasUnsupportedTypes == true {
-      Text("Unsupported message")
-        .italic()
-        .font(.callout)
-        .foregroundColor(.secondary)
-
     } else {
       Text((message?.displayText ?? "").replacingOccurrences(of: "\n", with: " "))
         .font(.callout)
