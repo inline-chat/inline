@@ -5,7 +5,7 @@ import UIKit
 public class ChatContainerView: UIView {
   let peerId: Peer
   let chatId: Int64?
-  let spaceId: Int64
+  let spaceId: Int64?
   private var peerUser: User?
 
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
@@ -106,7 +106,7 @@ public class ChatContainerView: UIView {
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
-  init(peerId: Peer, chatId: Int64?, spaceId: Int64, peerUser: User?) {
+  init(peerId: Peer, chatId: Int64?, spaceId: Int64?, peerUser: User?) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
@@ -494,7 +494,7 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
 struct ChatViewUIKit: UIViewRepresentable {
   let peerId: Peer
   let chatId: Int64?
-  let spaceId: Int64
+  let spaceId: Int64?
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
 

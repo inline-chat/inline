@@ -5,6 +5,7 @@ import { type Static, Type } from "@sinclair/typebox"
 import { TInputId } from "@in/server/types/methods"
 import { Authorize } from "@in/server/utils/authorize"
 import type { HandlerContext } from "@in/server/controllers/helpers"
+import { InlineError } from "@in/server/types/errors"
 
 export const Input = Type.Object({
   userId: TInputId,
@@ -40,6 +41,7 @@ type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: HandlerContext): Promise<Response> => {
   let userId = context.currentUserId
+  const spaceId = normalizeSpaceId(input.spaceId)
 
   let hasLinearConnected = false
   let hasNotionConnected = false
@@ -57,22 +59,19 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   hasLinearConnected = linearByUser.length > 0
 
   // Check Notion integrations (space-specific)
-  if (input.spaceId) {
-    const spaceId = Number(input.spaceId)
-    if (!isNaN(spaceId)) {
-      // Check if user is a member of the space
-      await Authorize.spaceMember(spaceId, context.currentUserId)
+  if (spaceId) {
+    // Check if user is a member of the space
+    await Authorize.spaceMember(spaceId, context.currentUserId)
 
-      const spaceIntegrations = await db.select().from(integrations).where(eq(integrations.spaceId, spaceId))
-      hasNotionConnected = spaceIntegrations.some((integration) => integration.provider === "notion")
-      hasLinearConnected = spaceIntegrations.some((integration) => integration.provider === "linear")
-      linearTeamId = spaceIntegrations.find((integration) => integration.provider === "linear")?.linearTeamId ?? undefined
-      notionDatabaseId =
-        spaceIntegrations.find((integration) => integration.provider === "notion")?.notionDatabaseId ?? undefined
+    const spaceIntegrations = await db.select().from(integrations).where(eq(integrations.spaceId, spaceId))
+    hasNotionConnected = spaceIntegrations.some((integration) => integration.provider === "notion")
+    hasLinearConnected = spaceIntegrations.some((integration) => integration.provider === "linear")
+    linearTeamId = spaceIntegrations.find((integration) => integration.provider === "linear")?.linearTeamId ?? undefined
+    notionDatabaseId =
+      spaceIntegrations.find((integration) => integration.provider === "notion")?.notionDatabaseId ?? undefined
 
-      // User has integration access if they're a member of this space and it has integrations
-      hasIntegrationAccess = spaceIntegrations.length > 0
-    }
+    // User has integration access if they're a member of this space and it has integrations
+    hasIntegrationAccess = spaceIntegrations.length > 0
   } else {
     // If no specific spaceId provided, check if user is member of any space with Notion integration
     // Get all spaces the user is a member of
@@ -134,4 +133,17 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     notionSpaces,
     linearSpaces,
   }
+}
+
+const normalizeSpaceId = (value: Input["spaceId"]): number | undefined => {
+  if (value === undefined) {
+    return undefined
+  }
+
+  const spaceId = Number(value)
+  if (!Number.isSafeInteger(spaceId)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  return spaceId > 0 ? spaceId : undefined
 }

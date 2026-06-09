@@ -30,7 +30,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   var outgoing: Bool = false
   var fromOtherSender: Bool = false
   var message: FullMessage!
-  var spaceId: Int64 = 0
+  var spaceId: Int64?
   var displayMode: MessageDisplayMode = .normal
 
   private var usesThreadLayout: Bool {
@@ -79,7 +79,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   func configure(
     with message: FullMessage,
     fromOtherSender: Bool,
-    spaceId: Int64,
+    spaceId: Int64?,
     displayMode: MessageDisplayMode = .normal
   ) {
     let newOutgoing = message.message.out == true

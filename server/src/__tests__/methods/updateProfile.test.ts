@@ -58,4 +58,25 @@ describe("updateProfile", () => {
       description: InlineError.ApiError.USERNAME_INVALID[2],
     })
   })
+
+  test("persists valid hyphenated timezones", async () => {
+    const user = await testUtils.createUser("valid-timezone-profile@example.com")
+
+    const result = await handler({ timeZone: "America/Port-au-Prince" }, makeContext(user.id))
+
+    expect(result.user.timeZone).toBe("America/Port-au-Prince")
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(storedUser?.timeZone).toBe("America/Port-au-Prince")
+  })
+
+  test("surfaces invalid timezone errors", async () => {
+    const user = await testUtils.createUser("invalid-timezone-profile@example.com")
+
+    await expect(handler({ timeZone: "America/UPPERCASE" }, makeContext(user.id))).rejects.toMatchObject({
+      type: InlineError.ApiError.TIMEZONE_INVALID[0],
+      code: InlineError.ApiError.TIMEZONE_INVALID[1],
+      description: InlineError.ApiError.TIMEZONE_INVALID[2],
+    })
+  })
 })

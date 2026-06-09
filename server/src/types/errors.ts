@@ -27,6 +27,7 @@ export const ApiError = {
   FIRST_NAME_INVALID: ["FIRST_NAME_INVALID", 400, "The first name is invalid"],
   LAST_NAME_INVALID: ["LAST_NAME_INVALID", 400, "The last name is invalid"],
   USERNAME_INVALID: ["USERNAME_INVALID", 400, "The username is invalid"],
+  TIMEZONE_INVALID: ["TIMEZONE_INVALID", 400, "The timezone is invalid"],
   USER_NOT_PARTICIPANT: ["USER_NOT_PARTICIPANT", 400, "The user is not a participant of the space/chat"],
   PHOTO_INVALID_DIMENSIONS: ["PHOTO_INVALID_DIMENSIONS", 400, "The photo dimensions are invalid"],
   PHOTO_INVALID_EXTENSION: ["PHOTO_INVALID_EXTENSION", 400, "The photo extension is not supported or invalid"],

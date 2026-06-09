@@ -35,10 +35,8 @@ public class NotionTaskService: ObservableObject {
       throw NotionTaskError.noIntegrationAccess
     }
 
-    let spaceId = message.peerId.isThread ? message.peerId.asThreadId() : nil
-
     do {
-      let result = try await ApiClient.shared.getIntegrations(userId: userId, spaceId: spaceId)
+      let result = try await ApiClient.shared.getIntegrations(userId: userId, spaceId: nil)
 
       guard result.hasIntegrationAccess && result.hasNotionConnected else {
         throw NotionTaskError.noIntegrationAccess
