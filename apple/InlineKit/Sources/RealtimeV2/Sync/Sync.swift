@@ -1065,7 +1065,8 @@ actor BucketActor {
       return
     }
 
-    await drainBufferedRealtimeUpdates()
+    let drained = await drainBufferedRealtimeUpdates()
+    guard drained else { return }
 
     // If we still have buffered updates, we're missing at least one seq and must fetch history.
     guard !bufferedRealtimeUpdates.isEmpty else { return }
@@ -1104,15 +1105,15 @@ actor BucketActor {
     }
   }
 
-  private func drainBufferedRealtimeUpdates() async {
-    guard !isInvalidated else { return }
+  private func drainBufferedRealtimeUpdates() async -> Bool {
+    guard !isInvalidated else { return true }
 
     guard let sync else {
       log.error("sync reference is nil, cannot apply realtime updates")
-      return
+      return false
     }
 
-    guard !bufferedRealtimeUpdates.isEmpty else { return }
+    guard !bufferedRealtimeUpdates.isEmpty else { return true }
 
     // Drop any buffered updates that are now behind our applied cursor.
     if bufferedRealtimeUpdates.count > 0 {
@@ -1130,7 +1131,7 @@ actor BucketActor {
       nextDate = next.date
     }
 
-    guard !contiguous.isEmpty else { return }
+    guard !contiguous.isEmpty else { return true }
 
     log.debug("applying \(contiguous.count) realtime updates for bucket \(key) (new seq=\(nextSeq))")
     let span = PerformanceTrace.begin(
@@ -1156,7 +1157,9 @@ actor BucketActor {
         "failed": result.failedCount,
       ]
     )
-    guard result.succeeded else {
+    let toleratedFailure = result.failedCount > 0 &&
+      (result.appliedCount > 0 || contiguous.count == 1)
+    guard result.succeeded || toleratedFailure else {
       PerformanceTrace.breadcrumb(
         "realtime drain apply failed",
         category: "sync.realtime",
@@ -1173,7 +1176,23 @@ actor BucketActor {
       )
       needsFetch = true
       Task { await self.fetchNewUpdates() }
-      return
+      return false
+    }
+    if toleratedFailure {
+      PerformanceTrace.breadcrumb(
+        "realtime drain apply failure tolerated",
+        category: "sync.realtime",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+          "updates": contiguous.count,
+          "applied": result.appliedCount,
+          "failed": result.failedCount,
+        ]
+      )
+      log.warning(
+        "tolerating \(result.failedCount) realtime apply failure(s) for bucket \(key); advancing to seq=\(nextSeq)"
+      )
     }
 
     for update in contiguous where update.hasSeq {
@@ -1191,13 +1210,14 @@ actor BucketActor {
         ]
       )
       needsFetch = true
-      return
+      return false
     }
 
     seq = nextSeq
     date = nextDate
     let maxAppliedDate = maxUpdateDate(in: contiguous)
     await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "realtime:\(key)")
+    return true
   }
 
   func fetchNewUpdates() async {
@@ -1274,7 +1294,7 @@ actor BucketActor {
       }
 
       // If we have buffered realtime updates, keep fetching until we've filled the gap.
-      await drainBufferedRealtimeUpdates()
+      _ = await drainBufferedRealtimeUpdates()
 
       guard needsFetch || bufferedRealtimeUpdates.isEmpty == false else { break }
       log.trace("follow-up fetch requested for bucket \(key)")
@@ -1429,10 +1449,33 @@ actor BucketActor {
         // Defensive guard: if the server reports non-final but does not advance seq,
         // we'd spin this loop forever and keep the sync actor busy.
         if !payload.final, payload.seq == currentSeq {
+          let pointerSeq = max(hardEndSeq ?? 0, Int64(payload.seq))
+          if totalCount == 0, payload.resultType == .empty, pendingUpdates.isEmpty {
+            PerformanceTrace.breadcrumb(
+              "sync bucket fetch trusted empty pointer",
+              category: "sync.catchup",
+              level: .warning,
+              data: [
+                "bucket": key.traceKind,
+                "seq": payload.seq,
+                "target_seq": pointerSeq,
+              ]
+            )
+            if await trustServerPointer(
+              targetSeq: pointerSeq,
+              targetDate: payload.date,
+              reason: "empty_non_progress"
+            ) {
+              resultLabel = "trusted_empty_pointer"
+              return true
+            }
+            resultLabel = "empty_pointer_save_failed"
+            return false
+          }
+
           log.error(
             "non-progress getUpdates response for bucket \(key) (seq=\(payload.seq), total=\(totalCount), result=\(payload.resultType)); aborting fetch loop"
           )
-          // Treat as transient and let outer loop schedule backoff retry.
           resultLabel = "non_progress"
           PerformanceTrace.breadcrumb(
             "sync bucket fetch non-progress response",
@@ -1444,13 +1487,15 @@ actor BucketActor {
               "updates": totalCount,
             ]
           )
-          let repairTargetSeq = max(hardEndSeq ?? 0, Int64(payload.seq))
-          _ = await repairChatSnapshotIfNeeded(
-            targetSeq: repairTargetSeq,
+          if await repairChatSnapshotIfNeeded(
+            targetSeq: pointerSeq,
             targetDate: payload.date,
             reason: "non_progress",
-            advanceCursor: false
-          )
+            advanceCursor: true
+          ) {
+            resultLabel = "repaired_non_progress"
+            return true
+          }
           return false
         }
 
@@ -1548,7 +1593,6 @@ actor BucketActor {
             duplicateSkipped += 1
             return false
           }
-
           let shouldProcess = shouldProcessUpdate(update)
           if !shouldProcess {
             log.trace("skipping update in bucket catch-up: \(String(describing: update.update))")
@@ -1564,6 +1608,14 @@ actor BucketActor {
         log.debug(
           "getUpdates response bucket \(key) seq=\(payload.seq) date=\(payload.date) final=\(payload.final) result=\(payload.resultType) total=\(totalCount) applied=\(filteredUpdates.count) skipped=\(skippedCount)"
         )
+        let maxDeliveredSeq = filteredUpdates
+          .compactMap { update in update.hasSeq ? Int64(update.seq) : nil }
+          .max() ?? currentSeq
+        if Int64(payload.seq) > maxDeliveredSeq {
+          log.warning(
+            "trusting getUpdates pointer ahead of delivered updates for bucket \(key) (deliveredSeq=\(maxDeliveredSeq), pointerSeq=\(payload.seq), total=\(totalCount), delivered=\(filteredUpdates.count))"
+          )
+        }
 
         pendingUpdates.append(contentsOf: filteredUpdates)
         totalFetched += filteredUpdates.count
@@ -1587,10 +1639,14 @@ actor BucketActor {
       }
 
       // Apply all accumulated updates in one batch, ordered by seq
+      var catchupAppliedSeqs = Set<Int64>()
       if !pendingUpdates.isEmpty {
         // Realtime draining is deferred while this batch is pending so we preserve
         // monotonic per-bucket ordering.
         let orderedUpdates = orderUpdatesBySeq(pendingUpdates)
+        catchupAppliedSeqs = Set(orderedUpdates.compactMap { update in
+          update.hasSeq ? Int64(update.seq) : nil
+        })
         log.debug("applying \(orderedUpdates.count) updates for bucket \(key)")
         let applyStartedAt = Date()
         let applySpan = PerformanceTrace.begin(
@@ -1635,15 +1691,32 @@ actor BucketActor {
           )
           await sync.recordBucketUpdatesApplied(
             applied: result.appliedCount,
-            skipped: totalSkipped,
+            skipped: totalSkipped + result.failedCount,
             duplicates: totalDuplicateSkipped
           )
+          if await repairChatSnapshotIfNeeded(
+            targetSeq: finalSeq,
+            targetDate: finalDate,
+            reason: "apply_failed",
+            advanceCursor: true
+          ) {
+            resultLabel = "repaired_apply_failed"
+            return true
+          }
           resultLabel = "apply_failed"
           return false
         }
         maxAppliedDate = max(maxAppliedDate, maxUpdateDate(in: orderedUpdates))
         clearPendingCatchupBatch()
       }
+
+      let bufferedMaxDate = await applyBufferedRealtimeUpdates(
+        upTo: finalSeq,
+        excluding: catchupAppliedSeqs,
+        reason: "catchup_pointer"
+      )
+      maxAppliedDate = max(maxAppliedDate, bufferedMaxDate)
+
       if totalFetched > 0 || totalSkipped > 0 || totalDuplicateSkipped > 0 {
         await sync.recordBucketUpdatesApplied(
           applied: totalFetched,
@@ -1657,10 +1730,10 @@ actor BucketActor {
       let committedDate: Int64
       if finalSeq > seq {
         committedSeq = finalSeq
-        committedDate = finalDate
+        committedDate = max(max(date, finalDate), bufferedMaxDate)
       } else {
         committedSeq = seq
-        committedDate = date
+        committedDate = max(date, bufferedMaxDate)
       }
       let saved = await sync.saveBucketState(for: key, seq: committedSeq, date: committedDate)
       guard saved else {
@@ -1862,23 +1935,105 @@ actor BucketActor {
     guard repaired else { return false }
     guard advanceCursor else { return true }
 
-    let saved = await sync.saveBucketState(for: key, seq: targetSeq, date: targetDate)
+    let bufferedMaxDate = await applyBufferedRealtimeUpdates(upTo: targetSeq, reason: "repair:\(reason)")
+    let committedDate = max(targetDate, bufferedMaxDate)
+    let saved = await sync.saveBucketState(for: key, seq: targetSeq, date: committedDate)
     guard saved else {
-      log.error("failed to save bucket state after chat repair for \(key): seq=\(targetSeq), date=\(targetDate)")
+      log.error("failed to save bucket state after chat repair for \(key): seq=\(targetSeq), date=\(committedDate)")
       return false
     }
 
     seq = targetSeq
-    date = targetDate
+    date = committedDate
     clearPendingCatchupBatch()
     bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > targetSeq }
     if let fetchSeqEnd, targetSeq >= fetchSeqEnd {
       self.fetchSeqEnd = nil
     }
-    if targetDate > 0 {
-      await sync.updateLastSyncDate(maxAppliedDate: targetDate, source: "repair:\(key)")
+    if committedDate > 0 {
+      await sync.updateLastSyncDate(maxAppliedDate: committedDate, source: "repair:\(key)")
     }
     return true
+  }
+
+  private func trustServerPointer(targetSeq: Int64, targetDate: Int64, reason: String) async -> Bool {
+    guard let sync else { return false }
+    guard targetSeq >= seq else { return false }
+
+    let bufferedMaxDate = await applyBufferedRealtimeUpdates(upTo: targetSeq, reason: reason)
+    let nextDate = targetDate > 0 ? max(date, targetDate) : date
+    let committedDate = max(nextDate, bufferedMaxDate)
+    guard targetSeq > seq || committedDate > date else {
+      log.warning("trusting server pointer for bucket \(key) without local cursor change (seq=\(seq), reason=\(reason))")
+      return true
+    }
+
+    let saved = await sync.saveBucketState(for: key, seq: targetSeq, date: committedDate)
+    guard saved else {
+      log.error("failed to save trusted server pointer for \(key): seq=\(targetSeq), date=\(committedDate)")
+      return false
+    }
+
+    log.warning("trusting server pointer for bucket \(key): seq \(seq) -> \(targetSeq) (reason=\(reason))")
+    seq = targetSeq
+    date = committedDate
+    clearPendingCatchupBatch()
+    bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > targetSeq }
+    if let fetchSeqEnd, targetSeq >= fetchSeqEnd {
+      self.fetchSeqEnd = nil
+    }
+    if committedDate > 0 {
+      await sync.updateLastSyncDate(maxAppliedDate: committedDate, source: "pointer:\(key)")
+    }
+    return true
+  }
+
+  @discardableResult
+  private func applyBufferedRealtimeUpdates(
+    upTo targetSeq: Int64,
+    excluding excludedSeqs: Set<Int64> = [],
+    reason: String
+  ) async -> Int64 {
+    guard targetSeq > seq else { return 0 }
+    guard let sync else {
+      log.error("sync reference is nil, cannot apply buffered realtime updates")
+      return 0
+    }
+
+    let entries = bufferedRealtimeUpdates
+      .filter { seq, _ in
+        seq > self.seq &&
+          seq <= targetSeq &&
+          !excludedSeqs.contains(seq)
+      }
+      .sorted { $0.key < $1.key }
+
+    guard !entries.isEmpty else { return 0 }
+
+    let updates = entries.map(\.value)
+    let result = await sync.applyUpdatesFromRealtime(updates)
+    if !result.succeeded {
+      PerformanceTrace.breadcrumb(
+        "trusted pointer buffered realtime apply failed",
+        category: "sync.realtime",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+          "updates": updates.count,
+          "applied": result.appliedCount,
+          "failed": result.failedCount,
+          "reason": reason,
+        ]
+      )
+      log.warning(
+        "tolerating \(result.failedCount) buffered realtime apply failure(s) for bucket \(key) while trusting pointer \(targetSeq) (reason=\(reason))"
+      )
+    }
+
+    for (seq, _) in entries {
+      bufferedRealtimeUpdates.removeValue(forKey: seq)
+    }
+    return maxUpdateDate(in: updates)
   }
 
   private func maxUpdateDate(in updates: [InlineProtocol.Update]) -> Int64 {
