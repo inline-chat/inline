@@ -4,6 +4,7 @@ import {
   type UserSettingsGeneral,
   type UserSettingsGeneralInput,
 } from "@in/server/db/models/userSettings/types"
+import { normalizeUserSettingsGeneral } from "@in/server/modules/notifications/notificationSettingsCompat"
 import { decrypt, encrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
 import { userSettings } from "@in/server/db/schema"
@@ -54,8 +55,7 @@ async function getGeneral(userId: number): Promise<UserSettingsGeneral | null> {
       return null
     }
 
-    // return
-    return general.data
+    return normalizeUserSettingsGeneral(general.data)
   } catch (error) {
     log.error("Failed to decrypt or parse general settings", { userId, error })
     return null
@@ -64,7 +64,7 @@ async function getGeneral(userId: number): Promise<UserSettingsGeneral | null> {
 
 async function updateGeneral(userId: number, general: UserSettingsGeneralInput): Promise<UserSettingsGeneral> {
   // Validate the input data
-  const validatedGeneral = UserSettingsGeneralSchema.parse(general)
+  const validatedGeneral = normalizeUserSettingsGeneral(UserSettingsGeneralSchema.parse(general))
 
   // Encrypt the settings
   const generalJson = JSON.stringify(validatedGeneral)

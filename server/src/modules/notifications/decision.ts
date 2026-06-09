@@ -1,5 +1,6 @@
 import { UpdateNewMessageNotification_Reason } from "@inline-chat/protocol/core"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
+import { normalizeNotificationMode } from "@in/server/modules/notifications/notificationSettingsCompat"
 
 export type NotificationDecisionInput = {
   mode: UserSettingsNotificationsMode | undefined
@@ -8,7 +9,6 @@ export type NotificationDecisionInput = {
   isDM: boolean
   isReplyToUser: boolean
   isExplicitlyMentioned: boolean
-  aiRequiresNotification: boolean
 }
 
 export type NotificationDecision = {
@@ -19,14 +19,14 @@ export type NotificationDecision = {
 
 export const decideNotification = (input: NotificationDecisionInput): NotificationDecision => {
   const {
-    mode,
+    mode: rawMode,
     isUrgentNudge,
     isNudge,
     isDM,
     isReplyToUser,
     isExplicitlyMentioned,
-    aiRequiresNotification,
   } = input
+  const mode = normalizeNotificationMode(rawMode)
 
   if (mode === UserSettingsNotificationsMode.None && !isUrgentNudge) {
     return {
@@ -46,7 +46,7 @@ export const decideNotification = (input: NotificationDecisionInput): Notificati
 
   const countsDmAsMention = mode !== UserSettingsNotificationsMode.OnlyMentions
   const isMentioned = isExplicitlyMentioned || isReplyToUser || (countsDmAsMention && isDM)
-  const requiresNotification = isNudge || aiRequiresNotification
+  const requiresNotification = isNudge
 
   if (mode === UserSettingsNotificationsMode.Mentions || mode === UserSettingsNotificationsMode.OnlyMentions) {
     if (!isMentioned && !requiresNotification && !(mode === UserSettingsNotificationsMode.Mentions && isDM)) {
@@ -61,22 +61,6 @@ export const decideNotification = (input: NotificationDecisionInput): Notificati
       shouldNotify: true,
       needsExplicitMacNotification: true,
       reason: UpdateNewMessageNotification_Reason.MENTION,
-    }
-  }
-
-  if (mode === UserSettingsNotificationsMode.ImportantOnly) {
-    if (!isMentioned || !requiresNotification) {
-      return {
-        shouldNotify: false,
-        needsExplicitMacNotification: false,
-        reason: UpdateNewMessageNotification_Reason.UNSPECIFIED,
-      }
-    }
-
-    return {
-      shouldNotify: true,
-      needsExplicitMacNotification: true,
-      reason: UpdateNewMessageNotification_Reason.IMPORTANT,
     }
   }
 

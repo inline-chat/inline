@@ -23,19 +23,16 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
-import { batchEvaluate, type NotificationEvalResult } from "@in/server/modules/notifications/eval"
-import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
-import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { decideNotification } from "@in/server/modules/notifications/decision"
 import {
   decodeDialogNotificationSettings,
-  normalizeGlobalNotificationMode,
   resolveEffectiveNotificationMode,
 } from "@in/server/modules/notifications/dialogNotificationSettings"
+import { normalizeGlobalNotificationMode } from "@in/server/modules/notifications/notificationSettingsCompat"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -876,7 +873,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
     return
   }
 
-  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, unencryptedEntities, inputPeer } = input
+  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, inputPeer } = input
   const isNudge = isNudgeMessage({ messageInfo })
   const trimmedText = unencryptedText?.trim()
   const isUrgentNudge = isNudge && trimmedText === "🚨"
@@ -891,68 +888,13 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
   // In linked reply threads (anchored by parentMessageId), each child message is
   // semantically a reply to the anchor message. We treat the anchor author as a
-  // reply/mention target so Mentions/ImportantOnly users don't miss thread activity.
+  // reply/mention target so users in mention-based modes don't miss thread activity.
   const replyThreadAnchorSenderId = await getReplyThreadAnchorSenderId(chat)
   const replyMentionUserIds = new Set<number>(
     [repliedToSenderId, replyThreadAnchorSenderId].filter(
       (userId): userId is number => userId != null && Number.isSafeInteger(userId) && userId > 0,
     ),
   )
-
-  // AI
-  let evalResult: NotificationEvalResult | undefined
-
-  try {
-    const chatId = chat.id
-    const chatInfo = await getCachedChatInfo(chatId)
-    const chatInfoParticipants = chatInfo?.participantUserIds ?? []
-    const participantSettings = await Promise.all(
-      chatInfoParticipants.map(async (userId) => {
-        const settings = await getCachedUserSettings(userId)
-        return { userId, settings: settings ?? null }
-      }),
-    )
-
-    log.debug("Participant settings", { participantSettings })
-
-    const isDM = inputPeer.type.oneofKind === "user"
-
-    // Only evaluate if any participant has set to ImportantOnly and is mentioned
-    const needsAIEval = participantSettings.some((setting) => {
-      let zenMode = setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly
-      let isReplyToUser = replyMentionUserIds.has(setting.userId)
-      let isExplicitlyMentioned = unencryptedEntities ? isUserMentioned(unencryptedEntities, setting.userId) : false
-      let isMentioned = isDM || isExplicitlyMentioned || isReplyToUser
-
-      log.debug("Evaluating notification", {
-        userId: setting.userId,
-        zenMode,
-        isReplyToUser,
-        isExplicitlyMentioned,
-        isMentioned,
-      })
-
-      return zenMode && isMentioned
-    })
-
-    const hasText = !!unencryptedText
-
-    if (needsAIEval && hasText && !isNudge) {
-      let evalResults = await batchEvaluate({
-        chatId: chatId,
-        message: {
-          id: messageInfo.message.messageId,
-          text: unencryptedText,
-          entities: unencryptedEntities ?? null,
-          message: messageInfo.message,
-        },
-        participantSettings,
-      })
-      evalResult = evalResults
-    }
-  } catch (error) {
-    log.error("Error getting chat info", { error })
-  }
 
   // decrypt message text
   let messageText = input.unencryptedText
@@ -995,7 +937,6 @@ async function sendNotifications(input: SendPushForMsgInput) {
       messageEntities,
       replyMentionUserIds,
       chat,
-      evalResult,
       isNudge,
       isUrgentNudge,
       updateGroup,
@@ -1016,7 +957,6 @@ async function sendNotificationToUser({
   messageEntities,
   replyMentionUserIds,
   chat,
-  evalResult,
   isNudge,
   isUrgentNudge,
   updateGroup,
@@ -1032,7 +972,6 @@ async function sendNotificationToUser({
   messageEntities: MessageEntities | undefined
   replyMentionUserIds: Set<number>
   chat?: DbChat
-  evalResult?: NotificationEvalResult
   isNudge: boolean
   isUrgentNudge: boolean
   // For explicit mac notification
@@ -1062,7 +1001,6 @@ async function sendNotificationToUser({
     isDM,
     isReplyToUser,
     isExplicitlyMentioned,
-    aiRequiresNotification: evalResult?.notifyUserIds?.includes(userId) ?? false,
   })
 
   if (!decision.shouldNotify) {
