@@ -82,10 +82,13 @@ async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
     },
   })
 
+  const latestSeq = Math.max(latest?.seq ?? seqStart, seqStart)
+  const latestDate = latest !== undefined && latest.seq >= seqStart ? latest.date : null
+
   return {
     updates: list,
-    latestSeq: latest?.seq ?? seqStart,
-    latestDate: latest?.date ?? null,
+    latestSeq,
+    latestDate,
   }
 }
 
@@ -275,6 +278,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
             msgId: String(serverUpdate.update.newMessage.msgId),
             seq: update.seq,
           })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
           break
         }
 
@@ -433,6 +437,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "newChat":
         if (!chatRecord) {
           log.warn("Skipping newChat update due to missing chat record", { chatId })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
           break
         }
         inflatedUpdates.push({
@@ -451,6 +456,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "chatMoved":
         if (!chatRecord) {
           log.warn("Skipping chatMoved update due to missing chat record", { chatId })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
           break
         }
         inflatedUpdates.push({

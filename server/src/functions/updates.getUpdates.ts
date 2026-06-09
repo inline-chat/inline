@@ -89,10 +89,12 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   } = fetchTiming.value
   const fetchMs = fetchTiming.ms
 
-  let sliceDate = latestDate
+  let pageSeq = latestSeq
+  let pageDate = latestDate
   if (dbUpdates.length > 0) {
     const lastRecord = dbUpdates[dbUpdates.length - 1]!
-    sliceDate = lastRecord.date
+    pageSeq = lastRecord.seq
+    pageDate = lastRecord.date
   }
 
   const seqDifference = latestSeq - seqStart
@@ -147,14 +149,23 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
   const inflateMs = elapsedMs(inflateStartedAt)
 
-  // Only deliver the contiguous inflated prefix. If seq N fails to inflate but
-  // seq N+1 succeeds, returning N+1 would let the client advance over the failed
-  // update and permanently lose it.
-  const delivery = selectContiguousDelivery(dbUpdates, inflatedUpdates, seqStart, sliceDate)
-  const updates = delivery.updates
-  const deliveredSeqNumber = delivery.seq
-  const deliveredDate = delivery.date
-  const final = latestSeq <= deliveredSeqNumber
+  // The server is authoritative for the bucket cursor. Deliver every update we
+  // can inflate for this page, but advance the response cursor to the page
+  // boundary even if some records were filtered or could not be represented.
+  const updates = inflatedUpdates
+  const filteredCount = dbUpdates.length - updates.length
+  if (filteredCount > 0) {
+    log.warn("getUpdates trusting page cursor after filtering updates", {
+      scope: descriptor.scope,
+      filtered: filteredCount,
+      dbUpdates: dbUpdates.length,
+      delivered: updates.length,
+      startSeq: seqStart,
+      pageSeq,
+      latestSeq,
+    })
+  }
+  const final = latestSeq <= pageSeq
   const sidecarsStartedAt = performance.now()
   const sidecars = descriptor.scope === "chat"
     ? await Sync.buildChatSidecarsForUpdates({
@@ -184,8 +195,8 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
 
   return {
     updates,
-    seq: BigInt(deliveredSeqNumber),
-    date: encodeOptionalDate(deliveredDate),
+    seq: BigInt(pageSeq),
+    date: encodeOptionalDate(pageDate),
     final,
     resultType,
     sidecars: updates.length > 0 && hasSidecars(sidecars) ? sidecars : undefined,
@@ -233,42 +244,6 @@ const encodeOptionalDate = (date: Date | null | undefined): bigint => {
     return 0n
   }
   return encodeDateStrict(date)
-}
-
-const selectContiguousDelivery = (
-  dbUpdates: { seq: number; date: Date }[],
-  updates: GetUpdatesResult["updates"],
-  seqStart: number,
-  fallbackDate: Date | null,
-): { updates: GetUpdatesResult["updates"]; seq: number; date: Date | null } => {
-  const updateBySeq = new Map<number, GetUpdatesResult["updates"][number]>()
-  for (const update of updates) {
-    const seq = Number(update.seq)
-    if (Number.isSafeInteger(seq)) {
-      updateBySeq.set(seq, update)
-    }
-  }
-
-  const contiguousUpdates: GetUpdatesResult["updates"] = []
-  let seq = seqStart
-  let date = fallbackDate
-
-  for (const record of dbUpdates) {
-    if (record.seq !== seq + 1) {
-      break
-    }
-
-    const update = updateBySeq.get(record.seq)
-    if (!update) {
-      break
-    }
-
-    contiguousUpdates.push(update)
-    seq = record.seq
-    date = record.date
-  }
-
-  return { updates: contiguousUpdates, seq, date }
 }
 
 const hasSidecars = (sidecars: GetUpdatesResult["sidecars"]): boolean => {
