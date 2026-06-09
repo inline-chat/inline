@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import InlineKit
 import InlineProtocol
 import SwiftUI
@@ -17,7 +18,9 @@ public struct VoiceMessageBubble: View {
 
   @ObservedObject private var player = SharedAudioPlayer.shared
   @State private var downloadProgress: DownloadProgress?
+  @State private var downloadedLocalURL: URL?
   @State private var progressCancellable: AnyCancellable?
+  @State private var autoDownloadRequestedVoiceID: Int64?
 
   public init(message: InlineKit.Message, outgoing: Bool, maxWidth: CGFloat? = nil, mode: Mode = .bubble) {
     self.message = message
@@ -107,11 +110,35 @@ public struct VoiceMessageBubble: View {
     return FileDownloader.shared.isVoiceDownloadActive(voiceId: voiceID)
   }
 
+  private var localURL: URL? {
+    existingFileURL(downloadedLocalURL) ?? existingFileURL(message.voiceLocalURL)
+  }
+
+  private var downloadID: String {
+    if let voiceID {
+      return "voice_\(voiceID)"
+    }
+    return "voice_\(message.messageId)"
+  }
+
+  private var visibleDownloadProgress: DownloadProgress? {
+    guard let downloadProgress, isDownloading, downloadProgress.error == nil else { return nil }
+    return downloadProgress.isComplete ? nil : downloadProgress
+  }
+
+  private var hasDownloadError: Bool {
+    guard let error = downloadProgress?.error else { return false }
+    return !Self.isCancellation(error)
+  }
+
   private var buttonIconName: String {
     if isDownloading {
       return "xmark"
     }
-    if message.voiceLocalURL != nil {
+    if hasDownloadError {
+      return "arrow.clockwise"
+    }
+    if localURL != nil {
       return isPlaying ? "pause.fill" : "play.fill"
     }
     return "arrow.down"
@@ -121,14 +148,20 @@ public struct VoiceMessageBubble: View {
     if isDownloading {
       return "Cancel download"
     }
-    if message.voiceLocalURL != nil {
+    if hasDownloadError {
+      return "Retry voice message download"
+    }
+    if localURL != nil {
       return isPlaying ? "Pause voice message" : "Play voice message"
     }
     return "Download voice message"
   }
 
   private var timeLabel: String {
-    if let downloadProgress, downloadProgress.totalBytes > 0 {
+    if hasDownloadError {
+      return "Failed"
+    }
+    if let downloadProgress = visibleDownloadProgress, downloadProgress.totalBytes > 0 {
       return "\(Int((downloadProgress.progress * 100).rounded()))%"
     }
     return Self.format(duration: currentPlaybackTime)
@@ -175,14 +208,30 @@ public struct VoiceMessageBubble: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .environment(\.layoutDirection, .leftToRight)
     .onAppear {
+      refreshLocalURLFromMessage()
       bindDownloadProgressIfNeeded()
+      requestAutoDownloadIfNeeded()
     }
     .onDisappear {
       progressCancellable?.cancel()
       progressCancellable = nil
     }
-    .onChange(of: message.voiceRemoteId) { _, _ in
+    .onChange(of: message.voiceRemoteId) { oldID, _ in
+      if oldID != message.voiceRemoteId {
+        downloadedLocalURL = nil
+        downloadProgress = nil
+        autoDownloadRequestedVoiceID = nil
+      }
+      refreshLocalURLFromMessage()
       bindDownloadProgressIfNeeded()
+      requestAutoDownloadIfNeeded()
+    }
+    .onChange(of: message.voiceLocalRelativePath) { _, _ in
+      refreshLocalURLFromMessage()
+      if localURL != nil {
+        downloadProgress = nil
+      }
+      requestAutoDownloadIfNeeded()
     }
   }
 
@@ -193,11 +242,16 @@ public struct VoiceMessageBubble: View {
         .fill(outgoing ? .white.opacity(0.14) : .accentColor.opacity(0.12))
         .frame(width: buttonSize, height: buttonSize)
 
-      if let downloadProgress, isDownloading {
-        ProgressView(value: downloadProgress.progress)
-          .progressViewStyle(.circular)
-          .tint(primaryTint)
-          .scaleEffect(0.62)
+      if let downloadProgress = visibleDownloadProgress {
+        Circle()
+          .trim(from: 0, to: max(0.04, downloadProgress.progress))
+          .stroke(primaryTint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+          .frame(width: buttonSize - 7, height: buttonSize - 7)
+
+        Image(systemName: "xmark")
+          .font(.system(size: iconSize - 1, weight: .bold))
+          .foregroundStyle(primaryTint)
       } else {
         Image(systemName: buttonIconName)
           .font(.system(size: iconSize, weight: .semibold))
@@ -213,11 +267,11 @@ public struct VoiceMessageBubble: View {
 
   private func handleSeek(_ progress: Double) {
     if !isCurrentVoice {
-      guard let localURL = message.voiceLocalURL else { return }
+      guard let localURL else { return }
       do {
         try player.prepareVoice(for: message, fileURLOverride: localURL)
       } catch {
-        downloadProgress = .failed(id: "voice", error: error)
+        downloadProgress = .failed(id: downloadID, error: error)
         return
       }
     }
@@ -226,24 +280,29 @@ public struct VoiceMessageBubble: View {
   }
 
   private func bindDownloadProgressIfNeeded() {
-    guard let voiceID else { return }
     progressCancellable?.cancel()
+
+    guard let voiceID else {
+      downloadProgress = nil
+      return
+    }
+
+    if let progress = FileDownloader.shared.currentVoiceProgress(voiceId: voiceID) {
+      applyDownloadProgress(progress)
+    }
+
     progressCancellable = FileDownloader.shared.voiceProgressPublisher(voiceId: voiceID)
       .sink { progress in
-        if progress.totalBytes == 0, progress.error == nil {
-          self.downloadProgress = nil
-        } else {
-          self.downloadProgress = progress
-        }
+        self.applyDownloadProgress(progress)
       }
   }
 
   private func handlePrimaryAction() {
-    if let localURL = message.voiceLocalURL {
+    if let localURL {
       do {
         try player.toggleVoicePlayback(for: message, fileURLOverride: localURL)
       } catch {
-        downloadProgress = .failed(id: "voice", error: error)
+        downloadProgress = .failed(id: downloadID, error: error)
       }
       return
     }
@@ -255,20 +314,78 @@ public struct VoiceMessageBubble: View {
       return
     }
 
+    startDownload(autoplay: true, showErrors: true)
+  }
+
+  private func requestAutoDownloadIfNeeded() {
+    guard let voiceID, let voice else { return }
+    guard localURL == nil, !isDownloading else { return }
+    guard autoDownloadRequestedVoiceID != voiceID else { return }
+    guard AutoDownloadPolicy.shouldDownload(kind: .voice, sizeBytes: voice.size > 0 ? voice.size : nil) else {
+      return
+    }
+
+    autoDownloadRequestedVoiceID = voiceID
+    startDownload(autoplay: false, showErrors: false)
+  }
+
+  private func startDownload(autoplay: Bool, showErrors: Bool) {
+    guard let voiceID else { return }
+
     bindDownloadProgressIfNeeded()
     FileDownloader.shared.downloadVoice(message: message) { result in
       switch result {
       case let .success(fileURL):
+        self.downloadedLocalURL = fileURL
         self.downloadProgress = nil
+        guard autoplay else { return }
         do {
           try player.toggleVoicePlayback(for: message, fileURLOverride: fileURL)
         } catch {
           self.downloadProgress = .failed(id: "voice_\(voiceID)", error: error)
         }
       case let .failure(error):
-        self.downloadProgress = .failed(id: "voice_\(voiceID)", error: error)
+        if Self.isCancellation(error) {
+          self.downloadProgress = nil
+        } else {
+          self.downloadProgress = showErrors ? .failed(id: "voice_\(voiceID)", error: error) : nil
+        }
       }
     }
+  }
+
+  private func applyDownloadProgress(_ progress: DownloadProgress) {
+    guard progress.id == downloadID else { return }
+    if localURL != nil {
+      downloadProgress = nil
+      return
+    }
+    if progress.isCancellation {
+      downloadProgress = nil
+      return
+    }
+    if progress.error != nil {
+      downloadProgress = progress
+      return
+    }
+    if isDownloading, progress.totalBytes > 0 {
+      downloadProgress = progress
+      return
+    }
+    downloadProgress = nil
+  }
+
+  private func refreshLocalURLFromMessage() {
+    if downloadedLocalURL == nil, let messageURL = existingFileURL(message.voiceLocalURL) {
+      downloadedLocalURL = messageURL
+    } else if existingFileURL(downloadedLocalURL) == nil {
+      downloadedLocalURL = nil
+    }
+  }
+
+  private func existingFileURL(_ url: URL?) -> URL? {
+    guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+    return url
   }
 
   private static func format(duration: TimeInterval) -> String {
@@ -276,5 +393,9 @@ public struct VoiceMessageBubble: View {
     let minutes = clamped / 60
     let seconds = clamped % 60
     return String(format: "%d:%02d", minutes, seconds)
+  }
+
+  private static func isCancellation(_ error: Error) -> Bool {
+    (error as NSError).code == NSURLErrorCancelled
   }
 }

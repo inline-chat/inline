@@ -107,42 +107,39 @@ actor ImagePrefetcher {
             return
         }
         
-        prefetchedPhotoIDs.insert(photoId)
-        
         // First try local path
         if let photoSize = photoInfo.bestPhotoSize(), let localPath = photoSize.localPath {
+            prefetchedPhotoIDs.insert(photoId)
             let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
             await prefetchLocalImage(url: localUrl, photoId: photoId)
         }
         // If not available locally, start downloading
         else {
+            let sizeBytes = photoInfo.bestPhotoSize()?.size.map(Int64.init)
+            guard await AutoDownloadPolicy.shouldDownload(kind: .media, sizeBytes: sizeBytes) else {
+                return
+            }
+
+            prefetchedPhotoIDs.insert(photoId)
+
             // Create a detached task to run on background thread
             let task = Task.detached(priority: .low) { [weak self] in
                 guard let self = self else { return }
-                
-                do {
-                    try await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: message.message)
-                    
-                    if Task.isCancelled { return }
-                    
-                    // After download, prefetch the local image
-                    if let photoSize = photoInfo.bestPhotoSize(), let localPath = photoSize.localPath {
-                        let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
-                        await self.prefetchLocalImage(url: localUrl, photoId: photoId)
-                    }
-                    
-                    #if DEBUG
-                    Log.shared.debug("Successfully downloaded and prefetched image for message \(message.id)")
-                    #endif
-                } catch {
-                    // Handle errors silently for prefetching
-                    if !Task.isCancelled {
-                        #if DEBUG
-                        Log.shared.error("Prefetch download failed: \(error.localizedDescription)")
-                        #endif
-                    }
+
+                await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: message.message)
+
+                if Task.isCancelled { return }
+
+                // After download, prefetch the local image
+                if let photoSize = photoInfo.bestPhotoSize(), let localPath = photoSize.localPath {
+                    let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
+                    await self.prefetchLocalImage(url: localUrl, photoId: photoId)
                 }
-                
+
+                #if DEBUG
+                Log.shared.debug("Successfully downloaded and prefetched image for message \(message.id)")
+                #endif
+
                 // Clean up after completion
                 await self.removePrefetchTask(for: photoId)
             }

@@ -1235,7 +1235,7 @@ extension InlineProtocol.UpdatePinnedMessages {
 
 extension InlineProtocol.UpdateUserSettings {
   func apply() {
-    guard let settings = hasSettings ? settings.notificationSettings : nil else { return }
+    guard hasSettings else { return }
 
     Task { @MainActor in
       INUserSettings.current.updateFromServer(settings)

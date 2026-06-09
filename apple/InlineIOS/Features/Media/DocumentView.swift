@@ -960,7 +960,20 @@ class DocumentView: UIView {
       if let document, case .downloading = determineDocumentState(document) {
         startMonitoringProgress()
       }
+      requestAutoDownloadIfNeeded()
     }
+  }
+
+  private func requestAutoDownloadIfNeeded() {
+    guard case .needsDownload = documentState else { return }
+    guard let documentInfo, let document else { return }
+    guard document.cdnUrl?.isEmpty == false else { return }
+    guard !FileDownloader.shared.isDocumentDownloadActive(documentId: documentInfo.id) else { return }
+
+    let sizeBytes = document.size.map(Int64.init)
+    guard AutoDownloadPolicy.shouldDownload(kind: .file, sizeBytes: sizeBytes) else { return }
+
+    downloadFile()
   }
 }
 

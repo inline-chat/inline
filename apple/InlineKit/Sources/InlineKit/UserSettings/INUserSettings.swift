@@ -12,11 +12,13 @@ public class INUserSettings {
   // MARK: - Public data
 
   public var notification = NotificationSettingsManager()
+  public var autoDownload = AutoDownloadSettingsManager()
 
   // MARK: - Private properties
 
   private var cancellables = Set<AnyCancellable>()
   private static let notificationSettingsKey = "notificationSettings"
+  private static let autoDownloadSettingsKey = "autoDownloadSettings"
   private var isApplyingServerUpdate = false
   private var pendingServerUpdateTask: Task<Void, Never>?
 
@@ -39,27 +41,39 @@ public class INUserSettings {
     // Save to UserDefaults whenever notification settings change
     notification.objectWillChange
       .sink { [weak self] _ in
-        let wasTriggeredBecauseOfServerUpdate = self?.isApplyingServerUpdate == true
-        Task { @MainActor in
-          // sleep a bit to use fresh values
-          self?.saveToUserDefaults()
-          // Only sync to server if this is not a server update
-          if !wasTriggeredBecauseOfServerUpdate {
-            self?.debouncedSaveToRealtime()
-          }
-        }
+        self?.settingsWillChange(syncToRealtime: true)
+      }
+      .store(in: &cancellables)
+
+    autoDownload.objectWillChange
+      .sink { [weak self] _ in
+        self?.settingsWillChange(syncToRealtime: false)
       }
       .store(in: &cancellables)
   }
 
+  private func settingsWillChange(syncToRealtime: Bool) {
+    let wasTriggeredBecauseOfServerUpdate = isApplyingServerUpdate
+    Task { @MainActor in
+      // Save after the published value has updated.
+      await Task.yield()
+      self.saveToUserDefaults()
+      // Only sync to server if this is not a server update
+      if syncToRealtime && !wasTriggeredBecauseOfServerUpdate {
+        self.debouncedSaveToRealtime()
+      }
+    }
+  }
+
   private func loadFromUserDefaults() {
-    guard let data = UserDefaults.shared.data(forKey: Self.notificationSettingsKey) else {
+    guard let notificationData = UserDefaults.shared.data(forKey: Self.notificationSettingsKey) else {
       log.info("No cached notification settings found")
+      loadAutoDownloadSettingsFromUserDefaults()
       return
     }
 
     do {
-      let cachedSettings = try JSONDecoder().decode(NotificationSettingsManager.self, from: data)
+      let cachedSettings = try JSONDecoder().decode(NotificationSettingsManager.self, from: notificationData)
       log.info("Loaded cached notification settings")
 
       // Update current settings with cached values
@@ -69,15 +83,38 @@ public class INUserSettings {
     } catch {
       log.error("Failed to decode cached notification settings: \(error)")
     }
+
+    loadAutoDownloadSettingsFromUserDefaults()
+  }
+
+  private func loadAutoDownloadSettingsFromUserDefaults() {
+    guard let data = UserDefaults.shared.data(forKey: Self.autoDownloadSettingsKey) else {
+      log.info("No cached auto-download settings found")
+      return
+    }
+
+    do {
+      let cachedSettings = try JSONDecoder().decode(AutoDownloadSettingsManager.self, from: data)
+      log.info("Loaded cached auto-download settings")
+
+      autoDownload.mediaMaxMB = cachedSettings.mediaMaxMB
+      autoDownload.fileMaxMB = cachedSettings.fileMaxMB
+      autoDownload.voiceMaxMB = cachedSettings.voiceMaxMB
+    } catch {
+      log.error("Failed to decode cached auto-download settings: \(error)")
+    }
   }
 
   private func saveToUserDefaults() {
     do {
-      let data = try JSONEncoder().encode(notification)
-      UserDefaults.shared.set(data, forKey: Self.notificationSettingsKey)
-      log.trace("Saved notification settings to UserDefaults")
+      let notificationData = try JSONEncoder().encode(notification)
+      UserDefaults.shared.set(notificationData, forKey: Self.notificationSettingsKey)
+
+      let autoDownloadData = try JSONEncoder().encode(autoDownload)
+      UserDefaults.shared.set(autoDownloadData, forKey: Self.autoDownloadSettingsKey)
+      log.trace("Saved user settings to UserDefaults")
     } catch {
-      log.error("Failed to encode notification settings: \(error)")
+      log.error("Failed to encode user settings: \(error)")
     }
   }
 
@@ -110,11 +147,13 @@ public class INUserSettings {
   }
 
   private func saveToRealtime() async {
-    log.trace("Saving notification settings to Realtime")
+    log.trace("Saving user settings to Realtime")
     do {
-      try await Api.realtime.send(.updateUserSettings(notificationSettings: notification))
+      try await Api.realtime.send(.updateUserSettings(
+        notificationSettings: notification
+      ))
     } catch {
-      log.error("Failed to save notification settings to server", error: error)
+      log.error("Failed to save user settings to server", error: error)
     }
   }
 
@@ -143,21 +182,23 @@ public class INUserSettings {
     // Save data to app groups data container
     log.trace("Updating from user settings")
 
-    if data.userSettings.hasNotificationSettings {
-      isApplyingServerUpdate = true
-      notification.update(from: data.userSettings.notificationSettings)
-      DispatchQueue.main.async {
-        self.isApplyingServerUpdate = false
-      }
-      // Save updated settings to UserDefaults
-      saveToUserDefaults()
+    guard data.userSettings.hasNotificationSettings else { return }
+
+    isApplyingServerUpdate = true
+    notification.update(from: data.userSettings.notificationSettings)
+    DispatchQueue.main.async {
+      self.isApplyingServerUpdate = false
     }
+    // Save updated settings to UserDefaults
+    saveToUserDefaults()
   }
 
   // Add a public method for server updates
-  public func updateFromServer(_ settings: InlineProtocol.NotificationSettings) {
+  public func updateFromServer(_ settings: InlineProtocol.UserSettings) {
+    guard settings.hasNotificationSettings else { return }
+
     isApplyingServerUpdate = true
-    notification.update(from: settings)
+    notification.update(from: settings.notificationSettings)
     DispatchQueue.main.async {
       self.isApplyingServerUpdate = false
     }
