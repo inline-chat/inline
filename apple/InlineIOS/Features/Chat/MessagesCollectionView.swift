@@ -82,6 +82,7 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   override func didMoveToWindow() {
+    super.didMoveToWindow()
     updateContentInsets()
   }
 
@@ -121,6 +122,26 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
+  func updateKeyboardInset(_ height: CGFloat, animated: Bool, keepAtBottom: Bool) {
+    let update = {
+      let wasAtBottom = self.shouldScrollToBottom
+
+      self.isKeyboardVisible = height > 0
+      self.keyboardHeight = height
+      self.updateContentInsets()
+
+      if keepAtBottom, wasAtBottom, !self.itemsEmpty {
+        self.safeScrollToTop(animated: false)
+      }
+    }
+
+    if animated {
+      update()
+    } else {
+      UIView.performWithoutAnimation(update)
+    }
+  }
+
   static let messagesBottomPadding = 12.0
   func updateContentInsets() {
     guard !MessagesCollectionView.contextMenuOpen else {
@@ -140,12 +161,10 @@ final class MessagesCollectionView: UICollectionView {
     }
     let effectiveNavBarHeight = navBarHeight > 0 ? navBarHeight : lastKnownNavBarHeight
 
-    let isLandscape = UIDevice.current.orientation.isLandscape
-
     // let topSafeArea = isLandscape ? window.safeAreaInsets.left : window.safeAreaInsets.top
-    let topSafeArea = isLandscape ? window.safeAreaInsets.top : window.safeAreaInsets.top
+    let topSafeArea = window.safeAreaInsets.top
 //    let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
-    let bottomSafeArea = isLandscape ? window.safeAreaInsets.bottom : window.safeAreaInsets.bottom
+    let bottomSafeArea = window.safeAreaInsets.bottom
     let navBarInset = topSafeArea + effectiveNavBarHeight
     let totalTopInset = navBarInset + pinnedHeaderHeight
 
@@ -179,6 +198,11 @@ final class MessagesCollectionView: UICollectionView {
     guard needsContentInsetUpdateAfterContextMenu else { return }
 
     let wasAtBottom = shouldScrollToBottom
+    KeyboardTrace.trace(
+      "MessagesCollectionView",
+      "updateContentInsetsAfterContextMenu",
+      details: "animated=\(animated) wasAtBottom=\(wasAtBottom) \(keyboardTraceSummary)"
+    )
     updateContentInsets()
 
     if wasAtBottom, !itemsEmpty {
@@ -294,6 +318,21 @@ final class MessagesCollectionView: UICollectionView {
     return nil
   }
 
+  private var keyboardTraceSummary: String {
+    [
+      "isKeyboardVisible=\(isKeyboardVisible)",
+      "keyboardHeight=\(KeyboardTrace.format(keyboardHeight))",
+      "composeHeight=\(KeyboardTrace.format(composeHeight))",
+      "pinnedHeaderHeight=\(KeyboardTrace.format(pinnedHeaderHeight))",
+      "contextMenuOpen=\(MessagesCollectionView.contextMenuOpen)",
+      "needsInsetAfterContextMenu=\(needsContentInsetUpdateAfterContextMenu)",
+      "contentInset=\(KeyboardTrace.insets(contentInset))",
+      "adjustedContentInset=\(KeyboardTrace.insets(adjustedContentInset))",
+      "scrollIndicatorInsets=\(KeyboardTrace.insets(scrollIndicatorInsets))",
+      "shouldScrollToBottom=\(shouldScrollToBottom)",
+    ].joined(separator: " ")
+  }
+
   private func setupObservers() {
     NotificationCenter.default.addObserver(
       self,
@@ -321,19 +360,6 @@ final class MessagesCollectionView: UICollectionView {
     )
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(keyboardWillShow),
-      name: UIResponder.keyboardWillShowNotification,
-      object: nil
-    )
-
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(keyboardWillHide),
-      name: UIResponder.keyboardWillHideNotification,
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
       selector: #selector(handleScrollToBottom),
       name: .scrollToBottom,
       object: nil
@@ -348,39 +374,6 @@ final class MessagesCollectionView: UICollectionView {
 
   var isKeyboardVisible: Bool = false
   var keyboardHeight: CGFloat = 0
-
-  @objc private func keyboardWillShow(_ notification: Notification) {
-    isKeyboardVisible = true
-    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
-    else {
-      return
-    }
-    let keyboardFrameHeight = keyboardFrame.height
-    keyboardHeight = keyboardFrameHeight
-
-    updateContentInsets()
-    UIView.animate(withDuration: duration) {
-      if self.shouldScrollToBottom, !self.itemsEmpty {
-        self.safeScrollToTop(animated: false)
-      }
-    }
-  }
-
-  @objc private func keyboardWillHide(_ notification: Notification) {
-    isKeyboardVisible = false
-    keyboardHeight = 0
-    guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else {
-      return
-    }
-
-    updateContentInsets()
-    UIView.animate(withDuration: duration) {
-      if self.shouldScrollToBottom, !self.itemsEmpty {
-        self.safeScrollToTop(animated: true)
-      }
-    }
-  }
 
   @objc private func replyStateChanged(_ notification: Notification) {
     DispatchQueue.main.async {
@@ -605,7 +598,9 @@ private extension MessagesCollectionView {
           updateInsets(true)
         }
       } else {
-        DispatchQueue.main.async { updateInsets(true) }
+        DispatchQueue.main.async {
+          updateInsets(true)
+        }
       }
     }
 
@@ -1380,9 +1375,10 @@ private extension MessagesCollectionView {
         "😡",
       ]
 
-      let containerWidth = currentCollectionView?.window?.bounds.width
-        ?? currentCollectionView?.bounds.width
-        ?? UIScreen.main.bounds.width
+      guard let currentCollectionView else { return UIView() }
+
+      let containerWidth = currentCollectionView.window?.bounds.width
+        ?? currentCollectionView.bounds.width
       let preferredWidth = ContextMenuAccessoryLayout.reactionPickerWidth(for: containerWidth)
 
       let containerView = UIView()
