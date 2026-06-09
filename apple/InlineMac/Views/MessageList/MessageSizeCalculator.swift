@@ -2132,6 +2132,13 @@ enum MessageTextConfiguration {
   static let font = Theme.messageTextFont
   static let lineFragmentPadding = Theme.messageTextLineFragmentPadding
   static let containerInset = Theme.messageTextContainerInset
+  static let useTextKit2ViewportWorkarounds: Bool = {
+    let os = ProcessInfo.processInfo.operatingSystemVersion
+    // macOS 27 beta can throw inside NSTextView's TextKit 2 viewport renderer while
+    // NSTableView installs message rows. Keep TextKit 2 enabled, but avoid our extra
+    // viewport delegate/forced-layout hooks on that OS while we isolate the AppKit crash.
+    return os.majorVersion < 27
+  }()
 
   static func configureTextContainer(_ container: NSTextContainer) {
     container.lineFragmentPadding = lineFragmentPadding

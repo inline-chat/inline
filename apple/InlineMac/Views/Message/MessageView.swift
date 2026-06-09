@@ -785,9 +785,12 @@ class MessageViewAppKit: NSView {
       textView.isHorizontallyResizable = false
       textView.delegate = self
 
-      // we need default delegate to handle rendering (GENIUS)
-      prevDelegate = textView.textLayoutManager?.textViewportLayoutController.delegate
-      textView.textLayoutManager?.textViewportLayoutController.delegate = self
+      if MessageTextConfiguration.useTextKit2ViewportWorkarounds {
+        // Avoid our custom TextKit 2 viewport delegate on macOS 27; crash reports show
+        // AppKit throwing while configuring viewport surfaces during NSTableView row install.
+        prevDelegate = textView.textLayoutManager?.textViewportLayoutController.delegate
+        textView.textLayoutManager?.textViewportLayoutController.delegate = self
+      }
 
       // In NSTextView you need to customize link colors here otherwise the attributed string for links
       // does not have any effect.
@@ -2859,7 +2862,9 @@ class MessageViewAppKit: NSView {
     )
 
     if !prevInViewport, inViewport {
-      if textView.inLiveResize {
+      if textView.inLiveResize, MessageTextConfiguration.useTextKit2ViewportWorkarounds {
+        // Avoid forcing TextKit 2 viewport layout on macOS 27; crash reports show
+        // AppKit throwing from this path during NSTableView row install.
         textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
       }
       log
@@ -3443,6 +3448,9 @@ class MessageViewAppKit: NSView {
       } completionHandler: { [weak self] in
         // Completion block
         DispatchQueue.main.async {
+          // Avoid forcing TextKit 2 viewport layout on macOS 27; crash reports show
+          // AppKit throwing from this path during NSTableView row install.
+          guard MessageTextConfiguration.useTextKit2ViewportWorkarounds else { return }
           // Fixes text display issues going blank
           self?.textView.textLayoutManager?.textViewportLayoutController
             .layoutViewport()

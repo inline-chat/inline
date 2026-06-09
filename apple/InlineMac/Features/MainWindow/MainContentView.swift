@@ -14,7 +14,9 @@ private extension View {
   @ViewBuilder
   func contentScrollEdgeEffect() -> some View {
     if #available(macOS 26.0, *) {
-      scrollEdgeEffectStyle(.soft, for: .all)
+      // Disabled while investigating macOS 27 beta AppKit/SwiftUI stack overflows on app open.
+      // scrollEdgeEffectStyle(.soft, for: .all)
+      self
     } else {
       self
     }
