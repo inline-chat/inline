@@ -545,7 +545,20 @@ class DocumentView: NSView {
       if case .downloading = documentState {
         startMonitoringProgress()
       }
+      requestAutoDownloadIfNeeded()
     }
+  }
+
+  private func requestAutoDownloadIfNeeded() {
+    guard superview != nil else { return }
+    guard case .needsDownload = documentState else { return }
+    guard documentInfo.document.cdnUrl?.isEmpty == false else { return }
+    guard !FileDownloader.shared.isDocumentDownloadActive(documentId: documentInfo.id) else { return }
+
+    let sizeBytes = documentInfo.document.size.map(Int64.init)
+    guard AutoDownloadPolicy.shouldDownload(kind: .file, sizeBytes: sizeBytes) else { return }
+
+    downloadAction()
   }
 
   @objc private func handleClose() {
@@ -582,6 +595,7 @@ class DocumentView: NSView {
     } else {
       stopMonitoringProgress()
     }
+    requestAutoDownloadIfNeeded()
   }
 
   // Method to manually set the state

@@ -73,6 +73,11 @@ public struct DownloadProgress: Equatable {
     DownloadProgress(id: id, bytesReceived: 0, totalBytes: 0, error: error)
   }
 
+  public var isCancellation: Bool {
+    guard let error else { return false }
+    return (error as NSError).code == NSURLErrorCancelled
+  }
+
   // Implement Equatable manually since Error doesn't conform to Equatable
   public static func == (lhs: DownloadProgress, rhs: DownloadProgress) -> Bool {
     lhs.id == rhs.id &&
@@ -129,6 +134,10 @@ public final class FileDownloader: NSObject, Sendable {
   /// Get a publisher for tracking download progress of a voice message.
   public func voiceProgressPublisher(voiceId: Int64) -> AnyPublisher<DownloadProgress, Never> {
     progressPublisher(for: "voice_\(voiceId)")
+  }
+
+  public func currentVoiceProgress(voiceId: Int64) -> DownloadProgress? {
+    currentProgress(for: "voice_\(voiceId)")
   }
 
   public func downloadDocument(
@@ -259,7 +268,17 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "voice_\(voice.voiceID)"
-    let fileExtension = Self.voiceFileExtension(mimeType: voice.mimeType)
+    guard let fileExtension = Self.voiceFileExtension(mimeType: voice.mimeType) else {
+      let error = NSError(
+        domain: "FileDownloader",
+        code: 415,
+        userInfo: [NSLocalizedDescriptionKey: "Unsupported voice MIME type"]
+      )
+      log.warning("Unsupported voice MIME type \(voice.mimeType) for voice \(voice.voiceID)")
+      completion(.failure(error))
+      return
+    }
+
     let localPath = "\(UUID().uuidString).\(fileExtension)"
     let localUrl = FileCache.getUrl(for: .voices, localPath: localPath)
 
@@ -333,14 +352,14 @@ public final class FileDownloader: NSObject, Sendable {
     isDownloadActive(for: "voice_\(voiceId)")
   }
 
-  private static func voiceFileExtension(mimeType: String) -> String {
+  private static func voiceFileExtension(mimeType: String) -> String? {
     switch mimeType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
       case "audio/mp4", "audio/x-m4a":
         return "m4a"
       case "audio/ogg":
         return "ogg"
       default:
-        return "ogg"
+        return nil
     }
   }
 

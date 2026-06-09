@@ -430,8 +430,8 @@ public actor FileCache: Sendable {
     data: Data,
     duration: Int,
     waveform: Data,
-    mimeType: String = "audio/ogg",
-    fileExtension: String = "ogg"
+    mimeType: String,
+    fileExtension: String
   ) throws -> Client_MessageVoiceContent {
     guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
       throw FileCacheError.failedToSave
@@ -567,6 +567,9 @@ extension FileCache {
 
     // Clear videos
     try await clearVideoCache()
+
+    // Clear voices
+    try await clearVoiceCache()
   }
 
   private func clearPhotoCache() async throws {
@@ -688,6 +691,60 @@ extension FileCache {
 
     // Step 4: Clear the videos directory to catch any orphaned files
     try clearOrphanedFiles(in: .videos)
+  }
+
+  private func clearVoiceCache() async throws {
+    let voiceCacheEntries = try await database.dbWriter.read { db in
+      var entries: [(messageId: Int64, chatId: Int64, localPath: String)] = []
+      let cursor = try Message
+        .filter(sql: "contentPayload IS NOT NULL")
+        .fetchCursor(db)
+
+      while let message = try cursor.next() {
+        guard let localPath = message.voiceLocalRelativePath else { continue }
+        entries.append((message.messageId, message.chatId, localPath))
+      }
+
+      return entries
+    }
+
+    log.debug("Found \(voiceCacheEntries.count) cached voices to clear")
+
+    var deletedCount = 0
+    var failedDeletions = 0
+
+    for entry in voiceCacheEntries {
+      let localPath = entry.localPath
+      let fileURL = FileCache.getUrl(for: .voices, localPath: localPath)
+
+      do {
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+          try FileManager.default.removeItem(at: fileURL)
+          deletedCount += 1
+        }
+      } catch {
+        failedDeletions += 1
+        log.error("Failed to delete cached voice at \(fileURL): \(error)")
+      }
+    }
+
+    _ = try await database.dbWriter.write { db in
+      for entry in voiceCacheEntries {
+        guard var message = try Message.fetchOne(
+          db,
+          key: ["messageId": entry.messageId, "chatId": entry.chatId]
+        ) else {
+          continue
+        }
+
+        message.setVoiceLocalRelativePath(nil)
+        try message.saveMessage(db)
+      }
+    }
+
+    log.info("Voice cache cleared: \(deletedCount) files deleted, \(failedDeletions) deletions failed")
+
+    try clearOrphanedFiles(in: .voices)
   }
 
   private func clearOrphanedFiles(in directory: FileLocalCacheDirectory) throws {

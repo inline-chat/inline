@@ -71,8 +71,16 @@ struct SettingsView: View {
         ) {
           Toggle("", isOn: $openLinksInApp)
             .labelsHidden()
-            .accessibilityLabel("Open links in app")
+          .accessibilityLabel("Open links in app")
         }
+      }
+
+      NavigationLink(destination: AutoDownloadSettingsView()) {
+        SettingsItem(
+          icon: "arrow.down.circle.fill",
+          iconColor: .blue,
+          title: "Auto-Download"
+        )
       }
 
       NavigationLink(destination: DebugView()) {
@@ -197,7 +205,7 @@ struct SettingsView: View {
         clearCache()
       }
     } message: {
-      Text("This will clear all locally cached images. Downloaded content will need to be re-downloaded.")
+      Text("This will clear locally cached media and files. Downloaded content will need to be re-downloaded.")
     }
     .alert("Error Clearing Cache", isPresented: $showClearCacheError) {
       Button("OK", role: .cancel) {}
@@ -233,6 +241,74 @@ struct SettingsView: View {
   private func dismissSettings() {
     router.dismissSheet()
     dismiss()
+  }
+}
+
+private struct AutoDownloadSettingsView: View {
+  @ObservedObject private var autoDownload = INUserSettings.current.autoDownload
+
+  var body: some View {
+    List {
+      Section("Auto-Download") {
+        thresholdRow(
+          icon: "photo.on.rectangle.angled",
+          iconColor: .blue,
+          title: "Media",
+          value: binding(\.mediaMaxMB)
+        )
+        thresholdRow(
+          icon: "doc.fill",
+          iconColor: .indigo,
+          title: "Files",
+          value: binding(\.fileMaxMB)
+        )
+        thresholdRow(
+          icon: "waveform",
+          iconColor: .red,
+          title: "Voice Messages",
+          value: binding(\.voiceMaxMB)
+        )
+      }
+    }
+    .listStyle(.insetGrouped)
+    .navigationTitle("Auto-Download")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+
+  private func binding(_ keyPath: ReferenceWritableKeyPath<AutoDownloadSettingsManager, Int>) -> Binding<Int> {
+    Binding {
+      autoDownload[keyPath: keyPath]
+    } set: { value in
+      autoDownload[keyPath: keyPath] = AutoDownloadSettingsManager.clamped(value)
+    }
+  }
+
+  private func thresholdRow(
+    icon: String,
+    iconColor: Color,
+    title: String,
+    value: Binding<Int>
+  ) -> some View {
+    SettingsItem(
+      icon: icon,
+      iconColor: iconColor,
+      title: title
+    ) {
+      HStack(spacing: 8) {
+        Text(thresholdLabel(value.wrappedValue))
+          .foregroundStyle(.secondary)
+          .monospacedDigit()
+
+        Stepper("", value: value, in: 0 ... AutoDownloadSettingsManager.maxAllowedMB, step: 1)
+          .labelsHidden()
+          .accessibilityLabel(title)
+          .accessibilityValue(thresholdLabel(value.wrappedValue))
+      }
+    }
+  }
+
+  private func thresholdLabel(_ value: Int) -> String {
+    value <= 0 ? "Off" : "\(value) MB"
   }
 }
 

@@ -177,9 +177,22 @@ final class NewVideoView: UIView {
       if isDownloadInFlight(), let videoId = fullMessage.videoInfo?.id {
         bindProgressIfNeeded(videoId: videoId)
       }
+      requestAutoDownloadIfNeeded()
       updateDurationLabel()
       updateOverlay()
     }
+  }
+
+  private func requestAutoDownloadIfNeeded() {
+    guard let videoInfo = fullMessage.videoInfo else { return }
+    guard videoInfo.video.cdnUrl?.isEmpty == false else { return }
+    guard videoLocalUrl().flatMap({ FileManager.default.fileExists(atPath: $0.path) }) != true else { return }
+    guard !FileDownloader.shared.isVideoDownloadActive(videoId: videoInfo.id) else { return }
+
+    let sizeBytes = videoInfo.video.size.map(Int64.init)
+    guard AutoDownloadPolicy.shouldDownload(kind: .media, sizeBytes: sizeBytes) else { return }
+
+    startDownloadIfNeeded()
   }
 
   // MARK: - Setup

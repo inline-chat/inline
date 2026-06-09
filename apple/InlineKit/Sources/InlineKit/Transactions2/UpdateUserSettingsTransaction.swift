@@ -12,6 +12,24 @@ public struct UpdateUserSettingsTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     public var notificationSettings: NotificationSettingsManager
+
+    enum CodingKeys: String, CodingKey {
+      case notificationSettings
+    }
+
+    public init(notificationSettings: NotificationSettingsManager) {
+      self.notificationSettings = notificationSettings
+    }
+
+    public init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      notificationSettings = try container.decode(NotificationSettingsManager.self, forKey: .notificationSettings)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encode(notificationSettings, forKey: .notificationSettings)
+    }
   }
 
   enum CodingKeys: String, CodingKey {
@@ -51,7 +69,9 @@ public struct UpdateUserSettingsTransaction: Transaction2 {
 // Helper
 
 public extension Transaction2 where Self == UpdateUserSettingsTransaction {
-  static func updateUserSettings(notificationSettings: NotificationSettingsManager) -> UpdateUserSettingsTransaction {
+  static func updateUserSettings(
+    notificationSettings: NotificationSettingsManager
+  ) -> UpdateUserSettingsTransaction {
     UpdateUserSettingsTransaction(notificationSettings: notificationSettings)
   }
 }

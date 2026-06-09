@@ -430,7 +430,10 @@ public actor FileUploader {
 
     let localURL = FileHelpers.getLocalCacheDirectory(for: .voices).appendingPathComponent(localPath)
     let fileName = localURL.lastPathComponent
-    let mimeType = voiceContent.mimeType.nilIfEmpty ?? "audio/ogg"
+    guard let mimeType = voiceContent.mimeType.nilIfEmpty else {
+      throw FileUploadError.invalidVoice
+    }
+
     let metadata = ApiClient.VoiceUploadMetadata(
       duration: Int(voiceContent.duration),
       waveform: voiceContent.waveform

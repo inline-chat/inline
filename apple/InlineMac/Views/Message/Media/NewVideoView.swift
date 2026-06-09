@@ -451,6 +451,7 @@ final class NewVideoView: NSView {
       refreshDownloadFlags()
       updateDurationLabel()
       updateOverlay()
+      requestAutoDownloadIfNeeded()
       return
     }
 
@@ -461,6 +462,7 @@ final class NewVideoView: NSView {
     updateImage()
     updateDurationLabel()
     updateOverlay()
+    requestAutoDownloadIfNeeded()
   }
 
   func setIsScrolling(_ isScrolling: Bool) {
@@ -1195,8 +1197,26 @@ final class NewVideoView: NSView {
       if isDownloadInFlight(), let videoId = fullMessage.videoInfo?.id {
         bindDownloadProgressIfNeeded(videoId: videoId)
       }
+      requestAutoDownloadIfNeeded()
       updateDurationLabel()
       updateOverlay()
+    }
+  }
+
+  private func requestAutoDownloadIfNeeded() {
+    guard superview != nil else { return }
+    guard let videoInfo = fullMessage.videoInfo else { return }
+    guard videoInfo.video.cdnUrl?.isEmpty == false else { return }
+    guard videoLocalUrl().flatMap({ FileManager.default.fileExists(atPath: $0.path) }) != true else { return }
+    guard !FileDownloader.shared.isVideoDownloadActive(videoId: videoInfo.id) else { return }
+
+    let sizeBytes = videoInfo.video.size.map(Int64.init)
+    guard AutoDownloadPolicy.shouldDownload(kind: .media, sizeBytes: sizeBytes) else { return }
+
+    ensureVideoAvailable { result in
+      if case let .failure(error) = result {
+        Log.shared.error("Failed to auto-download video", error: error)
+      }
     }
   }
 
