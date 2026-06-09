@@ -29,7 +29,7 @@ struct ProcessEntitiesTests {
 
     return ProcessEntities.Configuration(
       font: font,
-      textColor: textColor,
+      primaryColor: textColor,
       linkColor: linkColor,
       convertMentionsToLink: true
     )
@@ -40,6 +40,14 @@ struct ProcessEntitiesTests {
     NSColor.secondaryLabelColor
     #else
     UIColor.secondaryLabel
+    #endif
+  }
+
+  private var customThreadSyntaxColor: PlatformColor {
+    #if os(macOS)
+    NSColor.systemRed
+    #else
+    UIColor.systemRed
     #endif
   }
 
@@ -190,6 +198,36 @@ struct ProcessEntitiesTests {
     #expect(titleAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
   }
 
+  @Test("Thread link entity uses configured secondary color for syntax")
+  func testThreadLinkEntityUsesConfiguredSecondaryColorForSyntax() {
+    let text = "Open [[Engineering]]"
+    let threadRange = rangeOfSubstring("[[Engineering]]", in: text)
+    let entities = createMessageEntities([
+      createThreadEntity(offset: Int64(threadRange.location), length: Int64(threadRange.length), chatId: 42),
+    ])
+    let configuration = ProcessEntities.Configuration(
+      font: testConfiguration.font,
+      primaryColor: testConfiguration.primaryColor,
+      linkColor: testConfiguration.linkColor,
+      secondaryColor: customThreadSyntaxColor
+    )
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: configuration
+    )
+
+    let openBracketAttributes = result.attributes(at: threadRange.location, effectiveRange: nil)
+    #expect(openBracketAttributes[.foregroundColor] as? PlatformColor == customThreadSyntaxColor)
+
+    let titleAttributes = result.attributes(at: threadRange.location + 2, effectiveRange: nil)
+    #expect(titleAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+
+    let closeBracketAttributes = result.attributes(at: NSMaxRange(threadRange) - 1, effectiveRange: nil)
+    #expect(closeBracketAttributes[.foregroundColor] as? PlatformColor == customThreadSyntaxColor)
+  }
+
   @Test("Thread title entity")
   func testThreadTitleEntity() {
     let text = "Open [[Planning]]"
@@ -287,7 +325,7 @@ struct ProcessEntitiesTests {
       configuration: .init(
         font: NSFont.systemFont(ofSize: 14),
         boldWeight: .semibold,
-        textColor: .black,
+        primaryColor: .black,
         linkColor: .blue
       )
     )
@@ -725,7 +763,7 @@ struct ProcessEntitiesTests {
     let text = "Hello @john"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add mention attributes
@@ -753,7 +791,7 @@ struct ProcessEntitiesTests {
     let text = "Hi @Dena  @Test2  mentions"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let denaRange = NSRange(location: 3, length: 6)
@@ -778,7 +816,7 @@ struct ProcessEntitiesTests {
     let text = "Run /start"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let commandRange = rangeOfSubstring("/start", in: text)
@@ -801,7 +839,7 @@ struct ProcessEntitiesTests {
     let text = "Run /start@jobs_bot now"
     let attributedString = NSAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -818,7 +856,7 @@ struct ProcessEntitiesTests {
     let text = "abc/start"
     let attributedString = NSAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -830,7 +868,7 @@ struct ProcessEntitiesTests {
     let text = "Use `/start` today"
     let attributedString = NSAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -845,7 +883,7 @@ struct ProcessEntitiesTests {
     let text = "**bold**"
     let attributedString = NSAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString, parseMarkdown: false)
@@ -859,7 +897,7 @@ struct ProcessEntitiesTests {
     let text = "Call me"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let range = NSRange(location: 0, length: (text as NSString).length)
@@ -875,7 +913,7 @@ struct ProcessEntitiesTests {
     let text = "Inline"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let range = NSRange(location: 0, length: (text as NSString).length)
@@ -898,7 +936,7 @@ struct ProcessEntitiesTests {
     let text = "reach me"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let range = NSRange(location: 0, length: (text as NSString).length)
@@ -920,7 +958,7 @@ struct ProcessEntitiesTests {
     let text = "call me"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let range = NSRange(location: 0, length: (text as NSString).length)
@@ -942,7 +980,7 @@ struct ProcessEntitiesTests {
     let text = "Email test@example.com for updates"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -959,7 +997,7 @@ struct ProcessEntitiesTests {
     let text = "Call +1(415)555-1234 for updates"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -978,7 +1016,7 @@ struct ProcessEntitiesTests {
     let text = "Call 4155551234 for updates"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -997,7 +1035,7 @@ struct ProcessEntitiesTests {
     let text = "Call 415 555 1234 for updates"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1010,7 +1048,7 @@ struct ProcessEntitiesTests {
     let text = "Release 2025-09-12 is scheduled"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1023,7 +1061,7 @@ struct ProcessEntitiesTests {
     let text = "SSN 123-45-6789 is not a phone"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1036,7 +1074,7 @@ struct ProcessEntitiesTests {
     let text = "Code 1234567 should not match"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1049,7 +1087,7 @@ struct ProcessEntitiesTests {
     let urlText = "https://example.com"
     let attributedString = NSMutableAttributedString(
       string: urlText,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let range = NSRange(location: 0, length: (urlText as NSString).length)
@@ -1071,7 +1109,7 @@ struct ProcessEntitiesTests {
     let text = "This is bold text"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add bold font
@@ -1103,7 +1141,7 @@ struct ProcessEntitiesTests {
     let text = "Check this code block"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add monospace font and custom attribute
@@ -1142,7 +1180,7 @@ struct ProcessEntitiesTests {
     let text = "Hey @alice this is bold and italic"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add mention attributes
@@ -1200,7 +1238,7 @@ struct ProcessEntitiesTests {
     let text = "Open [[Roadmap]] and [[Planning]]"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let roadmapRange = rangeOfSubstring("[[Roadmap]]", in: text)
@@ -1235,7 +1273,7 @@ struct ProcessEntitiesTests {
     let text = "Open [Planning](inline://chat?id=42) now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1255,7 +1293,7 @@ struct ProcessEntitiesTests {
     let text = "Open [Planning](inline://thread?id=42) now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1275,7 +1313,7 @@ struct ProcessEntitiesTests {
     let text = "Open [Planning](inline://thread?space_id=7) now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1296,7 +1334,7 @@ struct ProcessEntitiesTests {
     let text = "Open [the thread](inline://thread?space_id=7&title=Planning) now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1317,7 +1355,7 @@ struct ProcessEntitiesTests {
     let text = "Open [[Planning]] now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
@@ -1338,7 +1376,7 @@ struct ProcessEntitiesTests {
     let text = "Open [[Project **Plan**]] now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
@@ -1361,7 +1399,7 @@ struct ProcessEntitiesTests {
     let text = "Open [[  Planning  ]] now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
@@ -1380,7 +1418,7 @@ struct ProcessEntitiesTests {
     let text = "Open [[Planning]] now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1394,7 +1432,7 @@ struct ProcessEntitiesTests {
     let text = "Open `[[Planning]]` now"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 7)
@@ -1409,7 +1447,7 @@ struct ProcessEntitiesTests {
     let text = "Start @user middle bold italic code end"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add mention
@@ -1483,7 +1521,7 @@ struct ProcessEntitiesTests {
     let text = "👍 **bold text**"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add bold font to the "bold text" part (without the markdown markers)
@@ -1516,7 +1554,7 @@ struct ProcessEntitiesTests {
     let text = "**@john**"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let mentionRange = NSRange(location: 2, length: 5) // "@john"
@@ -1546,7 +1584,7 @@ struct ProcessEntitiesTests {
     let text = "**one** **two**"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1568,7 +1606,7 @@ struct ProcessEntitiesTests {
     let text = "🙂 Hello **@john** and _@jane_ and `code` 👍"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let johnRange = rangeOfSubstring("@john", in: text)
@@ -1631,7 +1669,7 @@ struct ProcessEntitiesTests {
     let text = "Start **one `code` two** end"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1658,7 +1696,7 @@ struct ProcessEntitiesTests {
     let text = "🙂 ```\nlet x = 1\n``` @john"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let mentionRange = rangeOfSubstring("@john", in: text)
@@ -1689,7 +1727,7 @@ struct ProcessEntitiesTests {
     let text = "hi how ```are``` @john"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let mentionRange = rangeOfSubstring("@john", in: text)
@@ -1722,7 +1760,7 @@ struct ProcessEntitiesTests {
     let text = "hi ```swift\nlet x = 1\n``` @john"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let mentionRange = rangeOfSubstring("@john", in: text)
@@ -1804,7 +1842,7 @@ struct ProcessEntitiesTests {
     let text = "This is italic text"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add italic font
@@ -1827,7 +1865,7 @@ struct ProcessEntitiesTests {
     let text = "This is _italic_ text"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     // Add italic font to the "italic" part (without the markdown markers)
@@ -1852,7 +1890,7 @@ struct ProcessEntitiesTests {
     let text = "This_is_italic_text"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1866,7 +1904,7 @@ struct ProcessEntitiesTests {
     let text = "_italic_"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1885,7 +1923,7 @@ struct ProcessEntitiesTests {
     let text = "this is a code `let str = \"i'm writing a code _hey_ do not parse **bold**\"`"
     let attributedString = NSMutableAttributedString(
       string: text,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
@@ -1900,7 +1938,7 @@ struct ProcessEntitiesTests {
     let text1 = "```\nlet code = `inline code here`\nmore code\n```"
     let attributedString1 = NSMutableAttributedString(
       string: text1,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result1 = ProcessEntities.fromAttributedString(attributedString1)
@@ -1913,7 +1951,7 @@ struct ProcessEntitiesTests {
     let text2 = "```\nlet x = `value1`\nlet y = `value2`\n```"
     let attributedString2 = NSMutableAttributedString(
       string: text2,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result2 = ProcessEntities.fromAttributedString(attributedString2)
@@ -1926,7 +1964,7 @@ struct ProcessEntitiesTests {
     let text3 = "```\nlet text = \"**bold** and _italic_\"\n```"
     let attributedString3 = NSMutableAttributedString(
       string: text3,
-      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
     )
 
     let result3 = ProcessEntities.fromAttributedString(attributedString3)

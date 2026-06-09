@@ -81,11 +81,7 @@ class UIMessageView: UIView {
   }
 
   var textColor: UIColor {
-    if outgoing {
-      .white
-    } else {
-      ThemeManager.shared.selected.primaryTextColor ?? .label
-    }
+    MessageRichTextRenderer.primaryColor(for: outgoing)
   }
 
   private var forwardHeaderTextColor: UIColor {
@@ -1738,7 +1734,12 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    let cacheKey = "\(fullMessage.message.entities)\(message.stableId)-\(fullMessage.displayText ?? "")-\(outgoing)"
+    let cacheKey = [
+      "\(fullMessage.message.entities)",
+      "\(message.stableId)",
+      fullMessage.displayText ?? "",
+      MessageRichTextRenderer.cacheKey(for: outgoing),
+    ].joined(separator: "-")
     bubbleView.backgroundColor = bubbleColor
 
     guard let text = fullMessage.displayText else { return }
@@ -1763,8 +1764,7 @@ class UIMessageView: UIView {
       entities: entities,
       configuration: .init(
         font: font,
-        textColor: textColor,
-        linkColor: MessageRichTextRenderer.linkColor(for: outgoing),
+        palette: MessageRichTextRenderer.palette(for: outgoing),
         codeBlockBackgroundColor: codeBlockBackgroundColor,
         inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )

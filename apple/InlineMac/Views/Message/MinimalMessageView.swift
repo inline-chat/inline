@@ -255,8 +255,20 @@ class MinimalMessageViewAppKit: NSView {
     Self.linkColor(outgoing: outgoing)
   }
 
-  private var mentionColor: NSColor {
-    Self.linkColor(outgoing: outgoing)
+  private var secondaryTextColor: NSColor {
+    .secondaryLabelColor
+  }
+
+  private var richTextPalette: ProcessEntities.Configuration.Palette {
+    .init(
+      primaryColor: textColor,
+      linkColor: linkColor,
+      secondaryColor: secondaryTextColor
+    )
+  }
+
+  private var richTextStyleKey: String {
+    "minimal-default"
   }
 
   private var embeddedReplyStyle: EmbeddedMessageView.EmbeddedMessageStyle {
@@ -2759,7 +2771,11 @@ class MinimalMessageViewAppKit: NSView {
     // From Cache
 
     if
-      let cachedAttributedString = CacheAttrs.shared.get(message: fullMessage, renderStyle: .minimal)
+      let cachedAttributedString = CacheAttrs.shared.get(
+        message: fullMessage,
+        renderStyle: .minimal,
+        styleKey: richTextStyleKey
+      )
     {
       let attributedString = cachedAttributedString
       textView.setMessageAttributedString(
@@ -2781,8 +2797,7 @@ class MinimalMessageViewAppKit: NSView {
         // FIXME: Extract to a variable
         font: MessageTextConfiguration.font.withSize(props.layout.fontSize),
         boldWeight: .semibold,
-        textColor: textColor,
-        linkColor: mentionColor,
+        palette: richTextPalette,
         codeBlockBackgroundColor: codeBlockBackgroundColor,
         inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
@@ -2802,7 +2817,12 @@ class MinimalMessageViewAppKit: NSView {
     // Store links for tap handling
     detectedLinks = linkMatches.map { (range: $0.range, url: $0.url) }
 
-    CacheAttrs.shared.set(message: fullMessage, renderStyle: .minimal, value: attributedString)
+    CacheAttrs.shared.set(
+      message: fullMessage,
+      renderStyle: .minimal,
+      styleKey: richTextStyleKey,
+      value: attributedString
+    )
     textView.setMessageAttributedString(
       attributedString,
       isRtl: props.isRtl,

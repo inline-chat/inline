@@ -110,21 +110,50 @@ class MessageSizeCalculator {
     return false
   }
 
-  private func textColor(for style: RenderStyle, outgoing: Bool) -> NSColor {
+  private func primaryColor(for style: RenderStyle, usesOutgoingBubbleStyle: Bool) -> NSColor {
     switch style {
     case .bubble:
-      return MessageViewAppKit.textColor(outgoing: outgoing)
+      return MessageViewAppKit.textColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
     case .minimal:
-      return MinimalMessageViewAppKit.textColor(outgoing: outgoing)
+      return MinimalMessageViewAppKit.textColor(outgoing: false)
     }
   }
 
-  private func linkColor(for style: RenderStyle, outgoing: Bool) -> NSColor {
+  private func linkColor(for style: RenderStyle, usesOutgoingBubbleStyle: Bool) -> NSColor {
     switch style {
     case .bubble:
-      return MessageViewAppKit.linkColor(outgoing: outgoing)
+      return MessageViewAppKit.linkColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
     case .minimal:
-      return MinimalMessageViewAppKit.linkColor(outgoing: outgoing)
+      return MinimalMessageViewAppKit.linkColor(outgoing: false)
+    }
+  }
+
+  private func secondaryColor(for style: RenderStyle, usesOutgoingBubbleStyle: Bool) -> NSColor {
+    switch style {
+    case .bubble:
+      return MessageViewAppKit.secondaryColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
+    case .minimal:
+      return .secondaryLabelColor
+    }
+  }
+
+  private func richTextPalette(
+    for style: RenderStyle,
+    usesOutgoingBubbleStyle: Bool
+  ) -> ProcessEntities.Configuration.Palette {
+    .init(
+      primaryColor: primaryColor(for: style, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
+      linkColor: linkColor(for: style, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
+      secondaryColor: secondaryColor(for: style, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
+    )
+  }
+
+  private func richTextStyleKey(for style: RenderStyle, usesOutgoingBubbleStyle: Bool) -> String {
+    switch style {
+    case .bubble:
+      return usesOutgoingBubbleStyle ? "bubble-outgoing" : "bubble-default"
+    case .minimal:
+      return "minimal-default"
     }
   }
 
@@ -707,6 +736,8 @@ class MessageSizeCalculator {
       isSticker: isSticker,
       isPngPhotoWithoutCaption: isPngPhotoWithoutCaption
     )
+    let usesOutgoingBubbleStyle = isOutgoing && hasBubbleColor
+    let richTextStyleKey = richTextStyleKey(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
     let bubbleContentHorizontalInset = horizontalBubbleInset(for: .bubble)
 
     // Font size
@@ -726,7 +757,7 @@ class MessageSizeCalculator {
 
     // Attributed String
     let attributedString: NSAttributedString
-    if let cached = CacheAttrs.shared.get(message: message, renderStyle: .bubble) {
+    if let cached = CacheAttrs.shared.get(message: message, renderStyle: .bubble, styleKey: richTextStyleKey) {
       attributedString = cached
     } else {
       let processed = ProcessEntities.toAttributedString(
@@ -735,12 +766,11 @@ class MessageSizeCalculator {
         configuration: .init(
           font: font,
           boldWeight: .semibold,
-          textColor: textColor(for: .bubble, outgoing: isOutgoing),
-          linkColor: linkColor(for: .bubble, outgoing: isOutgoing)
+          palette: richTextPalette(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
         )
       )
       // cache processed string
-      CacheAttrs.shared.set(message: message, renderStyle: .bubble, value: processed)
+      CacheAttrs.shared.set(message: message, renderStyle: .bubble, styleKey: richTextStyleKey, value: processed)
       attributedString = processed
     }
 
@@ -1487,9 +1517,11 @@ class MessageSizeCalculator {
     // Font size
     let fontSize = Self.minimalTextFontSize(for: emojiInfo)
     let font = MessageTextConfiguration.font.withSize(fontSize)
+    let usesOutgoingBubbleStyle = false
+    let richTextStyleKey = richTextStyleKey(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
 
     let attributedString: NSAttributedString
-    if let cached = CacheAttrs.shared.get(message: message, renderStyle: .minimal) {
+    if let cached = CacheAttrs.shared.get(message: message, renderStyle: .minimal, styleKey: richTextStyleKey) {
       attributedString = cached
     } else {
       let processed = ProcessEntities.toAttributedString(
@@ -1498,11 +1530,10 @@ class MessageSizeCalculator {
         configuration: .init(
           font: font,
           boldWeight: .semibold,
-          textColor: textColor(for: .minimal, outgoing: isOutgoing),
-          linkColor: linkColor(for: .minimal, outgoing: isOutgoing)
+          palette: richTextPalette(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
         )
       )
-      CacheAttrs.shared.set(message: message, renderStyle: .minimal, value: processed)
+      CacheAttrs.shared.set(message: message, renderStyle: .minimal, styleKey: richTextStyleKey, value: processed)
       attributedString = processed
     }
 
