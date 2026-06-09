@@ -268,7 +268,7 @@ private struct ChatToolbarNotificationPopover: View {
       case .onlyMentions:
         "Only mentions"
       case .importantOnly:
-        "Zen"
+        "Any message to you"
       case .none:
         "None"
     }

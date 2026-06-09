@@ -9,7 +9,7 @@ struct DialogNotificationPreferenceTests {
     #expect(DialogNotificationSettingSelection.global.resolveEffectiveMode(globalMode: .all) == .all)
     #expect(DialogNotificationSettingSelection.global.resolveEffectiveMode(globalMode: .mentions) == .mentions)
     #expect(DialogNotificationSettingSelection.global.resolveEffectiveMode(globalMode: .none) == .none)
-    #expect(DialogNotificationSettingSelection.global.resolveEffectiveMode(globalMode: .importantOnly) == .importantOnly)
+    #expect(DialogNotificationSettingSelection.global.resolveEffectiveMode(globalMode: .importantOnly) == .mentions)
     #expect(DialogNotificationSettingSelection.global.resolveEffectiveMode(globalMode: .onlyMentions) == .onlyMentions)
   }
 

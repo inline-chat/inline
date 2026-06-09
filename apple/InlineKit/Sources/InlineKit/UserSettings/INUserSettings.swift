@@ -66,9 +66,6 @@ public class INUserSettings {
       notification.mode = cachedSettings.mode
       notification.silent = cachedSettings.silent
       notification.disableDmNotifications = cachedSettings.disableDmNotifications
-      notification.requiresMention = cachedSettings.requiresMention
-      notification.usesDefaultRules = cachedSettings.usesDefaultRules
-      notification.customRules = cachedSettings.customRules
     } catch {
       log.error("Failed to decode cached notification settings: \(error)")
     }
