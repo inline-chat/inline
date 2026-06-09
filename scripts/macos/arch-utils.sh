@@ -132,6 +132,37 @@ macos_thin_bundle_to_arch() {
   return "${status}"
 }
 
+macos_strip_binary_for_release() {
+  local path="$1"
+
+  if [[ ! -f "${path}" ]]; then
+    echo "Binary not found: ${path}" >&2
+    return 1
+  fi
+
+  if ! macos_lipo_archs "${path}" >/dev/null; then
+    echo "Not a Mach-O binary: ${path}" >&2
+    return 1
+  fi
+
+  xcrun strip -x "${path}"
+}
+
+macos_require_no_llvm_coverage() {
+  local path="$1"
+  local sections
+
+  if ! sections=$(xcrun size -m "${path}" 2>/dev/null); then
+    echo "Unable to inspect binary sections: ${path}" >&2
+    return 1
+  fi
+
+  if [[ "${sections}" == *"__LLVM_COV"* || "${sections}" == *"__llvm_cov"* || "${sections}" == *"__llvm_prf"* ]]; then
+    echo "Release binary contains LLVM coverage/profile sections: ${path}" >&2
+    return 1
+  fi
+}
+
 macos_check_bundle_exact_archs() {
   local bundle="$1"
   shift

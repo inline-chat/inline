@@ -26,9 +26,10 @@ bun run macos:release-app -- --channel beta
 The command runs:
 
 1. Preflight tool checks.
-2. Build an arm64-only app, sign, create DMG, notarize, and staple.
+2. Build an arm64-only app, disable release coverage instrumentation, strip the
+   release executable before signing, create DMG, notarize, and staple.
 3. Post-check the DMG, code signature, Gatekeeper, Sparkle keys, and arm64-only
-   architecture across the app bundle.
+   architecture across the app bundle, and reject release coverage sections.
 4. Verify the built app metadata (`CFBundleVersion`, `InlineCommit`, and
    `SUFeedURL`) matches the selected release.
 5. Upload the DMG to R2.

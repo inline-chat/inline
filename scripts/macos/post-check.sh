@@ -148,4 +148,7 @@ if [[ -n "${REQUIRED_ARCHS}" ]]; then
   macos_check_bundle_exact_archs "${APP_PATH}" ${REQUIRED_ARCHS} || die "App bundle contains unsupported architecture slices"
 fi
 
+info "Check release binary instrumentation"
+macos_require_no_llvm_coverage "${APP_PATH}/Contents/MacOS/Inline" || die "App executable contains release coverage instrumentation"
+
 info "Post-checks complete"
