@@ -23,7 +23,7 @@ public extension DialogNotificationSettingSelection {
   func resolveEffectiveMode(globalMode: NotificationMode) -> NotificationMode {
     switch self {
       case .global:
-        return globalMode
+        return NotificationSettingsCompat.mode(from: globalMode, disableDmNotifications: globalMode == .onlyMentions)
       case .all:
         return .all
       case .mentions:
