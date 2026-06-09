@@ -911,7 +911,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         if let text = message.message.text {
           let configuration = ProcessEntities.Configuration(
             font: .systemFont(ofSize: 17),
-            textColor: .label,
+            primaryColor: .label,
             linkColor: linkColor,
             convertMentionsToLink: false, // Keep as attributes for editing
             renderPhoneNumbers: false

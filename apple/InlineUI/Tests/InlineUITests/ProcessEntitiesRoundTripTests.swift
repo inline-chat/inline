@@ -18,7 +18,7 @@ struct ProcessEntitiesRoundTripTests {
   
   let config = ProcessEntities.Configuration(
     font: PlatformFont.systemFont(ofSize: 16),
-    textColor: PlatformColor.black,
+    primaryColor: PlatformColor.black,
     linkColor: PlatformColor.blue,
     convertMentionsToLink: false
   )

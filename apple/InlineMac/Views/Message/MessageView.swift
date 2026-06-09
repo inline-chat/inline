@@ -255,6 +255,10 @@ class MessageViewAppKit: NSView {
     linkColor(usesOutgoingBubbleStyle: outgoing)
   }
 
+  static func secondaryColor(usesOutgoingBubbleStyle: Bool) -> NSColor {
+    usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.7) : .secondaryLabelColor
+  }
+
   private var emojiMessage: Bool {
     props.layout.emojiMessage
   }
@@ -273,8 +277,20 @@ class MessageViewAppKit: NSView {
     Self.linkColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
   }
 
-  private var mentionColor: NSColor {
-    Self.linkColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
+  private var secondaryTextColor: NSColor {
+    Self.secondaryColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
+  }
+
+  private var richTextPalette: ProcessEntities.Configuration.Palette {
+    .init(
+      primaryColor: textColor,
+      linkColor: linkColor,
+      secondaryColor: secondaryTextColor
+    )
+  }
+
+  private var richTextStyleKey: String {
+    usesOutgoingBubbleStyle ? "bubble-outgoing" : "bubble-default"
   }
 
   private var senderFont: NSFont {
@@ -2749,7 +2765,11 @@ class MessageViewAppKit: NSView {
     // From Cache
 
     if
-      let cachedAttributedString = CacheAttrs.shared.get(message: fullMessage, renderStyle: .bubble)
+      let cachedAttributedString = CacheAttrs.shared.get(
+        message: fullMessage,
+        renderStyle: .bubble,
+        styleKey: richTextStyleKey
+      )
     {
       let attributedString = cachedAttributedString
       textView.setMessageAttributedString(
@@ -2771,8 +2791,7 @@ class MessageViewAppKit: NSView {
         // FIXME: Extract to a variable
         font: .systemFont(ofSize: props.layout.fontSize),
         boldWeight: .semibold,
-        textColor: textColor,
-        linkColor: mentionColor,
+        palette: richTextPalette,
         codeBlockBackgroundColor: codeBlockBackgroundColor,
         inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
@@ -2788,7 +2807,12 @@ class MessageViewAppKit: NSView {
     // Store links for tap handling
     detectedLinks = linkMatches.map { (range: $0.range, url: $0.url) }
 
-    CacheAttrs.shared.set(message: fullMessage, renderStyle: .bubble, value: attributedString)
+    CacheAttrs.shared.set(
+      message: fullMessage,
+      renderStyle: .bubble,
+      styleKey: richTextStyleKey,
+      value: attributedString
+    )
     textView.setMessageAttributedString(
       attributedString,
       isRtl: props.isRtl,

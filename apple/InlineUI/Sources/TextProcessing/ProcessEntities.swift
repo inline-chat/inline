@@ -81,14 +81,36 @@ public struct CodeBlockStyle: Sendable {
 
 public class ProcessEntities {
   public struct Configuration {
+    public struct Palette {
+      public let primaryColor: PlatformColor
+      public let linkColor: PlatformColor
+      public let secondaryColor: PlatformColor
+
+      public init(
+        primaryColor: PlatformColor,
+        linkColor: PlatformColor,
+        secondaryColor: PlatformColor
+      ) {
+        self.primaryColor = primaryColor
+        self.linkColor = linkColor
+        self.secondaryColor = secondaryColor
+      }
+    }
+
     var font: PlatformFont
     var boldWeight: PlatformFontWeight?
 
-    /// Default color for the text
-    var textColor: PlatformColor
+    /// Colors used for the rendered rich-text surface.
+    var palette: Palette
 
-    /// Color of URLs, link texts and mentions
-    var linkColor: PlatformColor
+    /// Default color for body text.
+    var primaryColor: PlatformColor { palette.primaryColor }
+
+    /// Color of URLs, link texts and mentions.
+    var linkColor: PlatformColor { palette.linkColor }
+
+    /// Color of lower-emphasis rich-text syntax like thread-link brackets.
+    var secondaryColor: PlatformColor { palette.secondaryColor }
 
     /// If enabled, mentions convert to in-app URLs
     var convertMentionsToLink: Bool
@@ -105,8 +127,7 @@ public class ProcessEntities {
     public init(
       font: PlatformFont,
       boldWeight: PlatformFontWeight? = nil,
-      textColor: PlatformColor,
-      linkColor: PlatformColor,
+      palette: Palette,
       convertMentionsToLink: Bool = true,
       renderPhoneNumbers: Bool = true,
       codeBlockBackgroundColor: PlatformColor? = nil,
@@ -114,12 +135,69 @@ public class ProcessEntities {
     ) {
       self.font = font
       self.boldWeight = boldWeight
-      self.textColor = textColor
-      self.linkColor = linkColor
+      self.palette = palette
       self.convertMentionsToLink = convertMentionsToLink
       self.renderPhoneNumbers = renderPhoneNumbers
       self.codeBlockBackgroundColor = codeBlockBackgroundColor
       self.inlineCodeBackgroundColor = inlineCodeBackgroundColor
+    }
+
+    public init(
+      font: PlatformFont,
+      boldWeight: PlatformFontWeight? = nil,
+      primaryColor: PlatformColor,
+      linkColor: PlatformColor,
+      secondaryColor: PlatformColor? = nil,
+      convertMentionsToLink: Bool = true,
+      renderPhoneNumbers: Bool = true,
+      codeBlockBackgroundColor: PlatformColor? = nil,
+      inlineCodeBackgroundColor: PlatformColor? = nil
+    ) {
+      self.init(
+        font: font,
+        boldWeight: boldWeight,
+        palette: Palette(
+          primaryColor: primaryColor,
+          linkColor: linkColor,
+          secondaryColor: secondaryColor ?? Self.defaultSecondaryColor
+        ),
+        convertMentionsToLink: convertMentionsToLink,
+        renderPhoneNumbers: renderPhoneNumbers,
+        codeBlockBackgroundColor: codeBlockBackgroundColor,
+        inlineCodeBackgroundColor: inlineCodeBackgroundColor
+      )
+    }
+
+    public init(
+      font: PlatformFont,
+      boldWeight: PlatformFontWeight? = nil,
+      textColor: PlatformColor,
+      linkColor: PlatformColor,
+      secondaryColor: PlatformColor? = nil,
+      convertMentionsToLink: Bool = true,
+      renderPhoneNumbers: Bool = true,
+      codeBlockBackgroundColor: PlatformColor? = nil,
+      inlineCodeBackgroundColor: PlatformColor? = nil
+    ) {
+      self.init(
+        font: font,
+        boldWeight: boldWeight,
+        primaryColor: textColor,
+        linkColor: linkColor,
+        secondaryColor: secondaryColor,
+        convertMentionsToLink: convertMentionsToLink,
+        renderPhoneNumbers: renderPhoneNumbers,
+        codeBlockBackgroundColor: codeBlockBackgroundColor,
+        inlineCodeBackgroundColor: inlineCodeBackgroundColor
+      )
+    }
+
+    private static var defaultSecondaryColor: PlatformColor {
+      #if os(macOS)
+      NSColor.secondaryLabelColor
+      #else
+      UIColor.secondaryLabel
+      #endif
     }
   }
 
@@ -132,21 +210,16 @@ public class ProcessEntities {
     configuration: Configuration
   ) -> NSMutableAttributedString {
     let inlineCodeBackground = configuration.inlineCodeBackgroundColor
-      ?? configuration.textColor.withAlphaComponent(0.12)
+      ?? configuration.primaryColor.withAlphaComponent(0.12)
     let blockCodeBackground = configuration.codeBlockBackgroundColor
-      ?? configuration.textColor.withAlphaComponent(0.08)
+      ?? configuration.primaryColor.withAlphaComponent(0.08)
     let codeBlockStyle = CodeBlockStyle.block
-    #if os(macOS)
-    let secondaryTextColor = NSColor.secondaryLabelColor
-    #else
-    let secondaryTextColor = UIColor.secondaryLabel
-    #endif
 
     let attributedString = NSMutableAttributedString(
       string: text,
       attributes: [
         .font: configuration.font,
-        .foregroundColor: configuration.textColor,
+        .foregroundColor: configuration.primaryColor,
       ]
     )
 
@@ -224,7 +297,7 @@ public class ProcessEntities {
                 in: attributedString,
                 range: range,
                 linkColor: configuration.linkColor,
-                bracketColor: secondaryTextColor
+                bracketColor: configuration.secondaryColor
               )
             } else if let emailAddress = emailAddress(from: textURL.url) {
               var attributes: [NSAttributedString.Key: Any] = [
@@ -335,7 +408,7 @@ public class ProcessEntities {
             in: attributedString,
             range: range,
             linkColor: configuration.linkColor,
-            bracketColor: secondaryTextColor
+            bracketColor: configuration.secondaryColor
           )
 
         case .threadTitle:
@@ -356,7 +429,7 @@ public class ProcessEntities {
             in: attributedString,
             range: range,
             linkColor: configuration.linkColor,
-            bracketColor: secondaryTextColor
+            bracketColor: configuration.secondaryColor
           )
 
         case .bold:

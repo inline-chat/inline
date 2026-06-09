@@ -2626,7 +2626,7 @@ extension ComposeAppKit {
       entities: entities,
       configuration: .init(
         font: ComposeTextEditor.font,
-        textColor: ComposeTextEditor.textColor,
+        primaryColor: ComposeTextEditor.textColor,
         linkColor: ComposeTextEditor.linkColor,
         convertMentionsToLink: false
       )
@@ -2642,7 +2642,7 @@ extension ComposeAppKit {
       entities: entities,
       configuration: .init(
         font: ComposeTextEditor.font,
-        textColor: ComposeTextEditor.textColor,
+        primaryColor: ComposeTextEditor.textColor,
         linkColor: ComposeTextEditor.linkColor,
         convertMentionsToLink: false
       )
