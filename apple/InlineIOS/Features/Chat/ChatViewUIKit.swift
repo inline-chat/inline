@@ -101,9 +101,13 @@ public class ChatContainerView: UIView {
   private var composeViewBottomConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
   private var keyboardFrameBottomInset: CGFloat = 0
+  private var keyboardPanActivationY: CGFloat?
+  private var keyboardPanStartBottomInset: CGFloat = 0
+  private var keyboardPanIsTracking = false
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    messagesCollectionView.panGestureRecognizer.removeTarget(self, action: #selector(handleMessagesPan(_:)))
   }
 
   init(peerId: Peer, chatId: Int64?, spaceId: Int64?, peerUser: User?) {
@@ -147,6 +151,7 @@ public class ChatContainerView: UIView {
     addSubview(composeView)
     addSubview(scrollButton)
     scrollButton.isHidden = true
+    messagesCollectionView.panGestureRecognizer.addTarget(self, action: #selector(handleMessagesPan(_:)))
     updateKeyboardAccessoryHeight(composeHeight: ComposeView.minHeight)
     let composeContainerBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
     let composeBottomConstraint = composeView.bottomAnchor.constraint(
@@ -354,6 +359,70 @@ public class ChatContainerView: UIView {
       keepAtBottom: keepAtBottom
     )
     layoutIfNeeded()
+  }
+
+  @objc private func handleMessagesPan(_ gesture: UIPanGestureRecognizer) {
+    switch gesture.state {
+    case .began:
+      beginKeyboardPan(gesture)
+
+    case .changed:
+      updateKeyboardPan(gesture)
+
+    case .ended, .cancelled, .failed:
+      endKeyboardPan()
+
+    default:
+      break
+    }
+  }
+
+  private func beginKeyboardPan(_ gesture: UIPanGestureRecognizer) {
+    guard composeView.textView.isFirstResponder || keyboardFrameBottomInset > 0 else { return }
+
+    let currentInset = max(keyboardFrameBottomInset, -(composeContainerViewBottomConstraint?.constant ?? 0))
+    guard currentInset > 0 else { return }
+
+    let inputTopY = bounds.maxY - currentInset - keyboardAccessoryHeight
+    let startY = gesture.location(in: self).y
+    let catchLimitY = inputTopY + keyboardAccessoryHeight
+    guard startY < catchLimitY else { return }
+
+    keyboardPanActivationY = max(startY, inputTopY)
+    keyboardPanStartBottomInset = currentInset
+  }
+
+  private func updateKeyboardPan(_ gesture: UIPanGestureRecognizer) {
+    guard let activationY = keyboardPanActivationY else { return }
+
+    let currentY = gesture.location(in: self).y
+    guard keyboardPanIsTracking || currentY > activationY + 3 else { return }
+
+    if !keyboardPanIsTracking {
+      keyboardPanIsTracking = true
+    }
+
+    let bottomInset = keyboardPanBottomInset(for: currentY)
+    keyboardFrameBottomInset = bottomInset
+    applyKeyboardBottomInset(
+      bottomInset,
+      animated: false,
+      keepAtBottom: false
+    )
+  }
+
+  private func endKeyboardPan() {
+    guard keyboardPanActivationY != nil else { return }
+
+    keyboardPanActivationY = nil
+    keyboardPanStartBottomInset = 0
+    keyboardPanIsTracking = false
+  }
+
+  private func keyboardPanBottomInset(for fingerY: CGFloat) -> CGFloat {
+    guard let activationY = keyboardPanActivationY else { return keyboardPanStartBottomInset }
+    let deltaY = max(0, fingerY - activationY)
+    return max(0, min(keyboardPanStartBottomInset, keyboardPanStartBottomInset - deltaY))
   }
 
   private var keyboardAccessoryHeight: CGFloat {
