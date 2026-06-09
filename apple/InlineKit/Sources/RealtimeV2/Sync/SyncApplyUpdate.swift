@@ -1,6 +1,6 @@
 import InlineProtocol
 
-public enum UpdateApplySource: Sendable {
+public enum UpdateApplySource: Sendable, Equatable {
   case realtime
   case syncCatchup
 }
