@@ -154,6 +154,80 @@ describe("getUpdates", () => {
     expect(result.updates.length).toBe(2)
   })
 
+  test("does not return a cursor behind startSeq", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Cursor Clamp", ["cursor-clamp@example.com"])
+    const user = users[0]
+    if (!user) throw new Error("User creation failed")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: {
+          chatId: 1n,
+        },
+      },
+    })
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 5n,
+      seqEnd: 0n,
+      totalLimit: 1000,
+      limit: 10,
+    }, { currentUserId: user.id } as any)
+
+    expect(Number(result.seq)).toBe(5)
+    expect(result.final).toBe(true)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.EMPTY)
+    expect(result.updates).toHaveLength(0)
+  })
+
+  test("trusts page cursor when one record is filtered but later updates inflate", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Filtered Cursor", ["filtered-cursor@example.com"])
+    const user = users[0]
+    if (!user) throw new Error("User creation failed")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "newMessage",
+        newMessage: {
+          chatId: 1n,
+          msgId: 1n,
+        },
+      },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 2,
+      payload: {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: {
+          chatId: 2n,
+        },
+      },
+    })
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 1000,
+      limit: 0,
+    }, { currentUserId: user.id } as any)
+
+    expect(result.seq).toBe(2n)
+    expect(result.final).toBe(true)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantDelete"])
+  })
+
   test("sanitizes public space member add updates for regular members", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Public Update Space", [
       "regular-public-updates@example.com",
@@ -239,7 +313,7 @@ describe("getUpdates", () => {
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
   })
 
-  test("does not advance seq when a required message cannot be inflated", async () => {
+  test("advances over missing newMessage targets with chatSkipPts", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Missing Message Update", ["missing@example.com"])
     const user = users[0]
     if (!user || !space) throw new Error("Fixture creation failed")
@@ -301,11 +375,10 @@ describe("getUpdates", () => {
       { currentUserId: user.id } as any,
     )
 
-    expect(result.updates).toHaveLength(0)
-    expect(result.seq).toBe(0n)
-    expect(result.final).toBe(false)
-    expect(result.resultType).toBe(GetUpdatesResult_ResultType.EMPTY)
-    expect(result.sidecars).toBeUndefined()
+    expect(result.seq).toBe(2n)
+    expect(result.final).toBe(true)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["chatSkipPts", "newMessage"])
   })
 
   test("advances over missing editMessage targets with chatSkipPts", async () => {
@@ -545,7 +618,7 @@ describe("getUpdates", () => {
     expect(result.sidecars?.dialogs.map((dialog) => dialog.chatId)).not.toContain(BigInt(parentChat.id))
   })
 
-  test("returns sidecars only for the delivered contiguous prefix", async () => {
+  test("returns sidecars only for the delivered page", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Prefix Sidecars", [
       "prefix-one@example.com",
       "prefix-two@example.com",
@@ -572,7 +645,7 @@ describe("getUpdates", () => {
       chatId: chat.id,
       messageId: 3,
       fromId: withheldSender.id,
-      text: "inflated but withheld behind missing seq 2",
+      text: "inflated but withheld behind page boundary",
     })
 
     await insertServerUpdate({
@@ -630,7 +703,7 @@ describe("getUpdates", () => {
         startSeq: 0n,
         seqEnd: 0n,
         totalLimit: 1000,
-        limit: 0,
+        limit: 1,
       },
       { currentUserId: viewer.id } as any,
     )
