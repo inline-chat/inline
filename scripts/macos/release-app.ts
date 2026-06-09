@@ -1221,7 +1221,10 @@ async function main() {
         ui.info(`  DMG_PATH=${ctx.dmgPath}`);
         ui.info(`  SPARKLE_DIR=${ctx.sparkleDir}`);
         ui.info(`  MACOS_RELEASE_ARCH=${macosReleaseArch}`);
+        ui.info("  ENABLE_CODE_COVERAGE=NO");
+        ui.info("  DEAD_CODE_STRIPPING=YES");
         ui.info(`  PAUSE_BEFORE_NOTARIZE=${ctx.pauseBeforeNotarize ? "1" : "0"}`);
+        ui.info("build-direct.sh strips the release executable before signing.");
         ui.info("build-direct.sh enforces signing/notarization env vars.");
       },
       run: async (ctx, ui) => {

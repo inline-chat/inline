@@ -54,6 +54,10 @@ if ! command -v lipo >/dev/null 2>&1; then
   echo "lipo is required" >&2
   exit 1
 fi
+if ! command -v xcrun >/dev/null 2>&1; then
+  echo "xcrun is required" >&2
+  exit 1
+fi
 
 if [[ ! -f "${ENTITLEMENTS_PATH}" ]]; then
   echo "Entitlements file not found: ${ENTITLEMENTS_PATH}" >&2
@@ -113,6 +117,9 @@ xcodebuild_args=(
   "OTHER_LDFLAGS=-framework Sparkle"
   "ARCHS=${MACOS_RELEASE_ARCH}"
   ONLY_ACTIVE_ARCH=NO
+  ENABLE_CODE_COVERAGE=NO
+  CLANG_COVERAGE_MAPPING=NO
+  DEAD_CODE_STRIPPING=YES
   "CODE_SIGN_ENTITLEMENTS=InlineMac/InlineMacDirect.entitlements"
   CODE_SIGNING_ALLOWED=NO
   CODE_SIGNING_REQUIRED=NO
@@ -202,6 +209,12 @@ if [[ ! -d "${SPARKLE_FRAMEWORK}" ]]; then
 fi
 macos_thin_bundle_to_arch "${APP_PATH}" "${MACOS_RELEASE_ARCH}"
 
+if [[ "${configuration}" == "Release" ]]; then
+  APP_EXECUTABLE="${APP_PATH}/Contents/MacOS/Inline"
+  macos_require_no_llvm_coverage "${APP_EXECUTABLE}"
+  macos_strip_binary_for_release "${APP_EXECUTABLE}"
+fi
+
 mkdir -p "${OUTPUT_DIR}"
 MACOS_CERTIFICATE_NAME="${MACOS_CERTIFICATE_NAME}" \
 MACOS_PROVISIONING_PROFILE_BASE64="${MACOS_PROVISIONING_PROFILE_BASE64}" \
@@ -235,9 +248,11 @@ if [[ -f "${DMG_PATH}" ]]; then
 fi
 
 if [[ -f "${CREATE_DMG_OUTPUT_DIR}/Inline.dmg" ]]; then
+  mkdir -p "$(dirname "${DMG_PATH}")"
   mv -f "${CREATE_DMG_OUTPUT_DIR}/Inline.dmg" "${DMG_PATH}"
 else
   DMG_SOURCE=$(ls -1 "${CREATE_DMG_OUTPUT_DIR}"/*.dmg | head -n 1)
+  mkdir -p "$(dirname "${DMG_PATH}")"
   mv -f "${DMG_SOURCE}" "${DMG_PATH}"
 fi
 
