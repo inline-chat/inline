@@ -30,24 +30,14 @@ public struct TransactionAddReaction: Transaction {
     Task(priority: .userInitiated) {
       do {
         try AppDatabase.shared.dbWriter.write { db in
-          let existing = try Reaction
-            .filter(
-              Column("messageId") == message.messageId && Column("chatId") == message
-                .chatId && Column("emoji") == emoji
-            ).fetchOne(db)
-          if existing != nil {
-            Log.shared.info("Reaction with this emoji already exists")
-            return
-          } else {
-            let reaction = Reaction(
-              messageId: message.messageId,
-              userId: userId,
-              emoji: emoji,
-              date: Date.now,
-              chatId: message.chatId
-            )
-            try reaction.save(db)
-          }
+          let reaction = Reaction(
+            messageId: message.messageId,
+            userId: userId,
+            emoji: emoji,
+            date: Date.now,
+            chatId: message.chatId
+          )
+          _ = try Reaction.save(db, reaction: reaction)
         }
       } catch {
         Log.shared.error("Failed to add reaction \(error)")
@@ -89,24 +79,14 @@ public struct TransactionAddReaction: Transaction {
     Log.shared.error("Failed to delete message", error: error)
     Task(priority: .userInitiated) {
       try? await AppDatabase.shared.dbWriter.write { db in
-        let existing = try Reaction
-          .filter(
-            Column("messageId") == message.messageId && Column("chatId") == message
-              .chatId && Column("emoji") == emoji
-          ).fetchOne(db)
-        if existing != nil {
-          Log.shared.info("Reaction with this emoji already exists")
-          return
-        } else {
-          let reaction = Reaction(
-            messageId: message.messageId,
-            userId: userId,
-            emoji: emoji,
-            date: Date.now,
-            chatId: message.chatId
-          )
-          try reaction.save(db)
-        }
+        let reaction = Reaction(
+          messageId: message.messageId,
+          userId: userId,
+          emoji: emoji,
+          date: Date.now,
+          chatId: message.chatId
+        )
+        _ = try Reaction.save(db, reaction: reaction)
       }
 
       Task(priority: .userInitiated) { @MainActor in
@@ -117,24 +97,14 @@ public struct TransactionAddReaction: Transaction {
 
   public func rollback() async {
     let _ = try? await AppDatabase.shared.dbWriter.write { db in
-      let existing = try Reaction
-        .filter(
-          Column("messageId") == message.messageId && Column("chatId") == message
-            .chatId && Column("emoji") == emoji
-        ).fetchOne(db)
-      if existing != nil {
-        Log.shared.info("Reaction with this emoji already exists")
-        return
-      } else {
-        let reaction = Reaction(
-          messageId: message.messageId,
-          userId: userId,
-          emoji: emoji,
-          date: Date.now,
-          chatId: message.chatId
-        )
-        try reaction.save(db)
-      }
+      let reaction = Reaction(
+        messageId: message.messageId,
+        userId: userId,
+        emoji: emoji,
+        date: Date.now,
+        chatId: message.chatId
+      )
+      _ = try Reaction.save(db, reaction: reaction)
     }
   }
 

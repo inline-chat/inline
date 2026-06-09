@@ -102,6 +102,12 @@ public class NotionTaskManager: @unchecked Sendable {
     }
   }
 
+  public func clearIntegrationAccess() {
+    accessQueue.async(flags: .barrier) {
+      self._hasIntegrationAccess = false
+    }
+  }
+
   /// Gets the current integration access status
   public var hasAccess: Bool {
     accessQueue.sync {

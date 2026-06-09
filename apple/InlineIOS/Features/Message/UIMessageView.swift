@@ -27,7 +27,7 @@ class UIMessageView: UIView {
   // MARK: - Properties
 
   let fullMessage: FullMessage
-  let spaceId: Int64
+  let spaceId: Int64?
   let displayMode: MessageDisplayMode
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
@@ -382,7 +382,7 @@ class UIMessageView: UIView {
     messageActionAnsweredCancellable?.cancel()
   }
 
-  init(fullMessage: FullMessage, spaceId: Int64, displayMode: MessageDisplayMode = .normal) {
+  init(fullMessage: FullMessage, spaceId: Int64?, displayMode: MessageDisplayMode = .normal) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
     self.displayMode = displayMode

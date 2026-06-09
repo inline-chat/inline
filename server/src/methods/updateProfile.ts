@@ -61,8 +61,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     }
     if ("timeZone" in input) {
       if (input.timeZone && !validateIanaTimezone(input.timeZone)) {
-        log.error("Invalid timeZone", { timeZone: input.timeZone })
-        throw new InlineError(InlineError.ApiError.INTERNAL)
+        throw new InlineError(InlineError.ApiError.TIMEZONE_INVALID)
       }
       if (input.timeZone) {
         log.debug("Setting timeZone", { timeZone: input.timeZone })
@@ -77,10 +76,10 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     }
     return { user: encodeUserInfo(user[0]) }
   } catch (error) {
-    log.error("Failed to set profile", error)
     if (error instanceof InlineError) {
       throw error
     }
+    log.error("Failed to set profile", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }

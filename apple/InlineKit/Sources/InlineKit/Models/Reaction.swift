@@ -101,12 +101,20 @@ public extension Reaction {
       : Date(timeIntervalSince1970: TimeInterval(from.date))
   }
 
+  @discardableResult
   static func save(
-    _ db: Database, protocolMessage: InlineProtocol.Reaction
+    _ db: Database,
+    protocolMessage: InlineProtocol.Reaction
 //    publishChanges: Bool = false,
 
-  ) throws {
+  ) throws -> Bool {
     let reaction = Reaction(from: protocolMessage)
+    return try save(db, reaction: reaction)
+  }
+
+  @discardableResult
+  static func save(_ db: Database, reaction: Reaction) throws -> Bool {
+    guard try canSave(db, reaction: reaction) else { return false }
 
     let existingReaction = try? Reaction
       .filter(Column("messageId") == reaction.messageId)
@@ -117,7 +125,23 @@ public extension Reaction {
 
     if existingReaction == nil {
       try reaction.save(db, onConflict: .replace)
+      return true
     }
+
+    return false
+  }
+
+  private static func canSave(_ db: Database, reaction: Reaction) throws -> Bool {
+    let hasMessage = try Message
+      .filter(Column("messageId") == reaction.messageId)
+      .filter(Column("chatId") == reaction.chatId)
+      .fetchCount(db) > 0
+
+    guard hasMessage else { return false }
+
+    return try User
+      .filter(Column("id") == reaction.userId)
+      .fetchCount(db) > 0
   }
 }
 

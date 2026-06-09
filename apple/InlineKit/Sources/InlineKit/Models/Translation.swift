@@ -81,8 +81,15 @@ public extension Translation {
     protocolTranslation: InlineProtocol.MessageTranslation,
     chatId: Int64,
     publishChanges: Bool = false
-  ) throws -> Translation {
+  ) throws -> Translation? {
     let translation = Translation(from: protocolTranslation, chatId: chatId)
+    let hasMessage = try Message
+      .filter(Column("messageId") == translation.messageId)
+      .filter(Column("chatId") == translation.chatId)
+      .fetchCount(db) > 0
+
+    guard hasMessage else { return nil }
+
     try translation.save(db, onConflict: .replace)
     return translation
   }

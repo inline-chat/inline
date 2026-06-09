@@ -53,24 +53,14 @@ public struct AddReactionTransaction: Transaction2 {
   public func optimistic() async {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        let existing = try Reaction
-          .filter(
-            Column("messageId") == messageId &&
-              Column("chatId") == chatId && Column("emoji") == emoji
-          ).fetchOne(db)
-
-        if existing != nil {
-          Log.shared.info("Reaction with this emoji already exists")
-        } else {
-          let reaction = Reaction(
-            messageId: messageId,
-            userId: userId,
-            emoji: emoji,
-            date: Date.now,
-            chatId: chatId
-          )
-          try reaction.save(db)
-        }
+        let reaction = Reaction(
+          messageId: messageId,
+          userId: userId,
+          emoji: emoji,
+          date: Date.now,
+          chatId: chatId
+        )
+        _ = try Reaction.save(db, reaction: reaction)
       }
 
       Task(priority: .userInitiated) { @MainActor in

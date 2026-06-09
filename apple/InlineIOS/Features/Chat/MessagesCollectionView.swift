@@ -15,13 +15,13 @@ import UIKit
 final class MessagesCollectionView: UICollectionView {
   private let peerId: Peer
   private var chatId: Int64
-  private var spaceId: Int64
+  private var spaceId: Int64?
   private var coordinator: Coordinator
   static var contextMenuOpen: Bool = false
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
 
-  init(peerId: Peer, chatId: Int64, spaceId: Int64) {
+  init(peerId: Peer, chatId: Int64, spaceId: Int64?) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
@@ -554,7 +554,7 @@ private extension MessagesCollectionView {
     private var hasAnalyzedInitialMessages = false
     private let peerId: Peer
     private let chatId: Int64
-    private let spaceId: Int64
+    private let spaceId: Int64?
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
@@ -710,7 +710,7 @@ private extension MessagesCollectionView {
       listSection(at: section)?.items.count ?? 0
     }
 
-    init(peerId: Peer, chatId: Int64, spaceId: Int64) {
+    init(peerId: Peer, chatId: Int64, spaceId: Int64?) {
       self.peerId = peerId
       self.chatId = chatId
       self.spaceId = spaceId
@@ -761,15 +761,16 @@ private extension MessagesCollectionView {
     private func setupNotionTaskManager() {
       NotionTaskManager.shared.delegate = self
       Task {
+        let scopedSpaceId = peerId.isThread ? spaceId.validSpaceId : nil
         do {
           let integrations = try await ApiClient.shared.getIntegrations(
             userId: Auth.shared.getCurrentUserId() ?? 0,
-            spaceId: peerId.isThread ? spaceId : nil
+            spaceId: scopedSpaceId
           )
 
           await NotionTaskManager.shared.checkIntegrationAccess(
             peerId: peerId,
-            spaceId: spaceId,
+            spaceId: scopedSpaceId,
             integrations: integrations
           )
 
@@ -782,7 +783,7 @@ private extension MessagesCollectionView {
             self.linearTeamId = integrations.linearTeamId
           }
         } catch {
-          await NotionTaskManager.shared.checkIntegrationAccess(peerId: peerId, spaceId: spaceId, integrations: nil)
+          NotionTaskManager.shared.clearIntegrationAccess()
           DispatchQueue.main.async { [weak self] in
             self?.hasLinearConnected = false
             self?.linearTeamId = nil
@@ -2312,7 +2313,7 @@ private extension MessagesCollectionView {
         image: UIImage(systemName: "circle.badge.plus")
       ) { _ in
         Task {
-          await NotionTaskManager.shared.handleWillDoAction(for: message, spaceId: self.spaceId)
+          await NotionTaskManager.shared.handleWillDoAction(for: message, spaceId: self.spaceId.validSpaceId)
         }
       }
     }
@@ -2348,7 +2349,7 @@ private extension MessagesCollectionView {
               )
               return
             }
-            await self.createLinearIssue(text: text, message: message, spaceId: nil)
+            await self.createLinearIssue(text: text, message: message, spaceId: self.spaceId.validSpaceId)
             return
           }
 
@@ -2655,5 +2656,12 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
         // No action needed for deletes
         break
     }
+  }
+}
+
+private extension Optional where Wrapped == Int64 {
+  var validSpaceId: Int64? {
+    guard let self, self > 0 else { return nil }
+    return self
   }
 }

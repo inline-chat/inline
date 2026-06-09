@@ -980,7 +980,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   public func getIntegrations(userId: Int64, spaceId: Int64? = nil) async throws -> GetIntegrations {
     var queryItems = [URLQueryItem(name: "userId", value: "\(userId)")]
-    if let spaceId {
+    if let spaceId, spaceId > 0 {
       queryItems.append(URLQueryItem(name: "spaceId", value: "\(spaceId)"))
     }
 

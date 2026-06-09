@@ -369,7 +369,7 @@ struct ChatView: View {
       ChatViewUIKit(
         peerId: peerId,
         chatId: chat.id,
-        spaceId: chat.spaceId ?? 0
+        spaceId: chat.spaceId
       )
       .edgesIgnoringSafeArea(.all)
     }

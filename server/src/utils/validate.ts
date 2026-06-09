@@ -53,18 +53,12 @@ export const validateIanaTimezone = (timezone: string): boolean => {
     return false
   }
 
-  if (timezone === "UTC" || timezone === "GMT") {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone })
     return true
+  } catch {
+    return false
   }
-
-  // Regex for most IANA time zone formats
-  const validRegex =
-    /^(Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific)\/([A-Za-z_]+)(\/[A-Za-z_]+)?$/
-
-  // Special regex for Etc timezones
-  const etcRegex = /^Etc\/(GMT[+-]\d{1,2}|UTC|UCT|Greenwich|Universal|Zulu)$/
-
-  return validRegex.test(timezone) || etcRegex.test(timezone)
 }
 
 export const isValidSpaceId = (spaceId: number | string | undefined | null): boolean => {
