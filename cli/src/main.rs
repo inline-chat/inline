@@ -1109,8 +1109,6 @@ enum NotificationModeArg {
     Mentions,
     #[value(name = "only-mentions", alias = "only_mentions")]
     OnlyMentions,
-    #[value(name = "important", alias = "important-only")]
-    ImportantOnly,
 }
 
 #[derive(Args)]
@@ -1119,7 +1117,7 @@ struct NotificationsSetArgs {
         long,
         value_name = "MODE",
         value_enum,
-        help = "Notification mode: all, none, mentions, only-mentions, important"
+        help = "Notification mode: all, none, mentions, only-mentions"
     )]
     mode: Option<NotificationModeArg>,
 
@@ -2898,10 +2896,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let notification_settings = proto::NotificationSettings {
                         mode: Some(values.mode as i32),
                         silent: Some(values.silent),
-                        zen_mode_requires_mention: Some(values.zen_requires_mention),
-                        zen_mode_uses_default_rules: Some(values.zen_uses_default_rules),
-                        zen_mode_custom_rules: Some(values.zen_custom_rules),
                         disable_dm_notifications: Some(values.disable_dm_notifications),
+                        ..Default::default()
                     };
                     let user_settings = proto::UserSettings {
                         notification_settings: Some(notification_settings),
@@ -3773,26 +3769,23 @@ async fn fetch_user_settings(
 struct NotificationSettingsValues {
     mode: proto::notification_settings::Mode,
     silent: bool,
-    zen_requires_mention: bool,
-    zen_uses_default_rules: bool,
-    zen_custom_rules: String,
     disable_dm_notifications: bool,
 }
 
 fn notification_settings_values(
     settings: Option<&proto::NotificationSettings>,
 ) -> NotificationSettingsValues {
-    let mut mode = match settings
+    let raw_mode = settings
         .and_then(|value| value.mode)
-        .and_then(|value| proto::notification_settings::Mode::try_from(value).ok())
-    {
+        .and_then(|value| proto::notification_settings::Mode::try_from(value).ok());
+    let mut mode = match raw_mode {
         Some(proto::notification_settings::Mode::All) => proto::notification_settings::Mode::All,
         Some(proto::notification_settings::Mode::None) => proto::notification_settings::Mode::None,
         Some(proto::notification_settings::Mode::Mentions) => {
             proto::notification_settings::Mode::Mentions
         }
         Some(proto::notification_settings::Mode::ImportantOnly) => {
-            proto::notification_settings::Mode::ImportantOnly
+            proto::notification_settings::Mode::Mentions
         }
         Some(proto::notification_settings::Mode::OnlyMentions) => {
             proto::notification_settings::Mode::OnlyMentions
@@ -3800,19 +3793,13 @@ fn notification_settings_values(
         _ => proto::notification_settings::Mode::All,
     };
     let silent = settings.and_then(|value| value.silent).unwrap_or(false);
-    let zen_requires_mention = settings
-        .and_then(|value| value.zen_mode_requires_mention)
-        .unwrap_or(true);
-    let zen_uses_default_rules = settings
-        .and_then(|value| value.zen_mode_uses_default_rules)
-        .unwrap_or(true);
-    let zen_custom_rules = settings
-        .and_then(|value| value.zen_mode_custom_rules.clone())
-        .unwrap_or_default();
     let mut disable_dm_notifications = settings
         .and_then(|value| value.disable_dm_notifications)
         .unwrap_or(false);
 
+    if raw_mode == Some(proto::notification_settings::Mode::ImportantOnly) {
+        disable_dm_notifications = false;
+    }
     if mode == proto::notification_settings::Mode::Mentions && disable_dm_notifications {
         mode = proto::notification_settings::Mode::OnlyMentions;
     }
@@ -3823,9 +3810,6 @@ fn notification_settings_values(
     NotificationSettingsValues {
         mode,
         silent,
-        zen_requires_mention,
-        zen_uses_default_rules,
-        zen_custom_rules,
         disable_dm_notifications,
     }
 }
@@ -3838,9 +3822,6 @@ fn notification_mode_from_arg(
         NotificationModeArg::None => proto::notification_settings::Mode::None,
         NotificationModeArg::Mentions => proto::notification_settings::Mode::Mentions,
         NotificationModeArg::OnlyMentions => proto::notification_settings::Mode::OnlyMentions,
-        NotificationModeArg::ImportantOnly => {
-            proto::notification_settings::Mode::ImportantOnly
-        }
     }
 }
 
@@ -3850,7 +3831,7 @@ fn notification_mode_label(mode: proto::notification_settings::Mode) -> &'static
         proto::notification_settings::Mode::None => "none",
         proto::notification_settings::Mode::Mentions => "mentions",
         proto::notification_settings::Mode::OnlyMentions => "only-mentions",
-        proto::notification_settings::Mode::ImportantOnly => "important",
+        proto::notification_settings::Mode::ImportantOnly => "mentions",
         _ => "all",
     }
 }
@@ -3866,19 +3847,6 @@ fn print_notification_settings(settings: Option<&proto::UserSettings>) {
         "  disable dm notifications: {}",
         if values.disable_dm_notifications { "yes" } else { "no" }
     );
-    println!(
-        "  zen requires mention: {}",
-        if values.zen_requires_mention { "yes" } else { "no" }
-    );
-    println!(
-        "  zen uses default rules: {}",
-        if values.zen_uses_default_rules { "yes" } else { "no" }
-    );
-    if values.zen_custom_rules.is_empty() {
-        println!("  zen custom rules: -");
-    } else {
-        println!("  zen custom rules: {}", values.zen_custom_rules);
-    }
 }
 
 fn apply_chat_list_limits(
