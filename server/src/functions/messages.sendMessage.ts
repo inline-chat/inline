@@ -365,7 +365,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   // send notification
-  sendNotifications({
+  void sendNotifications({
     updateGroup,
     messageInfo,
     currentUserId,
@@ -374,6 +374,13 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     unencryptedText: text,
     inputPeer,
     sendMode: input.sendMode,
+  }).catch((error) => {
+    log.error("Failed to send message notifications", {
+      error,
+      chatId,
+      messageId: newMessage.messageId,
+      currentUserId,
+    })
   })
 
   maybeScheduleThreadTitleGeneration({
@@ -924,29 +931,37 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads
-  for (let userId of updateGroup.userIds) {
-    if (userId === currentUserId) {
-      // Don't send push notifications to yourself.
-      continue
-    }
-
-    sendNotificationToUser({
-      userId,
-      messageInfo,
-      messageText,
-      messageEntities,
-      replyMentionUserIds,
-      chat,
-      isNudge,
-      isUrgentNudge,
-      updateGroup,
-      inputPeer,
-      currentUserId,
-      senderNameInfo,
-      senderProfilePhotoUrl,
-      dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
-    })
-  }
+  await Promise.all(
+    updateGroup.userIds
+      .filter((userId) => userId !== currentUserId)
+      .map(async (userId) => {
+        try {
+          await sendNotificationToUser({
+            userId,
+            messageInfo,
+            messageText,
+            messageEntities,
+            replyMentionUserIds,
+            chat,
+            isNudge,
+            isUrgentNudge,
+            updateGroup,
+            inputPeer,
+            currentUserId,
+            senderNameInfo,
+            senderProfilePhotoUrl,
+            dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
+          })
+        } catch (error) {
+          log.error("Failed to send message notification to user", {
+            error,
+            userId,
+            chatId: chat.id,
+            messageId: messageInfo.message.messageId,
+          })
+        }
+      }),
+  )
 }
 
 /** Send push notifications for this message */
@@ -1078,7 +1093,7 @@ async function sendNotificationToUser({
   })
 
   if (!suppressionDecision.suppress) {
-    Notifications.sendToUser({
+    await Notifications.sendToUser({
       userId,
       payload: {
         kind: "send_message",
