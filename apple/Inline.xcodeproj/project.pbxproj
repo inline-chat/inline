@@ -48,12 +48,12 @@
 		CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FEF2E493C8E00F7BFFE /* Translation */; };
 		CD735FF22E493C9400F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FF12E493C9400F7BFFE /* Translation */; };
 		CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */ = {isa = PBXBuildFile; productRef = CD7C6F122E5847CD00C89032 /* RealtimeV2 */; };
-		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
+		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 /* End PBXBuildFile section */
 
@@ -1845,10 +1845,6 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = RealtimeV2;
 		};
-		D4ACD0022F1B000000000001 /* MacDevtools */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = MacDevtools;
-		};
 		CDB123D42D3E8066001AFC1A /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */;
@@ -1872,6 +1868,10 @@
 		D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIOSUI;
+		};
+		D4ACD0022F1B000000000001 /* MacDevtools */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MacDevtools;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
