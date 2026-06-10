@@ -8,6 +8,8 @@ public class ChatContainerView: UIView {
   let spaceId: Int64?
   private var peerUser: User?
 
+  private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
+
   private lazy var keyboardDismissTapGestureRecognizer: UITapGestureRecognizer = {
     let gesture = UITapGestureRecognizer(target: self, action: #selector(handleTapOutsideCompose))
     gesture.cancelsTouchesInView = false
@@ -98,16 +100,10 @@ public class ChatContainerView: UIView {
   let scrollButton = BlurCircleButton()
 
   private var composeContainerViewBottomConstraint: NSLayoutConstraint?
-  private var composeViewBottomConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
-  private var keyboardFrameBottomInset: CGFloat = 0
-  private var keyboardPanActivationY: CGFloat?
-  private var keyboardPanStartBottomInset: CGFloat = 0
-  private var keyboardPanIsTracking = false
 
   deinit {
-    NotificationCenter.default.removeObserver(self)
-    messagesCollectionView.panGestureRecognizer.removeTarget(self, action: #selector(handleMessagesPan(_:)))
+    edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
   init(peerId: Peer, chatId: Int64?, spaceId: Int64?, peerUser: User?) {
@@ -119,6 +115,7 @@ public class ChatContainerView: UIView {
     super.init(frame: .zero)
     setupViews()
     setupObservers()
+    attachEdgePanHandlerIfNeeded()
   }
 
   @available(*, unavailable)
@@ -128,6 +125,7 @@ public class ChatContainerView: UIView {
 
   override public func didMoveToWindow() {
     super.didMoveToWindow()
+    attachEdgePanHandlerIfNeeded()
   }
 
   func setPeerUser(_ user: User?) {
@@ -142,7 +140,7 @@ public class ChatContainerView: UIView {
     backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
-    addGestureRecognizer(keyboardDismissTapGestureRecognizer)
+    messagesCollectionView.addGestureRecognizer(keyboardDismissTapGestureRecognizer)
     addSubview(pinnedHeaderView)
     addSubview(composeBlurBackgroundView)
     addSubview(composeContainerView)
@@ -151,15 +149,7 @@ public class ChatContainerView: UIView {
     addSubview(composeView)
     addSubview(scrollButton)
     scrollButton.isHidden = true
-    messagesCollectionView.panGestureRecognizer.addTarget(self, action: #selector(handleMessagesPan(_:)))
-    updateKeyboardAccessoryHeight(composeHeight: ComposeView.minHeight)
-    let composeContainerBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
-    let composeBottomConstraint = composeView.bottomAnchor.constraint(
-      equalTo: bottomAnchor,
-      constant: -ComposeView.textViewVerticalMargin
-    )
-    composeContainerViewBottomConstraint = composeContainerBottomConstraint
-    composeViewBottomConstraint = composeBottomConstraint
+    composeContainerViewBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
@@ -194,7 +184,7 @@ public class ChatContainerView: UIView {
           equalTo: composeView.topAnchor,
           constant: -ComposeView.textViewVerticalMargin
         ),
-        composeContainerBottomConstraint,
+        composeContainerViewBottomConstraint!,
 
         mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeView.topAnchor),
         mentionCompletionViewWrapper.leadingAnchor.constraint(
@@ -209,7 +199,9 @@ public class ChatContainerView: UIView {
 
         composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
         composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
-        composeBottomConstraint,
+        composeView.bottomAnchor.constraint(
+          equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
+        ),
         borderView.leadingAnchor.constraint(equalTo: composeContainerView.leadingAnchor),
         borderView.trailingAnchor.constraint(equalTo: composeContainerView.trailingAnchor),
         borderView.topAnchor.constraint(equalTo: composeContainerView.topAnchor),
@@ -224,8 +216,15 @@ public class ChatContainerView: UIView {
   private func setupObservers() {
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(keyboardWillChangeFrame),
-      name: UIResponder.keyboardWillChangeFrameNotification,
+      selector: #selector(keyboardWillShow),
+      name: UIResponder.keyboardWillShowNotification,
+      object: nil
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(keyboardWillHide),
+      name: UIResponder.keyboardWillHideNotification,
       object: nil
     )
     NotificationCenter.default.addObserver(
@@ -273,169 +272,43 @@ public class ChatContainerView: UIView {
     scrollButton.setHasUnread(hasUnread)
   }
 
-  @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+  @objc private func keyboardWillShow(_ notification: Notification) {
     guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
           let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
-      KeyboardTrace.trace(
-        "ChatContainerView",
-        "keyboardFrame.missingPayload",
-        view: self,
-        notification: notification,
-        details: keyboardTraceSummary
-      )
       return
     }
-
-    let oldBottomInset = keyboardFrameBottomInset
-    let overlap = keyboardOverlap(with: keyboardFrame)
-    let bottomInset = keyboardBottomInset(for: overlap)
-    let isOpening = bottomInset > oldBottomInset + 0.5
-    keyboardFrameBottomInset = bottomInset
 
     UIView.animate(
       withDuration: duration,
       delay: 0,
-      options: keyboardAnimationOptions(from: notification),
-      animations: {
-        self.applyKeyboardBottomInset(
-          bottomInset,
-          animated: duration > 0,
-          keepAtBottom: isOpening
-        )
-        KeyboardTrace.trace(
-          "ChatContainerView",
-          "keyboardFrame.apply",
-          view: self,
-          notification: notification,
-          details: "bottomInset=\(KeyboardTrace.format(bottomInset)) accessoryHeight=\(KeyboardTrace.format(self.keyboardAccessoryHeight)) \(self.keyboardTraceSummary)"
-        )
-      }
-    )
-  }
-
-  private func keyboardAnimationOptions(from notification: Notification) -> UIView.AnimationOptions {
-    var options: UIView.AnimationOptions = [.beginFromCurrentState, .allowUserInteraction]
-    if let curve = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber {
-      options.insert(UIView.AnimationOptions(rawValue: UInt(truncating: curve) << 16))
+      options: .curveEaseOut
+    ) {
+      self.composeContainerViewBottomConstraint?.isActive = false
+      self.composeContainerViewBottomConstraint = self.composeContainerView.bottomAnchor
+        .constraint(equalTo: self.keyboardLayoutGuide.topAnchor)
+      self.composeContainerViewBottomConstraint?.isActive = true
+      self.layoutIfNeeded()
     }
-    return options
   }
 
-  private func keyboardOverlap(with keyboardFrame: CGRect) -> CGFloat {
-    let keyboardFrameInView = convert(keyboardFrame, from: nil)
-    return max(0, bounds.maxY - keyboardFrameInView.minY)
-  }
-
-  private func keyboardBottomInset(for overlap: CGFloat) -> CGFloat {
-    let accessoryHeight = composeView.textView.isKeyboardAccessoryVisible ? keyboardAccessoryHeight : 0
-    return max(0, overlap - accessoryHeight)
-  }
-
-  @discardableResult
-  private func setComposeBottomInset(_ bottomInset: CGFloat) -> Bool {
-    let composeContainerConstant = -bottomInset
-    let composeViewConstant = -(bottomInset + ComposeView.textViewVerticalMargin)
-    guard composeContainerViewBottomConstraint?.constant != composeContainerConstant ||
-          composeViewBottomConstraint?.constant != composeViewConstant
+  @objc private func keyboardWillHide(_ notification: Notification) {
+    guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
-      return false
+      return
     }
 
-    composeContainerViewBottomConstraint?.constant = composeContainerConstant
-    composeViewBottomConstraint?.constant = composeViewConstant
-    return true
-  }
-
-  private func applyKeyboardBottomInset(
-    _ bottomInset: CGFloat,
-    animated: Bool,
-    keepAtBottom: Bool
-  ) {
-    setComposeBottomInset(bottomInset)
-    messagesCollectionView.updateKeyboardInset(
-      bottomInset,
-      animated: animated,
-      keepAtBottom: keepAtBottom
-    )
-    layoutIfNeeded()
-  }
-
-  @objc private func handleMessagesPan(_ gesture: UIPanGestureRecognizer) {
-    switch gesture.state {
-    case .began:
-      beginKeyboardPan(gesture)
-
-    case .changed:
-      updateKeyboardPan(gesture)
-
-    case .ended, .cancelled, .failed:
-      endKeyboardPan()
-
-    default:
-      break
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: .curveEaseIn
+    ) {
+      self.composeContainerViewBottomConstraint?.isActive = false
+      self.composeContainerViewBottomConstraint = self.composeContainerView.bottomAnchor
+        .constraint(equalTo: self.bottomAnchor)
+      self.composeContainerViewBottomConstraint?.isActive = true
+      self.layoutIfNeeded()
     }
-  }
-
-  private func beginKeyboardPan(_ gesture: UIPanGestureRecognizer) {
-    guard composeView.textView.isFirstResponder || keyboardFrameBottomInset > 0 else { return }
-
-    let currentInset = max(keyboardFrameBottomInset, -(composeContainerViewBottomConstraint?.constant ?? 0))
-    guard currentInset > 0 else { return }
-
-    let inputTopY = bounds.maxY - currentInset - keyboardAccessoryHeight
-    let startY = gesture.location(in: self).y
-    let catchLimitY = inputTopY + keyboardAccessoryHeight
-    guard startY < catchLimitY else { return }
-
-    keyboardPanActivationY = max(startY, inputTopY)
-    keyboardPanStartBottomInset = currentInset
-  }
-
-  private func updateKeyboardPan(_ gesture: UIPanGestureRecognizer) {
-    guard let activationY = keyboardPanActivationY else { return }
-
-    let currentY = gesture.location(in: self).y
-    guard keyboardPanIsTracking || currentY > activationY + 3 else { return }
-
-    if !keyboardPanIsTracking {
-      keyboardPanIsTracking = true
-    }
-
-    let bottomInset = keyboardPanBottomInset(for: currentY)
-    keyboardFrameBottomInset = bottomInset
-    applyKeyboardBottomInset(
-      bottomInset,
-      animated: false,
-      keepAtBottom: false
-    )
-  }
-
-  private func endKeyboardPan() {
-    guard keyboardPanActivationY != nil else { return }
-
-    keyboardPanActivationY = nil
-    keyboardPanStartBottomInset = 0
-    keyboardPanIsTracking = false
-  }
-
-  private func keyboardPanBottomInset(for fingerY: CGFloat) -> CGFloat {
-    guard let activationY = keyboardPanActivationY else { return keyboardPanStartBottomInset }
-    let deltaY = max(0, fingerY - activationY)
-    return max(0, min(keyboardPanStartBottomInset, keyboardPanStartBottomInset - deltaY))
-  }
-
-  private var keyboardAccessoryHeight: CGFloat {
-    composeHeightWithMargins(composeView.composeHeightConstraint?.constant ?? ComposeView.minHeight)
-  }
-
-  private func updateKeyboardAccessoryHeight(composeHeight: CGFloat) {
-    let height = composeHeightWithMargins(composeHeight)
-    composeView.textView.updateKeyboardAccessoryHeight(height)
-  }
-
-  private func composeHeightWithMargins(_ composeHeight: CGFloat) -> CGFloat {
-    composeHeight + ComposeView.textViewVerticalMargin * 2
   }
 
   private func addMentionCompletionView() {
@@ -523,7 +396,6 @@ public class ChatContainerView: UIView {
   }
 
   private func handleComposeViewHeightChange(_ newHeight: CGFloat) {
-    updateKeyboardAccessoryHeight(composeHeight: newHeight)
     messagesCollectionView.updateComposeInset(composeHeight: newHeight)
 
     setNeedsLayout()
@@ -561,50 +433,61 @@ public class ChatContainerView: UIView {
     }
   }
 
+  private func attachEdgePanHandlerIfNeeded() {
+    guard edgePanGestureRecognizer == nil else { return }
+
+    // SwiftUI NavigationStack still hosts inside a UINavigationController; grab its back-swipe recognizer.
+    guard let edgePan = findViewController()?.navigationController?.interactivePopGestureRecognizer
+      as? UIScreenEdgePanGestureRecognizer
+    else { return }
+
+    edgePan.addTarget(self, action: #selector(handleEdgePan(_:)))
+    edgePanGestureRecognizer = edgePan
+  }
+
+  @objc private func handleEdgePan(_ gesture: UIGestureRecognizer) {
+    // Dismiss keyboard as soon as back-swipe begins and guard against auto-refocus after cancel.
+    switch gesture.state {
+    case .began:
+      composeView.textView.isEditable = false
+      composeView.textView.resignFirstResponder()
+
+    case .ended, .cancelled, .failed:
+      // Briefly disable editing so the system doesn't restore the first responder on cancellation.
+      // Important note: Less than 0.3s would not work
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        guard let self else { return }
+        composeView.textView.isEditable = true
+      }
+
+    default:
+      break
+    }
+  }
+
   @objc private func handleTapOutsideCompose() {
     guard composeView.textView.isFirstResponder else { return }
-    KeyboardTrace.trace("ChatContainerView", "tapOutsideCompose", details: keyboardTraceSummary)
     composeView.textView.resignFirstResponder()
   }
 
-  private var keyboardTraceSummary: String {
-    [
-      "composeFrame=\(KeyboardTrace.rect(composeView.frame))",
-      "composeContainerFrame=\(KeyboardTrace.rect(composeContainerView.frame))",
-      "keyboardGuide=\(KeyboardTrace.rect(keyboardLayoutGuide.layoutFrame))",
-      "keyboardAccessoryHeight=\(KeyboardTrace.format(keyboardAccessoryHeight))",
-      "keyboardAccessoryVisible=\(composeView.textView.isKeyboardAccessoryVisible)",
-      "composeContainerBottomConstraint=\(KeyboardTrace.constraint(composeContainerViewBottomConstraint))",
-      "composeViewBottomConstraint=\(KeyboardTrace.constraint(composeViewBottomConstraint))",
-      "composeHeightConstraint=\(KeyboardTrace.format(composeView.composeHeightConstraint?.constant ?? 0))",
-      KeyboardTrace.textViewState(composeView.textView),
-    ].joined(separator: " ")
+  private func findViewController() -> UIViewController? {
+    var responder: UIResponder? = self
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        return viewController
+      }
+      responder = nextResponder
+    }
+    return nil
   }
-
 }
 
 extension ChatContainerView: UIGestureRecognizerDelegate {
-  public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-    guard gestureRecognizer === keyboardDismissTapGestureRecognizer else { return true }
-    guard composeView.textView.isFirstResponder else { return false }
-    guard let touchedView = touch.view else { return true }
-
-    if touchedView.isDescendant(of: composeView) ||
-      touchedView.isDescendant(of: mentionCompletionViewWrapper) ||
-      touchedView.isDescendant(of: scrollButton)
-    {
-      return false
-    }
-
-    return true
-  }
-
   public func gestureRecognizer(
     _ gestureRecognizer: UIGestureRecognizer,
-    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
   ) -> Bool {
-    gestureRecognizer === keyboardDismissTapGestureRecognizer ||
-      otherGestureRecognizer === keyboardDismissTapGestureRecognizer
+    gestureRecognizer === keyboardDismissTapGestureRecognizer
   }
 }
 

@@ -17,7 +17,7 @@ Current touched areas:
 
 - `ChatContainerView` is the single owner of keyboard frame notifications.
 - `MessagesCollectionView` no longer observes keyboard show/hide directly.
-- A minimal collection-view pan bridge is active so compose follows interactive dismiss.
+- No custom collection-view pan bridge is active for keyboard movement.
 - No keyboard-path `contentOffset` compensation should be added without strong device evidence.
 - No forced first-responder/editability hacks should be added for swipe-back or interactive dismiss unless they are proven necessary.
 - `KeyboardTrace` exists for debug investigation and is guarded to no-op outside `DEBUG`.
@@ -82,6 +82,5 @@ Important methods to review:
 - Do not add release logging.
 - Do not use `UIScreen.main` / global screen assumptions for geometry.
 - Do not make `MessagesCollectionView` and `ChatContainerView` both own keyboard state.
-- Do not let the pan bridge mutate scroll offset, force dismissal, or suppress UIKit keyboard notifications.
 - Do not add a fix that only works on one iPhone size without checking safe-area and accessory geometry.
 - Do not run device/build unless explicitly requested.
