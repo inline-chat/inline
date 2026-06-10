@@ -404,8 +404,8 @@ private struct ParticipantsButton: View {
   }
 
   private var buttonWidth: CGFloat {
-    let count = visibleParticipants.count
-    let width = CGFloat(count) * 24 - CGFloat(max(0, count - 1)) * 6 + 8
+    let count = self.visibleParticipants.count == 3 ? 4 : self.visibleParticipants.count
+    let width = CGFloat(count) * 24 - CGFloat(max(0, count - 1)) * 6
     return max(32, width)
   }
 
@@ -415,7 +415,7 @@ private struct ParticipantsButton: View {
         .frame(width: buttonWidth)
         .opacity(0)
         .overlay {
-          ParticipantAvatarStack(participants: visibleParticipants)
+          ParticipantAvatarStack(participants: self.participants)
         }
     }
   }
