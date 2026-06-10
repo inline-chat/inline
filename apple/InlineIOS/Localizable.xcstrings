@@ -19,6 +19,9 @@
     "@mo" : {
 
     },
+    "/" : {
+
+    },
     "#" : {
 
     },
@@ -188,6 +191,9 @@
 
     },
     "Are you sure you want to remove %@ from the chat?" : {
+
+    },
+    "Auto-Download" : {
 
     },
     "Bucket fetch failures" : {
@@ -878,9 +884,6 @@
     "Open links in app" : {
 
     },
-    "Open parent chat %@" : {
-
-    },
     "Options" : {
 
     },
@@ -970,6 +973,9 @@
 
     },
     "Saving..." : {
+
+    },
+    "Scenarios" : {
 
     },
     "Search countries..." : {
@@ -1100,7 +1106,7 @@
     "Sync" : {
 
     },
-    "Sync Engine Stats" : {
+    "Sync Engine" : {
 
     },
     "The document is not available for preview. Please try downloading it again." : {
@@ -1109,10 +1115,10 @@
     "Themes" : {
 
     },
-    "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
+    "This will clear all shared data used by the share extension. The data will be regenerated when needed." : {
 
     },
-    "This will clear all shared data used by the share extension. The data will be regenerated when needed." : {
+    "This will clear locally cached media and files. Downloaded content will need to be re-downloaded." : {
 
     },
     "Type" : {
@@ -1134,9 +1140,6 @@
 
     },
     "Unpin" : {
-
-    },
-    "Unsupported message" : {
 
     },
     "Use Global follows your app-wide notification settings." : {
