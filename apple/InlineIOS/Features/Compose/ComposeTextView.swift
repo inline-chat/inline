@@ -9,9 +9,19 @@ import UniformTypeIdentifiers
 class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
   weak var composeView: ComposeView?
+  private var trackingAccessoryView: UIView?
   private var processedRanges = Set<String>()
   private var recentlySentImageHashes = Set<Int>()
   private let processingLock = NSLock()
+
+  override var inputAccessoryView: UIView? {
+    get {
+      trackingAccessoryView
+    }
+    set {
+      trackingAccessoryView = newValue
+    }
+  }
 
   var placeholderText: String = "Message" {
     didSet {
@@ -36,6 +46,13 @@ class ComposeTextView: UITextView {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+  }
+
+  func setKeyboardTrackingAccessoryView(_ view: UIView?) {
+    trackingAccessoryView = view
+    if isFirstResponder {
+      reloadInputViews()
+    }
   }
 
   private func setupTextView() {
