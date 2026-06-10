@@ -99,10 +99,26 @@ public class ChatContainerView: UIView {
 
   let scrollButton = BlurCircleButton()
 
+  private var usesIOS27KeyboardWorkaround: Bool {
+    if #available(iOS 27.0, *) {
+      return true
+    }
+    return false
+  }
+
+  private lazy var keyboardTrackingAccessoryView: KeyboardTrackingAccessoryView = {
+    let view = KeyboardTrackingAccessoryView()
+    view.onFrameChange = { [weak self] view in
+      self?.updateComposeForKeyboardAccessory(view)
+    }
+    return view
+  }()
+
   private var composeContainerViewBottomConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
 
   deinit {
+    NotificationCenter.default.removeObserver(self)
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
@@ -148,15 +164,23 @@ public class ChatContainerView: UIView {
     addSubview(mentionCompletionViewWrapper)
     addSubview(composeView)
     addSubview(scrollButton)
+
+    if usesIOS27KeyboardWorkaround {
+      composeView.textView.setKeyboardTrackingAccessoryView(keyboardTrackingAccessoryView)
+    } else {
+      keyboardLayoutGuide.followsUndockedKeyboard = true
+    }
+
     scrollButton.isHidden = true
     composeContainerViewBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
-
-    keyboardLayoutGuide.followsUndockedKeyboard = true
 
     // initialize mention completion height constraint
     mentionCompletionHeightConstraint = mentionCompletionViewWrapper.heightAnchor
       .constraint(equalToConstant: 0)
     pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: 0)
+    let composeBottomAnchor = usesIOS27KeyboardWorkaround
+      ? composeContainerView.bottomAnchor
+      : keyboardLayoutGuide.topAnchor
 
     NSLayoutConstraint.activate(
       [
@@ -200,7 +224,8 @@ public class ChatContainerView: UIView {
         composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
         composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
         composeView.bottomAnchor.constraint(
-          equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
+          equalTo: composeBottomAnchor,
+          constant: -ComposeView.textViewVerticalMargin
         ),
         borderView.leadingAnchor.constraint(equalTo: composeContainerView.leadingAnchor),
         borderView.trailingAnchor.constraint(equalTo: composeContainerView.trailingAnchor),
@@ -214,19 +239,34 @@ public class ChatContainerView: UIView {
   }
 
   private func setupObservers() {
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(keyboardWillShow),
-      name: UIResponder.keyboardWillShowNotification,
-      object: nil
-    )
+    if usesIOS27KeyboardWorkaround {
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(keyboardFrameWillChange),
+        name: UIResponder.keyboardWillChangeFrameNotification,
+        object: nil
+      )
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(keyboardFrameDidChange),
+        name: UIResponder.keyboardDidChangeFrameNotification,
+        object: nil
+      )
+    } else {
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(keyboardWillShow),
+        name: UIResponder.keyboardWillShowNotification,
+        object: nil
+      )
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(keyboardWillHide),
+        name: UIResponder.keyboardWillHideNotification,
+        object: nil
+      )
+    }
 
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(keyboardWillHide),
-      name: UIResponder.keyboardWillHideNotification,
-      object: nil
-    )
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleScrollToBottomChanged),
@@ -273,7 +313,7 @@ public class ChatContainerView: UIView {
   }
 
   @objc private func keyboardWillShow(_ notification: Notification) {
-    guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+    guard !usesIOS27KeyboardWorkaround,
           let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
       return
@@ -284,16 +324,14 @@ public class ChatContainerView: UIView {
       delay: 0,
       options: .curveEaseOut
     ) {
-      self.composeContainerViewBottomConstraint?.isActive = false
-      self.composeContainerViewBottomConstraint = self.composeContainerView.bottomAnchor
-        .constraint(equalTo: self.keyboardLayoutGuide.topAnchor)
-      self.composeContainerViewBottomConstraint?.isActive = true
+      self.setComposeContainerBottom(to: self.keyboardLayoutGuide.topAnchor)
       self.layoutIfNeeded()
     }
   }
 
   @objc private func keyboardWillHide(_ notification: Notification) {
-    guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
+    guard !usesIOS27KeyboardWorkaround,
+          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
     else {
       return
     }
@@ -303,12 +341,98 @@ public class ChatContainerView: UIView {
       delay: 0,
       options: .curveEaseIn
     ) {
-      self.composeContainerViewBottomConstraint?.isActive = false
-      self.composeContainerViewBottomConstraint = self.composeContainerView.bottomAnchor
-        .constraint(equalTo: self.bottomAnchor)
-      self.composeContainerViewBottomConstraint?.isActive = true
+      self.setComposeContainerBottom(to: self.bottomAnchor)
       self.layoutIfNeeded()
     }
+  }
+
+  @objc private func keyboardFrameWillChange(_ notification: Notification) {
+    updateComposeForKeyboardFrame(notification, animated: true)
+  }
+
+  @objc private func keyboardFrameDidChange(_ notification: Notification) {
+    updateComposeForKeyboardFrame(notification, animated: false)
+  }
+
+  private func updateComposeForKeyboardFrame(_ notification: Notification, animated: Bool) {
+    guard usesIOS27KeyboardWorkaround,
+          window != nil,
+          let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+    else {
+      return
+    }
+
+    if composeView.textView.isFirstResponder {
+      keyboardTrackingAccessoryView.resumeTracking()
+    }
+
+    let inset = keyboardOverlap(with: keyboardFrame)
+    let update = {
+      guard self.setComposeKeyboardInset(inset) else { return }
+      self.layoutIfNeeded()
+    }
+
+    guard animated,
+          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+          duration > 0
+    else {
+      UIView.performWithoutAnimation(update)
+      return
+    }
+
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: keyboardAnimationOptions(from: notification),
+      animations: update
+    )
+  }
+
+  private func updateComposeForKeyboardAccessory(_ accessoryView: KeyboardTrackingAccessoryView) {
+    guard usesIOS27KeyboardWorkaround,
+          window != nil,
+          composeView.textView.isFirstResponder,
+          let keyboardTop = accessoryView.keyboardTop(in: self)
+    else {
+      return
+    }
+
+    let inset = normalizedKeyboardInset(fromKeyboardTop: keyboardTop)
+    UIView.performWithoutAnimation {
+      guard self.setComposeKeyboardInset(inset) else { return }
+      self.layoutIfNeeded()
+    }
+  }
+
+  private func keyboardOverlap(with keyboardFrame: CGRect) -> CGFloat {
+    let keyboardFrameInView = convert(keyboardFrame, from: nil)
+    return normalizedKeyboardInset(fromKeyboardTop: keyboardFrameInView.minY)
+  }
+
+  private func normalizedKeyboardInset(fromKeyboardTop keyboardTop: CGFloat) -> CGFloat {
+    min(bounds.height, max(0, bounds.maxY - keyboardTop))
+  }
+
+  @discardableResult
+  private func setComposeKeyboardInset(_ inset: CGFloat) -> Bool {
+    let constant = -inset
+    guard abs((composeContainerViewBottomConstraint?.constant ?? 0) - constant) > 0.5 else { return false }
+    composeContainerViewBottomConstraint?.constant = constant
+    return true
+  }
+
+  private func setComposeContainerBottom(to anchor: NSLayoutYAxisAnchor) {
+    composeContainerViewBottomConstraint?.isActive = false
+    composeContainerViewBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: anchor)
+    composeContainerViewBottomConstraint?.isActive = true
+  }
+
+  private func keyboardAnimationOptions(from notification: Notification) -> UIView.AnimationOptions {
+    var options: UIView.AnimationOptions = [.beginFromCurrentState, .allowUserInteraction]
+    if let curve = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber {
+      options.insert(UIView.AnimationOptions(rawValue: UInt(truncating: curve) << 16))
+    }
+    return options
   }
 
   private func addMentionCompletionView() {
@@ -479,6 +603,95 @@ public class ChatContainerView: UIView {
       responder = nextResponder
     }
     return nil
+  }
+}
+
+private final class KeyboardTrackingAccessoryView: UIView {
+  var onFrameChange: ((KeyboardTrackingAccessoryView) -> Void)?
+
+  private var displayLink: CADisplayLink?
+  private var lastScreenMaxY: CGFloat?
+
+  override init(frame: CGRect) {
+    super.init(frame: CGRect(origin: frame.origin, size: CGSize(width: frame.width, height: 1)))
+    backgroundColor = .clear
+    isUserInteractionEnabled = false
+    autoresizingMask = [.flexibleWidth]
+  }
+
+  convenience init() {
+    self.init(frame: CGRect(x: 0, y: 0, width: 0, height: 1))
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  deinit {
+    stopDisplayLink()
+  }
+
+  override var intrinsicContentSize: CGSize {
+    CGSize(width: UIView.noIntrinsicMetric, height: 1)
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+
+    if window == nil {
+      stopDisplayLink()
+      lastScreenMaxY = nil
+    } else {
+      resumeTracking()
+    }
+  }
+
+  func resumeTracking() {
+    guard window != nil else { return }
+    startDisplayLink()
+    _ = notifyIfNeeded(force: true)
+  }
+
+  func keyboardTop(in ownerView: UIView) -> CGFloat? {
+    guard let screenFrame = currentScreenFrame() else { return nil }
+    let frameInOwner = ownerView.convert(screenFrame, from: nil)
+    return frameInOwner.maxY
+  }
+
+  private func startDisplayLink() {
+    guard displayLink == nil else { return }
+    let link = CADisplayLink(target: self, selector: #selector(displayLinkTick))
+    link.add(to: .main, forMode: .common)
+    displayLink = link
+  }
+
+  private func stopDisplayLink() {
+    displayLink?.invalidate()
+    displayLink = nil
+  }
+
+  @objc private func displayLinkTick() {
+    notifyIfNeeded()
+  }
+
+  @discardableResult
+  private func notifyIfNeeded(force: Bool = false) -> Bool {
+    guard let screenFrame = currentScreenFrame() else { return false }
+    let screenMaxY = screenFrame.maxY
+    guard force || abs(screenMaxY - (lastScreenMaxY ?? .greatestFiniteMagnitude)) > 0.5 else { return false }
+    lastScreenMaxY = screenMaxY
+    onFrameChange?(self)
+    return true
+  }
+
+  private func currentScreenFrame() -> CGRect? {
+    guard let window else { return nil }
+
+    // The model frame can lag during interactive keyboard movement; sample presentation instead.
+    let currentLayer = layer.presentation() ?? layer
+    let frameInWindow = currentLayer.convert(currentLayer.bounds, to: window.layer)
+    return window.convert(frameInWindow, to: nil)
   }
 }
 
