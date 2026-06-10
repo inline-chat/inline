@@ -1,4 +1,8 @@
 {
+  "features" : [
+    "refractivity",
+    "specular-location"
+  ],
   "fill" : {
     "linear-gradient" : [
       "srgb:1.00000,1.00000,1.00000,1.00000",
@@ -7,6 +11,7 @@
   },
   "groups" : [
     {
+      "blur-material" : null,
       "layers" : [
         {
           "fill-specializations" : [
@@ -48,13 +53,18 @@
         }
       ],
       "opacity" : 1,
+      "refractivity" : {
+        "depth" : 0,
+        "enabled" : true,
+        "strength" : 0.464140625
+      },
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0
+        "opacity" : 1.12
       },
       "specular-specializations" : [
         {
-          "value" : true
+          "value" : "outside"
         },
         {
           "appearance" : "dark",
