@@ -8,7 +8,6 @@ import UniformTypeIdentifiers
 
 class ComposeTextView: UITextView {
   private var placeholderLabel: UILabel?
-  private let keyboardAccessorySpacer = KeyboardAccessorySpacerView()
   weak var composeView: ComposeView?
   private var processedRanges = Set<String>()
   private var recentlySentImageHashes = Set<Int>()
@@ -39,26 +38,6 @@ class ComposeTextView: UITextView {
     NotificationCenter.default.removeObserver(self)
   }
 
-  override func becomeFirstResponder() -> Bool {
-    let result = super.becomeFirstResponder()
-    KeyboardTrace.trace(
-      "ComposeTextView",
-      "becomeFirstResponder",
-      details: "result=\(result) \(KeyboardTrace.textViewState(self))"
-    )
-    return result
-  }
-
-  override func resignFirstResponder() -> Bool {
-    let result = super.resignFirstResponder()
-    KeyboardTrace.trace(
-      "ComposeTextView",
-      "resignFirstResponder",
-      details: "result=\(result) \(KeyboardTrace.textViewState(self))"
-    )
-    return result
-  }
-
   private func setupTextView() {
     backgroundColor = .clear
     allowsEditingTextAttributes = true
@@ -68,18 +47,6 @@ class ComposeTextView: UITextView {
     translatesAutoresizingMaskIntoConstraints = false
     tintColor = ThemeManager.shared.selected.accent
     dataDetectorTypes = []
-    inputAccessoryView = keyboardAccessorySpacer
-  }
-
-  func updateKeyboardAccessoryHeight(_ height: CGFloat) {
-    keyboardAccessorySpacer.height = height
-    if isFirstResponder {
-      reloadInputViews()
-    }
-  }
-
-  var isKeyboardAccessoryVisible: Bool {
-    keyboardAccessorySpacer.window != nil && keyboardAccessorySpacer.height > 0
   }
 
   private func setupPlaceholder() {
@@ -110,6 +77,12 @@ class ComposeTextView: UITextView {
       object: self
     )
 
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(keyboardWillShow),
+      name: UIResponder.keyboardWillShowNotification,
+      object: nil
+    )
   }
 
   @objc public func textDidChange() {
@@ -132,6 +105,8 @@ class ComposeTextView: UITextView {
 
     fixFontSizeAfterStickerInsertion()
   }
+
+  @objc private func keyboardWillShow(_ notification: Notification) {}
 
   func showPlaceholder(_ show: Bool) {
     placeholderLabel?.alpha = show ? 1 : 0
@@ -674,32 +649,6 @@ class ComposeTextView: UITextView {
 
       super.typingAttributes = newValue
     }
-  }
-}
-
-private final class KeyboardAccessorySpacerView: UIView {
-  var height: CGFloat = 0 {
-    didSet {
-      guard abs(height - oldValue) > 0.5 else { return }
-      invalidateIntrinsicContentSize()
-      frame.size.height = height
-    }
-  }
-
-  override var intrinsicContentSize: CGSize {
-    CGSize(width: UIView.noIntrinsicMetric, height: height)
-  }
-
-  override init(frame: CGRect) {
-    super.init(frame: frame)
-    backgroundColor = .clear
-    isUserInteractionEnabled = false
-    autoresizingMask = [.flexibleWidth]
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
   }
 }
 
