@@ -57,6 +57,17 @@
 - Do not remove comments explaining code or left by authors of code.
 - Preserve intentional comments, including inline documentation, bug-fix references, explanations for commented-out code, reasons for tricky code, and future TODO/FIXME notes. Only remove comments when they are clearly stale or incorrect and the change requires it.
 - Always explain in technical terms what was the issue and how you fixed it. 
+- When you're done, explain why you are confident in the change and if you think you made trade-offs (regarding backward compat, deferring, not abstracting, cutting corners, performance) that i need to confirm/review.
+
+## Track your work and see other WIP work
+- When in an active session you start modifying the project, add a new entry in .wip text file. This file is git ignored and used for keeping track of changes in the worktree and which active agentic session is responsible for those files. Keep a list of changed files with an optional one sentence summary of the change in a nested bullet list under the session title. 
+- You can see what other work is in progress in modified files in the current git worktree.
+- Sample:
+```
+- Adding @mention support on iOS compose
+  - .gitignore - excluded build file
+  - core.proto + generated files - added a new protocol type for XYZ
+```
 
 ## Style Guide
 - Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required. Don't use weird abbreviations like `idxes`; `msg`, `id`, `ctx` and alike are fine.
