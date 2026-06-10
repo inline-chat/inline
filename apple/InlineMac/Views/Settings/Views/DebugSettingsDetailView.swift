@@ -17,7 +17,7 @@ struct DebugSettingsDetailView: View {
   var body: some View {
     Form {
       Section("Sync") {
-        Button("Sync Engine Stats") {
+        Button("Sync Engine") {
           showSyncStats = true
         }
       }
