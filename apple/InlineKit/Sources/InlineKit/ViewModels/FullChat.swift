@@ -466,7 +466,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     do {
       return try await db.reader.read { db in
         guard let user = try User.fetchOne(db, id: userId) else { return true }
-        return user.needsDisplayNameFetch
+        return user.needsFullFetch
       }
     } catch {
       log.error("Failed to inspect cached user info \(error)")

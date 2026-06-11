@@ -171,6 +171,10 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
       normalizedUserText(phoneNumber) == nil
   }
 
+  public var needsFullFetch: Bool {
+    needsDisplayNameFetch || (!bot && timeZone == nil)
+  }
+
   private var resolvedFullName: String? {
     let components = PersonNameComponents(
       givenName: firstName,
