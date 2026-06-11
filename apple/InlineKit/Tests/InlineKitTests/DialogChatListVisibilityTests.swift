@@ -271,9 +271,19 @@ struct DialogChatListVisibilityTests {
     let named = User(id: 43, email: nil, firstName: "Riley", lastName: "Stone", username: nil)
 
     #expect(placeholder.needsDisplayNameFetch)
+    #expect(placeholder.needsFullFetch)
     #expect(placeholder.displayName == "User")
     #expect(named.needsDisplayNameFetch == false)
+    #expect(named.needsFullFetch)
     #expect(named.displayName == "Riley Stone")
+
+    var namedWithTimeZone = named
+    namedWithTimeZone.timeZone = "America/Vancouver"
+    #expect(namedWithTimeZone.needsFullFetch == false)
+
+    var namedBot = named
+    namedBot.bot = true
+    #expect(namedBot.needsFullFetch == false)
   }
 
   @Test("protocol dialog omission preserves hidden state")
