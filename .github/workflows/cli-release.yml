@@ -414,6 +414,7 @@ jobs:
           PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
           PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
           PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
+          INLINE_CLI_RELEASE_RESUME: "1"
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
         run: |
           set -euo pipefail
