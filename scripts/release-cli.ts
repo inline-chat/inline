@@ -20,6 +20,8 @@ const appleTeamId = process.env.APPLE_TEAM_ID;
 const appleNotarizationKey = process.env.APPLE_NOTARIZATION_KEY;
 const appleNotarizationKeyId = process.env.APPLE_NOTARIZATION_KEY_ID;
 const appleNotarizationIssuer = process.env.APPLE_NOTARIZATION_ISSUER;
+const skipNotarize =
+  isTruthy(process.env.INLINE_SKIP_NOTARIZE) || isTruthy(process.env.SKIP_NOTARIZE);
 const defaultTargets = [
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
@@ -56,6 +58,10 @@ function requireEnv(name: string): string {
 
 function trimSlash(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
+}
+
+function isTruthy(value: string | undefined): boolean {
+  return ["1", "true", "yes"].includes(value?.toLowerCase() ?? "");
 }
 
 function getR2Context() {
@@ -361,7 +367,7 @@ async function signAndNotarize(context: ReleaseContext) {
     Boolean(appleNotarizationKeyId) &&
     Boolean(appleNotarizationIssuer);
   const hasAppleId = Boolean(appleId) && Boolean(applePassword) && Boolean(appleTeamId);
-  if (!hasApiKey && !hasAppleId) {
+  if (!skipNotarize && !hasApiKey && !hasAppleId) {
     throw new Error(
       "Missing notarization env vars: provide APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER or APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID",
     );
@@ -380,7 +386,8 @@ async function signAndNotarize(context: ReleaseContext) {
     10,
   );
 
-  const keyPath = hasApiKey ? join(context.releaseDir, "notarization-key.p8") : null;
+  const keyPath =
+    !skipNotarize && hasApiKey ? join(context.releaseDir, "notarization-key.p8") : null;
   if (keyPath && appleNotarizationKey) {
     await writeFile(keyPath, appleNotarizationKey, { mode: 0o600 });
   }
@@ -404,6 +411,15 @@ async function signAndNotarize(context: ReleaseContext) {
         ],
         { cwd: cliDir },
       );
+
+      await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
+        cwd: cliDir,
+      });
+
+      if (skipNotarize) {
+        console.log(`Skipping notarization for ${target} (INLINE_SKIP_NOTARIZE=1).`);
+        continue;
+      }
 
       await runCommand("zip", ["-j", "-X", zipPath, binaryPath], { cwd: cliDir });
 
@@ -440,9 +456,6 @@ async function signAndNotarize(context: ReleaseContext) {
         await sleep(delay);
       }
 
-      await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
-        cwd: cliDir,
-      });
     }
   } finally {
     if (keyPath) {
