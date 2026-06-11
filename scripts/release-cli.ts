@@ -161,6 +161,18 @@ type ReleaseContext = {
   releaseDir: string;
 };
 
+type HomebrewHashes = {
+  arm: string;
+  intel: string;
+  linuxArm: string;
+  linuxIntel: string;
+};
+
+type GitHubReleaseAsset = {
+  name: string;
+  digest?: string | null;
+};
+
 async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
   await assertNoDuplicateVersion(context);
@@ -183,6 +195,14 @@ async function runBuildArtifacts() {
 
 async function runPublish(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
+  if (resumeRelease && (await resumePublishedRelease(context))) {
+    console.log(`Resumed Inline CLI v${context.version}`);
+    console.log(`Manifest: ${publicBaseUrl}/${prefix}/manifest.json`);
+    console.log(`Install: ${publicBaseUrl}/${prefix}/install.sh`);
+    console.log(`Install command: curl -fsSL ${publicBaseUrl}/${prefix}/install.sh | sh`);
+    return;
+  }
+
   if (!resumeRelease) {
     await assertNoDuplicateVersion(context);
   }
@@ -206,6 +226,26 @@ async function publishArtifacts(
   await createBundle(context);
   await publishGitHubRelease(context);
   await updateHomebrewCask(context);
+}
+
+async function resumePublishedRelease(context: ReleaseContext): Promise<boolean> {
+  const tag = releaseTag(context.version);
+  const assets = await githubReleaseAssets(tag);
+  if (!assets) {
+    return false;
+  }
+
+  const expected = githubReleaseAssetPaths(context).map((asset) => basename(asset));
+  const names = new Set(assets.map((asset) => asset.name));
+  const missing = expected.filter((name) => !names.has(name));
+  if (missing.length > 0) {
+    console.log(`GitHub release ${tag} exists but is missing assets: ${missing.join(", ")}`);
+    return false;
+  }
+
+  await updateHomebrewCask(context, homebrewHashesFromReleaseAssets(context, assets));
+  console.log(`GitHub release ${tag} already exists with all expected assets.`);
+  return true;
 }
 
 function isLinuxTarget(target: string): boolean {
@@ -503,7 +543,7 @@ async function createBundle(context: ReleaseContext) {
   console.log(`Bundle created: ${bundlePath}`);
 }
 
-async function updateHomebrewCask(context: ReleaseContext) {
+async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHashes) {
   if (process.env.INLINE_SKIP_HOMEBREW === "1") {
     console.log("Skipping Homebrew cask update (INLINE_SKIP_HOMEBREW=1).");
     return;
@@ -543,27 +583,12 @@ async function updateHomebrewCask(context: ReleaseContext) {
     throw new Error("Homebrew tap has uncommitted changes. Commit/stash before release.");
   }
 
-  const armArtifact = join(
-    context.releaseDir,
-    `inline-cli-${context.version}-${armTarget}.tar.gz`,
-  );
-  const intelArtifact = join(
-    context.releaseDir,
-    `inline-cli-${context.version}-${intelTarget}.tar.gz`,
-  );
-  const linuxArmArtifact = join(
-    context.releaseDir,
-    `inline-cli-${context.version}-${linuxArmTarget}.tar.gz`,
-  );
-  const linuxIntelArtifact = join(
-    context.releaseDir,
-    `inline-cli-${context.version}-${linuxIntelTarget}.tar.gz`,
-  );
-
-  const armSha = await sha256File(armArtifact);
-  const intelSha = await sha256File(intelArtifact);
-  const linuxArmSha = await sha256File(linuxArmArtifact);
-  const linuxIntelSha = await sha256File(linuxIntelArtifact);
+  const artifact = (target: string) =>
+    join(context.releaseDir, `inline-cli-${context.version}-${target}.tar.gz`);
+  const armSha = hashes?.arm ?? (await sha256File(artifact(armTarget)));
+  const intelSha = hashes?.intel ?? (await sha256File(artifact(intelTarget)));
+  const linuxArmSha = hashes?.linuxArm ?? (await sha256File(artifact(linuxArmTarget)));
+  const linuxIntelSha = hashes?.linuxIntel ?? (await sha256File(artifact(linuxIntelTarget)));
 
   const contents = await readFile(caskPath, "utf8");
   const versionPattern = /version\s+"[^"]+"/;
@@ -645,9 +670,10 @@ async function publishGitHubRelease(context: ReleaseContext) {
   const names = assets.map((asset) => basename(asset));
 
   if (resumeRelease) {
-    const existing = await githubReleaseAssetNames(tag);
+    const existing = await githubReleaseAssets(tag);
     if (existing) {
-      const missing = names.filter((name) => !existing.has(name));
+      const existingNames = new Set(existing.map((asset) => asset.name));
+      const missing = names.filter((name) => !existingNames.has(name));
       if (missing.length === 0) {
         console.log(`GitHub release ${tag} already exists with all expected assets.`);
         return;
@@ -693,7 +719,7 @@ function githubReleaseAssetPaths(context: ReleaseContext): string[] {
   return assets;
 }
 
-async function githubReleaseAssetNames(tag: string): Promise<Set<string> | null> {
+async function githubReleaseAssets(tag: string): Promise<GitHubReleaseAsset[] | null> {
   const result = await runCommandCapture(
     "gh",
     ["release", "view", tag, "--repo", githubRepo, "--json", "assets"],
@@ -707,8 +733,31 @@ async function githubReleaseAssetNames(tag: string): Promise<Set<string> | null>
     throw new Error(`Failed to check GitHub release ${tag}: ${result.stderr || result.stdout}`);
   }
 
-  const data = JSON.parse(result.stdout) as { assets: Array<{ name: string }> };
-  return new Set(data.assets.map((asset) => asset.name));
+  const data = JSON.parse(result.stdout) as { assets: GitHubReleaseAsset[] };
+  return data.assets;
+}
+
+function homebrewHashesFromReleaseAssets(
+  context: ReleaseContext,
+  assets: readonly GitHubReleaseAsset[],
+): HomebrewHashes {
+  const byName = new Map(assets.map((asset) => [asset.name, asset]));
+  const digestFor = (target: string): string => {
+    const name = `inline-cli-${context.version}-${target}.tar.gz`;
+    const digest = byName.get(name)?.digest;
+    const sha = digest?.replace(/^sha256:/, "");
+    if (!sha || !/^[a-f0-9]{64}$/i.test(sha)) {
+      throw new Error(`Missing sha256 digest for GitHub release asset: ${name}`);
+    }
+    return sha;
+  };
+
+  return {
+    arm: digestFor("aarch64-apple-darwin"),
+    intel: digestFor("x86_64-apple-darwin"),
+    linuxArm: digestFor("aarch64-unknown-linux-gnu"),
+    linuxIntel: digestFor("x86_64-unknown-linux-gnu"),
+  };
 }
 
 async function localTagExists(tag: string): Promise<boolean> {
