@@ -1,7 +1,7 @@
 import { S3Client } from "bun";
 import { createHash } from "crypto";
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from "fs/promises";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 
 const rootDir = resolve(import.meta.dir, "..");
 const cliDir = join(rootDir, "cli");
@@ -22,6 +22,7 @@ const appleNotarizationKeyId = process.env.APPLE_NOTARIZATION_KEY_ID;
 const appleNotarizationIssuer = process.env.APPLE_NOTARIZATION_ISSUER;
 const skipNotarize =
   isTruthy(process.env.INLINE_SKIP_NOTARIZE) || isTruthy(process.env.SKIP_NOTARIZE);
+const resumeRelease = isTruthy(process.env.INLINE_CLI_RELEASE_RESUME);
 const defaultTargets = [
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
@@ -182,7 +183,9 @@ async function runBuildArtifacts() {
 
 async function runPublish(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
-  await assertNoDuplicateVersion(context);
+  if (!resumeRelease) {
+    await assertNoDuplicateVersion(context);
+  }
   await assertBuiltArtifacts(context);
   await publishArtifacts(r2, publicBaseUrl, prefix, context);
 
@@ -638,22 +641,28 @@ async function assertNoDuplicateVersion(context: ReleaseContext) {
 
 async function publishGitHubRelease(context: ReleaseContext) {
   const tag = releaseTag(context.version);
-  const assets: string[] = [];
+  const assets = githubReleaseAssetPaths(context);
+  const names = assets.map((asset) => basename(asset));
 
-  for (const target of context.targets) {
-    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
-    const artifactPath = join(context.releaseDir, artifactName);
-    assets.push(artifactPath, `${artifactPath}.sha256`);
+  if (resumeRelease) {
+    const existing = await githubReleaseAssetNames(tag);
+    if (existing) {
+      const missing = names.filter((name) => !existing.has(name));
+      if (missing.length === 0) {
+        console.log(`GitHub release ${tag} already exists with all expected assets.`);
+        return;
+      }
+    }
   }
 
-  const bundleName = `inline-cli-v${context.version}-bundle.tar.gz`;
-  const bundlePath = join(context.releaseDir, bundleName);
-  assets.push(bundlePath);
-
-  await runCommand("git", ["tag", "-a", tag, "-m", `Inline CLI v${context.version}`], {
-    cwd: rootDir,
-  });
-  await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
+  if (!(await localTagExists(tag))) {
+    await runCommand("git", ["tag", "-a", tag, "-m", `Inline CLI v${context.version}`], {
+      cwd: rootDir,
+    });
+  }
+  if (!(await remoteTagExists(tag))) {
+    await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
+  }
   await runCommand(
     "gh",
     [
@@ -670,6 +679,55 @@ async function publishGitHubRelease(context: ReleaseContext) {
     ],
     { cwd: rootDir },
   );
+}
+
+function githubReleaseAssetPaths(context: ReleaseContext): string[] {
+  const assets: string[] = [];
+  for (const target of context.targets) {
+    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
+    const artifactPath = join(context.releaseDir, artifactName);
+    assets.push(artifactPath, `${artifactPath}.sha256`);
+  }
+
+  assets.push(join(context.releaseDir, `inline-cli-v${context.version}-bundle.tar.gz`));
+  return assets;
+}
+
+async function githubReleaseAssetNames(tag: string): Promise<Set<string> | null> {
+  const result = await runCommandCapture(
+    "gh",
+    ["release", "view", tag, "--repo", githubRepo, "--json", "assets"],
+    { cwd: rootDir },
+  );
+  if (result.exitCode !== 0) {
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (/release not found|not found|404/i.test(output)) {
+      return null;
+    }
+    throw new Error(`Failed to check GitHub release ${tag}: ${result.stderr || result.stdout}`);
+  }
+
+  const data = JSON.parse(result.stdout) as { assets: Array<{ name: string }> };
+  return new Set(data.assets.map((asset) => asset.name));
+}
+
+async function localTagExists(tag: string): Promise<boolean> {
+  const result = await runCommandCapture("git", ["tag", "--list", tag], { cwd: rootDir });
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to check local tags: ${result.stderr || result.stdout}`);
+  }
+  return Boolean(result.stdout.trim());
+}
+
+async function remoteTagExists(tag: string): Promise<boolean> {
+  const remoteUrl = `https://github.com/${githubRepo}.git`;
+  const result = await runCommandCapture("git", ["ls-remote", "--tags", remoteUrl, tag], {
+    cwd: rootDir,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to check remote tags: ${result.stderr || result.stdout}`);
+  }
+  return Boolean(result.stdout.trim());
 }
 
 async function getReleaseContext(): Promise<ReleaseContext> {
