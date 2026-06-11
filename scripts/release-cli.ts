@@ -22,12 +22,10 @@ const defaultTargets = [
   "x86_64-apple-darwin",
   "aarch64-unknown-linux-gnu",
   "x86_64-unknown-linux-gnu",
-] as const;
-const supportedTargets = [
-  ...defaultTargets,
   "aarch64-unknown-linux-musl",
   "x86_64-unknown-linux-musl",
 ] as const;
+const supportedTargets = [...defaultTargets] as const;
 
 const command = process.argv[2] ?? "release";
 
@@ -192,13 +190,25 @@ async function hasCargoZigbuild(): Promise<boolean> {
   return result.exitCode === 0;
 }
 
-async function buildArgsForTarget(target: string, canZigbuild: boolean): Promise<string[]> {
-  if (!isLinuxTarget(target) || process.platform === "linux") {
+async function rustHostTarget(): Promise<string | null> {
+  const result = await runCommandCapture("rustc", ["-vV"]);
+  if (result.exitCode !== 0) {
+    return null;
+  }
+  return result.stdout.match(/^host:\s*(\S+)/m)?.[1] ?? null;
+}
+
+async function buildArgsForTarget(
+  target: string,
+  canZigbuild: boolean,
+  hostTarget: string | null,
+): Promise<string[]> {
+  if (!isLinuxTarget(target) || target === hostTarget) {
     return ["build", "--release", "--locked", "--target", target];
   }
   if (!canZigbuild) {
     throw new Error(
-      `Building ${target} on ${process.platform} requires cargo-zigbuild. Install with: cargo install cargo-zigbuild --locked`,
+      `Cross-building ${target} requires cargo-zigbuild. Install with: cargo install cargo-zigbuild --locked`,
     );
   }
   return ["zigbuild", "--release", "--locked", "--target", target];
@@ -207,9 +217,10 @@ async function buildArgsForTarget(target: string, canZigbuild: boolean): Promise
 async function runBuild(context: ReleaseContext) {
   await ensureRustTargetsInstalled(context.targets);
   const canZigbuild = await hasCargoZigbuild();
+  const hostTarget = await rustHostTarget();
 
   for (const target of context.targets) {
-    const args = await buildArgsForTarget(target, canZigbuild);
+    const args = await buildArgsForTarget(target, canZigbuild, hostTarget);
     await runCommand("cargo", args, { cwd: cliDir });
   }
   console.log("Build complete.");

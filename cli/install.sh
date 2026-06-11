@@ -70,6 +70,70 @@ download_file() {
   mv "$temp_file" "$output_file"
 }
 
+can_write_dir() {
+  local dir="$1"
+  if [ -d "$dir" ]; then
+    [ -w "$dir" ]
+    return
+  fi
+
+  local parent
+  parent="$(dirname "$dir")"
+  [ -d "$parent" ] && [ -w "$parent" ]
+}
+
+install_user_writable() {
+  local dir="$1"
+  if ! can_write_dir "$dir"; then
+    return 1
+  fi
+
+  mkdir -p "$dir"
+  install -m 0755 "$TMPDIR_CLEANUP/inline" "$dir/inline"
+}
+
+install_with_sudo() {
+  local dir="$1"
+  if ! command_exists sudo; then
+    return 1
+  fi
+
+  sudo install -d -m 0755 "$dir"
+  sudo install -m 0755 "$TMPDIR_CLEANUP/inline" "$dir/inline"
+}
+
+install_binary() {
+  local requested_dir="${INLINE_INSTALL_DIR:-}"
+  local install_dir
+
+  if [ -n "$requested_dir" ]; then
+    install_dir="$requested_dir"
+    if install_user_writable "$install_dir" || install_with_sudo "$install_dir"; then
+      echo "$install_dir/inline"
+      return 0
+    fi
+    error "Failed to install into $install_dir"
+  fi
+
+  install_dir="/usr/local/bin"
+  if install_user_writable "$install_dir" || install_with_sudo "$install_dir"; then
+    echo "$install_dir/inline"
+    return 0
+  fi
+
+  if [ -z "${HOME:-}" ]; then
+    error "HOME is not set and inline could not be installed into $install_dir"
+  fi
+
+  install_dir="$HOME/.local/bin"
+  if install_user_writable "$install_dir"; then
+    echo "$install_dir/inline"
+    return 0
+  fi
+
+  error "Failed to install into $install_dir"
+}
+
 detect_target() {
   local os arch libc
   os="$(uname -s)"
@@ -142,17 +206,8 @@ if [ ! -f "$TMPDIR_CLEANUP/inline" ]; then
   error "Archive did not contain inline binary"
 fi
 
-install_dir="/usr/local/bin"
-install_path="$install_dir/inline"
-
-if [ -w "$install_dir" ]; then
-  install -m 0755 "$TMPDIR_CLEANUP/inline" "$install_path"
-else
-  if ! command_exists sudo; then
-    error "sudo is required to install into $install_dir"
-  fi
-  sudo install -m 0755 "$TMPDIR_CLEANUP/inline" "$install_path"
-fi
+install_path="$(install_binary)"
+install_dir="$(dirname "$install_path")"
 
 success "Installed inline v$version to $install_path"
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$install_dir"; then

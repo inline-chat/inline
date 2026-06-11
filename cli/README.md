@@ -17,7 +17,8 @@ brew install --cask inline
 curl -fsSL https://inline.chat/cli/install.sh | sh
 ```
 
-Supports macOS and Linux (x86_64/aarch64).
+Supports macOS and Linux (x86_64/aarch64, glibc and musl). Set
+`INLINE_INSTALL_DIR` to choose a custom install directory.
 
 ## (Optional) Add the skill to Claude/Codex
 

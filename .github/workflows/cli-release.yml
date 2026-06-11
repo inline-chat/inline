@@ -33,6 +33,7 @@ jobs:
 
       - name: Preflight Secrets
         env:
+          TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
           INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
           PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
@@ -46,17 +47,21 @@ jobs:
         run: |
           set -euo pipefail
           required=(
-            INLINE_HOMEBREW_TAP_TOKEN
             PUBLIC_RELEASES_R2_ACCESS_KEY_ID
             PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY
             PUBLIC_RELEASES_R2_BUCKET
             PUBLIC_RELEASES_R2_ENDPOINT
             PUBLIC_RELEASES_R2_PUBLIC_BASE_URL
-            APPLE_SIGNING_IDENTITY
-            APPLE_ID
-            APPLE_PASSWORD
-            APPLE_TEAM_ID
           )
+          if [[ -z "${TARGETS_OVERRIDE}" || "${TARGETS_OVERRIDE}" == *apple-darwin* ]]; then
+            required+=(
+              INLINE_HOMEBREW_TAP_TOKEN
+              APPLE_SIGNING_IDENTITY
+              APPLE_ID
+              APPLE_PASSWORD
+              APPLE_TEAM_ID
+            )
+          fi
           missing=0
           for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
@@ -90,11 +95,18 @@ jobs:
       - name: Install Release Toolchain
         run: |
           set -euo pipefail
-          rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+          rustup target add \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin \
+            aarch64-unknown-linux-gnu \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-musl \
+            x86_64-unknown-linux-musl
           brew list zig >/dev/null 2>&1 || brew install zig
           cargo install cargo-zigbuild --version 0.21.8 --locked
 
       - name: Clone Homebrew Tap
+        if: ${{ github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin') }}
         env:
           INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
         run: |
