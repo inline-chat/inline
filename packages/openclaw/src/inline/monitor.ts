@@ -77,6 +77,7 @@ import {
   Method,
   type Message,
   type MessageActions,
+  type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { resolveInlineMessageActionsParam } from "./actions.js"
@@ -1706,6 +1707,26 @@ function buildInlineSenderName(params: {
   return name || undefined
 }
 
+function mergeInlineSenderProfile(params: {
+  senderProfilesById: Map<string, SenderProfile>
+  user: User
+}): void {
+  const userId = String(params.user.id)
+  if (!userId) return
+
+  const nextName = buildInlineSenderName({ firstName: params.user.firstName, lastName: params.user.lastName })
+  const nextUsername = normalizeInlineUsername(params.user.username)
+  const previous = params.senderProfilesById.get(userId)
+  const mergedName = nextName ?? previous?.name
+  const mergedUsername = nextUsername ?? previous?.username
+
+  if (!mergedName && !mergedUsername) return
+  params.senderProfilesById.set(userId, {
+    ...(mergedName ? { name: mergedName } : {}),
+    ...(mergedUsername ? { username: mergedUsername } : {}),
+  })
+}
+
 function resolveInlineSystemPrompt(params: {
   account: ResolvedInlineAccount
   groupId?: string
@@ -2775,6 +2796,8 @@ export async function monitorInlineProvider(params: {
   const groupPendingHistories = new Map<string, InlinePendingHistoryEntry[]>()
   const hydratedParticipantChats = new Set<string>()
   const participantFetches = new Map<string, Promise<void>>()
+  let cachedDirectoryUserProfilesHydrated = false
+  let cachedDirectoryUserProfilesFetch: Promise<void> | null = null
   const inboundMediaMaxBytes = resolveInlineMediaMaxBytes({ cfg, account })
 
   const hydrateChatParticipants = async (chatId: bigint): Promise<void> => {
@@ -2791,17 +2814,7 @@ export async function monitorInlineProvider(params: {
       if (result.oneofKind !== "getChatParticipants") return
 
       for (const user of result.getChatParticipants.users ?? []) {
-        const userId = String(user.id)
-        if (!userId) continue
-        const nextName = buildInlineSenderName({ firstName: user.firstName, lastName: user.lastName })
-        const nextUsername = normalizeInlineUsername(user.username)
-        const previous = senderProfilesById.get(userId)
-        const mergedName = nextName ?? previous?.name
-        const mergedUsername = nextUsername ?? previous?.username
-        senderProfilesById.set(userId, {
-          ...(mergedName ? { name: mergedName } : {}),
-          ...(mergedUsername ? { username: mergedUsername } : {}),
-        })
+        mergeInlineSenderProfile({ senderProfilesById, user })
       }
 
       hydratedParticipantChats.add(chatKey)
@@ -2814,6 +2827,33 @@ export async function monitorInlineProvider(params: {
       })
 
     participantFetches.set(chatKey, run)
+    await run
+  }
+
+  const hydrateCachedDirectoryUserProfiles = async (): Promise<void> => {
+    if (cachedDirectoryUserProfilesHydrated) return
+    if (cachedDirectoryUserProfilesFetch) return cachedDirectoryUserProfilesFetch
+
+    const run = (async () => {
+      const result = await client.invokeRaw(Method.GET_CHATS, {
+        oneofKind: "getChats",
+        getChats: {},
+      })
+      if (result.oneofKind !== "getChats") return
+
+      for (const user of result.getChats.users ?? []) {
+        mergeInlineSenderProfile({ senderProfilesById, user })
+      }
+      cachedDirectoryUserProfilesHydrated = true
+    })()
+      .catch((err) => {
+        statusSink?.({ lastError: `getChats failed: ${String(err)}` })
+      })
+      .finally(() => {
+        cachedDirectoryUserProfilesFetch = null
+      })
+
+    cachedDirectoryUserProfilesFetch = run
     await run
   }
 
@@ -3034,8 +3074,12 @@ export async function monitorInlineProvider(params: {
 
     await hydrateChatParticipants(params.chatId)
     const senderId = String(params.senderId)
-    const senderProfile = senderProfilesById.get(senderId)
     const chatInfo = chatCache.get(params.chatId)
+    let senderProfile = senderProfilesById.get(senderId)
+    if (chatInfo?.kind === "direct" && !senderProfile?.name) {
+      await hydrateCachedDirectoryUserProfiles()
+      senderProfile = senderProfilesById.get(senderId)
+    }
     const senderLabel = resolveInlineSenderLabel({
       senderId,
       senderName: senderProfile?.name ?? (chatInfo?.kind === "direct" ? chatInfo.title ?? undefined : undefined),
@@ -3283,7 +3327,11 @@ export async function monitorInlineProvider(params: {
         : DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT
     const senderId = String(msg.fromId)
     await hydrateChatParticipants(chatId)
-    const senderProfile = senderProfilesById.get(senderId)
+    let senderProfile = senderProfilesById.get(senderId)
+    if (!isGroup && !senderProfile?.name) {
+      await hydrateCachedDirectoryUserProfiles()
+      senderProfile = senderProfilesById.get(senderId)
+    }
     const senderUsername = senderProfile?.username
     const senderName = senderProfile?.name ?? (!isGroup ? chatInfo.title ?? undefined : undefined)
     if (callbackActionEvent) {
