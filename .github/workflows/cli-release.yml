@@ -42,6 +42,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
+          APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+          APPLE_NOTARIZATION_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
         run: |
           set -euo pipefail
           supported=(
@@ -84,9 +87,6 @@ jobs:
               MACOS_CERTIFICATE_PWD
               MACOS_CERTIFICATE_NAME
               MACOS_CI_KEYCHAIN_PWD
-              APPLE_ID
-              APPLE_PASSWORD
-              APPLE_TEAM_ID
             )
           fi
           missing=0
@@ -98,6 +98,21 @@ jobs:
           done
           if [[ "${missing}" -ne 0 ]]; then
             exit 1
+          fi
+
+          if [[ -z "${TARGETS_OVERRIDE}" || "${TARGETS_OVERRIDE}" == *apple-darwin* ]]; then
+            has_api_key=false
+            if [[ -n "${APPLE_NOTARIZATION_KEY:-}" && -n "${APPLE_NOTARIZATION_KEY_ID:-}" && -n "${APPLE_NOTARIZATION_ISSUER:-}" ]]; then
+              has_api_key=true
+            fi
+            has_apple_id=false
+            if [[ -n "${APPLE_ID:-}" && -n "${APPLE_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+              has_apple_id=true
+            fi
+            if [[ "${has_api_key}" != "true" && "${has_apple_id}" != "true" ]]; then
+              echo "Missing notarization credentials: provide APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER or APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID" >&2
+              exit 1
+            fi
           fi
 
   build-linux:
@@ -296,6 +311,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
+          APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+          APPLE_NOTARIZATION_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
         run: |
           set -euo pipefail
           bun run scripts/release-cli.ts build
@@ -384,10 +402,6 @@ jobs:
           PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
           PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
           PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || secrets.MACOS_CERTIFICATE_NAME }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
         run: |
           set -euo pipefail

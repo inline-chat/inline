@@ -1,6 +1,6 @@
 import { S3Client } from "bun";
 import { createHash } from "crypto";
-import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from "fs/promises";
 import { dirname, join, resolve } from "path";
 
 const rootDir = resolve(import.meta.dir, "..");
@@ -17,6 +17,9 @@ const signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
 const appleId = process.env.APPLE_ID;
 const applePassword = process.env.APPLE_PASSWORD;
 const appleTeamId = process.env.APPLE_TEAM_ID;
+const appleNotarizationKey = process.env.APPLE_NOTARIZATION_KEY;
+const appleNotarizationKeyId = process.env.APPLE_NOTARIZATION_KEY_ID;
+const appleNotarizationIssuer = process.env.APPLE_NOTARIZATION_ISSUER;
 const defaultTargets = [
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
@@ -350,9 +353,17 @@ async function signAndNotarize(context: ReleaseContext) {
     return;
   }
 
-  if (!signingIdentity || !appleId || !applePassword || !appleTeamId) {
+  if (!signingIdentity) {
+    throw new Error("Missing signing env var: APPLE_SIGNING_IDENTITY");
+  }
+  const hasApiKey =
+    Boolean(appleNotarizationKey) &&
+    Boolean(appleNotarizationKeyId) &&
+    Boolean(appleNotarizationIssuer);
+  const hasAppleId = Boolean(appleId) && Boolean(applePassword) && Boolean(appleTeamId);
+  if (!hasApiKey && !hasAppleId) {
     throw new Error(
-      "Missing signing/notarization env vars: APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID",
+      "Missing notarization env vars: provide APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER or APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID",
     );
   }
 
@@ -369,78 +380,90 @@ async function signAndNotarize(context: ReleaseContext) {
     10,
   );
 
-  for (const target of macTargets) {
-    const binaryPath = join(cliDir, "target", target, "release", "inline");
-    const zipName = `inline-cli-${context.version}-${target}-notarize.zip`;
-    const zipPath = join(context.releaseDir, zipName);
+  const keyPath = hasApiKey ? join(context.releaseDir, "notarization-key.p8") : null;
+  if (keyPath && appleNotarizationKey) {
+    await writeFile(keyPath, appleNotarizationKey, { mode: 0o600 });
+  }
 
-    await runCommand(
-      "codesign",
-      [
-        "--force",
-        "--options",
-        "runtime",
-        "--timestamp",
-        "--sign",
-        signingIdentity,
-        binaryPath,
-      ],
-      { cwd: cliDir },
-    );
+  try {
+    for (const target of macTargets) {
+      const binaryPath = join(cliDir, "target", target, "release", "inline");
+      const zipName = `inline-cli-${context.version}-${target}-notarize.zip`;
+      const zipPath = join(context.releaseDir, zipName);
 
-    await runCommand("zip", ["-j", "-X", zipPath, binaryPath], { cwd: cliDir });
+      await runCommand(
+        "codesign",
+        [
+          "--force",
+          "--options",
+          "runtime",
+          "--timestamp",
+          "--sign",
+          signingIdentity,
+          binaryPath,
+        ],
+        { cwd: cliDir },
+      );
 
-    const args = [
-      "notarytool",
-      "submit",
-      zipPath,
-      "--apple-id",
-      appleId,
-      "--password",
-      applePassword,
-      "--team-id",
-      appleTeamId,
-      "--wait",
-      "--timeout",
-      "60m",
-      "--no-s3-acceleration",
-    ];
+      await runCommand("zip", ["-j", "-X", zipPath, binaryPath], { cwd: cliDir });
 
-    for (let attempt = 1; attempt <= notarizeMaxAttempts; attempt += 1) {
-      const { stdout, stderr, exitCode } = await runCommandCapture("xcrun", args, {
+      const args = notarytoolSubmitArgs(zipPath, keyPath);
+
+      for (let attempt = 1; attempt <= notarizeMaxAttempts; attempt += 1) {
+        const { stdout, stderr, exitCode } = await runCommandCapture("xcrun", args, {
+          cwd: cliDir,
+        });
+        if (stdout) process.stdout.write(stdout);
+        if (stderr) process.stderr.write(stderr);
+
+        if (exitCode === 0) {
+          break;
+        }
+
+        const combined = `${stdout}\n${stderr}`;
+        const retryable = shouldRetryNotarize(combined);
+        const isLastAttempt = attempt === notarizeMaxAttempts;
+
+        if (!retryable || isLastAttempt) {
+          throw new Error(`Command failed: xcrun ${redactArgs(args).join(" ")}`);
+        }
+
+        const exp = attempt - 1;
+        const baseDelay = Number.isFinite(notarizeBaseDelayMs) ? notarizeBaseDelayMs : 30000;
+        const maxDelay = Number.isFinite(notarizeMaxDelayMs) ? notarizeMaxDelayMs : 300000;
+        const delay = Math.min(maxDelay, baseDelay * 2 ** exp);
+        console.warn(
+          `Notarization upload failed (attempt ${attempt}/${notarizeMaxAttempts}); retrying in ${Math.round(
+            delay / 1000,
+          )}s...`,
+        );
+        await sleep(delay);
+      }
+
+      await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
         cwd: cliDir,
       });
-      if (stdout) process.stdout.write(stdout);
-      if (stderr) process.stderr.write(stderr);
-
-      if (exitCode === 0) {
-        break;
-      }
-
-      const combined = `${stdout}\n${stderr}`;
-      const retryable = shouldRetryNotarize(combined);
-      const isLastAttempt = attempt === notarizeMaxAttempts;
-
-      if (!retryable || isLastAttempt) {
-        throw new Error(`Command failed: xcrun ${redactArgs(args).join(" ")}`);
-      }
-
-      const exp = attempt - 1;
-      const baseDelay = Number.isFinite(notarizeBaseDelayMs) ? notarizeBaseDelayMs : 30000;
-      const maxDelay = Number.isFinite(notarizeMaxDelayMs) ? notarizeMaxDelayMs : 300000;
-      const delay = Math.min(maxDelay, baseDelay * 2 ** exp);
-      console.warn(
-        `Notarization upload failed (attempt ${attempt}/${notarizeMaxAttempts}); retrying in ${Math.round(
-          delay / 1000,
-        )}s...`,
-      );
-      await sleep(delay);
     }
-
-    await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
-      cwd: cliDir,
-    });
+  } finally {
+    if (keyPath) {
+      await rm(keyPath, { force: true });
+    }
   }
+}
+
+function notarytoolSubmitArgs(zipPath: string, keyPath: string | null): string[] {
+  const args = ["notarytool", "submit", zipPath];
+  if (keyPath) {
+    args.push("--key", keyPath);
+    args.push("--key-id", appleNotarizationKeyId ?? "");
+    args.push("--issuer", appleNotarizationIssuer ?? "");
+  } else {
+    args.push("--apple-id", appleId ?? "");
+    args.push("--password", applePassword ?? "");
+    args.push("--team-id", appleTeamId ?? "");
+  }
+  args.push("--wait", "--timeout", "60m", "--no-s3-acceleration");
+  return args;
 }
 
 async function createBundle(context: ReleaseContext) {
