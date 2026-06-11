@@ -167,6 +167,7 @@ type MonitorSetup = {
     parentMessageId?: bigint
   }>
   participants?: Record<string, Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>>
+  directoryUsers?: Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>
   historyByChat?: Record<string, Array<{
     id: bigint
     date: bigint
@@ -501,6 +502,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       oneofKind?: string
       getMe?: Record<string, never>
       getChatParticipants?: { chatId?: bigint }
+      getChats?: Record<string, never>
       getChatHistory?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
       getChat?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
       editMessage?: {
@@ -527,6 +529,16 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             id: setup.me?.userId ?? 777n,
             ...(setup.me?.username ? { username: setup.me.username } : {}),
           },
+        },
+      }
+    }
+    if (method === 17 && input?.oneofKind === "getChats") {
+      return {
+        oneofKind: "getChats",
+        getChats: {
+          chats: [],
+          dialogs: [],
+          users: setup.directoryUsers ?? [],
         },
       }
     }
@@ -737,6 +749,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         GET_CHAT_HISTORY: 5,
         GET_CHAT: 25,
         GET_CHAT_PARTICIPANTS: 13,
+        GET_CHATS: 17,
         EDIT_MESSAGE: 8,
         CREATE_SUBTHREAD: 42,
         GET_MESSAGES: 38,
@@ -4255,6 +4268,67 @@ describe("inline/monitor", () => {
           text: "cc @alice thanks",
         }),
       )
+    })
+
+    await handle.stop()
+  })
+
+  it("falls back to cached directory users for direct sender names", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 17n,
+          message: {
+            id: 1100n,
+            date: 1_700_000_100n,
+            fromId: 42n,
+            message: "hello",
+          },
+        },
+      ],
+      chats: {
+        "17": { kind: "direct", title: "user:42", peerUserId: 42n },
+      },
+      participants: {
+        "17": [],
+      },
+      directoryUsers: [{ id: 42n, username: "alice", firstName: "Alice" }],
+      dispatchReplyPayload: {
+        text: "cc @42 thanks",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ConversationLabel: "Alice (@alice) id:42",
+          SenderId: "42",
+          SenderName: "Alice",
+          SenderUsername: "alice",
+          Body: "hello",
+          BodyForAgent: "hello",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 17n,
+          text: "cc @alice thanks",
+          parseMarkdown: true,
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(17, {
+        oneofKind: "getChats",
+        getChats: {},
+      })
     })
 
     await handle.stop()
