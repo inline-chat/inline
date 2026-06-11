@@ -20,18 +20,12 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: macos-26
-    timeout-minutes: 120
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.inputs.ref }}
-
-      - name: Preflight Secrets
+      - name: Preflight
         env:
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
           INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
@@ -50,6 +44,32 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          supported=(
+            aarch64-apple-darwin
+            x86_64-apple-darwin
+            aarch64-unknown-linux-gnu
+            x86_64-unknown-linux-gnu
+            aarch64-unknown-linux-musl
+            x86_64-unknown-linux-musl
+          )
+          if [[ -n "${TARGETS_OVERRIDE}" ]]; then
+            IFS=',' read -ra requested <<< "${TARGETS_OVERRIDE}"
+            for raw in "${requested[@]}"; do
+              target="$(echo "${raw}" | xargs)"
+              found=0
+              for supported_target in "${supported[@]}"; do
+                if [[ "${target}" == "${supported_target}" ]]; then
+                  found=1
+                  break
+                fi
+              done
+              if [[ "${found}" -ne 1 ]]; then
+                echo "Unsupported target: ${target}" >&2
+                exit 1
+              fi
+            done
+          fi
+
           required=(
             PUBLIC_RELEASES_R2_ACCESS_KEY_ID
             PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY
@@ -80,48 +100,181 @@ jobs:
             exit 1
           fi
 
+  build-linux:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-musl
+
+    steps:
+      - name: Select Target
+        id: target
+        env:
+          TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          selected=false
+          if [[ -z "${TARGETS_OVERRIDE}" ]]; then
+            selected=true
+          else
+            IFS=',' read -ra requested <<< "${TARGETS_OVERRIDE}"
+            for raw in "${requested[@]}"; do
+              target="$(echo "${raw}" | xargs)"
+              if [[ "${target}" == "${TARGET}" ]]; then
+                selected=true
+                break
+              fi
+            done
+          fi
+          echo "selected=${selected}" >> "${GITHUB_OUTPUT}"
+          echo "Selected ${TARGET}: ${selected}"
+
+      - name: Checkout
+        if: steps.target.outputs.selected == 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref }}
+
       - name: Setup Bun
+        if: steps.target.outputs.selected == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.1"
 
       - name: Setup Rust
+        if: steps.target.outputs.selected == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install protoc
+        if: steps.target.outputs.selected == 'true'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Rust builds
+        if: steps.target.outputs.selected == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             cli -> target
 
-      - name: Install Release Toolchain
+      - name: Setup Zig
+        if: steps.target.outputs.selected == 'true'
+        uses: mlugg/setup-zig@v2
+
+      - name: Install Linux Toolchain
+        if: steps.target.outputs.selected == 'true'
         run: |
           set -euo pipefail
-          rustup target add \
-            aarch64-apple-darwin \
-            x86_64-apple-darwin \
-            aarch64-unknown-linux-gnu \
-            x86_64-unknown-linux-gnu \
-            aarch64-unknown-linux-musl \
-            x86_64-unknown-linux-musl
-          brew list zig >/dev/null 2>&1 || brew install zig
+          rustup target add "${{ matrix.target }}"
           cargo install cargo-zigbuild --version 0.21.8 --locked
 
-      - name: Clone Homebrew Tap
-        if: ${{ github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin') }}
+      - name: Build Target
+        if: steps.target.outputs.selected == 'true'
         env:
-          INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
+          INLINE_CLI_TARGETS: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          git clone "https://x-access-token:${INLINE_HOMEBREW_TAP_TOKEN}@github.com/inline-chat/homebrew-inline.git" homebrew-inline
+          bun run scripts/release-cli.ts build
+
+      - name: Package Target Artifact
+        if: steps.target.outputs.selected == 'true'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          tar -czf "release-artifacts/${TARGET}.tar.gz" -C "cli/target/${TARGET}/release" inline
+
+      - name: Upload Target Artifact
+        if: steps.target.outputs.selected == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: inline-cli-${{ matrix.target }}
+          path: release-artifacts/${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  build-macos:
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+
+    steps:
+      - name: Select Target
+        id: target
+        env:
+          TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          selected=false
+          if [[ -z "${TARGETS_OVERRIDE}" ]]; then
+            selected=true
+          else
+            IFS=',' read -ra requested <<< "${TARGETS_OVERRIDE}"
+            for raw in "${requested[@]}"; do
+              target="$(echo "${raw}" | xargs)"
+              if [[ "${target}" == "${TARGET}" ]]; then
+                selected=true
+                break
+              fi
+            done
+          fi
+          echo "selected=${selected}" >> "${GITHUB_OUTPUT}"
+          echo "Selected ${TARGET}: ${selected}"
+
+      - name: Checkout
+        if: steps.target.outputs.selected == 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Setup Bun
+        if: steps.target.outputs.selected == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.1"
+
+      - name: Setup Rust
+        if: steps.target.outputs.selected == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        if: steps.target.outputs.selected == 'true'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Rust builds
+        if: steps.target.outputs.selected == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            cli -> target
+
+      - name: Install macOS Toolchain
+        if: steps.target.outputs.selected == 'true'
+        run: rustup target add "${{ matrix.target }}"
 
       - name: Import macOS signing certificate
-        if: ${{ github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin') }}
+        if: steps.target.outputs.selected == 'true'
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
@@ -135,12 +288,94 @@ jobs:
           security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
 
+      - name: Build Target
+        if: steps.target.outputs.selected == 'true'
+        env:
+          INLINE_CLI_TARGETS: ${{ matrix.target }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || secrets.MACOS_CERTIFICATE_NAME }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          bun run scripts/release-cli.ts build
+
+      - name: Package Target Artifact
+        if: steps.target.outputs.selected == 'true'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          tar -czf "release-artifacts/${TARGET}.tar.gz" -C "cli/target/${TARGET}/release" inline
+
+      - name: Upload Target Artifact
+        if: steps.target.outputs.selected == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: inline-cli-${{ matrix.target }}
+          path: release-artifacts/${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs:
+      - preflight
+      - build-linux
+      - build-macos
+    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.1"
+
+      - name: Download Target Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: inline-cli-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Restore Target Artifacts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          count=0
+          for archive in release-artifacts/*.tar.gz; do
+            target="$(basename "${archive}" .tar.gz)"
+            mkdir -p "cli/target/${target}/release"
+            tar -xzf "${archive}" -C "cli/target/${target}/release"
+            count=$((count + 1))
+          done
+          if [[ "${count}" -eq 0 ]]; then
+            echo "No target artifacts were downloaded." >&2
+            exit 1
+          fi
+
+      - name: Clone Homebrew Tap
+        if: ${{ github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin') }}
+        env:
+          INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${INLINE_HOMEBREW_TAP_TOKEN}@github.com/inline-chat/homebrew-inline.git" homebrew-inline
+
       - name: Configure Git Identity
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run CLI Release
+      - name: Publish CLI Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INLINE_HOMEBREW_TAP_PATH: ${{ github.workspace }}/homebrew-inline
@@ -159,4 +394,4 @@ jobs:
           if [[ -n "${TARGETS_OVERRIDE}" ]]; then
             export INLINE_CLI_TARGETS="${TARGETS_OVERRIDE}"
           fi
-          bun run scripts/release-cli.ts release
+          bun run scripts/release-cli.ts publish

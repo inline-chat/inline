@@ -29,12 +29,19 @@ const supportedTargets = [...defaultTargets] as const;
 
 const command = process.argv[2] ?? "release";
 
-if (command !== "release") {
-  throw new Error(`Unknown command: ${command}. Only 'release' is supported.`);
+if (command === "release") {
+  const { r2, publicBaseUrl, prefix } = getR2Context();
+  await runRelease(r2, publicBaseUrl, prefix);
+} else if (command === "build") {
+  await runBuildArtifacts();
+} else if (command === "publish") {
+  const { r2, publicBaseUrl, prefix } = getR2Context();
+  await runPublish(r2, publicBaseUrl, prefix);
+} else {
+  throw new Error(
+    `Unknown command: ${command}. Supported commands: release, build, publish.`,
+  );
 }
-
-const { r2, publicBaseUrl, prefix } = getR2Context();
-await runRelease(r2, publicBaseUrl, prefix);
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -149,16 +156,44 @@ async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   await assertNoDuplicateVersion(context);
   await runBuild(context);
   await signAndNotarize(context);
-  await runPackageManifest(r2, publicBaseUrl, prefix, context);
-  await uploadInstall(r2, prefix);
-  await createBundle(context);
-  await publishGitHubRelease(context);
-  await updateHomebrewCask(context);
+  await publishArtifacts(r2, publicBaseUrl, prefix, context);
 
   console.log(`Uploaded Inline CLI v${context.version}`);
   console.log(`Manifest: ${publicBaseUrl}/${prefix}/manifest.json`);
   console.log(`Install: ${publicBaseUrl}/${prefix}/install.sh`);
   console.log(`Install command: curl -fsSL ${publicBaseUrl}/${prefix}/install.sh | sh`);
+}
+
+async function runBuildArtifacts() {
+  const context = await getReleaseContext();
+  await runBuild(context);
+  await signAndNotarize(context);
+  console.log(`Built Inline CLI v${context.version} for ${context.targets.join(", ")}`);
+}
+
+async function runPublish(r2: S3Client, publicBaseUrl: string, prefix: string) {
+  const context = await getReleaseContext();
+  await assertNoDuplicateVersion(context);
+  await assertBuiltArtifacts(context);
+  await publishArtifacts(r2, publicBaseUrl, prefix, context);
+
+  console.log(`Uploaded Inline CLI v${context.version}`);
+  console.log(`Manifest: ${publicBaseUrl}/${prefix}/manifest.json`);
+  console.log(`Install: ${publicBaseUrl}/${prefix}/install.sh`);
+  console.log(`Install command: curl -fsSL ${publicBaseUrl}/${prefix}/install.sh | sh`);
+}
+
+async function publishArtifacts(
+  r2: S3Client,
+  publicBaseUrl: string,
+  prefix: string,
+  context: ReleaseContext,
+) {
+  await runPackageManifest(r2, publicBaseUrl, prefix, context);
+  await uploadInstall(r2, prefix);
+  await createBundle(context);
+  await publishGitHubRelease(context);
+  await updateHomebrewCask(context);
 }
 
 function isLinuxTarget(target: string): boolean {
@@ -292,6 +327,20 @@ async function buildManifest(
   }
 
   return manifest;
+}
+
+async function assertBuiltArtifacts(context: ReleaseContext) {
+  const missing: string[] = [];
+  for (const target of context.targets) {
+    const binaryPath = join(cliDir, "target", target, "release", "inline");
+    await stat(binaryPath).catch(() => {
+      missing.push(`${target} (${binaryPath})`);
+    });
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Missing built CLI artifact(s): ${missing.join(", ")}`);
+  }
 }
 
 async function signAndNotarize(context: ReleaseContext) {
