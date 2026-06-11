@@ -6,13 +6,17 @@ on:
       - main
     paths:
       - "cli/**"
+      - "scripts/release-cli.ts"
       - ".github/workflows/cli-check.yml"
+      - ".github/workflows/cli-release.yml"
   pull_request:
     branches:
       - main
     paths:
       - "cli/**"
+      - "scripts/release-cli.ts"
       - ".github/workflows/cli-check.yml"
+      - ".github/workflows/cli-release.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +35,13 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Linux musl Toolchain
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -45,6 +56,10 @@ jobs:
       - name: Build
         working-directory: cli
         run: cargo build --locked
+
+      - name: Build Linux musl
+        working-directory: cli
+        run: cargo build --locked --target x86_64-unknown-linux-musl
 
       - name: Test
         working-directory: cli

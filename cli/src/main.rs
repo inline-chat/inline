@@ -1812,7 +1812,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         }
                     });
                     let input = proto::CreateChatInput {
-                        title: title.to_string(),
+                        title: Some(title.to_string()),
                         space_id: args.space_id,
                         description,
                         emoji,
