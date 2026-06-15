@@ -399,14 +399,18 @@ private struct ParticipantsButton: View {
   let participants: [UserInfo]
   let action: () -> Void
 
+  @Environment(\.macToolbarLayout) private var toolbarLayout
+
   private var visibleParticipants: [UserInfo] {
-    Array(participants.prefix(3))
+    Array(participants.prefix(toolbarLayout.visibleParticipantCount))
   }
 
   private var buttonWidth: CGFloat {
     let count = visibleParticipants.count
-    let width = CGFloat(count) * 24 - CGFloat(max(0, count - 1)) * 6 + 8
-    return max(32, width)
+    let width = CGFloat(count) * toolbarLayout.participantAvatarSize
+      - CGFloat(max(0, count - 1)) * toolbarLayout.participantOverlap
+      + toolbarLayout.participantHorizontalPadding
+    return max(toolbarLayout == .compact ? 26 : 32, width)
   }
 
   var body: some View {
@@ -415,7 +419,12 @@ private struct ParticipantsButton: View {
         .frame(width: buttonWidth)
         .opacity(0)
         .overlay {
-          ParticipantAvatarStack(participants: visibleParticipants)
+          ParticipantAvatarStack(
+            participants: visibleParticipants,
+            avatarSize: toolbarLayout.participantAvatarSize,
+            overlap: toolbarLayout.participantOverlap,
+            horizontalPadding: toolbarLayout.participantHorizontalPadding
+          )
         }
     }
   }

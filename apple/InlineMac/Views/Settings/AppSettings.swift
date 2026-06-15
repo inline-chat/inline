@@ -69,6 +69,31 @@ enum AppAppearance: String, CaseIterable, Identifiable {
   }
 }
 
+enum MacToolbarStyle: String, CaseIterable, Identifiable {
+  case unified
+  case unifiedCompact
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .unified:
+      return "Unified"
+    case .unifiedCompact:
+      return "Compact"
+    }
+  }
+
+  var nsToolbarStyle: NSWindow.ToolbarStyle {
+    switch self {
+    case .unified:
+      return .unified
+    case .unifiedCompact:
+      return .unifiedCompact
+    }
+  }
+}
+
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
 
@@ -121,6 +146,12 @@ final class AppSettings: ObservableObject {
   @Published var appearance: AppAppearance {
     didSet {
       UserDefaults.standard.set(appearance.rawValue, forKey: "appAppearance")
+    }
+  }
+
+  @Published var toolbarStyle: MacToolbarStyle {
+    didSet {
+      UserDefaults.standard.set(toolbarStyle.rawValue, forKey: "macToolbarStyle")
     }
   }
 
@@ -206,6 +237,13 @@ final class AppSettings: ObservableObject {
       appearance = appearanceValue
     } else {
       appearance = .system
+    }
+
+    if let storedToolbarStyle = UserDefaults.standard.string(forKey: "macToolbarStyle"),
+       let toolbarStyleValue = MacToolbarStyle(rawValue: storedToolbarStyle) {
+      toolbarStyle = toolbarStyleValue
+    } else {
+      toolbarStyle = .unified
     }
 
     if let storedMessageRenderStyle = UserDefaults.standard.string(forKey: "messageRenderStyle"),

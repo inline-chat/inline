@@ -25,6 +25,7 @@ struct BotPresenceToolbarButton: View {
 private struct BotPresenceToolbarPreview: View {
   let item: BotPresenceToolbarItem
 
+  @Environment(\.macToolbarLayout) private var toolbarLayout
   @State private var preview: CGImage?
 
   var body: some View {
@@ -40,14 +41,14 @@ private struct BotPresenceToolbarPreview: View {
           .padding(1)
       } else {
         Image(systemName: "sparkle")
-          .font(.system(size: 12, weight: .medium))
+          .font(.system(size: toolbarLayout.subtitleFontSize + 1, weight: .medium))
           .foregroundStyle(.secondary)
       }
     }
-    .frame(width: 22, height: 22)
-    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    .frame(width: toolbarLayout.botPresencePreviewSize, height: toolbarLayout.botPresencePreviewSize)
+    .clipShape(RoundedRectangle(cornerRadius: toolbarLayout.botPresenceCornerRadius, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 6, style: .continuous)
+      RoundedRectangle(cornerRadius: toolbarLayout.botPresenceCornerRadius, style: .continuous)
         .stroke(
           item.isVisible ? Color.accentColor : Color.primary.opacity(0.12),
           lineWidth: item.isVisible ? 1.4 : 0.7
