@@ -169,6 +169,13 @@ class MessageListAppKit: NSViewController {
         }
       }
       .store(in: &cancellables)
+
+    AppSettings.shared.$toolbarStyle
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.updateToolbarBackgroundForStyleChange()
+      }
+      .store(in: &cancellables)
   }
 
   @available(*, unavailable)
@@ -381,9 +388,21 @@ class MessageListAppKit: NSViewController {
   private var toolbarHeight: CGFloat = Theme.toolbarHeight
   private var toolbarBgHeightConstraint: NSLayoutConstraint?
 
-  private func toolbarBackgroundHeight(window: NSWindow, chromeHeight: CGFloat) -> CGFloat {
-    guard window.toolbarStyle == .unifiedCompact else { return chromeHeight }
+  private func toolbarBackgroundHeight(chromeHeight: CGFloat) -> CGFloat {
+    guard AppSettings.shared.toolbarStyle == .unifiedCompact else { return chromeHeight }
     return min(chromeHeight, Theme.toolbarHeight)
+  }
+
+  private func updateToolbarBackgroundForStyleChange() {
+    guard isViewLoaded else { return }
+    updateScrollViewInsets()
+    view.needsLayout = true
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self, isViewLoaded else { return }
+      updateScrollViewInsets()
+      view.needsLayout = true
+    }
   }
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did
@@ -395,7 +414,7 @@ class MessageListAppKit: NSViewController {
     let windowFrame = window.frame
     let contentFrame = window.contentLayoutRect
     let chromeHeight = windowFrame.height - contentFrame.height
-    let toolbarHeight = toolbarBackgroundHeight(window: window, chromeHeight: chromeHeight)
+    let toolbarHeight = toolbarBackgroundHeight(chromeHeight: chromeHeight)
     self.toolbarHeight = toolbarHeight
     toolbarBgHeightConstraint?.constant = toolbarHeight
     let topInset = toolbarHeight + pinnedHeaderHeight
