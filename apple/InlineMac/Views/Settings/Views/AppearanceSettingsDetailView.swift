@@ -14,6 +14,13 @@ struct AppearanceSettingsDetailView: View {
         .pickerStyle(.segmented)
       }
 
+      Section("Window") {
+        Toggle("Compact toolbar", isOn: Binding(
+          get: { appSettings.toolbarStyle == .unifiedCompact },
+          set: { appSettings.toolbarStyle = $0 ? .unifiedCompact : .unified }
+        ))
+      }
+
       Section("Messages") {
         Picker("Message style", selection: $appSettings.messageRenderStyle) {
           ForEach(MessageRenderStyle.allCases, id: \.self) { style in

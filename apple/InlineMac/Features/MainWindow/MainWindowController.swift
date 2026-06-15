@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import InlineKit
 import Logger
 import SwiftUI
@@ -25,6 +26,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   private let windowID: UUID
   private let log = Log.scoped("MainWindowController")
   private var rootEscapeUnsubscribe: (() -> Void)?
+  private var toolbarStyleCancellable: AnyCancellable?
 
   @discardableResult
   static func showDefault(dependencies: AppDependencies) -> MainWindowController {
@@ -203,6 +205,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       window?.invalidateRestorableState()
     }
     configureWindow(window)
+    bindToolbarStyle(window)
     installContent()
     applyWindowAppearance()
     TimezoneManager.shared.mainWindowDidOpen()
@@ -236,6 +239,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
   func windowWillClose(_ notification: Notification) {
     removeRootEscapeHandler()
+    toolbarStyleCancellable?.cancel()
+    toolbarStyleCancellable = nil
     keyMonitor.attach(window: nil)
     appBridge.unregisterWindow()
     Self.controllers.removeAll { $0 === self }
@@ -249,7 +254,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   private func configureWindow(_ window: NSWindow) {
     window.title = "Inline"
     window.titleVisibility = .hidden
-    window.toolbarStyle = .unified
+    window.toolbarStyle = AppSettings.shared.toolbarStyle.nsToolbarStyle
     window.tabbingMode = .preferred
     window.minSize = Self.minSizeWithSidebar
     DispatchQueue.main.async { [weak window] in
@@ -260,6 +265,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     window.restorationClass = MainWindowRestoration.self
     window.identifier = NSUserInterfaceItemIdentifier(MainWindowRestoration.identifier)
     window.delegate = self
+  }
+
+  private func bindToolbarStyle(_ window: NSWindow) {
+    toolbarStyleCancellable = AppSettings.shared.$toolbarStyle
+      .receive(on: DispatchQueue.main)
+      .sink { [weak window] style in
+        window?.toolbarStyle = style.nsToolbarStyle
+      }
   }
 
   private func showAsStandaloneWindow(_ sender: Any?) {

@@ -12,6 +12,7 @@ struct ChatRouteView: View {
   @Environment(\.nav) private var nav
 
   @ObservedObject private var botPresenceController = BotPresenceController.shared
+  @ObservedObject private var settings = AppSettings.shared
   @State private var chatToolbarState = ChatToolbarState()
   @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
@@ -95,6 +96,7 @@ struct ChatRouteView: View {
             ChatRouteTitleBar(peer: peer, db: db, contextSpaceId: nav.selectedSpaceId) { title in
               navigationTitle = title
             }
+            .macToolbarLayout(toolbarLayout)
             .toolbarVisibilityPriority(.high, label: "")
             .id(peer.toString())
             .modifier(ChatToolbarTranslationPresentations(
@@ -134,6 +136,7 @@ struct ChatRouteView: View {
               peer: peer,
               controller: botPresenceController
             )
+            .macToolbarLayout(toolbarLayout)
             .id(peer.toString())
           }
 
@@ -172,6 +175,7 @@ struct ChatRouteView: View {
               dependencies: dependencies,
               toolbarState: chatToolbarState
             )
+            .macToolbarLayout(toolbarLayout)
             .id(peer.toString())
           }
 
@@ -191,7 +195,7 @@ struct ChatRouteView: View {
           }
         }
 
-        if AppSettings.shared.translationUIEnabled {
+        if settings.translationUIEnabled {
           ToolbarItem {
             ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
           }
@@ -216,6 +220,10 @@ struct ChatRouteView: View {
       db: dependencies.database,
       chatId: chatId
     )
+  }
+
+  private var toolbarLayout: MacToolbarLayout {
+    settings.toolbarStyle.layout
   }
 }
 

@@ -11,6 +11,7 @@ struct ChatRouteTitleBar: View {
 
   @Environment(\.dependencies) private var dependencies
   @Environment(\.mainWindowID) private var mainWindowID
+  @Environment(\.macToolbarLayout) private var toolbarLayout
   @Environment(\.nav) private var nav
 
   @State private var model: ChatRouteToolbarTitleModel
@@ -36,7 +37,7 @@ struct ChatRouteTitleBar: View {
   var body: some View {
     @Bindable var model = model
 
-    HStack(spacing: 8) {
+    HStack(spacing: toolbarLayout.titleSpacing) {
       avatar
 
       VStack(alignment: .leading, spacing: 0) {
@@ -55,7 +56,7 @@ struct ChatRouteTitleBar: View {
         .frame(minWidth: 0, maxWidth: .infinity)
         .toolbarWindowDoubleClickZoom()
     }
-    .frame(minWidth: 0, maxWidth: 280, alignment: .leading)
+    .frame(minWidth: 0, maxWidth: toolbarLayout.titleMaxWidth, alignment: .leading)
     .toolbarWindowDragClickGate(suppressClick: $suppressClick)
     .animation(.easeInOut(duration: 0.18), value: model.status)
     .contextMenu {
@@ -86,16 +87,16 @@ struct ChatRouteTitleBar: View {
   private var avatar: some View {
     Button(action: handleAvatarClick) {
       if let iconPeer = model.iconPeer {
-        SidebarChatIcon(peer: iconPeer, size: Theme.chatToolbarIconSize)
+        SidebarChatIcon(peer: iconPeer, size: toolbarLayout.chatIconSize)
       } else {
         Circle()
           .fill(Color.primary.opacity(0.08))
           .overlay {
             Image(systemName: "bubble.left")
-              .font(.system(size: 12, weight: .medium))
+              .font(.system(size: toolbarLayout.subtitleFontSize + 1, weight: .medium))
               .foregroundStyle(.secondary)
           }
-          .frame(width: Theme.chatToolbarIconSize, height: Theme.chatToolbarIconSize)
+          .frame(width: toolbarLayout.chatIconSize, height: toolbarLayout.chatIconSize)
       }
     }
     .buttonStyle(.plain)
@@ -127,7 +128,7 @@ struct ChatRouteTitleBar: View {
 
   private var titleLabel: some View {
     Text(model.title)
-      .font(.system(size: 13, weight: .semibold))
+      .font(.system(size: toolbarLayout.titleFontSize, weight: .semibold))
       .lineLimit(1)
       .truncationMode(.tail)
       .frame(minWidth: 0, alignment: .leading)
@@ -180,7 +181,7 @@ struct ChatRouteTitleBar: View {
 
         if breadcrumb.parentThread != nil {
           Text("/")
-            .font(.system(size: 11))
+            .font(.system(size: toolbarLayout.subtitleFontSize))
             .foregroundStyle(.tertiary)
         }
       }
@@ -202,7 +203,7 @@ struct ChatRouteTitleBar: View {
 
   private func statusText(_ subtitle: String) -> some View {
     Text(subtitle)
-      .font(.system(size: 11))
+      .font(.system(size: toolbarLayout.subtitleFontSize))
       .foregroundStyle(model.status.isTyping ? Color.accentColor : Color.secondary)
       .lineLimit(1)
       .id("subtitle-\(model.status.isTyping)-\(subtitle)")
@@ -292,25 +293,26 @@ private struct BreadcrumbSegmentButton: View {
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.macToolbarLayout) private var toolbarLayout
   @State private var isHovered = false
 
   var body: some View {
     Button(action: action) {
       Text(title)
-        .font(.system(size: 11))
+        .font(.system(size: toolbarLayout.subtitleFontSize))
         .lineLimit(1)
         .foregroundStyle(Color.secondary)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 1)
+        .padding(.horizontal, toolbarLayout.breadcrumbHorizontalPadding)
+        .padding(.vertical, toolbarLayout.breadcrumbVerticalPadding)
         .background(
-          RoundedRectangle(cornerRadius: 5, style: .continuous)
+          RoundedRectangle(cornerRadius: toolbarLayout.breadcrumbCornerRadius, style: .continuous)
             .fill(backgroundColor)
         )
     }
     .buttonStyle(.plain)
     .help(help)
     .accessibilityLabel(accessibilityLabel)
-    .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+    .contentShape(RoundedRectangle(cornerRadius: toolbarLayout.breadcrumbCornerRadius, style: .continuous))
     .onHover { isHovered = $0 }
   }
 
