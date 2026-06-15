@@ -176,7 +176,7 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private lazy var toolbarBgView: NSVisualEffectView = ChatToolbarView(dependencies: dependencies)
+  private lazy var toolbarBgView = ToolbarBackgroundView(dependencies: dependencies)
   private var pinnedHeaderHeight: CGFloat = 0
   private var pinnedHeaderTopConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
@@ -233,16 +233,21 @@ class MessageListAppKit: NSViewController {
     return .normal
   }
 
-  private func toggleToolbarVisibility(_ hide: Bool) {
-    if #available(macOS 26.0, *) {
-      // No toolbar on macOS 14
-    } else {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.08
-        context.allowsImplicitAnimation = true
+  private func setToolbarVisible(_ visible: Bool, animated: Bool) {
+    let alpha: CGFloat = visible ? 1 : 0
+    guard isToolbarVisible != visible || toolbarBgView.alphaValue != alpha else { return }
+    isToolbarVisible = visible
 
-        toolbarBgView.alphaValue = hide ? 0 : 1
-      }
+    guard animated else {
+      toolbarBgView.alphaValue = alpha
+      return
+    }
+
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.08
+      context.allowsImplicitAnimation = true
+
+      toolbarBgView.alphaValue = alpha
     }
   }
 
@@ -374,6 +379,12 @@ class MessageListAppKit: NSViewController {
   }
 
   private var toolbarHeight: CGFloat = Theme.toolbarHeight
+  private var toolbarBgHeightConstraint: NSLayoutConstraint?
+
+  private func toolbarBackgroundHeight(window: NSWindow, chromeHeight: CGFloat) -> CGFloat {
+    guard window.toolbarStyle == .unifiedCompact else { return chromeHeight }
+    return min(chromeHeight, Theme.toolbarHeight)
+  }
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did
   // layout and it fixes the issue.
@@ -383,8 +394,10 @@ class MessageListAppKit: NSViewController {
 
     let windowFrame = window.frame
     let contentFrame = window.contentLayoutRect
-    let toolbarHeight = windowFrame.height - contentFrame.height
+    let chromeHeight = windowFrame.height - contentFrame.height
+    let toolbarHeight = toolbarBackgroundHeight(window: window, chromeHeight: chromeHeight)
     self.toolbarHeight = toolbarHeight
+    toolbarBgHeightConstraint?.constant = toolbarHeight
     let topInset = toolbarHeight + pinnedHeaderHeight
 
     pinnedHeaderTopConstraint?.constant = toolbarHeight
@@ -458,7 +471,8 @@ class MessageListAppKit: NSViewController {
 
   private func isAtTop() -> Bool {
     let scrollOffset = scrollView.contentView.bounds.origin
-    return scrollOffset.y <= min(-scrollView.contentInsets.top, 0)
+    let topOffset = min(-scrollView.contentInsets.top, 0)
+    return scrollOffset.y <= topOffset + 0.5
   }
 
   private func userVisibleRect() -> NSRect {
@@ -470,19 +484,33 @@ class MessageListAppKit: NSViewController {
 
   private func updateMessageViewColors() {}
 
-  private var isToolbarVisible = false
+  private var isToolbarVisible: Bool?
+
+  private var usesToolbarBgView: Bool {
+    if #available(macOS 27.0, *) {
+      return true
+    }
+    if #available(macOS 26.0, *) {
+      return false
+    }
+    return true
+  }
+
+  private var fadesToolbarBgView: Bool {
+    if #available(macOS 26.0, *) {
+      return false
+    }
+    return true
+  }
 
   private func updateToolbar() {
-    // make window toolbar layout and have background to fight the swiftui defaUlt behaviour
-    log.trace("Adjusting view's toolbar")
-
-    if #available(macOS 26.0, *) {
+    guard usesToolbarBgView else {
       isToolbarVisible = false
-    } else {
-      let atTop = isAtTop()
-      isToolbarVisible = !atTop
-      toggleToolbarVisibility(atTop)
+      return
     }
+
+    let atTop = isAtTop()
+    setToolbarVisible(!atTop, animated: fadesToolbarBgView)
   }
 
   private func setupViews() {
@@ -496,16 +524,16 @@ class MessageListAppKit: NSViewController {
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
 
-    if #available(macOS 26.0, *) {
-      // No BG
-    } else {
+    if usesToolbarBgView {
       view.addSubview(toolbarBgView)
+      let heightConstraint = toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight)
+      toolbarBgHeightConstraint = heightConstraint
 
       NSLayoutConstraint.activate([
         toolbarBgView.topAnchor.constraint(equalTo: view.topAnchor),
         toolbarBgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
         toolbarBgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-        toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight),
+        heightConstraint,
       ])
     }
 
@@ -788,7 +816,9 @@ class MessageListAppKit: NSViewController {
   }
 
   func updateToolbarDebounced() {
-    if isToolbarVisible {
+    if usesToolbarBgView, !fadesToolbarBgView {
+      updateToolbar()
+    } else if isToolbarVisible == true {
       throttle(.milliseconds(100), identifier: "chat.updateToolbar", by: .mainActor, option: .default) { [
         weak self
       ] in
@@ -810,6 +840,8 @@ class MessageListAppKit: NSViewController {
     // Update stores values
     oldDistanceFromBottom = contentSize.height - scrollOffset.y - viewportSize.height
 
+    updateToolbarDebounced()
+
     if needsInitialScroll {
       // reports inaccurate heights at this point
       return
@@ -825,8 +857,6 @@ class MessageListAppKit: NSViewController {
     if feature_loadsMoreWhenApproachingTop, isUserScrolling, currentScrollOffset < viewportSize.height {
       loadBatch(at: .older)
     }
-
-    updateToolbarDebounced()
 
     if prevAtBottom != isAtBottom {
       let shouldShow = !isAtBottom // && messages.count > 0

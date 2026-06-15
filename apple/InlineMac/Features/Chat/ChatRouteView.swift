@@ -63,6 +63,7 @@ struct ChatRouteView: View {
       .ignoresSafeArea(.all, edges: .vertical)
       .id(peer.toString())
       .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
+      .chatScrollEdgeEffect()
       .navigationTitle(navigationTitle.isEmpty ? fallbackTitle : navigationTitle)
       .onChange(of: peer.toString(), initial: true) { oldPeer, newPeer in
         navigationTitle = fallbackTitle
@@ -215,5 +216,19 @@ struct ChatRouteView: View {
       db: dependencies.database,
       chatId: chatId
     )
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func chatScrollEdgeEffect() -> some View {
+    if #available(macOS 27.0, *) {
+      scrollEdgeEffectStyle(.hard, for: .top)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+    } else if #available(macOS 26.0, *) {
+      scrollEdgeEffectStyle(.soft, for: .all)
+    } else {
+      self
+    }
   }
 }
