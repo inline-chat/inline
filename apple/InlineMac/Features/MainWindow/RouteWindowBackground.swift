@@ -9,6 +9,11 @@ struct RouteWindowAppearance {
     titlebarAppearsTransparent: false
   )
 
+  static let transparentTitlebar = Self(
+    windowBackground: .standard,
+    titlebarAppearsTransparent: true
+  )
+
   static let emptyPage = Self(
     windowBackground: .clear,
     titlebarAppearsTransparent: true
@@ -38,6 +43,8 @@ extension Nav3Route {
     switch self {
     case .empty:
       .emptyPage
+    case .chat:
+      .transparentTitlebar
     default:
       .standard
     }
