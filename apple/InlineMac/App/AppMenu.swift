@@ -404,6 +404,49 @@ final class AppMenu: NSObject {
       action: #selector(NSResponder.capitalizeWord(_:)),
       keyEquivalent: ""
     )
+
+    if #available(macOS 15.2, *) {
+      let writingToolsItems = NSMenuItem.writingToolsItems
+      if !writingToolsItems.isEmpty {
+        editMenu.addItem(NSMenuItem.separator())
+        writingToolsItems.forEach { editMenu.addItem($0) }
+      }
+    }
+
+    editMenu.addItem(NSMenuItem.separator())
+
+    let speechMenu = NSMenu(title: "Speech")
+    let speechMenuItem = NSMenuItem(title: "Speech", action: nil, keyEquivalent: "")
+    speechMenuItem.submenu = speechMenu
+    editMenu.addItem(speechMenuItem)
+
+    speechMenu.addItem(
+      withTitle: "Start Speaking",
+      action: Selector(("startSpeaking:")),
+      keyEquivalent: ""
+    )
+    speechMenu.addItem(
+      withTitle: "Stop Speaking",
+      action: Selector(("stopSpeaking:")),
+      keyEquivalent: ""
+    )
+
+    editMenu.addItem(NSMenuItem.separator())
+
+    editMenu.addItem(
+      withTitle: "Start Dictation…",
+      action: Selector(("startDictation:")),
+      keyEquivalent: ""
+    )
+
+    let emojiItem = NSMenuItem(
+      title: "Emoji & Symbols",
+      action: #selector(NSApplication.orderFrontCharacterPalette(_:)),
+      keyEquivalent: " "
+    )
+    emojiItem.keyEquivalentModifierMask = [.control, .command]
+    emojiItem.target = NSApp
+    editMenu.addItem(emojiItem)
   }
 
   private func setupViewMenu() {
