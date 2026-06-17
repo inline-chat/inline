@@ -416,6 +416,8 @@ class UIMessageView: UIView {
       return
     }
 
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
     let alert = UIAlertController(
       title: nil,
       message: linkTarget.url.absoluteString,

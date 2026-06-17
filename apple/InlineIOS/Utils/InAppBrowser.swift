@@ -73,7 +73,7 @@ final class InAppBrowser: NSObject {
     safariViewController.dismissButtonStyle = .close
     safariViewController.modalPresentationStyle = .pageSheet
     if let sheet = safariViewController.sheetPresentationController {
-      sheet.detents = [.medium(), .large()]
+      sheet.detents = [.large()]
       sheet.selectedDetentIdentifier = .large
       sheet.prefersGrabberVisible = true
       sheet.prefersScrollingExpandsWhenScrolledToEdge = true

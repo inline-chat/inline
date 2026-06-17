@@ -410,6 +410,14 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     return UITargetedPreview(view: self, parameters: parameters)
   }
 
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    willDisplayMenuFor configuration: UIContextMenuConfiguration,
+    animator: UIContextMenuInteractionAnimating?
+  ) {
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+  }
+
   func gestureRecognizer(
     _ gestureRecognizer: UIGestureRecognizer,
     shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
