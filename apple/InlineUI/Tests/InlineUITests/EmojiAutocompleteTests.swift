@@ -116,4 +116,31 @@ struct EmojiAutocompleteTests {
       Issue.record("Expected emoji payload")
     }
   }
+
+  @Test("picker data uses autocomplete search")
+  func pickerDataUsesAutocompleteSearch() {
+    let items = EmojiPickerData.suggestions(matching: ":tada", limit: 3)
+
+    #expect(items.first?.emoji == "🎉")
+    #expect(items.first?.shortcode == "tada")
+  }
+
+  @Test("picker data exposes non-empty default sections")
+  func pickerDataExposesDefaultSections() {
+    let sections = EmojiPickerData.defaultSections
+
+    #expect(!sections.isEmpty)
+    #expect(sections.allSatisfy { !$0.items.isEmpty })
+    #expect(sections.flatMap(\.items).contains { $0.shortcode == "thumbsup" })
+  }
+
+  @Test("picker data browse sections include all generated emoji")
+  func pickerDataBrowseSectionsIncludeAllGeneratedEmoji() {
+    let sectionItems = EmojiPickerData.defaultSections.flatMap(\.items)
+    let sectionIDs = Set(sectionItems.map(\.id))
+    let generatedIDs = Set(EmojiAutocomplete.allSuggestions.map(\.id))
+
+    #expect(sectionItems.count == EmojiAutocomplete.allSuggestions.count)
+    #expect(sectionIDs == generatedIDs)
+  }
 }
