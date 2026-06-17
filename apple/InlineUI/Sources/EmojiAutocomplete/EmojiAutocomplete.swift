@@ -186,6 +186,14 @@ private struct EmojiAutocompleteMatch: Sendable {
 }
 
 public enum EmojiAutocomplete {
+  public static let allSuggestions: [EmojiAutocompleteSuggestion] = EmojiAutocompleteData.entries.map { entry in
+    EmojiAutocompleteSuggestion(
+      emoji: entry.emoji,
+      shortcode: entry.shortcode,
+      label: entry.label
+    )
+  }
+
   public static func suggestions(matching query: String, limit: Int = 8) -> [EmojiAutocompleteSuggestion] {
     let query = normalize(query)
     guard !query.isEmpty, limit > 0 else { return [] }
