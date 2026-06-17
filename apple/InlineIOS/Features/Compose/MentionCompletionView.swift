@@ -19,9 +19,7 @@ public class MentionCompletionView: UIView {
 
   weak var delegate: MentionCompletionDelegate?
 
-  private var participants: [UserInfo] = []
-  private var filteredParticipants: [UserInfo] = []
-  private var selectedIndex = 0
+  private let model = MentionCompletionViewModel()
 
   private lazy var scrollView: UIScrollView = {
     let scrollView = UIScrollView()
@@ -86,7 +84,11 @@ public class MentionCompletionView: UIView {
   }()
 
   var isVisible: Bool {
-    !isHidden && alpha > 0
+    superview != nil && !isHidden && alpha > 0
+  }
+
+  var hasItems: Bool {
+    model.isVisible
   }
 
   override init(frame: CGRect) {
@@ -130,32 +132,30 @@ public class MentionCompletionView: UIView {
   }
 
   func updateParticipants(_ participants: [UserInfo]) {
-    self.participants = participants
-    filterParticipants(with: "")
+    model.updateParticipants(participants)
+    updateRows()
+    updateHeight()
+  }
+
+  func updateCandidates(_ candidates: [MentionCompletionUser]) {
+    model.updateCandidates(candidates)
+    updateRows()
+    updateHeight()
   }
 
   func filterParticipants(with query: String) {
-    if query.isEmpty {
-      filteredParticipants = participants.filter { !$0.user.isCurrentUser() }
-    } else {
-      filteredParticipants = participants.filter { userInfo in
-        userInfo.user.fullName.lowercased().contains(query.lowercased()) ||
-          userInfo.user.username?.lowercased().contains(query.lowercased()) == true
-      }
-    }
-
-    selectedIndex = 0
+    model.filter(with: query)
     updateRows()
     updateHeight()
   }
 
   /// Returns the only filtered participant when exactly one remains, otherwise nil.
   func singleFilteredParticipant() -> UserInfo? {
-    filteredParticipants.count == 1 ? filteredParticipants.first : nil
+    model.singleItem
   }
 
   func show() {
-    guard !filteredParticipants.isEmpty else { return }
+    guard model.isVisible else { return }
 
     isHidden = false
     updateHeight()
@@ -176,28 +176,25 @@ public class MentionCompletionView: UIView {
   }
 
   func selectNext() {
-    guard !filteredParticipants.isEmpty else { return }
-    selectedIndex = (selectedIndex + 1) % filteredParticipants.count
+    guard model.isVisible else { return }
+    model.selectNext()
     updateSelection()
   }
 
   func selectPrevious() {
-    guard !filteredParticipants.isEmpty else { return }
-    selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : filteredParticipants.count - 1
+    guard model.isVisible else { return }
+    model.selectPrevious()
     updateSelection()
   }
 
   func selectCurrentItem() -> Bool {
-    guard selectedIndex < filteredParticipants.count else { return false }
-    let user = filteredParticipants[selectedIndex]
+    guard let user = model.selectedItem else { return false }
     selectUser(user)
     return true
   }
 
   private func selectUser(_ user: UserInfo) {
-    // Use first name of user as mention text, like macOS version
-    let firstName = user.user.fullName.components(separatedBy: " ").first ?? user.user.fullName
-    let mentionText = "@\(firstName)"
+    let mentionText = model.mentionText(for: user)
     delegate?.mentionCompletion(self, didSelectUser: user, withText: mentionText, userId: user.user.id)
   }
 
@@ -206,7 +203,7 @@ public class MentionCompletionView: UIView {
     stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
     // Add new rows
-    for (index, user) in filteredParticipants.enumerated() {
+    for (index, user) in model.items.enumerated() {
       let row = createUserRow(user: user, index: index)
       stackView.addArrangedSubview(row)
     }
@@ -276,15 +273,16 @@ public class MentionCompletionView: UIView {
 
   @objc private func rowTapped(_ gesture: UITapGestureRecognizer) {
     guard let view = gesture.view,
-          view.tag < filteredParticipants.count else { return }
+          let user = model.item(at: view.tag)
+    else { return }
 
-    let user = filteredParticipants[view.tag]
+    model.select(index: view.tag)
     selectUser(user)
   }
 
   private func updateSelection() {
     for (index, arrangedSubview) in stackView.arrangedSubviews.enumerated() {
-      let isSelected = index == selectedIndex
+      let isSelected = index == model.selectedIndex
       arrangedSubview.backgroundColor = isSelected ? UIColor.systemBlue.withAlphaComponent(0.1) : .clear
 
       if isSelected {
@@ -304,7 +302,7 @@ public class MentionCompletionView: UIView {
   }
 
   private func updateHeight() {
-    let itemCount = min(filteredParticipants.count, 4) // Max 4 items visible
+    let itemCount = min(model.items.count, 4) // Max 4 items visible
     let height = CGFloat(itemCount) * Self.itemHeight
     let constrainedHeight = min(height, Self.maxHeight)
 

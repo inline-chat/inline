@@ -66,11 +66,21 @@ class MentionManager: NSObject {
       purpose: .mentionCandidates
     )
 
-    // Subscribe to participants updates
-    chatParticipantsViewModel?.$participants
-      .sink { [weak self] participants in
-        Log.shared.trace("🔍 Participants updated: \(participants.count) participants")
-        self?.mentionCompletionView?.updateParticipants(participants)
+    // Subscribe to mention candidate updates
+    chatParticipantsViewModel?.$mentionCandidates
+      .sink { [weak self] candidates in
+        Log.shared.trace("🔍 Mention candidates updated: \(candidates.count) candidates")
+        guard let self else { return }
+        mentionCompletionView?.updateCandidates(candidates)
+
+        if let mentionCompletionView,
+           mentionCompletionView.hasItems,
+           mentionCompletionView.isVisible == false,
+           let textView,
+           let currentMentionRange
+        {
+          showMentionCompletion(for: currentMentionRange.query, textView: textView)
+        }
       }
       .store(in: &cancellables)
 
@@ -91,8 +101,8 @@ class MentionManager: NSObject {
     mentionCompletionView = completionView
 
     // Update with current participants
-    if let participants = chatParticipantsViewModel?.participants {
-      completionView.updateParticipants(participants)
+    if let candidates = chatParticipantsViewModel?.mentionCandidates {
+      completionView.updateCandidates(candidates)
     }
   }
 
@@ -161,11 +171,10 @@ class MentionManager: NSObject {
     let insertionPoint = changeRange.location
     guard insertionPoint == mentionRange.range.location + mentionRange.range.length else { return false }
     guard let user = mentionCompletionView.singleFilteredParticipant() else { return false }
-    guard query(mentionRange.query, matches: user) else { return false }
+    guard MentionCompletionViewModel.query(mentionRange.query, exactlyMatches: user) else { return false }
 
     // Build the mention text (uses first name like existing selection path)
-    let firstName = user.user.fullName.components(separatedBy: " ").first ?? user.user.fullName
-    let mentionText = "@\(firstName)"
+    let mentionText = MentionCompletionViewModel.mentionText(for: user)
 
     // Replace mention and append the typed character as trailing text.
     let currentAttributedText = textView.attributedText ?? NSAttributedString()
@@ -271,6 +280,10 @@ class MentionManager: NSObject {
 
     // Filter participants first
     mentionCompletionView.filterParticipants(with: query)
+    guard mentionCompletionView.hasItems else {
+      hideMentionCompletion(clearCurrentRange: false)
+      return
+    }
 
     // Use ChatContainerView's method if available
     if let chatContainer = parentView as? ChatContainerView {
@@ -285,9 +298,11 @@ class MentionManager: NSObject {
     }
   }
 
-  private func hideMentionCompletion() {
+  private func hideMentionCompletion(clearCurrentRange: Bool = true) {
     Log.shared.debug("🔍 hideMentionCompletion")
-    currentMentionRange = nil
+    if clearCurrentRange {
+      currentMentionRange = nil
+    }
 
     // Use ChatContainerView's method if available
     if let chatContainer = parentView as? ChatContainerView {
@@ -351,29 +366,6 @@ class MentionManager: NSObject {
 
   func extractMentionEntities(from attributedText: NSAttributedString) -> [MessageEntity] {
     mentionDetector.extractMentionEntities(from: attributedText)
-  }
-
-  private func query(_ query: String, matches user: UserInfo) -> Bool {
-    let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-      .folding(options: .diacriticInsensitive, locale: .current)
-      .lowercased()
-    guard !normalizedQuery.isEmpty else { return false }
-
-    var candidates: [String] = []
-    if !user.user.fullName.isEmpty {
-      candidates.append(user.user.fullName)
-      if let first = user.user.fullName.split(separator: " ").first {
-        candidates.append(String(first))
-      }
-    }
-    if let username = user.user.username {
-      candidates.append(username)
-    }
-
-    return candidates.contains {
-      $0.folding(options: .diacriticInsensitive, locale: .current)
-        .lowercased() == normalizedQuery
-    }
   }
 
   private func mentionAttributes(for textView: UITextView) -> [NSAttributedString.Key: Any] {

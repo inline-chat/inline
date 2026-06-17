@@ -801,10 +801,18 @@ class ComposeAppKit: NSView {
     mentionCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
 
     // Subscribe to participants updates
-    chatParticipantsViewModel?.$participants
-      .sink { [weak self] participants in
-        self?.log.trace("Participants updated: \(participants.count) participants")
-        self?.mentionCompletionMenu?.updateParticipants(participants)
+    chatParticipantsViewModel?.$mentionCandidates
+      .sink { [weak self] candidates in
+        guard let self else { return }
+        log.trace("Mention candidates updated: \(candidates.count) candidates")
+        mentionCompletionMenu?.updateCandidates(candidates)
+
+        if let currentMentionRange,
+           mentionCompletionMenu?.hasItems == true,
+           mentionCompletionMenu?.isVisible == false
+        {
+          showMentionCompletion(for: currentMentionRange.query)
+        }
       }
       .store(in: &cancellables)
   }
