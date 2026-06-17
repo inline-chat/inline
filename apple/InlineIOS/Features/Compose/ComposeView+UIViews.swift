@@ -75,15 +75,18 @@ extension ComposeView {
   }
 
   func makePlusButton() -> UIButton {
-    let button = UIButton()
+    let button = UIButton(type: .system)
     button.translatesAutoresizingMaskIntoConstraints = false
 
     var config: UIButton.Configuration
     if #available(iOS 26.0, *) {
       config = UIButton.Configuration.glass()
+      config.cornerStyle = .capsule
+      config.contentInsets = .zero
     } else {
       config = UIButton.Configuration.plain()
       config.background.backgroundColor = .secondarySystemBackground
+      config.cornerStyle = .capsule
     }
 
     config.image = UIImage(systemName: "plus")?.withConfiguration(
@@ -91,8 +94,11 @@ extension ComposeView {
     )
     config.baseForegroundColor = .secondaryLabel
     button.configuration = config
-    button.layer.cornerRadius = 20
-    button.clipsToBounds = true
+    if #unavailable(iOS 26.0) {
+      button.layer.cornerRadius = (buttonSize.width + 10) / 2
+      button.layer.cornerCurve = .continuous
+      button.clipsToBounds = true
+    }
     button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
 
     return button
