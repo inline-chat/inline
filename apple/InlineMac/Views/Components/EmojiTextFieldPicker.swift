@@ -9,7 +9,7 @@ struct EmojiTextFieldPicker<Label: View>: View {
   var accessibilityLabel = "Emoji"
   var targetSize: CGSize
 
-  @State private var pickerRequest = 0
+  @State private var isPickerPresented = false
   @State private var isHovering = false
 
   private let label: (String, Bool, Bool) -> Label
@@ -33,7 +33,7 @@ struct EmojiTextFieldPicker<Label: View>: View {
   var body: some View {
     ZStack(alignment: .topTrailing) {
       Button {
-        pickerRequest += 1
+        isPickerPresented = true
       } label: {
         label(normalizedEmoji, isHovering, isDisabled)
           .frame(width: targetSize.width, height: targetSize.height)
@@ -43,14 +43,14 @@ struct EmojiTextFieldPicker<Label: View>: View {
       .disabled(isDisabled)
       .help(isDisabled ? "" : "Change icon")
       .accessibilityLabel(accessibilityLabel)
-
-      EmojiPanelPicker(presentationRequest: $pickerRequest) { selectedEmoji in
-        emoji = Self.normalizedEmoji(selectedEmoji)
+      .popover(isPresented: $isPickerPresented, arrowEdge: .bottom) {
+        EmojiPickerPopover { selectedEmoji in
+          if let selectedEmoji = EmojiPickerValue.normalizedEmoji(from: selectedEmoji) {
+            emoji = selectedEmoji
+          }
+          isPickerPresented = false
+        }
       }
-      .frame(width: targetSize.width, height: targetSize.height)
-      .opacity(0)
-      .allowsHitTesting(false)
-      .accessibilityHidden(true)
 
       if showsClearButton {
         Button {
@@ -90,9 +90,7 @@ struct EmojiTextFieldPicker<Label: View>: View {
   }
 
   private static func normalizedEmoji(_ emoji: String) -> String {
-    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let first = trimmed.first else { return "" }
-    return String(first)
+    EmojiPickerValue.normalizedEmoji(from: emoji) ?? ""
   }
 }
 
