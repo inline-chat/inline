@@ -124,6 +124,34 @@ final class Auth2StoreTests {
     } else {
       #expect(Bool(false), "Expected authenticated status")
     }
+
+    let writtenBack = UserDefaults.standard.object(forKey: h.userDefaultsKey) as? NSNumber
+    #expect(writtenBack?.int64Value == 42)
+  }
+
+  @Test("launch repair fills missing userId hint from cached credentials")
+  func launchRepairFillsMissingUserIdHintFromCache() async {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let creds = AuthCredentials(userId: 77, token: "77:tok")
+    let cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
+    let store = AuthStore(
+      cache: cache,
+      mocked: true,
+      namespace: h.namespace,
+      readSnapshot: { _, _, _ in
+        AuthSnapshot(status: .authenticated(creds), didHydrate: true)
+      }
+    )
+
+    #expect(UserDefaults.standard.object(forKey: h.userDefaultsKey) == nil)
+
+    await store.repairUserIdHint()
+
+    let writtenBack = UserDefaults.standard.object(forKey: h.userDefaultsKey) as? NSNumber
+    #expect(writtenBack?.int64Value == 77)
   }
 
   @Test("loads authenticated snapshot from legacy token + userId hint")
