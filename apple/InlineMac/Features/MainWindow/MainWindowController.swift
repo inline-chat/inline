@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {
   private static let defaultContentSize = MainWindowSceneOptions.defaultContentSize
+  private static let defaultFrameAutosaveName = "InlineMainWindow"
   static let minSizeWithSidebar = MainWindowSceneOptions.minSizeWithSidebar
   static let minSizeWithoutSidebar = MainWindowSceneOptions.minSizeWithoutSidebar
   private static var controllers: [MainWindowController] = []
@@ -324,6 +325,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     if appliesDefaultFrame {
       window?.setContentSize(Self.defaultContentSize)
       window?.center()
+      if sceneId == MainWindowSceneStateStore.defaultSceneId {
+        window?.setFrameAutosaveName(Self.defaultFrameAutosaveName)
+      }
     }
     log.debug("Configured SwiftUI main window sceneId=\(sceneId)")
   }
