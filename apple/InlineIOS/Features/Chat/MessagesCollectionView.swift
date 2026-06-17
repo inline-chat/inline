@@ -559,8 +559,12 @@ private extension MessagesCollectionView {
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
     private var olderLoadTask: Task<Void, Never>?
+    private var remoteOlderTask: Task<Void, Never>?
     private var threadAnchorFetchTask: Task<Void, Never>?
     private var didExhaustThreadAnchorFetch = false
+    private var loadingRemoteOlderBatch = false
+    private var noRemoteOlderBeforeMessageId: Int64?
+    private var lastRemoteOlderCursor: Int64?
     private var isPresentingImageViewer = false
 
     // MARK: - Date Separator Visibility Handling
@@ -751,6 +755,8 @@ private extension MessagesCollectionView {
     func dispose() {
       olderLoadTask?.cancel()
       olderLoadTask = nil
+      remoteOlderTask?.cancel()
+      remoteOlderTask = nil
       threadAnchorFetchTask?.cancel()
       threadAnchorFetchTask = nil
       viewModel.dispose()
@@ -2227,14 +2233,84 @@ private extension MessagesCollectionView {
     }
 
     private func loadOlderMessagesIfNeeded() {
-      guard olderLoadTask == nil, viewModel.canLoadOlderFromLocal else { return }
+      guard olderLoadTask == nil else { return }
+
+      let oldestMessageIdBeforeLoad = viewModel.oldestLoadedMessageId ?? messages.last?.message.messageId
+      guard viewModel.canLoadOlderFromLocal else {
+        if let oldestMessageIdBeforeLoad {
+          requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
+        }
+        return
+      }
 
       olderLoadTask = Task { @MainActor [weak self] in
         guard let self else { return }
         defer { self.olderLoadTask = nil }
         guard !Task.isCancelled else { return }
 
-        _ = await self.viewModel.loadBatchAsync(at: .older)
+        let didLoad = await self.viewModel.loadBatchAsync(at: .older)
+        guard !Task.isCancelled else { return }
+        guard !didLoad, let oldestMessageIdBeforeLoad, !self.viewModel.canLoadOlderFromLocal else { return }
+
+        self.requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
+      }
+    }
+
+    private func shouldRequestRemoteOlder(beforeMessageId: Int64) -> Bool {
+      guard beforeMessageId > 0 else { return false }
+
+      if let noRemoteOlderBeforeMessageId, beforeMessageId <= noRemoteOlderBeforeMessageId {
+        return false
+      }
+
+      if loadingRemoteOlderBatch, lastRemoteOlderCursor == beforeMessageId {
+        return false
+      }
+
+      return true
+    }
+
+    private func remoteOlderLimit() -> Int32 {
+      Int32(messages.count > 200 ? 200 : 100)
+    }
+
+    private func requestRemoteOlderBatch(beforeMessageId: Int64) {
+      guard shouldRequestRemoteOlder(beforeMessageId: beforeMessageId) else { return }
+
+      loadingRemoteOlderBatch = true
+      lastRemoteOlderCursor = beforeMessageId
+
+      remoteOlderTask?.cancel()
+      remoteOlderTask = Task { @MainActor [weak self] in
+        guard let self else { return }
+        defer { self.loadingRemoteOlderBatch = false }
+
+        do {
+          guard !Task.isCancelled else { return }
+          let rpcResult = try await Api.realtime.send(
+            .getChatHistory(peer: peerId, offsetID: beforeMessageId, limit: remoteOlderLimit())
+          )
+          guard !Task.isCancelled else { return }
+
+          guard let rpcResult, case let .getChatHistory(result) = rpcResult else {
+            return
+          }
+
+          if result.messages.isEmpty {
+            if let boundary = noRemoteOlderBeforeMessageId {
+              noRemoteOlderBeforeMessageId = max(boundary, beforeMessageId)
+            } else {
+              noRemoteOlderBeforeMessageId = beforeMessageId
+            }
+            return
+          }
+
+          _ = await viewModel.loadBatchAsync(at: .older, allowUnavailableLocal: true)
+        } catch is CancellationError {
+          return
+        } catch {
+          Log.shared.error("Failed to load older messages from remote", error: error)
+        }
       }
     }
 

@@ -41,6 +41,7 @@ public class MessagesSectionedViewModel {
   public var sections: [MessageSection] = []
   public var messages: [FullMessage] { progressiveViewModel.messages }
   public var messagesByID: [Int64: FullMessage] { progressiveViewModel.messagesByID }
+  public var oldestLoadedMessageId: Int64? { progressiveViewModel.oldestLoadedMessageId }
   public var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
   public var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
 
@@ -87,8 +88,19 @@ public class MessagesSectionedViewModel {
 
   @discardableResult
   public func loadBatchAsync(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) async -> Bool {
+    await loadBatchAsync(at: direction, allowUnavailableLocal: false)
+  }
+
+  @discardableResult
+  public func loadBatchAsync(
+    at direction: MessagesProgressiveViewModel.MessagesLoadDirection,
+    allowUnavailableLocal: Bool
+  ) async -> Bool {
     let previousSectionsSet = Set(sections.map(\.date))
-    let didLoad = await progressiveViewModel.loadBatchAsync(at: direction)
+    let didLoad = await progressiveViewModel.loadBatchAsync(
+      at: direction,
+      allowUnavailableLocal: allowUnavailableLocal
+    )
     guard didLoad else { return false }
     guard !Task.isCancelled else { return false }
 
