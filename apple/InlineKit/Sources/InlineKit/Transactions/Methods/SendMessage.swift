@@ -162,10 +162,15 @@ public struct TransactionSendMessage: Transaction {
     let media = attachments.first?.media
     let voiceContent = ExperimentalFeatureFlags.voiceMessagesEnabled ? media?.asVoiceContent() : nil
     Log.shared.debug("Optimistic send message \(media.debugDescription)")
+    guard let currentUserId = Auth.getCurrentUserId() else {
+      Log.shared.error("Skipping optimistic send message because current user id is missing")
+      return
+    }
+
     let message = Message(
       messageId: temporaryMessageId,
       randomId: randomId,
-      fromId: Auth.getCurrentUserId()!,
+      fromId: currentUserId,
       date: date,
       text: text,
       peerUserId: peerUserId,

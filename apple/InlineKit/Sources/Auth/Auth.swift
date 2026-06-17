@@ -33,6 +33,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
     startListening()
     syncUIFromCache()
+    repairUserIdHintOnLaunch()
   }
 
   init(mockAuthenticated: Bool) {
@@ -86,6 +87,13 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     let snapshot = cache.snapshot()
     Task { @MainActor [weak self] in
       self?.apply(snapshot)
+    }
+  }
+
+  private func repairUserIdHintOnLaunch() {
+    let store = store
+    Task {
+      await store.repairUserIdHint()
     }
   }
 

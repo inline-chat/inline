@@ -1,8 +1,33 @@
+import Foundation
 import Testing
+@testable import Auth
 @testable import InlineKit
 
 @Suite("Send Message Retry Policy")
 struct SendMessageRetryPolicyTests {
+  @Test("optimistic send skips local message when current user id is missing")
+  func optimisticSkipsMissingCurrentUserId() {
+    let userDefaultsKey = "\(AuthKeychainConfig.userDefaultsPrefix(mocked: false))userId"
+    let previous = UserDefaults.standard.object(forKey: userDefaultsKey)
+    UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+    defer {
+      if let previous {
+        UserDefaults.standard.set(previous, forKey: userDefaultsKey)
+      } else {
+        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+      }
+    }
+
+    let transaction = TransactionSendMessage(
+      text: "caption",
+      peerId: .user(id: 1),
+      chatId: 1,
+      mediaItems: []
+    )
+
+    transaction.optimistic()
+  }
+
   @Test("does not retry upload validation errors")
   func noRetryForUploadValidationErrors() {
     let transaction = TransactionSendMessage(

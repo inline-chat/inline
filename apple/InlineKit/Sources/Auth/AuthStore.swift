@@ -248,6 +248,25 @@ actor AuthStore: Sendable {
     await update(snapshot)
   }
 
+  func repairUserIdHint() async {
+    guard Self.readUserId(key: userDefaultsKey) == nil else { return }
+
+    if let userId = cache.snapshot().currentUserId {
+      UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
+      log.info("AUTH2_REPAIR_USER_ID_HINT source=cache")
+      return
+    }
+
+    await refreshFromStorage()
+
+    guard Self.readUserId(key: userDefaultsKey) == nil, let userId = cache.snapshot().currentUserId else {
+      return
+    }
+
+    UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
+    log.info("AUTH2_REPAIR_USER_ID_HINT source=refresh")
+  }
+
   // MARK: - Internals
 
   private func update(_ snapshot: AuthSnapshot) async {
@@ -354,6 +373,7 @@ actor AuthStore: Sendable {
     switch credentialsOutcome {
     case .success(let data, _):
       if let creds = try? JSONDecoder().decode(AuthCredentials.self, from: data) {
+        UserDefaults.standard.set(NSNumber(value: creds.userId), forKey: userDefaultsKey)
         return AuthSnapshot(status: .authenticated(creds), didHydrate: true)
       }
       // Corrupt record; fall back to legacy pieces.
