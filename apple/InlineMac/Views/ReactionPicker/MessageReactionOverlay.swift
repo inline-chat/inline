@@ -12,6 +12,8 @@ class ReactionOverlayWindow: NSPanel {
   private var mouseDownMonitor: Any?
   private var keyDownMonitor: Any?
   private var fullMessage: FullMessage
+  private var isEmojiPickerActive = false
+  private var isClosing = false
 
   init(messageView: NSView, fullMessage: FullMessage) {
     self.messageView = messageView
@@ -29,6 +31,12 @@ class ReactionOverlayWindow: NSPanel {
     let overlayView = ReactionOverlayView(
       fullMessage: fullMessage,
       onDismiss: { [weak self] in
+        self?.closeWithAnimation()
+      },
+      onEmojiPickerActiveChanged: { [weak self] isActive in
+        self?.isEmojiPickerActive = isActive
+      },
+      onEmojiPickerDismissed: { [weak self] in
         self?.closeWithAnimation()
       }
     )
@@ -59,9 +67,14 @@ class ReactionOverlayWindow: NSPanel {
     setupMouseDownMonitor()
     setupKeyDownMonitor()
   }
-  
+
   private func closeWithAnimation() {
-    guard let hostingView else { return }
+    guard !isClosing else { return }
+    isClosing = true
+    guard let hostingView else {
+      close()
+      return
+    }
 
     // Animate the closing of the window
     NSAnimationContext.runAnimationGroup({ context in
@@ -106,10 +119,16 @@ class ReactionOverlayWindow: NSPanel {
     mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
       guard let self else { return event }
 
-      // Convert the event location to window coordinates
-      let location = event.locationInWindow
+      guard event.window === self else {
+        if isEmojiPickerActive {
+          return event
+        }
+        closeWithAnimation()
+        return event
+      }
 
       // Check if click is outside our content view
+      let location = event.locationInWindow
       if let contentView, !contentView.frame.contains(location) {
         closeWithAnimation()
       }
@@ -138,6 +157,8 @@ class ReactionOverlayWindow: NSPanel {
   }
 
   override func close() {
+    isClosing = true
+    isEmojiPickerActive = false
     removeEventMonitors()
     super.close()
   }
