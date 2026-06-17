@@ -182,9 +182,15 @@ public class MessagesProgressiveViewModel {
   }
 
   @discardableResult
-  public func loadBatchAsync(at direction: MessagesLoadDirection, publish: Bool = true) async -> Bool {
-    if direction == .older, !canLoadOlderFromLocal { return false }
-    if direction == .newer, !canLoadNewerFromLocal { return false }
+  public func loadBatchAsync(
+    at direction: MessagesLoadDirection,
+    publish: Bool = true,
+    allowUnavailableLocal: Bool = false
+  ) async -> Bool {
+    if !allowUnavailableLocal {
+      if direction == .older, !canLoadOlderFromLocal { return false }
+      if direction == .newer, !canLoadNewerFromLocal { return false }
+    }
 
     let request = buildAdditionalLoadRequest(direction: direction)
     log.trace(
