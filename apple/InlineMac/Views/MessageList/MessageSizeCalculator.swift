@@ -337,6 +337,7 @@ class MessageSizeCalculator {
     /// reactions placement
     var reactionsOutsideBubble: Bool
     var reactionsOutsideBubbleTopInset: CGFloat
+    var timeInContentFlow: Bool
 
     /// time can be beside text or below it. it doesn't define vertical spacing.
     var time: LayoutPlan?
@@ -374,7 +375,7 @@ class MessageSizeCalculator {
     var hasActionsRows: Bool { actionsRows != nil }
     var hasTime: Bool { time != nil }
     var placesTimeAboveReactions: Bool {
-      emojiMessage && hasReactions && !reactionsOutsideBubble
+      timeInContentFlow && emojiMessage && hasReactions && !reactionsOutsideBubble
     }
 
     func hasSameConstraintShape(as other: LayoutPlans) -> Bool {
@@ -392,6 +393,7 @@ class MessageSizeCalculator {
         attachmentItems.map { $0.size.height } == other.attachmentItems.map { $0.size.height } &&
         hasActionsRows == other.hasActionsRows &&
         hasTime == other.hasTime &&
+        timeInContentFlow == other.timeInContentFlow &&
         reactionsOutsideBubble == other.reactionsOutsideBubble &&
         placesTimeAboveReactions == other.placesTimeAboveReactions
     }
@@ -1461,6 +1463,7 @@ class MessageSizeCalculator {
       reactionItems: reactionItemsPlan,
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: reactionsOutsideBubble ? reactionsOutsideBubbleTopInset : 0,
+      timeInContentFlow: true,
       time: timePlan,
       singleLine: isSingleLine,
       emojiMessage: emojiMessage,
@@ -1508,7 +1511,8 @@ class MessageSizeCalculator {
     var videoSize: CGSize?
 
     let isTextOnly = hasText && !hasMedia && !hasDocument && !hasAttachments && !hasReplyThreadSummary
-    let emojiInfo: (count: Int, isAllEmojis: Bool) = isTextOnly ? text.emojiInfo : (0, false)
+    let canUseEmojiTextSizing = hasText && !hasMedia && !hasDocument && !hasAttachments && !hasReply && !hasForwardHeader
+    let emojiInfo: (count: Int, isAllEmojis: Bool) = canUseEmojiTextSizing ? text.emojiInfo : (0, false)
     let emojiMessage =
       !hasReply && !hasForwardHeader && !hasReplyThreadSummary && isTextOnly &&
       emojiInfo.isAllEmojis && emojiInfo.count > 0
@@ -2003,6 +2007,7 @@ class MessageSizeCalculator {
       reactionItems: reactionItemsPlan,
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: 0,
+      timeInContentFlow: false,
       time: timePlan,
       singleLine: isSingleLine,
       emojiMessage: emojiMessage,
