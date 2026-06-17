@@ -16,6 +16,7 @@ import { type CreateBotInput, type CreateBotResult } from "@inline-chat/protocol
 import type { FunctionContext } from "@in/server/functions/_types"
 
 const log = new Log("createBot")
+export const MAX_BOTS_PER_USER = 25
 
 export const createBot = async (input: CreateBotInput, context: FunctionContext): Promise<CreateBotResult> => {
   // Validate input
@@ -47,7 +48,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
     )
   const existingBots = existingBotsResult[0]?.count ?? 0
 
-  if (existingBots >= 5) {
+  if (existingBots >= MAX_BOTS_PER_USER) {
     throw RealtimeRpcError.BadRequest()
   }
 
