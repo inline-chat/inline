@@ -18,7 +18,13 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     case spaceMembers(Int64)
   }
 
+  private struct ParticipantsSnapshot {
+    var participants: [UserInfo]
+    var mentionCandidates: [MentionCompletionUser]
+  }
+
   @Published public private(set) var participants: [UserInfo] = []
+  @Published public private(set) var mentionCandidates: [MentionCompletionUser] = []
 
   private var participantsCancellable: AnyCancellable?
   private var spaceMembersCancellable: AnyCancellable?
@@ -48,11 +54,67 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     }
   }
 
-  private static func fetchAllKnownUsers(_ db: Database) throws -> [UserInfo] {
-    try User
+  private static func uniqueUsers(_ users: [UserInfo]) -> [UserInfo] {
+    var seen = Set<Int64>()
+    return users.filter { seen.insert($0.id).inserted }
+  }
+
+  private static func userInfoRequest(_ userIds: [Int64]? = nil) -> QueryInterfaceRequest<UserInfo> {
+    var request = User
       .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
       .asRequest(of: UserInfo.self)
+
+    if let userIds {
+      request = request.filter(userIds.contains(Column("id")))
+    }
+
+    return request
+  }
+
+  private static func fetchUserInfos(_ db: Database, ids: [Int64]) throws -> [UserInfo] {
+    guard !ids.isEmpty else { return [] }
+    return try userInfoRequest(ids).fetchAll(db)
+  }
+
+  private static func fetchChatParticipants(_ db: Database, chatId: Int64) throws -> [UserInfo] {
+    try ChatParticipant
+      .including(
+        required: ChatParticipant.user
+          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      )
+      .filter(Column("chatId") == chatId)
+      .asRequest(of: UserInfo.self)
       .fetchAll(db)
+  }
+
+  private static func fetchSpaceMembers(_ db: Database, spaceId: Int64) throws -> [UserInfo] {
+    try Member
+      .fullMemberQuery()
+      .filter(Column("spaceId") == spaceId)
+      .fetchAll(db)
+      .map(\.userInfo)
+  }
+
+  private static func fetchDirectChatCandidates(_ db: Database) throws -> [MentionCompletionUser] {
+    let chats = try Chat
+      .filter(Chat.Columns.type == ChatType.privateChat.rawValue)
+      .filter(Chat.Columns.peerUserId != nil)
+      .filter(Chat.Columns.lastMsgId != nil)
+      .filter(Chat.Columns.lastMsgId > 0)
+      .fetchAll(db)
+
+    let userInfos = try fetchUserInfos(db, ids: chats.compactMap(\.peerUserId))
+    let usersById = Dictionary(uniqueKeysWithValues: userInfos.map { ($0.id, $0) })
+
+    return chats.compactMap { chat in
+      guard let peerUserId = chat.peerUserId,
+            let userInfo = usersById[peerUserId]
+      else {
+        return nil
+      }
+
+      return MentionCompletionUser(userInfo: userInfo, source: .directChat, lastMsgId: chat.lastMsgId)
+    }
   }
 
   private static func participantsSourceChat(_ db: Database, chatId: Int64, purpose: Purpose) throws -> Chat? {
@@ -93,6 +155,33 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         let requestedChat = try Chat.fetchOne(db, id: chatId)
         let chat = try requestedChat.flatMap { try Self.participantsSourceChat(db, for: $0, purpose: purpose) }
         let sourceChatId = chat?.id ?? chatId
+        let directChats = purpose == .mentionCandidates ? try Self.fetchDirectChatCandidates(db) : []
+
+        func snapshot(
+          participants: [UserInfo],
+          spaceMembers: [UserInfo] = [],
+          directChats: [MentionCompletionUser]
+        ) -> ParticipantsSnapshot {
+          let mentionParticipants = Self.filterMentionCandidates(participants)
+          let mentionSpaceMembers = Self.filterMentionCandidates(spaceMembers)
+
+          var mentionCandidates = mentionParticipants.map {
+            MentionCompletionUser(userInfo: $0, source: .participant)
+          }
+          mentionCandidates.append(contentsOf: mentionSpaceMembers.map {
+            MentionCompletionUser(userInfo: $0, source: .spaceMember)
+          })
+          mentionCandidates.append(contentsOf: directChats)
+
+          let users: [UserInfo]
+          if purpose == .mentionCandidates {
+            users = Self.uniqueUsers(mentionParticipants + mentionSpaceMembers)
+          } else {
+            users = participants
+          }
+
+          return ParticipantsSnapshot(participants: users, mentionCandidates: mentionCandidates)
+        }
 
         // DMs: mention candidates should only include the peer (not chat_participants).
         if let chat, chat.type == .privateChat, let peerUserId = chat.peerUserId {
@@ -104,69 +193,51 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             .fetchOne(db)
 
           let users = peer.map { [$0] } ?? []
-          return purpose == .mentionCandidates ? Self.filterMentionCandidates(users) : users
+          let peerCandidates = users.map {
+            MentionCompletionUser(userInfo: $0, source: .participant)
+          }
+          let candidates = purpose == .mentionCandidates ? directChats + peerCandidates : []
+          return snapshot(participants: users, directChats: candidates)
         }
 
         if let chat {
           if let spaceId = chat.spaceId {
             switch purpose {
             case .mentionCandidates:
-              log.trace("Space thread, fetching space members for mention candidates")
-              let spaceMembers = try Member
-                .fullMemberQuery()
-                .filter(Column("spaceId") == spaceId)
-                .fetchAll(db)
+              log.trace("Space thread, fetching chat participants and space members for mention candidates")
+              let participants = try Self.fetchChatParticipants(db, chatId: sourceChatId)
+              let spaceMembers = try Self.fetchSpaceMembers(db, spaceId: spaceId)
 
-              return Self.filterMentionCandidates(spaceMembers.map(\.userInfo))
+              return snapshot(participants: participants, spaceMembers: spaceMembers, directChats: directChats)
 
             case .participantsList:
               if chat.isPublic == true {
                 log.trace("Public space thread, fetching space members")
-                let spaceMembers = try Member
-                  .fullMemberQuery()
-                  .filter(Column("spaceId") == spaceId)
-                  .fetchAll(db)
-
-                return spaceMembers.map(\.userInfo)
+                let spaceMembers = try Self.fetchSpaceMembers(db, spaceId: spaceId)
+                return snapshot(participants: spaceMembers, directChats: [])
               }
 
               log.trace("Private space thread, fetching chat participants")
-              return try ChatParticipant
-                .including(
-                  required: ChatParticipant.user
-                    .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-                )
-                .filter(Column("chatId") == sourceChatId)
-                .asRequest(of: UserInfo.self)
-                .fetchAll(db)
+              return snapshot(participants: try Self.fetchChatParticipants(db, chatId: sourceChatId), directChats: [])
             }
           }
 
           if purpose == .mentionCandidates {
-            // Non-space threads: users use @mentions to add new participants, so show all known users.
-            log.trace("Home thread mention candidates, fetching all known users")
-            return Self.filterMentionCandidates(try Self.fetchAllKnownUsers(db))
+            log.trace("Home thread mention candidates, fetching participants and direct chats")
+            let participants = try Self.fetchChatParticipants(db, chatId: sourceChatId)
+            return snapshot(participants: participants, directChats: directChats)
           }
 
           log.trace("Home thread, fetching chat participants")
-          let participants = try ChatParticipant
-            .including(
-              required: ChatParticipant.user
-                .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-            )
-            .filter(Column("chatId") == sourceChatId)
-            .asRequest(of: UserInfo.self)
-            .fetchAll(db)
-
-          return participants
+          return snapshot(participants: try Self.fetchChatParticipants(db, chatId: sourceChatId), directChats: [])
         }
 
         if purpose == .mentionCandidates {
-          log.trace("Missing chat, falling back to local users for mention candidates")
-          return Self.filterMentionCandidates(try Self.fetchAllKnownUsers(db))
+          log.trace("Missing chat, falling back to direct chat mention candidates")
+          return snapshot(participants: [], directChats: directChats)
         }
 
-        return []
+        return snapshot(participants: [], directChats: [])
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -175,9 +246,10 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             self?.log.error("Failed to get enhanced chat participants: \(error)")
           }
         },
-        receiveValue: { [weak self] participants in
-          self?.log.trace("Updated participants: \(participants.count) users")
-          self?.participants = participants
+        receiveValue: { [weak self] snapshot in
+          self?.log.trace("Updated participants: \(snapshot.participants.count) users")
+          self?.participants = snapshot.participants
+          self?.mentionCandidates = snapshot.mentionCandidates
         }
       )
   }

@@ -1,5 +1,4 @@
 import AppKit
-import Auth
 import Combine
 import InlineKit
 import InlineUI
@@ -18,15 +17,21 @@ class MentionCompletionMenu: NSView {
   private let tableView = NSTableView()
   private let backgroundView = NSVisualEffectView()
   private let log = Log.scoped("MentionCompletionMenu")
+  private let model = MentionCompletionViewModel()
 
-  private var participants: [UserInfo] = []
-  private var filteredParticipants: [UserInfo] = []
-  private var selectedIndex: Int = 0
   private(set) var isVisible: Bool = false
 
   private var heightConstraint: NSLayoutConstraint!
-  private var currentUserId: Int64? {
-    Auth.shared.getCurrentUserId()
+  private var filteredParticipants: [UserInfo] {
+    model.items
+  }
+
+  private var selectedIndex: Int {
+    model.selectedIndex
+  }
+
+  var hasItems: Bool {
+    model.isVisible
   }
 
   // Extract size constants
@@ -133,58 +138,33 @@ class MentionCompletionMenu: NSView {
 
   func updateParticipants(_ participants: [UserInfo]) {
     log.trace("MentionMenu updateParticipants: received \(participants.count) participants")
-    self.participants = participants
-    filterParticipants(with: "")
+    model.updateParticipants(participants)
+    updateTableViewAndHeight()
+  }
+
+  func updateCandidates(_ candidates: [MentionCompletionUser]) {
+    log.trace("MentionMenu updateCandidates: received \(candidates.count) candidates")
+    model.updateCandidates(candidates)
+    updateTableViewAndHeight()
   }
 
   func filterParticipants(with query: String) {
-    log.trace("MentionMenu filterParticipants: query='\(query)', total participants=\(participants.count)")
-
-    if query.isEmpty {
-      filteredParticipants = participants.filter { participant in
-        // exclude pending setup users
-        if participant.user.pendingSetup == true {
-          return false
-        }
-
-        // exclude self
-        if participant.user.id == currentUserId {
-          return false
-        }
-
-        return true
-      }
-    } else {
-      filteredParticipants = participants.filter { participant in
-        // include users with matching display name or username
-        let displayName = participant.user.displayName.localizedCaseInsensitiveContains(query)
-        let username = participant.user.username?.localizedCaseInsensitiveContains(query) ?? false
-
-        // exclude pending setup users
-        if participant.user.pendingSetup == true {
-          return false
-        }
-
-        // exclude self
-        if participant.user.id == currentUserId {
-          return false
-        }
-
-        return displayName || username
-      }
-    }
-
-    selectedIndex = 0
-
+    log.trace("MentionMenu filterParticipants: query='\(query)', total participants=\(filteredParticipants.count)")
+    model.filter(with: query)
     log.trace("MentionMenu filterParticipants: filtered to \(filteredParticipants.count) participants")
-
-    DispatchQueue.main.async { [weak self] in
-      self?.updateTableViewAndHeight()
-    }
+    updateTableViewAndHeight()
   }
 
   private func updateTableViewAndHeight() {
     let itemCount = filteredParticipants.count
+
+    tableView.reloadData()
+
+    guard itemCount > 0 else {
+      heightConstraint.constant = 0
+      hide(animated: false)
+      return
+    }
 
     // Simplified height calculation - just row height * item count
     let contentHeight = CGFloat(itemCount) * Layout.rowHeight
@@ -204,10 +184,8 @@ class MentionCompletionMenu: NSView {
       heightConstraint.animator().constant = newHeight
     }
 
-    tableView.reloadData()
-
     // Update selection if needed
-    if itemCount > 0, selectedIndex < itemCount {
+    if selectedIndex < itemCount {
       let indexSet = IndexSet(integer: selectedIndex)
       tableView.selectRowIndexes(indexSet, byExtendingSelection: false)
       tableView.scrollRowToVisible(selectedIndex)
@@ -215,6 +193,11 @@ class MentionCompletionMenu: NSView {
   }
 
   func show(animated: Bool = true) {
+    guard hasItems else {
+      hide(animated: false)
+      return
+    }
+
     guard !isVisible else {
       log.trace("MentionMenu show: already visible")
       return
@@ -256,14 +239,14 @@ class MentionCompletionMenu: NSView {
   }
 
   func selectNext() {
-    guard filteredParticipants.count > 0 else { return }
-    selectedIndex = (selectedIndex + 1) % filteredParticipants.count
+    guard !filteredParticipants.isEmpty else { return }
+    model.selectNext()
     updateSelection()
   }
 
   func selectPrevious() {
-    guard filteredParticipants.count > 0 else { return }
-    selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : filteredParticipants.count - 1
+    guard !filteredParticipants.isEmpty else { return }
+    model.selectPrevious()
     updateSelection()
   }
 
@@ -288,11 +271,8 @@ class MentionCompletionMenu: NSView {
   /// Selects the current item and returns true if successful, false otherwise
   @discardableResult
   func selectCurrentItem() -> Bool {
-    guard selectedIndex >= 0, selectedIndex < filteredParticipants.count else { return false }
-    let participant = filteredParticipants[selectedIndex]
-    // Use first name of user as mention text
-    let firstName = participant.user.displayName.components(separatedBy: " ").first ?? participant.user.displayName
-    let mentionText = "@\(firstName)"
+    guard let participant = model.selectedItem else { return false }
+    let mentionText = model.mentionText(for: participant)
     delegate?.mentionMenu(self, didSelectUser: participant, withText: mentionText, userId: participant.user.id)
     return true
   }
@@ -301,7 +281,7 @@ class MentionCompletionMenu: NSView {
     // Get the clicked row
     let clickedRow = tableView.clickedRow
     if clickedRow >= 0, clickedRow < filteredParticipants.count {
-      selectedIndex = clickedRow
+      model.select(index: clickedRow)
 
       // Don't let the table view steal focus - we want compose to keep focus
       DispatchQueue.main.async { [weak self] in
@@ -352,7 +332,7 @@ extension MentionCompletionMenu: NSTableViewDelegate {
   }
 
   func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-    selectedIndex = row
+    model.select(index: row)
     // Update selection styling immediately
     updateCellSelectionStates()
     return true
@@ -360,7 +340,7 @@ extension MentionCompletionMenu: NSTableViewDelegate {
 
   func tableViewSelectionDidChange(_ notification: Notification) {
     if tableView.selectedRow >= 0 {
-      selectedIndex = tableView.selectedRow
+      model.select(index: tableView.selectedRow)
       // Update selection styling when selection changes
       updateCellSelectionStates()
     }
