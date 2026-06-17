@@ -5,14 +5,18 @@ import TextProcessing
 
 enum MessageGestureTrace {
   static let prefix = "[MessageGestureTrace]"
-  private static let log = Log.scoped("MessageGesture", enableTracing: true)
+  private static let traceDefaultsKey = "messageGestureTraceEnabled"
+  private static let log = Log.scoped(
+    "MessageGesture",
+    enableTracing: UserDefaults.standard.bool(forKey: traceDefaultsKey)
+  )
 
   static func trace(_ message: @autoclosure () -> String) {
     log.trace("\(prefix) \(message())")
   }
 
   static func debug(_ message: @autoclosure () -> String) {
-    log.debug("\(prefix) \(message())")
+    log.trace("\(prefix) \(message())")
   }
 
   static func point(_ point: NSPoint) -> String {
