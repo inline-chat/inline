@@ -819,7 +819,8 @@ class UIMessageView: UIView {
       replyCount: Int(summary.replyCount),
       recentAuthors: recentReplyThreadAuthors(),
       hasUnread: summary.hasUnread_p,
-      outgoing: shouldUseWhiteReplyThreadSummary
+      outgoing: shouldUseWhiteReplyThreadSummary,
+      title: fullMessage.replyThreadCustomTitle
     )
     replyThreadSummaryView.onTap = { [weak self] in
       guard let self else { return }

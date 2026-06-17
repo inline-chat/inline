@@ -3,15 +3,18 @@ import UIKit
 
 final class ReplyThreadSummaryView: UIControl {
   private enum Constants {
-    static let height: CGFloat = 32
-    static let minWidth: CGFloat = 170
-    static let avatarSize: CGFloat = 18
-    static let avatarOverlap: CGFloat = 7
-    static let horizontalPadding: CGFloat = 9
-    static let contentSpacing: CGFloat = 7
+    static let height: CGFloat = 36
+    static let titledHeight: CGFloat = 52
+    static let minWidth: CGFloat = 190
+    static let avatarSize: CGFloat = 20
+    static let avatarOverlap: CGFloat = 8
+    static let horizontalPadding: CGFloat = 11
+    static let contentSpacing: CGFloat = 8
     static let maxAvatars = 3
-    static let unreadDotSize: CGFloat = 7
-    static let cornerRadius: CGFloat = 9
+    static let unreadDotSize: CGFloat = 8
+    static let cornerRadius: CGFloat = 10
+    static let titleTopPadding: CGFloat = 7
+    static let titledRowCenterOffset: CGFloat = 8
   }
 
   var onTap: (() -> Void)?
@@ -23,7 +26,26 @@ final class ReplyThreadSummaryView: UIControl {
   private var unreadDotLeadingConstraint: NSLayoutConstraint?
   private var unreadDotWidthConstraint: NSLayoutConstraint?
   private var spinnerWidthConstraint: NSLayoutConstraint?
+  private var heightConstraint: NSLayoutConstraint?
+  private var avatarsCenterYConstraint: NSLayoutConstraint?
+  private var replyCountCenterYConstraint: NSLayoutConstraint?
+  private var unreadDotCenterYConstraint: NSLayoutConstraint?
+  private var spinnerCenterYConstraint: NSLayoutConstraint?
+  private var hasTitle = false
   private var loading = false
+
+  private let titleLabel: UILabel = {
+    let label = UILabel()
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = UIFontMetrics(forTextStyle: .caption1)
+      .scaledFont(for: .systemFont(ofSize: 12, weight: .semibold))
+    label.adjustsFontForContentSizeCategory = true
+    label.lineBreakMode = .byTruncatingTail
+    label.numberOfLines = 1
+    label.isHidden = true
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return label
+  }()
 
   private let avatarsContainer: UIView = {
     let view = UIView()
@@ -77,9 +99,11 @@ final class ReplyThreadSummaryView: UIControl {
     replyCount: Int,
     recentAuthors: [UserInfo],
     hasUnread: Bool,
-    outgoing: Bool
+    outgoing: Bool,
+    title: String? = nil
   ) {
     self.outgoing = outgoing
+    updateTitle(title)
     replyCountLabel.text = replyCount == 1 ? "1 reply" : "\(replyCount) replies"
     unreadDotView.isHidden = !hasUnread
     unreadDotLeadingConstraint?.constant = hasUnread ? Constants.contentSpacing : 0
@@ -109,6 +133,7 @@ final class ReplyThreadSummaryView: UIControl {
     isAccessibilityElement = true
     accessibilityTraits = [.button]
 
+    addSubview(titleLabel)
     addSubview(avatarsContainer)
     addSubview(replyCountLabel)
     addSubview(unreadDotView)
@@ -126,25 +151,37 @@ final class ReplyThreadSummaryView: UIControl {
     )
     unreadDotWidthConstraint = unreadDotView.widthAnchor.constraint(equalToConstant: 0)
     spinnerWidthConstraint = spinnerView.widthAnchor.constraint(equalToConstant: 0)
+    heightConstraint = heightAnchor.constraint(greaterThanOrEqualToConstant: Constants.height)
+    avatarsCenterYConstraint = avatarsContainer.centerYAnchor.constraint(equalTo: centerYAnchor)
+    replyCountCenterYConstraint = replyCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+    unreadDotCenterYConstraint = unreadDotView.centerYAnchor.constraint(equalTo: centerYAnchor)
+    spinnerCenterYConstraint = spinnerView.centerYAnchor.constraint(equalTo: centerYAnchor)
     let minWidthConstraint = widthAnchor.constraint(greaterThanOrEqualToConstant: Constants.minWidth)
     minWidthConstraint.priority = .defaultHigh
 
     NSLayoutConstraint.activate([
-      heightAnchor.constraint(greaterThanOrEqualToConstant: Constants.height),
+      heightConstraint!,
       minWidthConstraint,
 
+      titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.titleTopPadding),
+      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
+      titleLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: trailingAnchor,
+        constant: -Constants.horizontalPadding
+      ),
+
       avatarsContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
-      avatarsContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
+      avatarsCenterYConstraint!,
       avatarsContainer.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
       avatarsWidthConstraint!,
 
       avatarsToLabelSpacingConstraint!,
-      replyCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+      replyCountCenterYConstraint!,
       replyCountLabel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 5),
       replyCountLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -5),
 
       unreadDotLeadingConstraint!,
-      unreadDotView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      unreadDotCenterYConstraint!,
       unreadDotWidthConstraint!,
       unreadDotView.heightAnchor.constraint(equalToConstant: Constants.unreadDotSize),
 
@@ -153,7 +190,7 @@ final class ReplyThreadSummaryView: UIControl {
         constant: Constants.contentSpacing
       ),
       spinnerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
-      spinnerView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      spinnerCenterYConstraint!,
       spinnerWidthConstraint!,
       spinnerView.heightAnchor.constraint(equalToConstant: 16),
 
@@ -161,6 +198,22 @@ final class ReplyThreadSummaryView: UIControl {
     ])
 
     applyStyle()
+  }
+
+  private func updateTitle(_ title: String?) {
+    let title = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let nextHasTitle = title?.isEmpty == false
+    hasTitle = nextHasTitle
+    titleLabel.text = nextHasTitle ? title : nil
+    titleLabel.isHidden = !nextHasTitle
+    replyCountLabel.font = .preferredFont(forTextStyle: nextHasTitle ? .caption1 : .subheadline)
+
+    let rowOffset = nextHasTitle ? Constants.titledRowCenterOffset : 0
+    heightConstraint?.constant = nextHasTitle ? Constants.titledHeight : Constants.height
+    avatarsCenterYConstraint?.constant = rowOffset
+    replyCountCenterYConstraint?.constant = rowOffset
+    unreadDotCenterYConstraint?.constant = rowOffset
+    spinnerCenterYConstraint?.constant = rowOffset
   }
 
   private func updateAvatars(authors: [UserInfo]) {
@@ -205,9 +258,12 @@ final class ReplyThreadSummaryView: UIControl {
   private func applyStyle() {
     let pressed = isHighlighted
     let backgroundBase: UIColor = outgoing ? .white : .label
-    backgroundColor = backgroundBase.withAlphaComponent(outgoing ? (pressed ? 0.18 : 0.12) : (pressed ? 0.08 : 0.055))
+    backgroundColor = backgroundBase.withAlphaComponent(outgoing ? (pressed ? 0.18 : 0.12) : (pressed ? 0.105 : 0.065))
 
-    replyCountLabel.textColor = outgoing ? .white : (ThemeManager.shared.selected.primaryTextColor ?? .label)
+    titleLabel.textColor = outgoing ? .white.withAlphaComponent(0.96) : (ThemeManager.shared.selected.primaryTextColor ?? .label)
+    replyCountLabel.textColor = outgoing
+      ? .white.withAlphaComponent(hasTitle ? 0.74 : 0.96)
+      : (hasTitle ? .secondaryLabel : (ThemeManager.shared.selected.primaryTextColor ?? .label))
     unreadDotView.backgroundColor = outgoing ? UIColor.white.withAlphaComponent(0.88) : ThemeManager.shared.selected.accent
     spinnerView.color = outgoing ? .white : ThemeManager.shared.selected.accent
   }
