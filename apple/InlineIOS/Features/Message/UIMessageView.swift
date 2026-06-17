@@ -886,6 +886,17 @@ class UIMessageView: UIView {
       )
     } else {
       embedView.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
+      ensureRepliedMessageCachedOnce()
+    }
+  }
+
+  private func ensureRepliedMessageCachedOnce() {
+    guard let repliedId = message.repliedToMessageId, repliedId > 0 else { return }
+    let peer = message.peerId
+    let chatId = message.chatId
+
+    Task.detached(priority: .utility) {
+      await TargetMessagesFetcher.shared.ensureCachedOnce(peer: peer, chatId: chatId, messageIds: [repliedId])
     }
   }
 

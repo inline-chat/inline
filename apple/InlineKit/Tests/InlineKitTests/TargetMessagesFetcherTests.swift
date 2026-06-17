@@ -48,6 +48,34 @@ struct TargetMessagesFetcherTests {
     #expect(batches == [Set([4, 5])])
   }
 
+  @Test("one-time fetches do not retry missing ids")
+  func oneTimeFetchesDoNotRetryMissingIDs() async {
+    let resolveRecorder = ResolveRecorder()
+    let fetchRecorder = FetchRecorder()
+    let fetcher = TargetMessagesFetcher(
+      resolveMissingIds: { _, messageIds in
+        await resolveRecorder.record(messageIds)
+        return messageIds
+      },
+      fetchMessages: { _, messageIds in
+        await fetchRecorder.record(messageIds)
+      }
+    )
+
+    await fetcher.ensureCachedOnce(peer: .thread(id: 13), chatId: 13, messageIds: [7, 8])
+
+    let didFetch = await waitForCondition(timeout: .seconds(2)) {
+      await fetchRecorder.count() == 1
+    }
+    #expect(didFetch)
+
+    await fetcher.ensureCachedOnce(peer: .thread(id: 13), chatId: 13, messageIds: [7, 8])
+
+    #expect(await resolveRecorder.count() == 1)
+    #expect(await fetchRecorder.count() == 1)
+    #expect(await resolveRecorder.batches() == [Set([7, 8])])
+  }
+
   @Test("dedupes overlapping ids while first fetch is in flight")
   func dedupesOverlappingInFlightIDs() async {
     let recorder = FetchRecorder()
@@ -129,6 +157,22 @@ private actor MissingIDsProbe {
 
   func lastIDs() -> Set<Int64> {
     ids
+  }
+}
+
+private actor ResolveRecorder {
+  private var items: [Set<Int64>] = []
+
+  func record(_ messageIds: Set<Int64>) {
+    items.append(messageIds)
+  }
+
+  func count() -> Int {
+    items.count
+  }
+
+  func batches() -> [Set<Int64>] {
+    items
   }
 }
 

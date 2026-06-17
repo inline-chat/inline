@@ -27,6 +27,7 @@ public actor TargetMessagesFetcher {
   private let fetchMessages: FetchMessagesOperation
 
   private var targets: [FetchTarget: TargetState] = [:]
+  private var oneTimeAttemptedIds: [FetchTarget: Set<Int64>] = [:]
 
   public init() {
     resolveMissingIds = TargetMessagesFetcher.defaultResolveMissingIds
@@ -46,12 +47,27 @@ public actor TargetMessagesFetcher {
     guard !requestedIds.isEmpty else { return }
 
     let target = FetchTarget(peer: peer, chatId: chatId)
+    await ensureCached(target: target, messageIds: requestedIds)
+  }
+
+  public func ensureCachedOnce(peer: Peer, chatId: Int64, messageIds: [Int64]) async {
+    let requestedIds = Set(messageIds.filter { $0 > 0 })
+    guard !requestedIds.isEmpty else { return }
+
+    let target = FetchTarget(peer: peer, chatId: chatId)
+    let idsToAttempt = beginOneTimeAttempt(target: target, messageIds: requestedIds)
+    guard !idsToAttempt.isEmpty else { return }
+
+    await ensureCached(target: target, messageIds: idsToAttempt)
+  }
+
+  private func ensureCached(target: FetchTarget, messageIds requestedIds: Set<Int64>) async {
     let idsToResolve = beginResolving(target: target, messageIds: requestedIds)
     guard !idsToResolve.isEmpty else { return }
 
     let missingIds: Set<Int64>
     do {
-      missingIds = try await resolveMissingIds(chatId, idsToResolve)
+      missingIds = try await resolveMissingIds(target.chatId, idsToResolve)
     } catch is CancellationError {
       finishResolving(target: target, messageIds: idsToResolve)
       return
@@ -64,6 +80,15 @@ public actor TargetMessagesFetcher {
     guard !missingIds.isEmpty else { return }
 
     enqueue(target: target, messageIds: missingIds)
+  }
+
+  private func beginOneTimeAttempt(target: FetchTarget, messageIds: Set<Int64>) -> Set<Int64> {
+    let attempted = oneTimeAttemptedIds[target, default: []]
+    let idsToAttempt = messageIds.subtracting(attempted)
+    guard !idsToAttempt.isEmpty else { return [] }
+
+    oneTimeAttemptedIds[target, default: []].formUnion(idsToAttempt)
+    return idsToAttempt
   }
 
   private static func defaultResolveMissingIds(chatId: Int64, messageIds: Set<Int64>) async throws -> Set<Int64> {
