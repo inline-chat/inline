@@ -514,7 +514,8 @@ struct AllChatsItem: Identifiable, Equatable {
   }
 
   private static func draftText(for dialog: Dialog) -> String? {
-    guard let draftText = dialog.draftMessage?.text else { return nil }
+    let draftText = Drafts2.shared.cached(peer: dialog.peerId)?.text ?? dialog.draftMessage?.text
+    guard let draftText else { return nil }
     let text = normalizedPreviewText(draftText)
     guard text.isEmpty == false else { return nil }
     return "Draft: \(text)"
