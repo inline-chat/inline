@@ -150,7 +150,8 @@ struct ChatListItem: Hashable, Identifiable {
 
 extension ChatListItem {
   var draftPreviewText: String? {
-    guard let draftText = dialog?.draftMessage?.text else { return nil }
+    guard let peerId else { return nil }
+    guard let draftText = Drafts2.shared.cached(peer: peerId)?.text ?? dialog?.draftMessage?.text else { return nil }
     let normalizedText = draftText
       .components(separatedBy: .newlines)
       .joined(separator: " ")

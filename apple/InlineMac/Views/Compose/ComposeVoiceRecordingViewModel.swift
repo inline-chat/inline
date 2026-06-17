@@ -27,10 +27,16 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   private var player: AVAudioPlayer?
   private var playbackTimer: Timer?
   private var stopRecordingAction: (@Sendable () -> Void)?
+  private var draftVoice: Client_MessageVoiceContent?
   private var isStarting = false
 
   var isActive: Bool {
     phase != .idle
+  }
+
+  var draftVoiceAttachmentId: String? {
+    guard let draftVoice else { return nil }
+    return FileMediaItem.voice(draftVoice).getItemUniqueId()
   }
 
   init(peerId: InlineKit.Peer) {
@@ -44,9 +50,10 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
     let recorder = recorder
     let recordingURL = recording?.fileURL
+    let shouldRemoveRecording = recording.map(shouldRemoveRecordingFile) ?? false
     Task { @MainActor in
       recorder?.cancel()
-      if let recordingURL {
+      if shouldRemoveRecording, let recordingURL {
         try? FileManager.default.removeItem(at: recordingURL)
       }
     }
@@ -71,6 +78,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       try recorder.start()
 
       self.recorder = recorder
+      draftVoice = nil
       duration = 0
       samples = []
       playbackProgress = 0
@@ -96,6 +104,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       let recording = try recorder.finish()
       self.recorder = nil
       self.recording = recording
+      draftVoice = nil
       stopRecordingAction?()
       stopRecordingAction = nil
 
@@ -118,10 +127,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     stopRecordingAction = nil
     stopPlayback(resetProgress: true)
 
-    if let recording {
+    if let recording, shouldRemoveRecordingFile(recording) {
       try? FileManager.default.removeItem(at: recording.fileURL)
     }
     recording = nil
+    draftVoice = nil
 
     reset()
   }
@@ -192,6 +202,16 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     guard let recording else { return nil }
     stopPlayback(resetProgress: true)
 
+    if let draftVoice {
+      if shouldRemoveRecordingFile(recording) {
+        try? FileManager.default.removeItem(at: recording.fileURL)
+      }
+      self.recording = nil
+      self.draftVoice = nil
+      reset()
+      return .voice(draftVoice)
+    }
+
     let voice = try FileCache.saveVoice(
       data: recording.data,
       duration: Int(max(1, recording.duration.rounded(.up))),
@@ -202,8 +222,60 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
     try? FileManager.default.removeItem(at: recording.fileURL)
     self.recording = nil
+    draftVoice = nil
     reset()
     return .voice(voice)
+  }
+
+  func draftVoiceMediaItem() throws -> FileMediaItem? {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return nil }
+    guard phase == .review, let recording else { return nil }
+
+    if let draftVoice {
+      return .voice(draftVoice)
+    }
+
+    let voice = try FileCache.saveVoice(
+      data: recording.data,
+      duration: Int(max(1, recording.duration.rounded(.up))),
+      waveform: recording.waveform,
+      mimeType: recording.mimeType,
+      fileExtension: recording.fileExtension
+    )
+    draftVoice = voice
+    return .voice(voice)
+  }
+
+  func loadDraftVoice(_ voice: Client_MessageVoiceContent) -> Bool {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return false }
+    guard let url = FileMediaItem.voice(voice).localFileURL(),
+          let data = try? Data(contentsOf: url),
+          !data.isEmpty
+    else {
+      return false
+    }
+
+    stopPlayback(resetProgress: true)
+    recorder?.cancel()
+    recorder = nil
+    stopRecordingAction?()
+    stopRecordingAction = nil
+
+    draftVoice = voice
+    recording = ComposeVoiceRecording(
+      fileURL: url,
+      data: data,
+      duration: TimeInterval(max(1, voice.duration)),
+      waveform: voice.waveform,
+      mimeType: "audio/mp4",
+      fileExtension: url.pathExtension.isEmpty ? "m4a" : url.pathExtension
+    )
+    duration = TimeInterval(max(1, voice.duration))
+    samples = Array(voice.waveform)
+    playbackProgress = 0
+    isPlaying = false
+    phase = .review
+    return true
   }
 
   private func ensureMicrophoneAccess() async -> Bool {
@@ -268,6 +340,16 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     if resetProgress {
       playbackProgress = 0
     }
+  }
+
+  private func shouldRemoveRecordingFile(_ recording: ComposeVoiceRecording) -> Bool {
+    guard let draftVoice,
+          let draftURL = FileMediaItem.voice(draftVoice).localFileURL()
+    else {
+      return true
+    }
+
+    return draftURL.standardizedFileURL != recording.fileURL.standardizedFileURL
   }
 
   private func reset() {

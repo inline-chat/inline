@@ -118,6 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     MainActor.assumeIsolated {
       dockBadgeService.prepareForTermination()
     }
+    Drafts2.shared.flushBlocking()
     return .terminateNow
   }
 

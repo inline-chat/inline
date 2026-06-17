@@ -821,6 +821,17 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("drafts2") { db in
+      try db.create(table: "draft2") { t in
+        t.primaryKey("peerKey", .text)
+        t.column("text", .text).notNull().defaults(to: "")
+        t.column("entities", .blob)
+        t.column("attachments", .blob)
+        t.column("updatedAt", .integer).notNull()
+        t.column("revision", .integer).notNull()
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

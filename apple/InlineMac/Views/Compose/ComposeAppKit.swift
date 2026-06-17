@@ -8,6 +8,8 @@ import SwiftUI
 import TextProcessing
 
 class ComposeAppKit: NSView {
+  private static let attachmentMarker = "\u{FFFC}"
+
   // MARK: - Internals
 
   private var log = Log.scoped("Compose", enableTracing: false)
@@ -165,9 +167,12 @@ class ComposeAppKit: NSView {
   }
 
   // Draft
-  private let draftManager = DraftManager(debounceDelay: 3.0)
+  private let drafts2 = Drafts2.shared
   private var initializedDraft = false
   private var didRequestFinalDraftPersistence = false
+  private var draftEntitySaveTask: Task<Void, Never>?
+  private var draftAttachmentObserverCancel: (@Sendable () -> Void)?
+  private var pendingDraftVideoFallbackURLs: [String: URL] = [:]
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -370,6 +375,9 @@ class ComposeAppKit: NSView {
     self.dialog = dialog
 
     super.init(frame: .zero)
+    draftAttachmentObserverCancel = drafts2.observeAttachmentResults(peer: peerId) { [weak self] result in
+      self?.handleDraftAttachmentResult(result)
+    }
     setupView()
     setupObservers()
     setupKeyDownHandler()
@@ -664,6 +672,7 @@ class ComposeAppKit: NSView {
 
   private func pauseVoiceRecording() {
     voiceViewModel.pauseRecording()
+    persistVoiceDraftIfNeeded()
   }
 
   private func toggleVoicePlayback() {
@@ -671,7 +680,12 @@ class ComposeAppKit: NSView {
   }
 
   private func cancelVoiceRecording() {
+    let draftVoiceAttachmentId = voiceViewModel.draftVoiceAttachmentId
     voiceViewModel.cancel()
+    if let draftVoiceAttachmentId {
+      drafts2.removeAttachment(peer: peerId, id: draftVoiceAttachmentId)
+      drafts2.flushBlocking()
+    }
   }
 
   private func updateVoiceKeyHandlers(phase: ComposeVoiceRecordingPhase) {
@@ -715,7 +729,7 @@ class ComposeAppKit: NSView {
 
     switch voiceViewModel.phase {
       case .recording:
-        voiceViewModel.pauseRecording()
+        pauseVoiceRecording()
       case .review:
         voiceViewModel.togglePlayback()
       case .idle:
@@ -751,7 +765,7 @@ class ComposeAppKit: NSView {
       )
 
       state.clearReplyingToMsgId()
-      clearDraft()
+      clearDraft(flush: true)
       updateSendButtonIfNeeded()
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -1405,56 +1419,20 @@ class ComposeAppKit: NSView {
       return
     }
 
-    // Add a placeholder view immediately, then persist to cache/DB off the main thread.
-    let pendingId = "pending_photo_\(UUID().uuidString)"
+    // Add a placeholder view immediately; Drafts2 owns file-cache persistence.
+    let pendingId = drafts2.addImage(peer: peerId, image: image, preferredFormat: preferredImageFormat)
     attachments.addImageView(image, id: pendingId)
     updateHeight(animate: true)
-
-    let task = Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else { return }
-      if Task.isCancelled { return }
-      do {
-        let photoInfo = try FileCache.savePhoto(image: image, preferredFormat: preferredImageFormat)
-        let mediaItem = FileMediaItem.photo(photoInfo)
-        let uniqueId = mediaItem.getItemUniqueId()
-
-        await MainActor.run { [weak self] in
-          guard let self else { return }
-          guard self.pendingImageSaveTasks[pendingId] != nil else { return } // removed/cancelled
-          self.pendingImageSaveTasks.removeValue(forKey: pendingId)
-
-          // Swap the placeholder with the persisted attachment id.
-          self.attachments.removeImageView(id: pendingId)
-          self.attachments.addImageView(image, id: uniqueId)
-          self.attachmentItems[uniqueId] = mediaItem
-          self.updateHeight(animate: true)
-        }
-      } catch {
-        await MainActor.run { [weak self] in
-          guard let self else { return }
-          guard self.pendingImageSaveTasks[pendingId] != nil else { return } // removed/cancelled
-          self.pendingImageSaveTasks.removeValue(forKey: pendingId)
-          self.attachments.removeImageView(id: pendingId)
-          self.updateHeight(animate: true)
-        }
-        log.error("Failed to save photo in attachments", error: error)
-      }
-    }
-
-    pendingImageSaveTasks[pendingId] = task
   }
 
   func removeImage(_ id: String) {
-    if let task = pendingImageSaveTasks.removeValue(forKey: id) {
-      task.cancel()
-    }
-
     // Update UI
     attachments.removeImageView(id: id)
     updateHeight(animate: true)
 
     // Update state
     attachmentItems.removeValue(forKey: id)
+    drafts2.removeAttachment(peer: peerId, id: id)
   }
 
   private func isVideoFile(_ url: URL) -> Bool {
@@ -1463,88 +1441,32 @@ class ComposeAppKit: NSView {
   }
 
   private func loadThumbnail(from photoInfo: PhotoInfo?) -> NSImage? {
-    guard let localPath = photoInfo?.sizes.first?.localPath else { return nil }
+    guard let localPath = photoInfo?.bestPhotoSize()?.localPath else { return nil }
     let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
     return NSImage(contentsOf: url)
   }
 
   @MainActor
   func addVideo(_ url: URL, thumbnail: NSImage? = nil) async {
-    // Show a placeholder immediately, then persist/cache the video in background.
-    let pendingId = "pending_video_\(UUID().uuidString)"
+    // Show a placeholder immediately; Drafts2 owns file-cache persistence.
+    let pendingId = drafts2.addVideo(peer: peerId, url: url, thumbnail: thumbnail)
+    pendingDraftVideoFallbackURLs[pendingId] = url
     attachments.addVideoView(thumbnail: thumbnail, videoURL: url, id: pendingId)
     updateHeight(animate: true)
-
-    let task = Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else { return }
-      if Task.isCancelled { return }
-
-      do {
-        let videoInfo = try await FileCache.saveVideo(url: url, thumbnail: thumbnail)
-        let mediaItem = FileMediaItem.video(videoInfo)
-        let uniqueId = mediaItem.getItemUniqueId()
-
-        await MainActor.run { [weak self] in
-          guard let self else { return }
-          guard self.pendingVideoSaveTasks[pendingId] != nil else { return } // removed/cancelled
-          self.pendingVideoSaveTasks.removeValue(forKey: pendingId)
-
-          self.attachments.removeVideoView(id: pendingId)
-          self.attachments.addVideoView(videoInfo, id: uniqueId)
-          self.attachmentItems[uniqueId] = mediaItem
-          self.updateHeight(animate: true)
-        }
-      } catch {
-        let fellBackToFile = await MainActor.run { [weak self] in
-          guard let self else { return false }
-          guard self.pendingVideoSaveTasks[pendingId] != nil else { return false } // removed/cancelled
-          self.pendingVideoSaveTasks.removeValue(forKey: pendingId)
-          self.attachments.removeVideoView(id: pendingId)
-          self.updateHeight(animate: true)
-
-          if self.addFile(url) {
-            self.log.warning("Failed to save video in attachments; sending as file instead")
-            return true
-          }
-
-          self.log.error("Failed to save video in attachments", error: error)
-          return false
-        }
-        if fellBackToFile { return }
-      }
-    }
-
-    pendingVideoSaveTasks[pendingId] = task
   }
 
   func removeVideo(_ id: String) {
-    if let task = pendingVideoSaveTasks.removeValue(forKey: id) {
-      task.cancel()
-    }
-
     attachments.removeVideoView(id: id)
     attachmentItems.removeValue(forKey: id)
+    pendingDraftVideoFallbackURLs.removeValue(forKey: id)
+    drafts2.removeAttachment(peer: peerId, id: id)
     updateHeight(animate: true)
   }
 
   @discardableResult
   func addFile(_ url: URL) -> Bool {
-    do {
-      let documentInfo = try FileCache.saveDocument(url: url)
-      let mediaItem = FileMediaItem.document(documentInfo)
-      let uniqueId = mediaItem.getItemUniqueId()
-
-      // Update UI
-      attachments.addDocumentView(documentInfo, id: uniqueId)
-      updateHeight(animate: true)
-
-      // Update State
-      attachmentItems[uniqueId] = mediaItem
-      return true
-    } catch {
-      log.error("Failed to save document", error: error)
-      return false
-    }
+    drafts2.addFile(peer: peerId, url: url)
+    return true
   }
 
   func removeFile(_ id: String) {
@@ -1556,14 +1478,11 @@ class ComposeAppKit: NSView {
 
     // Update state
     attachmentItems.removeValue(forKey: id)
+    drafts2.removeAttachment(peer: peerId, id: id)
   }
 
   func clearAttachments(updateHeights: Bool = false) {
-    for (_, task) in pendingVideoSaveTasks {
-      task.cancel()
-    }
-    pendingVideoSaveTasks.removeAll()
-
+    pendingDraftVideoFallbackURLs.removeAll()
     attachmentItems.removeAll()
     attachments.clearViews()
     if updateHeights {
@@ -1582,7 +1501,7 @@ class ComposeAppKit: NSView {
     state.clearReplyingToMsgId()
     state.clearEditingMsgId()
     state.clearForwarding()
-    clearDraft()
+    clearDraft(flush: true)
 
     // Views
     attachments.clearViews()
@@ -1611,7 +1530,7 @@ class ComposeAppKit: NSView {
     ignoreNextHeightChange = true
     let attributedString = trimmedAttributedString(textEditor.attributedString)
     let replyToMsgId = state.replyingToMsgId
-    let attachmentItemsSnapshot = attachmentItems
+    let attachmentItemsSnapshot = drafts2.load(peer: peerId)?.attachments.map(\.media) ?? Array(attachmentItems.values)
     // keep a copy of editingMessageId before we clear it
     let editingMessageId = state.editingMsgId
     let forwardContext = state.forwardContext
@@ -1635,9 +1554,9 @@ class ComposeAppKit: NSView {
     let effectiveSendMode = sendMode ?? (state.sendSilently ? .modeSilent : nil)
 
     func enqueueAttachments(replyToMessageId: Int64?) {
-      for (index, (_, attachment)) in attachmentItemsSnapshot.enumerated() {
+      for (index, attachment) in attachmentItemsSnapshot.enumerated() {
         let isFirst = index == 0
-        _ = Transactions.shared.mutate(
+        Transactions.shared.mutate(
           transaction:
           .sendMessage(
             TransactionSendMessage(
@@ -1865,8 +1784,6 @@ class ComposeAppKit: NSView {
 
   private var keyMonitorUnsubscribe: (() -> Void)?
   private var keyMonitorPasteUnsubscribe: (() -> Void)?
-  private var pendingImageSaveTasks: [String: Task<Void, Never>] = [:]
-  private var pendingVideoSaveTasks: [String: Task<Void, Never>] = [:]
 
   private func setupKeyDownHandler() {
     keyMonitorUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -1928,6 +1845,10 @@ class ComposeAppKit: NSView {
 
   deinit {
     requestImmediateDraftPersistenceIfNeeded()
+    draftAttachmentObserverCancel?()
+    draftAttachmentObserverCancel = nil
+    draftEntitySaveTask?.cancel()
+    draftEntitySaveTask = nil
     cancellables.removeAll()
 
     // Clean up
@@ -1945,16 +1866,6 @@ class ComposeAppKit: NSView {
     mentionCompletionMenu?.removeFromSuperview()
     mentionParticipantsTask?.cancel()
     mentionParticipantsTask = nil
-
-    for (_, task) in pendingImageSaveTasks {
-      task.cancel()
-    }
-    pendingImageSaveTasks.removeAll()
-
-    for (_, task) in pendingVideoSaveTasks {
-      task.cancel()
-    }
-    pendingVideoSaveTasks.removeAll()
 
     log.trace("deinit")
   }
@@ -2195,11 +2106,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     updateSendButtonIfNeeded()
-    if isEmptyTrimmed {
-      clearDraft()
-    } else {
-      saveDraftWithDebounce()
-    }
+    saveDraftWithDebounce()
   }
 
   private func handleStickerDetectionIfNeeded(for textView: NSTextView) {
@@ -2417,7 +2324,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidChangeFormatting(_ textView: NSTextView) {
-    saveDraftWithDebounce()
+    saveDraft()
   }
 
   func textView(_ textView: NSTextView, didDetectMentionWith query: String, at location: Int) {
@@ -2530,6 +2437,7 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
 
     // Update height if needed
     updateHeightIfNeeded(for: textEditor.textView)
+    saveDraft()
   }
 
   func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu) {
@@ -2586,6 +2494,7 @@ extension ComposeAppKit: ComposeAutocompleteMenuDelegate {
 
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
+        saveDraft()
 
       case let .emoji(value, _):
         let result = emojiAutocompleteDetector.replaceEmojiAutocomplete(
@@ -2680,11 +2589,11 @@ extension ComposeAppKit {
 extension ComposeAppKit {
   /// Loads draft and if nothing found returns false
   func loadDraft() -> Bool {
-    // We should have the dialog, in the edge case we don't, just ignore draft for now
-    guard let dialog else { return false }
-
-    // Check if there is a draft message
-    guard let draft = draftManager.load(dialog.draftMessage) else { return false }
+    guard let draft = drafts2.load(peer: peerId, legacyDraftMessage: dialog?.draftMessage),
+          !draft.isEmpty
+    else {
+      return false
+    }
 
     // Convert to attributed string. Most drafts are plain text, so avoid entity
     // parsing work when protobuf entities are not present.
@@ -2706,40 +2615,149 @@ extension ComposeAppKit {
 
     // Set as compose text
     setAttributedString(attributedString)
+    renderDraftAttachments(draft.attachments)
 
     return true
   }
 
-  private func saveDraft() {
-    guard !isEmptyTrimmed else {
-      clearDraft()
-      return
-    }
-    draftManager.save(peerId: peerId, attributedString: textEditor.attributedString)
+  @discardableResult
+  private func saveDraft() -> Int64 {
+    let revision = updateDraftTextFromEditor()
+    saveDraftEntities(forRevision: revision)
+    return revision
   }
 
   private func clearDraft() {
-    draftManager.clear(peerId: peerId)
+    clearDraft(flush: false)
+  }
+
+  private func clearDraft(flush: Bool) {
+    draftEntitySaveTask?.cancel()
+    draftEntitySaveTask = nil
+    drafts2.clear(peer: peerId)
+    if flush {
+      drafts2.flushBlocking()
+    }
   }
 
   private func requestImmediateDraftPersistenceIfNeeded() {
     guard didRequestFinalDraftPersistence == false else { return }
     didRequestFinalDraftPersistence = true
 
-    draftManager.cancelPendingSave()
+    draftEntitySaveTask?.cancel()
+    draftEntitySaveTask = nil
 
-    if isEmptyTrimmed {
-      clearDraft()
-    } else {
-      saveDraft()
-    }
+    saveDraft()
+    drafts2.flushBlocking()
   }
 
   /// Triggers save with a 3s delay which cancels previous Task thus creating a basic debounced
-  /// version to be used on textDidChange.
+  /// entity extraction to be used on textDidChange.
   private func saveDraftWithDebounce() {
-    draftManager.scheduleSave(peerId: peerId) { [weak self] in
-      self?.textEditor.attributedString ?? NSAttributedString()
+    let revision = updateDraftTextFromEditor()
+    scheduleDraftEntitySave(forRevision: revision)
+  }
+
+  @discardableResult
+  private func updateDraftTextFromEditor() -> Int64 {
+    let text = textEditor.textView.string.replacingOccurrences(of: Self.attachmentMarker, with: "")
+    return drafts2.updateText(peer: peerId, text: text)
+  }
+
+  private func scheduleDraftEntitySave(forRevision revision: Int64) {
+    draftEntitySaveTask?.cancel()
+    draftEntitySaveTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      try? await Task.sleep(nanoseconds: 3_000_000_000)
+      guard !Task.isCancelled else { return }
+      saveDraftEntities(forRevision: revision)
     }
+  }
+
+  private func saveDraftEntities(forRevision revision: Int64) {
+    let (rawText, entities) = ProcessEntities.fromAttributedString(
+      textEditor.attributedString,
+      parseMarkdown: false,
+      threadLinkSpaceId: chat?.spaceId
+    )
+    let text = rawText.replacingOccurrences(of: Self.attachmentMarker, with: "")
+    let normalizedEntities: MessageEntities? = rawText == text ? Drafts2.normalizedEntities(entities) : nil
+    drafts2.updateEntities(peer: peerId, entities: normalizedEntities, forRevision: revision)
+  }
+
+  private func renderDraftAttachments(_ draftAttachments: [Drafts2Attachment]) {
+    guard !draftAttachments.isEmpty else { return }
+
+    attachmentItems.removeAll()
+    attachments.clearViews()
+    pendingDraftVideoFallbackURLs.removeAll()
+
+    for attachment in draftAttachments {
+      renderDraftAttachment(attachment)
+    }
+
+    updateHeight(animate: false)
+    updateSendButtonIfNeeded()
+  }
+
+  private func handleDraftAttachmentResult(_ result: Drafts2AttachmentResult) {
+    switch result {
+      case let .success(pendingId, attachment):
+        removeDraftAttachmentPlaceholder(id: pendingId)
+        pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
+        renderDraftAttachment(attachment)
+        updateHeight(animate: true)
+      case let .failure(pendingId, message):
+        removeDraftAttachmentPlaceholder(id: pendingId)
+        if let fallbackURL = pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId), addFile(fallbackURL) {
+          log.warning("Failed to save video in attachments; sending as file instead")
+          return
+        }
+
+        log.error("Failed to save draft attachment: \(message)")
+        updateHeight(animate: true)
+    }
+  }
+
+  private func renderDraftAttachment(_ attachment: Drafts2Attachment) {
+    switch attachment.media {
+      case let .photo(photoInfo):
+        guard let image = loadThumbnail(from: photoInfo) else {
+          log.warning("Unable to render draft photo attachment without local thumbnail")
+          return
+        }
+        attachmentItems[attachment.id] = attachment.media
+        attachments.addImageView(image, id: attachment.id)
+      case let .video(videoInfo):
+        attachmentItems[attachment.id] = attachment.media
+        attachments.addVideoView(videoInfo, id: attachment.id)
+      case let .document(documentInfo):
+        attachmentItems[attachment.id] = attachment.media
+        attachments.addDocumentView(documentInfo, id: attachment.id)
+      case let .voice(voice):
+        guard voiceControlsAvailable, voiceViewModel.loadDraftVoice(voice) else {
+          log.warning("Unable to restore draft voice attachment")
+          return
+        }
+        attachmentItems[attachment.id] = attachment.media
+        updateVoiceAvailability(phase: .review)
+    }
+  }
+
+  private func persistVoiceDraftIfNeeded() {
+    do {
+      guard let mediaItem = try voiceViewModel.draftVoiceMediaItem() else { return }
+      let attachment = drafts2.appendAttachment(peer: peerId, media: mediaItem)
+      attachmentItems[attachment.id] = mediaItem
+      updateSendButtonIfNeeded()
+    } catch {
+      log.error("Failed to persist voice draft", error: error)
+    }
+  }
+
+  private func removeDraftAttachmentPlaceholder(id: String) {
+    attachments.removeImageView(id: id)
+    attachments.removeVideoView(id: id)
+    attachments.removeDocumentView(id: id)
   }
 }
