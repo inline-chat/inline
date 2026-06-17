@@ -25,7 +25,7 @@ export const handler = async (
   { currentUserId }: Context,
 ): Promise<Static<typeof Response>> => {
   const users = await UsersModel.searchUsers({
-    query: input.q?.trim().replace("@", ""),
+    query: input.q?.trim().replace(/^@+/, ""),
     limit: input.limit ?? 10,
     excludeUserId: currentUserId,
   })

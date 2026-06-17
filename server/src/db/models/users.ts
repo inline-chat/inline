@@ -232,9 +232,16 @@ export class UsersModel {
     limit: number
     excludeUserId?: number
   }): Promise<Array<{ user: DbUser; photoFile?: DbFile | undefined }>> {
+    const normalizedQuery = query.trim()
+    if (normalizedQuery.length === 0) {
+      return []
+    }
+
+    const exactUsername = normalizedQuery.toLowerCase()
     const usersWithPhotos = await db._query.users.findMany({
       where: and(
-        sql`${users.username} ilike ${"%" + query + "%"}`,
+        sql`${users.username} ilike ${"%" + normalizedQuery + "%"}`,
+        sql`(${users.bot} is not true or lower(${users.username}) = ${exactUsername})`,
         excludeUserId ? not(eq(users.id, excludeUserId)) : undefined,
         userNotDeleted(),
       ),

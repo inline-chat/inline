@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach } from "bun:test"
-import { createBot } from "../../functions/createBot"
+import { createBot, MAX_BOTS_PER_USER } from "../../functions/createBot"
 import { setupTestLifecycle, defaultTestContext, testUtils } from "../setup"
 import type { FunctionContext } from "../../functions/_types"
 
@@ -116,7 +116,7 @@ describe("createBot", () => {
   })
 
   test("should enforce bot limit per creator", async () => {
-    const inputs = Array.from({ length: 5 }, (_, index) => ({
+    const inputs = Array.from({ length: MAX_BOTS_PER_USER }, (_, index) => ({
       name: `Bot ${index + 1}`,
       username: `limitbot${index + 1}bot`,
     }))
