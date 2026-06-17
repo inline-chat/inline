@@ -35,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private var globalFocusHotkeyController: GlobalFocusHotkeyController?
 
+  private let installLocationPrompt = AppInstallLocationPrompt()
   private let launchAtLoginController = LaunchAtLoginController()
 
 #if SPARKLE
@@ -65,6 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     initializeServices()
     setupAppearanceSetting()
     setupMainMenu()
+    presentInstallLocationPromptIfNeeded()
     registerMainWindowCoordinator()
     setupRealtimeConnectionFailureObserver()
     setupRealtimeAuthInvalidatedObserver()
@@ -492,20 +494,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var isSandboxedRuntime: Bool {
     ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
   }
+#endif
 
-  @MainActor private func restartApplication() {
-    let appURL = Bundle.main.bundleURL
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = true
-    NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { [weak self] _, error in
-      if let error {
-        self?.log.error("Failed to relaunch app after realtime connection error", error: error)
-        return
-      }
-      NSApp.terminate(nil)
+  @MainActor private func presentInstallLocationPromptIfNeeded() {
+    installLocationPrompt.presentIfNeeded { [weak self] appURL in
+      self?.restartApplication(at: appURL)
     }
   }
-#endif
+
+  @MainActor private func restartApplication(at appURL: URL = Bundle.main.bundleURL) {
+    let log = self.log
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+      if let error {
+        log.error("Failed to relaunch app", error: error)
+        return
+      }
+      Task { @MainActor in
+        NSApp.terminate(nil)
+      }
+    }
+  }
 
   @MainActor private func setupNotificationsSoundSetting() {
     // Set initial sound setting
