@@ -22,6 +22,7 @@ extension ComposeView {
     config.background.backgroundColor = ThemeManager.shared.selected.accent
     config.cornerStyle = .capsule
 
+    button.addTarget(self, action: #selector(buttonTouchDown), for: .touchDown)
     button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
 
     let silentAction = UIAction(
@@ -74,6 +75,13 @@ extension ComposeView {
     return button
   }
 
+  func makeVoiceButton() -> ComposeVoiceButton {
+    let button = ComposeVoiceButton()
+    button.addTarget(self, action: #selector(buttonTouchDown), for: .touchDown)
+    button.addTarget(self, action: #selector(startVoiceRecordingTapped), for: .touchUpInside)
+    return button
+  }
+
   func makePlusButton() -> UIButton {
     let button = UIButton(type: .system)
     button.translatesAutoresizingMaskIntoConstraints = false
@@ -100,8 +108,15 @@ extension ComposeView {
       button.clipsToBounds = true
     }
     button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
+    button.addTarget(self, action: #selector(buttonTouchDown), for: .touchDown)
 
     return button
+  }
+
+  @objc func buttonTouchDown() {
+    let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+    feedbackGenerator.prepare()
+    feedbackGenerator.impactOccurred(intensity: 1.0)
   }
 
   func makeComposeAndButtonContainer() -> UIView {

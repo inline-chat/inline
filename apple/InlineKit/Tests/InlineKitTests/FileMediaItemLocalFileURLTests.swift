@@ -1,4 +1,5 @@
 import Foundation
+import InlineProtocol
 import Testing
 
 @testable import InlineKit
@@ -58,6 +59,23 @@ struct FileMediaItemLocalFileURLTests {
 
     #expect(url?.lastPathComponent == "doc-1-guide.pdf")
     #expect(url?.path.contains("/Documents/") == true)
+  }
+
+  @Test("Resolves local voice URL in voices cache directory")
+  func resolvesVoiceLocalURL() {
+    let voice = Client_MessageVoiceContent.with {
+      $0.voiceID = 4
+      $0.duration = 2
+      $0.mimeType = "audio/mp4"
+      $0.localRelativePath = "voice-1.m4a"
+      $0.size = 128
+    }
+    let item = FileMediaItem.voice(voice)
+
+    let url = item.localFileURL()
+
+    #expect(url?.lastPathComponent == "voice-1.m4a")
+    #expect(url?.path.contains("/Voices/") == true)
   }
 
   @Test("Uses best photo size local path when available")
