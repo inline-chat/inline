@@ -123,7 +123,7 @@ final class ComposeVoiceRecorder: NSObject {
 
     let elapsed = Date().timeIntervalSince(startedAt ?? Date())
     let duration = max(recorder.currentTime, elapsed)
-    onUpdate?(duration, Self.reducedSamples(samples, targetCount: Self.liveSampleCount))
+    onUpdate?(duration, Self.liveSamples(from: samples))
   }
 
   nonisolated fileprivate static func normalizedPower(_ power: Float) -> Float {
@@ -170,6 +170,14 @@ final class ComposeVoiceRecorder: NSObject {
 
   private nonisolated static func waveformData(from samples: [UInt8], targetCount: Int = 96) -> Data {
     Data(reducedSamples(samples, targetCount: targetCount, emptyValue: 28))
+  }
+
+  private nonisolated static func liveSamples(from samples: [UInt8]) -> [UInt8] {
+    guard samples.count < liveSampleCount else {
+      return Array(samples.suffix(liveSampleCount))
+    }
+
+    return Array(repeating: 0, count: liveSampleCount - samples.count) + samples
   }
 
   private nonisolated static func reducedSamples(

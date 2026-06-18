@@ -15,10 +15,10 @@ struct ComposeVoiceInputView: View {
       switch viewModel.phase {
       case .starting:
         iconButton("xmark", title: "Cancel voice message", action: onCancel)
-        ProgressView()
-          .controlSize(.small)
+        progressIndicator
         waveform(progress: 0)
-        Spacer(minLength: 0)
+        durationLabel.hidden()
+        reservedIconSpace
 
       case .recording:
         iconButton("xmark", title: "Cancel voice message", action: onCancel)
@@ -29,10 +29,10 @@ struct ComposeVoiceInputView: View {
 
       case .finishing:
         iconButton("xmark", title: "Cancel voice message", action: onCancel)
-        ProgressView()
-          .controlSize(.small)
+        progressIndicator
         waveform(progress: 1)
         durationLabel
+        reservedIconSpace
 
       case .review:
         iconButton(
@@ -59,7 +59,14 @@ struct ComposeVoiceInputView: View {
     Circle()
       .fill(Color.red)
       .frame(width: 8, height: 8)
+      .frame(width: 20, height: 20)
       .accessibilityLabel("Recording")
+  }
+
+  private var progressIndicator: some View {
+    ProgressView()
+      .controlSize(.small)
+      .frame(width: 20, height: 20)
   }
 
   private var durationLabel: some View {
@@ -81,12 +88,19 @@ struct ComposeVoiceInputView: View {
       }
   }
 
+  private var reservedIconSpace: some View {
+    Color.clear
+      .frame(width: 30, height: 30)
+      .accessibilityHidden(true)
+  }
+
   private func waveform(progress: Double, onSeek: (@MainActor @Sendable (Double) -> Void)? = nil) -> some View {
     ComposeVoiceWaveformView(
       samples: viewModel.samples,
       progress: progress,
-      foreground: .accentColor,
-      background: Color(uiColor: .tertiaryLabel).opacity(0.35),
+      foreground: Color(uiColor: .secondaryLabel),
+      background: Color(uiColor: .tertiaryLabel).opacity(0.45),
+      motion: viewModel.phase == .recording ? .recordingReel : .fixed,
       onSeek: onSeek
     )
     .frame(height: 20)
