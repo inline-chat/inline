@@ -146,6 +146,22 @@ class MessageAttachmentsView: NSStackView {
     }
   }
 
+  func interactiveHitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, bounds.contains(point) else { return nil }
+
+    for view in arrangedSubviews.reversed() where !view.isHidden {
+      let pointInView = view.convert(point, from: self)
+      guard view.bounds.contains(pointInView) else { continue }
+      return view.hitTest(pointInView) ?? view
+    }
+
+    return nil
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    interactiveHitTest(point)
+  }
+
   private func apply(size: NSSize, to view: AttachmentView, id: Int64) {
     if let constraints = itemConstraints[id] {
       if constraints.width.constant != size.width {
