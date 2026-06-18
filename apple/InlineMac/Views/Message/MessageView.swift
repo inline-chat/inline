@@ -1359,6 +1359,15 @@ class MessageViewAppKit: NSView {
     return handled
   }
 
+  private func isTextEntityPoint(_ locationInSelf: NSPoint) -> Bool {
+    guard textView.superview != nil, !textView.isHidden else { return false }
+
+    let locationInText = textView.convert(locationInSelf, from: self)
+    guard textView.bounds.contains(locationInText) else { return false }
+
+    return textEntityHit(at: locationInText) != nil
+  }
+
   private func openThreadLink(_ target: ThreadLinkTarget) {
     if let peer = target.directPeer {
       openChat(peer: peer)
@@ -4030,22 +4039,27 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       return false
     }
 
-    if (gestureRecognizer === longPressGesture || gestureRecognizer === doubleClickGesture),
-       handleEntityClick(from: event, source: recognizerName(gestureRecognizer))
-    {
+    if gestureRecognizer === longPressGesture, isTextEntityPoint(locationInSelf) {
       MessageGestureTrace.debug(
-        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=entityClick"
+        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textEntity"
       )
       return false
     }
 
-    if (gestureRecognizer === longPressGesture || gestureRecognizer === doubleClickGesture),
-       isTextPoint(locationInSelf)
-    {
-      MessageGestureTrace.debug(
-        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textPoint"
-      )
-      return false
+    if gestureRecognizer === doubleClickGesture {
+      if handleEntityClick(from: event, source: recognizerName(gestureRecognizer)) {
+        MessageGestureTrace.debug(
+          "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=entityClick"
+        )
+        return false
+      }
+
+      if isTextPoint(locationInSelf) {
+        MessageGestureTrace.debug(
+          "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textPoint"
+        )
+        return false
+      }
     }
 
     if let result = interactiveHitTestResult(locationInSelf) {
@@ -4101,8 +4115,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
 
     if let attachmentsView, attachmentsView.superview != nil, !attachmentsView.isHidden {
       let pointInAttachments = attachmentsView.convert(point, from: self)
-      if attachmentsView.bounds.contains(pointInAttachments) {
-        let hit = attachmentsView.hitTest(pointInAttachments) ?? attachmentsView
+      if let hit = attachmentsView.interactiveHitTest(pointInAttachments) {
         MessageGestureTrace.trace(
           "MessageView.interactiveHitTest messageId=\(message.messageId) target=attachments point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInAttachments)) hit=\(type(of: hit))"
         )

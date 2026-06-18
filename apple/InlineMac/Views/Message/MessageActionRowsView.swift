@@ -84,7 +84,6 @@ final class MessageActionButtonView: NSView {
     var messageFontSize: CGFloat
   }
 
-  private static let horizontalInset: CGFloat = 10
   private final class ActionButton: NSButton {
     var onPressChange: ((Bool) -> Void)?
 
@@ -142,8 +141,8 @@ final class MessageActionButtonView: NSView {
 
     NSLayoutConstraint.activate([
       button.topAnchor.constraint(equalTo: topAnchor),
-      button.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.horizontalInset),
-      button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.horizontalInset),
+      button.leadingAnchor.constraint(equalTo: leadingAnchor),
+      button.trailingAnchor.constraint(equalTo: trailingAnchor),
       button.bottomAnchor.constraint(equalTo: bottomAnchor),
       spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
       spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -222,6 +221,11 @@ final class MessageActionButtonView: NSView {
     isHovered = false
     setPressed(false)
     applyAppearance()
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, bounds.contains(point) else { return nil }
+    return button.isEnabled ? button : self
   }
 
   private func applyAppearance() {
