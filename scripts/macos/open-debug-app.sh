@@ -125,6 +125,27 @@ run_cmd() {
   fi
 }
 
+try_cmd() {
+  local desc="$1"
+  shift
+
+  if [[ "${verbose}" == "1" ]]; then
+    echo "${desc}..."
+    "$@"
+    return
+  fi
+
+  {
+    echo
+    echo "### ${desc}"
+    printf '$'
+    printf ' %q' "$@"
+    echo
+  } >>"${LOG_PATH}"
+
+  "$@" >>"${LOG_PATH}" 2>&1
+}
+
 capture_cmd() {
   local desc="$1"
   local output_path="$2"
@@ -160,38 +181,143 @@ build_setting() {
   awk -F ' = ' -v key="${key}" '$1 ~ "^[[:space:]]*" key "$" { print $2; exit }' "${settings_file}"
 }
 
-pid_for_app() {
-  /usr/bin/pgrep -x "${APP_NAME}" 2>/dev/null | /usr/bin/head -n 1 || true
+pids_for_app() {
+  /usr/bin/pgrep -x "${APP_NAME}" 2>/dev/null || true
 }
 
-wait_until_stopped() {
-  local i
+pid_in_list() {
+  local needle="$1"
+  local pids="$2"
+  local pid
 
-  for i in {1..30}; do
-    if [[ -z "$(pid_for_app)" ]]; then
+  for pid in ${pids}; do
+    if [[ "${pid}" == "${needle}" ]]; then
       return 0
     fi
-
-    sleep 0.2
   done
 
   return 1
 }
 
+debugserver_parent_pids() {
+  local pids="$1"
+  local pid
+  local parent
+  local args
+
+  for pid in ${pids}; do
+    parent="$(/bin/ps -p "${pid}" -o ppid= 2>/dev/null | /usr/bin/tr -d ' ')"
+    if [[ -z "${parent}" || "${parent}" == "1" ]]; then
+      continue
+    fi
+
+    args="$(/bin/ps -p "${parent}" -o args= 2>/dev/null || true)"
+    if [[ "${args}" == *"/debugserver "* || "${args}" == *" debugserver "* || "${args}" == *"/debugserver" ]]; then
+      echo "${parent}"
+    fi
+  done | /usr/bin/sort -u
+}
+
+wait_until_stopped() {
+  local attempts="${1:-30}"
+  local delay="${2:-0.2}"
+  local i
+
+  for ((i = 0; i < attempts; i++)); do
+    if [[ -z "$(pids_for_app)" ]]; then
+      return 0
+    fi
+
+    sleep "${delay}"
+  done
+
+  return 1
+}
+
+stop_existing_app() {
+  local app_pids
+  local debugger_pids
+
+  app_pids="$(pids_for_app)"
+  app_pids="${app_pids:-}"
+  if [[ -z "${app_pids}" ]]; then
+    return 0
+  fi
+
+  log "Stopping existing ${APP_NAME}..."
+
+  run_cmd "Terminate existing ${APP_NAME}" /bin/kill -TERM ${app_pids} || true
+
+  if wait_until_stopped 30 0.2; then
+    return 0
+  fi
+
+  app_pids="$(pids_for_app)"
+  debugger_pids="$(debugserver_parent_pids "${app_pids}")"
+  if [[ -n "${debugger_pids}" ]]; then
+    run_cmd "Terminate debugserver for ${APP_NAME}" /bin/kill -TERM ${debugger_pids} || true
+  fi
+
+  if wait_until_stopped 20 0.2; then
+    return 0
+  fi
+
+  app_pids="$(pids_for_app)"
+  debugger_pids="$(debugserver_parent_pids "${app_pids}")"
+  if [[ -n "${debugger_pids}" ]]; then
+    run_cmd "Force stop debugserver for ${APP_NAME}" /bin/kill -KILL ${debugger_pids} || true
+  fi
+  if [[ -n "${app_pids}" ]]; then
+    run_cmd "Force stop existing ${APP_NAME}" /bin/kill -KILL ${app_pids} || true
+  fi
+
+  if wait_until_stopped 20 0.2; then
+    return 0
+  fi
+
+  echo "${APP_NAME} did not stop in time after terminate and force-stop attempts. Continuing with a new app instance." >&2
+  return 0
+}
+
 wait_until_running() {
+  local previous_pids="${1:-}"
   local i
   local pid
 
   for i in {1..40}; do
-    pid="$(pid_for_app)"
-    if [[ -n "${pid}" ]]; then
-      echo "${pid}"
-      return 0
-    fi
+    for pid in $(pids_for_app); do
+      if [[ -z "${previous_pids}" ]] || ! pid_in_list "${pid}" "${previous_pids}"; then
+        echo "${pid}"
+        return 0
+      fi
+    done
 
     sleep 0.25
   done
 
+  return 1
+}
+
+open_debug_app() {
+  local attempt
+  local -a open_args=()
+
+  if [[ "${stop}" == "1" ]]; then
+    open_args=(-n)
+  fi
+
+  for attempt in 1 2 3; do
+    if try_cmd "Open ${APP_NAME} (attempt ${attempt})" /usr/bin/open "${open_args[@]}" "${app_path}"; then
+      return 0
+    fi
+
+    sleep 0.75
+  done
+
+  echo "Open ${APP_NAME} failed. Log: ${LOG_PATH}" >&2
+  if [[ "${verbose}" != "1" ]]; then
+    tail -n 120 "${LOG_PATH}" >&2 || true
+  fi
   return 1
 }
 
@@ -223,20 +349,16 @@ if [[ "${open_app}" != "1" ]]; then
   exit 0
 fi
 
-if [[ "${stop}" == "1" && -n "$(pid_for_app)" ]]; then
-  log "Stopping existing ${APP_NAME}..."
-  run_cmd "Stop existing ${APP_NAME}" /usr/bin/pkill -x "${APP_NAME}" || true
-
-  if ! wait_until_stopped; then
-    echo "${APP_NAME} did not stop in time. Close it and retry, or pass --no-stop to reuse it." >&2
-    exit 1
-  fi
+previous_pids=""
+if [[ "${stop}" == "1" ]]; then
+  previous_pids="$(pids_for_app)"
+  stop_existing_app
 fi
 
 log "Opening ${APP_NAME}..."
-run_cmd "Open ${APP_NAME}" /usr/bin/open "${app_path}"
+open_debug_app
 
 if [[ "${verify}" == "1" ]]; then
-  pid="$(wait_until_running)"
+  pid="$(wait_until_running "${previous_pids}")"
   log "${APP_NAME} is running (pid ${pid})."
 fi
