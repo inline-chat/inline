@@ -483,6 +483,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func buttonDisappear(animated: Bool = true) {
+    sendButton.configuration?.showsActivityIndicator = false
     guard isButtonVisible || !ComposeSendButtonState.isEffectivelyHidden(alpha: Double(sendButton.alpha)) else {
       sendButton.isEnabled = false
       sendButton.isUserInteractionEnabled = false
@@ -690,8 +691,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     voicePhaseObserver = voiceViewModel.$phase
       .sink { [weak self] _ in
-        self?.updateVoiceAvailability(animated: true)
+        self?.reconcileVoiceControls(animated: true)
       }
+  }
+
+  private func reconcileVoiceControls(animated: Bool) {
+    guard voiceControlsInstalled else { return }
+
+    updateVoiceAvailability(animated: animated)
+    updateSendButtonVisibility(syncVoiceAvailability: false)
   }
 
   func updateVoiceAvailability(animated: Bool = false) {
@@ -743,8 +751,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   private func cancelVoiceRecording() {
     voiceViewModel.cancel()
-    updateVoiceAvailability(animated: true)
-    updateSendButtonVisibility()
+    reconcileVoiceControls(animated: true)
   }
 
   private func handleVoiceSendTapped(sendMode: MessageSendMode?) -> Bool {
@@ -759,12 +766,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     guard voiceControlsInstalled else { return }
     guard let peerId, let chatId else {
       voiceViewModel.cancel()
-      updateVoiceAvailability(animated: true)
+      reconcileVoiceControls(animated: true)
       return
     }
 
     do {
-      guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }
+      guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else {
+        reconcileVoiceControls(animated: true)
+        return
+      }
       let state = ChatState.shared.getState(peer: peerId)
       let replyToMessageId = state.replyingMessageId
 
@@ -789,7 +799,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
       clearComposeTextAfterSend()
-      updateVoiceAvailability(animated: true)
+      reconcileVoiceControls(animated: true)
     } catch {
       log.error("Failed to send voice recording", error: error)
       ToastManager.shared.showToast(
@@ -798,7 +808,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         systemImage: "exclamationmark.triangle.fill"
       )
       voiceViewModel.cancel()
-      updateVoiceAvailability(animated: true)
+      reconcileVoiceControls(animated: true)
     }
   }
 
@@ -1736,9 +1746,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     presenter.present(alert, animated: true)
   }
 
-  func updateSendButtonVisibility() {
+  func updateSendButtonVisibility(syncVoiceAvailability: Bool = true) {
     if voiceControlsInstalled {
-      updateVoiceAvailability(animated: false)
+      if syncVoiceAvailability {
+        updateVoiceAvailability(animated: false)
+      }
       if voiceViewModel.isActive || canStartVoiceRecording {
         buttonDisappear(animated: false)
         return
