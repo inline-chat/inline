@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Change Impact"
+  short_description: "Review risks and tradeoffs after changes"
+  default_prompt: "Use $review-change-impact to review these app changes, summarize technical details, and flag risks or tradeoffs."
