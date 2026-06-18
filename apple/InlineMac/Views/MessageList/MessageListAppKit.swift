@@ -1,11 +1,20 @@
 import AppKit
 import Combine
 import InlineKit
+import InlineUI
 import Logger
 import SwiftUI
 import Throttler
 import Translation
 import os.signpost
+
+struct MessageListSelectionUpdate: Equatable, Sendable {
+  let isActive: Bool
+  let count: Int
+  let selectedStableIds: [Int64]
+  let selectedMessageIds: [Int64]
+  let changedStableIds: Set<Int64>
+}
 
 class MessageListAppKit: NSViewController {
   // Data
@@ -20,6 +29,20 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { chatRows.messages }
   private var state: ChatState
   private let messageRenderStyle: MessageRenderStyle
+  private var messageSelection = MessageSelectionState()
+  var onMessageSelectionChange: ((MessageListSelectionUpdate) -> Void)?
+
+  var isMessageSelectionActive: Bool {
+    messageSelection.isActive
+  }
+
+  var selectedMessageCount: Int {
+    messageSelection.count
+  }
+
+  var selectedMessagesInLoadedOrder: [FullMessage] {
+    selectedStableIdsInLoadedOrder().compactMap { messageAndIndex(forStableId: $0)?.message }
+  }
 
   // MARK: - Interleaved chat rows (messages + UI-only rows)
 
@@ -213,6 +236,89 @@ class MessageListAppKit: NSViewController {
 
   private func messageStableId(forRow row: Int) -> Int64? {
     chatRows.messageStableId(forRow: row)
+  }
+
+  private var selectableMessageStableIds: [Int64] {
+    messages.map(\.id)
+  }
+
+  private func selectableStableId(forRow row: Int) -> Int64? {
+    guard chatRows.canSelect(row: row) else { return nil }
+    return messageStableId(forRow: row)
+  }
+
+  private func selectedStableIdsInLoadedOrder() -> [Int64] {
+    messageSelection.orderedSelection(in: selectableMessageStableIds)
+  }
+
+  private func selectedMessageIdsInLoadedOrder() -> [Int64] {
+    selectedMessagesInLoadedOrder.map(\.message.messageId)
+  }
+
+  func isMessageSelected(atRow row: Int) -> Bool {
+    guard let stableId = selectableStableId(forRow: row) else { return false }
+    return messageSelection.isSelected(stableId)
+  }
+
+  @discardableResult
+  func beginMessageSelection(atRow row: Int) -> Bool {
+    guard let stableId = selectableStableId(forRow: row) else { return false }
+    let changed = messageSelection.begin(with: stableId)
+    emitMessageSelectionChange(changedStableIds: changed)
+    return true
+  }
+
+  @discardableResult
+  func toggleMessageSelection(atRow row: Int) -> Bool {
+    guard let stableId = selectableStableId(forRow: row) else { return false }
+    let changed = messageSelection.toggle(stableId, orderedIds: selectableMessageStableIds)
+    emitMessageSelectionChange(changedStableIds: changed)
+    return true
+  }
+
+  @discardableResult
+  func extendMessageSelection(toRow row: Int) -> Bool {
+    guard let stableId = selectableStableId(forRow: row) else { return false }
+    let changed = messageSelection.selectRange(to: stableId, orderedIds: selectableMessageStableIds)
+    emitMessageSelectionChange(changedStableIds: changed)
+    return true
+  }
+
+  @discardableResult
+  func selectAllMessages() -> Bool {
+    let stableIds = selectableMessageStableIds
+    let changed = messageSelection.selectAll(stableIds)
+    emitMessageSelectionChange(changedStableIds: changed)
+    return !stableIds.isEmpty
+  }
+
+  @discardableResult
+  func clearMessageSelection() -> Bool {
+    let changed = messageSelection.clear()
+    emitMessageSelectionChange(changedStableIds: changed)
+    return !changed.isEmpty
+  }
+
+  @discardableResult
+  private func pruneMessageSelection() -> Bool {
+    guard messageSelection.isActive else { return false }
+    let stableIds = selectableMessageStableIds
+    let changed = messageSelection.prune(validIds: Set(stableIds), orderedIds: stableIds)
+    emitMessageSelectionChange(changedStableIds: changed)
+    return !changed.isEmpty
+  }
+
+  private func emitMessageSelectionChange(changedStableIds: Set<Int64>) {
+    guard !changedStableIds.isEmpty else { return }
+    onMessageSelectionChange?(
+      MessageListSelectionUpdate(
+        isActive: messageSelection.isActive,
+        count: messageSelection.count,
+        selectedStableIds: selectedStableIdsInLoadedOrder(),
+        selectedMessageIds: selectedMessageIdsInLoadedOrder(),
+        changedStableIds: changedStableIds
+      )
+    )
   }
 
   private var threadAnchor: FullMessage? {
@@ -1279,6 +1385,7 @@ class MessageListAppKit: NSViewController {
         log.trace("Loading batch at top")
         chatRows.loadBatch(at: direction, publish: false)
         let rowUpdate = chatRows.syncFromViewModelAfterManualMutation()
+        pruneMessageSelection()
 
         switch rowUpdate {
           case let .insert(inserted) where !inserted.isEmpty:
@@ -1330,6 +1437,7 @@ class MessageListAppKit: NSViewController {
     }
     rebuildRowItems()
     tableView.reloadData()
+    pruneMessageSelection()
   }
 
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
@@ -1370,6 +1478,7 @@ class MessageListAppKit: NSViewController {
     let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage &&
       !isUserScrolling // to prevent jitter when user is scrolling
     let rowUpdate = chatRows.apply(update)
+    pruneMessageSelection()
 
     func reloadAll(animated: Bool) {
       if animated {
@@ -2361,6 +2470,7 @@ extension MessageListAppKit {
           log.trace("Loaded local around-target window for message \(msgId), reason=\(reason.rawValue)")
           rebuildRowItems()
           tableView.reloadData()
+          pruneMessageSelection()
 
           DispatchQueue.main.async { [weak self] in
             self?.scrollToMsgAndHighlight(
@@ -2603,6 +2713,7 @@ extension MessageListAppKit {
 
     // Clear all callbacks
     scrollToBottomButton.onClick = nil
+    onMessageSelectionChange = nil
 
     // Dispose view model
     chatRows.dispose()
