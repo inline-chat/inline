@@ -38,6 +38,14 @@ public class ObjectCache {
     users[userId]
   }
 
+  public func getCachedChat(id chatId: Int64) -> Chat? {
+    chats[chatId]
+  }
+
+  public func getCachedSpace(id spaceId: Int64) -> Space? {
+    spaces[spaceId]
+  }
+
   public func getUserPublisher(id userId: Int64) -> PassthroughSubject<UserInfo?, Never> {
     if userPublishers[userId] == nil {
       userPublishers[userId] = PassthroughSubject<UserInfo?, Never>()

@@ -210,7 +210,7 @@ final class MessageReactionsView: NSView {
       let item = NSMenuItem(title: "\(name)\t\(when)", action: nil, keyEquivalent: "")
       let userInfo = reaction.userInfo ?? ObjectCache.shared.getUser(id: reaction.reaction.userId)
       if let userInfo {
-        item.image = avatarImage(for: userInfo)
+        item.image = MenuIcon.image(for: userInfo)
       }
       menu.addItem(item)
     }
@@ -231,21 +231,6 @@ final class MessageReactionsView: NSView {
     timeOnly.timeStyle = .short
 
     return "\(dateOnly.string(from: date)), \(timeOnly.string(from: date))"
-  }
-
-  private func avatarImage(for userInfo: UserInfo) -> NSImage? {
-    let size = NSSize(width: 18, height: 18)
-    let avatarView = UserAvatarView(userInfo: userInfo, size: size.width)
-    avatarView.frame = NSRect(origin: .zero, size: size)
-    avatarView.layoutSubtreeIfNeeded()
-
-    guard let rep = avatarView.bitmapImageRepForCachingDisplay(in: avatarView.bounds) else { return nil }
-    avatarView.cacheDisplay(in: avatarView.bounds, to: rep)
-
-    let image = NSImage(size: size)
-    image.addRepresentation(rep)
-    image.isTemplate = false
-    return image
   }
 
   private func animateInsert(_ chip: ReactionChipButton) {
