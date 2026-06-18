@@ -138,7 +138,7 @@ final class ComposeVoiceRecorder: NSObject {
   }
 
   private func startMetering() {
-    meterTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+    meterTimer = Timer.scheduledTimer(withTimeInterval: Self.meterInterval, repeats: true) { [weak self] _ in
       Task { @MainActor in
         self?.publishMeter()
       }
@@ -154,7 +154,7 @@ final class ComposeVoiceRecorder: NSObject {
     guard let capture else { return }
 
     let snapshot = capture.snapshot()
-    onUpdate?(snapshot.duration, snapshot.samples)
+    onUpdate?(snapshot.duration, Self.liveSamples(from: snapshot.samples))
   }
 
   nonisolated fileprivate static func normalizedPower(_ power: Float) -> Float {
@@ -162,7 +162,8 @@ final class ComposeVoiceRecorder: NSObject {
     if power <= -60 { return 0 }
     if power >= 0 { return 1 }
 
-    return pow(10, power / 20)
+    let linear = pow(10, power / 20)
+    return pow(linear, 0.55)
   }
 
   private static func waveformData(from samples: [UInt8], targetCount: Int = 96) -> Data {
@@ -183,6 +184,14 @@ final class ComposeVoiceRecorder: NSObject {
     }
 
     return Data(reduced)
+  }
+
+  private static func liveSamples(from samples: [UInt8]) -> [UInt8] {
+    guard samples.count < liveSampleCount else {
+      return Array(samples.suffix(liveSampleCount))
+    }
+
+    return Array(repeating: 0, count: liveSampleCount - samples.count) + samples
   }
 
   private static func renderVoiceMessage(from rawURL: URL, to finalURL: URL) throws {
@@ -324,7 +333,9 @@ final class ComposeVoiceRecorder: NSObject {
   }
 
   private static let bufferSize: AVAudioFrameCount = 1_024
+  private static let meterInterval: TimeInterval = 1.0 / 30.0
   private static let processingBufferFrameCount: AVAudioFramePosition = 8_192
+  private static let liveSampleCount = 160
   private static let targetPeak: Float = 0.891_251
   private static let limitPeak: Float = 0.98
   private static let maxNormalizationGain: Float = 4

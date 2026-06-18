@@ -61,12 +61,15 @@ struct ComposeVoiceInputView: View {
     AudioWaveformView(
       samples: viewModel.samples,
       progress: progress,
-      foreground: .accentColor,
-      background: Color(nsColor: .tertiaryLabelColor).opacity(0.35),
+      foreground: Color(nsColor: .secondaryLabelColor),
+      background: Color(nsColor: .tertiaryLabelColor).opacity(0.45),
       targetBarCount: 160,
-      barWidth: 2,
+      barWidth: 1.5,
       barSpacing: 2,
-      minBarHeight: 3,
+      minBarHeight: 2,
+      verticalAlignment: .bottom,
+      shortSamplesMode: viewModel.phase == .recording ? .padLeadingQuiet : .stretch,
+      motion: viewModel.phase == .recording ? .recordingReel : .fixed,
       onSeek: onSeek
     )
     .frame(height: 20)
