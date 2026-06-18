@@ -246,6 +246,125 @@ struct ComposeInteractionStateTests {
     #expect(shouldSendTextOnly == false)
   }
 
+  @Test("voice recording can start only from an idle empty composer")
+  func voiceRecordingCanStartFromIdleEmptyComposer() async throws {
+    let canStart = ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: false,
+      hasAttachments: false,
+      hasPendingVideos: false,
+      isEditing: false,
+      isForwarding: false,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: false
+    )
+
+    #expect(canStart == true)
+  }
+
+  @Test("voice recording is hidden when regular compose content exists")
+  func voiceRecordingCannotStartWithRegularComposeContent() async throws {
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: true,
+      hasAttachments: false,
+      hasPendingVideos: false,
+      isEditing: false,
+      isForwarding: false,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: false
+    ) == false)
+
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: false,
+      hasAttachments: true,
+      hasPendingVideos: false,
+      isEditing: false,
+      isForwarding: false,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: false
+    ) == false)
+
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: false,
+      hasAttachments: false,
+      hasPendingVideos: true,
+      isEditing: false,
+      isForwarding: false,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: false
+    ) == false)
+  }
+
+  @Test("voice recording is blocked by feature and mode state")
+  func voiceRecordingCannotStartWhenFeatureOrModeDisallowsIt() async throws {
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: false,
+      hasText: false,
+      hasAttachments: false,
+      hasPendingVideos: false,
+      isEditing: false,
+      isForwarding: false,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: false
+    ) == false)
+
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: false,
+      hasAttachments: false,
+      hasPendingVideos: false,
+      isEditing: true,
+      isForwarding: false,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: false
+    ) == false)
+
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: false,
+      hasAttachments: false,
+      hasPendingVideos: false,
+      isEditing: false,
+      isForwarding: true,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: false
+    ) == false)
+
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: false,
+      hasAttachments: false,
+      hasPendingVideos: false,
+      isEditing: false,
+      isForwarding: false,
+      hasPeer: false,
+      hasChat: true,
+      isVoiceActive: false
+    ) == false)
+
+    #expect(ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: true,
+      hasText: false,
+      hasAttachments: false,
+      hasPendingVideos: false,
+      isEditing: false,
+      isForwarding: false,
+      hasPeer: true,
+      hasChat: true,
+      isVoiceActive: true
+    ) == false)
+  }
+
   @Test("sending staged attachments resets compose without animation")
   func sendResetDoesNotAnimateAfterSendingAttachments() async throws {
     let shouldAnimateReset = ComposeResetBehavior.shouldAnimateHeightResetAfterSend(

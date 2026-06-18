@@ -98,6 +98,31 @@ public enum ComposeSendEligibility {
   }
 }
 
+public enum ComposeVoiceRecordingEligibility {
+  public static func canStart(
+    isFeatureEnabled: Bool,
+    hasText: Bool,
+    hasAttachments: Bool,
+    hasPendingVideos: Bool,
+    isEditing: Bool,
+    isForwarding: Bool,
+    hasPeer: Bool,
+    hasChat: Bool,
+    isVoiceActive: Bool
+  ) -> Bool {
+    guard isFeatureEnabled else { return false }
+    guard hasPeer, hasChat else { return false }
+    guard !isVoiceActive else { return false }
+    guard !hasText else { return false }
+    guard !hasAttachments else { return false }
+    guard !hasPendingVideos else { return false }
+    guard !isEditing else { return false }
+    guard !isForwarding else { return false }
+
+    return true
+  }
+}
+
 public enum ComposeAttachmentUploadBehavior {
   public static func shouldStartUploadsInCompose() -> Bool {
     false

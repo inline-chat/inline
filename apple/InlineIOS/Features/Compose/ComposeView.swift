@@ -40,10 +40,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var overlayView: UIView?
   var isOverlayVisible = false
   var phaseObserver: AnyCancellable?
+  private var voicePhaseObserver: AnyCancellable?
 
   let buttonBottomPadding: CGFloat = -4.0
   let buttonTrailingPadding: CGFloat = -6.0
   let buttonLeadingPadding: CGFloat = 10.0
+  private let voiceControlsInstalled = ExperimentalFeatureFlags.voiceMessagesEnabled
 
   // MARK: - State Management
 
@@ -95,6 +97,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   var canSend: Bool {
+    if isVoiceActive {
+      return false
+    }
+
     let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
     let hasText = !normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let hasAttachments = !attachmentItems.isEmpty
@@ -114,12 +120,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     didSet {
       updateEmbedState(animated: false)
       updatePlaceholderText()
+      updateVoiceAvailability(animated: false)
     }
   }
   private var peerUser: InlineKit.User?
   var chatId: Int64? {
     didSet {
       updateEmbedState(animated: false)
+      updateVoiceAvailability(animated: false)
     }
   }
   var spaceId: Int64? {
@@ -144,9 +152,36 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var textView = makeTextView()
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
+  lazy var voiceButton = makeVoiceButton()
   lazy var composeAndButtonContainer = makeComposeAndButtonContainer()
   lazy var attachmentScrollView = makeAttachmentScrollView()
   lazy var attachmentStackView = makeAttachmentStackView()
+  private lazy var voiceViewModel = ComposeVoiceRecordingViewModel()
+  private lazy var voiceInputHostingController = UIHostingController(rootView: ComposeVoiceInputView(
+    viewModel: voiceViewModel,
+    onStop: { [weak self] in
+      self?.stopVoiceRecording()
+    },
+    onPlay: { [weak self] in
+      self?.toggleVoicePlayback()
+    },
+    onCancel: { [weak self] in
+      self?.cancelVoiceRecording()
+    },
+    onSend: { [weak self] in
+      self?.sendVoiceRecording(sendMode: nil)
+    },
+    onSendSilently: { [weak self] in
+      self?.sendVoiceRecording(sendMode: .modeSilent)
+    }
+  ))
+  private lazy var voiceInputView: UIView = {
+    let view = voiceInputHostingController.view!
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = .clear
+    view.isHidden = true
+    return view
+  }()
   private lazy var embedContainerView = makeEmbedContainerView()
   var embedContainerHeightConstraint: NSLayoutConstraint?
   var attachmentContainerHeightConstraint: NSLayoutConstraint?
@@ -169,6 +204,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     setupScenePhaseObserver()
     setupChatStateObservers()
     setupStickerObserver()
+    setupVoicePhaseObserver()
   }
 
   @available(*, unavailable)
@@ -217,6 +253,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   override func removeFromSuperview() {
+    if voiceControlsInstalled {
+      voiceViewModel.cancel()
+    }
     saveDraft()
     stopDraftSaveTimer()
     resetMentionManager()
@@ -341,11 +380,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     attachmentScrollView.addSubview(attachmentStackView)
     composeAndButtonContainer.addSubview(textView)
     composeAndButtonContainer.addSubview(sendButton)
+    if voiceControlsInstalled {
+      composeAndButtonContainer.addSubview(voiceButton)
+      composeAndButtonContainer.addSubview(voiceInputView)
+    }
 
     setupInitialHeight()
     setupConstraints()
     addDropInteraction()
     refreshAttachmentPreviews()
+    updateVoiceAvailability(animated: false)
   }
 
   func clearBackground() {
@@ -422,6 +466,20 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
     ])
+
+    if voiceControlsInstalled {
+      NSLayoutConstraint.activate([
+        voiceButton.trailingAnchor.constraint(equalTo: sendButton.trailingAnchor),
+        voiceButton.bottomAnchor.constraint(equalTo: sendButton.bottomAnchor),
+        voiceButton.widthAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
+        voiceButton.heightAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
+
+        voiceInputView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
+        voiceInputView.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -8),
+        voiceInputView.topAnchor.constraint(equalTo: attachmentScrollView.bottomAnchor, constant: 3),
+        voiceInputView.bottomAnchor.constraint(equalTo: composeAndButtonContainer.bottomAnchor),
+      ])
+    }
   }
 
   func buttonDisappear(animated: Bool = true) {
@@ -596,13 +654,152 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   @objc func sendTapped() {
+    if handleVoiceSendTapped(sendMode: nil) {
+      return
+    }
+
     guard canSend else { return }
 
-    let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
-    feedbackGenerator.prepare()
-    feedbackGenerator.impactOccurred(intensity: 1.0)
-
     sendMessage()
+  }
+
+  private var isVoiceActive: Bool {
+    voiceControlsInstalled && voiceViewModel.isActive
+  }
+
+  private var canStartVoiceRecording: Bool {
+    let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
+    let hasText = !normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let state = peerId.map { ChatState.shared.getState(peer: $0) }
+
+    return ComposeVoiceRecordingEligibility.canStart(
+      isFeatureEnabled: voiceControlsInstalled,
+      hasText: hasText,
+      hasAttachments: !attachmentItems.isEmpty,
+      hasPendingVideos: !pendingVideoAttachments.isEmpty,
+      isEditing: state?.editingMessageId != nil,
+      isForwarding: state?.forwardContext != nil,
+      hasPeer: peerId != nil,
+      hasChat: chatId != nil,
+      isVoiceActive: isVoiceActive
+    )
+  }
+
+  func setupVoicePhaseObserver() {
+    guard voiceControlsInstalled else { return }
+
+    voicePhaseObserver = voiceViewModel.$phase
+      .sink { [weak self] _ in
+        self?.updateVoiceAvailability(animated: true)
+      }
+  }
+
+  func updateVoiceAvailability(animated: Bool = false) {
+    guard voiceControlsInstalled else { return }
+
+    let voiceActive = voiceViewModel.isActive
+    let shouldShowVoiceButton = canStartVoiceRecording
+
+    if voiceActive {
+      dismissOverlay()
+      textView.resignFirstResponder()
+    }
+
+    voiceInputView.isHidden = !voiceActive
+    textView.isHidden = voiceActive
+    plusButton.isHidden = voiceActive
+    voiceButton.isHidden = voiceActive || !shouldShowVoiceButton
+    sendButton.isHidden = voiceActive || shouldShowVoiceButton
+
+    if voiceActive {
+      attachmentScrollView.isHidden = true
+      attachmentContainerHeightConstraint?.constant = 0
+    } else {
+      let hasAttachments = !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty
+      attachmentScrollView.isHidden = !hasAttachments
+      attachmentContainerHeightConstraint?.constant = hasAttachments ? ComposeAttachmentPreviewItemView.stripHeight : 0
+    }
+
+    updateHeight(animated: animated)
+  }
+
+  @objc func startVoiceRecordingTapped() {
+    guard canStartVoiceRecording, let peerId else { return }
+    dismissOverlay()
+
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      await voiceViewModel.start(peerId: peerId)
+    }
+  }
+
+  private func stopVoiceRecording() {
+    voiceViewModel.stopRecording()
+  }
+
+  private func toggleVoicePlayback() {
+    voiceViewModel.togglePlayback()
+  }
+
+  private func cancelVoiceRecording() {
+    voiceViewModel.cancel()
+    updateVoiceAvailability(animated: true)
+    updateSendButtonVisibility()
+  }
+
+  private func handleVoiceSendTapped(sendMode: MessageSendMode?) -> Bool {
+    guard voiceControlsInstalled, voiceViewModel.isActive else { return false }
+    guard voiceViewModel.canSend else { return true }
+
+    sendVoiceRecording(sendMode: sendMode)
+    return true
+  }
+
+  private func sendVoiceRecording(sendMode: MessageSendMode?) {
+    guard voiceControlsInstalled else { return }
+    guard let peerId, let chatId else {
+      voiceViewModel.cancel()
+      updateVoiceAvailability(animated: true)
+      return
+    }
+
+    do {
+      guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }
+      let state = ChatState.shared.getState(peer: peerId)
+      let replyToMessageId = state.replyingMessageId
+
+      let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+      feedbackGenerator.prepare()
+      feedbackGenerator.impactOccurred(intensity: 1.0)
+
+      Transactions.shared.mutate(
+        transaction: .sendMessage(
+          .init(
+            text: nil,
+            peerId: peerId,
+            chatId: chatId,
+            mediaItems: [mediaItem],
+            replyToMsgId: replyToMessageId,
+            isSticker: nil,
+            entities: nil,
+            sendMode: sendMode
+          )
+        )
+      )
+
+      ChatState.shared.clearReplyingMessageId(peer: peerId)
+      clearComposeTextAfterSend()
+      updateVoiceAvailability(animated: true)
+    } catch {
+      log.error("Failed to send voice recording", error: error)
+      ToastManager.shared.showToast(
+        error.localizedDescription,
+        type: .error,
+        systemImage: "exclamationmark.triangle.fill"
+      )
+      voiceViewModel.cancel()
+      updateVoiceAvailability(animated: true)
+    }
   }
 
   func sendMessage(sendMode: MessageSendMode? = nil) {
@@ -941,6 +1138,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       }
     }
     updateEmbedState(animated: true)
+    updateSendButtonVisibility()
   }
 
   @objc private func handleReplyStateChange() {
@@ -1113,6 +1311,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func removeObservers() {
+    voicePhaseObserver?.cancel()
+    voicePhaseObserver = nil
     NotificationCenter.default.removeObserver(self)
   }
 
@@ -1341,8 +1541,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     case let .document(documentInfo):
       guard let localId = documentInfo.document.id else { return nil }
       return await FileUploader.shared.documentProgressPublisher(documentLocalId: localId)
-    case .voice:
-      return nil
+    case let .voice(voiceContent):
+      let localId = voiceContent.voiceID
+      guard localId != 0 else { return nil }
+      return await FileUploader.shared.voiceProgressPublisher(voiceLocalId: localId)
     }
   }
 
@@ -1354,8 +1556,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       _ = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
     case let .document(documentInfo):
       _ = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
-    case .voice:
-      break
+    case let .voice(voiceContent):
+      _ = try await FileUploader.shared.uploadVoice(voiceContent: voiceContent)
     }
   }
 
@@ -1535,6 +1737,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func updateSendButtonVisibility() {
+    if voiceControlsInstalled {
+      updateVoiceAvailability(animated: false)
+      if voiceViewModel.isActive || canStartVoiceRecording {
+        buttonDisappear(animated: false)
+        return
+      }
+    }
+
     if isAwaitingPendingVideoSend {
       showSendButtonImmediately()
       sendButton.configuration?.showsActivityIndicator = false

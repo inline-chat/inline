@@ -1,12 +1,25 @@
 # iOS Voice Message Support Platform Plan
 
 Date: 2026-06-07
+Last revised: 2026-06-12
 
 ## Goal
 
 Implement iOS voice message recording and sending using Inline's existing voice media backend, shared playback UI, and the current macOS voice composer as the product model.
 
 Telegram is only a technical reference for recorder lifecycle, audio capture, waveform handling, cleanup, and playback coordination. Do not copy Telegram's press-hold, slide-to-cancel, lock, trim, or other chat-input UX unless we explicitly decide to later.
+
+## Current Recommendation
+
+Ship V1 as a small iOS-only implementation using the existing voice media stack:
+
+- Use the macOS product model: tap mic, record in a compact composer row, stop into review, then cancel/play/send.
+- Use AAC `.m4a` with MIME `audio/mp4`.
+- Use the existing direct voice send path through `TransactionSendMessage(mediaItems: [.voice])`.
+- Build the active voice composer as a fixed-height SwiftUI row hosted inside the current UIKit `ComposeView`.
+- Keep voice code in its own folder with its own view model and view. `ComposeView` should be a thin host that talks to voice through a small API surface.
+- Keep recorder and view-model code iOS-local for V1. Extract shared Apple recorder code only after iOS proves the same lifecycle and tests as macOS.
+- Treat Telegram as a recorder/playback lifecycle reference only, not a UX reference.
 
 ## Current Inline State
 
@@ -290,147 +303,236 @@ Recommendation:
 
 - Do not use for V1. `AVAudioRecorder` is enough for compact voice messages and mirrors current macOS.
 
-## Second-Pass Adjustments To The Plan
+## Third-Pass Revision
 
-- Prefer a SwiftUI-hosted voice input row for V1, but make it fixed-height and callback-driven.
-- Add a fallback note: switch to UIKit-native row if hosting causes compose layout churn.
-- Keep iOS recorder/view-model local first; defer shared extraction.
-- Make `.voice` attachment upload tracking a small required cleanup, but not the main send surface.
-- Add a hard minimum-duration rule of 0.5s before `FileCache.saveVoice`.
-- Add explicit interruption/background handling to Phase 1, not only manual validation.
+This revision makes Proposal A the definitive V1 plan and turns the work into small implementation slices with clear acceptance criteria.
 
-## iOS Implementation Plan
+### Closed Decisions
 
-### Phase 1: iOS recorder and view model
+- Primary implementation: iOS-local recorder/view model plus a SwiftUI-hosted active voice row inside the existing UIKit composer.
+- Fallback implementation: switch only the row to UIKit if the hosted SwiftUI row causes measurable compose height jitter, input lag, gesture conflicts, or excessive layout invalidation during 20 Hz waveform updates.
+- Module boundary: all recorder, audio-session, waveform, playback-preview, permission, and active voice UI state belongs under `apple/InlineIOS/Features/Compose/Voice/`. `ComposeView` should not grow voice-specific audio logic.
+- Feature flag behavior: match macOS. Voice controls are installed/read when the composer is created; live toggling in Settings is not required for V1 because the current settings copy already says experimental UI changes may require restart.
+- Recording format: AAC `.m4a`, MIME `audio/mp4`, 48 kHz, mono, 32 kbps, medium quality.
+- Audio session: start conservatively with `.playAndRecord` and `.default`; do not force speaker routing. Try `.spokenAudio` only if device tests show better interruption/route behavior without hurting recording.
+- Minimum duration: reject recordings under 0.5s before `FileCache.saveVoice`.
+- Maximum duration: no product-visible cap in V1. Enforce the existing 20 MB server cap defensively by failing save/send if the encoded file is too large.
+- Send surface: voice review sends directly through `.sendMessage(mediaItems: [.voice])`, not through document/audio/attachment paths.
+- Silent sends: iOS already has "Send without notification" on the normal send button. The voice review send control should call the same send helper with an optional `MessageSendMode`, and should expose the silent action if it can do so without crowding the compact row.
+- Sharing: do not refactor macOS first. Extract a shared recorder later only if the iOS implementation proves the lifecycle is actually identical.
+
+## V1 Implementation Slices
+
+### Slice 0: Voice Module Boundary
+
+Create a contained voice feature boundary before adding recorder logic.
+
+Voice-owned responsibilities:
+
+- microphone permission checks and request flow
+- `AVAudioSession` setup/teardown
+- `AVAudioRecorder` lifecycle
+- interruption, route-change, background handling
+- live metering and waveform generation
+- local preview playback state
+- temp-file cleanup
+- active voice row UI state and callbacks
+- conversion from finished recording to `FileMediaItem.voice`
+
+Compose-owned responsibilities:
+
+- decide whether voice can be shown from broad compose state
+- host/show/hide the voice row
+- pass peer/chat/reply/silent-send context into a narrow send callback
+- reset normal compose UI after voice send/cancel
+
+Allowed boundary API:
+
+- `start(peerId:)`
+- `cancel()`
+- `send(mode:) async throws -> FileMediaItem`
+- `phase`
+- `canSend`
+- simple render state for duration, waveform, and playback controls
+
+Do not let `ComposeView` directly own recorder instances, audio sessions, waveform buffers, temp URLs, or preview player state.
+
+Acceptance criteria:
+
+- New voice files live under `apple/InlineIOS/Features/Compose/Voice/`.
+- `ComposeView.swift` contains hosting, eligibility, and send/cancel glue only.
+- Voice internals can be unit-tested or previewed without instantiating the full compose view.
+
+### Slice 1: Eligibility and State Boundaries
+
+Add a small, pure eligibility helper before touching the composer layout. It can live near `ComposeView.swift` unless a better existing compose helper exists.
+
+Inputs:
+
+- feature flag
+- text after trimming attachment replacement markers
+- attachment count
+- pending video count
+- editing state
+- forward context
+- peer/chat availability
+- current voice phase
+
+Acceptance criteria:
+
+- Mic is eligible only for an idle, empty composer with no attachments, no pending videos, no editing, no forwarding, and valid peer/chat.
+- The eligibility helper can be unit-tested without UIKit if it is extracted into a pure type.
+- Existing text/file send eligibility is unchanged.
+
+### Slice 2: Recorder and View Model
 
 Add iOS-local files under `apple/InlineIOS/Features/Compose/Voice/`:
 
 - `ComposeVoiceRecorder.swift`
 - `ComposeVoiceRecordingViewModel.swift`
-- `ComposeVoiceInputView.swift` or UIKit equivalent
-- `ComposeVoiceButton.swift` or a factory method beside existing compose buttons
+- `ComposeVoiceInputView.swift`
+- `ComposeVoiceButton.swift` or a factory method in `ComposeView+UIViews.swift`
 
-Start by porting the macOS recorder and view model shape with iOS-specific permission and UI hooks. Avoid refactoring macOS in this slice unless the extraction is mechanical and low risk.
+Recorder requirements:
 
-Recorder rules:
+- Request permission with the iOS 18+ `AVAudioApplication` APIs before recorder allocation.
+- Configure and deactivate `AVAudioSession` inside recorder lifecycle.
+- Pause active `SharedAudioPlayer` playback before starting or resuming recording.
+- Emit duration and live meter samples at about 20 Hz.
+- Produce a bounded waveform of 96 or 100 raw `UInt8` samples.
+- Finish into review when a valid file exists; return to idle when the file is invalid or too short.
+- Stop safely on audio interruption, route change, and app backgrounding.
+- Remove temp files on cancel, failed start, failed finish, failed save, and deinit.
 
-- Output `.m4a` with MIME `audio/mp4`.
-- Use the same settings as macOS unless testing shows an iOS-specific issue:
-  - 48 kHz
-  - mono
-  - 32 kbps
-  - AAC
-- Use `AVAudioApplication.shared.recordPermission` and `AVAudioApplication.requestRecordPermission` for iOS 18+.
-- Configure `AVAudioSession` for recording, and restore/deactivate when done:
-  - category likely `.playAndRecord`
-  - mode `.spokenAudio` or `.default` after testing
-  - options should be conservative; avoid forcing speaker unless playback/recording tests require it
-- Pause any active `SharedAudioPlayer` voice before recording starts.
-- Emit duration and live samples at roughly 20 Hz.
-- Keep waveform output to 96 or 100 bytes.
-- Discard recordings under 0.5s with haptic/error feedback.
-- Observe audio interruptions, route changes, and app backgrounding; stop safely and return to review or idle based on whether a valid recording exists.
-- Always remove temp files on cancel, failed start, failed finish, and deinit.
+View-model requirements:
 
-View-model rules:
+- Use one explicit phase enum: `idle`, `recording`, `review`.
+- Own recorder, local preview playback, timers, and `ComposeActions.startVoiceRecording(for:)` status cleanup.
+- Keep side effects out of SwiftUI `body` and UIKit layout methods.
+- Expose a small public surface to compose: phase/render state, start, cancel, send/take media, and optional silent-send capability.
+- `takeVoiceMediaItem()` calls `FileCache.saveVoice(...)` and returns `.voice(voice)`.
 
-- Mirror macOS states:
-  - `idle`
-  - `recording`
-  - `review`
-- Own recorder, local preview playback, timers, and `ComposeActions.startVoiceRecording(for:)` cleanup.
-- `takeVoiceMediaItem()` should call `FileCache.saveVoice(...)` and return `.voice(voice)`.
-- Do not call DB/network APIs from SwiftUI/UIKit body/layout code.
-- If SwiftUI is used for the input row, keep the view fixed-height and pass all side effects through explicit callbacks.
+Acceptance criteria:
 
-### Phase 2: iOS compose integration
+- Permission denied leaves the composer idle and does not create a stuck recording status.
+- A sub-0.5s recording cannot be sent.
+- A valid recording becomes a local `.voice` media item with duration, MIME type, size, local path, and waveform.
+- Temp files do not survive cancel or failed finish.
 
-Integrate into `apple/InlineIOS/Features/Compose/ComposeView.swift`.
+### Slice 3: Hosted Voice Row
 
-Behavior should match the macOS product model:
+Build `ComposeVoiceInputView` as a small render/control surface, not a service owner.
 
-- Show mic button only when the composer can start voice recording:
-  - voice flag enabled
-  - text is empty after trimming attachment replacement markers
-  - no attachments
-  - no pending videos
-  - not editing
-  - not forwarding
-  - peer/chat are available
-  - voice state is idle
-- When voice is active:
-  - hide text view, plus button if needed, attachment strip, and send button
-  - show the compact voice input row inside the compose container
-  - keep height at the normal compose minimum unless the current iOS layout needs a small fixed voice height
-- In recording state:
-  - show live waveform, duration, red recording indicator, stop/pause control, and cancel
-- In review state:
-  - show play/pause, seekable waveform, duration, cancel, and send
-- `sendTapped` should:
-  - send voice if phase is `review`
-  - ignore normal text send if voice is actively recording
-- Send should preserve:
-  - current reply target
-  - silent send if supported by the iOS composer state
-  - normal optimistic send path through `Transactions.shared.mutate(.sendMessage(...))`
-- Clear reply/draft and reset compose state after successful enqueue, same as normal send.
+UI shape:
 
-Do not send voice through generic document/audio file paths.
+- Fixed-height horizontal row hosted by the existing UIKit `ComposeView`.
+- Recording: cancel, red recording indicator, live waveform, duration, stop/pause.
+- Review: cancel, play/pause, seekable waveform, duration, send.
+- Accessibility labels for record, stop, pause, cancel, play, seek, send, and silent send if exposed.
 
-### Phase 3: upload tracking and resend correctness
+Performance rules:
 
-Fix the existing iOS compose voice attachment gaps:
+- UIKit owns the view model; SwiftUI receives explicit state/model input and callback closures.
+- Keep the host container stable and only show/hide it when the voice phase changes.
+- Keep changing observation scope narrow so 20 Hz metering updates re-render only the voice row.
+- Do not do formatting, file reads, DB reads, upload checks, or audio-session work from `body`.
 
-- `uploadProgressPublisher(for: .voice)` should return `FileUploader.shared.voiceProgressPublisher(voiceLocalId:)`.
-- `startAttachmentUpload(.voice)` should call `FileUploader.shared.uploadVoice(voiceContent:)`.
-- Cancellation should call `FileUploader.shared.cancelVoiceUpload(voiceLocalId:)` or the existing upload-id cancel path.
-- If the voice composer sends directly without rendering an attachment preview, still add these fixes because resend/queued/preview paths already have `.voice` support in shared models.
+Acceptance criteria:
 
-Add focused tests where feasible:
+- The row does not change compose width/height on each meter tick.
+- Typing performance in normal compose is unchanged when voice is idle.
+- Voice review playback works before upload because it uses the saved local file.
 
-- `FileMediaItemLocalFileURLTests` should include `.voice`.
-- `FileUploadProgressTests` should include voice progress publisher behavior if existing helpers make this cheap.
-- Add a small pure-state test for voice send eligibility if `ComposeSendEligibility` or a new helper is extended.
+### Slice 4: Compose Integration
 
-### Phase 4: polish received/sent message UI
+Integrate into:
 
-Validate iOS `VoiceMessageBubble` in actual message rows:
+- `apple/InlineIOS/Features/Compose/ComposeView.swift`
+- `apple/InlineIOS/Features/Compose/ComposeView+UIViews.swift`
 
-- outgoing optimistic voice with local path plays before upload completes
-- outgoing message keeps local path after server update merges remote ID/CDN URL
-- incoming voice auto-downloads under local policy
-- download progress, cancel, retry, and duration states render correctly
-- voice-only metadata/status placement is acceptable in bubble layout
-- accessibility labels are present for record, stop, cancel, play, seek, and send
+Behavior:
 
-Only adjust shared `VoiceMessageBubble` if iOS exposes a real issue; avoid platform-specific forks unless necessary.
+- Show the mic button only when the eligibility helper returns true.
+- Hide text view, plus button if needed, attachment strip, and normal send button while voice is active.
+- Keep the active row inside the compose container with stable constraints.
+- Interact with the voice feature only through the voice view model boundary; do not add recorder/audio-session/temp-file logic to compose.
+- `sendTapped` sends voice when phase is `review`, ignores normal sends while actively recording, and otherwise keeps current text/media behavior.
+- Voice send preserves reply target and silent-send mode.
+- Successful enqueue clears reply/draft/voice state the same way normal send clears composer state.
+- Cancelling voice returns to the exact idle composer state without discarding unrelated text or attachment state.
 
-### Phase 5: verification
+Acceptance criteria:
 
-Run focused checks:
+- Feature flag off has no visible or behavioral composer change.
+- Feature flag on shows mic only for eligible empty compose.
+- Recording/review state survives ordinary layout passes and keyboard frame changes.
+- Normal text, file, edit, forward, reply, and silent send paths still work.
+
+### Slice 5: Upload Tracking and Resend Correctness
+
+Fix the existing iOS `.voice` gaps even though V1 sends from the review row:
+
+- `uploadProgressPublisher(for: .voice)` returns `FileUploader.shared.voiceProgressPublisher(voiceLocalId:)`.
+- `startAttachmentUpload(.voice)` calls `FileUploader.shared.uploadVoice(voiceContent:)`.
+- Cancel paths use the voice upload cancellation mechanism if available; otherwise route through the shared upload ID cancellation path.
+- Add `.voice` coverage to `FileMediaItemLocalFileURLTests`.
+- Add voice upload progress tests only if the existing test helpers make this focused and cheap.
+
+Acceptance criteria:
+
+- Queued/resend flows can upload voice media using the same progress system as photo/video/document.
+- Local file URL lookup works for `.voice`.
+- Existing photo/video/document upload tests keep passing.
+
+### Slice 6: Message UI Validation
+
+Validate current iOS `VoiceMessageBubble` before changing shared UI:
+
+- outgoing optimistic voice plays from local path before upload completes
+- uploaded outgoing voice remains playable after server update/CDN URL merge
+- incoming voice downloads and plays under existing local-cache policy
+- download progress, retry, cancel, and duration states render correctly
+- voice-only metadata/status placement is acceptable in the iOS bubble
+
+Only patch shared `VoiceMessageBubble` if iOS exposes a real bug. Do not fork the voice bubble for iOS unless shared behavior cannot satisfy both platforms.
+
+## Verification Plan
+
+Focused checks:
 
 - `cd apple/InlineKit && swift build`
 - `cd apple/InlineKit && swift test --filter FileMediaItemLocalFileURLTests`
 - `cd apple/InlineUI && swift build`
-- iOS app build:
-  - `xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (iOS)" -configuration Debug -destination "generic/platform=iOS Simulator" CODE_SIGNING_ALLOWED=NO build`
+- `xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (iOS)" -configuration Debug -destination "generic/platform=iOS Simulator" CODE_SIGNING_ALLOWED=NO build`
 
-Manual simulator/device checks:
+Manual checks:
 
 - feature flag off: no mic UI, existing composer unaffected
-- feature flag on: mic appears only for empty composer
-- permission denied: clear prompt/open-settings path, no broken active state
+- feature flag on: mic appears only for eligible empty composer
+- permission allowed, denied, and previously denied paths
 - start, stop to review, play/pause, seek, cancel
-- send voice in regular chat
-- send voice as reply
-- send voice silently if iOS composer exposes silent mode
-- recording interrupted by app backgrounding/call/audio route change stops safely
-- message is playable immediately from local file, then remains playable after upload/server update
+- valid send in regular chat
+- send as reply
+- send without notification from voice review if exposed
+- recording interrupted by app backgrounding, call/audio interruption, and route change
+- local playback immediately after send, then playback after upload/server update
+- normal text, media, edit, forward, reply, and silent-send flows after cancelling voice
+
+## Non-Goals For V1
+
+- Telegram press-hold, slide-to-cancel, slide-to-lock, trim, view-once, or overlay UX
+- Opus/Ogg encoder dependency
+- transcription UI
+- waveform packing changes
+- voice drafts/resume after app relaunch
+- backend/protocol changes
+- web, bot API, desktop, or CLI changes
 
 ## Production Readiness Notes
 
-- Security: do not log file paths with sensitive user context beyond existing local debug logs; never print audio data or auth tokens.
-- Performance: recorder metering must be lightweight and must not write to DB or upload from UI render paths.
-- Storage: temp recorder files must be removed; saved voice files should live only in the existing `Voices` cache.
+- Security: do not log audio data, auth data, or user-sensitive file paths. Keep permission errors user-visible but not content-revealing.
+- Performance: recorder metering must stay lightweight and must not trigger broad composer or message-list invalidation.
+- Storage: temp recorder files must be removed; committed voice files should live only in the existing `Voices` cache.
 - Compatibility: use modern iOS microphone permission APIs because the app minimum is iOS 18.
-- Scope: keep this iOS-only. Backend/protocol are already present; do not expand to web, bot API, trim, transcription UI, or Telegram-style gestures in this slice.
+- Backward compatibility: server/protocol already support voice, so V1 should not require migrations or new realtime contracts.
+- Release safety: keep the feature behind the existing experimental voice flag until device testing covers permission, interruption, local playback, upload, and resend behavior.
