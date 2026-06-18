@@ -99,6 +99,15 @@ struct Nav3RouteState: Hashable, RawRepresentable {
   }
 }
 
+struct Nav3HistoryMenuItem: Identifiable, Hashable {
+  let index: Int
+  let state: Nav3RouteState
+
+  var id: Int {
+    index
+  }
+}
+
 /// This nav class is per window
 @Observable
 class Nav3 {
@@ -129,6 +138,15 @@ class Nav3 {
 
   var canGoForward: Bool {
     historyIndex >= 0 && historyIndex < history.count - 1
+  }
+
+  var backHistoryMenuItems: [Nav3HistoryMenuItem] {
+    historyMenuItems(from: stride(from: historyIndex - 1, through: 0, by: -1))
+  }
+
+  var forwardHistoryMenuItems: [Nav3HistoryMenuItem] {
+    let lastIndex = history.count - 1
+    return historyMenuItems(from: stride(from: historyIndex + 1, through: lastIndex, by: 1))
   }
 
   /// Used for environment defaults and previews
@@ -219,6 +237,13 @@ class Nav3 {
     notifyRouteChange()
   }
 
+  func go(to item: Nav3HistoryMenuItem) {
+    guard history.indices.contains(item.index) else { return }
+    guard item.index != historyIndex else { return }
+    historyIndex = item.index
+    notifyRouteChange()
+  }
+
   func openCommandBar() {
     cmdKVisible = true
   }
@@ -233,6 +258,13 @@ class Nav3 {
 
   private func notifyRouteChange() {
     onRouteChange?()
+  }
+
+  private func historyMenuItems<T: Sequence>(from indices: T) -> [Nav3HistoryMenuItem] where T.Element == Int {
+    Array(indices.lazy
+      .filter { history.indices.contains($0) }
+      .prefix(10)
+      .map { Nav3HistoryMenuItem(index: $0, state: history[$0]) })
   }
 
   private func state(for route: Nav3Route) -> Nav3RouteState {
