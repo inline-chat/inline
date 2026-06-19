@@ -1,6 +1,164 @@
 import InlineProtocol
 import UIKit
 
+private final class ComposeGlassGroupView: UIView {
+  private let rootView: UIView
+  let contentView: UIView
+
+  override init(frame: CGRect) {
+    if #available(iOS 26.0, *) {
+      let effect = UIGlassContainerEffect()
+      effect.spacing = 8
+      let visualEffectView = UIVisualEffectView(effect: effect)
+      rootView = visualEffectView
+      contentView = visualEffectView.contentView
+    } else {
+      let view = UIView()
+      rootView = view
+      contentView = view
+    }
+
+    super.init(frame: frame)
+
+    translatesAutoresizingMaskIntoConstraints = false
+    backgroundColor = .clear
+    rootView.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(rootView)
+
+    NSLayoutConstraint.activate([
+      rootView.topAnchor.constraint(equalTo: topAnchor),
+      rootView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      rootView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      rootView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard !isHidden, alpha > 0, isUserInteractionEnabled else { return nil }
+
+    for view in contentView.subviews.reversed() {
+      let convertedPoint = convert(point, to: view)
+      guard view.point(inside: convertedPoint, with: event) else { continue }
+
+      if let plusButton = view as? ComposePlusGlassButton {
+        return plusButton.hitTest(convertedPoint, with: event)
+      }
+
+      if let effectView = view as? UIVisualEffectView {
+        let contentPoint = convert(point, to: effectView.contentView)
+        if let result = effectView.contentView.hitTest(contentPoint, with: event),
+           result !== effectView.contentView
+        {
+          return result
+        }
+        continue
+      }
+
+      if let result = view.hitTest(convertedPoint, with: event) {
+        return result
+      }
+    }
+
+    return nil
+  }
+}
+
+private final class ComposePlusGlassButton: UIVisualEffectView {
+  var onTouchDown: (() -> Void)?
+  var onTap: (() -> Void)?
+
+  private let imageView = UIImageView()
+  private var isPressed = false {
+    didSet {
+      guard oldValue != isPressed else { return }
+      UIView.animate(
+        withDuration: 0.12,
+        delay: 0,
+        options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+      ) {
+        self.alpha = self.isPressed ? 0.58 : 1
+      }
+    }
+  }
+
+  init() {
+    if #available(iOS 26.0, *) {
+      let glassEffect = UIGlassEffect(style: .regular)
+      glassEffect.isInteractive = true
+      super.init(effect: glassEffect)
+    } else {
+      super.init(effect: nil)
+      backgroundColor = .secondarySystemBackground
+    }
+
+    setup()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard !isHidden, alpha > 0.01, isUserInteractionEnabled, self.point(inside: point, with: event) else {
+      return nil
+    }
+
+    return self
+  }
+
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+    isPressed = true
+    onTouchDown?()
+    super.touchesBegan(touches, with: event)
+  }
+
+  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+    let shouldTap = touches.contains { touch in
+      bounds.contains(touch.location(in: self))
+    }
+    isPressed = false
+    if shouldTap {
+      onTap?()
+    }
+    super.touchesEnded(touches, with: event)
+  }
+
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+    isPressed = false
+    super.touchesCancelled(touches, with: event)
+  }
+
+  private func setup() {
+    translatesAutoresizingMaskIntoConstraints = false
+    isUserInteractionEnabled = true
+    layer.cornerRadius = 21
+    layer.cornerCurve = .continuous
+    layer.masksToBounds = true
+    isAccessibilityElement = true
+    accessibilityLabel = "Add attachment"
+    accessibilityTraits = .button
+
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.image = UIImage(systemName: "plus")?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 20.5, weight: .medium)
+    )
+    imageView.tintColor = .secondaryLabel
+    imageView.contentMode = .center
+    contentView.addSubview(imageView)
+
+    NSLayoutConstraint.activate([
+      imageView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+      imageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+    ])
+  }
+}
+
 extension ComposeView {
   func makeTextView() -> ComposeTextView {
     let view = ComposeTextView(composeView: self)
@@ -82,34 +240,26 @@ extension ComposeView {
     return button
   }
 
-  func makePlusButton() -> UIButton {
-    let button = UIButton(type: .system)
-    button.translatesAutoresizingMaskIntoConstraints = false
+  func makeComposeGlassContainer() -> UIView {
+    ComposeGlassGroupView()
+  }
 
-    var config: UIButton.Configuration
-    if #available(iOS 26.0, *) {
-      config = UIButton.Configuration.glass()
-      config.cornerStyle = .capsule
-      config.contentInsets = .zero
-    } else {
-      config = UIButton.Configuration.plain()
-      config.background.backgroundColor = .secondarySystemBackground
-      config.cornerStyle = .capsule
+  func composeGlassContentView() -> UIView {
+    (composeGlassContainer as? ComposeGlassGroupView)?.contentView ?? composeGlassContainer
+  }
+
+  func composeContentView() -> UIView {
+    (composeAndButtonContainer as? UIVisualEffectView)?.contentView ?? composeAndButtonContainer
+  }
+
+  func makePlusButton() -> UIView {
+    let button = ComposePlusGlassButton()
+    button.onTouchDown = { [weak self] in
+      self?.buttonTouchDown()
     }
-
-    config.image = UIImage(systemName: "plus")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-    )
-    config.baseForegroundColor = .secondaryLabel
-    button.configuration = config
-    if #unavailable(iOS 26.0) {
-      button.layer.cornerRadius = (buttonSize.width + 10) / 2
-      button.layer.cornerCurve = .continuous
-      button.clipsToBounds = true
+    button.onTap = { [weak self] in
+      self?.plusTapped()
     }
-    button.addTarget(self, action: #selector(plusTapped), for: .touchUpInside)
-    button.addTarget(self, action: #selector(buttonTouchDown), for: .touchDown)
-
     return button
   }
 
@@ -120,36 +270,25 @@ extension ComposeView {
   }
 
   func makeComposeAndButtonContainer() -> UIView {
+    if #available(iOS 26.0, *) {
+      let glassEffect = UIGlassEffect(style: .regular)
+      glassEffect.isInteractive = true
+      let view = UIVisualEffectView(effect: glassEffect)
+      view.translatesAutoresizingMaskIntoConstraints = false
+      view.isUserInteractionEnabled = true
+      view.layer.cornerRadius = 20
+      view.layer.cornerCurve = .continuous
+      view.layer.masksToBounds = true
+      return view
+    }
+
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isUserInteractionEnabled = true
-    view.backgroundColor = .clear
-
-    if #available(iOS 26.0, *) {
-      let glassEffect = UIGlassEffect(style: .regular)
-      let glassView = UIVisualEffectView(effect: glassEffect)
-      glassView.translatesAutoresizingMaskIntoConstraints = false
-      view.addSubview(glassView)
-
-      NSLayoutConstraint.activate([
-        glassView.topAnchor.constraint(equalTo: view.topAnchor),
-        glassView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-        glassView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-        glassView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-      ])
-
-      glassView.layer.cornerRadius = 20
-      glassView.layer.cornerCurve = .continuous
-      glassView.layer.masksToBounds = true
-
-    } else {
-      // view.layer.backgroundColor = UIColor.systemBackground.cgColor
-      view.backgroundColor = .secondarySystemBackground.withAlphaComponent(0.8)
-      view.layer.cornerRadius = 20
-      view.layer.cornerCurve = .continuous
-      view.clipsToBounds = true
-    }
-
+    view.backgroundColor = .secondarySystemBackground.withAlphaComponent(0.8)
+    view.layer.cornerRadius = 20
+    view.layer.cornerCurve = .continuous
+    view.clipsToBounds = true
     return view
   }
 

@@ -14,6 +14,9 @@ struct ComposeVoiceWaveformView: View {
   let motion: Motion
   let onSeek: (@MainActor @Sendable (Double) -> Void)?
 
+  @State private var lastSeekTime: TimeInterval = 0
+  @State private var lastSeekProgress: Double = 0
+
   init(
     samples: [UInt8],
     progress: Double,
@@ -66,9 +69,28 @@ struct ComposeVoiceWaveformView: View {
   private func seekGesture(width: CGFloat) -> some Gesture {
     DragGesture(minimumDistance: 0)
       .onChanged { value in
-        guard let onSeek, width > 0 else { return }
-        onSeek(min(max(value.location.x / width, 0), 1))
+        commitSeek(locationX: value.location.x, width: width, force: false)
       }
+      .onEnded { value in
+        commitSeek(locationX: value.location.x, width: width, force: true)
+      }
+  }
+
+  private func commitSeek(locationX: CGFloat, width: CGFloat, force: Bool) {
+    guard let onSeek, width > 0 else { return }
+
+    let progress = Double(min(max(locationX / width, 0), 1))
+    let now = ProcessInfo.processInfo.systemUptime
+    guard force ||
+      now - lastSeekTime >= Self.seekCommitInterval ||
+      abs(progress - lastSeekProgress) >= Self.seekProgressThreshold
+    else {
+      return
+    }
+
+    lastSeekTime = now
+    lastSeekProgress = progress
+    onSeek(progress)
   }
 
   private static func barCount(for width: CGFloat, motion: Motion) -> Int {
@@ -143,6 +165,9 @@ struct ComposeVoiceWaveformView: View {
     let curved = CGFloat(pow(Double(min(max(value, 0), 1)), 0.72))
     return min(max(0.12 + curved * 0.88, 0.12), 1)
   }
+
+  private static let seekCommitInterval: TimeInterval = 1.0 / 30.0
+  private static let seekProgressThreshold: Double = 0.015
 }
 
 @MainActor
