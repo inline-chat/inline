@@ -14,6 +14,10 @@ Supports:
 - Message replies: OpenClaw `replyToId` is mapped to Inline `replyToMsgId` (message id).
 - Inline reply threads: tools can create and reply in real Inline reply-thread chats.
 - Inline media upload/send for images, videos, and documents from `mediaUrl` payloads.
+- Native-style file upload action via `upload-file`.
+- Native-style file download action via `download-file`.
+- Inline message forwarding via `forward`/`forwardMessages` message tool actions.
+- Inline compose indicators via `typing`, `stop-typing`, upload-state actions, and `recording-voice`.
 - Emoji reactions via message tool actions (`react`, `reactions`).
 - Reaction events on bot-authored messages are surfaced back to the agent as inbound context.
 
@@ -23,7 +27,7 @@ Reply-thread behavior:
 - `replyThreadMode: "auto"` also creates a child reply thread when the triggering parent-chat message explicitly asks OpenClaw to reply in a thread.
 - `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery once `replyThreadAutoCreateMinMessages` is reached; each triggering parent-chat message gets its own child reply thread.
 - `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
-- `thread-create` creates a real Inline reply thread. `thread-reply` sends into the child reply-thread chat id returned by `thread-create`.
+- `thread-create` creates a top-level Inline thread when called with participants or `spaceId`, and creates a real Inline reply thread when called with a parent chat target or anchor. `thread-reply` sends into the child reply-thread chat id returned by reply-thread creation.
 - Inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`.
 - Bot-participated reply threads can continue without an explicit bot mention by default, matching Slack-style thread behavior.
 
@@ -147,6 +151,8 @@ channels:
 
     # Streaming + chunking:
     mediaMaxMb: 20
+    debounceMs: 1200 # optional: coalesce rapid same-sender Inline messages; global alternative: messages.inbound.byChannel.inline
+    voiceTranscriptWaitMs: 8000 # wait for Inline's voice auto-transcript edit before falling back to audio STT; set 0 to disable
     blockStreaming: true
     streamViaEditMessage: true # optional: paragraph-level text streaming via send+edit fallback; off by default
     chunkMode: "newline" # length|newline
@@ -223,21 +229,34 @@ The plugin exposes Inline RPC-backed actions through OpenClaw's `message` tool.
 Most Inline RPC-backed actions use a numeric chat id via `to`, `chatId`, or `channelId`.
 Direct DM sends can also target `user:<id>`.
 
-- Sending: `send`, `sendAttachment`
+- Sending: `send`, `sendAttachment`, `upload-file`, `forward`, `forwardMessages`
 - Replying: `reply`, `thread-reply`
 - Reactions: `react`, `reactions`
-- Reading/searching: `read`, `search`
+- Reading/searching/translating: `read`, `get-messages`, `getMessages`, `download-file`, `bot-commands`, `botCommands`, `peer-bot-commands`, `peerBotCommands`, `search`, `translate`, `translateMessages`
 - Editing: `edit`
 - Channels/threads: `channel-info`, `channel-edit`, `renameGroup`, `channel-list`, `channel-create`, `channel-delete`, `channel-move`, `thread-list`, `thread-create`
-- Participants: `addParticipant`, `removeParticipant`, `kick`, `leaveGroup`, `member-info`
-- Message lifecycle: `delete`, `unsend`
-- Pins: `pin`, `unpin`, `list-pins`
+- Participants: `addParticipant`, `removeParticipant`, `kick`, `leaveGroup`, `member-info`, `invite-to-space`, `inviteToSpace`
+- Message lifecycle: `delete`, `unsend`, `delete-attachment`, `deleteMessageAttachment`
+- Message pins: `pin`, `unpin`, `list-pins`
 - Space permissions: `permissions`
 
 Inline reply-thread semantics:
 
+- `read` supports latest reads plus `before`/`offsetId` for older history, `after` for newer history, and `messageId`/`anchorId` for around-window reads. In reply-thread turns it defaults to the current reply-thread chat when `to`/`chatId`/`threadId` is omitted.
+- `get-messages`/`getMessages` fetches exact message ids from a target chat/user/reply thread and returns the same media-aware payloads as `read`/`search`.
+- `download-file` downloads Inline message media or URL-preview images to a local temp path. Pass `mediaUrl`/`url` directly, or pass `messageId` with optional `mediaId`/`attachmentId`; inside an Inline turn it defaults to the current chat/thread and current message.
+- `peer-bot-commands`/`bot-commands` reads Inline bot commands available in a target chat/user/reply thread. In reply-thread turns it can inspect inherited parent-chat bot commands.
+- `channel-edit` can rename (`title`/`name`/`threadName`), update `emoji`, and change space-thread visibility with `isPublic` or `visibility: "public"|"private"`. Private visibility changes require `participant`/`participants`.
+- `upload-file` is the native OpenClaw alias for `sendAttachment`; use `filePath`, `path`, `media`, `mediaUrl`, or `url` for the file/media source.
+- Inline `buttons` rows support `callback_data` for callbacks and `copy_text`/`copyText` for client-side copy buttons. JSON `callback_data` can include `callbackToast` or `toast` for an immediate short acknowledgement when pressed.
 - `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id.
-- `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor.
+- If `threadId` is missing, `thread-reply` can use the current reply-thread context or a saved route from `thread-create` when called with the parent chat target plus `parentMessageId`.
+- `thread-create` creates a top-level Inline thread when called without a parent target. Use `participant`/`participants` for a private thread, or `spaceId` with `isPublic: true` for a public space thread. If `spaceId` is present and no participants are supplied, Inline defaults `thread-create` to a public space thread.
+- `thread-create` creates a real reply thread from a parent chat when `to`/`chatId`/`channelId` is supplied, or when an explicit `replyToId`/`messageId` anchor can be paired with the current channel context.
+- `forward`/`forwardMessages` forwards one or more source `messageId`/`messageIds` to a destination `to`/`chatId`/`userId`. The source can be `from`/`source`/`fromChatId`/`fromUserId`; when omitted in an Inline conversation, it defaults to the current chat.
+- `delete-attachment` removes a URL-preview attachment from a message authored by the current bot/user. Use `attachments[].id` from `read` or `search` as `attachmentId`.
+- `pin`/`unpin` use `messageId` and default to the current Inline chat/thread when no target is passed; `list-pins` also defaults to the current chat/thread.
+- `invite-to-space` invites one user per call into a space using `userId`/`user`/`participant`, `email`, or `phoneNumber`; pass `role: "admin"` for admin invites or omit it for a member invite.
 - In `replyThreadMode: "auto"`, explicit user requests such as "reply in a thread" create and answer in a child reply thread automatically; the `thread-create` and `thread-reply` message-tool actions remain available for manual tool use.
 - Automatic thread creation falls back to parent-chat delivery if the reply thread cannot be created.
 - Existing route state is reused only for the same parent-message anchor. New parent-chat messages get separate reply threads; messages already inside a reply thread stay in that thread and do not create nested threads.
@@ -257,6 +276,7 @@ channels:
       reactions: true
       read: true
       search: true
+      translate: true
       edit: true
       channels: true
       participants: true
@@ -274,14 +294,25 @@ The plugin also registers dedicated tools outside the `message` action surface.
 `inline_parent_context` fetches more parent-chat history for the current Inline reply-thread session when the automatic context window is not enough.
 
 - Defaults to the current reply thread when invoked from one
-- Optional inputs: `threadId`, `parentChatId`, `parentMessageId`, `beforeMessageId`, `limit`, `includeAnchor`, `accountId`
+- Optional inputs: `threadId`, `parentChatId`, `parentMessageId`, `beforeMessageId`, `afterMessageId`, `messageId`/`aroundMessageId`, `mode`, `limit`, `beforeLimit`, `afterLimit`, `includeAnchor`, `accountId`
+- Supports `latest`, `older`, `newer`, and `around` history windows; the reply-thread default is an `around` window anchored to the parent/root message
 - Returned messages are ordered oldest to newest and include media/entity summaries
 
 `inline_members` handles space-member discovery:
 
-- Required input: `spaceId`
+- Optional input: `spaceId`/`space`; when omitted inside an Inline space chat or reply thread, the plugin infers the current space
 - Optional filters: `query`, `userId`, `limit`, `accountId`
 - Returned members include explicit DM targets like `user:123`
+
+`inline_nudge` sends an Inline nudge to a chat or user target.
+
+`inline_forward` forwards existing Inline message ids between chats or users.
+
+`inline_bot_presence` updates the bot's on-screen body state in Inline without sending a chat message. Use `action: "get"` to inspect the current avatar/state for a chat or user target.
+
+`inline_update_profile` updates the authenticated bot's Inline display name and/or profile photo. Use it only for explicit profile-setup requests.
+
+`inline_bot_avatar` installs, replaces, or clears the bot's on-screen avatar. Set/install uses a local or remote `.zip` avatar package; clearing uses `action: "clear"` or `clear: true`. It is for avatar setup/removal, not mood or presence changes.
 
 The plugin also registers `inline_bot_commands` for Inline bot command management (v1):
 
@@ -296,6 +327,7 @@ Bot command sync:
 - Default commands include the same user-facing command set as bundled chat providers (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
 - Inline also registers `/threadreply` to manage this group's reply-thread mode from chat.
 - The plugin uses OpenClaw's command, skill command, and plugin command registries when available.
+- If Inline rejects the full 100-command menu as `BOT_COMMANDS_TOO_MUCH`, startup sync retries with a smaller command set and logs how many entries were omitted.
 - Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`. Disabled startup sync clears existing Inline bot commands for the affected account.
 - Disable skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.
 

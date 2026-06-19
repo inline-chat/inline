@@ -154,6 +154,8 @@
           "dmHistoryLimit": { "type": "integer", "minimum": 0 },
           "parseMarkdown": { "type": "boolean" },
           "mediaMaxMb": { "type": "number", "exclusiveMinimum": 0 },
+          "debounceMs": { "type": "integer", "minimum": 0 },
+          "voiceTranscriptWaitMs": { "type": "integer", "minimum": 0, "maximum": 60000 },
           "reactionNotifications": { "type": "string", "enum": ["off", "own", "all", "allowlist"] },
           "reactionAllowlist": {
             "type": "array",
@@ -168,6 +170,7 @@
               "reactions": { "type": "boolean" },
               "read": { "type": "boolean" },
               "search": { "type": "boolean" },
+              "translate": { "type": "boolean" },
               "edit": { "type": "boolean" },
               "channels": { "type": "boolean" },
               "participants": { "type": "boolean" },
@@ -596,6 +599,15 @@
                     "type": "number",
                     "exclusiveMinimum": 0
                   },
+                  "debounceMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "voiceTranscriptWaitMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60000
+                  },
                   "reactionNotifications": {
                     "type": "string",
                     "enum": [
@@ -635,6 +647,9 @@
                         "type": "boolean"
                       },
                       "search": {
+                        "type": "boolean"
+                      },
+                      "translate": {
                         "type": "boolean"
                       },
                       "edit": {
@@ -1028,7 +1043,7 @@
         },
         "actions": {
           "label": "Inline Message Actions",
-          "help": "Enable or disable Inline message-tool action groups such as send, reactions, read, edit, participants, pins, and permissions."
+          "help": "Enable or disable Inline message-tool action groups such as send, reactions, read, search, translate, edit, participants, message pins, and permissions."
         },
         "reactionNotifications": {
           "label": "Inline Reaction Notifications",
@@ -1037,6 +1052,14 @@
         "reactionAllowlist": {
           "label": "Inline Reaction Sender Allowlist",
           "help": "Inline user IDs allowed to queue passive reaction notifications when reactionNotifications is \"allowlist\". Supports the same ID/access-group entries as allowFrom."
+        },
+        "debounceMs": {
+          "label": "Inline Inbound Debounce",
+          "help": "Coalesce rapid same-sender Inline text messages into one agent turn. Overrides messages.inbound.byChannel.inline for this Inline account when set."
+        },
+        "voiceTranscriptWaitMs": {
+          "label": "Inline Voice Transcript Wait",
+          "help": "Milliseconds to wait for Inline's server voice-message transcript edit before falling back to raw audio handling. Set 0 to disable the wait."
         },
         "commands.native": {
           "label": "Inline Bot Command Sync",
