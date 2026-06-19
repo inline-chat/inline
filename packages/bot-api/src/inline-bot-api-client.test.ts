@@ -125,6 +125,29 @@ describe("InlineBotApiClient", () => {
     expect(seenUrl).toContain("offset_message_id=5")
   })
 
+  it("uses GET for getChat", async () => {
+    let seenUrl = ""
+    let seenMethod = ""
+
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        seenUrl = String(input)
+        seenMethod = init?.method ?? ""
+        return new Response(JSON.stringify({ ok: true, result: { chat: { chat_id: 42 } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    const res = await client.getChat({ user_id: 7 })
+    expect(res.ok).toBe(true)
+    expect(seenMethod).toBe("GET")
+    expect(seenUrl).toContain("https://api.inline.chat/bot/getChat?")
+    expect(seenUrl).toContain("user_id=7")
+  })
+
   it("requestRaw supports explicit query and body", async () => {
     let seenUrl = ""
     let seenBody = ""
@@ -152,6 +175,41 @@ describe("InlineBotApiClient", () => {
     expect(seenUrl).toContain("a=1")
     expect(seenUrl).toContain("b=x")
     expect(JSON.parse(seenBody)).toEqual({ c: true })
+  })
+
+  it("requestRaw supports text responses and complex query values", async () => {
+    let seenUrl = ""
+
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input) => {
+        seenUrl = String(input)
+        return new Response("plain text", {
+          status: 202,
+          headers: { "content-type": "text/plain" },
+        })
+      }) as any,
+    })
+
+    const res = await client.requestRaw<string>("custom/path", {
+      method: "GET",
+      query: {
+        nil: null,
+        flag: false,
+        big: 12n,
+        obj: { a: 1 },
+        skip: undefined,
+      },
+    })
+
+    expect(res.status).toBe(202)
+    expect(res.data).toBe("plain text")
+    expect(seenUrl).toContain("https://api.inline.chat/custom/path?")
+    expect(seenUrl).toContain("nil=null")
+    expect(seenUrl).toContain("flag=false")
+    expect(seenUrl).toContain("big=12")
+    expect(seenUrl).toContain(`obj=${encodeURIComponent(JSON.stringify({ a: 1 }))}`)
+    expect(seenUrl).not.toContain("skip=")
   })
 
   it("uses GET for getMyCommands", async () => {
@@ -204,6 +262,43 @@ describe("InlineBotApiClient", () => {
     expect(JSON.parse(seenBody)).toEqual({
       commands: [{ command: "start", description: "Start the bot", sort_order: 1 }],
     })
+  })
+
+  it("uses POST JSON for editMessageText and deleteMessage", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        })
+        return new Response(JSON.stringify({ ok: true, result: { message: { message_id: 7 } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    const edit = await client.editMessageText({ chat_id: 42, message_id: 7, text: "updated" })
+    const deleted = await client.deleteMessage({ chat_id: 42, message_id: 7 })
+
+    expect(edit.ok).toBe(true)
+    expect(deleted.ok).toBe(true)
+    expect(calls).toEqual([
+      {
+        url: "https://api.inline.chat/bot/editMessageText",
+        method: "POST",
+        body: { chat_id: 42, message_id: 7, text: "updated" },
+      },
+      {
+        url: "https://api.inline.chat/bot/deleteMessage",
+        method: "POST",
+        body: { chat_id: 42, message_id: 7 },
+      },
+    ])
   })
 
   it("uses POST for deleteMyCommands", async () => {
