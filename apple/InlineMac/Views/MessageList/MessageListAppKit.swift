@@ -56,6 +56,7 @@ class MessageListAppKit: NSViewController {
   private var feature_updatesHeightsOnWidthChange = true
   private var feature_recalculatesHeightsWhileInitialScroll = true
   private var feature_loadsMoreWhenApproachingTop = true
+  private var feature_loadsMoreWhenApproachingBottom = true
 
   // Testing
   private var feature_updatesHeightsOnLiveResizeEnd = true
@@ -158,12 +159,12 @@ class MessageListAppKit: NSViewController {
             self_.scrollToMsgAndHighlight(request)
 
           case .scrollToBottom:
-            if !self_.isAtBottom {
-              self_.scrollToIndex(self_.tableView.numberOfRows - 1, position: .bottom, animated: true)
+            if !self_.isAtBottom || self_.chatRows.canLoadNewerFromLocal {
+              self_.scrollToNewestAvailable(animated: true)
             }
+          }
         }
       }
-    }
 
     TranslationState.shared.subject.sink { [weak self] _ in
       guard let self else { return }
@@ -429,8 +430,7 @@ class MessageListAppKit: NSViewController {
     let scrollToBottomButton = ScrollToBottomButtonHostingView()
     scrollToBottomButton.onClick = { [weak self] in
       guard let weakSelf = self else { return }
-      // self?.scrollToBottom(animated: true)
-      weakSelf.scrollToIndex(weakSelf.tableView.numberOfRows - 1, position: .bottom, animated: true)
+      weakSelf.scrollToNewestAvailable(animated: true)
       weakSelf.scrollToBottomButton.setVisibility(false)
     }
     scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false
@@ -777,6 +777,22 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  private func scrollToNewestAvailable(animated: Bool) {
+    guard chatRows.canLoadNewerFromLocal else {
+      scrollToBottom(animated: animated)
+      return
+    }
+
+    chatRows.loadLatestWindow()
+    rebuildRowItems()
+    tableView.reloadData()
+    pruneMessageSelection()
+
+    DispatchQueue.main.async { [weak self] in
+      self?.scrollToBottom(animated: animated)
+    }
+  }
+
   private func scrollToBottom(animated: Bool) {
     guard chatRows.rowCount > 0 else { return }
     #if DEBUG
@@ -981,6 +997,14 @@ class MessageListAppKit: NSViewController {
     // Check if we're approaching the top
     if feature_loadsMoreWhenApproachingTop, isUserScrolling, currentScrollOffset < viewportSize.height {
       loadBatch(at: .older)
+    }
+
+    if feature_loadsMoreWhenApproachingBottom,
+       isUserScrolling,
+       chatRows.canLoadNewerFromLocal,
+       maxScrollableHeight - currentScrollOffset < viewportSize.height
+    {
+      loadBatch(at: .newer)
     }
 
     if prevAtBottom != isAtBottom {
@@ -1318,6 +1342,15 @@ class MessageListAppKit: NSViewController {
     Int32(messages.count > 200 ? 200 : 100)
   }
 
+  private func loadDirectionLabel(_ direction: MessagesProgressiveViewModel.MessagesLoadDirection) -> String {
+    switch direction {
+      case .older:
+        "older"
+      case .newer:
+        "newer"
+    }
+  }
+
   private func requestRemoteOlderBatch(beforeMessageId: Int64) {
     guard shouldRequestRemoteOlder(beforeMessageId: beforeMessageId) else { return }
 
@@ -1361,9 +1394,7 @@ class MessageListAppKit: NSViewController {
     }
   }
 
-  // Currently only at top is supported.
   func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
-    if direction != .older { return }
     if loadingBatch { return }
     loadingBatch = true
 
@@ -1375,14 +1406,20 @@ class MessageListAppKit: NSViewController {
         loadingBatch = false
         return
       }
-      let oldestMessageIdBeforeLoad = messages.first?.message.messageId
+
+      let boundaryMessageIdBeforeLoad = switch direction {
+        case .older:
+          messages.first?.message.messageId
+        case .newer:
+          messages.last?.message.messageId
+      }
       var didInsertRows = false
-      // Preserve scroll position from bottom if we're loading at top
-      maintainingBottomScroll { [weak self] in
+
+      let applyLoad: () -> Bool? = { [weak self] in
         guard let self else { return false }
         guard !Task.isCancelled else { return false }
 
-        log.trace("Loading batch at top")
+        log.trace("Loading \(loadDirectionLabel(direction)) batch")
         chatRows.loadBatch(at: direction, publish: false)
         let rowUpdate = chatRows.syncFromViewModelAfterManualMutation()
         pruneMessageSelection()
@@ -1411,15 +1448,29 @@ class MessageListAppKit: NSViewController {
         }
       }
 
+      if direction == .older {
+        // Preserve scroll position from bottom if we're loading at top.
+        maintainingBottomScroll(applyLoad)
+      } else {
+        _ = applyLoad()
+      }
+
       loadingBatch = false
 
       guard !Task.isCancelled else { return }
       guard !didInsertRows else { return }
-      guard direction == .older else { return }
-      guard let oldestMessageIdBeforeLoad else { return }
-      guard !chatRows.canLoadOlderFromLocal else { return }
 
-      requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
+      switch direction {
+        case .older:
+          guard let boundaryMessageIdBeforeLoad else { return }
+          guard !chatRows.canLoadOlderFromLocal else { return }
+          requestRemoteOlderBatch(beforeMessageId: boundaryMessageIdBeforeLoad)
+
+        case .newer:
+          // TODO: Add a remote newer-history fallback if we need to bridge non-local gaps below a loaded window.
+          // Keep this local-only for now so CMD+K search recovery does not mix network reloads into scroll anchoring.
+          return
+      }
     }
   }
 

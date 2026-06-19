@@ -43,6 +43,7 @@ final class ChatRowListViewModel {
 
   var rowCount: Int { rows.count }
   var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
+  var canLoadNewerFromLocal: Bool { progressiveViewModel.canLoadNewerFromLocal }
   var reversed: Bool { progressiveViewModel.reversed }
 
   // MARK: - Init
@@ -96,6 +97,10 @@ final class ChatRowListViewModel {
 
   func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection, publish: Bool = true) {
     progressiveViewModel.loadBatch(at: direction, publish: publish)
+  }
+
+  func loadLatestWindow() {
+    progressiveViewModel.loadLatestWindow()
   }
 
   func setAtBottom(_ atBottom: Bool) {
