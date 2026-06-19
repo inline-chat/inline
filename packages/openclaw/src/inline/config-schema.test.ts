@@ -33,6 +33,22 @@ describe("inline/config-schema", () => {
     ).toBe(true)
   })
 
+  it("accepts Inline inbound debounce config at top level and account level", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        debounceMs: 1200,
+        accounts: {
+          work: {
+            debounceMs: 2500,
+          },
+        },
+      }).success,
+    ).toBe(true)
+
+    expect(InlineConfigSchema.safeParse({ debounceMs: -1 }).success).toBe(false)
+    expect(InlineConfigSchema.safeParse({ debounceMs: 1.5 }).success).toBe(false)
+  })
+
   it("accepts reply thread mode defaults and group overrides", () => {
     expect(
       InlineConfigSchema.safeParse({
@@ -214,6 +230,7 @@ describe("inline/config-schema", () => {
         actions: {
           send: true,
           read: true,
+          translate: true,
           channels: true,
           permissions: false,
         },
@@ -267,6 +284,14 @@ describe("inline/config-schema", () => {
         },
       }).success,
     ).toBe(true)
+
+    expect(
+      InlineConfigSchema.safeParse({
+        actions: {
+          translateMessages: true,
+        },
+      }).success,
+    ).toBe(false)
   })
 
   it("accepts native-compatible numeric allowlist entries", () => {

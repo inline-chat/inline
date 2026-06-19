@@ -16,6 +16,7 @@ import {
 } from "openclaw/plugin-sdk/command-auth-native"
 import { expandAllowFromWithAccessGroups } from "openclaw/plugin-sdk/security-runtime"
 import { buildCommandsMessagePaginated } from "openclaw/plugin-sdk/command-status"
+import { isAbortRequestText } from "openclaw/plugin-sdk/command-primitives-runtime"
 import {
   createConnectedChannelStatusPatch,
   createTransportActivityStatusPatch,
@@ -77,6 +78,7 @@ import {
   Method,
   type Message,
   type MessageActions,
+  type MessageActionResponseUi,
   type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
@@ -103,6 +105,7 @@ import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
 import {
   sanitizeInlineActionCallbackData,
+  sanitizeInlineActionCopyText,
   sanitizeInlineActionLabel,
   sanitizeInlineVisibleText,
 } from "./outbound-sanitize.js"
@@ -128,6 +131,7 @@ import {
   rememberInlineReplyThreadRoute,
   type InlineReplyThreadRouteRecord,
 } from "./thread-routes.js"
+import { resolveInlineThreadFreshness } from "./thread-freshness.js"
 import {
   logInboundDrop,
   resolveChannelMediaMaxBytes,
@@ -152,7 +156,8 @@ const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
 const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
-const INLINE_PARTICIPANT_ADD_READY_MAX_EVENT_AGE_MS = 10 * 60 * 1000
+const DEFAULT_INLINE_VOICE_TRANSCRIPT_WAIT_MS = 8_000
+const MAX_INLINE_VOICE_TRANSCRIPT_WAIT_MS = 60_000
 const INLINE_BOT_PRESENCE_IDLE_DELAY_MS = 8_000
 const INLINE_BOT_PRESENCE_FINISH_IDLE_DELAY_MS = 8_000
 const INLINE_BOT_PRESENCE_GESTURE_MS = 1_400
@@ -635,9 +640,16 @@ type InlineDebounceEntry = {
   msg: Message
 }
 
+type InlinePendingVoiceMessage = {
+  chatId: bigint
+  msg: Message
+  timeout: ReturnType<typeof setTimeout>
+}
+
 type InlineParsedInboundEvent = {
   chatId: bigint
   msg: Message
+  messageIds?: string[]
   rawBodyOverride?: string | null
   callbackActionEvent?: {
     interactionId: bigint
@@ -668,6 +680,11 @@ function formatSdkLogLine(message: string, meta?: unknown): string {
   const detail = summarizeSdkMeta(meta)
   if (!detail) return message
   return `${message} ${detail}`
+}
+
+function formatInlineOperationError(operation: string, error: unknown): string {
+  const detail = summarizeSdkMeta(error) || String(error)
+  return `${operation} failed: ${detail}`
 }
 
 type InlineHistoryEntryPayload = {
@@ -1007,10 +1024,21 @@ function buildInlineReactionContextKey(params: {
 function describeInlineParticipantAddSystemEvent(params: {
   channelLabel: string
   recentLines: string[]
+  priorMentionLines: string[]
 }): string {
-  const header = `Inline bot was added as a participant in ${params.channelLabel}.`
-  if (params.recentLines.length === 0) return header
-  return `${header}\nRecent messages before join:\n${params.recentLines.join("\n")}`
+  const lines = [`Inline bot was added as a participant in ${params.channelLabel}.`]
+  if (params.priorMentionLines.length > 0) {
+    lines.push(
+      "The bot was mentioned before it joined. Respond to the prior mention(s) that still need attention, then introduce yourself briefly.",
+    )
+    lines.push(`Prior bot mentions before join:\n${params.priorMentionLines.join("\n")}`)
+  } else {
+    lines.push("Introduce yourself briefly, then wait for the next user request.")
+  }
+  if (params.recentLines.length > 0) {
+    lines.push(`Recent messages before join:\n${params.recentLines.join("\n")}`)
+  }
+  return lines.join("\n")
 }
 
 function buildInlineParticipantAddContextKey(params: {
@@ -1044,6 +1072,11 @@ function normalizeInlineCommandBody(raw: string, botUsername: string | undefined
     }
   }
   return normalized
+}
+
+function isInlineAbortRequestMessage(msg: Message, botUsername: string | undefined): boolean {
+  const text = typeof msg.message === "string" ? msg.message : ""
+  return isAbortRequestText(text, botUsername ? { botUsername } : undefined)
 }
 
 function findInlineNativeCommandFromBody(commandBody: string): NonNullable<ReturnType<typeof findCommandByNativeName>> | null {
@@ -1228,6 +1261,13 @@ function buildInlineDebounceKey(params: {
   return `inline:${params.accountId}:${String(params.chatId)}:${String(params.senderId)}`
 }
 
+function buildInlineInboundTaskKey(params: {
+  accountId: string
+  chatId: bigint
+}): string {
+  return `inline:${params.accountId}:${String(params.chatId)}`
+}
+
 function buildSyntheticInlineTextMessage(params: {
   base: Message
   text: string
@@ -1240,11 +1280,97 @@ function buildSyntheticInlineTextMessage(params: {
   }
 }
 
+function buildInlineTranscriptTextMessage(params: {
+  base: Message
+  text: string
+}): Message {
+  const { media: _media, ...base } = params.base as Message & { media?: unknown }
+  return {
+    ...base,
+    message: params.text,
+  } as Message
+}
+
+function buildInlineVoicePendingKey(params: { chatId: bigint; messageId: bigint }): string {
+  return `${String(params.chatId)}:${String(params.messageId)}`
+}
+
+function resolveInlineVoiceTranscriptWaitMs(config: { voiceTranscriptWaitMs?: unknown }): number {
+  const raw = config.voiceTranscriptWaitMs
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return DEFAULT_INLINE_VOICE_TRANSCRIPT_WAIT_MS
+  }
+  return Math.max(0, Math.min(MAX_INLINE_VOICE_TRANSCRIPT_WAIT_MS, Math.trunc(raw)))
+}
+
+function resolveInlineInboundDebounceMsOverride(config: { debounceMs?: unknown }): number | undefined {
+  const raw = config.debounceMs
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return undefined
+  }
+  return Math.max(0, Math.trunc(raw))
+}
+
+function shouldWaitForInlineVoiceTranscript(message: Message): boolean {
+  const content = summarizeInlineMessageContent(message)
+  return content.media?.kind === "voice" && !content.rawText
+}
+
+function extractInlineVoiceTranscriptText(message: Message): string | null {
+  const text = message.message?.trim()
+  return text ? text : null
+}
+
 const INLINE_ACTION_MAX_ROWS = 8
 const INLINE_ACTION_MAX_PER_ROW = 8
+const INLINE_CALLBACK_TOAST_MAX_LENGTH = 256
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function normalizeInlineCallbackToastText(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined
+
+  const visible = sanitizeInlineVisibleText(raw)
+  if (visible.shouldSkip) return undefined
+
+  const text = visible.text.replace(/\s+/g, " ").trim()
+  if (!text) return undefined
+
+  if (text.length <= INLINE_CALLBACK_TOAST_MAX_LENGTH) {
+    return text
+  }
+
+  return text.slice(0, INLINE_CALLBACK_TOAST_MAX_LENGTH).trimEnd()
+}
+
+function resolveInlineCallbackResponseUi(data: Uint8Array): MessageActionResponseUi | undefined {
+  const decoded = callbackDataToUtf8(data)
+  if (!decoded) return undefined
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(decoded)
+  } catch {
+    return undefined
+  }
+
+  if (!isRecord(parsed)) return undefined
+
+  const text =
+    normalizeInlineCallbackToastText(parsed.callbackToast) ??
+    normalizeInlineCallbackToastText(parsed.callback_toast) ??
+    normalizeInlineCallbackToastText(parsed.toast)
+
+  if (!text) return undefined
+
+  return {
+    kind: {
+      oneofKind: "toast",
+      toast: { text },
+    },
+  }
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -1586,16 +1712,28 @@ function normalizeCompatibleButtonCallbackData(raw: string): string {
   return normalizeInlineActionCallbackData(trimmed)
 }
 
+type InlineParsedReplyActionButton =
+  | {
+      text: string
+      kind: "callback"
+      callbackData: string
+    }
+  | {
+      text: string
+      kind: "copyText"
+      copyText: string
+    }
+
 function normalizeReplyMarkupButtonsWith(
   raw: unknown,
   options?: { mapCallbackData?: (value: string) => string },
-): InlineReplyMarkupButton[][] {
+): InlineParsedReplyActionButton[][] {
   if (!Array.isArray(raw)) return []
 
-  const rows: InlineReplyMarkupButton[][] = []
+  const rows: InlineParsedReplyActionButton[][] = []
   for (const candidateRow of raw) {
     if (!Array.isArray(candidateRow)) continue
-    const row: InlineReplyMarkupButton[] = []
+    const row: InlineParsedReplyActionButton[] = []
     for (const candidateButton of candidateRow) {
       if (!isRecord(candidateButton)) continue
       const text = sanitizeInlineActionLabel(
@@ -1607,8 +1745,19 @@ function normalizeReplyMarkupButtonsWith(
         ? options.mapCallbackData(callbackDataRaw)
         : callbackDataRaw
       const callbackData = sanitizeInlineActionCallbackData(mappedCallbackData)
-      if (!text || !callbackData) continue
-      row.push({ text, callback_data: callbackData })
+      const copyText = sanitizeInlineActionCopyText(
+        typeof candidateButton.copy_text === "string"
+          ? candidateButton.copy_text
+          : typeof candidateButton.copyText === "string"
+            ? candidateButton.copyText
+            : "",
+      )
+      if (!text) continue
+      if (callbackData) {
+        row.push({ text, kind: "callback", callbackData })
+      } else if (copyText) {
+        row.push({ text, kind: "copyText", copyText })
+      }
       if (row.length >= INLINE_ACTION_MAX_PER_ROW) break
     }
     if (row.length === 0) continue
@@ -1654,28 +1803,43 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
       actions: row.map((button, buttonIndex) => ({
         actionId: `btn_${rowIndex + 1}_${buttonIndex + 1}`,
         text: button.text,
-        action: {
-          oneofKind: "callback",
-          callback: {
-            data: new TextEncoder().encode(button.callback_data),
-          },
-        },
+        action:
+          button.kind === "callback"
+            ? {
+                oneofKind: "callback" as const,
+                callback: {
+                  data: new TextEncoder().encode(button.callbackData),
+                },
+              }
+            : {
+                oneofKind: "copyText" as const,
+                copyText: {
+                  text: button.copyText,
+                },
+              },
       })),
     })),
   }
 }
 
-async function answerInlineMessageAction(client: InlineSdkClient, interactionId: bigint): Promise<void> {
+async function answerInlineMessageAction(
+  client: InlineSdkClient,
+  interactionId: bigint,
+  ui?: MessageActionResponseUi,
+): Promise<void> {
   const withAnswer = client as InlineSdkClient & {
-    answerMessageAction?: (params: { interactionId: bigint }) => Promise<void>
+    answerMessageAction?: (params: { interactionId: bigint; ui?: MessageActionResponseUi }) => Promise<void>
     invokeUncheckedRaw?: (
       method: Method,
-      input?: { oneofKind?: string; answerMessageAction?: { interactionId: bigint } },
+      input?: {
+        oneofKind?: string
+        answerMessageAction?: { interactionId: bigint; ui?: MessageActionResponseUi }
+      },
     ) => Promise<unknown>
   }
 
   if (typeof withAnswer.answerMessageAction === "function") {
-    await withAnswer.answerMessageAction({ interactionId })
+    await withAnswer.answerMessageAction({ interactionId, ...(ui ? { ui } : {}) })
     return
   }
 
@@ -1683,7 +1847,7 @@ async function answerInlineMessageAction(client: InlineSdkClient, interactionId:
   if (typeof answerMethod === "number" && typeof withAnswer.invokeUncheckedRaw === "function") {
     await withAnswer.invokeUncheckedRaw(answerMethod as Method, {
       oneofKind: "answerMessageAction",
-      answerMessageAction: { interactionId },
+      answerMessageAction: { interactionId, ...(ui ? { ui } : {}) },
     })
   }
 }
@@ -2691,21 +2855,6 @@ function buildInlineRecentHistoryLines(params: {
     .slice(-params.maxLines)
 }
 
-function buildInlineParticipantAddReadyText(botUsername: string | undefined): string {
-  const mention = botUsername ? `@${botUsername}` : "me"
-  return `I'm here and ready. Mention ${mention} to ask me something.`
-}
-
-function shouldSendInlineParticipantAddReadyMessage(
-  participantDate: bigint | undefined,
-  now = Date.now(),
-): boolean {
-  if (participantDate == null) return true
-  const eventMs = Number(participantDate) * 1000
-  if (!Number.isFinite(eventMs) || eventMs <= 0) return true
-  return now - eventMs <= INLINE_PARTICIPANT_ADD_READY_MAX_EVENT_AGE_MS
-}
-
 export async function monitorInlineProvider(params: {
   cfg: OpenClawConfig
   account: ResolvedInlineAccount
@@ -2758,17 +2907,33 @@ export async function monitorInlineProvider(params: {
     catchUpUserFromStart: hasExistingState,
   })
 
-  await client.connect(abortSignal)
-  pushDiagnostics()
-  const meResult = await client.invokeRaw(Method.GET_ME, {
-    oneofKind: "getMe",
-    getMe: {},
-  })
-  if (meResult.oneofKind !== "getMe" || !meResult.getMe.user) {
-    throw new Error("inline getMe: missing user")
+  let meUser: User | null = null
+  let startupOperation = "inline startup connect"
+  try {
+    await client.connect(abortSignal)
+    pushDiagnostics()
+    startupOperation = "inline startup getMe"
+    const meResult = await client.invokeRaw(Method.GET_ME, {
+      oneofKind: "getMe",
+      getMe: {},
+    })
+    if (meResult.oneofKind !== "getMe" || !meResult.getMe.user) {
+      throw new Error("missing user")
+    }
+    meUser = meResult.getMe.user
+  } catch (err) {
+    const message = formatInlineOperationError(startupOperation, err)
+    pushDiagnostics({ connected: false, lastError: message })
+    await client.close().catch((closeErr) => {
+      log?.warn(`inline startup cleanup failed: ${formatInlineOperationError("client close", closeErr)}`)
+    })
+    throw new Error(message)
   }
-  const meId = meResult.getMe.user.id
-  const botUsername = normalizeInlineUsername(meResult.getMe.user.username)?.toLowerCase()
+  if (!meUser) {
+    throw new Error("inline startup getMe failed: missing user")
+  }
+  const meId = meUser.id
+  const botUsername = normalizeInlineUsername(meUser.username)?.toLowerCase()
   log?.info(`[${account.accountId}] inline connected (me=${String(meId)})`)
   const connectedAt = Date.now()
   pushDiagnostics({
@@ -3111,7 +3276,8 @@ export async function monitorInlineProvider(params: {
     participant?: { userId?: bigint; date?: bigint }
     seq?: number
   }): Promise<void> => {
-    if (params.participant?.userId !== meId) return
+    const participant = params.participant
+    if (!participant || participant.userId !== meId) return
 
     const inboundAt = Date.now()
     statusSink?.({
@@ -3128,44 +3294,46 @@ export async function monitorInlineProvider(params: {
     if (!ingress) return
 
     await hydrateChatParticipants(params.chatId)
-    const chatInfo = chatCache.get(params.chatId)
-    const isGroup = chatInfo?.kind !== "direct"
-    const historyLimit = resolveHistoryLimit({
-      cfg,
-      isGroup,
-      historyLimit: account.config.historyLimit,
-      dmHistoryLimit: account.config.dmHistoryLimit,
+    const recentMessages = await loadChatHistoryMessages({
+      client,
+      chatId: params.chatId,
+      limit: 10,
+    }).catch((err) => {
+      statusSink?.({ lastError: `getChatHistory (participant add) failed: ${String(err)}` })
+      return null
     })
-    const recentMessages =
-      historyLimit > 0
-        ? await loadChatHistoryMessages({
-            client,
-            chatId: params.chatId,
-            limit: Math.min(historyLimit, 10),
-          }).catch((err) => {
-            statusSink?.({ lastError: `getChatHistory (participant add) failed: ${String(err)}` })
-            return null
-          })
-        : null
-    const recentLines = recentMessages
-      ? buildInlineRecentHistoryLines({
-          messages: recentMessages,
-          senderProfilesById,
-          meId,
-          maxLines: Math.min(historyLimit, 10),
-        })
-      : []
+    const freshness = resolveInlineThreadFreshness({
+      messages: recentMessages,
+      botUserId: meId,
+      botUsername,
+      participantDate: participant.date,
+    })
+    if (freshness.kind !== "existing") return
+
+    const recentLines = buildInlineRecentHistoryLines({
+      messages: freshness.preJoinMessages,
+      senderProfilesById,
+      meId,
+      maxLines: 10,
+    })
+    const priorMentionLines = buildInlineRecentHistoryLines({
+      messages: freshness.priorMentionMessages,
+      senderProfilesById,
+      meId,
+      maxLines: 10,
+    })
 
     const contextKey = buildInlineParticipantAddContextKey({
       chatId: params.chatId,
       userId: meId,
-      ...(params.participant.date != null ? { participantDate: params.participant.date } : {}),
+      ...(participant.date != null ? { participantDate: participant.date } : {}),
       ...(params.seq != null ? { seq: params.seq } : {}),
     })
     core.system.enqueueSystemEvent(
       describeInlineParticipantAddSystemEvent({
         channelLabel: ingress.channelLabel,
         recentLines,
+        priorMentionLines,
       }),
       {
         sessionKey: ingress.sessionKey,
@@ -3174,20 +3342,6 @@ export async function monitorInlineProvider(params: {
         trusted: false,
       },
     )
-
-    if (shouldSendInlineParticipantAddReadyMessage(params.participant.date)) {
-      try {
-        await client.sendMessage({
-          chatId: params.chatId,
-          text: buildInlineParticipantAddReadyText(botUsername),
-          parseMarkdown: account.config.parseMarkdown ?? true,
-        })
-        statusSink?.({ lastOutboundAt: Date.now() })
-      } catch (err) {
-        runtime.error?.(`inline participant-add ready message failed: ${String(err)}`)
-        statusSink?.({ lastError: `participant-add ready message failed: ${String(err)}` })
-      }
-    }
   }
 
   const shouldQueueInlineReactionSystemEvent = async (params: {
@@ -3370,18 +3524,20 @@ export async function monitorInlineProvider(params: {
 
     const effectiveAllowFrom = [...configAllowFrom, ...storeAllowList].filter(Boolean)
     const effectiveGroupAllowFrom = groupSenderAllowlist.expanded.filter(Boolean)
-    const effectiveGroupCommandAllowFrom =
-      groupSenderAllowlist.raw.length > 0 ? effectiveGroupAllowFrom : effectiveAllowFrom
+    const effectiveGroupCommandAllowFrom = effectiveGroupAllowFrom
     const callbackCommandBody = callbackActionEvent
       ? resolveCallbackCommandBodyFromActionData({
           data: callbackActionEvent.data,
           ...(botUsername ? { botUsername } : {}),
         })
       : undefined
+    const callbackResponseUi = callbackActionEvent
+      ? resolveInlineCallbackResponseUi(callbackActionEvent.data)
+      : undefined
     let callbackActionAnswered = false
     const answerCallbackIfNeeded = async () => {
       if (!callbackActionEvent || callbackActionAnswered) return
-      await answerInlineMessageAction(client, callbackActionEvent.interactionId)
+      await answerInlineMessageAction(client, callbackActionEvent.interactionId, callbackResponseUi)
       callbackActionAnswered = true
     }
     if (callbackActionEvent) {
@@ -4249,6 +4405,8 @@ export async function monitorInlineProvider(params: {
       msgId: msg.id,
       ...(callbackActionEvent ? { callbackActionEvent } : {}),
     })
+    const messageIds = input.messageIds?.filter(Boolean) ?? []
+    const batchMessageIds = messageIds.length > 1 ? messageIds : null
 
     const ctxPayload = core.channel.reply.finalizeInboundContext({
       Body: rawBody,
@@ -4272,6 +4430,13 @@ export async function monitorInlineProvider(params: {
       Provider: CHANNEL_ID,
       Surface: effectiveSurface,
       MessageSid: messageSid,
+      ...(batchMessageIds
+        ? {
+            MessageSids: batchMessageIds,
+            MessageSidFirst: batchMessageIds[0],
+            MessageSidLast: batchMessageIds[batchMessageIds.length - 1],
+          }
+        : {}),
       ...(commandSource ? { CommandSource: commandSource } : {}),
       CommandTurn: commandSource
         ? {
@@ -5115,9 +5280,14 @@ export async function monitorInlineProvider(params: {
     }
   }
 
+  const inlineDebounceMsOverride = resolveInlineInboundDebounceMsOverride(account.config)
   const { debouncer: inboundDebouncer } = createChannelInboundDebouncer<InlineDebounceEntry>({
     cfg,
     channel: CHANNEL_ID,
+    ...(inlineDebounceMsOverride !== undefined
+      ? { debounceMsOverride: inlineDebounceMsOverride }
+      : {}),
+    serializeImmediate: true,
     buildKey: (entry) =>
       buildInlineDebounceKey({
         accountId: account.accountId,
@@ -5160,6 +5330,7 @@ export async function monitorInlineProvider(params: {
           text: combinedText,
           mentioned: entries.some((entry) => entry.msg.mentioned === true),
         }),
+        messageIds: entries.map((entry) => String(entry.msg.id)),
         rawBodyOverride: combinedText,
       })
     },
@@ -5181,6 +5352,327 @@ export async function monitorInlineProvider(params: {
     },
   })
 
+  const voiceTranscriptWaitMs = resolveInlineVoiceTranscriptWaitMs(account.config)
+  const pendingVoiceMessages = new Map<string, InlinePendingVoiceMessage>()
+  const suppressedVoiceMessageEditTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+  const pendingInboundTasks = new Set<Promise<void>>()
+  const inboundTaskChains = new Map<string, Promise<void>>()
+
+  const isAuthorizedInlineAbortMessage = async (entry: InlineDebounceEntry): Promise<boolean> => {
+    if (!isInlineAbortRequestMessage(entry.msg, botUsername)) return false
+
+    const senderId = entry.msg.fromId != null ? String(entry.msg.fromId) : null
+    if (!senderId) return false
+
+    let chatInfo: CachedChatInfo
+    try {
+      chatInfo = await resolveChatInfo(client, chatCache, entry.chatId)
+    } catch (err) {
+      chatInfo = { kind: "group", title: null }
+      statusSink?.({ lastError: `getChat failed: ${String(err)}` })
+    }
+
+    const isGroup = chatInfo.kind !== "direct"
+    const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+    const replyThreadContext = await resolveInlineInboundReplyThreadContext({
+      replyThreadsEnabled,
+      client,
+      chatId: entry.chatId,
+      chatInfo,
+      chatCache,
+    }).catch((err) => {
+      statusSink?.({ lastError: `getChat (abort reply thread) failed: ${String(err)}` })
+      return null
+    })
+    const effectiveChatId = replyThreadContext?.parentChatId ?? entry.chatId
+    const dmPolicy = account.config.dmPolicy ?? "pairing"
+    const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
+    const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? INLINE_DEFAULT_GROUP_POLICY
+
+    if (!isGroup && dmPolicy === "disabled") return false
+    if (isGroup && groupPolicy === "disabled") return false
+
+    const configAllowFrom = await resolveInlineAllowlist({
+      cfg,
+      accountId: account.accountId,
+      entries: account.config.allowFrom,
+      senderId,
+    })
+    const storeAllowFrom = await core.channel.pairing
+      .readAllowFromStore({
+        channel: CHANNEL_ID,
+        accountId: account.accountId,
+      })
+      .catch(() => [])
+    const effectiveAllowFrom = [...configAllowFrom, ...normalizeAllowlist(storeAllowFrom)].filter(Boolean)
+
+    if (!isGroup) {
+      return dmPolicy === "open" || allowlistMatch({ allowFrom: effectiveAllowFrom, senderId })
+    }
+
+    const groupSenderAllowlist = await resolveInlineGroupSenderAllowlist({
+      cfg,
+      account,
+      groupId: String(effectiveChatId),
+      senderId,
+    })
+    if (groupPolicy === "allowlist") {
+      const nativeMentioned = entry.msg.mentioned === true
+      const groupAccess = resolveInlineGroupAccessPolicy({
+        cfg,
+        accountId: account.accountId,
+        groupId: String(effectiveChatId),
+        hasGroupAllowFrom: groupSenderAllowlist.raw.length > 0,
+        groupPolicy,
+      })
+      if (groupAccess.allowlistEnabled && !groupAccess.allowed && !nativeMentioned) return false
+      if (
+        groupSenderAllowlist.raw.length > 0 &&
+        !allowlistMatch({ allowFrom: groupSenderAllowlist.expanded, senderId })
+      ) {
+        return false
+      }
+    }
+
+    const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
+      cfg,
+      surface: CHANNEL_ID,
+      commandSource: "text",
+    })
+    if (!allowTextCommands) return false
+
+    const effectiveGroupAllowFrom = groupSenderAllowlist.expanded.filter(Boolean)
+    const effectiveGroupCommandAllowFrom = effectiveGroupAllowFrom
+    const senderAllowedForCommands = allowlistMatch({
+      allowFrom: effectiveGroupCommandAllowFrom,
+      senderId,
+    })
+    const commandGate = resolveControlCommandGate({
+      useAccessGroups: cfg.commands?.useAccessGroups !== false,
+      authorizers: [
+        {
+          configured: effectiveGroupCommandAllowFrom.length > 0,
+          allowed: senderAllowedForCommands,
+        },
+      ],
+      allowTextCommands,
+      hasControlCommand: true,
+    })
+
+    return resolveInlineCommandAuthorized({
+      cfg,
+      accountId: account.accountId,
+      isGroup: true,
+      chatId: String(effectiveChatId),
+      senderId,
+      commandAuthorized: commandGate.commandAuthorized,
+    })
+  }
+
+  const scheduleInboundTask = (
+    label: string,
+    run: () => Promise<void>,
+    options?: { serialKey?: string },
+  ): void => {
+    let task: Promise<void>
+    try {
+      if (options?.serialKey) {
+        const serialKey = options.serialKey
+        const previous = inboundTaskChains.get(serialKey) ?? Promise.resolve()
+        task = previous.catch(() => undefined).then(run)
+        const settled = task.catch(() => undefined)
+        inboundTaskChains.set(serialKey, settled)
+        const cleanup = () => {
+          if (inboundTaskChains.get(serialKey) === settled) {
+            inboundTaskChains.delete(serialKey)
+          }
+        }
+        settled.then(cleanup, cleanup)
+      } else {
+        task = run()
+      }
+    } catch (error) {
+      const message = String(error)
+      statusSink?.({ lastError: message })
+      runtime.error?.(`inline ${label} failed: ${message}`)
+      return
+    }
+
+    const tracked = task
+      .catch((error) => {
+        const message = String(error)
+        statusSink?.({ lastError: message })
+        runtime.error?.(`inline ${label} failed: ${message}`)
+      })
+      .finally(() => {
+        pendingInboundTasks.delete(tracked)
+      })
+    pendingInboundTasks.add(tracked)
+    void tracked
+  }
+
+  const enqueueInboundMessage = async (entry: InlineDebounceEntry): Promise<void> => {
+    await inboundDebouncer.enqueue(entry)
+  }
+
+  const scheduleInboundMessage = (entry: InlineDebounceEntry): void => {
+    scheduleInboundTask(
+      "inbound dispatch",
+      async () => {
+        await enqueueInboundMessage(entry)
+      },
+      {
+        serialKey: buildInlineInboundTaskKey({
+          accountId: account.accountId,
+          chatId: entry.chatId,
+        }),
+      },
+    )
+  }
+
+  const cancelPendingInlineDebounce = (entry: InlineDebounceEntry): void => {
+    const key = buildInlineDebounceKey({
+      accountId: account.accountId,
+      chatId: entry.chatId,
+      senderId: entry.msg.fromId,
+    })
+    if (!key) return
+    inboundDebouncer.cancelKey(key)
+  }
+
+  const suppressInlineVoiceMessageEdit = (key: string): void => {
+    const existing = suppressedVoiceMessageEditTimeouts.get(key)
+    if (existing) {
+      clearTimeout(existing)
+    }
+    const timeout = setTimeout(() => {
+      suppressedVoiceMessageEditTimeouts.delete(key)
+    }, MAX_INLINE_VOICE_TRANSCRIPT_WAIT_MS)
+    timeout.unref?.()
+    suppressedVoiceMessageEditTimeouts.set(key, timeout)
+  }
+
+  const cancelPendingInlineVoiceMessages = (entry: InlineDebounceEntry): void => {
+    for (const [key, pending] of pendingVoiceMessages) {
+      if (pending.chatId !== entry.chatId || pending.msg.fromId !== entry.msg.fromId) {
+        continue
+      }
+      pendingVoiceMessages.delete(key)
+      clearTimeout(pending.timeout)
+      suppressInlineVoiceMessageEdit(key)
+    }
+  }
+
+  const scheduleImmediateInboundMessage = (
+    input: InlineParsedInboundEvent,
+    label = "priority inbound dispatch",
+    options?: { serializeWithChat?: boolean },
+  ): void => {
+    scheduleInboundTask(
+      label,
+      async () => {
+        await handleInboundNow(input)
+      },
+      options?.serializeWithChat
+        ? {
+            serialKey: buildInlineInboundTaskKey({
+              accountId: account.accountId,
+              chatId: input.chatId,
+            }),
+          }
+        : undefined,
+    )
+  }
+
+  const flushPendingVoiceMessage = async (params: {
+    key: string
+    msg?: Message
+  }): Promise<boolean> => {
+    const pending = pendingVoiceMessages.get(params.key)
+    if (!pending) return false
+    pendingVoiceMessages.delete(params.key)
+    clearTimeout(pending.timeout)
+    const msg = params.msg ?? pending.msg
+    if (
+      isInlineAbortRequestMessage(msg, botUsername) &&
+      await isAuthorizedInlineAbortMessage({ chatId: pending.chatId, msg })
+    ) {
+      cancelPendingInlineDebounce({ chatId: pending.chatId, msg })
+      cancelPendingInlineVoiceMessages({ chatId: pending.chatId, msg })
+      scheduleImmediateInboundMessage(
+        { chatId: pending.chatId, msg },
+        "priority voice transcript abort dispatch",
+      )
+      return true
+    }
+    scheduleInboundMessage({ chatId: pending.chatId, msg })
+    return true
+  }
+
+  const holdInlineVoiceMessage = (params: {
+    chatId: bigint
+    msg: Message
+  }): void => {
+    const key = buildInlineVoicePendingKey({
+      chatId: params.chatId,
+      messageId: params.msg.id,
+    })
+    const existing = pendingVoiceMessages.get(key)
+    if (existing) {
+      clearTimeout(existing.timeout)
+    }
+
+    const timeout = setTimeout(() => {
+      void flushPendingVoiceMessage({ key })
+    }, voiceTranscriptWaitMs)
+    timeout.unref?.()
+    pendingVoiceMessages.set(key, {
+      chatId: params.chatId,
+      msg: params.msg,
+      timeout,
+    })
+  }
+
+  const handlePendingInlineVoiceEdit = async (params: {
+    chatId: bigint
+    msg: Message
+  }): Promise<boolean> => {
+    const key = buildInlineVoicePendingKey({
+      chatId: params.chatId,
+      messageId: params.msg.id,
+    })
+    if (suppressedVoiceMessageEditTimeouts.has(key)) return true
+    if (!pendingVoiceMessages.has(key)) return false
+
+    const transcript = extractInlineVoiceTranscriptText(params.msg)
+    if (!transcript) return true
+
+    return flushPendingVoiceMessage({
+      key,
+      msg: buildInlineTranscriptTextMessage({
+        base: params.msg,
+        text: transcript,
+      }),
+    })
+  }
+
+  const clearPendingInlineVoiceMessages = (): void => {
+    for (const pending of pendingVoiceMessages.values()) {
+      clearTimeout(pending.timeout)
+    }
+    pendingVoiceMessages.clear()
+    for (const timeout of suppressedVoiceMessageEditTimeouts.values()) {
+      clearTimeout(timeout)
+    }
+    suppressedVoiceMessageEditTimeouts.clear()
+  }
+
+  const drainInboundTasks = async (): Promise<void> => {
+    while (pendingInboundTasks.size > 0) {
+      await Promise.allSettled(pendingInboundTasks)
+    }
+  }
+
   const loop = (async () => {
     try {
       for await (const event of client.events()) {
@@ -5193,7 +5685,26 @@ export async function monitorInlineProvider(params: {
             chatId: event.chatId,
           } as Message
           if (msg.out || msg.fromId === meId) continue
-          await inboundDebouncer.enqueue({
+          if (
+            isInlineAbortRequestMessage(msg, botUsername) &&
+            await isAuthorizedInlineAbortMessage({ chatId: event.chatId, msg })
+          ) {
+            cancelPendingInlineDebounce({ chatId: event.chatId, msg })
+            cancelPendingInlineVoiceMessages({ chatId: event.chatId, msg })
+            scheduleImmediateInboundMessage(
+              { chatId: event.chatId, msg },
+              "priority abort dispatch",
+            )
+            continue
+          }
+          if (voiceTranscriptWaitMs > 0 && shouldWaitForInlineVoiceTranscript(msg)) {
+            holdInlineVoiceMessage({
+              chatId: event.chatId,
+              msg,
+            })
+            continue
+          }
+          scheduleInboundMessage({
             chatId: event.chatId,
             msg,
           })
@@ -5206,6 +5717,9 @@ export async function monitorInlineProvider(params: {
             chatId: event.chatId,
           } as Message
           if (msg.out || msg.fromId === meId) continue
+          if (await handlePendingInlineVoiceEdit({ chatId: event.chatId, msg })) {
+            continue
+          }
           await queueInlineMessageLifecycleSystemEvent({
             action: "edited",
             chatId: event.chatId,
@@ -5289,25 +5803,29 @@ export async function monitorInlineProvider(params: {
           }
           if (actorUserId === meId) continue
 
-          await handleInboundNow({
-            chatId: eventChatId,
-            msg: {
-              id: targetMessageId,
+          scheduleImmediateInboundMessage(
+            {
               chatId: eventChatId,
-              date: eventDate,
-              fromId: actorUserId,
-              message: "",
-              out: false,
-              mentioned: false,
-              replyToMsgId: targetMessageId,
-            } as Message,
-            callbackActionEvent: {
-              interactionId,
-              actionId,
-              targetMessageId,
-              data,
+              msg: {
+                id: targetMessageId,
+                chatId: eventChatId,
+                date: eventDate,
+                fromId: actorUserId,
+                message: "",
+                out: false,
+                mentioned: false,
+                replyToMsgId: targetMessageId,
+              } as Message,
+              callbackActionEvent: {
+                interactionId,
+                actionId,
+                targetMessageId,
+                data,
+              },
             },
-          })
+            "inline action dispatch",
+            { serializeWithChat: true },
+          )
           continue
         }
       }
@@ -5330,8 +5848,10 @@ export async function monitorInlineProvider(params: {
     }
     stopPromise = (async () => {
       clearInterval(diagnosticsTimer)
+      clearPendingInlineVoiceMessages()
       await client.close().catch(() => {})
       await loop.catch(() => {})
+      await drainInboundTasks()
     })()
     await stopPromise
   }
@@ -5344,5 +5864,6 @@ export async function monitorInlineProvider(params: {
     { once: true },
   )
 
-  return { stop, done: loop.catch(() => {}) }
+  const done = loop.catch(() => {}).then(drainInboundTasks)
+  return { stop, done }
 }

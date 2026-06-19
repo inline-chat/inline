@@ -19,33 +19,6 @@ describe("inline/parent-context-tool", () => {
           },
         }
       }
-      if (method === 38) {
-        expect(input).toMatchObject({
-          oneofKind: "getMessages",
-          getMessages: {
-            peerId: {
-              type: {
-                oneofKind: "chat",
-                chat: { chatId: 77n },
-              },
-            },
-            messageIds: [20n],
-          },
-        })
-        return {
-          oneofKind: "getMessages",
-          getMessages: {
-            messages: [
-              {
-                id: 20n,
-                fromId: 42n,
-                date: 1_700_000_020n,
-                message: "@inlinebot can you answer from the discussion above?",
-              },
-            ],
-          },
-        }
-      }
       if (method === 5) {
         expect(input).toMatchObject({
           oneofKind: "getChatHistory",
@@ -56,14 +29,24 @@ describe("inline/parent-context-tool", () => {
                 chat: { chatId: 77n },
               },
             },
-            offsetId: 20n,
-            limit: 49,
+            mode: 4,
+            anchorId: 20n,
+            beforeLimit: 49,
+            afterLimit: 0,
+            includeAnchor: true,
+            limit: 50,
           },
         })
         return {
           oneofKind: "getChatHistory",
           getChatHistory: {
             messages: [
+              {
+                id: 20n,
+                fromId: 42n,
+                date: 1_700_000_020n,
+                message: "@inlinebot can you answer from the discussion above?",
+              },
               {
                 id: 19n,
                 fromId: 41n,
@@ -84,7 +67,6 @@ describe("inline/parent-context-tool", () => {
         Method: {
           GET_CHAT: 25,
           GET_CHAT_HISTORY: 5,
-          GET_MESSAGES: 38,
         },
         InlineSdkClient: class {
           constructor(_opts: unknown) {}
@@ -121,10 +103,15 @@ describe("inline/parent-context-tool", () => {
         threadId: "88",
         threadTitle: "Re: launch plan",
         parentMessageId: "20",
+        mode: "around",
+        aroundMessageId: "20",
+        beforeLimit: 49,
+        afterLimit: 0,
         limit: 50,
         includeAnchor: true,
         usedCurrentThreadDefault: true,
         nextBeforeMessageId: "19",
+        nextAfterMessageId: "20",
         messages: [
           expect.objectContaining({
             id: "19",
@@ -141,10 +128,10 @@ describe("inline/parent-context-tool", () => {
     })
   })
 
-  it("dedupes parent context by message id and date so reused ids do not hide anchors", async () => {
+  it("fetches explicit around-message windows and marks the requested anchor", async () => {
     vi.resetModules()
 
-    const invokeRaw = vi.fn(async (method: number) => {
+    const invokeRaw = vi.fn(async (method: number, input: any) => {
       if (method === 25) {
         return {
           oneofKind: "getChat",
@@ -158,31 +145,45 @@ describe("inline/parent-context-tool", () => {
           },
         }
       }
-      if (method === 38) {
-        return {
-          oneofKind: "getMessages",
-          getMessages: {
-            messages: [
-              {
-                id: 20n,
-                fromId: 42n,
-                date: 1_700_000_020n,
-                message: "anchor with reused id",
-              },
-            ],
-          },
-        }
-      }
       if (method === 5) {
+        expect(input).toMatchObject({
+          oneofKind: "getChatHistory",
+          getChatHistory: {
+            peerId: {
+              type: {
+                oneofKind: "chat",
+                chat: { chatId: 77n },
+              },
+            },
+            mode: 4,
+            anchorId: 18n,
+            beforeLimit: 1,
+            afterLimit: 1,
+            includeAnchor: true,
+            limit: 50,
+          },
+        })
         return {
           oneofKind: "getChatHistory",
           getChatHistory: {
             messages: [
               {
-                id: 20n,
+                id: 19n,
                 fromId: 41n,
                 date: 1_700_000_019n,
-                message: "older message with same id",
+                message: "follow-up after the question",
+              },
+              {
+                id: 18n,
+                fromId: 42n,
+                date: 1_700_000_018n,
+                message: "the question to inspect",
+              },
+              {
+                id: 17n,
+                fromId: 41n,
+                date: 1_700_000_017n,
+                message: "setup before the question",
               },
             ],
           },
@@ -198,7 +199,6 @@ describe("inline/parent-context-tool", () => {
         Method: {
           GET_CHAT: 25,
           GET_CHAT_HISTORY: 5,
-          GET_MESSAGES: 38,
         },
         InlineSdkClient: class {
           constructor(_opts: unknown) {}
@@ -224,18 +224,28 @@ describe("inline/parent-context-tool", () => {
       sessionKey: "agent:main:inline:group:77:thread:88",
     })
 
-    const result = await tool?.execute("tool-parent", {})
+    const result = await tool?.execute("tool-parent", {
+      messageId: "18",
+      beforeLimit: 1,
+      afterLimit: 1,
+    })
 
-    expect(result?.details.messages.map((message) => ({ id: message.id, text: message.text }))).toEqual([
-      {
-        id: "20",
-        text: "older message with same id",
+    expect(result).toMatchObject({
+      details: {
+        parentMessageId: "20",
+        mode: "around",
+        aroundMessageId: "18",
+        beforeLimit: 1,
+        afterLimit: 1,
+        nextBeforeMessageId: "17",
+        nextAfterMessageId: "19",
+        messages: [
+          expect.objectContaining({ id: "17", text: "setup before the question", isAnchor: false }),
+          expect.objectContaining({ id: "18", text: "the question to inspect", isAnchor: true }),
+          expect.objectContaining({ id: "19", text: "follow-up after the question", isAnchor: false }),
+        ],
       },
-      {
-        id: "20",
-        text: "anchor with reused id",
-      },
-    ])
+    })
   })
 
   it("accepts chat-prefixed parent targets for explicit parent history lookup", async () => {
@@ -254,6 +264,8 @@ describe("inline/parent-context-tool", () => {
               chat: { chatId: 77n },
             },
           },
+          mode: 2,
+          beforeId: 55n,
           offsetId: 55n,
           limit: 2,
         },
@@ -323,13 +335,114 @@ describe("inline/parent-context-tool", () => {
         ok: true,
         parentChatId: "77",
         parentMessageId: null,
+        mode: "older",
+        beforeMessageId: "55",
         limit: 2,
         includeAnchor: false,
         usedCurrentThreadDefault: false,
         nextBeforeMessageId: "53",
+        nextAfterMessageId: "54",
         messages: [
           expect.objectContaining({ id: "53", text: "first parent line", isAnchor: false }),
           expect.objectContaining({ id: "54", text: "second parent line", isAnchor: false }),
+        ],
+      },
+    })
+  })
+
+  it("fetches newer parent-chat context after a message id", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number, input: any) => {
+      if (method !== 5) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      expect(input).toMatchObject({
+        oneofKind: "getChatHistory",
+        getChatHistory: {
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 77n },
+            },
+          },
+          mode: 3,
+          afterId: 55n,
+          limit: 2,
+        },
+      })
+      return {
+        oneofKind: "getChatHistory",
+        getChatHistory: {
+          messages: [
+            {
+              id: 57n,
+              fromId: 41n,
+              date: 1_700_000_057n,
+              message: "newest parent line",
+            },
+            {
+              id: 56n,
+              fromId: 42n,
+              date: 1_700_000_056n,
+              message: "newer parent line",
+            },
+          ],
+        },
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          GET_CHAT_HISTORY: 5,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = vi.fn(async () => {})
+          close = vi.fn(async () => {})
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineParentContextTool } = await import("./parent-context-tool")
+    const tool = createInlineParentContextTool({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:group:77",
+    })
+
+    const result = await tool?.execute("tool-parent", {
+      parentChatId: "chat:77",
+      afterMessageId: "55",
+      limit: 2,
+    })
+
+    expect(invokeRaw).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        parentChatId: "77",
+        parentMessageId: null,
+        mode: "newer",
+        afterMessageId: "55",
+        limit: 2,
+        nextBeforeMessageId: "56",
+        nextAfterMessageId: "57",
+        messages: [
+          expect.objectContaining({ id: "56", text: "newer parent line", isAnchor: false }),
+          expect.objectContaining({ id: "57", text: "newest parent line", isAnchor: false }),
         ],
       },
     })

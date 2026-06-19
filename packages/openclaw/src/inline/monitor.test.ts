@@ -68,6 +68,7 @@ type MonitorHarness = {
     dispatchReply: ReturnType<typeof vi.fn>
     enqueueSystemEvent: ReturnType<typeof vi.fn>
     answerMessageAction: ReturnType<typeof vi.fn>
+    closeClient: ReturnType<typeof vi.fn>
     upsertPairingRequest: ReturnType<typeof vi.fn>
     buildPairingReply: ReturnType<typeof vi.fn>
     readAllowFromStore: ReturnType<typeof vi.fn>
@@ -232,9 +233,16 @@ type MonitorSetup = {
   payloadInfoKinds?: Array<"final" | "partial" | "error">
   skipInfos?: Array<{ reason?: string }>
   dispatchErrorInfos?: Array<{ kind?: string }>
+  resolveControlCommandGate?: (params: any) => { shouldBlock: boolean; commandAuthorized: boolean }
+  dispatchReplyBlocker?: (params: {
+    ctx: unknown
+    dispatcherOptions: any
+    replyOptions: any
+  }) => Promise<void> | void
   sendMessageDelayMs?: number
   runtimeConfig?: Record<string, unknown>
   createSubthreadError?: string
+  getMeError?: Error
   openKeyedStore?: ReturnType<typeof vi.fn>
 }
 
@@ -270,6 +278,8 @@ function buildAccount(overrides?: {
   blockStreaming?: boolean
   streamViaEditMessage?: boolean
   mediaMaxMb?: number
+  debounceMs?: number
+  voiceTranscriptWaitMs?: number
   replyThreads?: boolean
   commands?: { native?: boolean | "auto"; nativeSkills?: boolean | "auto" }
   execApprovals?: Record<string, unknown>
@@ -309,6 +319,8 @@ function buildAccount(overrides?: {
       blockStreaming: overrides?.blockStreaming,
       streamViaEditMessage: overrides?.streamViaEditMessage,
       mediaMaxMb: overrides?.mediaMaxMb,
+      debounceMs: overrides?.debounceMs,
+      voiceTranscriptWaitMs: overrides?.voiceTranscriptWaitMs,
       commands: overrides?.commands,
       execApprovals: overrides?.execApprovals,
       capabilities: overrides?.replyThreads != null ? { replyThreads: overrides.replyThreads } : undefined,
@@ -399,6 +411,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const sendTyping = vi.fn(setup.sendTyping ?? (async () => {}))
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
   const answerMessageAction = vi.fn(async () => {})
+  const closeClient = vi.fn(async () => {})
   const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
     const media = setup.mediaByUrl?.[url]
     return {
@@ -432,7 +445,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const recordInboundSession = vi.fn(async () => {})
   const finalizeInboundContext = vi.fn((ctx: any) => ctx)
   const enqueueSystemEvent = vi.fn(() => true)
-  const dispatchReply = vi.fn(async ({ dispatcherOptions, replyOptions }: any) => {
+  const dispatchReply = vi.fn(async ({ ctx, dispatcherOptions, replyOptions }: any) => {
+    await setup.dispatchReplyBlocker?.({ ctx, dispatcherOptions, replyOptions })
     if (setup.dispatchTypingLifecycle) {
       await (dispatcherOptions.onReplyStart ?? dispatcherOptions.typingCallbacks?.onReplyStart)?.()
     }
@@ -522,6 +536,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     },
   ) => {
     if (method === 1 && input?.oneofKind === "getMe") {
+      if (setup.getMeError) {
+        throw setup.getMeError
+      }
       return {
         oneofKind: "getMe",
         getMe: {
@@ -803,7 +820,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             },
           },
         }))
-        close = vi.fn(async () => {})
+        close = closeClient
         events = vi.fn(() => eventsGenerator())
       },
     }
@@ -823,7 +840,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       })),
       detectMime: vi.fn(async () => "image/png"),
       logInboundDrop: vi.fn(),
-      resolveControlCommandGate: vi.fn(() => ({ shouldBlock: false, commandAuthorized: true })),
+      resolveControlCommandGate: vi.fn(
+        setup.resolveControlCommandGate ?? (() => ({ shouldBlock: false, commandAuthorized: true })),
+      ),
       resolveMentionGatingWithBypass: vi.fn((params: any) => {
         const shouldBypassMention = Boolean(
           params.isGroup &&
@@ -1007,6 +1026,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       dispatchReply,
       enqueueSystemEvent,
       answerMessageAction,
+      closeClient,
       upsertPairingRequest,
       buildPairingReply,
       readAllowFromStore,
@@ -1071,6 +1091,42 @@ describe("inline/monitor", () => {
     })
 
     await handle.stop()
+  })
+
+  it("surfaces startup getMe failures with operation context and closes the client", async () => {
+    const statusPatches: Array<Record<string, unknown>> = []
+    const getMeError = new Error("Internal server error")
+    getMeError.name = "ProtocolClientError:rpc-error"
+    const harness = await setupMonitorHarness({
+      events: [],
+      chats: {},
+      getMeError,
+    })
+
+    await expect(
+      harness.monitorInlineProvider({
+        cfg: {} as any,
+        account: buildAccount({ dmPolicy: "open" }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        statusSink: (patch: Record<string, unknown>) => {
+          statusPatches.push(patch)
+        },
+      }),
+    ).rejects.toThrow(
+      "inline startup getMe failed: ProtocolClientError:rpc-error: Internal server error",
+    )
+
+    expect(statusPatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          connected: false,
+          lastError: "inline startup getMe failed: ProtocolClientError:rpc-error: Internal server error",
+        }),
+      ]),
+    )
+    expect(harness.calls.closeClient).toHaveBeenCalledTimes(1)
   })
 
   it("registers native approval runtime context when Inline approvals are configured", async () => {
@@ -1191,7 +1247,7 @@ describe("inline/monitor", () => {
       cfg: {
         messages: {
           inbound: {
-            debounceMs: 20,
+            debounceMs: 0,
             byChannel: {
               inline: 20,
             },
@@ -1212,6 +1268,9 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           RawBody: "first line\nsecond line",
           MessageSid: "1002",
+          MessageSids: ["1001", "1002"],
+          MessageSidFirst: "1001",
+          MessageSidLast: "1002",
           From: "inline:42",
           To: "inline:7",
         }),
@@ -1220,6 +1279,992 @@ describe("inline/monitor", () => {
 
     await handle.stop()
   }, 30_000)
+
+  it("uses global inbound debounceMs when Inline channel override is absent", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "first global line",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "second global line",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "batched reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            debounceMs: 20,
+          },
+        },
+      } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          RawBody: "first global line\nsecond global line",
+          MessageSid: "1002",
+          MessageSids: ["1001", "1002"],
+          MessageSidFirst: "1001",
+          MessageSidLast: "1002",
+        }),
+      )
+    })
+
+    await handle.stop()
+  }, 30_000)
+
+  it("uses Inline account debounceMs to batch rapid inbound text messages", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "first account-level line",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "second account-level line",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "batched reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        debounceMs: 20,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          RawBody: "first account-level line\nsecond account-level line",
+          MessageSid: "1002",
+          From: "inline:42",
+          To: "inline:7",
+        }),
+      )
+    })
+
+    await handle.stop()
+  }, 30_000)
+
+  it("lets Inline account debounceMs 0 disable global inbound debounce", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "first unbatched line",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "second unbatched line",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "unbatched reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            debounceMs: 40,
+          },
+        },
+      } as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        debounceMs: 0,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "first unbatched line",
+          MessageSid: "1001",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "second unbatched line",
+          MessageSid: "1002",
+        }),
+      )
+    })
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        RawBody: "first unbatched line\nsecond unbatched line",
+      }),
+    )
+
+    await handle.stop()
+  }, 30_000)
+
+  it("keeps rapid inbound text from different senders in separate debounce turns", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "first sender",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 43n,
+            message: "second sender",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "group", title: "Ops" },
+      },
+      dispatchReplyPayload: {
+        text: "reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 30,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: false,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "first sender",
+          MessageSid: "1001",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "second sender",
+          MessageSid: "1002",
+        }),
+      )
+    })
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        RawBody: "first sender\nsecond sender",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("keeps rapid inbound text from different chats in separate debounce turns", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "first chat",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 8n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "second chat",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+        "8": { kind: "direct", title: "Alice Thread" },
+      },
+      dispatchReplyPayload: {
+        text: "reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 30,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "first chat",
+          MessageSid: "1001",
+          To: "inline:7",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "second chat",
+          MessageSid: "1002",
+          To: "inline:8",
+        }),
+      )
+    })
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        RawBody: "first chat\nsecond chat",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("dispatches message action callbacks before pending debounced text flushes", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "queued before callback",
+          },
+        },
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 22n,
+          messageId: 1000n,
+          actorUserId: 42n,
+          actionId: "pick",
+          data: new Uint8Array([112, 105, 99, 107]),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1000n, date: 1_700_000_000n, fromId: 777n, message: "original" }],
+      },
+      dispatchReplyPayload: {
+        text: "reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 200,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
+    })
+
+    const contexts = harness.calls.finalizeInboundContext.mock.calls.map((call) => call[0])
+    expect(contexts[0]).toEqual(
+      expect.objectContaining({
+        MessageActionInteractionId: "22",
+        MessageActionId: "pick",
+        Body: 'Alice pressed "pick" on message #1000',
+      }),
+    )
+    expect(contexts[1]).toEqual(
+      expect.objectContaining({
+        Body: "queued before callback",
+        MessageSid: "1001",
+      }),
+    )
+    expect(harness.calls.answerMessageAction.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.calls.dispatchReply.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+
+    await handle.stop()
+  })
+
+  it("dispatches stop requests without waiting for an active inbound run", async () => {
+    let releaseFirstRun!: () => void
+    const firstRunBlocked = new Promise<void>((resolve) => {
+      releaseFirstRun = resolve
+    })
+    let blockedFirstRun = false
+
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "long task",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "/stop",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyBlocker: async ({ ctx }) => {
+        if ((ctx as { Body?: string }).Body !== "long task") return
+        blockedFirstRun = true
+        await firstRunBlocked
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(blockedFirstRun).toBe(true)
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "/stop",
+          CommandBody: "/stop",
+          MessageSid: "1002",
+        }),
+      )
+    })
+
+    releaseFirstRun()
+    await waitForMockPromise(harness.calls.dispatchReply, 0)
+    await waitForMockPromise(harness.calls.dispatchReply, 1)
+    await handle.stop()
+  })
+
+  it("cancels pending debounced text when a stop request arrives", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "queued before stop",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "/stop",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 40,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "/stop",
+          CommandBody: "/stop",
+          MessageSid: "1002",
+        }),
+      )
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        Body: "queued before stop",
+        MessageSid: "1001",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("does not cancel pending debounced text for unauthorized group stop requests", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "queued before unauthorized stop",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "/stop",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "group", title: "Ops" },
+      },
+      resolveControlCommandGate: ({ hasControlCommand }: any) => ({
+        commandAuthorized: !hasControlCommand,
+        shouldBlock: Boolean(hasControlCommand),
+      }),
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 40,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: false,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "queued before unauthorized stop",
+          MessageSid: "1001",
+        }),
+      )
+    })
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        Body: "/stop",
+        MessageSid: "1002",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("does not use DM allowFrom to authorize group stop requests", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "queued before group stop",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "/stop",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "group", title: "Ops" },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 40,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: false,
+        allowFrom: ["42"],
+        groupAllowFrom: [],
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "queued before group stop",
+          MessageSid: "1001",
+        }),
+      )
+    })
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        Body: "/stop",
+        MessageSid: "1002",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("cancels pending debounced text when a voice transcript resolves to stop", async () => {
+    const voiceMedia = {
+      media: {
+        oneofKind: "voice",
+        voice: {
+          voice: {
+            id: 9101n,
+            cdnUrl: "https://cdn.inline.chat/stop-voice.ogg",
+            mimeType: "audio/ogg",
+            size: 12_345,
+            duration: 2,
+          },
+        },
+      },
+    }
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "queued before voice stop",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "",
+            media: voiceMedia,
+          } as any,
+        },
+        {
+          kind: "message.edit",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_002n,
+            fromId: 42n,
+            message: "/stop",
+            media: voiceMedia,
+          } as any,
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 40,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        voiceTranscriptWaitMs: 200,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "/stop",
+          CommandBody: "/stop",
+          MessageSid: "1002",
+        }),
+      )
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        Body: "queued before voice stop",
+        MessageSid: "1001",
+      }),
+    )
+    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("does not cancel pending debounced text for unauthorized voice stop transcripts", async () => {
+    const voiceMedia = {
+      media: {
+        oneofKind: "voice",
+        voice: {
+          voice: {
+            id: 9103n,
+            cdnUrl: "https://cdn.inline.chat/unauthorized-stop-voice.ogg",
+            mimeType: "audio/ogg",
+            size: 12_345,
+            duration: 2,
+          },
+        },
+      },
+    }
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "queued before unauthorized voice stop",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "",
+            media: voiceMedia,
+          } as any,
+        },
+        {
+          kind: "message.edit",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_002n,
+            fromId: 42n,
+            message: "/stop",
+            media: voiceMedia,
+          } as any,
+        },
+      ],
+      chats: {
+        "7": { kind: "group", title: "Ops" },
+      },
+      resolveControlCommandGate: ({ hasControlCommand }: any) => ({
+        commandAuthorized: !hasControlCommand,
+        shouldBlock: Boolean(hasControlCommand),
+      }),
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            byChannel: {
+              inline: 40,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: false,
+        voiceTranscriptWaitMs: 200,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "queued before unauthorized voice stop",
+          MessageSid: "1001",
+        }),
+      )
+    })
+    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        Body: "/stop",
+        MessageSid: "1002",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("cancels held voice messages and suppresses their transcript edits when stop arrives", async () => {
+    const voiceMedia = {
+      media: {
+        oneofKind: "voice",
+        voice: {
+          voice: {
+            id: 9102n,
+            cdnUrl: "https://cdn.inline.chat/canceled-voice.ogg",
+            mimeType: "audio/ogg",
+            size: 12_345,
+            duration: 3,
+          },
+        },
+      },
+    }
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "",
+            media: voiceMedia,
+          } as any,
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "/stop",
+          },
+        },
+        {
+          kind: "message.edit",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_002n,
+            fromId: 42n,
+            message: "transcript after stop",
+            media: voiceMedia,
+          } as any,
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      mediaByUrl: {
+        "https://cdn.inline.chat/canceled-voice.ogg": {
+          contentType: "audio/ogg",
+          fileName: "canceled-voice.ogg",
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        voiceTranscriptWaitMs: 20,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "/stop",
+          CommandBody: "/stop",
+          MessageSid: "1002",
+        }),
+      )
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        Body: "transcript after stop",
+        MessageSid: "1001",
+      }),
+    )
+
+    await handle.stop()
+  })
 
   it("forwards reply-pipeline payload transforms to the dispatcher", async () => {
     const transformReplyPayload = vi.fn((payload: Record<string, unknown>) => ({
@@ -3151,6 +4196,7 @@ describe("inline/monitor", () => {
           interactionId: 22n,
         }),
       )
+      expect(harness.calls.answerMessageAction.mock.calls[0]?.[0]).not.toHaveProperty("ui")
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           MessageActionInteractionId: "22",
@@ -3178,6 +4224,71 @@ describe("inline/monitor", () => {
       ? harness.calls.invokeRaw.mock.invocationCallOrder[harness.calls.invokeRaw.mock.calls.indexOf(editCall)]
       : Number.POSITIVE_INFINITY
     expect(harness.calls.answerMessageAction.mock.invocationCallOrder[0]).toBeLessThan(editOrder)
+
+    await handle.stop()
+  })
+
+  it("answers message action callbacks with toast ui from callback payload", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 23n,
+          messageId: 1002n,
+          actorUserId: 42n,
+          actionId: "save",
+          data: new TextEncoder().encode(
+            JSON.stringify({ value: "draft-1", callbackToast: "Saved" }),
+          ),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1002n, date: 1_700_000_000n, fromId: 777n, message: "draft" }],
+      },
+      dispatchReplyPayload: {
+        text: "saved",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledTimes(1)
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledWith({
+        interactionId: 23n,
+        ui: {
+          kind: {
+            oneofKind: "toast",
+            toast: { text: "Saved" },
+          },
+        },
+      })
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1002n,
+            text: "saved",
+            parseMarkdown: true,
+          }),
+        }),
+      )
+    })
+
+    expect(harness.calls.answerMessageAction.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.calls.dispatchReply.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
 
     await handle.stop()
   })
@@ -3864,6 +4975,58 @@ describe("inline/monitor", () => {
     const buttonData = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
     expect(buttonData).toBeInstanceOf(Uint8Array)
     expect(new TextDecoder().decode(buttonData)).toBe("cmd:a")
+
+    await handle.stop()
+  })
+
+  it("maps Inline copy-text buttons on text replies", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 73n,
+          message: {
+            id: 10022n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "copy command",
+          },
+        },
+      ],
+      chats: {
+        "73": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "copy this",
+        channelData: {
+          inline: {
+            buttons: [[{ text: "Copy", copy_text: "bun run lint" }]],
+          },
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const action = harness.calls.sendMessage.mock.calls[0]?.[0]?.actions?.rows?.[0]?.actions?.[0]
+      expect(action).toMatchObject({
+        actionId: "btn_1_1",
+        text: "Copy",
+        action: {
+          oneofKind: "copyText",
+          copyText: {
+            text: "bun run lint",
+          },
+        },
+      })
+    })
 
     await handle.stop()
   })
@@ -6905,7 +8068,8 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("allows Inline group control commands from channel allowFrom when groupAllowFrom is unset", async () => {
+  it("does not allow Inline group control commands from DM allowFrom when groupAllowFrom is unset", async () => {
+    const runtime = { log: vi.fn(), error: vi.fn() }
     const harness = await setupMonitorHarness({
       me: {
         userId: 777n,
@@ -6928,7 +8092,7 @@ describe("inline/monitor", () => {
         "88": { kind: "group", title: "Project Room" },
       },
       dispatchReplyPayload: {
-        text: "command handled",
+        text: "should not send",
       },
     })
 
@@ -6940,27 +8104,18 @@ describe("inline/monitor", () => {
         allowFrom: ["51"],
         groupAllowFrom: [],
       }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      runtime: runtime as any,
       abortSignal: new AbortController().signal,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
     await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          CommandBody: "/status",
-          WasMentioned: true,
-          CommandAuthorized: true,
-        }),
-      )
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          chatId: 88n,
-          text: "command handled",
-        }),
+      expect(runtime.log).toHaveBeenCalledWith(
+        expect.stringContaining("inline: drop control command (unauthorized) target=51"),
       )
     })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -7063,8 +8218,7 @@ describe("inline/monitor", () => {
       account: buildAccount({
         groupPolicy: "open",
         requireMention: true,
-        allowFrom: ["51"],
-        groupAllowFrom: [],
+        groupAllowFrom: ["51"],
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
@@ -7146,8 +8300,7 @@ describe("inline/monitor", () => {
       account: buildAccount({
         groupPolicy: "open",
         requireMention: true,
-        allowFrom: ["51"],
-        groupAllowFrom: [],
+        groupAllowFrom: ["51"],
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
@@ -7219,8 +8372,7 @@ describe("inline/monitor", () => {
       account: buildAccount({
         groupPolicy: "open",
         requireMention: true,
-        allowFrom: ["51"],
-        groupAllowFrom: [],
+        groupAllowFrom: ["51"],
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
@@ -7289,8 +8441,7 @@ describe("inline/monitor", () => {
       account: buildAccount({
         groupPolicy: "open",
         requireMention: true,
-        allowFrom: ["51"],
-        groupAllowFrom: [],
+        groupAllowFrom: ["51"],
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
@@ -7367,8 +8518,7 @@ describe("inline/monitor", () => {
       account: buildAccount({
         groupPolicy: "open",
         requireMention: true,
-        allowFrom: ["51"],
-        groupAllowFrom: [],
+        groupAllowFrom: ["51"],
         commands: { nativeSkills: false },
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
@@ -7442,8 +8592,7 @@ describe("inline/monitor", () => {
       account: buildAccount({
         groupPolicy: "open",
         requireMention: true,
-        allowFrom: ["51"],
-        groupAllowFrom: [],
+        groupAllowFrom: ["51"],
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
@@ -8154,6 +9303,161 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("waits for Inline voice auto-transcript edits before dispatching", async () => {
+    const voiceMedia = {
+      media: {
+        oneofKind: "voice",
+        voice: {
+          voice: {
+            id: 901n,
+            cdnUrl: "https://cdn.inline.chat/voice.ogg",
+            mimeType: "audio/ogg",
+            size: 12_345,
+            duration: 4,
+          },
+        },
+      },
+    }
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 7401n,
+            date: 1_700_000_130n,
+            fromId: 42n,
+            message: "",
+            media: voiceMedia,
+          } as any,
+        },
+        {
+          kind: "message.edit",
+          chatId: 7n,
+          message: {
+            id: 7401n,
+            date: 1_700_000_131n,
+            fromId: 42n,
+            message: "transcribed voice request",
+            media: voiceMedia,
+          } as any,
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "voice reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        voiceTranscriptWaitMs: 200,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "transcribed voice request",
+          BodyForAgent: "transcribed voice request",
+          RawBody: "transcribed voice request",
+          MessageSid: "7401",
+        }),
+      )
+    })
+    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("falls back to raw voice audio when Inline transcript edit does not arrive", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 7402n,
+            date: 1_700_000_132n,
+            fromId: 42n,
+            message: "",
+            media: {
+              media: {
+                oneofKind: "voice",
+                voice: {
+                  voice: {
+                    id: 902n,
+                    cdnUrl: "https://cdn.inline.chat/fallback-voice.ogg",
+                    mimeType: "audio/ogg",
+                    size: 12_345,
+                    duration: 4,
+                  },
+                },
+              },
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      mediaByUrl: {
+        "https://cdn.inline.chat/fallback-voice.ogg": {
+          contentType: "audio/ogg",
+          fileName: "fallback-voice.ogg",
+        },
+      },
+      dispatchReplyPayload: {
+        text: "fallback reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        voiceTranscriptWaitMs: 20,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://cdn.inline.chat/fallback-voice.ogg",
+          filePathHint: "fallback-voice.ogg",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "<media:audio>",
+          BodyForAgent: "<media:audio>",
+          RawBody: "<media:audio>",
+          MediaPath: "/tmp/fallback-voice.ogg",
+          MediaType: "audio/ogg",
+          MediaUrl: "/tmp/fallback-voice.ogg",
+          MediaPaths: ["/tmp/fallback-voice.ogg"],
+          MediaUrls: ["/tmp/fallback-voice.ogg"],
+          MediaTypes: ["audio/ogg"],
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("continues when inbound media download fails", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -8738,7 +10042,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("queues bot participant-add events with recent chat context", async () => {
+  it("queues same-second existing bot participant-add events with prior mention guidance", async () => {
     const participantDate = BigInt(Math.floor(Date.now() / 1000))
     const harness = await setupMonitorHarness({
       me: {
@@ -8768,7 +10072,7 @@ describe("inline/monitor", () => {
         "88": [
           {
             id: 5001n,
-            date: participantDate - 10n,
+            date: participantDate,
             fromId: 51n,
             message: "@inlinebot can you check this after joining?",
             out: false,
@@ -8802,13 +10106,72 @@ describe("inline/monitor", () => {
       expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
         "#5001 Alice (@alice) id:51: @inlinebot can you check this after joining?",
       )
+      expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
+        "The bot was mentioned before it joined.",
+      )
+      expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
+        "Prior bot mentions before join:",
+      )
     })
     expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-    expect(harness.calls.sendMessage).toHaveBeenCalledWith({
-      chatId: 88n,
-      text: "I'm here and ready. Mention @inlinebot to ask me something.",
-      parseMarkdown: true,
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("keeps fresh bot participant-add events quiet", async () => {
+    const participantDate = BigInt(Math.floor(Date.now() / 1000))
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "chat.participant.add",
+          chatId: 88n,
+          participant: {
+            userId: 777n,
+            date: participantDate,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Fresh Room" },
+      },
+      participants: {
+        "88": [
+          { id: 51n, username: "alice", firstName: "Alice" },
+          { id: 777n, username: "inlinebot", firstName: "Inline Bot" },
+        ],
+      },
+      historyByChat: {
+        "88": [],
+      },
     })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "allowlist",
+        requireMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          oneofKind: "getChatHistory",
+        }),
+      )
+    })
+    expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })

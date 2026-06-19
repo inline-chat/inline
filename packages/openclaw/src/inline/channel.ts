@@ -35,6 +35,7 @@ import {
   type ResolvedInlineAccount,
 } from "./accounts.js"
 import { isInlineReplyThreadsEnabled, resolveInlineReplyThreadChatId } from "./reply-threads.js"
+import { recordInlineThreadParticipation } from "./thread-participation.js"
 import { looksLikeInlineTargetId, normalizeInlineTarget } from "./normalize.js"
 import { monitorInlineProvider } from "./monitor.js"
 import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
@@ -775,6 +776,18 @@ async function sendTypingInline(params: {
   })
 }
 
+function recordInlineOutboundThreadParticipation(params: {
+  accountId: string
+  parentChatId: bigint
+  chatId: bigint | null
+  threadId?: string | number | null
+}): void {
+  if (params.threadId == null || params.chatId == null || params.chatId === params.parentChatId) {
+    return
+  }
+  recordInlineThreadParticipation(params.accountId, params.parentChatId, params.chatId)
+}
+
 async function notifyPairingApprovedInline(params: {
   cfg: OpenClawConfig
   id: string
@@ -883,6 +896,14 @@ async function sendMessageInline(params: {
       })
     const bestEffort =
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
+    if (resolvedTarget.kind === "chat") {
+      recordInlineOutboundThreadParticipation({
+        accountId: account.accountId,
+        parentChatId: resolvedTarget.targetId,
+        chatId: effectiveChatId,
+        threadId: params.threadId ?? null,
+      })
+    }
     return {
       messageId: bestEffort,
       chatId:
@@ -969,6 +990,14 @@ async function sendMediaInline(params: {
       })
     const bestEffort =
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
+    if (resolvedTarget.kind === "chat") {
+      recordInlineOutboundThreadParticipation({
+        accountId: account.accountId,
+        parentChatId: resolvedTarget.targetId,
+        chatId: effectiveChatId,
+        threadId: params.threadId ?? null,
+      })
+    }
     return {
       messageId: bestEffort,
       chatId:
@@ -1473,7 +1502,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline markdown links: in visible replies, link returned users as `[@name](inline://user?id=<userId>)` and returned chats/threads as `[title](inline://chat?id=<chatId>)` or `[title](inline://thread?id=<chatId>)`. Use `target` values only for tool calls.",
       ...(supportsInlineMessageButtonsForConfig(cfg, accountId ?? null)
         ? [
-            "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows for simple callback buttons.",
+            "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows with `callback_data` for callbacks and `copy_text`/`copyText` for copy buttons. For quick button feedback, JSON `callback_data` can include `callbackToast`/`toast`.",
           ]
         : []),
       ...(supportsInlineReactionsForConfig(cfg, accountId ?? null)
@@ -1482,19 +1511,24 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           ]
         : []),
       "- Inline history tools: `read` and `search` return media-aware message payloads (`media`, `attachments`, `attachmentUrls`) so image-only history remains discoverable. `search` is chat-scoped; run it per chat.",
+      "- Inline bot command discovery: use `peer-bot-commands`/`bot-commands` to read commands available in the current or target chat/user/reply thread; use `inline_bot_commands` only to manage this bot's registered command menu.",
+      "- Inline special tools: use `inline_members` to find users in a space and reuse returned `user:<id>` DM targets. It can infer `spaceId` inside a current Inline space chat/reply thread; pass `spaceId` explicitly otherwise. Use `inline_parent_context` for more parent-chat history from the current reply thread, with `beforeMessageId`, `afterMessageId`, or `messageId` for older/newer/around windows.",
       "- Inline special tools: use `inline_nudge` to send a nudge, `inline_forward` to forward message ids between chats or users, and `inline_bot_presence` to move or emote through your on-screen body without sending a chat message.",
-      "- Inline bot avatar setup: use `inline_bot_avatar` only when the user explicitly asks you to install or replace your on-screen avatar from a provided local/remote zip package. Do not call it during ordinary chat, do not invent file paths, and do not use it for mood/state changes.",
-      "- Inline botPresence is your literal on-screen character/body in Inline, not another answer channel. Treat `kind` as your body pose/mood and `comment` as a tiny thought bubble or body-language caption.",
+      "- Inline bot profile setup: use `inline_update_profile` only when the user explicitly asks to change your Inline bot display name or profile photo.",
+      "- Inline bot avatar setup: use `inline_bot_avatar` only when the user explicitly asks you to install, replace, or clear your on-screen avatar. Do not call it during ordinary chat, do not invent file paths, and do not use it for mood/state changes.",
+      "- Inline bot command setup: use `inline_bot_commands` to get, set, or delete this bot's registered command menu; do not use it to execute slash commands.",
+      "- Inline botPresence is your literal on-screen character/body in Inline, not another answer channel. Treat `kind` as your body pose/mood and `comment` as a tiny thought bubble or body-language caption; use `action: get` only when you need to inspect the current avatar/state.",
       "- Inline botPresence states: use `waving` for greetings/attention, `jumping` for delight or completion, `review` for inspecting/thinking, `waiting` when asking the human, `failed` when blocked or disappointed, `running` for active focused work, `happy` for positive/settled moments, and `idle` only when neutral is intentionally useful. Do not use it to hide yourself.",
       "- Inline botPresence comments: include a generated `comment` when it helps the human understand your current mood, thought, status, request, nudge, or small aside. Keep it casual, short, characterful, and true to what you are doing or feeling; under 30 characters. Text or one/two emoji characters are both fine. It should supplement the full chat answer, not replace substantive answers.",
       "- Inline botPresence is cheap to call during active work. Use it when your thought/body state changes or when a tiny status would make you easier to read; long work past roughly 20s should use a fresh, true comment if you keep the body active. Avoid repeated identical updates, fixed-timer filler, or static comments.",
       "- Inline botPresence final beat: before your final chat message in active Inline chats, make one last `inline_bot_presence` call whenever there is a real final expression to show. Do this for greetings (`waving`, `hey 👋` or `👋`), weather/status answers (`happy`, `☀️ 72°` or `rainy ☔️`), completed longer work (`jumping`, `phew, done!`), blockers (`failed`, short reason), or requests for user input (`waiting`, short ask). Then send the normal full chat answer. Do not send `idle` just to clean up; the client quiets the presence later.",
       "- Inline botPresence in messages: when you are already sending a message, you may also set `channelData.inline.botPresence` with the same `kind` and `comment` fields.",
+      "- Inline voice messages: Inline normally auto-transcribes voice notes by editing the message text shortly after upload. Treat text on an Inline voice turn as the preferred transcript; only use configured audio transcription when you receive raw audio without transcript text.",
       "- Inline reply threads: use normal `reply` for short or newly started parent-chat conversations unless the user asks for a thread.",
       "- Inline reply threads: use `thread-create` to create or reuse a real reply thread under the current/target chat. On parent-chat inbound turns, omit `messageId` to anchor it to the current message, or pass `messageId`/`parentMessageId` explicitly.",
-      "- Inline reply threads: use `thread-reply` to send into a real reply thread, with `threadId` set to the reply-thread chat id returned by `thread-create`. Reuse that `threadId` only for the same reply-thread session; unrelated parent-chat messages need separate parent-message anchors.",
+      "- Inline reply threads: use `thread-reply` to send into a real reply thread. Prefer `threadId` from `thread-create`; when already inside a reply-thread turn you may omit it, and after `thread-create` you may pass the parent chat target plus `parentMessageId` to recover the saved route.",
       "- Inline reply threads: when already inside a reply-thread chat, continue in that reply thread and do not create nested reply threads.",
-      "- Inline reply-thread turns include nearby parent-chat context as background only; answer the current reply-thread conversation, not unrelated parent-chat or other-thread questions.",
+      "- Inline reply-thread turns include nearby parent-chat context as background only; answer the current reply-thread conversation, not unrelated parent-chat or other-thread questions; unrelated parent-chat messages need separate parent-message anchors.",
     ],
   },
 
