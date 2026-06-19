@@ -28,7 +28,7 @@ mock.module("@in/server/ws/presence", () => ({
 setupTestLifecycle()
 
 describe("realtime protocol safety", () => {
-  let app: Elysia
+  let app: any
 
   beforeAll(async () => {
     const { realtime } = await import("@in/server/realtime")

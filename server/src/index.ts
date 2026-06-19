@@ -63,7 +63,9 @@ if (NODE_ENV !== "development") {
   Log.shared.info(`🚧 Starting server • ${NODE_ENV} • ${version} • ${gitCommitHash}`)
 }
 
-export const app = new Elysia()
+export const app: any = new Elysia()
+
+app
   .use(health)
   .use(root)
   .use(oauth)
@@ -151,6 +153,8 @@ export const app = new Elysia()
             "```",
             "",
             "Targeting: use `chat_id` for chats/threads or `user_id` for DMs.",
+            "",
+            "Errors return `{ \"ok\": false, \"error_code\": <http status>, \"description\": \"...\" }`; `error` may be present as a machine-readable code.",
             "",
             "### Quick check",
             "",

@@ -1,6 +1,6 @@
 import { t, type TSchema } from "elysia"
 
-export const TApiEnvelope = <T extends TSchema>(type: T) => {
+export const TApiEnvelope = <T extends TSchema>(type: T): any => {
   const success = t.Object({ ok: t.Literal(true), result: type })
   const failure = t.Object({
     ok: t.Literal(false),
@@ -11,7 +11,13 @@ export const TApiEnvelope = <T extends TSchema>(type: T) => {
     description: t.String(),
   })
 
-  return t.Union([success, failure])
+  return {
+    200: success,
+    400: failure,
+    401: failure,
+    404: failure,
+    500: failure,
+  } as any
 }
 
 export const normalizeInputId = (value: string | number | undefined): number | undefined => {

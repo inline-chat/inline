@@ -111,7 +111,7 @@ export const createHealthController = (deps?: HealthDeps, lifecycleDeps?: Health
   }
 
   const route = (path: "/health" | "/healthz") =>
-    new Elysia({ name: path.slice(1), scoped: true, prefix: path }).use(setup).get("/", healthHandler)
+    new Elysia({ name: path.slice(1), prefix: path }).use(setup).get("/", healthHandler)
 
   return (app: Elysia) => app.use(route("/healthz")).use(route("/health"))
 }

@@ -21,7 +21,7 @@ export enum ConnVersion {
   REALTIME_V1 = 2,
 }
 
-type WS = ElysiaWS<any, any, any>
+type WS = ElysiaWS<any, any>
 
 interface Connection {
   ws: WS

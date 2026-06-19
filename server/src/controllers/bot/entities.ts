@@ -4,13 +4,28 @@ import { MessageEntities, MessageEntity_Type, type MessageEntity } from "@inline
 import type { BotMessageEntityOutput, BotUser } from "@inline-chat/bot-api-types"
 
 const TInt64 = t.Union([t.Number(), t.String()])
+const TBotMessageEntityType = t.Union([
+  t.Literal("mention"),
+  t.Literal("url"),
+  t.Literal("text_link"),
+  t.Literal("email"),
+  t.Literal("bold"),
+  t.Literal("italic"),
+  t.Literal("username_mention"),
+  t.Literal("code"),
+  t.Literal("pre"),
+  t.Literal("phone_number"),
+  t.Literal("thread"),
+  t.Literal("thread_title"),
+  t.Literal("bot_command"),
+])
 
 export const TBotMessageEntityInput = t.Object({
   // 2026-06-03: Deprecated compatibility accepts legacy enum numbers and normalized names
   // for existing production bot clients. New thread-link entities stay canonical.
   // Remove after confirming no production use in the previous month.
   // Canonical output is lowercase.
-  type: t.Union([t.String(), t.Number()]),
+  type: TBotMessageEntityType,
   offset: TInt64,
   length: TInt64,
 
@@ -30,9 +45,6 @@ export const TBotMessageEntityInput = t.Object({
   space_id: t.Optional(TInt64),
   title: t.Optional(t.String()),
 
-  // 2026-06-03: Deprecated compatibility accepts `user: { id }`; prefer `user_id`.
-  // Remove after confirming no production use in the previous month.
-  user: t.Optional(t.Object({ id: TInt64 })),
 })
 
 export const TBotMessageEntitiesInput = t.Array(TBotMessageEntityInput)

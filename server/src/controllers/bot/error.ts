@@ -31,8 +31,8 @@ export const handleBotError = new Elysia({ name: "bot-api-error-handler" })
       }
     }
 
-    if (code === "VALIDATION") {
-      Log.shared.error("BOT API VALIDATION ERROR", error)
+    if (code === "VALIDATION" || code === "PARSE") {
+      Log.shared.error("BOT API REQUEST ERROR", error)
       set.status = 400
       return {
         ok: false,

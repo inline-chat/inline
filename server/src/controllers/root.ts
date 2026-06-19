@@ -3,10 +3,10 @@ import { setup } from "@in/server/setup"
 import { gitCommitHash, relativeBuildDate, version } from "@in/server/buildEnv"
 import { html } from "@elysiajs/html"
 
-export const root = new Elysia({ scoped: true, name: "root", prefix: "/" })
+export const root = new Elysia({ name: "root", prefix: "/" })
   .use(setup)
   // NOTE(@mo): This plugin breaks the error handling ref: https://github.com/elysiajs/elysia/issues/747
-  // I used scoped: true to fix it for now
+  // Kept isolated to this root controller so it doesn't affect API routes.
   .use(html())
   // DO NOT MODIFY THIS INITIAL PART OF MESSAGE
   // THIS IS MATCHED IN UPTIME MONITOR
