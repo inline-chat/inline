@@ -29,7 +29,7 @@ struct SettingsSidebarView: View {
     }
 
     // more items
-    categories.append(.general)
+    categories.append(contentsOf: [.general, .dataStorage])
 #if SPARKLE
     categories.append(.updates)
 #endif
@@ -84,10 +84,9 @@ struct AccountSettingsRow: View {
           .font(.body)
           .fontWeight(.medium)
         
-        if let username = root.currentUser?.username {
-          Text("@\(username)")
-            .font(.caption)
-        }
+        Text("Your Account")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
  
       Spacer()

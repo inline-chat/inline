@@ -3,6 +3,7 @@ import Foundation
 enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
   case bots
+  case dataStorage
   case general
   case hotkeys
 #if SPARKLE
@@ -19,6 +20,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general:
       return "General"
+    case .dataStorage:
+      return "Data & Storage"
     case .hotkeys:
       return "Hotkeys"
     case .appearance:
@@ -44,6 +47,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general:
       return "gear"
+    case .dataStorage:
+      return "externaldrive"
     case .hotkeys:
       return "keyboard"
     case .appearance:

@@ -7,7 +7,6 @@ struct ExperimentalSettingsDetailView: View {
     Form {
       Section("Experimental") {
         Toggle("Enable voice messages", isOn: $appSettings.enableVoiceMessages)
-        Toggle("Sidebar as Inbox", isOn: $appSettings.sidebarAsInbox)
 
         Text("Voice features may require an app restart.")
           .font(.caption)

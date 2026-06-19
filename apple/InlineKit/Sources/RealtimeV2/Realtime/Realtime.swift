@@ -459,6 +459,76 @@ public actor RealtimeV2 {
     return revokeResult
   }
 
+  public func getSessions() async throws -> InlineProtocol.GetSessionsResult {
+    let result = try await callRpcDirect(
+      method: .getSessions,
+      input: .getSessions(.with { _ in })
+    )
+
+    guard case let .getSessions(sessionsResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected getSessions response", code: 500)
+    }
+
+    return sessionsResult
+  }
+
+  public func checkUsername(_ username: String) async throws -> InlineProtocol.CheckUsernameResult {
+    let result = try await callRpcDirect(
+      method: .checkUsername,
+      input: .checkUsername(.with {
+        $0.username = username
+      })
+    )
+
+    guard case let .checkUsername(usernameResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected checkUsername response", code: 500)
+    }
+
+    return usernameResult
+  }
+
+  public func changeUsername(_ username: String) async throws -> InlineProtocol.ChangeUsernameResult {
+    let result = try await callRpcDirect(
+      method: .changeUsername,
+      input: .changeUsername(.with {
+        $0.username = username
+      })
+    )
+
+    guard case let .changeUsername(usernameResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected changeUsername response", code: 500)
+    }
+
+    return usernameResult
+  }
+
+  public func updateProfile(
+    firstName: String?,
+    lastName: String?,
+    bio: String?
+  ) async throws -> InlineProtocol.UpdateProfileResult {
+    let result = try await callRpcDirect(
+      method: .updateProfile,
+      input: .updateProfile(.with {
+        if let firstName {
+          $0.firstName = firstName
+        }
+        if let lastName {
+          $0.lastName = lastName
+        }
+        if let bio {
+          $0.bio = bio
+        }
+      })
+    )
+
+    guard case let .updateProfile(profileResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected updateProfile response", code: 500)
+    }
+
+    return profileResult
+  }
+
   public func cancelTransaction(where predicate: @escaping @Sendable (TransactionWrapper) -> Bool) {
     Task { [predicate] in
       await transactions.cancel(where: predicate)
@@ -595,7 +665,10 @@ public actor RealtimeV2 {
          .emailInvalid,
          .phoneNumberInvalid,
          .spaceAdminRequired,
-         .spaceOwnerRequired:
+         .spaceOwnerRequired,
+         .usernameInvalid,
+         .usernameTaken,
+         .firstNameInvalid:
       return true
     case .unknown,
          .unauthenticated,

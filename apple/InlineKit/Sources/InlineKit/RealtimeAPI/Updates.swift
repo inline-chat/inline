@@ -129,6 +129,9 @@ public actor UpdatesEngine: Sendable {
         case let .updateUserSettings(userSettings):
           userSettings.apply()
 
+        case let .updatedUser(updatedUser):
+          try updatedUser.apply(db)
+
         case .chatSkipPts:
           break
 
@@ -1240,6 +1243,12 @@ extension InlineProtocol.UpdateUserSettings {
     Task { @MainActor in
       INUserSettings.current.updateFromServer(settings)
     }
+  }
+}
+
+extension InlineProtocol.UpdateUpdatedUser {
+  func apply(_ db: Database) throws {
+    _ = try User.save(db, user: user)
   }
 }
 
