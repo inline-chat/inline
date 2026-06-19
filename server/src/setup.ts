@@ -52,7 +52,7 @@ const getRequestId = (request: Request) => {
   return nanoid()
 }
 
-const setSecurityHeaders = (set: { headers: Record<string, string> }) => {
+const setSecurityHeaders = (set: { headers: Record<string, string | number> }) => {
   set.headers["X-Content-Type-Options"] = "nosniff"
   set.headers["X-Frame-Options"] = "SAMEORIGIN"
   set.headers["Referrer-Policy"] = "no-referrer"

@@ -6,12 +6,6 @@ const TTargetId = t.Union([t.Number(), t.String()])
 const TBotTargetFields = {
   user_id: t.Optional(TTargetId),
   chat_id: t.Optional(TTargetId),
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `user_id`.
-  // Remove after confirming no production use in the previous month.
-  peer_user_id: t.Optional(TTargetId),
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `chat_id`.
-  // Remove after confirming no production use in the previous month.
-  peer_thread_id: t.Optional(TTargetId),
 } as const
 
 export const TBotUser = t.Object({
@@ -24,9 +18,6 @@ export const TBotUser = t.Object({
 
 export const TBotPeer = t.Object({
   user_id: t.Optional(t.Number()),
-  // 2026-06-03: Deprecated output shape kept for production bot clients.
-  // Prefer top-level `chat_id`; remove after confirming no production use in the previous month.
-  thread_id: t.Optional(t.Number()),
 })
 
 export const TBotCommand = t.Object({
@@ -85,9 +76,6 @@ export const TSendMessageInput = t.Object({
   reply_to_message_id: t.Optional(TTargetId),
   entities: t.Optional(TBotMessageEntitiesInput),
   parse_markdown: t.Optional(t.Boolean()),
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
-  // Remove after confirming no production use in the previous month.
-  parseMarkdown: t.Optional(t.Boolean()),
 })
 
 export const TGetChatInput = t.Object({
@@ -106,9 +94,6 @@ export const TEditMessageTextInput = t.Object({
   text: t.String(),
   entities: t.Optional(TBotMessageEntitiesInput),
   parse_markdown: t.Optional(t.Boolean()),
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
-  // Remove after confirming no production use in the previous month.
-  parseMarkdown: t.Optional(t.Boolean()),
 })
 
 export const TDeleteMessageInput = t.Object({

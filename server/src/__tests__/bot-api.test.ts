@@ -6,8 +6,100 @@ import { generateToken, hashToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { setupTestLifecycle } from "./setup"
 
+async function createBotSession(username: string) {
+  const [bot] = await db
+    .insert(users)
+    .values({
+      firstName: username,
+      username,
+      bot: true,
+      emailVerified: false,
+      phoneVerified: false,
+      pendingSetup: false,
+    })
+    .returning()
+
+  expect(bot).toBeDefined()
+
+  const { token } = await generateToken(bot!.id)
+  await SessionsModel.create({
+    userId: bot!.id,
+    tokenHash: hashToken(token),
+    personalData: {},
+    clientType: "api",
+  })
+
+  return { bot: bot!, token }
+}
+
 describe("Bot HTTP API", () => {
   setupTestLifecycle()
+
+  it("documents only canonical Bot API fields", async () => {
+    const res = await app.handle(new Request("http://localhost/bot-api-reference/json"))
+
+    expect(res.status).toBe(200)
+    const spec = await res.json()
+    const text = JSON.stringify(spec)
+
+    expect(text).toContain("chat_id")
+    expect(text).toContain("user_id")
+    expect(text).toContain("parse_markdown")
+    expect(text).toContain("error_code")
+    expect(text).not.toContain("peer_thread_id")
+    expect(text).not.toContain("peer_user_id")
+    expect(text).not.toContain("parseMarkdown")
+    expect(text).not.toContain("thread_id")
+  })
+
+  it("returns documented Bot API errors for malformed requests", async () => {
+    const { token } = await createBotSession("malformedbot")
+
+    const res = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: "{",
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      ok: false,
+      error: "INVALID_ARGS",
+      error_code: 400,
+      description: "Validation error",
+    })
+    expect("errorCode" in json).toBe(false)
+  })
+
+  it("returns documented Bot API errors for legacy versioned sendMessage", async () => {
+    const { token } = await createBotSession("legacyversionedbot")
+
+    const res = await app.handle(
+      new Request("http://localhost/v1/sendMessage20250509", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text: "missing peer" }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      ok: false,
+      error: "PEER_INVALID",
+      error_code: 400,
+    })
+    expect("errorCode" in json).toBe(false)
+  })
 
   it("supports Authorization header auth at /bot/<method>", async () => {
     const [bot] = await db

@@ -1,6 +1,11 @@
 import { Elysia } from "elysia"
 import { setup } from "@in/server/setup"
-import { handleError, makeApiRoute, makeUnauthApiRoute, makeUploadApiRoute } from "@in/server/controllers/helpers"
+import {
+  handleError,
+  makeApiRoute,
+  makeBotApiCompatRoute,
+  makeUnauthApiRoute,
+} from "@in/server/controllers/helpers"
 import {
   handler as sendEmailCodeHandler,
   Input as SendEmailCodeInput,
@@ -234,8 +239,11 @@ import {
   Response as GetInviteCodesResponse,
 } from "@in/server/methods/getInviteCodes"
 
-export const apiV1 = new Elysia({ name: "v1" })
-  .group("v1", (app) => {
+export const apiV1: any = new Elysia({ name: "v1" })
+
+apiV1
+  .use(handleError)
+  .group("v1", (app: any) => {
     return ((
       (app as any)
       .use(setup)
@@ -310,7 +318,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       )
       .use(makeApiRoute("/getAlphaText", GetAlphaTextInput, GetAlphaTextResponse, getAlphaTextHandler))
       .use(
-        makeApiRoute(
+        makeBotApiCompatRoute(
           "/sendMessage20250509",
           SendMessage20250509Input,
           SendMessage20250509Response,
@@ -359,4 +367,3 @@ export const apiV1 = new Elysia({ name: "v1" })
         return { ok: false, errorCode: 404, description: "Method not found" }
       })
   })
-  .use(handleError)

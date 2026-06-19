@@ -1,4 +1,4 @@
-import { Elysia, t } from "elysia"
+import { Elysia, t, type TSchema } from "elysia"
 import { InlineError } from "@in/server/types/errors"
 import { authenticateBotHeader, authenticateBotPathOrHeader, type BotHandlerContext } from "./auth"
 import { handleBotError } from "./error"
@@ -404,6 +404,45 @@ const randomId64 = (): bigint => {
   return id === 0n ? 1n : id
 }
 
+const jsonBodyDoc = (schema: TSchema) => ({
+  requestBody: {
+    required: false,
+    content: {
+      "application/json": {
+        schema,
+      },
+    },
+  },
+})
+
+const queryDoc = (schema: TSchema) => {
+  const record = schema as Record<string, any>
+  const properties = "properties" in record && record["properties"] ? record["properties"] : {}
+  const required = new Set(Array.isArray((schema as any).required) ? (schema as any).required : [])
+  return {
+    parameters: [
+      {
+        name: "authorization",
+        in: "header",
+        required: false,
+        description: "Bearer bot token. Recommended instead of token-in-path auth.",
+        schema: { type: "string" },
+      },
+      ...Object.entries(properties).map(([name, value]) => {
+        const { type, description, examples, ...rest } = value as any
+        return {
+          name,
+          in: "query",
+          required: required.has(name),
+          description,
+          examples,
+          schema: { type, ...rest },
+        }
+      }),
+    ],
+  }
+}
+
 const throwInlineFromUnknown = (error: unknown): never => {
   if (error instanceof InlineError) throw error
 
@@ -521,7 +560,7 @@ const botMethods = (authPlugin: any): any => {
       }
     },
     {
-      body: t.Optional(TSendMessageInput),
+      detail: jsonBodyDoc(TSendMessageInput),
       response: TApiEnvelope(t.Object({ message: TBotMessage })),
     },
   )
@@ -559,7 +598,7 @@ const botMethods = (authPlugin: any): any => {
       }
     },
     {
-      query: TGetChatInput,
+      detail: queryDoc(TGetChatInput),
       response: TApiEnvelope(t.Object({ chat: TBotChat })),
     },
   )
@@ -627,7 +666,7 @@ const botMethods = (authPlugin: any): any => {
       }
     },
     {
-      query: TGetChatHistoryInput,
+      detail: queryDoc(TGetChatHistoryInput),
       response: TApiEnvelope(t.Object({ messages: t.Array(TBotMessage) })),
     },
   )
@@ -685,7 +724,7 @@ const botMethods = (authPlugin: any): any => {
       }
     },
     {
-      body: t.Optional(TEditMessageTextInput),
+      detail: jsonBodyDoc(TEditMessageTextInput),
       response: TApiEnvelope(t.Object({ message: TBotMessage })),
     },
   )
@@ -713,7 +752,7 @@ const botMethods = (authPlugin: any): any => {
       }
     },
     {
-      body: t.Optional(TDeleteMessageInput),
+      detail: jsonBodyDoc(TDeleteMessageInput),
       response: TApiEnvelope(t.Object({})),
     },
   )
@@ -752,7 +791,7 @@ const botMethods = (authPlugin: any): any => {
       }
     },
     {
-      body: t.Optional(TSendReactionInput),
+      detail: jsonBodyDoc(TSendReactionInput),
       response: TApiEnvelope(t.Object({})),
     },
   )
@@ -801,7 +840,7 @@ const botMethods = (authPlugin: any): any => {
       }
     },
     {
-      body: t.Optional(TSetMyCommandsInput),
+      detail: jsonBodyDoc(TSetMyCommandsInput),
       response: TApiEnvelope(t.Object({})),
     },
   )
@@ -830,9 +869,11 @@ const botMethods = (authPlugin: any): any => {
   return app
 }
 
-export const botApi = new Elysia({ name: "bot-api" })
-  // Recommended: Authorization header auth
-  .group("/bot", (app) => app.use(botMethods(authenticateBotHeader) as any))
-  // Token in path: /bot<token>/<method>
-  .group("/bot:token", (app) => app.use(botMethods(authenticateBotPathOrHeader) as any))
+export const botApi: any = new Elysia({ name: "bot-api" })
+
+botApi
   .use(handleBotError)
+  // Recommended: Authorization header auth
+  .group("/bot", (app: any) => app.use(botMethods(authenticateBotHeader) as any))
+  // Token in path: /bot<token>/<method>
+  .group("/bot:token", (app: any) => app.use(botMethods(authenticateBotPathOrHeader) as any))
