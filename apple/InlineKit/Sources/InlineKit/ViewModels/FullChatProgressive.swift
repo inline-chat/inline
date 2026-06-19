@@ -181,6 +181,10 @@ public class MessagesProgressiveViewModel {
     loadAdditionalMessages(request: request, publish: publish)
   }
 
+  public func loadLatestWindow() {
+    loadMessages(.limit(initialLimit))
+  }
+
   @discardableResult
   public func loadBatchAsync(
     at direction: MessagesLoadDirection,
