@@ -185,11 +185,18 @@ struct Nav2Entry: Codable {
   }
 
   @MainActor
-  func requestOpenChat(peer: Peer, database: AppDatabase = .shared) {
+  func requestOpenChat(
+    peer: Peer,
+    targetMessageId: Int64? = nil,
+    database: AppDatabase = .shared
+  ) {
     if pendingChatPeer == peer {
       return
     }
     if case let .chat(currentPeer) = currentRoute, pendingChatPeer == nil, currentPeer == peer {
+      if let targetMessageId {
+        scrollOpenChat(peer: peer, targetMessageId: targetMessageId, database: database)
+      }
       return
     }
 
@@ -204,7 +211,11 @@ struct Nav2Entry: Codable {
     pendingChatOpenTask = Task(priority: .userInitiated) { [weak self] in
       guard let self else { return }
       do {
-        let payload = try await ChatOpenPreloader.shared.prepare(peer: peer, database: database)
+        let payload = try await ChatOpenPreloader.shared.prepare(
+          peer: peer,
+          targetMessageId: targetMessageId,
+          database: database
+        )
         await MainActor.run {
           guard self.pendingChatOpenRequestID == requestID else { return }
           guard self.activeTab == requestTab else {
@@ -240,6 +251,22 @@ struct Nav2Entry: Codable {
   func requestOpenChatInHome(peer: Peer, database: AppDatabase = .shared) {
     openHomeTabIfNeeded()
     requestOpenChat(peer: peer, database: database)
+  }
+
+  private func scrollOpenChat(peer: Peer, targetMessageId: Int64, database: AppDatabase) {
+    Task { @MainActor in
+      do {
+        let chat = try await database.reader.read { db in
+          try Chat.getByPeerId(db: db, peerId: peer)
+        }
+        guard let chat else { return }
+        ChatsManager
+          .get(for: peer, chatId: chat.id)
+          .scrollTo(msgId: targetMessageId, reason: .search)
+      } catch {
+        Log.shared.error("Failed to resolve open chat for search scroll", error: error)
+      }
+    }
   }
 
   func goBack() {

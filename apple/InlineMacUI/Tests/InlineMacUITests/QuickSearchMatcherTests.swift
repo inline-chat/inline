@@ -19,3 +19,27 @@ import Testing
   #expect(asciiApostropheScore == exactScore)
   #expect(curlyApostropheScore == exactScore)
 }
+
+@Test func quickSearchMatcher_matchesCompactOmittedSpaces() {
+  let score = QuickSearchMatcher.score(
+    query: "xy",
+    fields: [.init(value: "x y", boost: 0)]
+  )
+
+  #expect(score != nil)
+  #expect((score ?? 0) > 8_000)
+}
+
+@Test func quickSearchMatcher_rejectsWeakPartialMultiTokenMatches() {
+  let partialScore = QuickSearchMatcher.score(
+    query: "deploy message",
+    fields: [.init(value: "message", boost: 0)]
+  )
+  let completeScore = QuickSearchMatcher.score(
+    query: "deploy message",
+    fields: [.init(value: "deploy message", boost: 0)]
+  )
+
+  #expect(partialScore == nil)
+  #expect(completeScore != nil)
+}

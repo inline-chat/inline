@@ -77,16 +77,6 @@ private struct CommandBarOverlay: View {
     .onExitCommand {
       close()
     }
-    .onMoveCommand { direction in
-      switch direction {
-      case .up:
-        viewModel.moveSelection(isForward: false)
-      case .down:
-        viewModel.moveSelection(isForward: true)
-      default:
-        break
-      }
-    }
   }
 
   private func close(reset: Bool = true) {
