@@ -2576,6 +2576,24 @@ export interface RpcCall {
          */
         updateProfile: UpdateProfileInput;
     } | {
+        oneofKind: "getSpaceUrlPreviewExclusions";
+        /**
+         * @generated from protobuf field: GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions = 66;
+         */
+        getSpaceUrlPreviewExclusions: GetSpaceUrlPreviewExclusionsInput;
+    } | {
+        oneofKind: "addSpaceUrlPreviewExclusion";
+        /**
+         * @generated from protobuf field: AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion = 67;
+         */
+        addSpaceUrlPreviewExclusion: AddSpaceUrlPreviewExclusionInput;
+    } | {
+        oneofKind: "removeSpaceUrlPreviewExclusion";
+        /**
+         * @generated from protobuf field: RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68;
+         */
+        removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2975,6 +2993,24 @@ export interface RpcResult {
          */
         updateProfile: UpdateProfileResult;
     } | {
+        oneofKind: "getSpaceUrlPreviewExclusions";
+        /**
+         * @generated from protobuf field: GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions = 66;
+         */
+        getSpaceUrlPreviewExclusions: GetSpaceUrlPreviewExclusionsResult;
+    } | {
+        oneofKind: "addSpaceUrlPreviewExclusion";
+        /**
+         * @generated from protobuf field: AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion = 67;
+         */
+        addSpaceUrlPreviewExclusion: AddSpaceUrlPreviewExclusionResult;
+    } | {
+        oneofKind: "removeSpaceUrlPreviewExclusion";
+        /**
+         * @generated from protobuf field: RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
+         */
+        removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3209,6 +3245,109 @@ export interface UpdateMemberAccessResult {
      * @generated from protobuf field: repeated Update updates = 1;
      */
     updates: Update[];
+}
+/**
+ * @generated from protobuf message SpaceUrlPreviewExclusion
+ */
+export interface SpaceUrlPreviewExclusion {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: int64 space_id = 2;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: string host = 3;
+     */
+    host: string;
+    /**
+     * @generated from protobuf field: optional string path_prefix = 4;
+     */
+    pathPrefix?: string;
+    /**
+     * @generated from protobuf field: int64 created_by = 5;
+     */
+    createdBy: bigint;
+    /**
+     * @generated from protobuf field: int64 date = 6;
+     */
+    date: bigint;
+}
+/**
+ * @generated from protobuf message GetSpaceUrlPreviewExclusionsInput
+ */
+export interface GetSpaceUrlPreviewExclusionsInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetSpaceUrlPreviewExclusionsResult
+ */
+export interface GetSpaceUrlPreviewExclusionsResult {
+    /**
+     * @generated from protobuf field: repeated SpaceUrlPreviewExclusion exclusions = 1;
+     */
+    exclusions: SpaceUrlPreviewExclusion[];
+}
+/**
+ * @generated from protobuf message AddSpaceUrlPreviewExclusionInput
+ */
+export interface AddSpaceUrlPreviewExclusionInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: string host = 2;
+     */
+    host: string;
+    /**
+     * @generated from protobuf field: optional string path_prefix = 3;
+     */
+    pathPrefix?: string;
+    /**
+     * @generated from protobuf field: optional InputPeer peer_id = 4;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: optional int64 message_id = 5;
+     */
+    messageId?: bigint;
+}
+/**
+ * @generated from protobuf message AddSpaceUrlPreviewExclusionResult
+ */
+export interface AddSpaceUrlPreviewExclusionResult {
+    /**
+     * @generated from protobuf field: SpaceUrlPreviewExclusion exclusion = 1;
+     */
+    exclusion?: SpaceUrlPreviewExclusion;
+    /**
+     * @generated from protobuf field: repeated Update updates = 2;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message RemoveSpaceUrlPreviewExclusionInput
+ */
+export interface RemoveSpaceUrlPreviewExclusionInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int64 exclusion_id = 2;
+     */
+    exclusionId: bigint;
+}
+/**
+ * @generated from protobuf message RemoveSpaceUrlPreviewExclusionResult
+ */
+export interface RemoveSpaceUrlPreviewExclusionResult {
 }
 /**
  * @generated from protobuf message GetUpdatesStateInput
@@ -6762,7 +6901,19 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_PROFILE = 64;
      */
-    UPDATE_PROFILE = 64
+    UPDATE_PROFILE = 64,
+    /**
+     * @generated from protobuf enum value: GET_SPACE_URL_PREVIEW_EXCLUSIONS = 65;
+     */
+    GET_SPACE_URL_PREVIEW_EXCLUSIONS = 65,
+    /**
+     * @generated from protobuf enum value: ADD_SPACE_URL_PREVIEW_EXCLUSION = 66;
+     */
+    ADD_SPACE_URL_PREVIEW_EXCLUSION = 66,
+    /**
+     * @generated from protobuf enum value: REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
+     */
+    REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67
 }
 /**
  * @generated from protobuf enum UsernameAvailability
@@ -11584,7 +11735,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 62, name: "getSessions", kind: "message", oneof: "input", T: () => GetSessionsInput },
             { no: 63, name: "checkUsername", kind: "message", oneof: "input", T: () => CheckUsernameInput },
             { no: 64, name: "changeUsername", kind: "message", oneof: "input", T: () => ChangeUsernameInput },
-            { no: 65, name: "updateProfile", kind: "message", oneof: "input", T: () => UpdateProfileInput }
+            { no: 65, name: "updateProfile", kind: "message", oneof: "input", T: () => UpdateProfileInput },
+            { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "input", T: () => GetSpaceUrlPreviewExclusionsInput },
+            { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => AddSpaceUrlPreviewExclusionInput },
+            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => RemoveSpaceUrlPreviewExclusionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -11987,6 +12141,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateProfile: UpdateProfileInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateProfile)
                     };
                     break;
+                case /* GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions */ 66:
+                    message.input = {
+                        oneofKind: "getSpaceUrlPreviewExclusions",
+                        getSpaceUrlPreviewExclusions: GetSpaceUrlPreviewExclusionsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaceUrlPreviewExclusions)
+                    };
+                    break;
+                case /* AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion */ 67:
+                    message.input = {
+                        oneofKind: "addSpaceUrlPreviewExclusion",
+                        addSpaceUrlPreviewExclusion: AddSpaceUrlPreviewExclusionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).addSpaceUrlPreviewExclusion)
+                    };
+                    break;
+                case /* RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion */ 68:
+                    message.input = {
+                        oneofKind: "removeSpaceUrlPreviewExclusion",
+                        removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).removeSpaceUrlPreviewExclusion)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12194,6 +12366,15 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateProfileInput updateProfile = 65; */
         if (message.input.oneofKind === "updateProfile")
             UpdateProfileInput.internalBinaryWrite(message.input.updateProfile, writer.tag(65, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions = 66; */
+        if (message.input.oneofKind === "getSpaceUrlPreviewExclusions")
+            GetSpaceUrlPreviewExclusionsInput.internalBinaryWrite(message.input.getSpaceUrlPreviewExclusions, writer.tag(66, WireType.LengthDelimited).fork(), options).join();
+        /* AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion = 67; */
+        if (message.input.oneofKind === "addSpaceUrlPreviewExclusion")
+            AddSpaceUrlPreviewExclusionInput.internalBinaryWrite(message.input.addSpaceUrlPreviewExclusion, writer.tag(67, WireType.LengthDelimited).fork(), options).join();
+        /* RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68; */
+        if (message.input.oneofKind === "removeSpaceUrlPreviewExclusion")
+            RemoveSpaceUrlPreviewExclusionInput.internalBinaryWrite(message.input.removeSpaceUrlPreviewExclusion, writer.tag(68, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12272,7 +12453,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 62, name: "getSessions", kind: "message", oneof: "result", T: () => GetSessionsResult },
             { no: 63, name: "checkUsername", kind: "message", oneof: "result", T: () => CheckUsernameResult },
             { no: 64, name: "changeUsername", kind: "message", oneof: "result", T: () => ChangeUsernameResult },
-            { no: 65, name: "updateProfile", kind: "message", oneof: "result", T: () => UpdateProfileResult }
+            { no: 65, name: "updateProfile", kind: "message", oneof: "result", T: () => UpdateProfileResult },
+            { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "result", T: () => GetSpaceUrlPreviewExclusionsResult },
+            { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => AddSpaceUrlPreviewExclusionResult },
+            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => RemoveSpaceUrlPreviewExclusionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -12675,6 +12859,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateProfile: UpdateProfileResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateProfile)
                     };
                     break;
+                case /* GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions */ 66:
+                    message.result = {
+                        oneofKind: "getSpaceUrlPreviewExclusions",
+                        getSpaceUrlPreviewExclusions: GetSpaceUrlPreviewExclusionsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaceUrlPreviewExclusions)
+                    };
+                    break;
+                case /* AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion */ 67:
+                    message.result = {
+                        oneofKind: "addSpaceUrlPreviewExclusion",
+                        addSpaceUrlPreviewExclusion: AddSpaceUrlPreviewExclusionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).addSpaceUrlPreviewExclusion)
+                    };
+                    break;
+                case /* RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion */ 68:
+                    message.result = {
+                        oneofKind: "removeSpaceUrlPreviewExclusion",
+                        removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).removeSpaceUrlPreviewExclusion)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12882,6 +13084,15 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateProfileResult updateProfile = 65; */
         if (message.result.oneofKind === "updateProfile")
             UpdateProfileResult.internalBinaryWrite(message.result.updateProfile, writer.tag(65, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions = 66; */
+        if (message.result.oneofKind === "getSpaceUrlPreviewExclusions")
+            GetSpaceUrlPreviewExclusionsResult.internalBinaryWrite(message.result.getSpaceUrlPreviewExclusions, writer.tag(66, WireType.LengthDelimited).fork(), options).join();
+        /* AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion = 67; */
+        if (message.result.oneofKind === "addSpaceUrlPreviewExclusion")
+            AddSpaceUrlPreviewExclusionResult.internalBinaryWrite(message.result.addSpaceUrlPreviewExclusion, writer.tag(67, WireType.LengthDelimited).fork(), options).join();
+        /* RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68; */
+        if (message.result.oneofKind === "removeSpaceUrlPreviewExclusion")
+            RemoveSpaceUrlPreviewExclusionResult.internalBinaryWrite(message.result.removeSpaceUrlPreviewExclusion, writer.tag(68, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13525,6 +13736,396 @@ class UpdateMemberAccessResult$Type extends MessageType<UpdateMemberAccessResult
  * @generated MessageType for protobuf message UpdateMemberAccessResult
  */
 export const UpdateMemberAccessResult = new UpdateMemberAccessResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SpaceUrlPreviewExclusion$Type extends MessageType<SpaceUrlPreviewExclusion> {
+    constructor() {
+        super("SpaceUrlPreviewExclusion", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "host", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "path_prefix", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "created_by", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SpaceUrlPreviewExclusion>): SpaceUrlPreviewExclusion {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.spaceId = 0n;
+        message.host = "";
+        message.createdBy = 0n;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<SpaceUrlPreviewExclusion>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SpaceUrlPreviewExclusion): SpaceUrlPreviewExclusion {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* string host */ 3:
+                    message.host = reader.string();
+                    break;
+                case /* optional string path_prefix */ 4:
+                    message.pathPrefix = reader.string();
+                    break;
+                case /* int64 created_by */ 5:
+                    message.createdBy = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 6:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SpaceUrlPreviewExclusion, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* int64 space_id = 2; */
+        if (message.spaceId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
+        /* string host = 3; */
+        if (message.host !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.host);
+        /* optional string path_prefix = 4; */
+        if (message.pathPrefix !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.pathPrefix);
+        /* int64 created_by = 5; */
+        if (message.createdBy !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.createdBy);
+        /* int64 date = 6; */
+        if (message.date !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SpaceUrlPreviewExclusion
+ */
+export const SpaceUrlPreviewExclusion = new SpaceUrlPreviewExclusion$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceUrlPreviewExclusionsInput$Type extends MessageType<GetSpaceUrlPreviewExclusionsInput> {
+    constructor() {
+        super("GetSpaceUrlPreviewExclusionsInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceUrlPreviewExclusionsInput>): GetSpaceUrlPreviewExclusionsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceUrlPreviewExclusionsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceUrlPreviewExclusionsInput): GetSpaceUrlPreviewExclusionsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceUrlPreviewExclusionsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceUrlPreviewExclusionsInput
+ */
+export const GetSpaceUrlPreviewExclusionsInput = new GetSpaceUrlPreviewExclusionsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceUrlPreviewExclusionsResult$Type extends MessageType<GetSpaceUrlPreviewExclusionsResult> {
+    constructor() {
+        super("GetSpaceUrlPreviewExclusionsResult", [
+            { no: 1, name: "exclusions", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => SpaceUrlPreviewExclusion }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceUrlPreviewExclusionsResult>): GetSpaceUrlPreviewExclusionsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.exclusions = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceUrlPreviewExclusionsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceUrlPreviewExclusionsResult): GetSpaceUrlPreviewExclusionsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated SpaceUrlPreviewExclusion exclusions */ 1:
+                    message.exclusions.push(SpaceUrlPreviewExclusion.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceUrlPreviewExclusionsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated SpaceUrlPreviewExclusion exclusions = 1; */
+        for (let i = 0; i < message.exclusions.length; i++)
+            SpaceUrlPreviewExclusion.internalBinaryWrite(message.exclusions[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceUrlPreviewExclusionsResult
+ */
+export const GetSpaceUrlPreviewExclusionsResult = new GetSpaceUrlPreviewExclusionsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AddSpaceUrlPreviewExclusionInput$Type extends MessageType<AddSpaceUrlPreviewExclusionInput> {
+    constructor() {
+        super("AddSpaceUrlPreviewExclusionInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "host", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "path_prefix", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 5, name: "message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AddSpaceUrlPreviewExclusionInput>): AddSpaceUrlPreviewExclusionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.host = "";
+        if (value !== undefined)
+            reflectionMergePartial<AddSpaceUrlPreviewExclusionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AddSpaceUrlPreviewExclusionInput): AddSpaceUrlPreviewExclusionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* string host */ 2:
+                    message.host = reader.string();
+                    break;
+                case /* optional string path_prefix */ 3:
+                    message.pathPrefix = reader.string();
+                    break;
+                case /* optional InputPeer peer_id */ 4:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional int64 message_id */ 5:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AddSpaceUrlPreviewExclusionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* string host = 2; */
+        if (message.host !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.host);
+        /* optional string path_prefix = 3; */
+        if (message.pathPrefix !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.pathPrefix);
+        /* optional InputPeer peer_id = 4; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 message_id = 5; */
+        if (message.messageId !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.messageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AddSpaceUrlPreviewExclusionInput
+ */
+export const AddSpaceUrlPreviewExclusionInput = new AddSpaceUrlPreviewExclusionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AddSpaceUrlPreviewExclusionResult$Type extends MessageType<AddSpaceUrlPreviewExclusionResult> {
+    constructor() {
+        super("AddSpaceUrlPreviewExclusionResult", [
+            { no: 1, name: "exclusion", kind: "message", T: () => SpaceUrlPreviewExclusion },
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<AddSpaceUrlPreviewExclusionResult>): AddSpaceUrlPreviewExclusionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<AddSpaceUrlPreviewExclusionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AddSpaceUrlPreviewExclusionResult): AddSpaceUrlPreviewExclusionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* SpaceUrlPreviewExclusion exclusion */ 1:
+                    message.exclusion = SpaceUrlPreviewExclusion.internalBinaryRead(reader, reader.uint32(), options, message.exclusion);
+                    break;
+                case /* repeated Update updates */ 2:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AddSpaceUrlPreviewExclusionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* SpaceUrlPreviewExclusion exclusion = 1; */
+        if (message.exclusion)
+            SpaceUrlPreviewExclusion.internalBinaryWrite(message.exclusion, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Update updates = 2; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AddSpaceUrlPreviewExclusionResult
+ */
+export const AddSpaceUrlPreviewExclusionResult = new AddSpaceUrlPreviewExclusionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RemoveSpaceUrlPreviewExclusionInput$Type extends MessageType<RemoveSpaceUrlPreviewExclusionInput> {
+    constructor() {
+        super("RemoveSpaceUrlPreviewExclusionInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "exclusion_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RemoveSpaceUrlPreviewExclusionInput>): RemoveSpaceUrlPreviewExclusionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.exclusionId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<RemoveSpaceUrlPreviewExclusionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RemoveSpaceUrlPreviewExclusionInput): RemoveSpaceUrlPreviewExclusionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 exclusion_id */ 2:
+                    message.exclusionId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RemoveSpaceUrlPreviewExclusionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* int64 exclusion_id = 2; */
+        if (message.exclusionId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.exclusionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RemoveSpaceUrlPreviewExclusionInput
+ */
+export const RemoveSpaceUrlPreviewExclusionInput = new RemoveSpaceUrlPreviewExclusionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RemoveSpaceUrlPreviewExclusionResult$Type extends MessageType<RemoveSpaceUrlPreviewExclusionResult> {
+    constructor() {
+        super("RemoveSpaceUrlPreviewExclusionResult", []);
+    }
+    create(value?: PartialMessage<RemoveSpaceUrlPreviewExclusionResult>): RemoveSpaceUrlPreviewExclusionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<RemoveSpaceUrlPreviewExclusionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RemoveSpaceUrlPreviewExclusionResult): RemoveSpaceUrlPreviewExclusionResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: RemoveSpaceUrlPreviewExclusionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RemoveSpaceUrlPreviewExclusionResult
+ */
+export const RemoveSpaceUrlPreviewExclusionResult = new RemoveSpaceUrlPreviewExclusionResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
     constructor() {

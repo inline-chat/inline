@@ -67,6 +67,11 @@ import {
 import { showInChatList } from "@in/server/realtime/handlers/messages.showInChatList"
 import { updateDialogOpen } from "@in/server/realtime/handlers/messages.updateDialogOpen"
 import { updateDialogOrder } from "@in/server/realtime/handlers/messages.updateDialogOrder"
+import {
+  addSpaceUrlPreviewExclusionHandler,
+  getSpaceUrlPreviewExclusionsHandler,
+  removeSpaceUrlPreviewExclusionHandler,
+} from "@in/server/realtime/handlers/space.urlPreviewExclusions"
 
 const log = new Log("rpc")
 
@@ -201,6 +206,33 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await getSpaceMembers(call.input.getSpaceMembers, handlerContext)
       return { oneofKind: "getSpaceMembers", getSpaceMembers: result }
+    }
+
+    case Method.GET_SPACE_URL_PREVIEW_EXCLUSIONS: {
+      if (call.input.oneofKind !== "getSpaceUrlPreviewExclusions") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getSpaceUrlPreviewExclusionsHandler(call.input.getSpaceUrlPreviewExclusions, handlerContext)
+      return { oneofKind: "getSpaceUrlPreviewExclusions", getSpaceUrlPreviewExclusions: result }
+    }
+
+    case Method.ADD_SPACE_URL_PREVIEW_EXCLUSION: {
+      if (call.input.oneofKind !== "addSpaceUrlPreviewExclusion") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await addSpaceUrlPreviewExclusionHandler(call.input.addSpaceUrlPreviewExclusion, handlerContext)
+      return { oneofKind: "addSpaceUrlPreviewExclusion", addSpaceUrlPreviewExclusion: result }
+    }
+
+    case Method.REMOVE_SPACE_URL_PREVIEW_EXCLUSION: {
+      if (call.input.oneofKind !== "removeSpaceUrlPreviewExclusion") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await removeSpaceUrlPreviewExclusionHandler(
+        call.input.removeSpaceUrlPreviewExclusion,
+        handlerContext,
+      )
+      return { oneofKind: "removeSpaceUrlPreviewExclusion", removeSpaceUrlPreviewExclusion: result }
     }
 
     case Method.DELETE_CHAT: {

@@ -15,6 +15,7 @@ struct SpaceSettingsView: View {
 
   @StateObject private var viewModel: FullSpaceViewModel
   @StateObject private var membershipStatus: SpaceMembershipStatusViewModel
+  @StateObject private var urlPreviewExclusions: SpaceUrlPreviewExclusionsViewModel
   @State private var showDeleteConfirm = false
   @State private var showLeaveConfirm = false
   @State private var actionError: String?
@@ -32,6 +33,7 @@ struct SpaceSettingsView: View {
     self.onExit = onExit
     _viewModel = StateObject(wrappedValue: FullSpaceViewModel(db: AppDatabase.shared, spaceId: spaceId))
     _membershipStatus = StateObject(wrappedValue: SpaceMembershipStatusViewModel(db: AppDatabase.shared, spaceId: spaceId))
+    _urlPreviewExclusions = StateObject(wrappedValue: SpaceUrlPreviewExclusionsViewModel(spaceId: spaceId))
   }
 
   private var isCreator: Bool {
@@ -191,6 +193,12 @@ struct SpaceSettingsView: View {
         }
       }
 
+      if isAdminOrOwner {
+        Section("URL Previews") {
+          SpaceUrlPreviewExclusionsSettingsView(viewModel: urlPreviewExclusions)
+        }
+      }
+
       Section(destructiveSectionTitle) {
         SpaceSettingsDangerRow(
           title: destructiveTitle,
@@ -210,6 +218,9 @@ struct SpaceSettingsView: View {
     .task {
       await membershipStatus.refreshIfNeeded()
       try? await data.getSpace(spaceId: spaceId)
+      if isAdminOrOwner {
+        await urlPreviewExclusions.loadIfNeeded()
+      }
     }
     .sheet(isPresented: $showDeleteConfirm) {
       DeleteSpaceConfirmationSheet(
@@ -493,6 +504,106 @@ private struct SpaceSettingsActionRow: View {
       .font(.system(size: 15, weight: .regular))
       .foregroundStyle(.secondary)
       .frame(width: 20, height: 20)
+  }
+}
+
+private struct SpaceUrlPreviewExclusionsSettingsView: View {
+  @ObservedObject var viewModel: SpaceUrlPreviewExclusionsViewModel
+  @State private var draft = ""
+
+  private var canAdd: Bool {
+    draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false && viewModel.isMutating == false
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 8) {
+        TextField("example.com or example.com/path", text: $draft)
+          .textFieldStyle(.roundedBorder)
+          .onSubmit(add)
+
+        Button("Add", action: add)
+          .controlSize(.small)
+          .disabled(!canAdd)
+      }
+
+      if viewModel.isLoading {
+        SpaceSettingsStatusRow(title: "Loading exclusions...")
+      } else if viewModel.exclusions.isEmpty {
+        Text("No exclusions")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      } else {
+        VStack(spacing: 0) {
+          ForEach(viewModel.exclusions) { exclusion in
+            SpaceUrlPreviewExclusionRow(
+              exclusion: exclusion,
+              isMutating: viewModel.isMutating,
+              onRemove: {
+                Task {
+                  await viewModel.remove(id: exclusion.id)
+                }
+              }
+            )
+
+            if exclusion.id != viewModel.exclusions.last?.id {
+              Divider()
+            }
+          }
+        }
+      }
+
+      if let error = viewModel.errorMessage {
+        Text(error)
+          .font(.footnote)
+          .foregroundStyle(.red)
+      }
+    }
+    .padding(.vertical, 4)
+    .task {
+      await viewModel.loadIfNeeded()
+    }
+  }
+
+  private func add() {
+    guard canAdd else { return }
+    let value = draft
+    Task {
+      await viewModel.add(value: value)
+      if viewModel.errorMessage == nil {
+        draft = ""
+      }
+    }
+  }
+}
+
+private struct SpaceUrlPreviewExclusionRow: View {
+  let exclusion: SpaceUrlPreviewExclusionItem
+  let isMutating: Bool
+  let onRemove: () -> Void
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: exclusion.pathPrefix == nil ? "network" : "link")
+        .font(.system(size: 14, weight: .regular))
+        .foregroundStyle(.secondary)
+        .frame(width: 20, height: 20)
+
+      Text(exclusion.displayValue)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .textSelection(.enabled)
+
+      Spacer(minLength: 12)
+
+      Button(role: .destructive, action: onRemove) {
+        Image(systemName: "trash")
+      }
+      .buttonStyle(.borderless)
+      .disabled(isMutating)
+      .help("Remove")
+    }
+    .padding(.vertical, 6)
   }
 }
 

@@ -9,12 +9,14 @@ struct SpaceSettingsView: View {
   @EnvironmentObject private var navigation: Navigation
   @EnvironmentObject private var data: DataManager
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
+  @StateObject private var urlPreviewExclusions: SpaceUrlPreviewExclusionsViewModel
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
     _viewModel = EnvironmentStateObject { env in
       FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
     }
+    _urlPreviewExclusions = StateObject(wrappedValue: SpaceUrlPreviewExclusionsViewModel(spaceId: spaceId))
   }
 
   private var currentUserMember: FullMemberItem? {
@@ -74,6 +76,12 @@ struct SpaceSettingsView: View {
         }
       }
 
+      if isAdminOrOwner {
+        Section("URL Previews") {
+          SpaceUrlPreviewExclusionsSettingsView(viewModel: urlPreviewExclusions)
+        }
+      }
+
       Section {
         Button(role: .destructive) {
           showSpaceActionAlert()
@@ -92,6 +100,11 @@ struct SpaceSettingsView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
     .hideTabBarIfNeeded()
+    .task {
+      if isAdminOrOwner {
+        await urlPreviewExclusions.loadIfNeeded()
+      }
+    }
     .toolbar {
       ToolbarItem(id: "settings", placement: .principal) {
         HStack {
@@ -139,6 +152,98 @@ struct SpaceSettingsView: View {
        let rootVC = windowScene.windows.first?.rootViewController
     {
       rootVC.topmostPresentedViewController.present(alert, animated: true)
+    }
+  }
+}
+
+private struct SpaceUrlPreviewExclusionsSettingsView: View {
+  @ObservedObject var viewModel: SpaceUrlPreviewExclusionsViewModel
+  @State private var draft = ""
+
+  private var canAdd: Bool {
+    draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false && viewModel.isMutating == false
+  }
+
+  var body: some View {
+    HStack(spacing: 8) {
+      TextField("example.com or example.com/path", text: $draft)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .keyboardType(.URL)
+        .onSubmit(add)
+
+      Button(action: add) {
+        Image(systemName: "plus.circle.fill")
+      }
+      .disabled(!canAdd)
+    }
+    .task {
+      await viewModel.loadIfNeeded()
+    }
+
+    if viewModel.isLoading {
+      HStack {
+        ProgressView()
+        Text("Loading exclusions...")
+          .foregroundStyle(.secondary)
+      }
+    } else if viewModel.exclusions.isEmpty {
+      Text("No exclusions")
+        .foregroundStyle(.secondary)
+    } else {
+      ForEach(viewModel.exclusions) { exclusion in
+        SpaceUrlPreviewExclusionRow(
+          exclusion: exclusion,
+          isMutating: viewModel.isMutating,
+          onRemove: {
+            Task {
+              await viewModel.remove(id: exclusion.id)
+            }
+          }
+        )
+      }
+    }
+
+    if let error = viewModel.errorMessage {
+      Text(error)
+        .font(.footnote)
+        .foregroundStyle(.red)
+    }
+  }
+
+  private func add() {
+    guard canAdd else { return }
+    let value = draft
+    Task {
+      await viewModel.add(value: value)
+      if viewModel.errorMessage == nil {
+        draft = ""
+      }
+    }
+  }
+}
+
+private struct SpaceUrlPreviewExclusionRow: View {
+  let exclusion: SpaceUrlPreviewExclusionItem
+  let isMutating: Bool
+  let onRemove: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Image(systemName: exclusion.pathPrefix == nil ? "network" : "link")
+        .foregroundColor(.secondary)
+        .frame(width: 24, height: 24)
+
+      Text(exclusion.displayValue)
+        .lineLimit(1)
+        .truncationMode(.middle)
+
+      Spacer()
+
+      Button(role: .destructive, action: onRemove) {
+        Image(systemName: "trash")
+      }
+      .disabled(isMutating)
     }
   }
 }

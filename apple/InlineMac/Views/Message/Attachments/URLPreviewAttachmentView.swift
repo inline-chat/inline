@@ -347,6 +347,27 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     removeURLPreviewAttachment()
   }
 
+  @objc private func neverShowPreviewFromMenu() {
+    guard let context = previewExclusionContext() else { return }
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.addSpaceUrlPreviewExclusion(
+          spaceId: context.spaceId,
+          host: context.pattern.host,
+          pathPrefix: nil,
+          peerId: message.peerId,
+          messageId: message.messageId
+        ))
+      } catch {
+        Log.shared.error("Failed to exclude URL preview host", error: error)
+        DispatchQueue.main.async { [weak self] in
+          self?.showExcludeErrorAlert(error: error)
+        }
+      }
+    }
+  }
+
   @objc private func openPhotoPreviewFromMenu() {
     guard let photoInfo = fullAttachment.photoInfo else { return }
     openPhotoPreview(for: photoInfo)
@@ -652,6 +673,19 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       menu.addItem(previewAction)
     }
 
+    if let exclusionContext = previewExclusionContext() {
+      menu.addItem(NSMenuItem.separator())
+
+      let excludeAction = NSMenuItem(
+        title: "Never Show Previews for \(exclusionContext.pattern.host)",
+        action: #selector(neverShowPreviewFromMenu),
+        keyEquivalent: ""
+      )
+      excludeAction.target = self
+      excludeAction.image = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil)
+      menu.addItem(excludeAction)
+    }
+
     if canRemovePreview {
       menu.addItem(NSMenuItem.separator())
 
@@ -662,6 +696,11 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     }
 
     return menu
+  }
+
+  private func previewExclusionContext() -> SpaceUrlPreviewExclusionContext? {
+    guard let previewURL else { return nil }
+    return SpaceUrlPreviewExclusionAccess.context(peer: message.peerId, url: previewURL)
   }
 
   private func removeURLPreviewAttachment() {
@@ -691,6 +730,15 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     let alert = NSAlert()
     alert.messageText = "Remove Failed"
     alert.informativeText = "Failed to remove the link preview: \(error.localizedDescription)"
+    alert.alertStyle = .critical
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
+  }
+
+  private func showExcludeErrorAlert(error: Error) {
+    let alert = NSAlert()
+    alert.messageText = "Update Failed"
+    alert.informativeText = "Failed to update URL preview settings: \(error.localizedDescription)"
     alert.alertStyle = .critical
     alert.addButton(withTitle: "OK")
     alert.runModal()

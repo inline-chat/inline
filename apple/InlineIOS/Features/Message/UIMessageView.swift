@@ -567,9 +567,47 @@ class UIMessageView: UIView {
       canRemove: outgoing && attachment.attachment.attachmentId != nil,
       onRemove: { [weak self] in
         self?.removeURLPreviewAttachment(attachment)
+      },
+      neverShowPreviewActionProvider: { [weak self] in
+        self?.makeURLPreviewExclusionAction(for: attachment)
       }
     )
     return previewView
+  }
+
+  private func makeURLPreviewExclusionAction(for attachment: FullAttachment) -> URLPreviewView.NeverShowPreviewAction? {
+    guard let url = attachment.urlPreview?.openURL else { return nil }
+    guard let context = SpaceUrlPreviewExclusionAccess.context(peer: message.peerId, url: url) else { return nil }
+
+    return URLPreviewView.NeverShowPreviewAction(host: context.pattern.host) { [weak self] in
+      self?.addURLPreviewExclusion(context)
+    }
+  }
+
+  private func addURLPreviewExclusion(_ context: SpaceUrlPreviewExclusionContext) {
+    let peerId = message.peerId
+    let messageId = message.messageId
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.addSpaceUrlPreviewExclusion(
+          spaceId: context.spaceId,
+          host: context.pattern.host,
+          pathPrefix: nil,
+          peerId: peerId,
+          messageId: messageId
+        ))
+      } catch {
+        Log.shared.error("Failed to exclude URL preview host", error: error)
+        await MainActor.run {
+          ToastManager.shared.showToast(
+            "Update failed",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+        }
+      }
+    }
   }
 
   private func removeURLPreviewAttachment(_ attachment: FullAttachment) {

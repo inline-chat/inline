@@ -28,6 +28,7 @@ export const relations = defineRelations(
     userSettings: schema.userSettings,
     updates: schema.updates,
     botCommands: schema.botCommands,
+    spaceUrlPreviewExclusions: schema.spaceUrlPreviewExclusions,
   },
   (r) => ({
     users: {
@@ -175,6 +176,18 @@ export const relations = defineRelations(
       }),
       members: r.many.members(),
       chats: r.many.chats(),
+      urlPreviewExclusions: r.many.spaceUrlPreviewExclusions(),
+    },
+
+    spaceUrlPreviewExclusions: {
+      space: r.one.spaces({
+        from: r.spaceUrlPreviewExclusions.spaceId,
+        to: r.spaces.id,
+      }),
+      creator: r.one.users({
+        from: r.spaceUrlPreviewExclusions.createdBy,
+        to: r.users.id,
+      }),
     },
 
     // Member relations - handles space membership
