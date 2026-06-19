@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto"
+import { mkdir, writeFile } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import type { InlineSdkClient, InlineSdkSendMessageMedia } from "@inline-chat/realtime-sdk"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
@@ -14,6 +17,14 @@ const DEFAULT_VIDEO_DURATION = 1
 
 type InlineUploadType = "photo" | "video" | "document"
 type InlineLoadedMedia = Awaited<ReturnType<ReturnType<typeof getInlineRuntime>["media"]["loadWebMedia"]>>
+export type InlineDownloadedMedia = {
+  path: string
+  sourceUrl: string
+  fileName: string
+  sizeBytes: number
+  contentType?: string
+  kind?: string
+}
 type InlineMediaReadFile = (filePath: string) => Promise<Buffer>
 type InlineMediaLocalRoots = readonly string[] | "any"
 type InlineMediaAccess = {
@@ -94,6 +105,35 @@ function ensureUploadFileName(params: {
     inferredExt ??
     (params.uploadType === "photo" ? "jpg" : params.uploadType === "video" ? "mp4" : "bin")
   return `attachment.${fallbackExt}`
+}
+
+function fileNameFromMediaUrl(mediaUrl: string): string | undefined {
+  try {
+    const url = new URL(mediaUrl)
+    const pathname = decodeURIComponent(url.pathname)
+    const fileName = sanitizeUploadFileName(pathname)
+    return fileName === "attachment" ? undefined : fileName
+  } catch {
+    const fileName = sanitizeUploadFileName(mediaUrl)
+    return fileName === "attachment" ? undefined : fileName
+  }
+}
+
+function ensureDownloadFileName(params: {
+  fileName?: string
+  mediaUrl: string
+  mime?: string
+}): string {
+  const candidate = params.fileName?.trim() || fileNameFromMediaUrl(params.mediaUrl)
+  if (candidate) {
+    const baseName = sanitizeUploadFileName(candidate)
+    if (normalizeExt(baseName)) return baseName
+    const inferredExt = extensionForMimeCompat(params.mime) ?? "bin"
+    return `${baseName}.${inferredExt}`
+  }
+
+  const inferredExt = extensionForMimeCompat(params.mime) ?? "bin"
+  return `download.${inferredExt}`
 }
 
 function sanitizeUploadFileName(raw: string): string {
@@ -295,6 +335,81 @@ export async function uploadInlineMediaFromUrl(params: {
       ...(fileName ? { uploadFileName: fileName } : {}),
     })
     throw new Error(`inline media upload failed (${extractErrorMessage(error)}; ${context})`, {
+      cause: error as Error,
+    })
+  }
+}
+
+export async function downloadInlineMediaFromUrl(params: {
+  cfg: OpenClawConfig
+  accountId?: string | null
+  mediaUrl: string
+  fileName?: string
+  mediaAccess?: InlineMediaAccess
+  mediaLocalRoots?: readonly string[]
+  mediaReadFile?: InlineMediaReadFile
+}): Promise<InlineDownloadedMedia> {
+  const maxBytes = resolveMediaMaxBytes({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+  })
+  const runtimeMedia = getInlineRuntime().media
+  const loadWebMediaCompat = runtimeMedia.loadWebMedia as unknown as LoadWebMediaCompat
+  let loaded: InlineLoadedMedia | undefined
+  let detectedMime: string | undefined
+  let fileName: string | undefined
+  try {
+    loaded = await loadWebMediaCompat(
+      params.mediaUrl,
+      buildInlineMediaLoadOptions({
+        maxBytes,
+        ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
+        ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
+        ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
+      }),
+    )
+    if (!loaded) {
+      throw new Error("inline media download: media load returned no data")
+    }
+
+    detectedMime = normalizeMime(
+      loaded.contentType ??
+        (await runtimeMedia.detectMime({
+          buffer: loaded.buffer,
+          ...(loaded.fileName ? { filePath: loaded.fileName } : {}),
+        })),
+    )
+    fileName = ensureDownloadFileName({
+      mediaUrl: params.mediaUrl,
+      ...(params.fileName ?? loaded.fileName ? { fileName: params.fileName ?? loaded.fileName } : {}),
+      ...(detectedMime ? { mime: detectedMime } : {}),
+    })
+
+    const dir = path.join(os.tmpdir(), "openclaw-inline-downloads")
+    await mkdir(dir, { recursive: true })
+    const filePath = path.join(dir, `${randomUUID()}-${fileName}`)
+    await writeFile(filePath, loaded.buffer, { flag: "wx" })
+
+    return {
+      path: filePath,
+      sourceUrl: params.mediaUrl,
+      fileName,
+      sizeBytes: loaded.buffer.byteLength,
+      ...(detectedMime ? { contentType: detectedMime } : {}),
+      ...(loaded.kind ? { kind: loaded.kind } : {}),
+    }
+  } catch (error) {
+    const context = describeInlineMediaContext({
+      ...(params.accountId !== undefined ? { accountId: params.accountId } : {}),
+      mediaUrl: params.mediaUrl,
+      maxBytes,
+      ...(loaded?.kind ? { loadKind: loaded.kind } : {}),
+      ...(loaded?.fileName ? { loadedFileName: sanitizeUploadFileName(loaded.fileName) } : {}),
+      ...(loaded?.buffer ? { loadedSize: loaded.buffer.byteLength } : {}),
+      ...(detectedMime ? { detectedMime } : {}),
+      ...(fileName ? { uploadFileName: fileName } : {}),
+    })
+    throw new Error(`inline media download failed (${extractErrorMessage(error)}; ${context})`, {
       cause: error as Error,
     })
   }

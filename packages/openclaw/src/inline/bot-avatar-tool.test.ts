@@ -9,15 +9,28 @@ const uploadFile = vi.fn(async () => ({
   fileUniqueId: "uploaded-avatar-1",
   photoId: 77n,
 }))
-const invokeRaw = vi.fn(async (_method: number, _input: unknown) => ({
-  oneofKind: "setBotAvatar",
-  setBotAvatar: {
-    bot: {
-      id: 42n,
-      firstName: "OpenClaw",
+const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
+  if (method === 57) {
+    return {
+      oneofKind: "clearBotAvatar",
+      clearBotAvatar: {
+        bot: {
+          id: 42n,
+          firstName: "OpenClaw",
+        },
+      },
+    }
+  }
+  return {
+    oneofKind: "setBotAvatar",
+    setBotAvatar: {
+      bot: {
+        id: 42n,
+        firstName: "OpenClaw",
+      },
     },
-  },
-}))
+  }
+})
 let zipBuffer = createAvatarZip()
 const loadWebMedia = vi.fn(async () => ({
   kind: "document" as const,
@@ -33,6 +46,7 @@ vi.mock("@inline-chat/realtime-sdk", () => ({
   },
   Method: {
     SET_BOT_AVATAR: 56,
+    CLEAR_BOT_AVATAR: 57,
   },
   InlineSdkClient: class {
     constructor(_opts: unknown) {}
@@ -228,6 +242,71 @@ describe("inline/bot-avatar-tool", () => {
         },
       },
     })
+  })
+
+  it("clears the authenticated bot avatar without loading a package", async () => {
+    const { createInlineBotAvatarTool } = await import("./bot-avatar-tool")
+
+    const tool = createInlineBotAvatarTool({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+    })
+
+    const result = await tool?.execute("tool-clear", {
+      action: "clear",
+    })
+
+    expect(loadWebMedia).not.toHaveBeenCalled()
+    expect(uploadFile).not.toHaveBeenCalled()
+    expect(invokeRaw).toHaveBeenCalledWith(57, {
+      oneofKind: "clearBotAvatar",
+      clearBotAvatar: {
+        botUserId: 42n,
+      },
+    })
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        action: "clear",
+        accountId: "default",
+        botUserId: "42",
+        cleared: true,
+        avatar: null,
+      },
+    })
+  })
+
+  it("rejects clear requests that also provide avatar package metadata", async () => {
+    const { createInlineBotAvatarTool } = await import("./bot-avatar-tool")
+
+    const tool = createInlineBotAvatarTool({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+    })
+
+    await expect(
+      tool?.execute("tool-ambiguous-clear", {
+        action: "clear",
+        source: "/Users/mo/Downloads/zhu-bajie.zip",
+      }),
+    ).rejects.toThrow(/clear action must not include avatar package/)
+    expect(loadWebMedia).not.toHaveBeenCalled()
+    expect(uploadFile).not.toHaveBeenCalled()
+    expect(invokeRaw).not.toHaveBeenCalled()
   })
 
   it("extracts deflated zip packages", async () => {

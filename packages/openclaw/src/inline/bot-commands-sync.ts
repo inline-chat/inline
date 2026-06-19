@@ -28,6 +28,7 @@ type InlineCommandsConfig = {
 const INLINE_COMMAND_NAME_RE = /^[a-z0-9_]{1,32}$/
 const INLINE_COMMAND_LIMIT = 100
 const INLINE_COMMAND_DESCRIPTION_LIMIT = 256
+const INLINE_COMMAND_RETRY_RATIO = 0.8
 const INLINE_NATIVE_COMMAND_PROVIDER = "inline"
 
 function resolveInlineChannelCommands(cfg: OpenClawConfig): InlineCommandsConfig | undefined {
@@ -41,6 +42,66 @@ function normalizeDynamicCommandName(raw: string): string {
   const trimmed = raw.trim().toLowerCase()
   const withoutSlash = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed
   return withoutSlash.trim()
+}
+
+function readErrorTextField(value: unknown, key: "description" | "message"): string | undefined {
+  if (!value || typeof value !== "object" || !(key in value)) return undefined
+  const raw = (value as Record<"description" | "message", unknown>)[key]
+  return typeof raw === "string" ? raw : undefined
+}
+
+function isInlineBotCommandsTooMuchError(err: unknown): boolean {
+  const pattern = /\bBOT_COMMANDS_TOO_MUCH\b/i
+  if (typeof err === "string") return pattern.test(err)
+  if (err instanceof Error && pattern.test(err.message)) return true
+  const description = readErrorTextField(err, "description")
+  if (description && pattern.test(description)) return true
+  const message = readErrorTextField(err, "message")
+  return Boolean(message && pattern.test(message))
+}
+
+async function setInlineBotCommandsWithRetry(params: {
+  baseUrl: string
+  token: string
+  accountId: string
+  commands: InlineBotCommand[]
+  logger?: InlineCommandsSyncLogger
+}): Promise<InlineBotCommand[]> {
+  try {
+    await callInlineBotApi<Record<string, never>>({
+      baseUrl: params.baseUrl,
+      token: params.token,
+      methodName: "setMyCommands",
+      method: "POST",
+      body: { commands: params.commands },
+    })
+    return params.commands
+  } catch (err) {
+    if (!isInlineBotCommandsTooMuchError(err) || params.commands.length <= 1) {
+      throw err
+    }
+
+    const retryCount = Math.max(1, Math.floor(params.commands.length * INLINE_COMMAND_RETRY_RATIO))
+    if (retryCount >= params.commands.length) {
+      throw err
+    }
+
+    const retryCommands = params.commands.slice(0, retryCount)
+    params.logger?.warn?.(
+      `[inline] bot command sync rejected ${params.commands.length} commands for account "${params.accountId}" (BOT_COMMANDS_TOO_MUCH); retrying with ${retryCommands.length}`,
+    )
+    await callInlineBotApi<Record<string, never>>({
+      baseUrl: params.baseUrl,
+      token: params.token,
+      methodName: "setMyCommands",
+      method: "POST",
+      body: { commands: retryCommands },
+    })
+    params.logger?.warn?.(
+      `[inline] bot command sync accepted ${retryCommands.length} commands for account "${params.accountId}" after BOT_COMMANDS_TOO_MUCH (started with ${params.commands.length}; omitted ${params.commands.length - retryCommands.length}). Reduce plugin/skill/custom commands to expose more menu entries.`,
+    )
+    return retryCommands
+  }
 }
 
 function appendUniqueCommand(
@@ -223,16 +284,16 @@ export async function syncInlineNativeCommands(params: {
     }
 
     try {
-      await callInlineBotApi<Record<string, never>>({
+      const syncedCommands = await setInlineBotCommandsWithRetry({
         baseUrl: account.baseUrl,
         token,
-        methodName: "setMyCommands",
-        method: "POST",
-        body: { commands },
+        accountId: account.accountId,
+        commands,
+        ...(params.logger ? { logger: params.logger } : {}),
       })
       synced += 1
       params.logger?.info?.(
-        `[inline] bot commands synced for account "${account.accountId}" (${commands.length} command${commands.length === 1 ? "" : "s"})`,
+        `[inline] bot commands synced for account "${account.accountId}" (${syncedCommands.length} command${syncedCommands.length === 1 ? "" : "s"})`,
       )
     } catch (err) {
       failed += 1

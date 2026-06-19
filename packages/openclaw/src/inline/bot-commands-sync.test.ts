@@ -533,4 +533,118 @@ describe("inline/bot-commands-sync", () => {
       "[inline] bot command sync truncated description for /long_desc to 256 characters",
     )
   })
+
+  it("retries automatic command sync with fewer commands on BOT_COMMANDS_TOO_MUCH", async () => {
+    vi.resetModules()
+
+    const listNativeCommandSpecsForConfig = vi.fn(() =>
+      Array.from({ length: 100 }, (_, index) => ({
+        name: `cmd_${index}`,
+        description: `Command ${index}`,
+      })),
+    )
+    const getPluginCommandSpecs = vi.fn(() => [])
+
+    vi.doMock("openclaw/plugin-sdk/native-command-registry", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/native-command-registry")
+      return {
+        ...actual,
+        listNativeCommandSpecsForConfig,
+      }
+    })
+    vi.doMock("openclaw/plugin-sdk/plugin-runtime", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/plugin-runtime")
+      return {
+        ...actual,
+        getPluginCommandSpecs,
+      }
+    })
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (!url.endsWith("/bot/setMyCommands")) {
+        return new Response(JSON.stringify({ ok: false, error_code: 404, description: "not found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        })
+      }
+
+      const body = JSON.parse(String(init?.body)) as {
+        commands: Array<{ command: string; description: string }>
+      }
+      if (body.commands.length === 100) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: BOT_COMMANDS_TOO_MUCH",
+          }),
+          {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          },
+        )
+      }
+      if (body.commands.length === 80) {
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error_code: 400,
+          description: `unexpected command count ${body.commands.length}`,
+        }),
+        {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        },
+      )
+    })
+    globalThis.fetch = fetchMock as typeof fetch
+
+    const { syncInlineNativeCommands } = await import("./bot-commands-sync")
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    }
+    const result = await syncInlineNativeCommands({
+      cfg: {
+        commands: { nativeSkills: false },
+        channels: {
+          inline: {
+            token: "inline-bot-token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      logger,
+    })
+
+    expect(result).toEqual({
+      attempted: 1,
+      synced: 1,
+      failed: 0,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      commands: Array<{ command: string }>
+    }
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      commands: Array<{ command: string }>
+    }
+    expect(firstBody.commands).toHaveLength(100)
+    expect(secondBody.commands).toHaveLength(80)
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[inline] bot command sync rejected 100 commands for account "default" (BOT_COMMANDS_TOO_MUCH); retrying with 80',
+    )
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[inline] bot command sync accepted 80 commands for account "default" after BOT_COMMANDS_TOO_MUCH (started with 100; omitted 20). Reduce plugin/skill/custom commands to expose more menu entries.',
+    )
+    expect(logger.info).toHaveBeenCalledWith(
+      '[inline] bot commands synced for account "default" (80 commands)',
+    )
+  })
 })
