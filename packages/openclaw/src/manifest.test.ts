@@ -129,6 +129,12 @@ describe("plugin manifest", () => {
     expect(accounts?.additionalProperties?.properties?.reactionAllowlist).toEqual(
       schema?.properties?.reactionAllowlist,
     )
+    expect(accounts?.additionalProperties?.properties?.debounceMs).toEqual(
+      schema?.properties?.debounceMs,
+    )
+    expect(accounts?.additionalProperties?.properties?.voiceTranscriptWaitMs).toEqual(
+      schema?.properties?.voiceTranscriptWaitMs,
+    )
     expect(accounts?.additionalProperties?.properties?.commands).toEqual(
       schema?.properties?.commands,
     )
@@ -154,6 +160,18 @@ describe("plugin manifest", () => {
     })
     expect(schema?.properties?.defaultTo).toEqual({
       anyOf: [{ type: "string" }, { type: "number" }],
+    })
+    expect(schema?.properties?.debounceMs).toEqual({
+      type: "integer",
+      minimum: 0,
+    })
+    expect(schema?.properties?.voiceTranscriptWaitMs).toEqual({
+      type: "integer",
+      minimum: 0,
+      maximum: 60000,
+    })
+    expect(schema?.properties?.actions?.properties?.translate).toEqual({
+      type: "boolean",
     })
     expect(schema?.properties?.replyThreadMode).toEqual({
       type: "string",

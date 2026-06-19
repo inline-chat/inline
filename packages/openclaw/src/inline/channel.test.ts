@@ -40,11 +40,15 @@ async function setInlineTestRuntime(options?: {
   loadWebMedia?: ReturnType<typeof vi.fn>
   detectMime?: ReturnType<typeof vi.fn>
   stateDir?: string
+  openKeyedStore?: ReturnType<typeof vi.fn>
 }): Promise<void> {
   const runtimeMod = await import("../runtime")
   runtimeMod.setInlineRuntime({
     version: "test",
-    state: { resolveStateDir: () => options?.stateDir ?? "/tmp" },
+    state: {
+      resolveStateDir: () => options?.stateDir ?? "/tmp",
+      ...(options?.openKeyedStore ? { openKeyedStore: options.openKeyedStore } : {}),
+    },
     channel: { text: { chunkMarkdownText: (text: string) => [text] } },
     media: {
       loadWebMedia:
@@ -137,7 +141,14 @@ describe("inline/channel", () => {
     expect(messageToolHints).toContain("Inline markdown links")
     expect(messageToolHints).toContain("inline://thread")
     expect(messageToolHints).toContain("Use `target` values only for tool calls.")
+    expect(messageToolHints).toContain("inline_members")
+    expect(messageToolHints).toContain("inline_parent_context")
+    expect(messageToolHints).toContain("inline_nudge")
+    expect(messageToolHints).toContain("inline_forward")
     expect(messageToolHints).toContain("channelData.inline.botPresence")
+    expect(messageToolHints).toContain("inline_update_profile")
+    expect(messageToolHints).toContain("inline_bot_avatar")
+    expect(messageToolHints).toContain("inline_bot_commands")
     expect(messageToolHints).toContain("inline_bot_presence")
     expect(inlineChannelPlugin.commands?.buildModelsMenuChannelData?.({
       providers: [{ id: "openai", count: 2 }],
@@ -2285,6 +2296,8 @@ describe("inline/channel", () => {
     const connect = vi.fn(async () => {})
     const sendMessage = vi.fn(async () => ({ messageId: null }))
     const close = vi.fn(async () => {})
+    const register = vi.fn(async () => {})
+    const openKeyedStore = vi.fn(() => ({ register, lookup: vi.fn(async () => undefined) }))
 
     mockRealtimeSdk({
       InlineSdkClient: class {
@@ -2295,7 +2308,7 @@ describe("inline/channel", () => {
       },
     })
 
-    await setInlineTestRuntime()
+    await setInlineTestRuntime({ openKeyedStore })
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -2318,6 +2331,11 @@ describe("inline/channel", () => {
 
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 42n, text: "hi" }),
+    )
+    expect(register).toHaveBeenCalledWith(
+      "default:7:42",
+      expect.objectContaining({ repliedAt: expect.any(Number) }),
+      { ttlMs: 86_400_000 },
     )
     expect(connect).toHaveBeenCalled()
     expect(close).toHaveBeenCalled()
@@ -2480,6 +2498,8 @@ describe("inline/channel", () => {
     const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 101n }))
     const sendMessage = vi.fn(async () => ({ messageId: 55n }))
     const close = vi.fn(async () => {})
+    const register = vi.fn(async () => {})
+    const openKeyedStore = vi.fn(() => ({ register, lookup: vi.fn(async () => undefined) }))
     const loadWebMedia = vi.fn(async () => ({
       buffer: Buffer.from([1, 2, 3]),
       contentType: "image/png",
@@ -2505,6 +2525,7 @@ describe("inline/channel", () => {
     await setInlineTestRuntime({
       loadWebMedia,
       detectMime: vi.fn(async () => "image/png"),
+      openKeyedStore,
     })
 
     const { inlineChannelPlugin } = await import("./channel")
@@ -2533,6 +2554,11 @@ describe("inline/channel", () => {
         chatId: 42n,
         text: "caption",
       }),
+    )
+    expect(register).toHaveBeenCalledWith(
+      "default:7:42",
+      expect.objectContaining({ repliedAt: expect.any(Number) }),
+      { ttlMs: 86_400_000 },
     )
     expect(close).toHaveBeenCalled()
   })

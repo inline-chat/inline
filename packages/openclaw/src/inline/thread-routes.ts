@@ -185,8 +185,13 @@ function messageKey(accountId: string, parentChatId: string, parentMessageId: st
   return `${accountId}:parent:${parentChatId}:message:${parentMessageId}`
 }
 
+function threadKey(accountId: string, threadId: string): string {
+  return `${accountId}:thread:${threadId}`
+}
+
 function keysForRecord(record: InlineReplyThreadRouteRecord): string[] {
   const keys = new Set<string>()
+  keys.add(threadKey(record.accountId, record.threadId))
   if (record.parentMessageId) {
     keys.add(messageKey(record.accountId, record.parentChatId, record.parentMessageId))
   }
@@ -215,6 +220,47 @@ function keysForLookup(params: {
   return [...keys]
 }
 
+async function lookupInlineReplyThreadRouteByKeys(
+  accountId: string,
+  keys: string[],
+): Promise<InlineReplyThreadRouteRecord | null> {
+  const now = Date.now()
+
+  for (const key of keys) {
+    const cached = getMemory(key, now)
+    if (cached) return cached
+  }
+
+  const store = getPersistentStore()
+  if (store) {
+    for (const key of keys) {
+      try {
+        const found = await store.lookup(key)
+        const normalized = normalizeRecord(found)
+        if (normalized && !isExpired(normalized, now)) {
+          setMemory(key, normalized, now)
+          return normalized
+        }
+      } catch (error) {
+        disablePersistentStore(error)
+        break
+      }
+    }
+  }
+
+  const fileRoutes = await readFileRoutes(accountId)
+  for (const key of keys) {
+    const found = fileRoutes.get(key)
+    const normalized = normalizeRecord(found)
+    if (normalized) {
+      setMemory(key, normalized, now)
+      return normalized
+    }
+  }
+
+  return null
+}
+
 function setMemory(key: string, value: InlineReplyThreadRouteRecord, now: number): void {
   const memory = getRouteState().memory
   memory.delete(key)
@@ -226,7 +272,7 @@ function getMemory(key: string, now: number): InlineReplyThreadRouteRecord | und
   const memory = getRouteState().memory
   const entry = memory.get(key)
   if (!entry) return undefined
-  if (now - entry.updatedAt > TTL_MS) {
+  if (now - entry.updatedAt > TTL_MS || isExpired(entry.value, now)) {
     memory.delete(key)
     return undefined
   }
@@ -364,41 +410,18 @@ export async function lookupInlineReplyThreadRoute(params: {
     ...(parentMessageId ? { parentMessageId } : {}),
     ...(agentId ? { agentId } : {}),
   })
-  const now = Date.now()
+  return await lookupInlineReplyThreadRouteByKeys(accountId, keys)
+}
 
-  for (const key of keys) {
-    const cached = getMemory(key, now)
-    if (cached) return cached
-  }
+export async function lookupInlineReplyThreadRouteByThreadId(params: {
+  accountId: string
+  threadId: bigint | string | null
+}): Promise<InlineReplyThreadRouteRecord | null> {
+  const accountId = params.accountId.trim()
+  const threadId = normalizePositiveId(params.threadId)
+  if (!accountId || !threadId) return null
 
-  const store = getPersistentStore()
-  if (store) {
-    for (const key of keys) {
-      try {
-        const found = await store.lookup(key)
-        const normalized = normalizeRecord(found)
-        if (normalized && !isExpired(normalized, now)) {
-          setMemory(key, normalized, now)
-          return normalized
-        }
-      } catch (error) {
-        disablePersistentStore(error)
-        break
-      }
-    }
-  }
-
-  const fileRoutes = await readFileRoutes(accountId)
-  for (const key of keys) {
-    const found = fileRoutes.get(key)
-    const normalized = normalizeRecord(found)
-    if (normalized) {
-      setMemory(key, normalized, now)
-      return normalized
-    }
-  }
-
-  return null
+  return await lookupInlineReplyThreadRouteByKeys(accountId, [threadKey(accountId, threadId)])
 }
 
 export function clearInlineReplyThreadRouteCacheForTest(): void {
