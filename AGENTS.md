@@ -22,6 +22,7 @@
 - Never revert/discard/reset/clean work unless explicitly asked; ask before one-way deletion commands (`rm`, restore/reset/checkout) unless explicitly requested.
 - When the worktree is dirty, continue without stopping for unrelated modified/untracked files. Only stop if unexpected changes appear in the specific file/hunk currently being edited.
 - Never read, write or touch `.env` files.
+- **NEVER EVER modify an existing database migration that may have already run or been committed.** Add a new forward migration instead. The only exception is a migration you just created yourself, before it has run anywhere and before it has been committed; in that case you may undo, replace, or edit that new migration. Always disclose every migration created, edited, replaced, or revised in the final handoff, including any migration mistake and how it was corrected.
 
 ## Multi-agent Safety
 
