@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 import { db, schema } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
+import { addSpaceUrlPreviewExclusion } from "@in/server/functions/space.urlPreviewExclusions"
 import { encrypt } from "@in/server/modules/encryption/encryption"
+import { isSpaceUrlPreviewExcluded } from "@in/server/modules/urlPreview/exclusions"
 import { getPreviewRoutesFromMessage, processUrlPreview } from "@in/server/modules/urlPreview/processUrlPreview"
 import {
   getFreshPreviewCache,
@@ -170,6 +172,128 @@ describe("URL preview cache", () => {
     expect(attachment?.linkEmbed?.siteName).toBe("Facebook & Video")
     expect(attachment?.linkEmbed?.title).toBe("\u{1f534} \u6b63\u5728\u76f4\u64ad\uff01Amy \u5e36\u4f60")
     expect(attachment?.linkEmbed?.description).toBe('Fish & chips "safe" \u00a9')
+  })
+
+  it("skips excluded space URL previews before fetch or cache work", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("URL Preview Exclusion", ["preview-excluded@example.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create exclusion test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create exclusion test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://secure.example.com/private/page",
+    })
+
+    await db.insert(schema.spaceUrlPreviewExclusions).values({
+      spaceId: space.id,
+      host: "secure.example.com",
+      pathPrefix: "/private",
+      createdBy: user.id,
+    })
+
+    expect(await isSpaceUrlPreviewExcluded({ spaceId: space.id, url: "https://secure.example.com/private/page" })).toBe(
+      true,
+    )
+    expect(await isSpaceUrlPreviewExcluded({ spaceId: space.id, url: "https://example.com/private/page" })).toBe(false)
+    expect(await isSpaceUrlPreviewExcluded({ spaceId: space.id, url: "https://secure.example.com/public/page" })).toBe(
+      false,
+    )
+
+    let fetchCalls = 0
+    globalThis.fetch = (async () => {
+      fetchCalls += 1
+      throw new Error("network fetch should not run for excluded previews")
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewUrl: "https://secure.example.com/private/page",
+        chatId: chat.id,
+        spaceId: space.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const attachments = await db.select().from(schema.messageAttachments)
+    expect(fetchCalls).toBe(0)
+    expect(attachments).toHaveLength(0)
+  })
+
+  it("adds an exclusion and removes matching previews from the current message", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("URL Preview Cleanup", ["preview-cleanup@example.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create cleanup test fixtures")
+    }
+    await db
+      .update(schema.members)
+      .set({ role: "owner" })
+      .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, user.id)))
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create cleanup test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://private.example.com/dashboard",
+    })
+
+    await upsertPreviewCache({
+      photoId: null,
+      metadata: {
+        url: "https://private.example.com/dashboard",
+        finalUrl: "https://private.example.com/dashboard",
+        siteName: "Private",
+        title: "Dashboard",
+        provider: "generic",
+      },
+    })
+
+    await processUrlPreview({
+      message,
+      previewUrl: "https://private.example.com/dashboard",
+      chatId: chat.id,
+      spaceId: space.id,
+      currentUserId: user.id,
+      inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+    })
+
+    expect(await db.select().from(schema.messageAttachments)).toHaveLength(1)
+
+    const result = await addSpaceUrlPreviewExclusion(
+      {
+        spaceId: BigInt(space.id),
+        host: "private.example.com",
+        peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+        messageId: BigInt(message.messageId),
+      },
+      testUtils.functionContext({ userId: user.id, sessionId: 1 }),
+    )
+
+    if (!result.exclusion) {
+      throw new Error("Expected add exclusion result")
+    }
+    expect(result.exclusion.host).toBe("private.example.com")
+    expect(result.exclusion.createdBy).toBe(BigInt(user.id))
+    expect(result.updates).toHaveLength(1)
+    expect(await db.select().from(schema.messageAttachments)).toHaveLength(0)
   })
 
   it("does not store authenticated Notion previews in the global cache", async () => {

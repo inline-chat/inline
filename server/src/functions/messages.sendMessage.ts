@@ -350,6 +350,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       message: newMessage,
       previewRoutes,
       chatId,
+      spaceId: chat.spaceId,
       currentUserId,
       inputPeer,
     })

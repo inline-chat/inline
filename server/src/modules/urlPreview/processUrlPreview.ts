@@ -37,6 +37,7 @@ import {
   upsertPreviewCache,
 } from "@in/server/modules/urlPreview/cache"
 import { resolvePreviewAuth } from "@in/server/modules/urlPreview/auth"
+import { isSpaceUrlPreviewExcluded } from "@in/server/modules/urlPreview/exclusions"
 import {
   encodeMessageAttachment,
   encodeMessageAttachmentUpdate,
@@ -54,6 +55,7 @@ type ProcessUrlPreviewInput = {
   previewUrl?: string
   previewRoute?: PreviewRoute
   chatId: number
+  spaceId?: number | null
   currentUserId: number
   inputPeer: InputPeer
 }
@@ -155,6 +157,10 @@ export async function processUrlPreviews(
 export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<void> {
   const previewRoute = input.previewRoute ?? (input.previewUrl ? generalPreviewRoute(input.previewUrl) : null)
   if (!previewRoute) {
+    return
+  }
+
+  if (await isSpaceUrlPreviewExcluded({ spaceId: input.spaceId, url: previewRouteUrl(previewRoute) })) {
     return
   }
 

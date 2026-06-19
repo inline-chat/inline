@@ -156,6 +156,9 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case checkUsername // = 62
   case changeUsername // = 63
   case updateProfile // = 64
+  case getSpaceURLPreviewExclusions // = 65
+  case addSpaceURLPreviewExclusion // = 66
+  case removeSpaceURLPreviewExclusion // = 67
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -229,6 +232,9 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 62: self = .checkUsername
     case 63: self = .changeUsername
     case 64: self = .updateProfile
+    case 65: self = .getSpaceURLPreviewExclusions
+    case 66: self = .addSpaceURLPreviewExclusion
+    case 67: self = .removeSpaceURLPreviewExclusion
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -300,6 +306,9 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .checkUsername: return 62
     case .changeUsername: return 63
     case .updateProfile: return 64
+    case .getSpaceURLPreviewExclusions: return 65
+    case .addSpaceURLPreviewExclusion: return 66
+    case .removeSpaceURLPreviewExclusion: return 67
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -371,6 +380,9 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .checkUsername,
     .changeUsername,
     .updateProfile,
+    .getSpaceURLPreviewExclusions,
+    .addSpaceURLPreviewExclusion,
+    .removeSpaceURLPreviewExclusion,
   ]
 
 }
@@ -4157,6 +4169,30 @@ public struct RpcCall: Sendable {
     set {input = .updateProfile(newValue)}
   }
 
+  public var getSpaceURLPreviewExclusions: GetSpaceUrlPreviewExclusionsInput {
+    get {
+      if case .getSpaceURLPreviewExclusions(let v)? = input {return v}
+      return GetSpaceUrlPreviewExclusionsInput()
+    }
+    set {input = .getSpaceURLPreviewExclusions(newValue)}
+  }
+
+  public var addSpaceURLPreviewExclusion: AddSpaceUrlPreviewExclusionInput {
+    get {
+      if case .addSpaceURLPreviewExclusion(let v)? = input {return v}
+      return AddSpaceUrlPreviewExclusionInput()
+    }
+    set {input = .addSpaceURLPreviewExclusion(newValue)}
+  }
+
+  public var removeSpaceURLPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput {
+    get {
+      if case .removeSpaceURLPreviewExclusion(let v)? = input {return v}
+      return RemoveSpaceUrlPreviewExclusionInput()
+    }
+    set {input = .removeSpaceURLPreviewExclusion(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -4224,6 +4260,9 @@ public struct RpcCall: Sendable {
     case checkUsername(CheckUsernameInput)
     case changeUsername(ChangeUsernameInput)
     case updateProfile(UpdateProfileInput)
+    case getSpaceURLPreviewExclusions(GetSpaceUrlPreviewExclusionsInput)
+    case addSpaceURLPreviewExclusion(AddSpaceUrlPreviewExclusionInput)
+    case removeSpaceURLPreviewExclusion(RemoveSpaceUrlPreviewExclusionInput)
 
   }
 
@@ -4751,6 +4790,30 @@ public struct RpcResult: Sendable {
     set {result = .updateProfile(newValue)}
   }
 
+  public var getSpaceURLPreviewExclusions: GetSpaceUrlPreviewExclusionsResult {
+    get {
+      if case .getSpaceURLPreviewExclusions(let v)? = result {return v}
+      return GetSpaceUrlPreviewExclusionsResult()
+    }
+    set {result = .getSpaceURLPreviewExclusions(newValue)}
+  }
+
+  public var addSpaceURLPreviewExclusion: AddSpaceUrlPreviewExclusionResult {
+    get {
+      if case .addSpaceURLPreviewExclusion(let v)? = result {return v}
+      return AddSpaceUrlPreviewExclusionResult()
+    }
+    set {result = .addSpaceURLPreviewExclusion(newValue)}
+  }
+
+  public var removeSpaceURLPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult {
+    get {
+      if case .removeSpaceURLPreviewExclusion(let v)? = result {return v}
+      return RemoveSpaceUrlPreviewExclusionResult()
+    }
+    set {result = .removeSpaceURLPreviewExclusion(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -4818,6 +4881,9 @@ public struct RpcResult: Sendable {
     case checkUsername(CheckUsernameResult)
     case changeUsername(ChangeUsernameResult)
     case updateProfile(UpdateProfileResult)
+    case getSpaceURLPreviewExclusions(GetSpaceUrlPreviewExclusionsResult)
+    case addSpaceURLPreviewExclusion(AddSpaceUrlPreviewExclusionResult)
+    case removeSpaceURLPreviewExclusion(RemoveSpaceUrlPreviewExclusionResult)
 
   }
 
@@ -5112,6 +5178,153 @@ public struct UpdateMemberAccessResult: Sendable {
   // methods supported on all messages.
 
   public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct SpaceUrlPreviewExclusion: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: Int64 = 0
+
+  public var spaceID: Int64 = 0
+
+  public var host: String = String()
+
+  public var pathPrefix: String {
+    get {return _pathPrefix ?? String()}
+    set {_pathPrefix = newValue}
+  }
+  /// Returns true if `pathPrefix` has been explicitly set.
+  public var hasPathPrefix: Bool {return self._pathPrefix != nil}
+  /// Clears the value of `pathPrefix`. Subsequent reads from it will return its default value.
+  public mutating func clearPathPrefix() {self._pathPrefix = nil}
+
+  public var createdBy: Int64 = 0
+
+  public var date: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _pathPrefix: String? = nil
+}
+
+public struct GetSpaceUrlPreviewExclusionsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct GetSpaceUrlPreviewExclusionsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var exclusions: [SpaceUrlPreviewExclusion] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct AddSpaceUrlPreviewExclusionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var host: String = String()
+
+  public var pathPrefix: String {
+    get {return _pathPrefix ?? String()}
+    set {_pathPrefix = newValue}
+  }
+  /// Returns true if `pathPrefix` has been explicitly set.
+  public var hasPathPrefix: Bool {return self._pathPrefix != nil}
+  /// Clears the value of `pathPrefix`. Subsequent reads from it will return its default value.
+  public mutating func clearPathPrefix() {self._pathPrefix = nil}
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var messageID: Int64 {
+    get {return _messageID ?? 0}
+    set {_messageID = newValue}
+  }
+  /// Returns true if `messageID` has been explicitly set.
+  public var hasMessageID: Bool {return self._messageID != nil}
+  /// Clears the value of `messageID`. Subsequent reads from it will return its default value.
+  public mutating func clearMessageID() {self._messageID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _pathPrefix: String? = nil
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _messageID: Int64? = nil
+}
+
+public struct AddSpaceUrlPreviewExclusionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var exclusion: SpaceUrlPreviewExclusion {
+    get {return _exclusion ?? SpaceUrlPreviewExclusion()}
+    set {_exclusion = newValue}
+  }
+  /// Returns true if `exclusion` has been explicitly set.
+  public var hasExclusion: Bool {return self._exclusion != nil}
+  /// Clears the value of `exclusion`. Subsequent reads from it will return its default value.
+  public mutating func clearExclusion() {self._exclusion = nil}
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _exclusion: SpaceUrlPreviewExclusion? = nil
+}
+
+public struct RemoveSpaceUrlPreviewExclusionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var exclusionID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct RemoveSpaceUrlPreviewExclusionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -10377,6 +10590,9 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     62: .same(proto: "CHECK_USERNAME"),
     63: .same(proto: "CHANGE_USERNAME"),
     64: .same(proto: "UPDATE_PROFILE"),
+    65: .same(proto: "GET_SPACE_URL_PREVIEW_EXCLUSIONS"),
+    66: .same(proto: "ADD_SPACE_URL_PREVIEW_EXCLUSION"),
+    67: .same(proto: "REMOVE_SPACE_URL_PREVIEW_EXCLUSION"),
   ]
 }
 
@@ -14724,6 +14940,9 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     63: .same(proto: "checkUsername"),
     64: .same(proto: "changeUsername"),
     65: .same(proto: "updateProfile"),
+    66: .same(proto: "getSpaceUrlPreviewExclusions"),
+    67: .same(proto: "addSpaceUrlPreviewExclusion"),
+    68: .same(proto: "removeSpaceUrlPreviewExclusion"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -15565,6 +15784,45 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updateProfile(v)
         }
       }()
+      case 66: try {
+        var v: GetSpaceUrlPreviewExclusionsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getSpaceURLPreviewExclusions(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getSpaceURLPreviewExclusions(v)
+        }
+      }()
+      case 67: try {
+        var v: AddSpaceUrlPreviewExclusionInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .addSpaceURLPreviewExclusion(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .addSpaceURLPreviewExclusion(v)
+        }
+      }()
+      case 68: try {
+        var v: RemoveSpaceUrlPreviewExclusionInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .removeSpaceURLPreviewExclusion(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .removeSpaceURLPreviewExclusion(v)
+        }
+      }()
       default: break
       }
     }
@@ -15835,6 +16093,18 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updateProfile(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 65)
     }()
+    case .getSpaceURLPreviewExclusions?: try {
+      guard case .getSpaceURLPreviewExclusions(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 66)
+    }()
+    case .addSpaceURLPreviewExclusion?: try {
+      guard case .addSpaceURLPreviewExclusion(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 67)
+    }()
+    case .removeSpaceURLPreviewExclusion?: try {
+      guard case .removeSpaceURLPreviewExclusion(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 68)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -15916,6 +16186,9 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     63: .same(proto: "checkUsername"),
     64: .same(proto: "changeUsername"),
     65: .same(proto: "updateProfile"),
+    66: .same(proto: "getSpaceUrlPreviewExclusions"),
+    67: .same(proto: "addSpaceUrlPreviewExclusion"),
+    68: .same(proto: "removeSpaceUrlPreviewExclusion"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -16757,6 +17030,45 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           self.result = .updateProfile(v)
         }
       }()
+      case 66: try {
+        var v: GetSpaceUrlPreviewExclusionsResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .getSpaceURLPreviewExclusions(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .getSpaceURLPreviewExclusions(v)
+        }
+      }()
+      case 67: try {
+        var v: AddSpaceUrlPreviewExclusionResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .addSpaceURLPreviewExclusion(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .addSpaceURLPreviewExclusion(v)
+        }
+      }()
+      case 68: try {
+        var v: RemoveSpaceUrlPreviewExclusionResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .removeSpaceURLPreviewExclusion(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .removeSpaceURLPreviewExclusion(v)
+        }
+      }()
       default: break
       }
     }
@@ -17026,6 +17338,18 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     case .updateProfile?: try {
       guard case .updateProfile(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 65)
+    }()
+    case .getSpaceURLPreviewExclusions?: try {
+      guard case .getSpaceURLPreviewExclusions(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 66)
+    }()
+    case .addSpaceURLPreviewExclusion?: try {
+      guard case .addSpaceURLPreviewExclusion(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 67)
+    }()
+    case .removeSpaceURLPreviewExclusion?: try {
+      guard case .removeSpaceURLPreviewExclusion(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 68)
     }()
     case nil: break
     }
@@ -17545,6 +17869,295 @@ extension UpdateMemberAccessResult: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
   public static func ==(lhs: UpdateMemberAccessResult, rhs: UpdateMemberAccessResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SpaceUrlPreviewExclusion: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SpaceUrlPreviewExclusion"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "id"),
+    2: .standard(proto: "space_id"),
+    3: .same(proto: "host"),
+    4: .standard(proto: "path_prefix"),
+    5: .standard(proto: "created_by"),
+    6: .same(proto: "date"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.host) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._pathPrefix) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self.createdBy) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    }
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 2)
+    }
+    if !self.host.isEmpty {
+      try visitor.visitSingularStringField(value: self.host, fieldNumber: 3)
+    }
+    try { if let v = self._pathPrefix {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    if self.createdBy != 0 {
+      try visitor.visitSingularInt64Field(value: self.createdBy, fieldNumber: 5)
+    }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SpaceUrlPreviewExclusion, rhs: SpaceUrlPreviewExclusion) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.host != rhs.host {return false}
+    if lhs._pathPrefix != rhs._pathPrefix {return false}
+    if lhs.createdBy != rhs.createdBy {return false}
+    if lhs.date != rhs.date {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetSpaceUrlPreviewExclusionsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpaceUrlPreviewExclusionsInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "space_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpaceUrlPreviewExclusionsInput, rhs: GetSpaceUrlPreviewExclusionsInput) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetSpaceUrlPreviewExclusionsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpaceUrlPreviewExclusionsResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "exclusions"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.exclusions) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.exclusions.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.exclusions, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpaceUrlPreviewExclusionsResult, rhs: GetSpaceUrlPreviewExclusionsResult) -> Bool {
+    if lhs.exclusions != rhs.exclusions {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension AddSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AddSpaceUrlPreviewExclusionInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "space_id"),
+    2: .same(proto: "host"),
+    3: .standard(proto: "path_prefix"),
+    4: .standard(proto: "peer_id"),
+    5: .standard(proto: "message_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.host) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._pathPrefix) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._messageID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    if !self.host.isEmpty {
+      try visitor.visitSingularStringField(value: self.host, fieldNumber: 2)
+    }
+    try { if let v = self._pathPrefix {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._messageID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AddSpaceUrlPreviewExclusionInput, rhs: AddSpaceUrlPreviewExclusionInput) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.host != rhs.host {return false}
+    if lhs._pathPrefix != rhs._pathPrefix {return false}
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs._messageID != rhs._messageID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension AddSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AddSpaceUrlPreviewExclusionResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "exclusion"),
+    2: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._exclusion) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._exclusion {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AddSpaceUrlPreviewExclusionResult, rhs: AddSpaceUrlPreviewExclusionResult) -> Bool {
+    if lhs._exclusion != rhs._exclusion {return false}
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RemoveSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RemoveSpaceUrlPreviewExclusionInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "space_id"),
+    2: .standard(proto: "exclusion_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.exclusionID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    if self.exclusionID != 0 {
+      try visitor.visitSingularInt64Field(value: self.exclusionID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RemoveSpaceUrlPreviewExclusionInput, rhs: RemoveSpaceUrlPreviewExclusionInput) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.exclusionID != rhs.exclusionID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RemoveSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RemoveSpaceUrlPreviewExclusionResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RemoveSpaceUrlPreviewExclusionResult, rhs: RemoveSpaceUrlPreviewExclusionResult) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

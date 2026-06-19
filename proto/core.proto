@@ -936,6 +936,9 @@ enum Method {
   CHECK_USERNAME = 62;
   CHANGE_USERNAME = 63;
   UPDATE_PROFILE = 64;
+  GET_SPACE_URL_PREVIEW_EXCLUSIONS = 65;
+  ADD_SPACE_URL_PREVIEW_EXCLUSION = 66;
+  REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
 }
 
 message RpcCall {
@@ -1005,6 +1008,9 @@ message RpcCall {
     CheckUsernameInput checkUsername = 63;
     ChangeUsernameInput changeUsername = 64;
     UpdateProfileInput updateProfile = 65;
+    GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions = 66;
+    AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion = 67;
+    RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68;
   }
 }
 
@@ -1076,6 +1082,9 @@ message RpcResult {
     CheckUsernameResult checkUsername = 63;
     ChangeUsernameResult changeUsername = 64;
     UpdateProfileResult updateProfile = 65;
+    GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions = 66;
+    AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion = 67;
+    RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
   }
 }
 
@@ -1171,6 +1180,43 @@ message UpdateMemberAccessInput {
 }
 
 message UpdateMemberAccessResult { repeated Update updates = 1; }
+
+message SpaceUrlPreviewExclusion {
+  int64 id = 1;
+  int64 space_id = 2;
+  string host = 3;
+  optional string path_prefix = 4;
+  int64 created_by = 5;
+  int64 date = 6;
+}
+
+message GetSpaceUrlPreviewExclusionsInput {
+  int64 space_id = 1;
+}
+
+message GetSpaceUrlPreviewExclusionsResult {
+  repeated SpaceUrlPreviewExclusion exclusions = 1;
+}
+
+message AddSpaceUrlPreviewExclusionInput {
+  int64 space_id = 1;
+  string host = 2;
+  optional string path_prefix = 3;
+  optional InputPeer peer_id = 4;
+  optional int64 message_id = 5;
+}
+
+message AddSpaceUrlPreviewExclusionResult {
+  SpaceUrlPreviewExclusion exclusion = 1;
+  repeated Update updates = 2;
+}
+
+message RemoveSpaceUrlPreviewExclusionInput {
+  int64 space_id = 1;
+  int64 exclusion_id = 2;
+}
+
+message RemoveSpaceUrlPreviewExclusionResult {}
 
 message GetUpdatesStateInput {
   reserved 1;

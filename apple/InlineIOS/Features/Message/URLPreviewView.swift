@@ -8,6 +8,11 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     case large
   }
 
+  struct NeverShowPreviewAction {
+    let host: String
+    let action: () -> Void
+  }
+
   private enum Metrics {
     static let compactImageSize = CGSize(width: 32, height: 32)
     static let largeImageWidth: CGFloat = 240
@@ -68,6 +73,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
   private var previewUrl: URL?
   private var canRemove = false
   private var onRemove: (() -> Void)?
+  private var neverShowPreviewActionProvider: (() -> NeverShowPreviewAction?)?
   private var activeConstraints: [NSLayoutConstraint] = []
   private var pressed = false
 
@@ -138,12 +144,14 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     mode: Mode = .compact,
     reloadMessageOnFinish message: Message? = nil,
     canRemove: Bool = false,
-    onRemove: (() -> Void)? = nil
+    onRemove: (() -> Void)? = nil,
+    neverShowPreviewActionProvider: (() -> NeverShowPreviewAction?)? = nil
   ) {
     self.parentViewController = parentViewController
     previewUrl = preview.openURL
     self.canRemove = canRemove
     self.onRemove = onRemove
+    self.neverShowPreviewActionProvider = neverShowPreviewActionProvider
 
     resetLayout()
 
@@ -386,6 +394,17 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
       }
 
       var actions: [UIMenuElement] = [openAction, copyAction]
+
+      if let exclusion = self?.neverShowPreviewActionProvider?() {
+        let excludeAction = UIAction(
+          title: "Never Show Previews for \(exclusion.host)",
+          image: UIImage(systemName: "eye.slash")
+        ) { _ in
+          exclusion.action()
+        }
+        actions.append(excludeAction)
+      }
+
       if self?.canRemove == true {
         let removeAction = UIAction(
           title: "Remove",

@@ -14,6 +14,11 @@ import { getSpaceMembers } from "./space.getSpaceMembers"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
 import { updateMemberAccess } from "./space.updateMemberAccess"
+import {
+  addSpaceUrlPreviewExclusion,
+  getSpaceUrlPreviewExclusions,
+  removeSpaceUrlPreviewExclusion,
+} from "./space.urlPreviewExclusions"
 import { getChatParticipants } from "./messages.getChatParticipants"
 import { removeChatParticipant } from "./messages.removeChatParticipant"
 import { addChatParticipant } from "./messages.addChatParticipant"
@@ -90,6 +95,9 @@ export const Functions = {
     inviteToSpace: inviteToSpace,
     deleteMember: deleteMember,
     updateMemberAccess: updateMemberAccess,
+    getUrlPreviewExclusions: getSpaceUrlPreviewExclusions,
+    addUrlPreviewExclusion: addSpaceUrlPreviewExclusion,
+    removeUrlPreviewExclusion: removeSpaceUrlPreviewExclusion,
   },
   user: {
     getUserSettings: getUserSettings,
