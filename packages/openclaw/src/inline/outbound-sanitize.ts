@@ -15,6 +15,7 @@ const OPENCLAW_LEGACY_UNTRUSTED_RESULT_BEGIN = "<<<BEGIN_UNTRUSTED_CHILD_RESULT>
 const OPENCLAW_LEGACY_UNTRUSTED_RESULT_END = "<<<END_UNTRUSTED_CHILD_RESULT>>>"
 export const INLINE_ACTION_LABEL_MAX_LENGTH = 64
 export const INLINE_ACTION_CALLBACK_DATA_MAX_BYTES = 1024
+export const INLINE_ACTION_COPY_TEXT_MAX_LENGTH = 4096
 
 const utf8Encoder = new TextEncoder()
 
@@ -279,5 +280,12 @@ export function sanitizeInlineActionCallbackData(raw: string | null | undefined)
   const text = raw?.trim()
   if (!text) return null
   if (utf8Encoder.encode(text).length > INLINE_ACTION_CALLBACK_DATA_MAX_BYTES) return null
+  return text
+}
+
+export function sanitizeInlineActionCopyText(raw: string | null | undefined): string | null {
+  const text = raw?.trim()
+  if (!text) return null
+  if (text.length > INLINE_ACTION_COPY_TEXT_MAX_LENGTH) return null
   return text
 }

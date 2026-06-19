@@ -53,6 +53,7 @@ export type InlineMessageAttachmentSummary =
   | {
       kind: "urlPreview"
       id: string | null
+      urlPreviewId: string | null
       url: string | null
       siteName: string | null
       title: string | null
@@ -62,6 +63,7 @@ export type InlineMessageAttachmentSummary =
   | {
       kind: "externalTask"
       id: string | null
+      externalTaskId: string | null
       url: string | null
       application: string | null
       title: string | null
@@ -227,7 +229,8 @@ function messageAttachmentSummaries(message: Message): InlineMessageAttachmentSu
       const previewPhoto = preview.photo ? bestPhotoSize(preview.photo).cdnUrl : null
       attachments.push({
         kind: "urlPreview",
-        id: preview.id?.toString() ?? null,
+        id: item.id?.toString() ?? null,
+        urlPreviewId: preview.id?.toString() ?? null,
         url: preview.url ?? null,
         siteName: preview.siteName ?? null,
         title: preview.title ?? null,
@@ -241,7 +244,8 @@ function messageAttachmentSummaries(message: Message): InlineMessageAttachmentSu
       const task = item.attachment.externalTask
       attachments.push({
         kind: "externalTask",
-        id: task.id?.toString() ?? null,
+        id: item.id?.toString() ?? null,
+        externalTaskId: task.id?.toString() ?? null,
         url: task.url ?? null,
         application: task.application ?? null,
         title: task.title ?? null,

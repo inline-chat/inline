@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
   INLINE_ACTION_CALLBACK_DATA_MAX_BYTES,
+  INLINE_ACTION_COPY_TEXT_MAX_LENGTH,
   INLINE_ACTION_LABEL_MAX_LENGTH,
   sanitizeInlineActionCallbackData,
+  sanitizeInlineActionCopyText,
   sanitizeInlineActionLabel,
   sanitizeInlineVisibleLabel,
   sanitizeInlineVisibleText,
@@ -175,5 +177,13 @@ describe("inline/outbound-sanitize", () => {
       "x".repeat(INLINE_ACTION_CALLBACK_DATA_MAX_BYTES),
     )
     expect(sanitizeInlineActionCallbackData("x".repeat(INLINE_ACTION_CALLBACK_DATA_MAX_BYTES + 1))).toBeNull()
+  })
+
+  it("drops copy text that exceeds Inline server limits", () => {
+    expect(sanitizeInlineActionCopyText(" copy me ")).toBe("copy me")
+    expect(sanitizeInlineActionCopyText("x".repeat(INLINE_ACTION_COPY_TEXT_MAX_LENGTH))).toBe(
+      "x".repeat(INLINE_ACTION_COPY_TEXT_MAX_LENGTH),
+    )
+    expect(sanitizeInlineActionCopyText("x".repeat(INLINE_ACTION_COPY_TEXT_MAX_LENGTH + 1))).toBeNull()
   })
 })

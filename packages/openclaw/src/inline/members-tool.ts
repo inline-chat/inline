@@ -1,10 +1,12 @@
 import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
-import { InlineSdkClient } from "@inline-chat/realtime-sdk"
+import { InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { getSpaceMembersWithUsers, type InlineSpaceMemberRecord } from "./space-members.js"
+import { parseCurrentInlineSession } from "./tool-targets.js"
 
 type InlineMembersToolArgs = {
-  spaceId: string
+  spaceId?: string
+  space?: string
   query?: string
   userId?: string
   limit?: number
@@ -22,7 +24,11 @@ const InlineMembersToolParameters = {
   properties: {
     spaceId: {
       type: "string",
-      description: "Inline space id whose members should be listed.",
+      description: "Inline space id whose members should be listed. Optional inside an Inline space chat/reply thread.",
+    },
+    space: {
+      type: "string",
+      description: "Alias for spaceId.",
     },
     query: {
       type: "string",
@@ -41,8 +47,14 @@ const InlineMembersToolParameters = {
       description: "Optional Inline account id override.",
     },
   },
-  required: ["spaceId"],
 } as const
+
+const GET_CHAT_METHOD =
+  typeof (Method as Record<string, unknown>).GET_CHAT === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).GET_CHAT) &&
+  ((Method as Record<string, unknown>).GET_CHAT as number) > 0
+    ? ((Method as Record<string, unknown>).GET_CHAT as Method)
+    : (25 as Method)
 
 function parseRequiredId(raw: string, label: string): bigint {
   const trimmed = raw.trim()
@@ -53,6 +65,11 @@ function parseRequiredId(raw: string, label: string): bigint {
     throw new Error(`inline_members: invalid ${label} "${raw}"`)
   }
   return BigInt(trimmed)
+}
+
+function parseOptionalId(raw: string | undefined, label: string): bigint | undefined {
+  if (raw == null || !raw.trim()) return undefined
+  return parseRequiredId(raw, label)
 }
 
 function resolveLimit(raw: number | undefined): number {
@@ -120,9 +137,100 @@ async function withInlineClient<T>(params: {
   }
 }
 
+function buildChatPeer(chatId: bigint) {
+  return {
+    type: {
+      oneofKind: "chat" as const,
+      chat: { chatId },
+    },
+  }
+}
+
+async function loadChatSpaceId(params: {
+  client: InlineSdkClient
+  chatId: bigint
+}): Promise<bigint | undefined> {
+  const result = await params.client.invokeRaw(GET_CHAT_METHOD, {
+    oneofKind: "getChat",
+    getChat: {
+      peerId: buildChatPeer(params.chatId),
+    },
+  })
+  if (result.oneofKind !== "getChat") {
+    throw new Error(`inline_members: expected getChat result, got ${String(result.oneofKind)}`)
+  }
+  return result.getChat.chat?.spaceId ?? result.getChat.dialog?.spaceId
+}
+
+async function resolveMembersSpaceId(params: {
+  args: InlineMembersToolArgs
+  client: InlineSdkClient
+  ctx: {
+    messageChannel?: string
+    sessionKey?: string
+  }
+}): Promise<{
+  spaceId: bigint
+  inferred: boolean
+  source: "explicit" | "current-chat" | "parent-chat"
+  chatId: string | null
+}> {
+  const explicitSpaceId = parseOptionalId(
+    params.args.spaceId?.trim() ? params.args.spaceId : params.args.space,
+    "spaceId",
+  )
+  if (explicitSpaceId != null) {
+    return {
+      spaceId: explicitSpaceId,
+      inferred: false,
+      source: "explicit",
+      chatId: null,
+    }
+  }
+
+  const session = parseCurrentInlineSession(params.ctx)
+  const peer = session?.target.peerId.type
+  if (peer?.oneofKind !== "chat") {
+    throw new Error("inline_members: spaceId is required outside an Inline space chat or reply thread")
+  }
+
+  const currentChatId = peer.chat.chatId
+  const currentSpaceId = await loadChatSpaceId({
+    client: params.client,
+    chatId: currentChatId,
+  })
+  if (currentSpaceId != null) {
+    return {
+      spaceId: currentSpaceId,
+      inferred: true,
+      source: "current-chat",
+      chatId: String(currentChatId),
+    }
+  }
+
+  if (session?.parentChatId != null && session.parentChatId !== currentChatId) {
+    const parentSpaceId = await loadChatSpaceId({
+      client: params.client,
+      chatId: session.parentChatId,
+    })
+    if (parentSpaceId != null) {
+      return {
+        spaceId: parentSpaceId,
+        inferred: true,
+        source: "parent-chat",
+        chatId: String(session.parentChatId),
+      }
+    }
+  }
+
+  throw new Error("inline_members: current Inline chat is not part of a space; pass spaceId explicitly")
+}
+
 export function createInlineMembersTool(ctx: {
   config?: OpenClawConfig
   agentAccountId?: string
+  sessionKey?: string
+  messageChannel?: string
 }): AnyAgentTool | null {
   if (!ctx.config) {
     return null
@@ -132,11 +240,10 @@ export function createInlineMembersTool(ctx: {
     name: "inline_members",
     label: "Inline Members",
     description:
-      "List or search Inline space members by space id so the agent can identify who to DM or manage.",
+      "List or search Inline space members by space id, or infer the current space when invoked from an Inline space chat/reply thread.",
     parameters: InlineMembersToolParameters,
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as InlineMembersToolArgs
-      const spaceId = parseRequiredId(args.spaceId, "spaceId")
       const userId = args.userId ? parseRequiredId(args.userId, "userId") : undefined
       const limit = resolveLimit(args.limit)
 
@@ -144,9 +251,14 @@ export function createInlineMembersTool(ctx: {
         cfg: ctx.config as OpenClawConfig,
         accountId: args.accountId ?? ctx.agentAccountId ?? null,
         fn: async (client, resolvedAccountId) => {
+          const resolvedSpace = await resolveMembersSpaceId({
+            args,
+            client,
+            ctx,
+          })
           const members = await getSpaceMembersWithUsers({
             client,
-            spaceId,
+            spaceId: resolvedSpace.spaceId,
           })
           const filteredMembers = filterSpaceMembers({
             members,
@@ -158,7 +270,10 @@ export function createInlineMembersTool(ctx: {
           return jsonResult({
             ok: true,
             accountId: resolvedAccountId,
-            spaceId: String(spaceId),
+            spaceId: String(resolvedSpace.spaceId),
+            inferredSpaceId: resolvedSpace.inferred,
+            spaceIdSource: resolvedSpace.source,
+            sourceChatId: resolvedSpace.chatId,
             query: args.query ?? null,
             userId: userId != null ? String(userId) : null,
             count: filteredMembers.length,

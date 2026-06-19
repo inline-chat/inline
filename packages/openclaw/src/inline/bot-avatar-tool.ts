@@ -18,8 +18,22 @@ const ZIP_METHOD_STORE = 0
 const ZIP_METHOD_DEFLATE = 8
 const ZIP_FLAG_ENCRYPTED = 1
 const CODEX_ATLAS_KIND = "codex_atlas"
+const SET_BOT_AVATAR_METHOD =
+  typeof (Method as Record<string, unknown>).SET_BOT_AVATAR === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).SET_BOT_AVATAR) &&
+  ((Method as Record<string, unknown>).SET_BOT_AVATAR as number) > 0
+    ? ((Method as Record<string, unknown>).SET_BOT_AVATAR as Method)
+    : (56 as Method)
+const CLEAR_BOT_AVATAR_METHOD =
+  typeof (Method as Record<string, unknown>).CLEAR_BOT_AVATAR === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).CLEAR_BOT_AVATAR) &&
+  ((Method as Record<string, unknown>).CLEAR_BOT_AVATAR as number) > 0
+    ? ((Method as Record<string, unknown>).CLEAR_BOT_AVATAR as Method)
+    : (57 as Method)
 
 type InlineBotAvatarToolArgs = {
+  action?: string
+  clear?: boolean
   zipPath?: string
   archivePath?: string
   zipUrl?: string
@@ -68,6 +82,15 @@ const InlineBotAvatarToolParameters = {
   type: "object",
   additionalProperties: false,
   properties: {
+    action: {
+      type: "string",
+      enum: ["set", "clear"],
+      description: "Avatar operation. Defaults to `set`; use `clear` to remove the current bot avatar.",
+    },
+    clear: {
+      type: "boolean",
+      description: "Boolean alias for action: clear.",
+    },
     zipPath: {
       type: "string",
       description:
@@ -130,6 +153,27 @@ function resolvePackageSource(args: InlineBotAvatarToolArgs): string {
     throw new Error("inline_bot_avatar: source must be a .zip package")
   }
   return source
+}
+
+function resolveAvatarAction(args: InlineBotAvatarToolArgs): "set" | "clear" {
+  if (args.clear === true) return "clear"
+  const action = readTrimmedString(args.action)?.toLowerCase()
+  if (!action || action === "set" || action === "install" || action === "replace") return "set"
+  if (action === "clear" || action === "remove" || action === "delete") return "clear"
+  throw new Error(`inline_bot_avatar: invalid action "${args.action}"`)
+}
+
+function assertClearArgs(args: InlineBotAvatarToolArgs): void {
+  if (
+    readTrimmedString(args.zipPath) ||
+    readTrimmedString(args.archivePath) ||
+    readTrimmedString(args.zipUrl) ||
+    readTrimmedString(args.source) ||
+    readTrimmedString(args.displayName) ||
+    readTrimmedString(args.description)
+  ) {
+    throw new Error("inline_bot_avatar: clear action must not include avatar package or display metadata")
+  }
 }
 
 function sourceWithoutQuery(raw: string): string {
@@ -398,10 +442,41 @@ export function createInlineBotAvatarTool(ctx: {
     name: "inline_bot_avatar",
     label: "Bot Avatar",
     description:
-      "Upload or replace the authenticated Inline bot's on-screen avatar from a user-provided Codex atlas zip package. Use only when the user explicitly asks to install or change your avatar.",
+      "Install, replace, or clear the authenticated Inline bot's on-screen avatar. Zip package installs require a user-provided Codex atlas package. Use only when the user explicitly asks to manage your avatar.",
     parameters: InlineBotAvatarToolParameters,
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as InlineBotAvatarToolArgs
+      const action = resolveAvatarAction(args)
+      if (action === "clear") {
+        assertClearArgs(args)
+        return await withInlineClient({
+          cfg: ctx.config as OpenClawConfig,
+          accountId: args.accountId ?? ctx.agentAccountId ?? null,
+          fn: async (client, resolvedAccountId) => {
+            const me = await client.getMe()
+            const result = await client.invokeRaw(CLEAR_BOT_AVATAR_METHOD, {
+              oneofKind: "clearBotAvatar",
+              clearBotAvatar: {
+                botUserId: me.userId,
+              },
+            })
+            if (result.oneofKind !== "clearBotAvatar") {
+              throw new Error(`inline_bot_avatar: expected clearBotAvatar result, got ${String(result.oneofKind)}`)
+            }
+
+            return jsonResult({
+              ok: true,
+              action,
+              accountId: resolvedAccountId,
+              botUserId: String(me.userId),
+              cleared: true,
+              avatar: null,
+              bot: result.clearBotAvatar.bot ?? null,
+            })
+          },
+        })
+      }
+
       const source = resolvePackageSource(args)
       const displayName = readVisibleString(args.displayName, "displayName")
       const description = readVisibleString(args.description, "description")
@@ -428,7 +503,7 @@ export function createInlineBotAvatarTool(ctx: {
             throw new Error("inline_bot_avatar: upload did not return fileUniqueId")
           }
 
-          const result = await client.invokeRaw(Method.SET_BOT_AVATAR, {
+          const result = await client.invokeRaw(SET_BOT_AVATAR_METHOD, {
             oneofKind: "setBotAvatar",
             setBotAvatar: {
               botUserId: me.userId,
@@ -444,6 +519,7 @@ export function createInlineBotAvatarTool(ctx: {
 
           return jsonResult({
             ok: true,
+            action,
             accountId: resolvedAccountId,
             botUserId: String(me.userId),
             avatar: {

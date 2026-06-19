@@ -60,6 +60,7 @@ const INLINE_BOT_PRESENCE_KINDS = [
 type InlineBotPresenceKind = (typeof INLINE_BOT_PRESENCE_KINDS)[number]
 
 type InlineBotPresenceToolArgs = {
+  action?: string
   kind?: string
   comment?: string
   to?: string
@@ -177,6 +178,11 @@ const InlineBotPresenceToolParameters = {
   type: "object",
   additionalProperties: false,
   properties: {
+    action: {
+      type: "string",
+      enum: ["set", "get"],
+      description: "Presence operation. Defaults to `set`; use `get` to read the current bot avatar/state for a peer.",
+    },
     kind: {
       type: "string",
       enum: INLINE_BOT_PRESENCE_KINDS,
@@ -211,8 +217,20 @@ const InlineBotPresenceToolParameters = {
       description: "Optional Inline account id override.",
     },
   },
-  required: ["kind"],
 } as const
+
+const GET_BOT_PRESENCE_METHOD =
+  typeof (Method as Record<string, unknown>).GET_BOT_PRESENCE === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).GET_BOT_PRESENCE) &&
+  ((Method as Record<string, unknown>).GET_BOT_PRESENCE as number) > 0
+    ? ((Method as Record<string, unknown>).GET_BOT_PRESENCE as Method)
+    : (58 as Method)
+const SET_BOT_PRESENCE_STATE_METHOD =
+  typeof (Method as Record<string, unknown>).SET_BOT_PRESENCE_STATE === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).SET_BOT_PRESENCE_STATE) &&
+  ((Method as Record<string, unknown>).SET_BOT_PRESENCE_STATE as number) > 0
+    ? ((Method as Record<string, unknown>).SET_BOT_PRESENCE_STATE as Method)
+    : (59 as Method)
 
 function resolvePeerTarget(params: {
   label: string
@@ -316,6 +334,13 @@ function normalizeInlineBotPresenceKind(value: unknown): InlineBotPresenceKind {
   throw new Error(`inline_bot_presence: invalid kind "${value}"`)
 }
 
+function resolveInlineBotPresenceAction(args: InlineBotPresenceToolArgs): "set" | "get" {
+  const action = typeof args.action === "string" ? args.action.trim().toLowerCase() : ""
+  if (!action || action === "set" || action === "update") return "set"
+  if (action === "get" || action === "read" || action === "status") return "get"
+  throw new Error(`inline_bot_presence: invalid action "${args.action}"`)
+}
+
 function botPresenceStateKind(kind: InlineBotPresenceKind): BotPresenceState_Kind {
   switch (kind) {
     case "idle":
@@ -334,6 +359,29 @@ function botPresenceStateKind(kind: InlineBotPresenceKind): BotPresenceState_Kin
       return BotPresenceState_Kind.RUNNING
     case "review":
       return BotPresenceState_Kind.REVIEW
+  }
+}
+
+function botPresenceKindFromState(kind: unknown): InlineBotPresenceKind | null {
+  switch (kind) {
+    case BotPresenceState_Kind.IDLE:
+      return "idle"
+    case BotPresenceState_Kind.HAPPY:
+      return "happy"
+    case BotPresenceState_Kind.WAVING:
+      return "waving"
+    case BotPresenceState_Kind.JUMPING:
+      return "jumping"
+    case BotPresenceState_Kind.FAILED:
+      return "failed"
+    case BotPresenceState_Kind.WAITING:
+      return "waiting"
+    case BotPresenceState_Kind.RUNNING:
+      return "running"
+    case BotPresenceState_Kind.REVIEW:
+      return "review"
+    default:
+      return null
   }
 }
 
@@ -440,6 +488,7 @@ function createInlineBotPresenceTool(ctx: InlineMessageToolContext): AnyAgentToo
       }
 
       const args = rawArgs as InlineBotPresenceToolArgs
+      const action = resolveInlineBotPresenceAction(args)
       const fallbackTarget = parseCurrentInlineTarget(ctx)
       const { target, usedFallback } = resolvePeerTarget({
         label: "target",
@@ -448,6 +497,38 @@ function createInlineBotPresenceTool(ctx: InlineMessageToolContext): AnyAgentToo
         userId: args.userId,
         fallback: fallbackTarget,
       })
+      if (action === "get") {
+        return await withInlineClient({
+          cfg: ctx.config,
+          accountId: args.accountId ?? ctx.agentAccountId ?? null,
+          fn: async (client, resolvedAccountId) => {
+            const result = await client.invokeRaw(GET_BOT_PRESENCE_METHOD, {
+              oneofKind: "getBotPresence",
+              getBotPresence: {
+                peerId: target.peerId,
+              },
+            })
+            if (result.oneofKind !== "getBotPresence") {
+              throw new Error(`inline_bot_presence: expected getBotPresence result, got ${String(result.oneofKind)}`)
+            }
+            const state = result.getBotPresence.state ?? null
+            return jsonResult({
+              ok: true,
+              action,
+              accountId: resolvedAccountId,
+              target: target.normalized,
+              usedCurrentChatDefault: usedFallback,
+              botUserId: result.getBotPresence.botUserId != null ? String(result.getBotPresence.botUserId) : null,
+              avatar: result.getBotPresence.avatar ?? null,
+              state,
+              kind: state ? botPresenceKindFromState(state.kind) : null,
+              comment: typeof state?.comment === "string" ? state.comment : null,
+              peerId: result.getBotPresence.peerId ?? null,
+            })
+          },
+        })
+      }
+
       const kind = normalizeInlineBotPresenceKind(args.kind)
       const comment = normalizeInlineBotPresenceComment(args.comment)
 
@@ -455,7 +536,7 @@ function createInlineBotPresenceTool(ctx: InlineMessageToolContext): AnyAgentToo
         cfg: ctx.config,
         accountId: args.accountId ?? ctx.agentAccountId ?? null,
         fn: async (client, resolvedAccountId) => {
-          await client.invokeRaw(Method.SET_BOT_PRESENCE_STATE, {
+          await client.invokeRaw(SET_BOT_PRESENCE_STATE_METHOD, {
             oneofKind: "setBotPresenceState",
             setBotPresenceState: {
               peerId: target.peerId,
@@ -468,6 +549,7 @@ function createInlineBotPresenceTool(ctx: InlineMessageToolContext): AnyAgentToo
 
           return jsonResult({
             ok: true,
+            action,
             accountId: resolvedAccountId,
             target: target.normalized,
             usedCurrentChatDefault: usedFallback,

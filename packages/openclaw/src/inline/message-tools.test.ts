@@ -404,6 +404,114 @@ describe("inline/message-tools", () => {
     expect(close).toHaveBeenCalled()
   })
 
+  it("reads bot presence for the current Inline chat", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
+      if (method !== 58) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "getBotPresence",
+        getBotPresence: {
+          botUserId: 42n,
+          avatar: {
+            id: "avatar-1",
+            displayName: "Inline Bot",
+          },
+          state: {
+            kind: 8,
+            comment: "working",
+          },
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 77n },
+            },
+          },
+        },
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          GET_BOT_PRESENCE: 58,
+        },
+        BotPresenceState_Kind: {
+          IDLE: 2,
+          HAPPY: 3,
+          WAVING: 4,
+          JUMPING: 5,
+          FAILED: 6,
+          WAITING: 7,
+          RUNNING: 8,
+          REVIEW: 9,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_bot_presence")
+    const result = await tool?.execute("tool-presence-get", {
+      action: "get",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        action: "get",
+        target: "77",
+        usedCurrentChatDefault: true,
+        botUserId: "42",
+        kind: "running",
+        comment: "working",
+        avatar: {
+          id: "avatar-1",
+          displayName: "Inline Bot",
+        },
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(58, {
+      oneofKind: "getBotPresence",
+      getBotPresence: {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: 77n },
+          },
+        },
+      },
+    })
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
   it("forwards messages from an explicit source and defaults destination/account aliases correctly", async () => {
     vi.resetModules()
 
