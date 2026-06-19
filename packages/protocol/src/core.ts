@@ -487,6 +487,10 @@ export interface User {
      * @generated from protobuf field: optional BotAvatar bot_avatar = 14;
      */
     botAvatar?: BotAvatar;
+    /**
+     * @generated from protobuf field: optional string bio = 15;
+     */
+    bio?: string;
 }
 /**
  * @generated from protobuf message UserProfilePhoto
@@ -2162,7 +2166,19 @@ export enum RpcError_Code {
     /**
      * @generated from protobuf enum value: SPACE_OWNER_REQUIRED = 14;
      */
-    SPACE_OWNER_REQUIRED = 14
+    SPACE_OWNER_REQUIRED = 14,
+    /**
+     * @generated from protobuf enum value: USERNAME_INVALID = 15;
+     */
+    USERNAME_INVALID = 15,
+    /**
+     * @generated from protobuf enum value: USERNAME_TAKEN = 16;
+     */
+    USERNAME_TAKEN = 16,
+    /**
+     * @generated from protobuf enum value: FIRST_NAME_INVALID = 17;
+     */
+    FIRST_NAME_INVALID = 17
 }
 /**
  * @generated from protobuf message RpcCall
@@ -2535,6 +2551,30 @@ export interface RpcCall {
          * @generated from protobuf field: UpdateDialogFollowModeInput updateDialogFollowMode = 61;
          */
         updateDialogFollowMode: UpdateDialogFollowModeInput;
+    } | {
+        oneofKind: "getSessions";
+        /**
+         * @generated from protobuf field: GetSessionsInput getSessions = 62;
+         */
+        getSessions: GetSessionsInput;
+    } | {
+        oneofKind: "checkUsername";
+        /**
+         * @generated from protobuf field: CheckUsernameInput checkUsername = 63;
+         */
+        checkUsername: CheckUsernameInput;
+    } | {
+        oneofKind: "changeUsername";
+        /**
+         * @generated from protobuf field: ChangeUsernameInput changeUsername = 64;
+         */
+        changeUsername: ChangeUsernameInput;
+    } | {
+        oneofKind: "updateProfile";
+        /**
+         * @generated from protobuf field: UpdateProfileInput updateProfile = 65;
+         */
+        updateProfile: UpdateProfileInput;
     } | {
         oneofKind: undefined;
     };
@@ -2910,6 +2950,30 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateDialogFollowModeResult updateDialogFollowMode = 61;
          */
         updateDialogFollowMode: UpdateDialogFollowModeResult;
+    } | {
+        oneofKind: "getSessions";
+        /**
+         * @generated from protobuf field: GetSessionsResult getSessions = 62;
+         */
+        getSessions: GetSessionsResult;
+    } | {
+        oneofKind: "checkUsername";
+        /**
+         * @generated from protobuf field: CheckUsernameResult checkUsername = 63;
+         */
+        checkUsername: CheckUsernameResult;
+    } | {
+        oneofKind: "changeUsername";
+        /**
+         * @generated from protobuf field: ChangeUsernameResult changeUsername = 64;
+         */
+        changeUsername: ChangeUsernameResult;
+    } | {
+        oneofKind: "updateProfile";
+        /**
+         * @generated from protobuf field: UpdateProfileResult updateProfile = 65;
+         */
+        updateProfile: UpdateProfileResult;
     } | {
         oneofKind: undefined;
     };
@@ -3523,6 +3587,147 @@ export interface RevokeSessionResult {
      * @generated from protobuf field: bool already_revoked = 2;
      */
     alreadyRevoked: boolean;
+}
+/**
+ * @generated from protobuf message GetSessionsInput
+ */
+export interface GetSessionsInput {
+}
+/**
+ * @generated from protobuf message AccountSession
+ */
+export interface AccountSession {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: string client_type = 2;
+     */
+    clientType: string;
+    /**
+     * @generated from protobuf field: optional string client_version = 3;
+     */
+    clientVersion?: string;
+    /**
+     * @generated from protobuf field: optional string os_version = 4;
+     */
+    osVersion?: string;
+    /**
+     * @generated from protobuf field: optional string device_name = 5;
+     */
+    deviceName?: string;
+    /**
+     * @generated from protobuf field: optional string city = 6;
+     */
+    city?: string;
+    /**
+     * @generated from protobuf field: optional string country = 7;
+     */
+    country?: string;
+    /**
+     * @generated from protobuf field: optional string timezone = 8;
+     */
+    timezone?: string;
+    /**
+     * @generated from protobuf field: int64 created_at = 9;
+     */
+    createdAt: bigint;
+    /**
+     * @generated from protobuf field: int64 last_active_at = 10;
+     */
+    lastActiveAt: bigint;
+    /**
+     * @generated from protobuf field: bool active = 11;
+     */
+    active: boolean;
+    /**
+     * @generated from protobuf field: bool current = 12;
+     */
+    current: boolean;
+}
+/**
+ * @generated from protobuf message GetSessionsResult
+ */
+export interface GetSessionsResult {
+    /**
+     * @generated from protobuf field: repeated AccountSession sessions = 1;
+     */
+    sessions: AccountSession[];
+}
+/**
+ * @generated from protobuf message CheckUsernameInput
+ */
+export interface CheckUsernameInput {
+    /**
+     * @generated from protobuf field: string username = 1;
+     */
+    username: string;
+}
+/**
+ * @generated from protobuf message CheckUsernameResult
+ */
+export interface CheckUsernameResult {
+    /**
+     * @generated from protobuf field: string username = 1;
+     */
+    username: string;
+    /**
+     * @generated from protobuf field: UsernameAvailability availability = 2;
+     */
+    availability: UsernameAvailability;
+}
+/**
+ * @generated from protobuf message ChangeUsernameInput
+ */
+export interface ChangeUsernameInput {
+    /**
+     * @generated from protobuf field: string username = 1;
+     */
+    username: string;
+}
+/**
+ * @generated from protobuf message ChangeUsernameResult
+ */
+export interface ChangeUsernameResult {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+    /**
+     * @generated from protobuf field: repeated Update updates = 2;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message UpdateProfileInput
+ */
+export interface UpdateProfileInput {
+    /**
+     * @generated from protobuf field: optional string first_name = 1;
+     */
+    firstName?: string;
+    /**
+     * @generated from protobuf field: optional string last_name = 2;
+     */
+    lastName?: string;
+    /**
+     * @generated from protobuf field: optional string bio = 3;
+     */
+    bio?: string;
+}
+/**
+ * @generated from protobuf message UpdateProfileResult
+ */
+export interface UpdateProfileResult {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+    /**
+     * @generated from protobuf field: repeated Update updates = 2;
+     */
+    updates: Update[];
 }
 /**
  * @generated from protobuf message BotCommand
@@ -5173,6 +5378,12 @@ export interface Update {
          */
         dialogFollowMode: UpdateDialogFollowMode;
     } | {
+        oneofKind: "updatedUser";
+        /**
+         * @generated from protobuf field: UpdateUpdatedUser updated_user = 40;
+         */
+        updatedUser: UpdateUpdatedUser;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5355,6 +5566,17 @@ export interface UpdateUserSettings {
      * @generated from protobuf field: UserSettings settings = 1;
      */
     settings?: UserSettings;
+}
+/**
+ * Update when a user's profile/account fields change.
+ *
+ * @generated from protobuf message UpdateUpdatedUser
+ */
+export interface UpdateUpdatedUser {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
 }
 /**
  * Update when a new space member is added
@@ -6524,7 +6746,52 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_DIALOG_FOLLOW_MODE = 60;
      */
-    UPDATE_DIALOG_FOLLOW_MODE = 60
+    UPDATE_DIALOG_FOLLOW_MODE = 60,
+    /**
+     * @generated from protobuf enum value: GET_SESSIONS = 61;
+     */
+    GET_SESSIONS = 61,
+    /**
+     * @generated from protobuf enum value: CHECK_USERNAME = 62;
+     */
+    CHECK_USERNAME = 62,
+    /**
+     * @generated from protobuf enum value: CHANGE_USERNAME = 63;
+     */
+    CHANGE_USERNAME = 63,
+    /**
+     * @generated from protobuf enum value: UPDATE_PROFILE = 64;
+     */
+    UPDATE_PROFILE = 64
+}
+/**
+ * @generated from protobuf enum UsernameAvailability
+ */
+export enum UsernameAvailability {
+    /**
+     * @generated from protobuf enum value: USERNAME_AVAILABILITY_UNSPECIFIED = 0;
+     */
+    USERNAME_AVAILABILITY_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: USERNAME_AVAILABLE = 1;
+     */
+    USERNAME_AVAILABLE = 1,
+    /**
+     * @generated from protobuf enum value: USERNAME_CURRENT = 2;
+     */
+    USERNAME_CURRENT = 2,
+    /**
+     * @generated from protobuf enum value: USERNAME_TAKEN = 3;
+     */
+    USERNAME_TAKEN = 3,
+    /**
+     * @generated from protobuf enum value: USERNAME_RESERVED = 4;
+     */
+    USERNAME_RESERVED = 4,
+    /**
+     * @generated from protobuf enum value: USERNAME_INVALID = 5;
+     */
+    USERNAME_INVALID = 5
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -7685,7 +7952,8 @@ class User$Type extends MessageType<User> {
             { no: 11, name: "pending_setup", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 12, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 13, name: "bot", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 14, name: "bot_avatar", kind: "message", T: () => BotAvatar }
+            { no: 14, name: "bot_avatar", kind: "message", T: () => BotAvatar },
+            { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -7739,6 +8007,9 @@ class User$Type extends MessageType<User> {
                 case /* optional BotAvatar bot_avatar */ 14:
                     message.botAvatar = BotAvatar.internalBinaryRead(reader, reader.uint32(), options, message.botAvatar);
                     break;
+                case /* optional string bio */ 15:
+                    message.bio = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7790,6 +8061,9 @@ class User$Type extends MessageType<User> {
         /* optional BotAvatar bot_avatar = 14; */
         if (message.botAvatar)
             BotAvatar.internalBinaryWrite(message.botAvatar, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
+        /* optional string bio = 15; */
+        if (message.bio !== undefined)
+            writer.tag(15, WireType.LengthDelimited).string(message.bio);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11306,7 +11580,11 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 58, name: "clearBotAvatar", kind: "message", oneof: "input", T: () => ClearBotAvatarInput },
             { no: 59, name: "getBotPresence", kind: "message", oneof: "input", T: () => GetBotPresenceInput },
             { no: 60, name: "setBotPresenceState", kind: "message", oneof: "input", T: () => SetBotPresenceStateInput },
-            { no: 61, name: "updateDialogFollowMode", kind: "message", oneof: "input", T: () => UpdateDialogFollowModeInput }
+            { no: 61, name: "updateDialogFollowMode", kind: "message", oneof: "input", T: () => UpdateDialogFollowModeInput },
+            { no: 62, name: "getSessions", kind: "message", oneof: "input", T: () => GetSessionsInput },
+            { no: 63, name: "checkUsername", kind: "message", oneof: "input", T: () => CheckUsernameInput },
+            { no: 64, name: "changeUsername", kind: "message", oneof: "input", T: () => ChangeUsernameInput },
+            { no: 65, name: "updateProfile", kind: "message", oneof: "input", T: () => UpdateProfileInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -11685,6 +11963,30 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateDialogFollowMode: UpdateDialogFollowModeInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogFollowMode)
                     };
                     break;
+                case /* GetSessionsInput getSessions */ 62:
+                    message.input = {
+                        oneofKind: "getSessions",
+                        getSessions: GetSessionsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSessions)
+                    };
+                    break;
+                case /* CheckUsernameInput checkUsername */ 63:
+                    message.input = {
+                        oneofKind: "checkUsername",
+                        checkUsername: CheckUsernameInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).checkUsername)
+                    };
+                    break;
+                case /* ChangeUsernameInput changeUsername */ 64:
+                    message.input = {
+                        oneofKind: "changeUsername",
+                        changeUsername: ChangeUsernameInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).changeUsername)
+                    };
+                    break;
+                case /* UpdateProfileInput updateProfile */ 65:
+                    message.input = {
+                        oneofKind: "updateProfile",
+                        updateProfile: UpdateProfileInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateProfile)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11880,6 +12182,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateDialogFollowModeInput updateDialogFollowMode = 61; */
         if (message.input.oneofKind === "updateDialogFollowMode")
             UpdateDialogFollowModeInput.internalBinaryWrite(message.input.updateDialogFollowMode, writer.tag(61, WireType.LengthDelimited).fork(), options).join();
+        /* GetSessionsInput getSessions = 62; */
+        if (message.input.oneofKind === "getSessions")
+            GetSessionsInput.internalBinaryWrite(message.input.getSessions, writer.tag(62, WireType.LengthDelimited).fork(), options).join();
+        /* CheckUsernameInput checkUsername = 63; */
+        if (message.input.oneofKind === "checkUsername")
+            CheckUsernameInput.internalBinaryWrite(message.input.checkUsername, writer.tag(63, WireType.LengthDelimited).fork(), options).join();
+        /* ChangeUsernameInput changeUsername = 64; */
+        if (message.input.oneofKind === "changeUsername")
+            ChangeUsernameInput.internalBinaryWrite(message.input.changeUsername, writer.tag(64, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateProfileInput updateProfile = 65; */
+        if (message.input.oneofKind === "updateProfile")
+            UpdateProfileInput.internalBinaryWrite(message.input.updateProfile, writer.tag(65, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11954,7 +12268,11 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 58, name: "clearBotAvatar", kind: "message", oneof: "result", T: () => ClearBotAvatarResult },
             { no: 59, name: "getBotPresence", kind: "message", oneof: "result", T: () => GetBotPresenceResult },
             { no: 60, name: "setBotPresenceState", kind: "message", oneof: "result", T: () => SetBotPresenceStateResult },
-            { no: 61, name: "updateDialogFollowMode", kind: "message", oneof: "result", T: () => UpdateDialogFollowModeResult }
+            { no: 61, name: "updateDialogFollowMode", kind: "message", oneof: "result", T: () => UpdateDialogFollowModeResult },
+            { no: 62, name: "getSessions", kind: "message", oneof: "result", T: () => GetSessionsResult },
+            { no: 63, name: "checkUsername", kind: "message", oneof: "result", T: () => CheckUsernameResult },
+            { no: 64, name: "changeUsername", kind: "message", oneof: "result", T: () => ChangeUsernameResult },
+            { no: 65, name: "updateProfile", kind: "message", oneof: "result", T: () => UpdateProfileResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -12333,6 +12651,30 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateDialogFollowMode: UpdateDialogFollowModeResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogFollowMode)
                     };
                     break;
+                case /* GetSessionsResult getSessions */ 62:
+                    message.result = {
+                        oneofKind: "getSessions",
+                        getSessions: GetSessionsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSessions)
+                    };
+                    break;
+                case /* CheckUsernameResult checkUsername */ 63:
+                    message.result = {
+                        oneofKind: "checkUsername",
+                        checkUsername: CheckUsernameResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).checkUsername)
+                    };
+                    break;
+                case /* ChangeUsernameResult changeUsername */ 64:
+                    message.result = {
+                        oneofKind: "changeUsername",
+                        changeUsername: ChangeUsernameResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).changeUsername)
+                    };
+                    break;
+                case /* UpdateProfileResult updateProfile */ 65:
+                    message.result = {
+                        oneofKind: "updateProfile",
+                        updateProfile: UpdateProfileResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateProfile)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12528,6 +12870,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateDialogFollowModeResult updateDialogFollowMode = 61; */
         if (message.result.oneofKind === "updateDialogFollowMode")
             UpdateDialogFollowModeResult.internalBinaryWrite(message.result.updateDialogFollowMode, writer.tag(61, WireType.LengthDelimited).fork(), options).join();
+        /* GetSessionsResult getSessions = 62; */
+        if (message.result.oneofKind === "getSessions")
+            GetSessionsResult.internalBinaryWrite(message.result.getSessions, writer.tag(62, WireType.LengthDelimited).fork(), options).join();
+        /* CheckUsernameResult checkUsername = 63; */
+        if (message.result.oneofKind === "checkUsername")
+            CheckUsernameResult.internalBinaryWrite(message.result.checkUsername, writer.tag(63, WireType.LengthDelimited).fork(), options).join();
+        /* ChangeUsernameResult changeUsername = 64; */
+        if (message.result.oneofKind === "changeUsername")
+            ChangeUsernameResult.internalBinaryWrite(message.result.changeUsername, writer.tag(64, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateProfileResult updateProfile = 65; */
+        if (message.result.oneofKind === "updateProfile")
+            UpdateProfileResult.internalBinaryWrite(message.result.updateProfile, writer.tag(65, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14527,6 +14881,524 @@ class RevokeSessionResult$Type extends MessageType<RevokeSessionResult> {
  * @generated MessageType for protobuf message RevokeSessionResult
  */
 export const RevokeSessionResult = new RevokeSessionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSessionsInput$Type extends MessageType<GetSessionsInput> {
+    constructor() {
+        super("GetSessionsInput", []);
+    }
+    create(value?: PartialMessage<GetSessionsInput>): GetSessionsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetSessionsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSessionsInput): GetSessionsInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: GetSessionsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSessionsInput
+ */
+export const GetSessionsInput = new GetSessionsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AccountSession$Type extends MessageType<AccountSession> {
+    constructor() {
+        super("AccountSession", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "client_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "client_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "os_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "device_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "city", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "country", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "timezone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "created_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 10, name: "last_active_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 11, name: "active", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 12, name: "current", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AccountSession>): AccountSession {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.clientType = "";
+        message.createdAt = 0n;
+        message.lastActiveAt = 0n;
+        message.active = false;
+        message.current = false;
+        if (value !== undefined)
+            reflectionMergePartial<AccountSession>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AccountSession): AccountSession {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* string client_type */ 2:
+                    message.clientType = reader.string();
+                    break;
+                case /* optional string client_version */ 3:
+                    message.clientVersion = reader.string();
+                    break;
+                case /* optional string os_version */ 4:
+                    message.osVersion = reader.string();
+                    break;
+                case /* optional string device_name */ 5:
+                    message.deviceName = reader.string();
+                    break;
+                case /* optional string city */ 6:
+                    message.city = reader.string();
+                    break;
+                case /* optional string country */ 7:
+                    message.country = reader.string();
+                    break;
+                case /* optional string timezone */ 8:
+                    message.timezone = reader.string();
+                    break;
+                case /* int64 created_at */ 9:
+                    message.createdAt = reader.int64().toBigInt();
+                    break;
+                case /* int64 last_active_at */ 10:
+                    message.lastActiveAt = reader.int64().toBigInt();
+                    break;
+                case /* bool active */ 11:
+                    message.active = reader.bool();
+                    break;
+                case /* bool current */ 12:
+                    message.current = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AccountSession, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* string client_type = 2; */
+        if (message.clientType !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.clientType);
+        /* optional string client_version = 3; */
+        if (message.clientVersion !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.clientVersion);
+        /* optional string os_version = 4; */
+        if (message.osVersion !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.osVersion);
+        /* optional string device_name = 5; */
+        if (message.deviceName !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.deviceName);
+        /* optional string city = 6; */
+        if (message.city !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.city);
+        /* optional string country = 7; */
+        if (message.country !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.country);
+        /* optional string timezone = 8; */
+        if (message.timezone !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.timezone);
+        /* int64 created_at = 9; */
+        if (message.createdAt !== 0n)
+            writer.tag(9, WireType.Varint).int64(message.createdAt);
+        /* int64 last_active_at = 10; */
+        if (message.lastActiveAt !== 0n)
+            writer.tag(10, WireType.Varint).int64(message.lastActiveAt);
+        /* bool active = 11; */
+        if (message.active !== false)
+            writer.tag(11, WireType.Varint).bool(message.active);
+        /* bool current = 12; */
+        if (message.current !== false)
+            writer.tag(12, WireType.Varint).bool(message.current);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AccountSession
+ */
+export const AccountSession = new AccountSession$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSessionsResult$Type extends MessageType<GetSessionsResult> {
+    constructor() {
+        super("GetSessionsResult", [
+            { no: 1, name: "sessions", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AccountSession }
+        ]);
+    }
+    create(value?: PartialMessage<GetSessionsResult>): GetSessionsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.sessions = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetSessionsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSessionsResult): GetSessionsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated AccountSession sessions */ 1:
+                    message.sessions.push(AccountSession.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSessionsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated AccountSession sessions = 1; */
+        for (let i = 0; i < message.sessions.length; i++)
+            AccountSession.internalBinaryWrite(message.sessions[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSessionsResult
+ */
+export const GetSessionsResult = new GetSessionsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CheckUsernameInput$Type extends MessageType<CheckUsernameInput> {
+    constructor() {
+        super("CheckUsernameInput", [
+            { no: 1, name: "username", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CheckUsernameInput>): CheckUsernameInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.username = "";
+        if (value !== undefined)
+            reflectionMergePartial<CheckUsernameInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CheckUsernameInput): CheckUsernameInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string username */ 1:
+                    message.username = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CheckUsernameInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string username = 1; */
+        if (message.username !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.username);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CheckUsernameInput
+ */
+export const CheckUsernameInput = new CheckUsernameInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CheckUsernameResult$Type extends MessageType<CheckUsernameResult> {
+    constructor() {
+        super("CheckUsernameResult", [
+            { no: 1, name: "username", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "availability", kind: "enum", T: () => ["UsernameAvailability", UsernameAvailability] }
+        ]);
+    }
+    create(value?: PartialMessage<CheckUsernameResult>): CheckUsernameResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.username = "";
+        message.availability = 0;
+        if (value !== undefined)
+            reflectionMergePartial<CheckUsernameResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CheckUsernameResult): CheckUsernameResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string username */ 1:
+                    message.username = reader.string();
+                    break;
+                case /* UsernameAvailability availability */ 2:
+                    message.availability = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CheckUsernameResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string username = 1; */
+        if (message.username !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.username);
+        /* UsernameAvailability availability = 2; */
+        if (message.availability !== 0)
+            writer.tag(2, WireType.Varint).int32(message.availability);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CheckUsernameResult
+ */
+export const CheckUsernameResult = new CheckUsernameResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChangeUsernameInput$Type extends MessageType<ChangeUsernameInput> {
+    constructor() {
+        super("ChangeUsernameInput", [
+            { no: 1, name: "username", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChangeUsernameInput>): ChangeUsernameInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.username = "";
+        if (value !== undefined)
+            reflectionMergePartial<ChangeUsernameInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChangeUsernameInput): ChangeUsernameInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string username */ 1:
+                    message.username = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChangeUsernameInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string username = 1; */
+        if (message.username !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.username);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChangeUsernameInput
+ */
+export const ChangeUsernameInput = new ChangeUsernameInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChangeUsernameResult$Type extends MessageType<ChangeUsernameResult> {
+    constructor() {
+        super("ChangeUsernameResult", [
+            { no: 1, name: "user", kind: "message", T: () => User },
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<ChangeUsernameResult>): ChangeUsernameResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<ChangeUsernameResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChangeUsernameResult): ChangeUsernameResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* repeated Update updates */ 2:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChangeUsernameResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Update updates = 2; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChangeUsernameResult
+ */
+export const ChangeUsernameResult = new ChangeUsernameResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateProfileInput$Type extends MessageType<UpdateProfileInput> {
+    constructor() {
+        super("UpdateProfileInput", [
+            { no: 1, name: "first_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "last_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateProfileInput>): UpdateProfileInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateProfileInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateProfileInput): UpdateProfileInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string first_name */ 1:
+                    message.firstName = reader.string();
+                    break;
+                case /* optional string last_name */ 2:
+                    message.lastName = reader.string();
+                    break;
+                case /* optional string bio */ 3:
+                    message.bio = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateProfileInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string first_name = 1; */
+        if (message.firstName !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.firstName);
+        /* optional string last_name = 2; */
+        if (message.lastName !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.lastName);
+        /* optional string bio = 3; */
+        if (message.bio !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.bio);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateProfileInput
+ */
+export const UpdateProfileInput = new UpdateProfileInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateProfileResult$Type extends MessageType<UpdateProfileResult> {
+    constructor() {
+        super("UpdateProfileResult", [
+            { no: 1, name: "user", kind: "message", T: () => User },
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateProfileResult>): UpdateProfileResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateProfileResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateProfileResult): UpdateProfileResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* repeated Update updates */ 2:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateProfileResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Update updates = 2; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateProfileResult
+ */
+export const UpdateProfileResult = new UpdateProfileResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class BotCommand$Type extends MessageType<BotCommand> {
     constructor() {
@@ -19103,7 +19975,8 @@ class Update$Type extends MessageType<Update> {
             { no: 36, name: "message_action_answered", kind: "message", oneof: "update", T: () => UpdateMessageActionAnswered },
             { no: 37, name: "clear_chat_history", kind: "message", oneof: "update", T: () => UpdateClearChatHistory },
             { no: 38, name: "bot_presence", kind: "message", oneof: "update", T: () => UpdateBotPresence },
-            { no: 39, name: "dialog_follow_mode", kind: "message", oneof: "update", T: () => UpdateDialogFollowMode }
+            { no: 39, name: "dialog_follow_mode", kind: "message", oneof: "update", T: () => UpdateDialogFollowMode },
+            { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -19340,6 +20213,12 @@ class Update$Type extends MessageType<Update> {
                         dialogFollowMode: UpdateDialogFollowMode.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogFollowMode)
                     };
                     break;
+                case /* UpdateUpdatedUser updated_user */ 40:
+                    message.update = {
+                        oneofKind: "updatedUser",
+                        updatedUser: UpdateUpdatedUser.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).updatedUser)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19466,6 +20345,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateDialogFollowMode dialog_follow_mode = 39; */
         if (message.update.oneofKind === "dialogFollowMode")
             UpdateDialogFollowMode.internalBinaryWrite(message.update.dialogFollowMode, writer.tag(39, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUpdatedUser updated_user = 40; */
+        if (message.update.oneofKind === "updatedUser")
+            UpdateUpdatedUser.internalBinaryWrite(message.update.updatedUser, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -19985,6 +20867,52 @@ class UpdateUserSettings$Type extends MessageType<UpdateUserSettings> {
  * @generated MessageType for protobuf message UpdateUserSettings
  */
 export const UpdateUserSettings = new UpdateUserSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateUpdatedUser$Type extends MessageType<UpdateUpdatedUser> {
+    constructor() {
+        super("UpdateUpdatedUser", [
+            { no: 1, name: "user", kind: "message", T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateUpdatedUser>): UpdateUpdatedUser {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateUpdatedUser>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateUpdatedUser): UpdateUpdatedUser {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateUpdatedUser, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateUpdatedUser
+ */
+export const UpdateUpdatedUser = new UpdateUpdatedUser$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateSpaceMemberAdd$Type extends MessageType<UpdateSpaceMemberAdd> {
     constructor() {

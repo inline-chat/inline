@@ -856,6 +856,55 @@ describe("getUpdates", () => {
     )
   })
 
+  test("inflates updatedUser in user bucket", async () => {
+    const user = await testUtils.createUser("updated-user@sync.com")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "updatedUser",
+        updatedUser: {
+          user: {
+            id: BigInt(user.id),
+            firstName: "Updated",
+            lastName: "User",
+            username: "updateduser",
+            bio: "Profile bio",
+          },
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 0,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.final).toBe(true)
+    expect(Number(result.seq)).toBe(1)
+    expect(result.updates).toHaveLength(1)
+    const first = result.updates[0]
+    expect(first).toBeDefined()
+    if (!first) throw new Error("Missing first update")
+    expect(first.update.oneofKind).toBe("updatedUser")
+    if (first.update.oneofKind !== "updatedUser") throw new Error("Unexpected update type")
+    const updatedUser = first.update.updatedUser.user
+    expect(updatedUser).toBeDefined()
+    if (!updatedUser) throw new Error("Expected updated user")
+    expect(updatedUser.id).toBe(BigInt(user.id))
+    expect(updatedUser.firstName).toBe("Updated")
+    expect(updatedUser.bio).toBe("Profile bio")
+  })
+
   test("integration: readMessages persists userReadMaxId and getUpdates inflates updateReadMaxId", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("ReadState Integration", ["readstate@sync.com"])
     const user = users[0]

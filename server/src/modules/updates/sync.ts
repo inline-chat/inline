@@ -1016,6 +1016,18 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         },
       }
 
+    case "updatedUser":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "updatedUser",
+          updatedUser: {
+            user: payload.updatedUser.user,
+          },
+        },
+      }
+
     case "userChatOpen":
       return {
         seq,

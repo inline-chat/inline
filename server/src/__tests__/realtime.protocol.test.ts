@@ -7,9 +7,15 @@ import {
   wsSendClientProtocolMessage,
   wsServerProtocolMessage,
 } from "@in/server/realtime/test/utils"
-import { ConnectionError_Reason, Method, PushNotificationProvider, RpcError_Code } from "@inline-chat/protocol/core"
+import {
+  ConnectionError_Reason,
+  Method,
+  PushNotificationProvider,
+  RpcError_Code,
+  UsernameAvailability,
+} from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { sessions } from "@in/server/db/schema"
+import { sessions, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test"
 import Elysia from "elysia"
@@ -67,6 +73,31 @@ describe("realtime protocol safety", () => {
     const openMessage = await wsServerProtocolMessage(ws)
     expect(openMessage.body.oneofKind).toBe("connectionOpen")
     return { ws, userId: user.id, sessionId: session.id }
+  }
+
+  const authenticateExistingUserSocket = async (
+    userId: number,
+    clientType: "ios" | "macos" | "web" | "api" | "cli" = "macos",
+  ) => {
+    const ws = await openRealtimeSocket()
+    const { token, session } = await testUtils.createSessionForUser(userId, { clientType })
+
+    wsSendClientProtocolMessage(ws, {
+      id: BigInt(10_000 + session.id),
+      seq: 1,
+      body: {
+        oneofKind: "connectionInit",
+        connectionInit: {
+          token,
+          layer: 2,
+          clientVersion: "1.2.3",
+        },
+      },
+    })
+
+    const openMessage = await wsServerProtocolMessage(ws)
+    expect(openMessage.body.oneofKind).toBe("connectionOpen")
+    return { ws, sessionId: session.id }
   }
 
   it("closes socket for text payloads", async () => {
@@ -336,6 +367,274 @@ describe("realtime protocol safety", () => {
       .then((rows) => rows[0])
     expect(revoked?.revoked).not.toBeNull()
     expect(revoked?.active).toBe(false)
+
+    await wsClosed(ws)
+  })
+
+  it("lists active account sessions via RPC", async () => {
+    const { ws, userId, sessionId } = await authenticateSocket()
+    const otherSession = await testUtils.createSessionForUser(userId, {
+      clientType: "macos",
+      deviceName: "MacBook Pro",
+      clientVersion: "1.2.3",
+      osVersion: "macOS 15.2",
+    })
+
+    wsSendClientProtocolMessage(ws, {
+      id: 601n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.GET_SESSIONS,
+          input: {
+            oneofKind: "getSessions",
+            getSessions: {},
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind === "rpcResult") {
+      expect(response.body.rpcResult.reqMsgId).toBe(601n)
+      expect(response.body.rpcResult.result.oneofKind).toBe("getSessions")
+      if (response.body.rpcResult.result.oneofKind === "getSessions") {
+        const sessionsResult = response.body.rpcResult.result.getSessions.sessions
+        expect(sessionsResult.some((session) => session.id === BigInt(sessionId) && session.current)).toBe(true)
+        expect(
+          sessionsResult.some(
+            (session) =>
+              session.id === BigInt(otherSession.session.id) &&
+              session.clientType === "macos" &&
+              session.deviceName === "MacBook Pro" &&
+              session.clientVersion === "1.2.3" &&
+              !session.current,
+          ),
+        ).toBe(true)
+      }
+    }
+
+    await wsClosed(ws)
+  })
+
+  it("checks username availability via RPC", async () => {
+    const { ws, userId } = await authenticateSocket()
+    const existing = await testUtils.createUser("username-taken@example.com")
+    await db.update(users).set({ username: "mine" }).where(eq(users.id, userId))
+    await db.update(users).set({ username: "taken" }).where(eq(users.id, existing.id))
+
+    const check = async (id: bigint, username: string) => {
+      wsSendClientProtocolMessage(ws, {
+        id,
+        seq: Number(id),
+        body: {
+          oneofKind: "rpcCall",
+          rpcCall: {
+            method: Method.CHECK_USERNAME,
+            input: {
+              oneofKind: "checkUsername",
+              checkUsername: { username },
+            },
+          },
+        },
+      })
+
+      const response = await wsServerProtocolMessage(ws)
+      expect(response.body.oneofKind).toBe("rpcResult")
+      if (response.body.oneofKind !== "rpcResult") {
+        throw new Error("Expected rpcResult")
+      }
+      expect(response.body.rpcResult.result.oneofKind).toBe("checkUsername")
+      if (response.body.rpcResult.result.oneofKind !== "checkUsername") {
+        throw new Error("Expected checkUsername result")
+      }
+      return response.body.rpcResult.result.checkUsername.availability
+    }
+
+    expect(await check(610n, "freshhandle")).toBe(UsernameAvailability.USERNAME_AVAILABLE)
+    expect(await check(611n, "mine")).toBe(UsernameAvailability.USERNAME_CURRENT)
+    expect(await check(612n, "taken")).toBe(UsernameAvailability.USERNAME_TAKEN)
+    expect(await check(613n, "inline")).toBe(UsernameAvailability.USERNAME_RESERVED)
+    expect(await check(614n, "a")).toBe(UsernameAvailability.USERNAME_INVALID)
+
+    await wsClosed(ws)
+  })
+
+  it("changes and clears username via RPC", async () => {
+    const { ws, userId } = await authenticateSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 620n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.CHANGE_USERNAME,
+          input: {
+            oneofKind: "changeUsername",
+            changeUsername: { username: "@newhandle" },
+          },
+        },
+      },
+    })
+
+    const setResponse = await wsServerProtocolMessage(ws)
+    expect(setResponse.body.oneofKind).toBe("rpcResult")
+    if (setResponse.body.oneofKind === "rpcResult") {
+      expect(setResponse.body.rpcResult.result.oneofKind).toBe("changeUsername")
+      if (setResponse.body.rpcResult.result.oneofKind === "changeUsername") {
+        const user = setResponse.body.rpcResult.result.changeUsername.user
+        expect(user).toBeDefined()
+        if (!user) {
+          throw new Error("Expected changeUsername user")
+        }
+        expect(user.username).toBe("newhandle")
+      }
+    }
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, userId))
+    expect(storedUser?.username).toBe("newhandle")
+
+    wsSendClientProtocolMessage(ws, {
+      id: 621n,
+      seq: 3,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.CHANGE_USERNAME,
+          input: {
+            oneofKind: "changeUsername",
+            changeUsername: { username: "" },
+          },
+        },
+      },
+    })
+
+    const clearResponse = await wsServerProtocolMessage(ws)
+    expect(clearResponse.body.oneofKind).toBe("rpcResult")
+    if (clearResponse.body.oneofKind === "rpcResult") {
+      expect(clearResponse.body.rpcResult.result.oneofKind).toBe("changeUsername")
+      if (clearResponse.body.rpcResult.result.oneofKind === "changeUsername") {
+        const user = clearResponse.body.rpcResult.result.changeUsername.user
+        expect(user).toBeDefined()
+        if (!user) {
+          throw new Error("Expected changeUsername user")
+        }
+        expect(user.username).toBeUndefined()
+      }
+    }
+
+    const [clearedUser] = await db.select().from(users).where(eq(users.id, userId))
+    expect(clearedUser?.username).toBeNull()
+
+    await wsClosed(ws)
+  })
+
+  it("updates profile name and bio via RPC", async () => {
+    const { ws, userId } = await authenticateSocket()
+    await db.update(users).set({ firstName: "Old", lastName: "Name", bio: "Old bio" }).where(eq(users.id, userId))
+    const other = await authenticateExistingUserSocket(userId)
+    const pushedUpdate = wsServerProtocolMessage(other.ws)
+
+    wsSendClientProtocolMessage(ws, {
+      id: 630n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PROFILE,
+          input: {
+            oneofKind: "updateProfile",
+            updateProfile: {
+              firstName: " M ",
+              lastName: " ",
+              bio: " Building Inline ",
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind === "rpcResult") {
+      expect(response.body.rpcResult.result.oneofKind).toBe("updateProfile")
+      if (response.body.rpcResult.result.oneofKind === "updateProfile") {
+        const user = response.body.rpcResult.result.updateProfile.user
+        expect(user).toBeDefined()
+        if (!user) {
+          throw new Error("Expected updateProfile user")
+        }
+        expect(user.firstName).toBe("M")
+        expect(user.lastName).toBeUndefined()
+        expect(user.bio).toBe("Building Inline")
+        expect(response.body.rpcResult.result.updateProfile.updates).toHaveLength(1)
+        const update = response.body.rpcResult.result.updateProfile.updates[0]
+        expect(update?.update.oneofKind).toBe("updatedUser")
+        if (update?.update.oneofKind === "updatedUser") {
+          const updatedUser = update.update.updatedUser.user
+          expect(updatedUser).toBeDefined()
+          if (!updatedUser) throw new Error("Expected updated user")
+          expect(updatedUser.firstName).toBe("M")
+          expect(updatedUser.bio).toBe("Building Inline")
+        }
+      }
+    }
+
+    const pushed = await pushedUpdate
+    expect(pushed.body.oneofKind).toBe("message")
+    if (pushed.body.oneofKind === "message") {
+      expect(pushed.body.message.payload.oneofKind).toBe("update")
+      if (pushed.body.message.payload.oneofKind !== "update") {
+        throw new Error("Expected update payload")
+      }
+      expect(pushed.body.message.payload.update.updates).toHaveLength(1)
+      const update = pushed.body.message.payload.update.updates[0]
+      expect(update?.update.oneofKind).toBe("updatedUser")
+      if (update?.update.oneofKind === "updatedUser") {
+        const updatedUser = update.update.updatedUser.user
+        expect(updatedUser).toBeDefined()
+        if (!updatedUser) throw new Error("Expected pushed user")
+        expect(updatedUser.id).toBe(BigInt(userId))
+        expect(updatedUser.firstName).toBe("M")
+      }
+    }
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, userId))
+    expect(storedUser?.firstName).toBe("M")
+    expect(storedUser?.lastName).toBeNull()
+    expect(storedUser?.bio).toBe("Building Inline")
+
+    await wsClosed(other.ws)
+    await wsClosed(ws)
+  })
+
+  it("returns profile-specific rpc errors for invalid writes", async () => {
+    const { ws } = await authenticateSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 640n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PROFILE,
+          input: {
+            oneofKind: "updateProfile",
+            updateProfile: { firstName: " " },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcError")
+    if (response.body.oneofKind === "rpcError") {
+      expect(response.body.rpcError.errorCode).toBe(RpcError_Code.FIRST_NAME_INVALID)
+      expect(response.body.rpcError.code).toBe(400)
+    }
 
     await wsClosed(ws)
   })

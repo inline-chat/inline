@@ -161,6 +161,8 @@ message User {
   optional bool bot = 13;
 
   optional BotAvatar bot_avatar = 14;
+
+  optional string bio = 15;
 }
 
 message UserProfilePhoto {
@@ -862,6 +864,9 @@ message RpcError {
     PHONE_NUMBER_INVALID = 12;
     SPACE_ADMIN_REQUIRED = 13;
     SPACE_OWNER_REQUIRED = 14;
+    USERNAME_INVALID = 15;
+    USERNAME_TAKEN = 16;
+    FIRST_NAME_INVALID = 17;
   }
 }
 
@@ -927,6 +932,10 @@ enum Method {
   GET_BOT_PRESENCE = 58;
   SET_BOT_PRESENCE_STATE = 59;
   UPDATE_DIALOG_FOLLOW_MODE = 60;
+  GET_SESSIONS = 61;
+  CHECK_USERNAME = 62;
+  CHANGE_USERNAME = 63;
+  UPDATE_PROFILE = 64;
 }
 
 message RpcCall {
@@ -992,6 +1001,10 @@ message RpcCall {
     GetBotPresenceInput getBotPresence = 59;
     SetBotPresenceStateInput setBotPresenceState = 60;
     UpdateDialogFollowModeInput updateDialogFollowMode = 61;
+    GetSessionsInput getSessions = 62;
+    CheckUsernameInput checkUsername = 63;
+    ChangeUsernameInput changeUsername = 64;
+    UpdateProfileInput updateProfile = 65;
   }
 }
 
@@ -1059,6 +1072,10 @@ message RpcResult {
     GetBotPresenceResult getBotPresence = 59;
     SetBotPresenceStateResult setBotPresenceState = 60;
     UpdateDialogFollowModeResult updateDialogFollowMode = 61;
+    GetSessionsResult getSessions = 62;
+    CheckUsernameResult checkUsername = 63;
+    ChangeUsernameResult changeUsername = 64;
+    UpdateProfileResult updateProfile = 65;
   }
 }
 
@@ -1308,6 +1325,59 @@ message RevokeSessionInput { int64 session_id = 1; }
 message RevokeSessionResult {
   bool revoked = 1;
   bool already_revoked = 2;
+}
+
+message GetSessionsInput {}
+
+message AccountSession {
+  int64 id = 1;
+  string client_type = 2;
+  optional string client_version = 3;
+  optional string os_version = 4;
+  optional string device_name = 5;
+  optional string city = 6;
+  optional string country = 7;
+  optional string timezone = 8;
+  int64 created_at = 9;
+  int64 last_active_at = 10;
+  bool active = 11;
+  bool current = 12;
+}
+
+message GetSessionsResult { repeated AccountSession sessions = 1; }
+
+enum UsernameAvailability {
+  USERNAME_AVAILABILITY_UNSPECIFIED = 0;
+  USERNAME_AVAILABLE = 1;
+  USERNAME_CURRENT = 2;
+  USERNAME_TAKEN = 3;
+  USERNAME_RESERVED = 4;
+  USERNAME_INVALID = 5;
+}
+
+message CheckUsernameInput { string username = 1; }
+
+message CheckUsernameResult {
+  string username = 1;
+  UsernameAvailability availability = 2;
+}
+
+message ChangeUsernameInput { string username = 1; }
+
+message ChangeUsernameResult {
+  User user = 1;
+  repeated Update updates = 2;
+}
+
+message UpdateProfileInput {
+  optional string first_name = 1;
+  optional string last_name = 2;
+  optional string bio = 3;
+}
+
+message UpdateProfileResult {
+  User user = 1;
+  repeated Update updates = 2;
 }
 
 message BotCommand {
@@ -1930,6 +2000,7 @@ message Update {
     UpdateClearChatHistory clear_chat_history = 37;
     UpdateBotPresence bot_presence = 38;
     UpdateDialogFollowMode dialog_follow_mode = 39;
+    UpdateUpdatedUser updated_user = 40;
   }
 }
 
@@ -2009,6 +2080,9 @@ message UpdateNewMessageNotification {
 }
 
 message UpdateUserSettings { UserSettings settings = 1; }
+
+// Update when a user's profile/account fields change.
+message UpdateUpdatedUser { User user = 1; }
 
 // Update when a new space member is added
 message UpdateSpaceMemberAdd {

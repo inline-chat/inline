@@ -27,6 +27,20 @@ describe("updateProfile", () => {
     expect(storedUser?.username).toBe("profilehandle")
   })
 
+  test("ignores undefined optional name fields on username updates", async () => {
+    const user = await testUtils.createUser("optional-name-profile@example.com")
+
+    const result = await handler(
+      { firstName: undefined, lastName: undefined, username: "optionalhandle" },
+      makeContext(user.id),
+    )
+
+    expect(result.user.username).toBe("optionalhandle")
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(storedUser?.username).toBe("optionalhandle")
+  })
+
   test("surfaces taken username errors", async () => {
     const existing = await testUtils.createUser("existing-profile@example.com")
     const user = await testUtils.createUser("new-profile@example.com")
@@ -57,6 +71,66 @@ describe("updateProfile", () => {
       code: InlineError.ApiError.USERNAME_INVALID[1],
       description: InlineError.ApiError.USERNAME_INVALID[2],
     })
+  })
+
+  test("trims names and clears blank last name", async () => {
+    const user = await testUtils.createUser("name-profile@example.com")
+    await db.update(users).set({ firstName: "Old", lastName: "Name" }).where(eq(users.id, user.id))
+
+    const result = await handler({ firstName: " Ada ", lastName: "   " }, makeContext(user.id))
+
+    expect(result.user.firstName).toBe("Ada")
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(storedUser?.firstName).toBe("Ada")
+    expect(storedUser?.lastName).toBeNull()
+  })
+
+  test("trims and clears bio", async () => {
+    const user = await testUtils.createUser("bio-profile@example.com")
+    await db.update(users).set({ bio: "Old bio" }).where(eq(users.id, user.id))
+
+    const result = await handler({ bio: " Building Inline " }, makeContext(user.id))
+
+    expect(result.user.bio).toBe("Building Inline")
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(storedUser?.bio).toBe("Building Inline")
+
+    const clearedResult = await handler({ bio: "   " }, makeContext(user.id))
+    expect(clearedResult.user.bio).toBeNull()
+
+    const [clearedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(clearedUser?.bio).toBeNull()
+  })
+
+  test("ignores blank optional username fields on name updates", async () => {
+    const user = await testUtils.createUser("blank-username-profile@example.com")
+    await db.update(users).set({ username: "existinghandle" }).where(eq(users.id, user.id))
+
+    const result = await handler({ firstName: "Mo", username: "" }, makeContext(user.id))
+
+    expect(result.user.firstName).toBe("Mo")
+    expect(result.user.username).toBe("existinghandle")
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(storedUser?.firstName).toBe("Mo")
+    expect(storedUser?.username).toBe("existinghandle")
+  })
+
+  test("persists one-character names", async () => {
+    const user = await testUtils.createUser("short-name-profile@example.com")
+    const firstName = "M"
+    const lastName = "Q"
+
+    const result = await handler({ firstName, lastName }, makeContext(user.id))
+
+    expect(result.user.firstName).toBe(firstName)
+    expect(result.user.lastName).toBe(lastName)
+
+    const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(storedUser?.firstName).toBe(firstName)
+    expect(storedUser?.lastName).toBe(lastName)
   })
 
   test("persists valid hyphenated timezones", async () => {

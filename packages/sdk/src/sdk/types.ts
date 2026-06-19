@@ -278,6 +278,10 @@ export const rpcInputKindByMethod = {
   48: "invokeMessageAction",
   49: "answerMessageAction",
   53: "clearChatHistory",
+  61: "getSessions",
+  62: "checkUsername",
+  63: "changeUsername",
+  64: "updateProfile",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -327,6 +331,10 @@ export const rpcResultKindByMethod = {
   48: "invokeMessageAction",
   49: "answerMessageAction",
   53: "clearChatHistory",
+  61: "getSessions",
+  62: "checkUsername",
+  63: "changeUsername",
+  64: "updateProfile",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

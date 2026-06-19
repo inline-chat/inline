@@ -120,6 +120,30 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.PhoneNumberInvalid,
     )
   }
+  public static UsernameInvalid() {
+    return RealtimeRpcError.create(
+      RpcError_Code.USERNAME_INVALID,
+      "Username is invalid",
+      400,
+      RealtimeRpcError.UsernameInvalid,
+    )
+  }
+  public static UsernameTaken() {
+    return RealtimeRpcError.create(
+      RpcError_Code.USERNAME_TAKEN,
+      "Username is taken",
+      400,
+      RealtimeRpcError.UsernameTaken,
+    )
+  }
+  public static FirstNameInvalid() {
+    return RealtimeRpcError.create(
+      RpcError_Code.FIRST_NAME_INVALID,
+      "First name is invalid",
+      400,
+      RealtimeRpcError.FirstNameInvalid,
+    )
+  }
   public static SpaceAdminRequired() {
     return RealtimeRpcError.create(
       RpcError_Code.SPACE_ADMIN_REQUIRED,

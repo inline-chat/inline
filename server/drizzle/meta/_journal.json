@@ -582,6 +582,13 @@
       "when": 1780785278874,
       "tag": "0082_reply-thread-follow-mode",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1781886232525,
+      "tag": "0083_add-user-bio",
+      "breakpoints": true
     }
   ]
 }
