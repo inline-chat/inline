@@ -1,7 +1,7 @@
 import UIKit
 
 final class ComposeVoiceButton: UIButton {
-  static let size: CGFloat = 26
+  static let size: CGFloat = 28
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -14,7 +14,7 @@ final class ComposeVoiceButton: UIButton {
   }
 
   override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-    let hitBounds = bounds.insetBy(dx: -9, dy: -9)
+    let hitBounds = bounds.insetBy(dx: -8, dy: -8)
     return hitBounds.contains(point)
   }
 
@@ -26,24 +26,12 @@ final class ComposeVoiceButton: UIButton {
     config.image = UIImage(systemName: "mic.fill")?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
     )
-    config.baseForegroundColor = .secondaryLabel
+    config.baseForegroundColor = .tertiaryLabel
     config.cornerStyle = .capsule
     config.contentInsets = .zero
     configuration = config
 
     accessibilityLabel = "Record voice message"
     isHidden = true
-
-    configurationUpdateHandler = { [weak self] button in
-      guard let self else { return }
-      let scale: CGFloat = button.isHighlighted ? 0.86 : 1
-      UIView.animate(
-        withDuration: 0.16,
-        delay: 0,
-        options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
-      ) {
-        self.transform = CGAffineTransform(scaleX: scale, y: scale)
-      }
-    }
   }
 }

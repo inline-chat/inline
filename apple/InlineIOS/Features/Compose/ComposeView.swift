@@ -41,10 +41,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var isOverlayVisible = false
   var phaseObserver: AnyCancellable?
   private var voicePhaseObserver: AnyCancellable?
+  private var composeLeadingToPlusConstraint: NSLayoutConstraint?
+  private var composeLeadingExpandedConstraint: NSLayoutConstraint?
 
   let buttonBottomPadding: CGFloat = -4.0
   let buttonTrailingPadding: CGFloat = -6.0
   let buttonLeadingPadding: CGFloat = 10.0
+  private let composeEdgeInset: CGFloat = 7.0
+  private let composePlusSpacing: CGFloat = 9.5
+  private let composeHorizontalInset: CGFloat = 10.0
+  private let composeControlTrailingInset: CGFloat = 6.0
   private let voiceControlsInstalled = ExperimentalFeatureFlags.voiceMessagesEnabled
 
   // MARK: - State Management
@@ -153,6 +159,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
   lazy var voiceButton = makeVoiceButton()
+  lazy var composeGlassContainer = makeComposeGlassContainer()
   lazy var composeAndButtonContainer = makeComposeAndButtonContainer()
   lazy var attachmentScrollView = makeAttachmentScrollView()
   lazy var attachmentStackView = makeAttachmentStackView()
@@ -371,18 +378,23 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func setupViews() {
     clearBackground()
 
-    addSubview(plusButton)
-    addSubview(composeAndButtonContainer)
+    addSubview(composeGlassContainer)
+
+    let glassContent = composeGlassContentView()
+    glassContent.addSubview(plusButton)
+    glassContent.addSubview(composeAndButtonContainer)
+
+    let composeContent = composeContentView()
 
     // Add embed container, textView, and sendButton to the container
-    composeAndButtonContainer.addSubview(embedContainerView)
-    composeAndButtonContainer.addSubview(attachmentScrollView)
+    composeContent.addSubview(embedContainerView)
+    composeContent.addSubview(attachmentScrollView)
     attachmentScrollView.addSubview(attachmentStackView)
-    composeAndButtonContainer.addSubview(textView)
-    composeAndButtonContainer.addSubview(sendButton)
+    composeContent.addSubview(textView)
+    composeContent.addSubview(sendButton)
     if voiceControlsInstalled {
-      composeAndButtonContainer.addSubview(voiceButton)
-      composeAndButtonContainer.addSubview(voiceInputView)
+      composeContent.addSubview(voiceButton)
+      composeContent.addSubview(voiceInputView)
     }
 
     setupInitialHeight()
@@ -410,38 +422,51 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       .constraint(equalToConstant: 0)
     let attachmentHeightConstraint = attachmentScrollView.heightAnchor
       .constraint(equalToConstant: 0)
+    let glassContent = composeGlassContentView()
+    let composeContent = composeContentView()
+    let composeLeadingToPlusConstraint = composeAndButtonContainer.leadingAnchor
+      .constraint(equalTo: plusButton.trailingAnchor, constant: composePlusSpacing)
+    let composeLeadingExpandedConstraint = composeAndButtonContainer.leadingAnchor
+      .constraint(equalTo: glassContent.leadingAnchor, constant: composeEdgeInset)
     embedContainerHeightConstraint = embedHeightConstraint
     attachmentContainerHeightConstraint = attachmentHeightConstraint
+    self.composeLeadingToPlusConstraint = composeLeadingToPlusConstraint
+    self.composeLeadingExpandedConstraint = composeLeadingExpandedConstraint
 
     NSLayoutConstraint.activate([
       composeHeightConstraint,
 
-      plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+      composeGlassContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+      composeGlassContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+      composeGlassContainer.topAnchor.constraint(equalTo: topAnchor),
+      composeGlassContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      plusButton.leadingAnchor.constraint(equalTo: glassContent.leadingAnchor, constant: composeEdgeInset),
       plusButton.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
+        equalTo: glassContent.bottomAnchor,
         constant: buttonBottomPadding
       ),
       plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width + 10),
       plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height + 10),
 
       // Container constraints
-      composeAndButtonContainer.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
-      composeAndButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
-      composeAndButtonContainer.topAnchor.constraint(equalTo: topAnchor),
+      composeLeadingToPlusConstraint,
+      composeAndButtonContainer.trailingAnchor.constraint(equalTo: glassContent.trailingAnchor, constant: -composeEdgeInset),
+      composeAndButtonContainer.topAnchor.constraint(equalTo: glassContent.topAnchor),
       composeAndButtonContainer.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
+        equalTo: glassContent.bottomAnchor,
         constant: buttonBottomPadding
       ),
 
       // Embed constraints within container
-      embedContainerView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
-      embedContainerView.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -8),
-      embedContainerView.topAnchor.constraint(equalTo: composeAndButtonContainer.topAnchor),
+      embedContainerView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
+      embedContainerView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
+      embedContainerView.topAnchor.constraint(equalTo: composeContent.topAnchor),
       embedHeightConstraint,
 
       // Attachment strip within container
-      attachmentScrollView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
-      attachmentScrollView.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -8),
+      attachmentScrollView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
+      attachmentScrollView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
       attachmentScrollView.topAnchor.constraint(equalTo: embedContainerView.bottomAnchor),
       attachmentHeightConstraint,
 
@@ -452,15 +477,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       attachmentStackView.heightAnchor.constraint(equalTo: attachmentScrollView.frameLayoutGuide.heightAnchor),
 
       // TextView constraints within container
-      textView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
+      textView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
       textView.topAnchor.constraint(equalTo: attachmentScrollView.bottomAnchor, constant: 3),
-      textView.bottomAnchor.constraint(equalTo: composeAndButtonContainer.bottomAnchor),
+      textView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor),
       textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12),
 
       // SendButton constraints within container
-      sendButton.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -5),
+      sendButton.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeControlTrailingInset),
       sendButton.bottomAnchor.constraint(
-        equalTo: composeAndButtonContainer.bottomAnchor,
+        equalTo: composeContent.bottomAnchor,
         constant: -5
       ),
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
@@ -469,15 +494,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     if voiceControlsInstalled {
       NSLayoutConstraint.activate([
-        voiceButton.trailingAnchor.constraint(equalTo: sendButton.trailingAnchor),
-        voiceButton.bottomAnchor.constraint(equalTo: sendButton.bottomAnchor),
+        voiceButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
+        voiceButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
         voiceButton.widthAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
         voiceButton.heightAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
 
-        voiceInputView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
-        voiceInputView.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -8),
-        voiceInputView.topAnchor.constraint(equalTo: attachmentScrollView.bottomAnchor, constant: 3),
-        voiceInputView.bottomAnchor.constraint(equalTo: composeAndButtonContainer.bottomAnchor),
+        voiceInputView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
+        voiceInputView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
+        voiceInputView.topAnchor.constraint(equalTo: composeContent.topAnchor),
+        voiceInputView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor),
       ])
     }
   }
@@ -715,8 +740,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     voiceInputView.isHidden = !voiceActive
     textView.isHidden = voiceActive
-    plusButton.isHidden = voiceActive
-    voiceButton.isHidden = voiceActive || !shouldShowVoiceButton
+    updateComposeWidth(expanded: voiceActive, animated: animated)
+    updateVoiceButtonVisibility(visible: !voiceActive && shouldShowVoiceButton, animated: animated)
     sendButton.isHidden = voiceActive || shouldShowVoiceButton
 
     if voiceActive {
@@ -731,9 +756,94 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     updateHeight(animated: animated)
   }
 
+  private func updateComposeWidth(expanded: Bool, animated: Bool) {
+    guard let composeLeadingToPlusConstraint, let composeLeadingExpandedConstraint else {
+      plusButton.isHidden = expanded
+      plusButton.alpha = expanded ? 0 : 1
+      return
+    }
+
+    let isExpanded = composeLeadingExpandedConstraint.isActive
+    guard isExpanded != expanded else {
+      plusButton.isHidden = expanded
+      plusButton.alpha = expanded ? 0 : 1
+      return
+    }
+
+    if !expanded {
+      plusButton.isHidden = false
+      plusButton.alpha = 0
+    }
+
+    layoutIfNeeded()
+    composeLeadingToPlusConstraint.isActive = !expanded
+    composeLeadingExpandedConstraint.isActive = expanded
+
+    guard animated else {
+      plusButton.alpha = expanded ? 0 : 1
+      plusButton.isHidden = expanded
+      layoutIfNeeded()
+      return
+    }
+
+    if expanded {
+      plusButton.isHidden = false
+    }
+
+    UIView.animate(
+      withDuration: 0.22,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+    ) {
+      self.plusButton.alpha = expanded ? 0 : 1
+      self.layoutIfNeeded()
+    } completion: { [weak self] _ in
+      guard let self else { return }
+      let isVoiceActive = self.voiceViewModel.isActive
+      self.plusButton.alpha = isVoiceActive ? 0 : 1
+      self.plusButton.isHidden = isVoiceActive
+    }
+  }
+
+  private func updateVoiceButtonVisibility(visible: Bool, animated: Bool) {
+    let isVisible = !voiceButton.isHidden && voiceButton.alpha > 0.01
+    guard isVisible != visible else {
+      voiceButton.isUserInteractionEnabled = visible
+      return
+    }
+
+    voiceButton.isUserInteractionEnabled = visible
+
+    guard animated else {
+      voiceButton.layer.removeAllAnimations()
+      voiceButton.alpha = visible ? 1 : 0
+      voiceButton.isHidden = !visible
+      return
+    }
+
+    if visible {
+      voiceButton.alpha = 0
+      voiceButton.isHidden = false
+    }
+
+    UIView.animate(
+      withDuration: 0.16,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+    ) {
+      self.voiceButton.alpha = visible ? 1 : 0
+    } completion: { [weak self] _ in
+      guard let self else { return }
+      let shouldShowVoiceButton = !self.voiceViewModel.isActive && self.canStartVoiceRecording
+      self.voiceButton.alpha = shouldShowVoiceButton ? 1 : 0
+      self.voiceButton.isHidden = !shouldShowVoiceButton
+    }
+  }
+
   @objc func startVoiceRecordingTapped() {
     guard canStartVoiceRecording, let peerId else { return }
     dismissOverlay()
+    guard voiceViewModel.prepareToStart() else { return }
 
     Task { @MainActor [weak self] in
       guard let self else { return }
@@ -778,10 +888,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       let state = ChatState.shared.getState(peer: peerId)
       let replyToMessageId = state.replyingMessageId
 
-      let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
-      feedbackGenerator.prepare()
-      feedbackGenerator.impactOccurred(intensity: 1.0)
-
       Transactions.shared.mutate(
         transaction: .sendMessage(
           .init(
@@ -807,7 +913,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         type: .error,
         systemImage: "exclamationmark.triangle.fill"
       )
-      voiceViewModel.cancel()
       reconcileVoiceControls(animated: true)
     }
   }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 struct ComposeVoiceInputView: View {
@@ -11,6 +12,15 @@ struct ComposeVoiceInputView: View {
   let onSendSilently: @MainActor () -> Void
 
   var body: some View {
+    controls
+      .padding(.horizontal, 4)
+      .frame(maxWidth: .infinity, minHeight: ComposeView.minHeight, maxHeight: ComposeView.minHeight)
+      .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
+      .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
+      .animation(.easeInOut(duration: 0.14), value: viewModel.isSending)
+  }
+
+  private var controls: some View {
     HStack(spacing: 8) {
       switch viewModel.phase {
       case .starting:
@@ -38,21 +48,22 @@ struct ComposeVoiceInputView: View {
         iconButton(
           viewModel.isPlaying ? "pause.fill" : "play.fill",
           title: viewModel.isPlaying ? "Pause voice message" : "Play voice message",
+          isEnabled: !viewModel.isSending,
           action: onPlay
         )
         waveform(progress: viewModel.playbackProgress) { progress in
           viewModel.seekPlayback(to: progress)
         }
         durationLabel
-        iconButton("xmark", title: "Cancel voice message", action: onCancel)
+        iconButton("xmark", title: "Cancel voice message", isEnabled: !viewModel.isSending, action: onCancel)
         sendButton
 
       case .idle:
         EmptyView()
       }
     }
-    .padding(.horizontal, 4)
-    .frame(maxWidth: .infinity, minHeight: ComposeView.minHeight, maxHeight: ComposeView.minHeight)
+    .id(viewModel.phase)
+    .transition(.opacity.combined(with: .scale(scale: 0.98)))
   }
 
   private var recordingIndicator: some View {
@@ -78,14 +89,27 @@ struct ComposeVoiceInputView: View {
   }
 
   private var sendButton: some View {
-    iconButton("arrow.up", title: "Send voice message", isPrimary: true, action: onSend)
-      .contextMenu {
-        Button {
-          onSendSilently()
-        } label: {
-          Label("Send without notification", systemImage: "bell.slash")
-        }
+    Group {
+      if viewModel.isSending {
+        progressIndicator
+          .transition(.opacity.combined(with: .scale(scale: 0.9)))
+      } else {
+        iconButton(
+          "arrow.up",
+          title: "Send voice message",
+          isPrimary: true,
+          isEnabled: viewModel.canSend,
+          action: onSend
+        )
+          .contextMenu {
+            Button {
+              onSendSilently()
+            } label: {
+              Label("Send without notification", systemImage: "bell.slash")
+            }
+          }
       }
+    }
   }
 
   private var reservedIconSpace: some View {
@@ -103,7 +127,7 @@ struct ComposeVoiceInputView: View {
       motion: viewModel.phase == .recording ? .recordingReel : .fixed,
       onSeek: onSeek
     )
-    .frame(height: 20)
+    .frame(height: 36.5)
     .frame(maxWidth: .infinity)
   }
 
@@ -111,12 +135,14 @@ struct ComposeVoiceInputView: View {
     _ systemName: String,
     title: String,
     isPrimary: Bool = false,
+    isEnabled: Bool = true,
     action: @escaping @MainActor () -> Void
   ) -> some View {
     VoiceIconControl(
       systemName: systemName,
       title: title,
       isPrimary: isPrimary,
+      isEnabled: isEnabled,
       action: action
     )
   }
@@ -134,24 +160,53 @@ private struct VoiceIconControl: View {
   let systemName: String
   let title: String
   let isPrimary: Bool
+  let isEnabled: Bool
   let action: @MainActor () -> Void
 
   var body: some View {
-    Button(action: action) {
+    Button(action: performAction) {
       Image(systemName: systemName)
-        .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(isPrimary ? Color.white : Color.primary)
-        .frame(width: Self.visualSize, height: Self.visualSize)
-        .background(
-          Circle()
-            .fill(backgroundColor)
-        )
-        .contentShape(Circle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(VoiceIconButtonStyle(isPrimary: isPrimary))
     .frame(width: 30, height: 30)
     .contentShape(Circle())
+    .disabled(!isEnabled)
     .accessibilityLabel(title)
+  }
+
+  private func performAction() {
+    action()
+  }
+}
+
+private struct VoiceIconButtonStyle: ButtonStyle {
+  let isPrimary: Bool
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.system(size: 11, weight: .semibold))
+      .foregroundStyle(isPrimary ? Color.white : Color(uiColor: .secondaryLabel))
+      .frame(width: Self.visualSize, height: Self.visualSize)
+      .contentShape(Circle())
+      .background(
+        Circle()
+          .fill(backgroundColor)
+      )
+      .opacity(opacity(isPressed: configuration.isPressed))
+      .animation(.easeInOut(duration: 0.14), value: configuration.isPressed)
+      .animation(.easeInOut(duration: 0.14), value: isEnabled)
+      .onChange(of: configuration.isPressed) { _, isPressed in
+        guard isPressed, isEnabled else { return }
+        VoiceHaptics.tap()
+      }
+  }
+
+  private static let visualSize: CGFloat = 26
+
+  private func opacity(isPressed: Bool) -> Double {
+    guard isEnabled else { return 0.48 }
+    return isPressed ? 0.55 : 1
   }
 
   private var backgroundColor: Color {
@@ -159,8 +214,15 @@ private struct VoiceIconControl: View {
       return .accentColor
     }
 
-    return Color(uiColor: .quaternaryLabel).opacity(0.72)
+    return Color(uiColor: .tertiarySystemFill).opacity(0.9)
   }
+}
 
-  private static let visualSize: CGFloat = 26
+@MainActor
+private enum VoiceHaptics {
+  static func tap() {
+    let generator = UIImpactFeedbackGenerator(style: .light)
+    generator.prepare()
+    generator.impactOccurred(intensity: 0.85)
+  }
 }
