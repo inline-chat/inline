@@ -1,0 +1,4 @@
+interface:
+  display_name: "Modern Apple Frameworks"
+  short_description: "Modern Apple API patterns and availability"
+  default_prompt: "Use $modern-apple-frameworks to review this SwiftUI/UIKit/AppKit change for modern APIs, Observation usage, and deployment-target availability."
