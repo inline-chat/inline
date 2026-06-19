@@ -1114,6 +1114,9 @@ class MinimalMessageViewAppKit: NSView {
     messageTextView.onEntityClick = { [weak self] location, event in
       self?.handleEntityClick(at: location, event: event) ?? false
     }
+    messageTextView.onTextLongPress = { [weak self] location, event in
+      self?.handleTextLongPress(at: location, event: event)
+    }
     MessageGestureTrace.debug("MinimalMessageView.setupEntityClickHandling messageId=\(message.messageId) mode=mouseDownCallback")
   }
 
@@ -1136,6 +1139,7 @@ class MinimalMessageViewAppKit: NSView {
     guard textView.superview != nil else { return }
     MessageGestureTrace.debug("MinimalMessageView.syncTextView messageId=\(message.messageId) action=detachTextView")
     (textView as? MessageTextView)?.onEntityClick = nil
+    (textView as? MessageTextView)?.onTextLongPress = nil
     textView.removeFromSuperview()
     clearTextViewConstraints()
     detectedLinks = []
@@ -1357,6 +1361,29 @@ class MinimalMessageViewAppKit: NSView {
     guard textView.bounds.contains(locationInText) else { return false }
 
     return textEntityHit(at: locationInText) != nil
+  }
+
+  private func handleTextLongPress(at location: NSPoint, event: NSEvent) {
+    let locationInSelf = textView.convert(location, to: self)
+    MessageGestureTrace.debug(
+      "MinimalMessageView.handleTextLongPress messageId=\(message.messageId) eventNumber=\(event.eventNumber) point=\(MessageGestureTrace.point(locationInSelf))"
+    )
+
+    if let result = interactiveHitTestResult(locationInSelf) {
+      MessageGestureTrace.debug(
+        "MinimalMessageView.handleTextLongPress messageId=\(message.messageId) blocked=interactive target=\(result.name)"
+      )
+      return
+    }
+
+    if isTextEntityPoint(locationInSelf) {
+      MessageGestureTrace.debug("MinimalMessageView.handleTextLongPress messageId=\(message.messageId) blocked=textEntity")
+      return
+    }
+
+    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+    MessageGestureTrace.debug("MinimalMessageView.handleTextLongPress messageId=\(message.messageId) action=showReactionOverlay")
+    showReactionOverlay()
   }
 
   private func openThreadLink(_ target: ThreadLinkTarget) {
@@ -4245,6 +4272,13 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
       return false
     }
 
+    if gestureRecognizer === longPressGesture, isTextPoint(locationInSelf) {
+      MessageGestureTrace.debug(
+        "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textHoldFallback"
+      )
+      return false
+    }
+
     if gestureRecognizer === longPressGesture, isTextEntityPoint(locationInSelf) {
       MessageGestureTrace.debug(
         "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textEntity"
@@ -4308,6 +4342,13 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
 // MARK: - NSTextViewDelegate
 
 extension MinimalMessageViewAppKit: NSTextViewDelegate {
+  func textViewDidChangeSelection(_ notification: Notification) {
+    guard let textView = notification.object as? NSTextView else { return }
+    guard textView.selectedRanges.contains(where: { $0.rangeValue.length > 0 }) else { return }
+    MessageGestureTrace.debug("MinimalMessageView.textSelectionChanged messageId=\(message.messageId) action=dismissReactionOverlay")
+    ReactionOverlayWindow.dismiss(for: self)
+  }
+
   func textView(_: NSTextView, menu: NSMenu, for _: NSEvent, at charIndex: Int) -> NSMenu? {
     let linkURL = linkURLForContextMenu(at: charIndex)
     return createMenu(context: .textView, nativeMenu: menu, linkURL: linkURL)
