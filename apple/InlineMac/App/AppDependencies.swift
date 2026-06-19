@@ -123,15 +123,20 @@ extension AppDependencies {
   /// User-initiated chat open. Nav3 uses the temporary preload path here.
   /// Route restoration/hydration should call `Nav3.open` directly so the first
   /// frame commits immediately and the chat view performs its normal load.
-  func requestOpenChat(peer: Peer) {
+  func requestOpenChat(peer: Peer, targetMessageId: Int64? = nil) {
     if let nav2 {
-      nav2.requestOpenChat(peer: peer, database: database)
+      nav2.requestOpenChat(peer: peer, targetMessageId: targetMessageId, database: database)
       return
     }
 
     if let nav3 {
       if let nav3ChatOpenPreloader {
-        nav3ChatOpenPreloader.openChat(peer: peer, nav: nav3, database: database)
+        nav3ChatOpenPreloader.openChat(
+          peer: peer,
+          targetMessageId: targetMessageId,
+          nav: nav3,
+          database: database
+        )
       } else {
         nav3.open(.chat(peer: peer))
       }
@@ -298,16 +303,25 @@ final class Nav3ChatOpenPreloadBridge {
 
   @ObservationIgnored private let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   @ObservationIgnored private var pendingTask: Task<Void, Never>?
+  @ObservationIgnored private var pendingTargetMessageId: Int64?
   @ObservationIgnored private var requestID: UUID?
   @ObservationIgnored private var payloads: [Peer: PreparedChatPayload] = [:]
 
   init() {}
 
-  func openChat(peer: Peer, nav: Nav3, database: AppDatabase) {
+  func openChat(
+    peer: Peer,
+    targetMessageId: Int64? = nil,
+    nav: Nav3,
+    database: AppDatabase
+  ) {
     if pendingPeer == peer {
-      return
+      guard pendingTargetMessageId != targetMessageId else { return }
     }
     if pendingPeer == nil, nav.currentRoute == .chat(peer: peer) {
+      if let targetMessageId {
+        scrollOpenChat(peer: peer, targetMessageId: targetMessageId, database: database)
+      }
       return
     }
 
@@ -317,6 +331,7 @@ final class Nav3ChatOpenPreloadBridge {
     let id = UUID()
     requestID = id
     pendingPeer = peer
+    pendingTargetMessageId = targetMessageId
     os_signpost(
       .event,
       log: signpostLog,
@@ -340,7 +355,11 @@ final class Nav3ChatOpenPreloadBridge {
       guard let self else { return }
 
       do {
-        let payload = try await ChatOpenPreloader.shared.prepare(peer: peer, database: database)
+        let payload = try await ChatOpenPreloader.shared.prepare(
+          peer: peer,
+          targetMessageId: targetMessageId,
+          database: database
+        )
         guard self.requestID == id else {
           os_signpost(
             .end,
@@ -442,11 +461,28 @@ final class Nav3ChatOpenPreloadBridge {
     clearPending()
   }
 
+  private func scrollOpenChat(peer: Peer, targetMessageId: Int64, database: AppDatabase) {
+    Task { @MainActor in
+      do {
+        let chat = try await database.reader.read { db in
+          try Chat.getByPeerId(db: db, peerId: peer)
+        }
+        guard let chat else { return }
+        ChatsManager
+          .get(for: peer, chatId: chat.id)
+          .scrollTo(msgId: targetMessageId, reason: .search)
+      } catch {
+        Log.shared.error("Failed to resolve open chat for search scroll", error: error)
+      }
+    }
+  }
+
   private func clearPending(cancelTask: Bool = true) {
     if cancelTask {
       pendingTask?.cancel()
     }
     pendingTask = nil
+    pendingTargetMessageId = nil
     requestID = nil
     pendingPeer = nil
   }

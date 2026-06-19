@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import GRDB
 import InlineKit
 import InlineMacUI
 import InlineUI
@@ -13,6 +14,7 @@ private enum QuickSearchLayout {
   static let rowHeight: CGFloat = Theme.sidebarItemHeight
   static let rowSpacing: CGFloat = 1
   static let rowInnerPadding: CGFloat = 4
+  static let maxVisibleRows = 10
   static let sectionHeaderHeight: CGFloat = 22
   static let sectionSpacing: CGFloat = 8
   static let searchBarHeight: CGFloat = 36
@@ -51,6 +53,7 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   case space(Space)
   case command(QuickSearchCommand)
   case createThread(title: String, spaceId: Int64, spaceName: String?)
+  case message(LocalMessageSearchResult)
 
   var id: String {
     switch self {
@@ -64,6 +67,8 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
         "command-\(command.id)"
       case let .createThread(title, spaceId, _):
         "create-thread-\(spaceId)-\(title.lowercased())"
+      case let .message(result):
+        result.id
     }
   }
 }
@@ -219,10 +224,83 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
   func isAvailable(in context: QuickSearchCommandContext) -> Bool {
     condition.isSatisfied(by: context)
   }
+
+  func isLikelyIntent(for query: String) -> Bool {
+    let tokens = Self.tokens(from: query)
+    guard tokens.isEmpty == false else { return false }
+
+    func hasAny(_ values: Set<String>) -> Bool {
+      tokens.contains { token in
+        if values.contains(token) {
+          return true
+        }
+        guard token.count >= 2 else { return false }
+        return values.contains { $0.hasPrefix(token) }
+      }
+    }
+
+    switch self {
+      case .settings:
+        return hasAny(["settings", "setting", "prefs", "pref", "preferences", "config", "configuration"])
+#if SPARKLE
+      case .checkForUpdates:
+        return hasAny(["check", "update", "updates", "upgrade", "version", "sparkle"])
+#endif
+      case .backHome:
+        return hasAny(["back", "home"])
+      case .newThread:
+        if hasAny(["new", "create", "compose"]) {
+          return true
+        }
+        return tokens.contains("start") && hasAny(["thread", "chat", "message", "conversation"])
+      case .renameThread:
+        return hasAny(["rename", "renaming", "title"])
+      case .newSpace:
+        return hasAny(["new", "create"])
+    }
+  }
+
+  private static func tokens(from query: String) -> Set<String> {
+    var values = Set<String>()
+    var current = ""
+    let normalized = query
+      .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+      .lowercased()
+
+    for scalar in normalized.unicodeScalars {
+      if CharacterSet.alphanumerics.contains(scalar) {
+        current.unicodeScalars.append(scalar)
+      } else if current.isEmpty == false {
+        values.insert(current)
+        current = ""
+      }
+    }
+
+    if current.isEmpty == false {
+      values.insert(current)
+    }
+    return values
+  }
 }
 
 private typealias QuickSearchSearchField = QuickSearchMatcher.SearchField
 private typealias QuickSearchRanker = QuickSearchMatcher
+
+private struct QuickSearchUserActivity: Equatable {
+  let hasMessages: Bool
+  let open: Bool
+  let pinned: Bool
+  let unread: Bool
+
+  var boost: Int {
+    var value = 0
+    if hasMessages { value += 260 }
+    if open { value += 180 }
+    if pinned { value += 140 }
+    if unread { value += 120 }
+    return value
+  }
+}
 
 @MainActor
 final class QuickSearchViewModel: ObservableObject {
@@ -231,6 +309,7 @@ final class QuickSearchViewModel: ObservableObject {
   @Published var focusToken: UUID = .init()
 
   let localSearch: HomeSearchViewModel
+  let messageSearch: LocalMessageSearchViewModel
   let globalSearch: GlobalSearch
 
   private let dependencies: AppDependencies
@@ -241,16 +320,28 @@ final class QuickSearchViewModel: ObservableObject {
   @Published private var commandContext = QuickSearchCommandContext()
   @Published private var savedMessagesUser: User?
   @Published private var isSavedMessagesSearching = false
+  @Published private var userActivity: [Int64: QuickSearchUserActivity] = [:]
+  @Published private var activeSearchQuery = ""
+  @Published private var isLocalSearchPending = false
   private var spaceSearchToken = UUID()
   private var savedMessagesSearchToken = UUID()
+  private var userActivityToken = UUID()
+  private var localSearchTask: Task<Void, Never>?
+  private var didLoadUserActivity = false
+  private let localSearchDebounceNanos: UInt64 = 90_000_000
   private var cancellables = Set<AnyCancellable>()
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
     localSearch = HomeSearchViewModel(db: dependencies.database)
+    messageSearch = LocalMessageSearchViewModel(db: dependencies.database)
     globalSearch = GlobalSearch()
     bindSearchUpdates()
     bindCommandContext()
+  }
+
+  deinit {
+    localSearchTask?.cancel()
   }
 
   func attach(nav3: Nav3, openSettings: @escaping () -> Void) {
@@ -281,7 +372,7 @@ final class QuickSearchViewModel: ObservableObject {
     items.append(contentsOf: spaces)
     items.append(contentsOf: commands)
 
-    guard let preparedQuery = QuickSearchRanker.prepareQuery(trimmedQuery) else {
+    guard let preparedQuery = QuickSearchRanker.prepareQuery(activeSearchQuery) else {
       if let createThreadResult {
         items.append(createThreadResult)
       }
@@ -336,7 +427,7 @@ final class QuickSearchViewModel: ObservableObject {
       }
     }
 
-    guard let preparedQuery = QuickSearchRanker.prepareQuery(trimmedQuery) else {
+    guard let preparedQuery = QuickSearchRanker.prepareQuery(activeSearchQuery) else {
       return filtered
     }
 
@@ -362,24 +453,55 @@ final class QuickSearchViewModel: ObservableObject {
       .map(\.result)
   }
 
+  fileprivate var messageResults: [QuickSearchLocalItem] {
+    messageSearch.results.map { .message($0) }
+  }
+
   var isLoading: Bool {
-    globalSearch.isLoading
+    isLocalSearchPending ||
+      localSearch.isSearching ||
+      isSavedMessagesSearching ||
+      isSpaceSearching ||
+      messageSearch.isSearching ||
+      globalSearch.isLoading
   }
 
   var error: Error? {
-    globalSearch.error
+    globalSearch.error ?? messageSearch.error
   }
 
   var totalResults: Int {
-    localResults.count + renderedGlobalResults.count
+    localResults.count + messageResults.count + renderedGlobalResults.count
   }
 
   func performSearch() {
-    localSearch.search(query: query)
-    searchSavedMessages(query: query)
-    searchSpaces(query: query)
-    globalSearch.updateQuery(query)
+    let trimmedQuery = trimmedQuery
+    localSearchTask?.cancel()
     selectedIndex = 0
+
+    guard trimmedQuery.isEmpty == false else {
+      globalSearch.clear()
+      setLocalSearchPending(false)
+      updateActiveSearchQuery("")
+      localSearch.search(query: "")
+      messageSearch.clear()
+      savedMessagesUser = nil
+      isSavedMessagesSearching = false
+      spaceResults = []
+      isSpaceSearching = false
+      return
+    }
+
+    globalSearch.updateQuery(trimmedQuery)
+    loadUserActivityIfNeeded()
+    setLocalSearchPending(true)
+
+    let delay = localSearchDebounceNanos
+    localSearchTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: delay)
+      guard !Task.isCancelled, let self else { return }
+      self.runLocalSearch(query: trimmedQuery)
+    }
   }
 
   func requestFocus() {
@@ -387,10 +509,19 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   func reset() {
+    localSearchTask?.cancel()
     query = ""
+    updateActiveSearchQuery("")
+    setLocalSearchPending(false)
+    savedMessagesSearchToken = UUID()
+    spaceSearchToken = UUID()
+    userActivityToken = UUID()
     localSearch.search(query: "")
+    messageSearch.clear()
     savedMessagesUser = nil
     isSavedMessagesSearching = false
+    didLoadUserActivity = false
+    userActivity = [:]
     spaceResults = []
     globalSearch.clear()
     selectedIndex = 0
@@ -407,17 +538,28 @@ final class QuickSearchViewModel: ObservableObject {
   func moveSelection(isForward: Bool) {
     guard totalResults > 0 else { return }
     let nextIndex = isForward ? min(selectedIndex + 1, totalResults - 1) : max(selectedIndex - 1, 0)
+    guard nextIndex != selectedIndex else { return }
     selectedIndex = nextIndex
   }
 
   func activateSelection() -> Bool {
-    guard totalResults > 0 else { return false }
-    if selectedIndex < localResults.count {
-      selectLocal(localResults[selectedIndex])
+    let locals = localResults
+    let messages = messageResults
+    let globals = renderedGlobalResults
+    let total = locals.count + messages.count + globals.count
+
+    guard total > 0 else { return false }
+    if selectedIndex < locals.count {
+      selectLocal(locals[selectedIndex])
+    } else if selectedIndex < locals.count + messages.count {
+      let index = selectedIndex - locals.count
+      if messages.indices.contains(index) {
+        selectLocal(messages[index])
+      }
     } else {
-      let index = selectedIndex - localResults.count
-      if renderedGlobalResults.indices.contains(index) {
-        if case let .users(user) = renderedGlobalResults[index] {
+      let index = selectedIndex - locals.count - messages.count
+      if globals.indices.contains(index) {
+        if case let .users(user) = globals[index] {
           selectRemote(user)
         }
       }
@@ -458,6 +600,8 @@ final class QuickSearchViewModel: ObservableObject {
         runCommand(command)
       case let .createThread(title, spaceId, _):
         NewThreadAction.start(dependencies: dependencies, spaceId: spaceId, title: title)
+      case let .message(result):
+        openMessageResult(result)
     }
   }
 
@@ -517,10 +661,17 @@ final class QuickSearchViewModel: ObservableObject {
         self?.objectWillChange.send()
       }
       .store(in: &cancellables)
+
+    messageSearch.objectWillChange
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.objectWillChange.send()
+      }
+      .store(in: &cancellables)
   }
 
   private var commandResults: [QuickSearchCommand] {
-    guard let preparedQuery = QuickSearchRanker.prepareQuery(trimmedQuery) else { return [] }
+    guard let preparedQuery = QuickSearchRanker.prepareQuery(activeSearchQuery) else { return [] }
     let context = commandContext
     let rankedCommands: [RankedCommand] = QuickSearchCommand.allCases
       .filter { $0.isAvailable(in: context) }
@@ -543,7 +694,7 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   private var createThreadResult: QuickSearchLocalItem? {
-    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedQuery = activeSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmedQuery.isEmpty == false else { return nil }
     guard let spaceContext = activeSpaceContext else { return nil }
     guard isSearchComplete else { return nil }
@@ -553,6 +704,7 @@ final class QuickSearchViewModel: ObservableObject {
 
   private var hasAnySearchResults: Bool {
     if localSearch.results.isEmpty == false { return true }
+    if messageSearch.results.isEmpty == false { return true }
     if savedMessagesUser != nil { return true }
     if spaceResults.isEmpty == false { return true }
     if renderedGlobalResults.isEmpty == false { return true }
@@ -561,9 +713,11 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   private var isSearchComplete: Bool {
-    localSearch.isSearching == false &&
+    isLocalSearchPending == false &&
+      localSearch.isSearching == false &&
       isSavedMessagesSearching == false &&
       isSpaceSearching == false &&
+      messageSearch.isSearching == false &&
       globalSearch.isLoading == false &&
       error == nil
   }
@@ -571,6 +725,43 @@ final class QuickSearchViewModel: ObservableObject {
   private var activeSpaceContext: (id: Int64, name: String?)? {
     guard let spaceId = commandContext.selectedSpaceId else { return nil }
     return (id: spaceId, name: nil)
+  }
+
+  private var messageSearchOptions: LocalMessageSearchOptions {
+    LocalMessageSearchOptions(
+      spaceId: commandContext.selectedSpaceId,
+      limit: 20,
+      includeArchived: true,
+      sort: .newest
+    )
+  }
+
+  private func openMessageResult(_ result: LocalMessageSearchResult) {
+    let peer = result.peer
+    let messageId = result.messageId
+
+    Task { @MainActor in
+      if let nav2 = dependencies.nav2 {
+        if nav2.currentRoute.selectedPeer == peer {
+          ChatsManager
+            .get(for: peer, chatId: result.chatId)
+            .scrollTo(msgId: messageId, reason: .search)
+        } else {
+          nav2.requestOpenChat(
+            peer: peer,
+            targetMessageId: messageId,
+            database: dependencies.database
+          )
+        }
+      } else if nav3?.currentRoute.selectedPeer == peer {
+        ChatsManager
+          .get(for: peer, chatId: result.chatId)
+          .scrollTo(msgId: messageId, reason: .search)
+      } else {
+        dependencies.requestOpenChat(peer: peer, targetMessageId: messageId)
+      }
+      openInSidebar(peer: peer)
+    }
   }
 
   private func searchSavedMessages(query: String) {
@@ -637,6 +828,75 @@ final class QuickSearchViewModel: ObservableObject {
         guard spaceSearchToken == token else { return }
         spaceResults = []
         isSpaceSearching = false
+      }
+    }
+  }
+
+  private func searchUserActivity() {
+    userActivityToken = UUID()
+    let token = userActivityToken
+
+    Task { @MainActor in
+      do {
+        let activity = try await dependencies.database.reader.read { db in
+          let rows = try Row.fetchAll(
+            db,
+            sql: """
+            SELECT
+              "user".id AS userId,
+              chat.lastMsgId AS lastMsgId,
+              COALESCE(dialog.open, 0) AS isOpen,
+              COALESCE(dialog.pinned, 0) AS isPinned,
+              COALESCE(dialog.unreadCount, 0) AS unreadCount,
+              COALESCE(dialog.unreadMark, 0) AS unreadMark
+            FROM chat
+            JOIN "user" ON "user".id = chat.peerUserId
+            LEFT JOIN dialog ON dialog.peerUserId = "user".id
+            WHERE chat.peerUserId IS NOT NULL
+              AND (
+                chat.lastMsgId IS NOT NULL
+                OR dialog.open = 1
+                OR dialog.pinned = 1
+                OR dialog.unreadCount > 0
+                OR dialog.unreadMark = 1
+              )
+            ORDER BY
+              COALESCE(dialog.pinned, 0) DESC,
+              COALESCE(dialog.open, 0) DESC,
+              COALESCE(chat.lastMsgId, 0) DESC
+            LIMIT 500
+            """
+          )
+
+          var values: [Int64: QuickSearchUserActivity] = [:]
+          values.reserveCapacity(rows.count)
+          for row in rows {
+            let userId: Int64 = row["userId"]
+            let lastMsgId: Int64? = row["lastMsgId"]
+            let isOpen: Bool = row["isOpen"]
+            let isPinned: Bool = row["isPinned"]
+            let unreadCount: Int = row["unreadCount"]
+            let unreadMark: Bool = row["unreadMark"]
+            values[userId] = QuickSearchUserActivity(
+              hasMessages: lastMsgId != nil,
+              open: isOpen,
+              pinned: isPinned,
+              unread: unreadCount > 0 || unreadMark
+            )
+          }
+          return values
+        }
+
+        guard userActivityToken == token else { return }
+        if userActivity != activity {
+          userActivity = activity
+        }
+      } catch {
+        Log.shared.error("Failed to load quick search user activity", error: error)
+        guard userActivityToken == token else { return }
+        if userActivity.isEmpty == false {
+          userActivity = [:]
+        }
       }
     }
   }
@@ -718,6 +978,31 @@ final class QuickSearchViewModel: ObservableObject {
     query.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
+  private func runLocalSearch(query: String) {
+    setLocalSearchPending(false)
+    updateActiveSearchQuery(query)
+    localSearch.search(query: query)
+    messageSearch.search(query: query, options: messageSearchOptions)
+    searchSavedMessages(query: query)
+    searchSpaces(query: query)
+  }
+
+  private func loadUserActivityIfNeeded() {
+    guard didLoadUserActivity == false else { return }
+    didLoadUserActivity = true
+    searchUserActivity()
+  }
+
+  private func updateActiveSearchQuery(_ query: String) {
+    guard activeSearchQuery != query else { return }
+    activeSearchQuery = query
+  }
+
+  private func setLocalSearchPending(_ isPending: Bool) {
+    guard isLocalSearchPending != isPending else { return }
+    isLocalSearchPending = isPending
+  }
+
   private var supportsSpaceSelection: Bool {
     dependencies.nav2 != nil || nav3 != nil
   }
@@ -726,7 +1011,10 @@ final class QuickSearchViewModel: ObservableObject {
     for item: QuickSearchLocalItem,
     query: QuickSearchRanker.PreparedQuery
   ) -> Int? {
-    QuickSearchRanker.score(preparedQuery: query, fields: localSearchFields(for: item))
+    guard let score = QuickSearchRanker.score(preparedQuery: query, fields: localSearchFields(for: item)) else {
+      return nil
+    }
+    return score + localActivityBoost(for: item)
   }
 
   private func globalScore(
@@ -740,7 +1028,28 @@ final class QuickSearchViewModel: ObservableObject {
     for command: QuickSearchCommand,
     query: QuickSearchRanker.PreparedQuery
   ) -> Int? {
-    QuickSearchRanker.score(preparedQuery: query, fields: commandSearchFields(for: command))
+    guard command.isLikelyIntent(for: activeSearchQuery) else { return nil }
+    return QuickSearchRanker.score(preparedQuery: query, fields: commandSearchFields(for: command))
+  }
+
+  private func localActivityBoost(for item: QuickSearchLocalItem) -> Int {
+    switch item {
+      case let .thread(threadInfo):
+        var boost = 0
+        if threadInfo.chat.lastMsgId != nil {
+          boost += 120
+        }
+        if threadInfo.space?.id == commandContext.selectedSpaceId {
+          boost += 80
+        }
+        return boost
+      case let .user(user):
+        return userActivity[user.id]?.boost ?? 0
+      case let .space(space):
+        return space.id == commandContext.selectedSpaceId ? 80 : 0
+      case .command, .createThread, .message:
+        return 0
+    }
   }
 
   private func localSearchFields(for item: QuickSearchLocalItem) -> [QuickSearchSearchField] {
@@ -758,9 +1067,12 @@ final class QuickSearchViewModel: ObservableObject {
         var fields = [
           QuickSearchSearchField(value: user.displayName, boost: 700),
           QuickSearchSearchField(value: fullName, boost: 600),
-          QuickSearchSearchField(value: user.username ?? "", boost: 520),
           QuickSearchSearchField(value: user.email ?? "", boost: 480)
         ]
+        if let username = user.username, username.isEmpty == false {
+          fields.insert(QuickSearchSearchField(value: "@\(username)", boost: 900), at: 0)
+          fields.insert(QuickSearchSearchField(value: username, boost: 840), at: 1)
+        }
         if user.isCurrentUser() {
           fields.insert(QuickSearchSearchField(value: QuickSearchSavedMessages.title, boost: 760), at: 0)
         }
@@ -777,6 +1089,12 @@ final class QuickSearchViewModel: ObservableObject {
           QuickSearchSearchField(value: title, boost: 200),
           QuickSearchSearchField(value: spaceName ?? "", boost: 80)
         ]
+      case let .message(result):
+        return [
+          QuickSearchSearchField(value: result.title, boost: 260),
+          QuickSearchSearchField(value: result.snippet, boost: 140),
+          QuickSearchSearchField(value: result.contextTitle ?? "", boost: 80)
+        ]
     }
   }
 
@@ -790,16 +1108,25 @@ final class QuickSearchViewModel: ObservableObject {
         return [
           QuickSearchSearchField(value: user.anyName, boost: 720),
           QuickSearchSearchField(value: fullName, boost: 650),
-          QuickSearchSearchField(value: user.username ?? "", boost: 560),
           QuickSearchSearchField(value: user.email ?? "", boost: 520)
         ]
+          + usernameFields(for: user.username, plainBoost: 860, mentionBoost: 920)
     }
   }
 
   private func commandSearchFields(for command: QuickSearchCommand) -> [QuickSearchSearchField] {
     var fields = [QuickSearchSearchField(value: command.title, boost: 620)]
     fields.append(contentsOf: command.keywords.map { QuickSearchSearchField(value: $0, boost: 420) })
+    fields.append(QuickSearchSearchField(value: ([command.title] + command.keywords).joined(separator: " "), boost: 260))
     return fields
+  }
+
+  private func usernameFields(for username: String?, plainBoost: Int, mentionBoost: Int) -> [QuickSearchSearchField] {
+    guard let username, username.isEmpty == false else { return [] }
+    return [
+      QuickSearchSearchField(value: "@\(username)", boost: mentionBoost),
+      QuickSearchSearchField(value: username, boost: plainBoost)
+    ]
   }
 
   private func localSortTitle(for item: QuickSearchLocalItem) -> String {
@@ -814,6 +1141,8 @@ final class QuickSearchViewModel: ObservableObject {
         command.title
       case let .createThread(title, _, _):
         title
+      case let .message(result):
+        result.title
     }
   }
 
@@ -836,6 +1165,8 @@ final class QuickSearchViewModel: ObservableObject {
         return "d-\(item.id)"
       case .createThread:
         return "e-\(item.id)"
+      case .message:
+        return "f-\(item.id)"
     }
   }
 
@@ -877,16 +1208,40 @@ struct QuickSearchOverlayView: View {
   @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
+    let localResults = viewModel.localResults
+    let messageResults = viewModel.messageResults
+    let globalResults = viewModel.renderedGlobalResults
+    let isLoading = viewModel.isLoading
+    let error = viewModel.error
+    let localCount = localResults.count
+    let messageCount = messageResults.count
+    let globalCount = globalResults.count
+    let errorDescription = error?.localizedDescription ?? ""
+    let showList = shouldShowList(query: trimmedQuery, isLoading: isLoading, error: error)
+    let resultListHeight = listHeight(
+      localCount: localCount,
+      messageCount: messageCount,
+      globalCount: globalCount,
+      isLoading: isLoading,
+      error: error,
+      shouldShowList: showList
+    )
     let shape = RoundedRectangle(cornerRadius: QuickSearchLayout.cornerRadius, style: .continuous)
     let content = VStack(spacing: 0) {
       searchHeader
-      if shouldShowDivider {
+      if showList {
         Divider()
           .frame(height: QuickSearchLayout.separatorHeight)
       }
-      if shouldShowList {
+      if showList {
         QuickSearchResultsView(
-          viewModel: viewModel,
+          localResults: localResults,
+          messageResults: messageResults,
+          globalResults: globalResults,
+          selectedIndex: viewModel.selectedIndex,
+          isLoading: isLoading,
+          error: error,
+          query: viewModel.query,
           rowHeight: QuickSearchLayout.rowHeight,
           rowSpacing: QuickSearchLayout.rowSpacing,
           rowInnerPadding: QuickSearchLayout.rowInnerPadding,
@@ -901,7 +1256,7 @@ struct QuickSearchOverlayView: View {
             onDismiss()
           }
         )
-        .frame(height: listHeight)
+        .frame(height: resultListHeight)
       }
     }
     .frame(width: QuickSearchLayout.preferredWidth)
@@ -915,6 +1270,7 @@ struct QuickSearchOverlayView: View {
         content
           .background(VisualEffectView(material: .popover, blendingMode: .withinWindow))
           .background(shape.fill(tint))
+          .compositingGroup()
           .clipShape(shape)
       }
     }
@@ -936,18 +1292,22 @@ struct QuickSearchOverlayView: View {
       viewModel.performSearch()
       notifySizeChange()
     }
-    .onChange(of: viewModel.localResults.count) { _ in
+    .onChange(of: localCount) { _ in
       viewModel.clampSelection()
       notifySizeChange()
     }
-    .onChange(of: viewModel.renderedGlobalResults.count) { _ in
+    .onChange(of: messageCount) { _ in
       viewModel.clampSelection()
       notifySizeChange()
     }
-    .onChange(of: viewModel.isLoading) { _ in
+    .onChange(of: globalCount) { _ in
+      viewModel.clampSelection()
       notifySizeChange()
     }
-    .onChange(of: viewModel.error?.localizedDescription ?? "") { _ in
+    .onChange(of: isLoading) { _ in
+      notifySizeChange()
+    }
+    .onChange(of: errorDescription) { _ in
       notifySizeChange()
     }
   }
@@ -956,7 +1316,7 @@ struct QuickSearchOverlayView: View {
     TextField(
       "",
       text: $viewModel.query,
-      prompt: Text("Search chats and members")
+      prompt: Text("Search chats, members, and messages")
         .foregroundStyle(.secondary)
     )
     .textFieldStyle(.plain)
@@ -981,19 +1341,43 @@ struct QuickSearchOverlayView: View {
   }
 
   private var shouldShowList: Bool {
-    !trimmedQuery.isEmpty || viewModel.isLoading || viewModel.error != nil
+    shouldShowList(query: trimmedQuery, isLoading: viewModel.isLoading, error: viewModel.error)
   }
 
   private var listHeight: CGFloat {
+    listHeight(
+      localCount: viewModel.localResults.count,
+      messageCount: viewModel.messageResults.count,
+      globalCount: viewModel.renderedGlobalResults.count,
+      isLoading: viewModel.isLoading,
+      error: viewModel.error,
+      shouldShowList: shouldShowList
+    )
+  }
+
+  private func shouldShowList(query: String, isLoading: Bool, error: Error?) -> Bool {
+    !query.isEmpty || isLoading || error != nil
+  }
+
+  private func listHeight(
+    localCount: Int,
+    messageCount: Int,
+    globalCount: Int,
+    isLoading: Bool,
+    error: Error?,
+    shouldShowList: Bool
+  ) -> CGFloat {
     guard shouldShowList else { return 0 }
 
-    if viewModel.totalResults == 0, viewModel.isLoading == false, viewModel.error == nil {
+    let totalResults = localCount + messageCount + globalCount
+
+    if totalResults == 0, isLoading == false, error == nil {
       return QuickSearchLayout.rowHeight +
         QuickSearchLayout.listContentTopInset +
         QuickSearchLayout.listContentBottomInset
     }
 
-    let visibleRows = min(viewModel.totalResults, 8)
+    let visibleRows = min(totalResults, QuickSearchLayout.maxVisibleRows)
     let rowBlockHeight = CGFloat(visibleRows) * QuickSearchLayout.rowHeight +
       CGFloat(max(visibleRows - 1, 0)) * QuickSearchLayout.rowSpacing
     var height = rowBlockHeight +
@@ -1003,9 +1387,16 @@ struct QuickSearchOverlayView: View {
       QuickSearchLayout.listContentTopInset +
       QuickSearchLayout.listContentBottomInset
 
-    if shouldShowGlobalHeader {
+    if globalCount > 0 {
       height += QuickSearchLayout.sectionHeaderHeight + QuickSearchLayout.rowSpacing
-      if shouldShowSectionSpacing {
+      if localCount > 0 || messageCount > 0 {
+        height += QuickSearchLayout.sectionSpacing
+      }
+    }
+
+    if messageCount > 0 {
+      height += QuickSearchLayout.sectionHeaderHeight + QuickSearchLayout.rowSpacing
+      if localCount > 0 {
         height += QuickSearchLayout.sectionSpacing
       }
     }
@@ -1028,14 +1419,6 @@ struct QuickSearchOverlayView: View {
     return colorScheme == .dark ? Color.black.opacity(opacity) : Color.white.opacity(opacity)
   }
 
-  private var shouldShowGlobalHeader: Bool {
-    !viewModel.renderedGlobalResults.isEmpty
-  }
-
-  private var shouldShowSectionSpacing: Bool {
-    !viewModel.localResults.isEmpty && shouldShowGlobalHeader
-  }
-
   private func notifySizeChange() {
     let newSize = NSSize(width: QuickSearchLayout.preferredWidth, height: preferredHeight)
     guard abs(newSize.height - lastSize.height) > 0.5 else { return }
@@ -1045,7 +1428,13 @@ struct QuickSearchOverlayView: View {
 }
 
 private struct QuickSearchResultsView: View {
-  @ObservedObject var viewModel: QuickSearchViewModel
+  let localResults: [QuickSearchLocalItem]
+  let messageResults: [QuickSearchLocalItem]
+  let globalResults: [GlobalSearchResult]
+  let selectedIndex: Int
+  let isLoading: Bool
+  let error: Error?
+  let query: String
   let rowHeight: CGFloat
   let rowSpacing: CGFloat
   let rowInnerPadding: CGFloat
@@ -1054,89 +1443,204 @@ private struct QuickSearchResultsView: View {
   let onSelectLocal: (QuickSearchLocalItem) -> Void
   let onSelectRemote: (ApiUser) -> Void
 
-  private var hasAnyResults: Bool {
-    !viewModel.localResults.isEmpty || !viewModel.renderedGlobalResults.isEmpty
-  }
-
   private var trimmedQuery: String {
-    viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  private var shouldShowSectionSpacing: Bool {
-    !viewModel.localResults.isEmpty && !viewModel.renderedGlobalResults.isEmpty
+    query.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   var body: some View {
-    ScrollView(.vertical) {
-      LazyVStack(alignment: .leading, spacing: rowSpacing) {
-        if hasAnyResults {
-          if !viewModel.localResults.isEmpty {
-            ForEach(Array(viewModel.localResults.enumerated()), id: \.element.id) { index, result in
-              QuickSearchRow(
-                item: result,
-                highlighted: viewModel.selectedIndex == index,
+    let hasAnyResults = !localResults.isEmpty || !messageResults.isEmpty || !globalResults.isEmpty
+    let rows = visibleRows(
+      localResults: localResults,
+      messageResults: messageResults,
+      globalResults: globalResults
+    )
+    let rowIds = rows.map(\.id)
+
+    ScrollViewReader { proxy in
+      ScrollView(.vertical) {
+        LazyVStack(alignment: .leading, spacing: rowSpacing) {
+          if hasAnyResults {
+            ForEach(rows) { row in
+              QuickSearchResultRowView(
+                row: row,
+                selectedIndex: selectedIndex,
                 rowHeight: rowHeight,
                 rowInnerPadding: rowInnerPadding,
-                action: { onSelectLocal(result) }
+                sectionHeaderHeight: sectionHeaderHeight,
+                onSelectLocal: onSelectLocal,
+                onSelectRemote: onSelectRemote
               )
             }
-          }
-
-          if !viewModel.renderedGlobalResults.isEmpty {
-            QuickSearchSectionHeader(
-              title: "Global Search",
-              height: sectionHeaderHeight,
+          } else if isLoading {
+            QuickSearchLoadingRow(rowHeight: rowHeight, rowInnerPadding: rowInnerPadding)
+          } else if let error {
+            QuickSearchEmptyRow(
+              text: "Failed to load: \(error.localizedDescription)",
+              rowHeight: rowHeight,
               rowInnerPadding: rowInnerPadding
             )
-            .padding(.top, shouldShowSectionSpacing ? sectionSpacing : 0)
-
-            ForEach(Array(viewModel.renderedGlobalResults.enumerated()), id: \.element.id) { index, result in
-              let globalIndex = index + viewModel.localResults.count
-              switch result {
-                case let .users(user):
-                  QuickSearchRow(
-                    user: user,
-                    highlighted: viewModel.selectedIndex == globalIndex,
-                    rowHeight: rowHeight,
-                    rowInnerPadding: rowInnerPadding,
-                    action: { onSelectRemote(user) }
-                  )
-              }
-            }
+          } else if !trimmedQuery.isEmpty {
+            QuickSearchEmptyRow(text: "No results found", rowHeight: rowHeight, rowInnerPadding: rowInnerPadding)
           }
-        } else if viewModel.isLoading {
-          QuickSearchLoadingRow(rowHeight: rowHeight, rowInnerPadding: rowInnerPadding)
-        } else if let error = viewModel.error {
-          QuickSearchEmptyRow(
-            text: "Failed to load: \(error.localizedDescription)",
-            rowHeight: rowHeight,
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .contentMargins(
+        .horizontal,
+        QuickSearchLayout.listContentHorizontalInset,
+        for: .scrollContent
+      )
+      .contentMargins(
+        .top,
+        QuickSearchLayout.listContentTopInset,
+        for: .scrollContent
+      )
+      .contentMargins(
+        .bottom,
+        QuickSearchLayout.listContentBottomInset,
+        for: .scrollContent
+      )
+      .scrollIndicators(.hidden, axes: .horizontal)
+      .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+      .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .onAppear {
+        scrollToSelection(proxy: proxy, rows: rows)
+      }
+      .onChange(of: selectedIndex) { _, _ in
+        scrollToSelection(proxy: proxy, rows: rows)
+      }
+      .onChange(of: trimmedQuery) { _, _ in
+        scrollToSelection(proxy: proxy, rows: rows)
+      }
+      .onChange(of: rowIds) { _, _ in
+        scrollToSelection(proxy: proxy, rows: rows)
+      }
+    }
+  }
+
+  private func visibleRows(
+    localResults: [QuickSearchLocalItem],
+    messageResults: [QuickSearchLocalItem],
+    globalResults: [GlobalSearchResult]
+  ) -> [QuickSearchVisibleRow] {
+    var rows: [QuickSearchVisibleRow] = []
+
+    for (index, result) in localResults.enumerated() {
+      rows.append(.local(index: index, item: result))
+    }
+
+    if messageResults.isEmpty == false {
+      rows.append(.header(
+        id: "messages",
+        title: "Messages",
+        topPadding: localResults.isEmpty ? 0 : sectionSpacing
+      ))
+      for (index, result) in messageResults.enumerated() {
+        rows.append(.local(index: localResults.count + index, item: result))
+      }
+    }
+
+    if globalResults.isEmpty == false {
+      rows.append(.header(
+        id: "global",
+        title: "Global Search",
+        topPadding: localResults.isEmpty && messageResults.isEmpty ? 0 : sectionSpacing
+      ))
+      for (index, result) in globalResults.enumerated() {
+        rows.append(.global(index: localResults.count + messageResults.count + index, result: result))
+      }
+    }
+
+    return rows
+  }
+
+  private func scrollToSelection(proxy: ScrollViewProxy, rows: [QuickSearchVisibleRow]) {
+    guard let id = rows.first(where: { $0.resultIndex == selectedIndex })?.id else { return }
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      proxy.scrollTo(id)
+    }
+  }
+}
+
+private struct QuickSearchVisibleRow: Identifiable {
+  enum Content {
+    case header(title: String, topPadding: CGFloat)
+    case local(QuickSearchLocalItem)
+    case global(GlobalSearchResult)
+  }
+
+  let id: String
+  let resultIndex: Int?
+  let content: Content
+
+  static func header(id: String, title: String, topPadding: CGFloat) -> QuickSearchVisibleRow {
+    QuickSearchVisibleRow(
+      id: "quick-search-header-\(id)",
+      resultIndex: nil,
+      content: .header(title: title, topPadding: topPadding)
+    )
+  }
+
+  static func local(index: Int, item: QuickSearchLocalItem) -> QuickSearchVisibleRow {
+    QuickSearchVisibleRow(
+      id: "quick-search-local-\(item.id)",
+      resultIndex: index,
+      content: .local(item)
+    )
+  }
+
+  static func global(index: Int, result: GlobalSearchResult) -> QuickSearchVisibleRow {
+    QuickSearchVisibleRow(
+      id: "quick-search-global-\(result.id)",
+      resultIndex: index,
+      content: .global(result)
+    )
+  }
+}
+
+private struct QuickSearchResultRowView: View {
+  let row: QuickSearchVisibleRow
+  let selectedIndex: Int
+  let rowHeight: CGFloat
+  let rowInnerPadding: CGFloat
+  let sectionHeaderHeight: CGFloat
+  let onSelectLocal: (QuickSearchLocalItem) -> Void
+  let onSelectRemote: (ApiUser) -> Void
+
+  var body: some View {
+    VStack(spacing: 0) {
+      switch row.content {
+        case let .header(title, topPadding):
+          QuickSearchSectionHeader(
+            title: title,
+            height: sectionHeaderHeight,
             rowInnerPadding: rowInnerPadding
           )
-        } else if !trimmedQuery.isEmpty {
-          QuickSearchEmptyRow(text: "No results found", rowHeight: rowHeight, rowInnerPadding: rowInnerPadding)
-        }
+          .padding(.top, topPadding)
+        case let .local(result):
+          QuickSearchRow(
+            item: result,
+            highlighted: row.resultIndex == selectedIndex,
+            rowHeight: rowHeight,
+            rowInnerPadding: rowInnerPadding,
+            action: { onSelectLocal(result) }
+          )
+        case let .global(result):
+          switch result {
+            case let .users(user):
+              QuickSearchRow(
+                user: user,
+                highlighted: row.resultIndex == selectedIndex,
+                rowHeight: rowHeight,
+                rowInnerPadding: rowInnerPadding,
+                action: { onSelectRemote(user) }
+              )
+          }
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .contentMargins(
-      .horizontal,
-      QuickSearchLayout.listContentHorizontalInset,
-      for: .scrollContent
-    )
-    .contentMargins(
-      .top,
-      QuickSearchLayout.listContentTopInset,
-      for: .scrollContent
-    )
-    .contentMargins(
-      .bottom,
-      QuickSearchLayout.listContentBottomInset,
-      for: .scrollContent
-    )
-    .scrollIndicators(.hidden, axes: .horizontal)
-    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-    .scrollBounceBehavior(.basedOnSize, axes: .vertical)
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -1297,6 +1801,27 @@ private struct QuickSearchRow: View {
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }
+
+            case let .message(result):
+              messageIcon(for: result)
+                .frame(
+                  width: QuickSearchLayout.iconContainerSize,
+                  height: QuickSearchLayout.iconContainerSize,
+                  alignment: .center
+                )
+              HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+                Text(result.title)
+                  .lineLimit(1)
+                if result.snippet.isEmpty == false {
+                  Text(result.snippet)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Text("Message")
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
           }
         } else if let user {
           UserAvatar(apiUser: user, size: QuickSearchLayout.iconSize)
@@ -1343,6 +1868,27 @@ private struct QuickSearchRow: View {
       return .primary.opacity(0.05)
     }
     return .clear
+  }
+
+  @ViewBuilder
+  private func messageIcon(for result: LocalMessageSearchResult) -> some View {
+    switch result.peer {
+      case .thread:
+        if let chat = result.chat {
+          SidebarChatIcon(peer: .chat(chat), size: QuickSearchLayout.iconSize)
+        } else {
+          InitialsCircle(name: result.title, size: QuickSearchLayout.iconSize, symbol: "text.bubble.fill")
+        }
+      case .user:
+        if let user = result.peerUser {
+          SidebarChatIcon(
+            peer: user.isCurrentUser() ? .savedMessage(user) : .user(UserInfo(user: user)),
+            size: QuickSearchLayout.iconSize
+          )
+        } else {
+          InitialsCircle(name: result.title, size: QuickSearchLayout.iconSize, symbol: "text.bubble.fill")
+        }
+    }
   }
 }
 

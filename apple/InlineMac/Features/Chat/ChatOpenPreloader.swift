@@ -5,6 +5,7 @@ import os.signpost
 
 struct PreparedChatPayload: Sendable {
   let peer: Peer
+  let targetMessageId: Int64?
   let chatItem: SpaceChatItem?
   let messagesInitialState: MessagesProgressiveViewModel.InitialState
   let pinnedMessage: PreparedPinnedMessage?
@@ -24,7 +25,11 @@ actor ChatOpenPreloader {
     case newer
   }
 
-  func prepare(peer: Peer, database: AppDatabase) async throws -> PreparedChatPayload {
+  func prepare(
+    peer: Peer,
+    targetMessageId: Int64? = nil,
+    database: AppDatabase
+  ) async throws -> PreparedChatPayload {
     let prepareSignpostID = OSSignpostID(log: Self.signpostLog)
     var preparedMessageCount = 0
     os_signpost(
@@ -111,7 +116,12 @@ actor ChatOpenPreloader {
             "messages=\(messageCount)"
           )
         }
-        messages = try Self.fetchInitialMessages(peer: peer, limit: initialLimit, db: db)
+        messages = try Self.fetchInitialMessages(
+          peer: peer,
+          limit: initialLimit,
+          targetMessageId: targetMessageId,
+          db: db
+        )
         messageCount = messages.count
       }
 
@@ -162,6 +172,7 @@ actor ChatOpenPreloader {
 
       return PreparedChatPayload(
         peer: peer,
+        targetMessageId: targetMessageId,
         chatItem: chatItem,
         messagesInitialState: messagesInitialState,
         pinnedMessage: pinnedMessage
@@ -192,7 +203,73 @@ actor ChatOpenPreloader {
     return try item.map { try fillMissingChat(in: $0, peer: peer, db: db) }
   }
 
-  private static func fetchInitialMessages(peer: Peer, limit: Int, db: Database) throws -> [FullMessage] {
+  private static func fetchInitialMessages(
+    peer: Peer,
+    limit: Int,
+    targetMessageId: Int64?,
+    db: Database
+  ) throws -> [FullMessage] {
+    if let targetMessageId,
+       let messages = try fetchMessagesAround(peer: peer, messageId: targetMessageId, limit: limit, db: db) {
+      return messages
+    }
+
+    return try fetchLatestMessages(peer: peer, limit: limit, db: db)
+  }
+
+  private static func fetchLatestMessages(peer: Peer, limit: Int, db: Database) throws -> [FullMessage] {
+    let batch = try baseQuery(peer: peer)
+      .order(Column("date").desc, Column("messageId").desc)
+      .limit(limit)
+      .fetchAll(db)
+
+    return batch.reversed()
+  }
+
+  private static func fetchMessagesAround(
+    peer: Peer,
+    messageId: Int64,
+    limit: Int,
+    db: Database
+  ) throws -> [FullMessage]? {
+    guard messageId > 0 else { return nil }
+
+    let totalWindow = max(60, limit)
+    let beforeLimit = max(20, totalWindow / 2)
+    let afterLimit = max(20, totalWindow - beforeLimit - 1)
+
+    guard let target = try baseQuery(peer: peer)
+      .filter(Column("messageId") == messageId)
+      .fetchOne(db)
+    else {
+      return nil
+    }
+
+    let targetDate = target.message.date
+    let targetMessageId = target.message.messageId
+
+    let olderOrTarget = try baseQuery(peer: peer)
+      .filter(
+        (Column("date") < targetDate)
+          || ((Column("date") == targetDate) && (Column("messageId") <= targetMessageId))
+      )
+      .order(Column("date").desc, Column("messageId").desc)
+      .limit(beforeLimit + 1)
+      .fetchAll(db)
+
+    let newer = try baseQuery(peer: peer)
+      .filter(
+        (Column("date") > targetDate)
+          || ((Column("date") == targetDate) && (Column("messageId") > targetMessageId))
+      )
+      .order(Column("date").asc, Column("messageId").asc)
+      .limit(afterLimit)
+      .fetchAll(db)
+
+    return sortMessages(Array(olderOrTarget.reversed()) + newer)
+  }
+
+  private static func baseQuery(peer: Peer) -> QueryInterfaceRequest<FullMessage> {
     var query = FullMessage.queryRequest()
     switch peer {
       case let .thread(id):
@@ -200,13 +277,30 @@ actor ChatOpenPreloader {
       case let .user(id):
         query = query.filter(Column("peerUserId") == id)
     }
+    return query
+  }
 
-    let batch = try query
-      .order(Column("date").desc, Column("messageId").desc)
-      .limit(limit)
-      .fetchAll(db)
+  private static func sortMessages(_ batch: [FullMessage]) -> [FullMessage] {
+    guard batch.count > 1 else { return batch }
 
-    return batch.reversed()
+    return batch
+      .enumerated()
+      .sorted { lhs, rhs in
+        let left = lhs.element.message
+        let right = rhs.element.message
+
+        if left.date != right.date {
+          return left.date < right.date
+        }
+        if (left.globalId ?? 0) != (right.globalId ?? 0) {
+          return (left.globalId ?? 0) < (right.globalId ?? 0)
+        }
+        if left.messageId != right.messageId {
+          return left.messageId < right.messageId
+        }
+        return lhs.offset < rhs.offset
+      }
+      .map(\.element)
   }
 
   private static func fetchThreadAnchorMessage(

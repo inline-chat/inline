@@ -102,9 +102,22 @@ public enum QuickSearchMatcher {
   ) -> Int? {
     var score = 0
     let fieldTokens = tokens(from: field)
+    let fieldCompact = field.replacingOccurrences(of: " ", with: "")
+    let usesCompaction = fieldCompact != field
 
     if field == normalizedQuery {
       score += 12_000
+    }
+
+    if usesCompaction, compactQuery.count >= 2 {
+      if fieldCompact == compactQuery {
+        score += 11_000
+      } else if fieldCompact.hasPrefix(compactQuery) {
+        score += 8_200
+      } else if compactQuery.count >= 3, let range = fieldCompact.range(of: compactQuery) {
+        let position = fieldCompact.distance(from: fieldCompact.startIndex, to: range.lowerBound)
+        score += 4_600 - min(position * 25, 1_000)
+      }
     }
 
     if field.hasPrefix(normalizedQuery) {
@@ -144,6 +157,8 @@ public enum QuickSearchMatcher {
 
       if matchedTokenCount == queryTokens.count {
         score += 1_500
+      } else if queryTokens.count > 1 {
+        return nil
       } else if matchedTokenCount == 0, score == 0 {
         return nil
       }

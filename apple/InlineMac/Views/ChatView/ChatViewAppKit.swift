@@ -47,6 +47,7 @@ class ChatViewAppKit: NSViewController {
   private var fetchChatTask: Task<Void, Never>?
   private var isDisposed = false
   private var didStartDeferredObservation = false
+  private var didScrollToInitialTarget = false
 
   private var didInitialRefetch = false
   private let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
@@ -364,6 +365,20 @@ class ChatViewAppKit: NSViewController {
     }
 
     consumePendingDropAttachmentsIfPossible()
+    scheduleInitialTargetScrollIfNeeded(chat: chat)
+  }
+
+  private func scheduleInitialTargetScrollIfNeeded(chat: Chat) {
+    guard !didScrollToInitialTarget else { return }
+    guard let targetMessageId = preparedPayload?.targetMessageId else { return }
+    didScrollToInitialTarget = true
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self, !isDisposed else { return }
+      ChatsManager
+        .get(for: peerId, chatId: chat.id)
+        .scrollTo(msgId: targetMessageId, reason: .search)
+    }
   }
 
   private func unreadBoundaryAtOpen() -> Int64? {

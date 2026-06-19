@@ -66,25 +66,55 @@ public final class HomeSearchViewModel: ObservableObject {
       return
     }
 
+    let compactQuery = Self.compactSearchText(trimmedQuery)
+    guard compactQuery.isEmpty == false else {
+      results = []
+      isSearching = false
+      return
+    }
+
     isSearching = true
 
     Task {
       do {
-        let queryPattern = "%\(trimmedQuery)%"
+        let normalizedQuery = Self.normalizedSearchText(trimmedQuery)
+        let usernameQuery = normalizedQuery.hasPrefix("@") ? String(normalizedQuery.dropFirst()) : normalizedQuery
+        let queryPattern = "%\(normalizedQuery)%"
+        let compactPattern = "%\(compactQuery)%"
+        let usernamePrefixPattern = usernameQuery.isEmpty ? "\u{0}" : "\(usernameQuery)%"
         let chats = try await db.reader.read { db in
           let threads = try Chat
-            .filter {
-              $0.title.like("%\(trimmedQuery)%") &&
-                $0.type == ChatType.thread.rawValue
-            }
+            .filter(
+              sql: """
+              type = ? AND (
+                LOWER(COALESCE(title, '')) LIKE ?
+                OR LOWER(REPLACE(COALESCE(title, ''), ' ', '')) LIKE ?
+              )
+              """,
+              arguments: [ChatType.thread.rawValue, queryPattern, compactPattern]
+            )
             .including(optional: Chat.space)
             .asRequest(of: ThreadInfo.self)
             .fetchAll(db)
 
           let users = try User
             .filter(
-              sql: "firstName LIKE ? OR lastName LIKE ? OR email = ? OR username = ?",
-              arguments: [queryPattern, queryPattern, trimmedQuery, trimmedQuery]
+              sql: """
+              LOWER(COALESCE(firstName, '')) LIKE ?
+              OR LOWER(COALESCE(lastName, '')) LIKE ?
+              OR LOWER(TRIM(COALESCE(firstName, '') || ' ' || COALESCE(lastName, ''))) LIKE ?
+              OR LOWER(COALESCE(firstName, '') || COALESCE(lastName, '')) LIKE ?
+              OR LOWER(COALESCE(username, '')) LIKE ?
+              OR LOWER(COALESCE(email, '')) LIKE ?
+              """,
+              arguments: [
+                queryPattern,
+                queryPattern,
+                queryPattern,
+                compactPattern,
+                usernamePrefixPattern,
+                usernamePrefixPattern
+              ]
             )
             .fetchAll(db)
 
@@ -101,5 +131,19 @@ public final class HomeSearchViewModel: ObservableObject {
         isSearching = false
       }
     }
+  }
+
+  private static func normalizedSearchText(_ text: String) -> String {
+    text
+      .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+      .lowercased()
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func compactSearchText(_ text: String) -> String {
+    let normalized = normalizedSearchText(text)
+    return String(String.UnicodeScalarView(normalized.unicodeScalars.filter {
+      CharacterSet.alphanumerics.contains($0)
+    }))
   }
 }
