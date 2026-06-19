@@ -832,6 +832,17 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("message text fts") { db in
+      try db.create(virtualTable: "messageTextFts", using: FTS5()) { t in
+        t.synchronize(withTable: "message")
+        t.tokenizer = .unicode61()
+        t.prefixes = [2, 3, 4]
+        t.column("text")
+      }
+
+      try db.execute(sql: "PRAGMA optimize")
+    }
+
     migrator.registerMigration("user bio") { db in
       guard try !db.columns(in: "user").contains(where: { $0.name == "bio" }) else {
         return
@@ -890,31 +901,7 @@ public extension AppDatabase {
 
   static func clearDB() throws {
     _ = try AppDatabase.shared.dbWriter.write { db in
-
-      // Disable foreign key checks temporarily
-      try db.execute(sql: "PRAGMA foreign_keys = OFF")
-
-      // Get all table names excluding sqlite_* tables
-      let tables = try String.fetchAll(
-        db,
-        sql: """
-        SELECT name FROM sqlite_master
-        WHERE type = 'table'
-        AND name NOT LIKE 'sqlite_%'
-        AND name NOT LIKE 'grdb_%'
-        """
-      )
-
-      // Delete all rows from each table
-      for table in tables {
-        try db.execute(sql: "DELETE FROM \(table)")
-
-        // Reset the auto-increment counters
-        try db.execute(sql: "DELETE FROM sqlite_sequence WHERE name = ?", arguments: [table])
-      }
-
-      // Re-enable foreign key checks
-      try db.execute(sql: "PRAGMA foreign_keys = ON")
+      try clearTables(db)
     }
 
     // Note(@mo): Commented because database file won't be availble for the next user!!!!! If you need this
@@ -922,6 +909,53 @@ public extension AppDatabase {
     // try deleteDatabaseFile()
 
     log.info("Database successfully cleared.")
+  }
+
+  internal static func clearTables(_ db: Database) throws {
+    try db.execute(sql: "PRAGMA foreign_keys = OFF")
+    defer {
+      try? db.execute(sql: "PRAGMA foreign_keys = ON")
+    }
+
+    let ftsTables = try ftsTableNamesToSkip(db)
+    let tables = try String.fetchAll(
+      db,
+      sql: """
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+      AND name NOT LIKE 'sqlite_%'
+      AND name NOT LIKE 'grdb_%'
+      """
+    )
+
+    for table in tables where !ftsTables.contains(table) {
+      try db.execute(sql: "DELETE FROM \(quotedIdentifier(table))")
+      try db.execute(sql: "DELETE FROM sqlite_sequence WHERE name = ?", arguments: [table])
+    }
+  }
+
+  private static func ftsTableNamesToSkip(_ db: Database) throws -> Set<String> {
+    let virtualTables = try String.fetchAll(
+      db,
+      sql: """
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+      AND lower(sql) LIKE '%using fts%'
+      """
+    )
+
+    let shadowSuffixes = ["_data", "_idx", "_docsize", "_config", "_content"]
+    var names = Set(virtualTables)
+    for table in virtualTables {
+      for suffix in shadowSuffixes {
+        names.insert("\(table)\(suffix)")
+      }
+    }
+    return names
+  }
+
+  private static func quotedIdentifier(_ value: String) -> String {
+    "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
   }
 
   static func loggedOut() throws {
