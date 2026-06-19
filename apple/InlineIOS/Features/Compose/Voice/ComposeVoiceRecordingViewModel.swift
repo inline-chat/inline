@@ -5,7 +5,7 @@ import InlineKit
 import Logger
 import UIKit
 
-enum ComposeVoiceRecordingPhase: Equatable {
+enum ComposeVoiceRecordingPhase: Equatable, Hashable {
   case idle
   case starting
   case recording
@@ -20,6 +20,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   @Published private(set) var samples: [UInt8] = []
   @Published private(set) var isPlaying = false
   @Published private(set) var playbackProgress: Double = 0
+  @Published private(set) var isSending = false
 
   private let log = Log.scoped("ComposeVoiceRecordingViewModel")
 
@@ -27,6 +28,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   private var recording: ComposeVoiceRecording?
   private var player: AVAudioPlayer?
   private var playbackTimer: Timer?
+  private var playbackSessionActive = false
   private var stopRecordingAction: (@Sendable () -> Void)?
   private var operationId = UUID()
   private var cancellables: Set<AnyCancellable> = []
@@ -36,7 +38,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   var canSend: Bool {
-    phase == .review && recording != nil
+    phase == .review && recording != nil && !isSending
   }
 
   init() {
@@ -50,7 +52,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
     let recorder = recorder
     let recordingURL = recording?.fileURL
+    let shouldDeactivatePlaybackSession = playbackSessionActive
     Task { @MainActor in
+      if shouldDeactivatePlaybackSession {
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+      }
       recorder?.cancel()
       if let recordingURL {
         try? FileManager.default.removeItem(at: recordingURL)
@@ -58,17 +64,32 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
-  func start(peerId: InlineKit.Peer) async {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
-    guard phase == .idle else { return }
+  @discardableResult
+  func prepareToStart() -> Bool {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return false }
+    guard phase == .idle else { return false }
 
     let operationId = UUID()
-    self.operationId = operationId
-    duration = 0
-    samples = []
-    playbackProgress = 0
-    isPlaying = false
-    phase = .starting
+    enterStarting(operationId: operationId)
+    return true
+  }
+
+  func start(peerId: InlineKit.Peer) async {
+    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
+
+    let operationId: UUID
+    switch phase {
+    case .idle:
+      operationId = UUID()
+      enterStarting(operationId: operationId)
+    case .starting:
+      operationId = self.operationId
+    case .recording, .finishing, .review:
+      return
+    }
+
+    await Task.yield()
+    try? await Task.sleep(nanoseconds: 25_000_000)
 
     guard await ensureMicrophoneAccess() else {
       if self.operationId == operationId {
@@ -102,6 +123,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       samples = []
       playbackProgress = 0
       isPlaying = false
+      isSending = false
       phase = .recording
       stopRecordingAction = ComposeActions.shared.startVoiceRecording(for: peerId)
     } catch {
@@ -114,6 +136,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func stopRecording() {
+    guard phase == .recording else { return }
     Task { @MainActor in
       await finishRecording(showTooShortToast: true)
     }
@@ -144,25 +167,25 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     guard phase == .review, let recording else { return }
 
     if player?.isPlaying == true {
-      player?.pause()
-      isPlaying = false
+      pausePlayback()
       return
     }
 
     do {
       try configurePlaybackSession()
-      let player = try player ?? AVAudioPlayer(contentsOf: recording.fileURL)
-      player.prepareToPlay()
+      let player = try player ?? makePlaybackPlayer(for: recording)
       if playbackProgress >= 1 {
         player.currentTime = 0
         playbackProgress = 0
       }
       self.player = player
-      player.play()
+      guard player.play() else {
+        throw ComposeVoicePlaybackError.playFailed
+      }
       isPlaying = true
       startPlaybackTimer()
     } catch {
-      log.error("Failed to play voice recording", error: error)
+      logPlaybackError("Failed to play voice recording", error: error, recording: recording)
       showError("Failed to play voice message")
       stopPlayback(resetProgress: true)
     }
@@ -173,9 +196,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     guard phase == .review, let recording else { return }
 
     do {
-      try configurePlaybackSession()
-      let player = try player ?? AVAudioPlayer(contentsOf: recording.fileURL)
-      player.prepareToPlay()
+      let player = try player ?? makePlaybackPlayer(for: recording)
 
       let duration = max(player.duration, recording.duration)
       let clampedProgress = min(max(progress, 0), 1)
@@ -188,7 +209,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
         startPlaybackTimer()
       }
     } catch {
-      log.error("Failed to seek voice recording", error: error)
+      logPlaybackError("Failed to seek voice recording", error: error, recording: recording)
       showError("Failed to seek voice message")
       stopPlayback(resetProgress: true)
     }
@@ -200,7 +221,14 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       return nil
     }
 
-    guard let recording else { return nil }
+    guard canSend, let recording else { return nil }
+    isSending = true
+    defer {
+      if phase == .review {
+        isSending = false
+      }
+    }
+
     stopPlayback(resetProgress: true)
 
     let voice = try FileCache.saveVoice(
@@ -240,11 +268,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       }
 
       guard recording.duration >= Self.minimumDuration else {
-        try? FileManager.default.removeItem(at: recording.fileURL)
+        discard(recording)
         if showTooShortToast {
           showError("Voice message is too short.")
         }
-        reset()
+        resetFinishedAttempt()
         return
       }
 
@@ -253,6 +281,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       samples = Array(recording.waveform)
       playbackProgress = 0
       isPlaying = false
+      isSending = false
       phase = .review
     } catch {
       guard self.operationId == operationId else { return }
@@ -260,7 +289,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       if showTooShortToast {
         showError(error.localizedDescription)
       }
-      cancel()
+      resetFinishedAttempt()
     }
   }
 
@@ -268,6 +297,16 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     guard phase == .recording else { return }
     self.duration = duration
     self.samples = samples
+  }
+
+  private func enterStarting(operationId: UUID) {
+    self.operationId = operationId
+    duration = 0
+    samples = []
+    playbackProgress = 0
+    isPlaying = false
+    isSending = false
+    phase = .starting
   }
 
   private func observeSystemEvents() {
@@ -395,8 +434,32 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
   private func configurePlaybackSession() throws {
     let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.playback, mode: .spokenAudio, options: [.defaultToSpeaker])
+    try session.setCategory(.playback, mode: .spokenAudio, options: [])
     try session.setActive(true)
+    playbackSessionActive = true
+  }
+
+  private func deactivatePlaybackSession() {
+    guard playbackSessionActive else { return }
+    playbackSessionActive = false
+    try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+  }
+
+  private func makePlaybackPlayer(for recording: ComposeVoiceRecording) throws -> AVAudioPlayer {
+    let player = try AVAudioPlayer(data: recording.data)
+    player.prepareToPlay()
+    return player
+  }
+
+  private func logPlaybackError(_ message: String, error: Error, recording: ComposeVoiceRecording) {
+    let route = AVAudioSession.sharedInstance().currentRoute.outputs
+      .map(\.portType.rawValue)
+      .joined(separator: ",")
+    let fileExists = FileManager.default.fileExists(atPath: recording.fileURL.path)
+    log.error(
+      "\(message) bytes=\(recording.data.count) duration=\(recording.duration) progress=\(playbackProgress) fileExists=\(fileExists) route=\(route)",
+      error: error
+    )
   }
 
   private func startPlaybackTimer() {
@@ -425,11 +488,20 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     isPlaying = false
     playbackTimer?.invalidate()
     playbackTimer = nil
+    deactivatePlaybackSession()
 
     if player.currentTime >= player.duration {
       player.currentTime = 0
       playbackProgress = 0
     }
+  }
+
+  private func pausePlayback() {
+    player?.pause()
+    playbackTimer?.invalidate()
+    playbackTimer = nil
+    isPlaying = false
+    deactivatePlaybackSession()
   }
 
   private func stopPlayback(resetProgress: Bool) {
@@ -438,6 +510,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     player?.stop()
     player = nil
     isPlaying = false
+    deactivatePlaybackSession()
     if resetProgress {
       playbackProgress = 0
     }
@@ -448,7 +521,17 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     samples = []
     playbackProgress = 0
     isPlaying = false
+    isSending = false
     phase = .idle
+  }
+
+  private func resetFinishedAttempt() {
+    recording = nil
+    reset()
+  }
+
+  private func discard(_ recording: ComposeVoiceRecording) {
+    try? FileManager.default.removeItem(at: recording.fileURL)
   }
 
   private func showError(_ message: String) {
@@ -456,4 +539,15 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private static let minimumDuration: TimeInterval = 0.5
+}
+
+private enum ComposeVoicePlaybackError: LocalizedError {
+  case playFailed
+
+  var errorDescription: String? {
+    switch self {
+    case .playFailed:
+      "Could not play voice recording."
+    }
+  }
 }

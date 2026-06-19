@@ -64,6 +64,9 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
   private let log = Log.scoped("SharedAudioPlayer")
   private var audioPlayer: AVAudioPlayer?
   private var progressTimer: Timer?
+  #if os(iOS)
+  private var audioSessionActive = false
+  #endif
 
   override private init() {
     super.init()
@@ -142,6 +145,9 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
       state.duration = audioPlayer.duration
     }
     state.isPlaying = false
+    #if os(iOS)
+    deactivateAudioSessionIfNeeded()
+    #endif
   }
 
   public func stop() {
@@ -150,6 +156,9 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
     audioPlayer?.stop()
     audioPlayer = nil
     state = SharedAudioPlayerState()
+    #if os(iOS)
+    deactivateAudioSessionIfNeeded()
+    #endif
   }
 
   public func seekVoice(to progress: Double, for message: Message) {
@@ -186,12 +195,18 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
       state.currentTime = duration
       state.duration = duration
       state.isPlaying = false
+      #if os(iOS)
+      deactivateAudioSessionIfNeeded()
+      #endif
     }
   }
 
   private func resumeOrRestartVoicePlayback(for message: Message, fileURLOverride: URL?) throws {
     let item = try? voiceItem(for: message)
     if let audioPlayer, let item, state.item == item {
+      #if os(iOS)
+      try configureAudioSessionIfNeeded()
+      #endif
       if audioPlayer.play() {
         state.isPlaying = true
         startProgressTimer()
@@ -246,8 +261,15 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
   #if os(iOS)
   private func configureAudioSessionIfNeeded() throws {
     let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.playback, mode: .spokenAudio, options: [.defaultToSpeaker])
+    try session.setCategory(.playback, mode: .spokenAudio, options: [])
     try session.setActive(true)
+    audioSessionActive = true
+  }
+
+  private func deactivateAudioSessionIfNeeded() {
+    guard audioSessionActive else { return }
+    audioSessionActive = false
+    try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
   }
   #endif
 }
