@@ -39,20 +39,25 @@ struct SettingsRootView: View {
     .navigationSplitViewStyle(.balanced)
     .frame(minWidth: Metrics.windowMinWidth, minHeight: Metrics.windowMinHeight)
     .toolbar {
-      ToolbarItemGroup(placement: .navigation) {
-        Button {
-          goBack()
-        } label: {
-          Image(systemName: "chevron.left")
-        }
-        .disabled(!canGoBack)
+      ToolbarItem(placement: .navigation) {
+        ControlGroup {
+          Button {
+            goBack()
+          } label: {
+            Label("Go Back", systemImage: "chevron.left")
+              .labelStyle(.iconOnly)
+          }
+          .disabled(!canGoBack)
 
-        Button {
-          goForward()
-        } label: {
-          Image(systemName: "chevron.right")
+          Button {
+            goForward()
+          } label: {
+            Label("Go Forward", systemImage: "chevron.right")
+              .labelStyle(.iconOnly)
+          }
+          .disabled(!canGoForward)
         }
-        .disabled(!canGoForward)
+        .controlGroupStyle(.navigation)
       }
     }
     .onChange(of: selectedCategory) { _, _ in
@@ -137,6 +142,8 @@ struct SettingsDetailView: View {
       switch category {
         case .general:
           GeneralSettingsDetailView()
+        case .dataStorage:
+          DataStorageSettingsDetailView()
         case .hotkeys:
           HotkeysSettingsDetailView()
         #if SPARKLE

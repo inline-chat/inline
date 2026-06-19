@@ -11,6 +11,7 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var email: String?
   public var firstName: String?
   public var lastName: String?
+  public var bio: String?
   public var online: Bool?
   public var pendingSetup: Bool?
   public var phoneNumber: String?
@@ -41,6 +42,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var email: String?
   public var firstName: String?
   public var lastName: String?
+  public var bio: String?
   public var date: Date?
   public var username: String?
   public var phoneNumber: String?
@@ -59,6 +61,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let email = Column(CodingKeys.email)
     static let firstName = Column(CodingKeys.firstName)
     static let lastName = Column(CodingKeys.lastName)
+    static let bio = Column(CodingKeys.bio)
     static let date = Column(CodingKeys.date)
     static let username = Column(CodingKeys.username)
     static let phoneNumber = Column(CodingKeys.phoneNumber)
@@ -130,12 +133,13 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 5_000), email: String?, firstName: String?,
-    lastName: String? = nil, username: String? = nil
+    lastName: String? = nil, username: String? = nil, bio: String? = nil
   ) {
     self.id = id
     self.email = email
     self.firstName = firstName
     self.lastName = lastName
+    self.bio = bio
     date = Date.now
     self.username = username
     bot = false
@@ -198,6 +202,7 @@ public extension User {
     email = apiUser.email
     firstName = apiUser.firstName
     lastName = apiUser.lastName
+    bio = apiUser.bio
     username = apiUser.username
     date = Self.fromTimestamp(from: apiUser.date)
     online = apiUser.online
@@ -316,6 +321,7 @@ public extension User {
     id = user.id
     firstName = user.hasFirstName ? user.firstName : nil
     lastName = user.hasLastName ? user.lastName : nil
+    bio = user.hasBio ? user.bio : nil
     username = user.hasUsername ? user.username : nil
     timeZone = user.hasTimeZone ? user.timeZone : nil
     date = Date() // unused field
@@ -357,13 +363,20 @@ public extension User {
     if let existing {
       // Check if we need to clear local cache due to profile photo change
       let shouldClearCache = existing.shouldInvalidateLocalCache(newFileUniqueId: user.profileFileUniqueId)
+      let preservesOmittedFields = protocolUser.hasMin && protocolUser.min
 
       // keep existing values
       user.profileFileId = existing.profileFileId
       user.date = existing.date
-      user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
-      user.email = user.email ?? existing.email
-      user.timeZone = user.timeZone ?? existing.timeZone
+      if preservesOmittedFields {
+        user.firstName = user.firstName ?? existing.firstName
+        user.lastName = user.lastName ?? existing.lastName
+        user.bio = user.bio ?? existing.bio
+        user.username = user.username ?? existing.username
+        user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
+        user.email = user.email ?? existing.email
+        user.timeZone = user.timeZone ?? existing.timeZone
+      }
       user.profileCdnUrl = user.profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
       user.profileFileUniqueId = user.profileFileUniqueId ?? existing.profileFileUniqueId

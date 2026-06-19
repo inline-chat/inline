@@ -16,35 +16,63 @@ struct DebugSettingsDetailView: View {
 
   var body: some View {
     Form {
-      Section("Sync") {
-        Button("Sync Engine") {
-          showSyncStats = true
+      Section {
+        LabeledContent("Sync Engine") {
+          Button("Open") {
+            showSyncStats = true
+          }
         }
+      } header: {
+        Text("Sync")
+      } footer: {
+        Text("Inspect local RealtimeV2 sync state and run sync debug scenarios.")
       }
-      Section("Permissions") {
-        Button("Open Permissions") {
-          showPermissions = true
+
+      Section {
+        LabeledContent("App Permissions") {
+          Button("Open") {
+            showPermissions = true
+          }
         }
+      } header: {
+        Text("Permissions")
+      } footer: {
+        Text("Check notification, microphone, and local permission state used by this build.")
       }
-      Section("MacDevtools") {
-        Button("Open MacDevtools") {
-          MacDevtoolsWindowController.show()
+
+      Section {
+        LabeledContent("MacDevtools") {
+          Button("Open") {
+            MacDevtoolsWindowController.show()
+          }
         }
+      } header: {
+        Text("Developer Tools")
+      } footer: {
+        Text("Open the internal macOS developer tools window.")
       }
 #if DEBUG || DEBUG_BUILD
-      Section("Database") {
-        Button(role: .destructive) {
-          confirmDeleteDatabase = true
-        } label: {
-          Text(isDeletingDatabase ? "Deleting Database..." : "Delete DB File and Restart")
+      Section {
+        LabeledContent("Local Database") {
+          Button(isDeletingDatabase ? "Deleting..." : "Delete and Restart...", role: .destructive) {
+            confirmDeleteDatabase = true
+          }
+          .disabled(isDeletingDatabase)
         }
-        .disabled(isDeletingDatabase)
+      } header: {
+        Text("Database")
+      } footer: {
+        Text("Deletes the on-disk SQLite database for the current build profile, then restarts Inline.")
       }
 #endif
 #if DEBUG
-      Section("Updates") {
+      Section {
         Toggle("Show Update Button", isOn: $updateInstallState.debugForceReady)
           .toggleStyle(.switch)
+      } header: {
+        Text("Updates")
+      } footer: {
+        Text("Forces update UI into a ready state in debug builds.")
       }
 #endif
     }

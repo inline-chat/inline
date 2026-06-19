@@ -849,7 +849,7 @@ actor Sync {
         .space(id: payload.member.spaceID)
       case .joinSpace:
         .user
-      case .updateUserStatus, .updateUserSettings, .dialogArchived, .dialogNotificationSettings:
+      case .updateUserStatus, .updateUserSettings, .updatedUser, .dialogArchived, .dialogNotificationSettings:
         .user
       case let .newChat(payload):
         .chat(peer: payload.chat.peerID)

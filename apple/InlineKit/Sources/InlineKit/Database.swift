@@ -832,6 +832,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("user bio") { db in
+      guard try !db.columns(in: "user").contains(where: { $0.name == "bio" }) else {
+        return
+      }
+
+      try db.alter(table: "user") { t in
+        t.add(column: "bio", .text)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
