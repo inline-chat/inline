@@ -7,8 +7,30 @@ import SwiftUI
 // MARK: - Reaction Overlay Window
 
 class ReactionOverlayWindow: NSPanel {
+  private static var activeByMessageView: [ObjectIdentifier: ReactionOverlayWindow] = [:]
+
+  static func show(messageView: NSView, fullMessage: FullMessage) {
+    let key = ObjectIdentifier(messageView)
+    activeByMessageView[key]?.close()
+
+    let overlayWindow = ReactionOverlayWindow(
+      messageView: messageView,
+      fullMessage: fullMessage
+    )
+    activeByMessageView[key] = overlayWindow
+
+    overlayWindow.ignoresMouseEvents = false
+    overlayWindow.contentView?.wantsLayer = true
+    overlayWindow.orderFront(nil)
+  }
+
+  static func dismiss(for messageView: NSView) {
+    activeByMessageView[ObjectIdentifier(messageView)]?.closeWithAnimation()
+  }
+
   private var hostingView: NSHostingView<ReactionOverlayView>?
-  private var messageView: NSView
+  private weak var messageView: NSView?
+  private let messageViewKey: ObjectIdentifier
   private var mouseDownMonitor: Any?
   private var keyDownMonitor: Any?
   private var fullMessage: FullMessage
@@ -17,6 +39,7 @@ class ReactionOverlayWindow: NSPanel {
 
   init(messageView: NSView, fullMessage: FullMessage) {
     self.messageView = messageView
+    messageViewKey = ObjectIdentifier(messageView)
     self.fullMessage = fullMessage
 
     // Configure window
@@ -97,7 +120,7 @@ class ReactionOverlayWindow: NSPanel {
     let preferredY = cursorLocation.y + bottomGapFromCursor
 
     let targetScreen = screen(containing: cursorLocation)
-      ?? messageView.window?.screen
+      ?? messageView?.window?.screen
       ?? NSScreen.main
     guard let visibleFrame = targetScreen?.visibleFrame else { return }
 
@@ -160,6 +183,9 @@ class ReactionOverlayWindow: NSPanel {
     isClosing = true
     isEmojiPickerActive = false
     removeEventMonitors()
+    if Self.activeByMessageView[messageViewKey] === self {
+      Self.activeByMessageView[messageViewKey] = nil
+    }
     super.close()
   }
 
@@ -265,17 +291,10 @@ extension MessageViewAppKit {
     // Don't show reactions for messages that are still sending
     guard fullMessage.message.status != .sending else { return }
 
-    // Create and show the overlay window
-    let overlayWindow = ReactionOverlayWindow(
+    ReactionOverlayWindow.show(
       messageView: self,
       fullMessage: fullMessage
     )
-
-    // Make sure the window can receive mouse events
-    overlayWindow.ignoresMouseEvents = false
-    overlayWindow.contentView?.wantsLayer = true
-
-    overlayWindow.makeKeyAndOrderFront(nil)
   }
 }
 
@@ -284,13 +303,9 @@ extension MinimalMessageViewAppKit {
     // Don't show reactions for messages that are still sending
     guard fullMessage.message.status != .sending else { return }
 
-    let overlayWindow = ReactionOverlayWindow(
+    ReactionOverlayWindow.show(
       messageView: self,
       fullMessage: fullMessage
     )
-
-    overlayWindow.ignoresMouseEvents = false
-    overlayWindow.contentView?.wantsLayer = true
-    overlayWindow.makeKeyAndOrderFront(nil)
   }
 }

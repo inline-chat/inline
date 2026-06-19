@@ -62,6 +62,20 @@ class MessageTextView: NSTextView {
   // The owning message view handles links/entities here and returns true only
   // when the click should not continue into AppKit text selection.
   var onEntityClick: ((NSPoint, NSEvent) -> Bool)?
+  var onTextLongPress: ((NSPoint, NSEvent) -> Void)?
+
+  private var textHoldTimer: Timer?
+  private var textHoldMonitor: Any?
+  private var textHoldStart: NSPoint?
+
+  private enum TextHold {
+    static let duration: TimeInterval = 0.5
+    static let movement: CGFloat = 10
+  }
+
+  deinit {
+    cancelTextHold(reason: "deinit")
+  }
 
   override func resignFirstResponder() -> Bool {
     // Clear out selection when user clicks somewhere else
@@ -119,10 +133,92 @@ class MessageTextView: NSTextView {
         "MessageTextView.mouseDown entityClickAttempt point=\(MessageGestureTrace.point(location)) handled=\(handled)"
       )
       if handled { return }
+      startTextHold(at: location, event: event)
     }
 
     MessageGestureTrace.trace("MessageTextView.mouseDown forwardingToSuper")
     super.mouseDown(with: event)
+    cancelTextHold(reason: "mouseDownReturn")
+  }
+
+  private func startTextHold(at location: NSPoint, event: NSEvent) {
+    guard onTextLongPress != nil else { return }
+
+    cancelTextHold(reason: "restart")
+    textHoldStart = location
+    MessageGestureTrace.debug(
+      "MessageTextView.textHold start point=\(MessageGestureTrace.point(location)) eventNumber=\(event.eventNumber)"
+    )
+
+    let timer = Timer(timeInterval: TextHold.duration, repeats: false) { [weak self, event] _ in
+      guard let self, let start = self.textHoldStart else { return }
+      guard !self.cancelTextHoldIfSelectionStarted(source: "fire") else { return }
+      let action = self.onTextLongPress
+      self.cancelTextHold(reason: "fire")
+      MessageGestureTrace.debug(
+        "MessageTextView.textHold action=fire point=\(MessageGestureTrace.point(start)) eventNumber=\(event.eventNumber)"
+      )
+      action?(start, event)
+    }
+    textHoldTimer = timer
+    RunLoop.current.add(timer, forMode: .eventTracking)
+    RunLoop.current.add(timer, forMode: .default)
+
+    textHoldMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] next in
+      self?.updateTextHold(with: next)
+      return next
+    }
+  }
+
+  private func updateTextHold(with event: NSEvent) {
+    guard textHoldTimer != nil, let start = textHoldStart else { return }
+
+    switch event.type {
+    case .leftMouseDragged:
+      if cancelTextHoldIfSelectionStarted(source: "drag") { return }
+
+      let location = convert(event.locationInWindow, from: nil)
+      let dx = location.x - start.x
+      let dy = location.y - start.y
+      let distanceSquared = (dx * dx) + (dy * dy)
+      if distanceSquared > TextHold.movement * TextHold.movement {
+        MessageGestureTrace.debug(
+          "MessageTextView.textHold action=cancel reason=drag point=\(MessageGestureTrace.point(location))"
+        )
+        cancelTextHold(reason: "drag")
+      }
+
+      DispatchQueue.main.async { [weak self] in
+        _ = self?.cancelTextHoldIfSelectionStarted(source: "dragDeferred")
+      }
+    case .leftMouseUp:
+      MessageGestureTrace.debug("MessageTextView.textHold action=cancel reason=mouseUp")
+      cancelTextHold(reason: "mouseUp")
+    default:
+      break
+    }
+  }
+
+  private func cancelTextHoldIfSelectionStarted(source: String) -> Bool {
+    guard textHoldTimer != nil else { return false }
+    guard selectedRanges.contains(where: { $0.rangeValue.length > 0 }) else { return false }
+    MessageGestureTrace.debug("MessageTextView.textHold action=cancel reason=selection source=\(source)")
+    cancelTextHold(reason: "selection")
+    return true
+  }
+
+  private func cancelTextHold(reason: String) {
+    if textHoldTimer != nil {
+      MessageGestureTrace.trace("MessageTextView.textHold cancel reason=\(reason)")
+    }
+    textHoldTimer?.invalidate()
+    textHoldTimer = nil
+    textHoldStart = nil
+
+    if let textHoldMonitor {
+      NSEvent.removeMonitor(textHoldMonitor)
+      self.textHoldMonitor = nil
+    }
   }
 
   private func disableSystemTextChecking() {
