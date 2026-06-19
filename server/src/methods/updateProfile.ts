@@ -13,6 +13,7 @@ import { normalizeUsername } from "@in/server/utils/normalize"
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
   lastName: Type.Optional(Type.String()),
+  bio: Type.Optional(Type.String()),
   username: Type.Optional(Type.String()),
   timeZone: Type.Optional(Type.String()),
 })
@@ -27,45 +28,45 @@ const log = new Log("updateProfile")
 
 export const handler = async (input: Input, context: HandlerContext): Promise<Static<typeof Response>> => {
   try {
-    const username = input.username ? normalizeUsername(input.username) : input.username
-
-    if (username) {
-      // check username is available if it's set
-      let isAvailable = await checkUsernameAvailable(username, { userId: context.currentUserId })
-      if (!isAvailable) {
-        throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
-      }
-    }
-
     let props: DbNewUser = {}
-    if ("firstName" in input) {
-      if (input.firstName && input.firstName.length < 1) {
+    if (input.firstName !== undefined) {
+      const firstName = input.firstName.trim()
+      if (!firstName) {
         throw new InlineError(InlineError.ApiError.FIRST_NAME_INVALID)
       }
-      if (input.firstName) {
-        props.firstName = input.firstName
-      }
+      props.firstName = firstName
     }
-    if ("lastName" in input) {
-      if (input.lastName) {
-        props.lastName = input.lastName
-      }
+    if (input.lastName !== undefined) {
+      const lastName = input.lastName.trim()
+      props.lastName = lastName || null
     }
-    if ("username" in input) {
-      if (username && username.length < 2) {
-        throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
-      }
+    if (input.bio !== undefined) {
+      const bio = input.bio.trim()
+      props.bio = bio || null
+    }
+    if (input.username !== undefined) {
+      const username = normalizeUsername(input.username)
       if (username) {
+        if (username.length < 2) {
+          throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
+        }
+
+        // check username is available if it's set
+        let isAvailable = await checkUsernameAvailable(username, { userId: context.currentUserId })
+        if (!isAvailable) {
+          throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
+        }
         props.username = username
       }
     }
-    if ("timeZone" in input) {
-      if (input.timeZone && !validateIanaTimezone(input.timeZone)) {
+    if (input.timeZone !== undefined) {
+      const timeZone = input.timeZone.trim()
+      if (timeZone && !validateIanaTimezone(timeZone)) {
         throw new InlineError(InlineError.ApiError.TIMEZONE_INVALID)
       }
-      if (input.timeZone) {
-        log.debug("Setting timeZone", { timeZone: input.timeZone })
-        props.timeZone = input.timeZone
+      if (timeZone) {
+        log.debug("Setting timeZone", { timeZone })
+        props.timeZone = timeZone
       }
     }
 

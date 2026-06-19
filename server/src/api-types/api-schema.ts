@@ -112,6 +112,7 @@ export const TUserInfo = Type.Object({
   id: Type.Integer(),
   firstName: Optional(Type.String()),
   lastName: Optional(Type.String()),
+  bio: Optional(Type.String()),
   username: Optional(Type.String()),
   email: Optional(Type.String()),
   phoneNumber: Optional(Type.String()),

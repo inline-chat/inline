@@ -152,6 +152,10 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getBotPresence // = 58
   case setBotPresenceState // = 59
   case updateDialogFollowMode // = 60
+  case getSessions // = 61
+  case checkUsername // = 62
+  case changeUsername // = 63
+  case updateProfile // = 64
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -221,6 +225,10 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 58: self = .getBotPresence
     case 59: self = .setBotPresenceState
     case 60: self = .updateDialogFollowMode
+    case 61: self = .getSessions
+    case 62: self = .checkUsername
+    case 63: self = .changeUsername
+    case 64: self = .updateProfile
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -288,6 +296,10 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getBotPresence: return 58
     case .setBotPresenceState: return 59
     case .updateDialogFollowMode: return 60
+    case .getSessions: return 61
+    case .checkUsername: return 62
+    case .changeUsername: return 63
+    case .updateProfile: return 64
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -355,6 +367,60 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getBotPresence,
     .setBotPresenceState,
     .updateDialogFollowMode,
+    .getSessions,
+    .checkUsername,
+    .changeUsername,
+    .updateProfile,
+  ]
+
+}
+
+public enum UsernameAvailability: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case usernameAvailable // = 1
+  case usernameCurrent // = 2
+  case usernameTaken // = 3
+  case usernameReserved // = 4
+  case usernameInvalid // = 5
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .usernameAvailable
+    case 2: self = .usernameCurrent
+    case 3: self = .usernameTaken
+    case 4: self = .usernameReserved
+    case 5: self = .usernameInvalid
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .usernameAvailable: return 1
+    case .usernameCurrent: return 2
+    case .usernameTaken: return 3
+    case .usernameReserved: return 4
+    case .usernameInvalid: return 5
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [UsernameAvailability] = [
+    .unspecified,
+    .usernameAvailable,
+    .usernameCurrent,
+    .usernameTaken,
+    .usernameReserved,
+    .usernameInvalid,
   ]
 
 }
@@ -1246,6 +1312,15 @@ public struct User: @unchecked Sendable {
   public var hasBotAvatar: Bool {return _storage._botAvatar != nil}
   /// Clears the value of `botAvatar`. Subsequent reads from it will return its default value.
   public mutating func clearBotAvatar() {_uniqueStorage()._botAvatar = nil}
+
+  public var bio: String {
+    get {return _storage._bio ?? String()}
+    set {_uniqueStorage()._bio = newValue}
+  }
+  /// Returns true if `bio` has been explicitly set.
+  public var hasBio: Bool {return _storage._bio != nil}
+  /// Clears the value of `bio`. Subsequent reads from it will return its default value.
+  public mutating func clearBio() {_uniqueStorage()._bio = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3477,6 +3552,9 @@ public struct RpcError: Sendable {
     case phoneNumberInvalid // = 12
     case spaceAdminRequired // = 13
     case spaceOwnerRequired // = 14
+    case usernameInvalid // = 15
+    case usernameTaken // = 16
+    case firstNameInvalid // = 17
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -3500,6 +3578,9 @@ public struct RpcError: Sendable {
       case 12: self = .phoneNumberInvalid
       case 13: self = .spaceAdminRequired
       case 14: self = .spaceOwnerRequired
+      case 15: self = .usernameInvalid
+      case 16: self = .usernameTaken
+      case 17: self = .firstNameInvalid
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -3521,6 +3602,9 @@ public struct RpcError: Sendable {
       case .phoneNumberInvalid: return 12
       case .spaceAdminRequired: return 13
       case .spaceOwnerRequired: return 14
+      case .usernameInvalid: return 15
+      case .usernameTaken: return 16
+      case .firstNameInvalid: return 17
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -3542,6 +3626,9 @@ public struct RpcError: Sendable {
       .phoneNumberInvalid,
       .spaceAdminRequired,
       .spaceOwnerRequired,
+      .usernameInvalid,
+      .usernameTaken,
+      .firstNameInvalid,
     ]
 
   }
@@ -4038,6 +4125,38 @@ public struct RpcCall: Sendable {
     set {input = .updateDialogFollowMode(newValue)}
   }
 
+  public var getSessions: GetSessionsInput {
+    get {
+      if case .getSessions(let v)? = input {return v}
+      return GetSessionsInput()
+    }
+    set {input = .getSessions(newValue)}
+  }
+
+  public var checkUsername: CheckUsernameInput {
+    get {
+      if case .checkUsername(let v)? = input {return v}
+      return CheckUsernameInput()
+    }
+    set {input = .checkUsername(newValue)}
+  }
+
+  public var changeUsername: ChangeUsernameInput {
+    get {
+      if case .changeUsername(let v)? = input {return v}
+      return ChangeUsernameInput()
+    }
+    set {input = .changeUsername(newValue)}
+  }
+
+  public var updateProfile: UpdateProfileInput {
+    get {
+      if case .updateProfile(let v)? = input {return v}
+      return UpdateProfileInput()
+    }
+    set {input = .updateProfile(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -4101,6 +4220,10 @@ public struct RpcCall: Sendable {
     case getBotPresence(GetBotPresenceInput)
     case setBotPresenceState(SetBotPresenceStateInput)
     case updateDialogFollowMode(UpdateDialogFollowModeInput)
+    case getSessions(GetSessionsInput)
+    case checkUsername(CheckUsernameInput)
+    case changeUsername(ChangeUsernameInput)
+    case updateProfile(UpdateProfileInput)
 
   }
 
@@ -4596,6 +4719,38 @@ public struct RpcResult: Sendable {
     set {result = .updateDialogFollowMode(newValue)}
   }
 
+  public var getSessions: GetSessionsResult {
+    get {
+      if case .getSessions(let v)? = result {return v}
+      return GetSessionsResult()
+    }
+    set {result = .getSessions(newValue)}
+  }
+
+  public var checkUsername: CheckUsernameResult {
+    get {
+      if case .checkUsername(let v)? = result {return v}
+      return CheckUsernameResult()
+    }
+    set {result = .checkUsername(newValue)}
+  }
+
+  public var changeUsername: ChangeUsernameResult {
+    get {
+      if case .changeUsername(let v)? = result {return v}
+      return ChangeUsernameResult()
+    }
+    set {result = .changeUsername(newValue)}
+  }
+
+  public var updateProfile: UpdateProfileResult {
+    get {
+      if case .updateProfile(let v)? = result {return v}
+      return UpdateProfileResult()
+    }
+    set {result = .updateProfile(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -4659,6 +4814,10 @@ public struct RpcResult: Sendable {
     case getBotPresence(GetBotPresenceResult)
     case setBotPresenceState(SetBotPresenceStateResult)
     case updateDialogFollowMode(UpdateDialogFollowModeResult)
+    case getSessions(GetSessionsResult)
+    case checkUsername(CheckUsernameResult)
+    case changeUsername(ChangeUsernameResult)
+    case updateProfile(UpdateProfileResult)
 
   }
 
@@ -5576,6 +5735,236 @@ public struct RevokeSessionResult: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+public struct GetSessionsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct AccountSession: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: Int64 = 0
+
+  public var clientType: String = String()
+
+  public var clientVersion: String {
+    get {return _clientVersion ?? String()}
+    set {_clientVersion = newValue}
+  }
+  /// Returns true if `clientVersion` has been explicitly set.
+  public var hasClientVersion: Bool {return self._clientVersion != nil}
+  /// Clears the value of `clientVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearClientVersion() {self._clientVersion = nil}
+
+  public var osVersion: String {
+    get {return _osVersion ?? String()}
+    set {_osVersion = newValue}
+  }
+  /// Returns true if `osVersion` has been explicitly set.
+  public var hasOsVersion: Bool {return self._osVersion != nil}
+  /// Clears the value of `osVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearOsVersion() {self._osVersion = nil}
+
+  public var deviceName: String {
+    get {return _deviceName ?? String()}
+    set {_deviceName = newValue}
+  }
+  /// Returns true if `deviceName` has been explicitly set.
+  public var hasDeviceName: Bool {return self._deviceName != nil}
+  /// Clears the value of `deviceName`. Subsequent reads from it will return its default value.
+  public mutating func clearDeviceName() {self._deviceName = nil}
+
+  public var city: String {
+    get {return _city ?? String()}
+    set {_city = newValue}
+  }
+  /// Returns true if `city` has been explicitly set.
+  public var hasCity: Bool {return self._city != nil}
+  /// Clears the value of `city`. Subsequent reads from it will return its default value.
+  public mutating func clearCity() {self._city = nil}
+
+  public var country: String {
+    get {return _country ?? String()}
+    set {_country = newValue}
+  }
+  /// Returns true if `country` has been explicitly set.
+  public var hasCountry: Bool {return self._country != nil}
+  /// Clears the value of `country`. Subsequent reads from it will return its default value.
+  public mutating func clearCountry() {self._country = nil}
+
+  public var timezone: String {
+    get {return _timezone ?? String()}
+    set {_timezone = newValue}
+  }
+  /// Returns true if `timezone` has been explicitly set.
+  public var hasTimezone: Bool {return self._timezone != nil}
+  /// Clears the value of `timezone`. Subsequent reads from it will return its default value.
+  public mutating func clearTimezone() {self._timezone = nil}
+
+  public var createdAt: Int64 = 0
+
+  public var lastActiveAt: Int64 = 0
+
+  public var active: Bool = false
+
+  public var current: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _clientVersion: String? = nil
+  fileprivate var _osVersion: String? = nil
+  fileprivate var _deviceName: String? = nil
+  fileprivate var _city: String? = nil
+  fileprivate var _country: String? = nil
+  fileprivate var _timezone: String? = nil
+}
+
+public struct GetSessionsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var sessions: [AccountSession] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct CheckUsernameInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var username: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct CheckUsernameResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var username: String = String()
+
+  public var availability: UsernameAvailability = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct ChangeUsernameInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var username: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct ChangeUsernameResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var user: User {
+    get {return _user ?? User()}
+    set {_user = newValue}
+  }
+  /// Returns true if `user` has been explicitly set.
+  public var hasUser: Bool {return self._user != nil}
+  /// Clears the value of `user`. Subsequent reads from it will return its default value.
+  public mutating func clearUser() {self._user = nil}
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _user: User? = nil
+}
+
+public struct UpdateProfileInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var firstName: String {
+    get {return _firstName ?? String()}
+    set {_firstName = newValue}
+  }
+  /// Returns true if `firstName` has been explicitly set.
+  public var hasFirstName: Bool {return self._firstName != nil}
+  /// Clears the value of `firstName`. Subsequent reads from it will return its default value.
+  public mutating func clearFirstName() {self._firstName = nil}
+
+  public var lastName: String {
+    get {return _lastName ?? String()}
+    set {_lastName = newValue}
+  }
+  /// Returns true if `lastName` has been explicitly set.
+  public var hasLastName: Bool {return self._lastName != nil}
+  /// Clears the value of `lastName`. Subsequent reads from it will return its default value.
+  public mutating func clearLastName() {self._lastName = nil}
+
+  public var bio: String {
+    get {return _bio ?? String()}
+    set {_bio = newValue}
+  }
+  /// Returns true if `bio` has been explicitly set.
+  public var hasBio: Bool {return self._bio != nil}
+  /// Clears the value of `bio`. Subsequent reads from it will return its default value.
+  public mutating func clearBio() {self._bio = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _firstName: String? = nil
+  fileprivate var _lastName: String? = nil
+  fileprivate var _bio: String? = nil
+}
+
+public struct UpdateProfileResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var user: User {
+    get {return _user ?? User()}
+    set {_user = newValue}
+  }
+  /// Returns true if `user` has been explicitly set.
+  public var hasUser: Bool {return self._user != nil}
+  /// Clears the value of `user`. Subsequent reads from it will return its default value.
+  public mutating func clearUser() {self._user = nil}
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _user: User? = nil
 }
 
 public struct BotCommand: Sendable {
@@ -8162,6 +8551,14 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .dialogFollowMode(newValue)}
   }
 
+  public var updatedUser: UpdateUpdatedUser {
+    get {
+      if case .updatedUser(let v)? = _storage._update {return v}
+      return UpdateUpdatedUser()
+    }
+    set {_uniqueStorage()._update = .updatedUser(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -8211,6 +8608,7 @@ public struct Update: @unchecked Sendable {
     case clearChatHistory_p(UpdateClearChatHistory)
     case botPresence(UpdateBotPresence)
     case dialogFollowMode(UpdateDialogFollowMode)
+    case updatedUser(UpdateUpdatedUser)
 
   }
 
@@ -8493,6 +8891,28 @@ public struct UpdateUserSettings: Sendable {
   public init() {}
 
   fileprivate var _settings: UserSettings? = nil
+}
+
+/// Update when a user's profile/account fields change.
+public struct UpdateUpdatedUser: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var user: User {
+    get {return _user ?? User()}
+    set {_user = newValue}
+  }
+  /// Returns true if `user` has been explicitly set.
+  public var hasUser: Bool {return self._user != nil}
+  /// Clears the value of `user`. Subsequent reads from it will return its default value.
+  public mutating func clearUser() {self._user = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _user: User? = nil
 }
 
 /// Update when a new space member is added
@@ -9953,6 +10373,21 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     58: .same(proto: "GET_BOT_PRESENCE"),
     59: .same(proto: "SET_BOT_PRESENCE_STATE"),
     60: .same(proto: "UPDATE_DIALOG_FOLLOW_MODE"),
+    61: .same(proto: "GET_SESSIONS"),
+    62: .same(proto: "CHECK_USERNAME"),
+    63: .same(proto: "CHANGE_USERNAME"),
+    64: .same(proto: "UPDATE_PROFILE"),
+  ]
+}
+
+extension UsernameAvailability: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "USERNAME_AVAILABILITY_UNSPECIFIED"),
+    1: .same(proto: "USERNAME_AVAILABLE"),
+    2: .same(proto: "USERNAME_CURRENT"),
+    3: .same(proto: "USERNAME_TAKEN"),
+    4: .same(proto: "USERNAME_RESERVED"),
+    5: .same(proto: "USERNAME_INVALID"),
   ]
 }
 
@@ -11010,6 +11445,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     12: .standard(proto: "time_zone"),
     13: .same(proto: "bot"),
     14: .standard(proto: "bot_avatar"),
+    15: .same(proto: "bio"),
   ]
 
   fileprivate class _StorageClass {
@@ -11026,6 +11462,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     var _timeZone: String? = nil
     var _bot: Bool? = nil
     var _botAvatar: BotAvatar? = nil
+    var _bio: String? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -11053,6 +11490,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       _timeZone = source._timeZone
       _bot = source._bot
       _botAvatar = source._botAvatar
+      _bio = source._bio
     }
   }
 
@@ -11084,6 +11522,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
         case 12: try { try decoder.decodeSingularStringField(value: &_storage._timeZone) }()
         case 13: try { try decoder.decodeSingularBoolField(value: &_storage._bot) }()
         case 14: try { try decoder.decodeSingularMessageField(value: &_storage._botAvatar) }()
+        case 15: try { try decoder.decodeSingularStringField(value: &_storage._bio) }()
         default: break
         }
       }
@@ -11135,6 +11574,9 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       try { if let v = _storage._botAvatar {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
       } }()
+      try { if let v = _storage._bio {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 15)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -11157,6 +11599,7 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
         if _storage._timeZone != rhs_storage._timeZone {return false}
         if _storage._bot != rhs_storage._bot {return false}
         if _storage._botAvatar != rhs_storage._botAvatar {return false}
+        if _storage._bio != rhs_storage._bio {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -14207,6 +14650,9 @@ extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
     12: .same(proto: "PHONE_NUMBER_INVALID"),
     13: .same(proto: "SPACE_ADMIN_REQUIRED"),
     14: .same(proto: "SPACE_OWNER_REQUIRED"),
+    15: .same(proto: "USERNAME_INVALID"),
+    16: .same(proto: "USERNAME_TAKEN"),
+    17: .same(proto: "FIRST_NAME_INVALID"),
   ]
 }
 
@@ -14274,6 +14720,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     59: .same(proto: "getBotPresence"),
     60: .same(proto: "setBotPresenceState"),
     61: .same(proto: "updateDialogFollowMode"),
+    62: .same(proto: "getSessions"),
+    63: .same(proto: "checkUsername"),
+    64: .same(proto: "changeUsername"),
+    65: .same(proto: "updateProfile"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -15063,6 +15513,58 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updateDialogFollowMode(v)
         }
       }()
+      case 62: try {
+        var v: GetSessionsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getSessions(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getSessions(v)
+        }
+      }()
+      case 63: try {
+        var v: CheckUsernameInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .checkUsername(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .checkUsername(v)
+        }
+      }()
+      case 64: try {
+        var v: ChangeUsernameInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .changeUsername(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .changeUsername(v)
+        }
+      }()
+      case 65: try {
+        var v: UpdateProfileInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateProfile(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateProfile(v)
+        }
+      }()
       default: break
       }
     }
@@ -15317,6 +15819,22 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updateDialogFollowMode(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 61)
     }()
+    case .getSessions?: try {
+      guard case .getSessions(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 62)
+    }()
+    case .checkUsername?: try {
+      guard case .checkUsername(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 63)
+    }()
+    case .changeUsername?: try {
+      guard case .changeUsername(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 64)
+    }()
+    case .updateProfile?: try {
+      guard case .updateProfile(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 65)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -15394,6 +15912,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     59: .same(proto: "getBotPresence"),
     60: .same(proto: "setBotPresenceState"),
     61: .same(proto: "updateDialogFollowMode"),
+    62: .same(proto: "getSessions"),
+    63: .same(proto: "checkUsername"),
+    64: .same(proto: "changeUsername"),
+    65: .same(proto: "updateProfile"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -16183,6 +16705,58 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           self.result = .updateDialogFollowMode(v)
         }
       }()
+      case 62: try {
+        var v: GetSessionsResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .getSessions(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .getSessions(v)
+        }
+      }()
+      case 63: try {
+        var v: CheckUsernameResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .checkUsername(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .checkUsername(v)
+        }
+      }()
+      case 64: try {
+        var v: ChangeUsernameResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .changeUsername(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .changeUsername(v)
+        }
+      }()
+      case 65: try {
+        var v: UpdateProfileResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .updateProfile(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .updateProfile(v)
+        }
+      }()
       default: break
       }
     }
@@ -16436,6 +17010,22 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     case .updateDialogFollowMode?: try {
       guard case .updateDialogFollowMode(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 61)
+    }()
+    case .getSessions?: try {
+      guard case .getSessions(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 62)
+    }()
+    case .checkUsername?: try {
+      guard case .checkUsername(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 63)
+    }()
+    case .changeUsername?: try {
+      guard case .changeUsername(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 64)
+    }()
+    case .updateProfile?: try {
+      guard case .updateProfile(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 65)
     }()
     case nil: break
     }
@@ -18142,6 +18732,393 @@ extension RevokeSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   public static func ==(lhs: RevokeSessionResult, rhs: RevokeSessionResult) -> Bool {
     if lhs.revoked != rhs.revoked {return false}
     if lhs.alreadyRevoked != rhs.alreadyRevoked {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetSessionsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSessionsInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSessionsInput, rhs: GetSessionsInput) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension AccountSession: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AccountSession"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "id"),
+    2: .standard(proto: "client_type"),
+    3: .standard(proto: "client_version"),
+    4: .standard(proto: "os_version"),
+    5: .standard(proto: "device_name"),
+    6: .same(proto: "city"),
+    7: .same(proto: "country"),
+    8: .same(proto: "timezone"),
+    9: .standard(proto: "created_at"),
+    10: .standard(proto: "last_active_at"),
+    11: .same(proto: "active"),
+    12: .same(proto: "current"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.clientType) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._clientVersion) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._osVersion) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._deviceName) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self._city) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self._country) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._timezone) }()
+      case 9: try { try decoder.decodeSingularInt64Field(value: &self.createdAt) }()
+      case 10: try { try decoder.decodeSingularInt64Field(value: &self.lastActiveAt) }()
+      case 11: try { try decoder.decodeSingularBoolField(value: &self.active) }()
+      case 12: try { try decoder.decodeSingularBoolField(value: &self.current) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    }
+    if !self.clientType.isEmpty {
+      try visitor.visitSingularStringField(value: self.clientType, fieldNumber: 2)
+    }
+    try { if let v = self._clientVersion {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._osVersion {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._deviceName {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._city {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._country {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._timezone {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
+    if self.createdAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.createdAt, fieldNumber: 9)
+    }
+    if self.lastActiveAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.lastActiveAt, fieldNumber: 10)
+    }
+    if self.active != false {
+      try visitor.visitSingularBoolField(value: self.active, fieldNumber: 11)
+    }
+    if self.current != false {
+      try visitor.visitSingularBoolField(value: self.current, fieldNumber: 12)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AccountSession, rhs: AccountSession) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.clientType != rhs.clientType {return false}
+    if lhs._clientVersion != rhs._clientVersion {return false}
+    if lhs._osVersion != rhs._osVersion {return false}
+    if lhs._deviceName != rhs._deviceName {return false}
+    if lhs._city != rhs._city {return false}
+    if lhs._country != rhs._country {return false}
+    if lhs._timezone != rhs._timezone {return false}
+    if lhs.createdAt != rhs.createdAt {return false}
+    if lhs.lastActiveAt != rhs.lastActiveAt {return false}
+    if lhs.active != rhs.active {return false}
+    if lhs.current != rhs.current {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetSessionsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSessionsResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "sessions"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.sessions) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.sessions.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.sessions, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSessionsResult, rhs: GetSessionsResult) -> Bool {
+    if lhs.sessions != rhs.sessions {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension CheckUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CheckUsernameInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "username"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.username) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.username.isEmpty {
+      try visitor.visitSingularStringField(value: self.username, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CheckUsernameInput, rhs: CheckUsernameInput) -> Bool {
+    if lhs.username != rhs.username {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension CheckUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CheckUsernameResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "username"),
+    2: .same(proto: "availability"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.username) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.availability) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.username.isEmpty {
+      try visitor.visitSingularStringField(value: self.username, fieldNumber: 1)
+    }
+    if self.availability != .unspecified {
+      try visitor.visitSingularEnumField(value: self.availability, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CheckUsernameResult, rhs: CheckUsernameResult) -> Bool {
+    if lhs.username != rhs.username {return false}
+    if lhs.availability != rhs.availability {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ChangeUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ChangeUsernameInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "username"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.username) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.username.isEmpty {
+      try visitor.visitSingularStringField(value: self.username, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ChangeUsernameInput, rhs: ChangeUsernameInput) -> Bool {
+    if lhs.username != rhs.username {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ChangeUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ChangeUsernameResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "user"),
+    2: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._user) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._user {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ChangeUsernameResult, rhs: ChangeUsernameResult) -> Bool {
+    if lhs._user != rhs._user {return false}
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateProfileInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "first_name"),
+    2: .standard(proto: "last_name"),
+    3: .same(proto: "bio"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self._firstName) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._lastName) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._bio) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._firstName {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._lastName {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._bio {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateProfileInput, rhs: UpdateProfileInput) -> Bool {
+    if lhs._firstName != rhs._firstName {return false}
+    if lhs._lastName != rhs._lastName {return false}
+    if lhs._bio != rhs._bio {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateProfileResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "user"),
+    2: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._user) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._user {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateProfileResult, rhs: UpdateProfileResult) -> Bool {
+    if lhs._user != rhs._user {return false}
+    if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -21759,6 +22736,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     37: .standard(proto: "clear_chat_history"),
     38: .standard(proto: "bot_presence"),
     39: .standard(proto: "dialog_follow_mode"),
+    40: .standard(proto: "updated_user"),
   ]
 
   fileprivate class _StorageClass {
@@ -22270,6 +23248,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .dialogFollowMode(v)
           }
         }()
+        case 40: try {
+          var v: UpdateUpdatedUser?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .updatedUser(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .updatedUser(v)
+          }
+        }()
         default: break
         }
       }
@@ -22432,6 +23423,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .dialogFollowMode?: try {
         guard case .dialogFollowMode(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 39)
+      }()
+      case .updatedUser?: try {
+        guard case .updatedUser(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 40)
       }()
       case nil: break
       }
@@ -22837,6 +23832,42 @@ extension UpdateUserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
   public static func ==(lhs: UpdateUserSettings, rhs: UpdateUserSettings) -> Bool {
     if lhs._settings != rhs._settings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateUpdatedUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateUpdatedUser"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "user"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._user) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._user {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateUpdatedUser, rhs: UpdateUpdatedUser) -> Bool {
+    if lhs._user != rhs._user {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -214,6 +214,12 @@ export interface ServerUpdate {
          */
         userDialogFollowMode: ServerUserUpdateDialogFollowMode;
     } | {
+        oneofKind: "updatedUser";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateUser updated_user = 33;
+         */
+        updatedUser: ServerUserUpdateUser;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -669,6 +675,17 @@ export interface ServerUserUpdateDialogFollowMode {
     followMode?: DialogFollowMode;
 }
 /**
+ * Update for a user when their profile/account fields change.
+ *
+ * @generated from protobuf message server.ServerUserUpdateUser
+ */
+export interface ServerUserUpdateUser {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+}
+/**
  * Update for a user when a chat becomes chat-list-visible for them.
  *
  * @generated from protobuf message server.ServerUserUpdateChatOpen
@@ -763,7 +780,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 26, name: "user_message_action_answered", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionAnswered },
             { no: 27, name: "clear_chat_history", kind: "message", oneof: "update", T: () => ServerChatUpdateClearHistory },
             { no: 29, name: "message_attachment", kind: "message", oneof: "update", T: () => ServerChatUpdateMessageAttachment },
-            { no: 32, name: "user_dialog_follow_mode", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFollowMode }
+            { no: 32, name: "user_dialog_follow_mode", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFollowMode },
+            { no: 33, name: "updated_user", kind: "message", oneof: "update", T: () => ServerUserUpdateUser }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -960,6 +978,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userDialogFollowMode: ServerUserUpdateDialogFollowMode.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogFollowMode)
                     };
                     break;
+                case /* server.ServerUserUpdateUser updated_user */ 33:
+                    message.update = {
+                        oneofKind: "updatedUser",
+                        updatedUser: ServerUserUpdateUser.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).updatedUser)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1065,6 +1089,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateDialogFollowMode user_dialog_follow_mode = 32; */
         if (message.update.oneofKind === "userDialogFollowMode")
             ServerUserUpdateDialogFollowMode.internalBinaryWrite(message.update.userDialogFollowMode, writer.tag(32, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateUser updated_user = 33; */
+        if (message.update.oneofKind === "updatedUser")
+            ServerUserUpdateUser.internalBinaryWrite(message.update.updatedUser, writer.tag(33, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2605,6 +2632,52 @@ class ServerUserUpdateDialogFollowMode$Type extends MessageType<ServerUserUpdate
  * @generated MessageType for protobuf message server.ServerUserUpdateDialogFollowMode
  */
 export const ServerUserUpdateDialogFollowMode = new ServerUserUpdateDialogFollowMode$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateUser$Type extends MessageType<ServerUserUpdateUser> {
+    constructor() {
+        super("server.ServerUserUpdateUser", [
+            { no: 1, name: "user", kind: "message", T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateUser>): ServerUserUpdateUser {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateUser>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateUser): ServerUserUpdateUser {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateUser, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateUser
+ */
+export const ServerUserUpdateUser = new ServerUserUpdateUser$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateChatOpen$Type extends MessageType<ServerUserUpdateChatOpen> {
     constructor() {

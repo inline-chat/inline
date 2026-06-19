@@ -45,6 +45,7 @@ message ServerUpdate {
     ServerChatUpdateClearHistory clear_chat_history = 27;
     ServerChatUpdateMessageAttachment message_attachment = 29;
     ServerUserUpdateDialogFollowMode user_dialog_follow_mode = 32;
+    ServerUserUpdateUser updated_user = 33;
   }
 }
 
@@ -235,6 +236,9 @@ message ServerUserUpdateDialogFollowMode {
   Peer peer_id = 1;
   optional DialogFollowMode follow_mode = 2;
 }
+
+// Update for a user when their profile/account fields change.
+message ServerUserUpdateUser { User user = 1; }
 
 // Update for a user when a chat becomes chat-list-visible for them.
 message ServerUserUpdateChatOpen {

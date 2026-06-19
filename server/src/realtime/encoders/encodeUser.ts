@@ -27,6 +27,7 @@ export const encodeUser = ({
     username: user.username ?? undefined,
     firstName: user.firstName ?? undefined,
     lastName: user.lastName ?? undefined,
+    bio: min ? undefined : user.bio ?? undefined,
     email: min ? undefined : user.email ?? undefined,
     phoneNumber: min ? undefined : user.phoneNumber ?? undefined,
     pendingSetup: min ? undefined : user.pendingSetup === true ? true : undefined,

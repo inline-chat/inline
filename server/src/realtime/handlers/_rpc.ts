@@ -58,6 +58,12 @@ import { invokeMessageAction } from "@in/server/realtime/handlers/messages.invok
 import { answerMessageAction } from "@in/server/realtime/handlers/messages.answerMessageAction"
 import { createSubthread } from "@in/server/realtime/handlers/messages.createSubthread"
 import { revokeSessionHandler } from "@in/server/realtime/handlers/user.revokeSession"
+import { getSessionsHandler } from "@in/server/realtime/handlers/user.getSessions"
+import {
+  changeUsernameHandler,
+  checkUsernameHandler,
+  updateProfileHandler,
+} from "@in/server/realtime/handlers/user.account"
 import { showInChatList } from "@in/server/realtime/handlers/messages.showInChatList"
 import { updateDialogOpen } from "@in/server/realtime/handlers/messages.updateDialogOpen"
 import { updateDialogOrder } from "@in/server/realtime/handlers/messages.updateDialogOrder"
@@ -542,6 +548,35 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await revokeSessionHandler(call.input.revokeSession, handlerContext)
       return { oneofKind: "revokeSession", revokeSession: result }
+    }
+
+    case Method.GET_SESSIONS: {
+      if (call.input.oneofKind !== "getSessions") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getSessionsHandler(call.input.getSessions, handlerContext)
+      return { oneofKind: "getSessions", getSessions: result }
+    }
+    case Method.CHECK_USERNAME: {
+      if (call.input.oneofKind !== "checkUsername") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await checkUsernameHandler(call.input.checkUsername, handlerContext)
+      return { oneofKind: "checkUsername", checkUsername: result }
+    }
+    case Method.CHANGE_USERNAME: {
+      if (call.input.oneofKind !== "changeUsername") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await changeUsernameHandler(call.input.changeUsername, handlerContext)
+      return { oneofKind: "changeUsername", changeUsername: result }
+    }
+    case Method.UPDATE_PROFILE: {
+      if (call.input.oneofKind !== "updateProfile") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await updateProfileHandler(call.input.updateProfile, handlerContext)
+      return { oneofKind: "updateProfile", updateProfile: result }
     }
 
     default:

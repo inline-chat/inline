@@ -2,6 +2,7 @@ import { eq, isNull, or, SQL, sql } from "drizzle-orm"
 import {
   integer,
   pgTable,
+  text,
   uniqueIndex,
   varchar,
   boolean,
@@ -38,6 +39,7 @@ export const users = pgTable(
     phoneVerified: boolean("phone_verified"),
     firstName: varchar("first_name", { length: 256 }),
     lastName: varchar("last_name", { length: 256 }),
+    bio: text("bio"),
     username: varchar("username", { length: 256 }),
     deleted: boolean("deleted"),
     online: boolean("online").default(false).notNull(),
