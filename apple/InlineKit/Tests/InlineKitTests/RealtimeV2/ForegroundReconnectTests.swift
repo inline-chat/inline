@@ -5,7 +5,7 @@ import Testing
 
 @testable import RealtimeV2
 
-@Suite("RealtimeV2.ConnectionManager")
+@Suite("RealtimeV2.ConnectionManager", .serialized)
 final class ConnectionManagerTests {
   @Test("login triggers immediate transport start")
   func testLoginTriggersImmediateTransportStart() async throws {

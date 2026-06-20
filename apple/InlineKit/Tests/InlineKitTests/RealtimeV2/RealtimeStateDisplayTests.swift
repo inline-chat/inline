@@ -3,7 +3,7 @@ import Testing
 
 @testable import RealtimeV2
 
-@Suite("RealtimeV2.RealtimeStateDisplay")
+@Suite("RealtimeV2.RealtimeStateDisplay", .serialized)
 final class RealtimeStateDisplayTests {
   @Test("default display policy uses longer cold start and reconnect delays")
   func testDefaultDisplayPolicy() {

@@ -6,7 +6,7 @@ import Testing
 @testable import Auth
 @testable import RealtimeV2
 
-@Suite("RealtimeV2.Send")
+@Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
   @Test("sendQueued runs optimistic immediately")
   func testSendQueuedRunsOptimisticImmediately() async throws {

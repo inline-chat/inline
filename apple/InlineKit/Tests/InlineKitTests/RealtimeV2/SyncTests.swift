@@ -5,7 +5,7 @@ import Testing
 
 @testable import RealtimeV2
 
-@Suite("SyncTests")
+@Suite("SyncTests", .serialized)
 final class SyncTests {
   @Test("sync config defaults")
   func testSyncConfigDefaults() {
