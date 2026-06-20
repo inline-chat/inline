@@ -77,11 +77,12 @@ public final class ThreadLinkDetector {
     replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
 
     let mutable = attributedText.mutableCopy() as! NSMutableAttributedString
-    mutable.replaceCharacters(in: range, with: replacement)
+    let replacementRange = rangeIncludingImmediateClosingBrackets(in: attributedText.string, range: range)
+    mutable.replaceCharacters(in: replacementRange, with: replacement)
 
     let newAttributedText = mutable.copy() as! NSAttributedString
     let replacementLength = text.utf16.count + trailingText.utf16.count
-    let newCursorPosition = range.location + replacementLength
+    let newCursorPosition = replacementRange.location + replacementLength
     return (newAttributedText, newCursorPosition)
   }
 
@@ -114,5 +115,25 @@ public final class ThreadLinkDetector {
 
   private func isLineBreak(_ character: unichar) -> Bool {
     character == 10 || character == 13
+  }
+
+  private func rangeIncludingImmediateClosingBrackets(in text: String, range: NSRange) -> NSRange {
+    let nsText = text as NSString
+    guard range.location != NSNotFound,
+          range.location >= 0,
+          range.length >= 0,
+          NSMaxRange(range) <= nsText.length
+    else {
+      return range
+    }
+
+    let closeRange = NSRange(location: NSMaxRange(range), length: 2)
+    guard NSMaxRange(closeRange) <= nsText.length,
+          nsText.substring(with: closeRange) == "]]"
+    else {
+      return range
+    }
+
+    return NSRange(location: range.location, length: range.length + closeRange.length)
   }
 }

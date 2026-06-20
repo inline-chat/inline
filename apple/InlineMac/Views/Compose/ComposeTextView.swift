@@ -28,6 +28,7 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
 
 class ComposeNSTextView: NSTextView {
   private var isStrippingEmailLinks = false
+  private var isHandlingKeyDown = false
   private let boldUndoActionName = "Bold"
   private let linkUndoActionName = "Make Link"
 
@@ -112,7 +113,60 @@ class ComposeNSTextView: NSTextView {
       }
     }
 
+    isHandlingKeyDown = true
+    defer { isHandlingKeyDown = false }
     super.keyDown(with: event)
+  }
+
+  override func insertText(_ insertString: Any, replacementRange: NSRange) {
+    guard isHandlingKeyDown,
+          let text = insertString as? String,
+          let replacement = ComposeAutoPairEditing.insertionReplacement(
+            in: string,
+            selectedRange: selectedRange(),
+            replacementRange: replacementRange,
+            insertedText: text
+          )
+    else {
+      super.insertText(insertString, replacementRange: replacementRange)
+      return
+    }
+
+    applyAutoPairReplacement(replacement)
+  }
+
+  override func deleteBackward(_ sender: Any?) {
+    guard let replacement = ComposeAutoPairEditing.deletionReplacement(
+      in: string,
+      selectedRange: selectedRange()
+    ) else {
+      super.deleteBackward(sender)
+      return
+    }
+
+    applyAutoPairReplacement(replacement)
+  }
+
+  private func applyAutoPairReplacement(_ replacement: ComposeAutoPairEditing.Replacement) {
+    if replacement.text.isEmpty, replacement.range.length == 0 {
+      setSelectedRange(replacement.selectedRange)
+      return
+    }
+
+    updateTypingAttributesIfNeeded()
+
+    guard shouldChangeText(in: replacement.range, replacementString: replacement.text) else { return }
+
+    guard let textStorage else {
+      super.insertText(replacement.text, replacementRange: replacement.range)
+      setSelectedRange(replacement.selectedRange)
+      return
+    }
+
+    let attributed = NSAttributedString(string: replacement.text, attributes: typingAttributes)
+    textStorage.replaceCharacters(in: replacement.range, with: attributed)
+    setSelectedRange(replacement.selectedRange)
+    didChangeText()
   }
 
   override func didChangeText() {

@@ -40,6 +40,19 @@ struct ThreadLinkDetectorTests {
     #expect(result?.query == "")
   }
 
+  @Test("detects bare thread opener before auto-paired closing brackets")
+  func detectsBareThreadOpenerBeforeAutoPairedClosingBrackets() {
+    let detector = ThreadLinkDetector()
+    let text = "[[]]"
+    let attributed = NSAttributedString(string: text)
+
+    let result = detector.detectThreadLinkAt(cursorPosition: 2, in: attributed)
+
+    #expect(result != nil)
+    #expect(result?.range == NSRange(location: 0, length: 2))
+    #expect(result?.query == "")
+  }
+
   @Test("does not detect after closing brackets")
   func doesNotDetectAfterClosingBrackets() {
     let detector = ThreadLinkDetector()
@@ -97,6 +110,38 @@ struct ThreadLinkDetectorTests {
       effectiveRange: nil
     ) as? ThreadLinkTarget
     #expect(trailingTarget == nil)
+  }
+
+  @Test("replace consumes auto-paired closing brackets")
+  func replaceConsumesAutoPairedClosingBrackets() {
+    let detector = ThreadLinkDetector()
+    let original = NSAttributedString(string: "[[Pl]]")
+
+    let result = detector.replaceThreadLink(
+      in: original,
+      range: NSRange(location: 0, length: 4),
+      with: "Planning",
+      chatId: 42
+    )
+
+    #expect(result.newAttributedText.string == "[[Planning]] ")
+    #expect(result.newCursorPosition == 13)
+  }
+
+  @Test("replace consumes empty auto-paired thread opener")
+  func replaceConsumesEmptyAutoPairedThreadOpener() {
+    let detector = ThreadLinkDetector()
+    let original = NSAttributedString(string: "[[]]")
+
+    let result = detector.replaceThreadLink(
+      in: original,
+      range: NSRange(location: 0, length: 2),
+      with: "Planning",
+      chatId: 42
+    )
+
+    #expect(result.newAttributedText.string == "[[Planning]] ")
+    #expect(result.newCursorPosition == 13)
   }
 
   @Test("replace applies compose typography to link and trailing text")
