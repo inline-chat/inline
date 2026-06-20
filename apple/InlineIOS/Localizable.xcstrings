@@ -667,6 +667,9 @@
     "Everyone in %@" : {
 
     },
+    "example.com or example.com/path" : {
+
+    },
     "Experimental" : {
 
     },
@@ -766,6 +769,9 @@
     "Loading chats..." : {
 
     },
+    "Loading exclusions..." : {
+
+    },
     "Logout" : {
 
     },
@@ -837,6 +843,9 @@
 
     },
     "No chats or spaces yet" : {
+
+    },
+    "No exclusions" : {
 
     },
     "No files found in this chat." : {
@@ -1146,6 +1155,9 @@
 
     },
     "Unpin" : {
+
+    },
+    "URL Previews" : {
 
     },
     "Use Global follows your app-wide notification settings." : {
