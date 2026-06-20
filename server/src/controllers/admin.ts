@@ -96,7 +96,7 @@ type AdminSessionContext = {
   stepUpAt: Date | null
 }
 
-type BunServer = Server<unknown>
+type BunServer = Server<unknown> | null
 type AdminSet = { status?: number | string }
 
 type AdminCookieStore = {

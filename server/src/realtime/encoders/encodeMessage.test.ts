@@ -62,6 +62,7 @@ const baseUser: DbUser = {
   phoneVerified: null,
   firstName: null,
   lastName: null,
+  bio: null,
   username: null,
   deleted: null,
   online: false,

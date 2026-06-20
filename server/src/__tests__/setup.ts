@@ -263,6 +263,7 @@ export const testUtils = {
     options?: {
       clientType?: "ios" | "macos" | "web" | "api" | "cli"
       deviceId?: string
+      deviceName?: string
       osVersion?: string
       clientVersion?: string
     },
@@ -271,7 +272,9 @@ export const testUtils = {
     const session = await SessionsModel.create({
       userId,
       tokenHash,
-      personalData: {},
+      personalData: {
+        deviceName: options?.deviceName,
+      },
       clientType: options?.clientType ?? "web",
       deviceId: options?.deviceId,
       osVersion: options?.osVersion,
