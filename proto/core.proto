@@ -1270,6 +1270,8 @@ message UpdateDialogOpenResult {
   Chat chat = 1;
   Dialog dialog = 2;
   optional User user = 3;
+  // True when closing the sidebar item deleted a safe empty untitled thread.
+  optional bool deleted_chat = 4;
 }
 
 message UpdateDialogOrderInput {

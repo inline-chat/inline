@@ -94,8 +94,45 @@ enum MacToolbarStyle: String, CaseIterable, Identifiable {
   }
 }
 
+enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
+  case twelveHours = "12h"
+  case never
+
+  static let defaultValue: Self = .twelveHours
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .twelveHours:
+      return "12 hrs"
+    case .never:
+      return "Off"
+    }
+  }
+
+  var timeout: TimeInterval? {
+    switch self {
+    case .twelveHours:
+      return 12 * 60 * 60
+    case .never:
+      return nil
+    }
+  }
+
+  var detailText: String {
+    switch self {
+    case .twelveHours:
+      return "close chats i haven't opened in 12 hrs."
+    case .never:
+      return "Don't close chats automatically."
+    }
+  }
+}
+
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
+  static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
 
   // MARK: - General Settings
 
@@ -172,6 +209,12 @@ final class AppSettings: ObservableObject {
   @Published var includeSpaceChatsInHomeSidebar: Bool {
     didSet {
       UserDefaults.standard.set(includeSpaceChatsInHomeSidebar, forKey: "includeSpaceChatsInHomeSidebar")
+    }
+  }
+
+  @Published var sidebarCleanupInterval: SidebarCleanupInterval {
+    didSet {
+      UserDefaults.standard.set(sidebarCleanupInterval.rawValue, forKey: Self.sidebarCleanupIntervalKey)
     }
   }
 
@@ -260,6 +303,12 @@ final class AppSettings: ObservableObject {
     }
     includeSpaceChatsInHomeSidebar =
       UserDefaults.standard.object(forKey: "includeSpaceChatsInHomeSidebar") as? Bool ?? true
+    if let storedCleanupInterval = UserDefaults.standard.string(forKey: Self.sidebarCleanupIntervalKey),
+       let cleanupInterval = SidebarCleanupInterval(rawValue: storedCleanupInterval) {
+      sidebarCleanupInterval = cleanupInterval
+    } else {
+      sidebarCleanupInterval = .defaultValue
+    }
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false

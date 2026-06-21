@@ -5555,6 +5555,16 @@ public struct UpdateDialogOpenResult: @unchecked Sendable {
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {_uniqueStorage()._user = nil}
 
+  /// True when closing the sidebar item deleted a safe empty untitled thread.
+  public var deletedChat: Bool {
+    get {return _storage._deletedChat ?? false}
+    set {_uniqueStorage()._deletedChat = newValue}
+  }
+  /// Returns true if `deletedChat` has been explicitly set.
+  public var hasDeletedChat: Bool {return _storage._deletedChat != nil}
+  /// Clears the value of `deletedChat`. Subsequent reads from it will return its default value.
+  public mutating func clearDeletedChat() {_uniqueStorage()._deletedChat = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -18547,12 +18557,14 @@ extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
     1: .same(proto: "chat"),
     2: .same(proto: "dialog"),
     3: .same(proto: "user"),
+    4: .standard(proto: "deleted_chat"),
   ]
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
     var _user: User? = nil
+    var _deletedChat: Bool? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -18570,6 +18582,7 @@ extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
       _chat = source._chat
       _dialog = source._dialog
       _user = source._user
+      _deletedChat = source._deletedChat
     }
   }
 
@@ -18591,6 +18604,7 @@ extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
         case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
         case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
         case 3: try { try decoder.decodeSingularMessageField(value: &_storage._user) }()
+        case 4: try { try decoder.decodeSingularBoolField(value: &_storage._deletedChat) }()
         default: break
         }
       }
@@ -18612,6 +18626,9 @@ extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
       try { if let v = _storage._user {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
       } }()
+      try { if let v = _storage._deletedChat {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -18624,6 +18641,7 @@ extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
         if _storage._chat != rhs_storage._chat {return false}
         if _storage._dialog != rhs_storage._dialog {return false}
         if _storage._user != rhs_storage._user {return false}
+        if _storage._deletedChat != rhs_storage._deletedChat {return false}
         return true
       }
       if !storagesAreEqual {return false}

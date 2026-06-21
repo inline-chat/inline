@@ -80,6 +80,7 @@ struct MainWindowRootView: View {
     .nativeWindowTab(title: nativeTab.title, icon: nativeTab.iconPeer)
     .onAppear {
       nativeTab.update(peer: nav3.currentRoute.selectedPeer)
+      markCurrentChatOpened()
       installNativeTabShortcuts()
       syncTopLevelRoute(viewModel.topLevelRoute)
     }
@@ -89,6 +90,7 @@ struct MainWindowRootView: View {
     .onChange(of: nav3.currentRoute) { _, _ in
       guard showsMain else { return }
       nativeTab.update(peer: nav3.currentRoute.selectedPeer)
+      markCurrentChatOpened()
     }
     .onDisappear {
       chatOpenPreloader.cancelPendingOpen()
@@ -166,6 +168,11 @@ struct MainWindowRootView: View {
       default:
         columnVisibility = .detailOnly
     }
+  }
+
+  private func markCurrentChatOpened() {
+    guard case let .chat(peer) = nav3.currentRoute else { return }
+    SidebarCleanup.shared.markOpened(peer)
   }
 
   private var sidebarMode: SidebarViewModel.ContentMode {

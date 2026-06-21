@@ -67,6 +67,18 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       throw TransactionExecutionError.invalid
     }
 
+    if response.deletedChat {
+      do {
+        try await AppDatabase.shared.dbWriter.write { db in
+          try Self.applyDeletedChat(peer: context.peerId, db: db)
+        }
+        return
+      } catch {
+        log.error("Failed to apply deleted dialog open result", error: error)
+        throw TransactionExecutionError.invalid
+      }
+    }
+
     guard response.hasChat, response.hasDialog else {
       throw TransactionExecutionError.invalid
     }
@@ -147,6 +159,23 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       dialog.open = false
       dialog.openedDate = nil
       dialog.order = nil
+    }
+  }
+
+  private static func applyDeletedChat(peer: Peer, db: Database) throws {
+    guard case let .thread(chatId) = peer else { return }
+
+    try Message.filter(Column("chatId") == chatId).deleteAll(db)
+    try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
+    try Chat.filter(Column("id") == chatId).deleteAll(db)
+    try deleteChatSyncBucket(db, chatId: chatId)
+
+    Task.detached {
+      NotificationCenter.default.post(
+        name: Notification.Name("chatDeletedNotification"),
+        object: nil,
+        userInfo: ["chatId": chatId]
+      )
     }
   }
 

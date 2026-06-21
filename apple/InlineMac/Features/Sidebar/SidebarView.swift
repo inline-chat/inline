@@ -1,3 +1,4 @@
+import Foundation
 import InlineKit
 import InlineMacUI
 import InlineUI
@@ -25,6 +26,7 @@ struct SidebarView: View {
   @State private var fetchingDialogSpaceIds = Set<Int64>()
   @State private var sidebarDrag = SidebarDragViewModel()
   @State private var ephemeralChat = SidebarEphemeralChatModel()
+  @State private var cleanupOwnerID = UUID()
   @Environment(SidebarViewModel.self) private var viewModel
   private let isCollapsed: Bool
 
@@ -121,10 +123,14 @@ struct SidebarView: View {
       sidebarDrag.cancel()
       syncSource(spaceId: nav.selectedSpaceId)
       refreshEphemeralChatScope(selectedPeer)
+      refreshSidebarCleanup()
     }
     .onChange(of: settings.includeSpaceChatsInHomeSidebar, initial: true) { _, includeSpaceChats in
       viewModel.setIncludeSpaceChatsInHome(includeSpaceChats)
       refreshEphemeralChatScope(selectedPeer)
+    }
+    .onChange(of: settings.sidebarCleanupInterval, initial: true) { _, _ in
+      refreshSidebarCleanup()
     }
     .onChange(of: visibleItems.map(\.peerId)) { _, _ in
       reconcileEphemeralChat()
@@ -135,6 +141,7 @@ struct SidebarView: View {
     .onAppear {
       legacyApiState = realtime.apiState
       handleRealtimeConnectionStateChange(realtimeState.connectionState)
+      refreshSidebarCleanup()
     }
     .onChange(of: sidebarNavigationSignature, initial: true) { _, _ in
       registerSidebarNavigation()
@@ -155,6 +162,7 @@ struct SidebarView: View {
       ephemeralChat.cancel()
       hideConnectedTask?.cancel()
       hideConnectedTask = nil
+      deactivateSidebarCleanup()
       unregisterSidebarNavigation()
     }
   }
@@ -616,7 +624,13 @@ struct SidebarView: View {
     dependencies?.pendingChatPeer ?? nav.currentRoute.selectedPeer
   }
 
+  private var cleanupOwner: UUID {
+    cleanupOwnerID
+  }
+
   private func openChat(_ item: SidebarViewModel.Item) {
+    SidebarCleanup.shared.markOpened(item.peerId)
+
     if let dependencies {
       dependencies.requestOpenChat(peer: item.peerId)
       return
@@ -637,12 +651,6 @@ struct SidebarView: View {
 
     Task(priority: .userInitiated) {
       do {
-        if try await dependencies.data.deleteThreadIfUntitledAndEmpty(peerId: item.peerId) {
-          _ = await MainActor.run {
-            dependencies.removeChatFromNavigation(peer: item.peerId)
-          }
-          return
-        }
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: item.peerId, open: false))
       } catch {
         Log.shared.error("Failed to close chat in sidebar", error: error)
@@ -704,6 +712,7 @@ struct SidebarView: View {
   private func persistTemporaryChat(_ item: SidebarViewModel.Item) {
     guard settings.sidebarAsInbox else { return }
     guard isTemporaryItem(item) else { return }
+    SidebarCleanup.shared.markOpened(item.peerId)
     SidebarState.shared.keepInSidebar(item.peerId)
   }
 
@@ -984,6 +993,15 @@ struct SidebarView: View {
   private func unregisterSidebarNavigation() {
     guard let mainWindowID else { return }
     MainWindowOpenCoordinator.shared.unregisterSidebarNavigation(id: mainWindowID)
+  }
+
+  private func refreshSidebarCleanup() {
+    guard let dependencies else { return }
+    SidebarCleanup.shared.activate(owner: cleanupOwner, realtimeV2: dependencies.realtimeV2)
+  }
+
+  private func deactivateSidebarCleanup() {
+    SidebarCleanup.shared.deactivate(owner: cleanupOwner)
   }
 
   private func syncSource(spaceId: Int64?) {

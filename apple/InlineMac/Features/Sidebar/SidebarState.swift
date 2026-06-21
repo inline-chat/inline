@@ -9,6 +9,7 @@ final class SidebarState {
   func keepInSidebar(_ peer: Peer) {
     Task { @MainActor in
       guard AppSettings.shared.sidebarAsInbox else { return }
+      SidebarCleanup.shared.markOpened(peer)
 
       do {
         if peer.isThread {

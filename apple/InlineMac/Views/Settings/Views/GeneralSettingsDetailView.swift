@@ -25,6 +25,25 @@ struct GeneralSettingsDetailView: View {
       Section("Translation") {
         Toggle("Show translation controls", isOn: $appSettings.translationUIEnabled)
       }
+
+      Section("Sidebar") {
+        LabeledContent {
+          Picker("Sidebar Cleanup", selection: $appSettings.sidebarCleanupInterval) {
+            ForEach(SidebarCleanupInterval.allCases) { interval in
+              Text(interval.title).tag(interval)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        } label: {
+          VStack(alignment: .leading, spacing: 3) {
+            Text("Sidebar Cleanup")
+            Text(appSettings.sidebarCleanupInterval.detailText)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
       
       Section("Keyboard") {
         Picker("Send messages with:", selection: $appSettings.sendsWithCmdEnter) {

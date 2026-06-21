@@ -3472,6 +3472,12 @@ export interface UpdateDialogOpenResult {
      * @generated from protobuf field: optional User user = 3;
      */
     user?: User;
+    /**
+     * True when closing the sidebar item deleted a safe empty untitled thread.
+     *
+     * @generated from protobuf field: optional bool deleted_chat = 4;
+     */
+    deletedChat?: boolean;
 }
 /**
  * @generated from protobuf message UpdateDialogOrderInput
@@ -14515,7 +14521,8 @@ class UpdateDialogOpenResult$Type extends MessageType<UpdateDialogOpenResult> {
         super("UpdateDialogOpenResult", [
             { no: 1, name: "chat", kind: "message", T: () => Chat },
             { no: 2, name: "dialog", kind: "message", T: () => Dialog },
-            { no: 3, name: "user", kind: "message", T: () => User }
+            { no: 3, name: "user", kind: "message", T: () => User },
+            { no: 4, name: "deleted_chat", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateDialogOpenResult>): UpdateDialogOpenResult {
@@ -14538,6 +14545,9 @@ class UpdateDialogOpenResult$Type extends MessageType<UpdateDialogOpenResult> {
                 case /* optional User user */ 3:
                     message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
                     break;
+                case /* optional bool deleted_chat */ 4:
+                    message.deletedChat = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14559,6 +14569,9 @@ class UpdateDialogOpenResult$Type extends MessageType<UpdateDialogOpenResult> {
         /* optional User user = 3; */
         if (message.user)
             User.internalBinaryWrite(message.user, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool deleted_chat = 4; */
+        if (message.deletedChat !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.deletedChat);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -23,6 +23,10 @@ describe("messages.updateDialogOpen", () => {
     },
   })
 
+  const markUntitledThread = async (chatId: number) => {
+    await db.update(chats).set({ isUntitled: true }).where(eq(chats.id, chatId))
+  }
+
   test("opens and unarchives an existing dialog without unhiding it", async () => {
     const userA = await testUtils.createUser("dialog-open-a@example.com")
     const userB = await testUtils.createUser("dialog-open-b@example.com")
@@ -47,10 +51,10 @@ describe("messages.updateDialogOpen", () => {
       testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
     )
 
-    expect(result.dialog.open).toBe(true)
-    expect(result.dialog.archived).toBe(false)
-    expect(result.dialog.chatListHidden).toBe(true)
-    expect(result.dialog.order).toBe("m")
+    expect(result.dialog?.open).toBe(true)
+    expect(result.dialog?.archived).toBe(false)
+    expect(result.dialog?.chatListHidden).toBe(true)
+    expect(result.dialog?.order).toBe("m")
 
     const [dialog] = await db
       .select()
@@ -240,9 +244,9 @@ describe("messages.updateDialogOpen", () => {
       testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
     )
 
-    expect(result.dialog.open).toBe(false)
-    expect(result.dialog.openedDate).toBeUndefined()
-    expect(result.dialog.order).toBeUndefined()
+    expect(result.dialog?.open).toBe(false)
+    expect(result.dialog?.openedDate).toBeUndefined()
+    expect(result.dialog?.order).toBeUndefined()
 
     const [dialog] = await db
       .select()
@@ -283,7 +287,7 @@ describe("messages.updateDialogOpen", () => {
       testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
     )
 
-    expect(result.dialog.open).toBe(false)
+    expect(result.dialog?.open).toBe(false)
 
     const [dialog] = await db
       .select()
@@ -300,5 +304,163 @@ describe("messages.updateDialogOpen", () => {
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, userA.id)))
 
     expect(updatesAfter.length).toBe(updatesBefore.length)
+  })
+
+  test("deletes own empty untitled thread when closing sidebar item", async () => {
+    const userA = await testUtils.createUser("dialog-close-empty-thread-a@example.com")
+    const userB = await testUtils.createUser("dialog-close-empty-thread-b@example.com")
+    const chat = await testUtils.createChat(null, "", "thread", false, userA.id)
+    if (!chat) {
+      throw new Error("Failed to create empty thread")
+    }
+
+    await markUntitledThread(chat.id)
+    await testUtils.addParticipant(chat.id, userA.id)
+    await testUtils.addParticipant(chat.id, userB.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: userA.id,
+      open: true,
+      order: "m",
+    })
+
+    const result = await updateDialogOpen(
+      {
+        peerId: peerThread(chat.id),
+        open: false,
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+
+    expect(result.deletedChat).toBe(true)
+    expect(result.chat?.id).toBe(BigInt(chat.id))
+    expect(result.dialog?.open).toBe(false)
+
+    const [savedChat] = await db.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
+    const [savedDialog] = await db.select().from(dialogs).where(eq(dialogs.chatId, chat.id)).limit(1)
+    const [chatUpdate] = await db
+      .select({ id: updates.id })
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, chat.id)))
+      .limit(1)
+
+    expect(savedChat).toBeUndefined()
+    expect(savedDialog).toBeUndefined()
+    expect(chatUpdate).toBeDefined()
+  })
+
+  test("does not delete blank thread without untitled flag when closing", async () => {
+    const userA = await testUtils.createUser("dialog-close-blank-titled-thread-a@example.com")
+    const userB = await testUtils.createUser("dialog-close-blank-titled-thread-b@example.com")
+    const chat = await testUtils.createChat(null, "", "thread", false, userA.id)
+    if (!chat) {
+      throw new Error("Failed to create blank-titled thread")
+    }
+
+    await testUtils.addParticipant(chat.id, userA.id)
+    await testUtils.addParticipant(chat.id, userB.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: userA.id,
+      open: true,
+      order: "m",
+    })
+
+    const result = await updateDialogOpen(
+      {
+        peerId: peerThread(chat.id),
+        open: false,
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+
+    expect(result.deletedChat).toBeUndefined()
+    expect(result.dialog?.open).toBe(false)
+
+    const [savedChat] = await db.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
+    const [savedDialog] = await db.select().from(dialogs).where(eq(dialogs.chatId, chat.id)).limit(1)
+
+    expect(savedChat).toBeDefined()
+    expect(savedDialog?.open).toBe(false)
+  })
+
+  test("does not delete pinned empty untitled thread when closing", async () => {
+    const userA = await testUtils.createUser("dialog-close-pinned-empty-thread-a@example.com")
+    const userB = await testUtils.createUser("dialog-close-pinned-empty-thread-b@example.com")
+    const chat = await testUtils.createChat(null, "", "thread", false, userA.id)
+    if (!chat) {
+      throw new Error("Failed to create pinned empty thread")
+    }
+
+    await markUntitledThread(chat.id)
+    await testUtils.addParticipant(chat.id, userA.id)
+    await testUtils.addParticipant(chat.id, userB.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: userA.id,
+      open: true,
+      pinned: true,
+      order: "m",
+    })
+
+    const result = await updateDialogOpen(
+      {
+        peerId: peerThread(chat.id),
+        open: false,
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+
+    expect(result.deletedChat).toBeUndefined()
+    expect(result.dialog?.open).toBe(false)
+
+    const [savedChat] = await db.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
+    const [savedDialog] = await db.select().from(dialogs).where(eq(dialogs.chatId, chat.id)).limit(1)
+
+    expect(savedChat).toBeDefined()
+    expect(savedDialog?.open).toBe(false)
+    expect(savedDialog?.pinned).toBe(true)
+  })
+
+  test("does not delete untitled thread with message rows when closing", async () => {
+    const userA = await testUtils.createUser("dialog-close-nonempty-thread-a@example.com")
+    const userB = await testUtils.createUser("dialog-close-nonempty-thread-b@example.com")
+    const chat = await testUtils.createChat(null, "", "thread", false, userA.id)
+    if (!chat) {
+      throw new Error("Failed to create nonempty thread")
+    }
+
+    await markUntitledThread(chat.id)
+    await testUtils.addParticipant(chat.id, userA.id)
+    await testUtils.addParticipant(chat.id, userB.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: userA.id,
+      open: true,
+      order: "m",
+    })
+    await db.insert(messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: userA.id,
+      text: "message",
+    })
+
+    const result = await updateDialogOpen(
+      {
+        peerId: peerThread(chat.id),
+        open: false,
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+
+    expect(result.deletedChat).toBeUndefined()
+    expect(result.dialog?.open).toBe(false)
+
+    const [savedChat] = await db.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
+    const [savedDialog] = await db.select().from(dialogs).where(eq(dialogs.chatId, chat.id)).limit(1)
+
+    expect(savedChat).toBeDefined()
+    expect(savedDialog?.open).toBe(false)
   })
 })
