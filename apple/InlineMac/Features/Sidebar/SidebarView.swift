@@ -27,6 +27,8 @@ struct SidebarView: View {
   @State private var sidebarDrag = SidebarDragViewModel()
   @State private var ephemeralChat = SidebarEphemeralChatModel()
   @State private var cleanupOwnerID = UUID()
+  @State private var visibleInboxItemIDs = Set<ChatListItem.Identifier>()
+  @State private var hasMeasuredInboxViewport = false
   @Environment(SidebarViewModel.self) private var viewModel
   private let isCollapsed: Bool
 
@@ -55,23 +57,25 @@ struct SidebarView: View {
 
   @ViewBuilder
   private var sidebarContent: some View {
-    if #available(macOS 26.0, *) {
-      // Safe area bar gives us the natural progressive blur background on macOS 26.0
-      list
-        .safeAreaBar(edge: .top) {
-          topBar
-        }
-        .safeAreaBar(edge: .bottom) {
-          bottomBar
-        }
-    } else {
-      list
-        .safeAreaInset(edge: .top) {
-          topBar
-        }
-        .safeAreaInset(edge: .bottom) {
-          bottomBar
-        }
+    ScrollViewReader { scrollProxy in
+      if #available(macOS 26.0, *) {
+        // Safe area bar gives us the natural progressive blur background on macOS 26.0
+        list
+          .safeAreaBar(edge: .top) {
+            topBar
+          }
+          .safeAreaBar(edge: .bottom) {
+            bottomBar(scrollProxy: scrollProxy)
+          }
+      } else {
+        list
+          .safeAreaInset(edge: .top) {
+            topBar
+          }
+          .safeAreaInset(edge: .bottom) {
+            bottomBar(scrollProxy: scrollProxy)
+          }
+      }
     }
   }
 
@@ -111,7 +115,10 @@ struct SidebarView: View {
     .onChange(of: selectedPeer, initial: true) { _, peer in
       syncEphemeralChat(peer)
     }
-    .onChange(of: nav.selectedSpaceId, initial: true) { _, spaceId in
+    .onChange(of: nav.selectedSpaceId, initial: true) { oldSpaceId, spaceId in
+      if oldSpaceId != spaceId {
+        resetInboxVisibility()
+      }
       syncSource(spaceId: spaceId)
       refreshEphemeralChatScope(selectedPeer)
       refreshSpaceIfNeeded(spaceId)
@@ -119,6 +126,8 @@ struct SidebarView: View {
     .onChange(of: settings.sidebarAsInbox, initial: true) { _, isEnabled in
       if isEnabled {
         isArchiveVisible = false
+      } else {
+        resetInboxVisibility()
       }
       sidebarDrag.cancel()
       syncSource(spaceId: nav.selectedSpaceId)
@@ -133,6 +142,7 @@ struct SidebarView: View {
       refreshSidebarCleanup()
     }
     .onChange(of: visibleItems.map(\.peerId)) { _, _ in
+      pruneVisibleInboxItems()
       reconcileEphemeralChat()
     }
     .onChange(of: viewModel.spaces.map(\.id)) { _, _ in
@@ -162,6 +172,7 @@ struct SidebarView: View {
       ephemeralChat.cancel()
       hideConnectedTask?.cancel()
       hideConnectedTask = nil
+      resetInboxVisibility()
       deactivateSidebarCleanup()
       unregisterSidebarNavigation()
     }
@@ -245,6 +256,13 @@ struct SidebarView: View {
         }
       )
       .equatable()
+      .id(item.id)
+      .onScrollVisibilityChange { isVisible in
+        setInboxItemVisibility(item.id, isVisible: isVisible)
+      }
+      .onDisappear {
+        visibleInboxItemIDs.remove(item.id)
+      }
       .simultaneousGesture(TapGesture(count: 2).onEnded {
         if isTemporary {
           persistTemporaryChat(item)
@@ -436,7 +454,7 @@ struct SidebarView: View {
   }
 
   @ViewBuilder
-  private var bottomBar: some View {
+  private func bottomBar(scrollProxy: ScrollViewProxy) -> some View {
     VStack(spacing: 3) {
       // Temporarily hide the sidebar connection indicator.
       // if let state = sidebarConnectionState {
@@ -452,8 +470,18 @@ struct SidebarView: View {
 
       footerBar
     }
+    .overlay(alignment: .top) {
+      if let unreadBelowViewport {
+        SidebarUnreadBelowButton(count: unreadBelowViewport.count) {
+          scrollToUnreadBelow(unreadBelowViewport, using: scrollProxy)
+        }
+        .offset(y: SidebarUnreadBelowButton.bottomBarTopOffset)
+        .transition(SidebarUnreadBelowButton.transition)
+      }
+    }
     .animation(.smoothSnappy, value: sidebarConnectionState)
     .animation(.smoothSnappy, value: updateInstallState.isReadyToInstall)
+    .animation(SidebarUnreadBelowButton.visibilityAnimation, value: unreadBelowViewport)
   }
 
   @ViewBuilder
@@ -548,6 +576,40 @@ struct SidebarView: View {
   private var visibleNormalSourceItems: [SidebarViewModel.Item] {
     guard let visibleTemporaryItem else { return visibleNormalItems }
     return visibleNormalItems + [visibleTemporaryItem]
+  }
+
+  private var inboxOrderedItems: [SidebarViewModel.Item] {
+    guard settings.sidebarAsInbox else { return [] }
+    guard isArchiveVisible == false else { return [] }
+
+    return sidebarDrag.displayItems(visiblePinnedItems, lane: .pinned)
+      + sidebarDrag.displayItems(visibleNormalSourceItems, lane: .normal)
+  }
+
+  private var unreadBelowViewport: SidebarUnreadBelowState? {
+    guard settings.sidebarAsInbox else { return nil }
+    guard hasMeasuredInboxViewport else { return nil }
+
+    let items = inboxOrderedItems
+    guard items.isEmpty == false else { return nil }
+
+    let visibleIndexes = items.indices.filter { index in
+      visibleInboxItemIDs.contains(items[index].id)
+    }
+
+    let firstBelowIndex = visibleIndexes.max().map { items.index(after: $0) } ?? items.startIndex
+    guard firstBelowIndex < items.endIndex else { return nil }
+
+    var count = 0
+    var targetID: ChatListItem.Identifier?
+    for item in items[firstBelowIndex...] where item.unread {
+      targetID = targetID ?? item.id
+      count += 1
+    }
+
+    guard let targetID else { return nil }
+
+    return SidebarUnreadBelowState(count: count, targetID: targetID)
   }
 
   private var visibleTemporaryItem: SidebarViewModel.Item? {
@@ -982,6 +1044,38 @@ struct SidebarView: View {
     openChat(visibleItems[targetIndex])
   }
 
+  private func scrollToUnreadBelow(_ unreadBelow: SidebarUnreadBelowState, using scrollProxy: ScrollViewProxy) {
+    withAnimation(.smoothSnappy) {
+      scrollProxy.scrollTo(unreadBelow.targetID, anchor: .center)
+    }
+  }
+
+  private func setInboxItemVisibility(_ id: ChatListItem.Identifier, isVisible: Bool) {
+    guard settings.sidebarAsInbox else { return }
+
+    hasMeasuredInboxViewport = true
+    if isVisible {
+      visibleInboxItemIDs.insert(id)
+    } else {
+      visibleInboxItemIDs.remove(id)
+    }
+  }
+
+  private func pruneVisibleInboxItems() {
+    guard settings.sidebarAsInbox else {
+      resetInboxVisibility()
+      return
+    }
+
+    let itemIDs = Set(inboxOrderedItems.map(\.id))
+    visibleInboxItemIDs = visibleInboxItemIDs.intersection(itemIDs)
+  }
+
+  private func resetInboxVisibility() {
+    visibleInboxItemIDs.removeAll()
+    hasMeasuredInboxViewport = false
+  }
+
   private func registerSidebarNavigation() {
     guard let mainWindowID else { return }
 
@@ -1094,6 +1188,11 @@ private struct SidebarTopBarHoverBackground: View {
 private enum SidebarTopBarMetrics {
   static let buttonHeight: CGFloat = 30
   static let leadingPadding = Theme.sidebarItemOuterSpacing + 3
+}
+
+private struct SidebarUnreadBelowState: Equatable {
+  let count: Int
+  let targetID: ChatListItem.Identifier
 }
 
 private struct SidebarInboxActionRow: View {
