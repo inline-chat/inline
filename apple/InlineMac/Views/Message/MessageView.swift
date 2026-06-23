@@ -1390,9 +1390,7 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-    MessageGestureTrace.debug("MessageView.handleTextLongPress messageId=\(message.messageId) action=showReactionOverlay")
-    showReactionOverlay()
+    performConfiguredHoldAction(at: locationInSelf, source: "textHold")
   }
 
   private func openThreadLink(_ target: ThreadLinkTarget) {
@@ -1737,12 +1735,8 @@ class MessageViewAppKit: NSView {
         return
       }
 
-      // Provide haptic feedback
-      NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-
-      // Show reaction overlay
-      MessageGestureTrace.debug("MessageView.handleLongPress messageId=\(message.messageId) action=showReactionOverlay")
-      showReactionOverlay()
+      // Run the configured hold action after interactive hit-testing.
+      performConfiguredHoldAction(at: location, source: "recognizer")
     }
   }
 
@@ -1752,56 +1746,101 @@ class MessageViewAppKit: NSView {
       "MessageView.handleDoubleClick messageId=\(message.messageId) state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(location))"
     )
     guard gesture.state == .ended else { return }
-    performDoubleClickAck(at: location, source: "recognizer")
+    performConfiguredDoubleClickAction(at: location, source: "recognizer")
   }
 
-  private func performDoubleClickAck(at location: NSPoint, source: String) {
+  private func performConfiguredDoubleClickAction(at location: NSPoint, source: String) {
+    performMessageGestureAction(
+      AppSettings.shared.messageDoubleClickAction,
+      at: location,
+      source: "doubleClick.\(source)",
+      blocksText: true
+    )
+  }
+
+  private func performConfiguredHoldAction(at location: NSPoint, source: String) {
+    performMessageGestureAction(
+      AppSettings.shared.messageHoldAction,
+      at: location,
+      source: "hold.\(source)",
+      blocksText: false
+    )
+  }
+
+  private func performMessageGestureAction(
+    _ action: MessageGestureAction,
+    at location: NSPoint,
+    source: String,
+    blocksText: Bool
+  ) {
     MessageGestureTrace.debug(
-      "MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) point=\(MessageGestureTrace.point(location))"
+      "MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) point=\(MessageGestureTrace.point(location))"
     )
     if let result = interactiveHitTestResult(location) {
       MessageGestureTrace.debug(
-        "MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=interactive target=\(result.name)"
+        "MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=interactive target=\(result.name)"
       )
       return
     }
 
-    if isTextPoint(location) {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=textPoint")
+    if blocksText, isTextPoint(location) {
+      MessageGestureTrace.debug("MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=textPoint")
+      return
+    }
+
+    if action == .reply, (!fullMessage.canReply || isAnchorMessage) {
+      MessageGestureTrace.debug("MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=replyUnavailable")
       return
     }
 
     // Provide haptic feedback
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
+    switch action {
+    case .reply:
+      reply()
+    case .reactionsMenu:
+      showReactionOverlay()
+    case .toggleAck, .toggleHeart, .toggleThumbsUp:
+      guard let emoji = action.reactionEmoji else { return }
+      toggleReaction(emoji, action: action, source: source)
+    }
+  }
+
+  private func toggleReaction(_ emoji: String, action: MessageGestureAction, source: String) {
     guard let currentUserId = Auth.shared.getCurrentUserId() else {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=noCurrentUser")
+      MessageGestureTrace.debug("MessageView.toggleReaction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) blocked=noCurrentUser")
       return
     }
-    let emoji = "✔️"
+    let targetMessage = fullMessage.message
     let weReacted = fullMessage.groupedReactions
       .first(where: { $0.emoji == emoji })?
       .reactions
       .contains(where: { $0.reaction.userId == currentUserId }) ?? false
 
-    // Set reaction
     if weReacted {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) action=deleteAckReaction")
-      // Remove reaction
+      MessageGestureTrace.debug("MessageView.toggleReaction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) rpc=deleteReaction")
       Task(priority: .userInitiated) {
-        try await Api.realtime.send(.deleteReaction(
-          emoji: emoji,
-          message: fullMessage.message,
-        ))
+        do {
+          try await Api.realtime.send(.deleteReaction(
+            emoji: emoji,
+            message: targetMessage,
+          ))
+        } catch {
+          self.log.error("Failed to delete reaction from message gesture", error: error)
+        }
       }
     } else {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) action=addAckReaction")
-      // Add reaction
+      MessageGestureTrace.debug("MessageView.toggleReaction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) rpc=addReaction")
       Task(priority: .userInitiated) {
-        try await Api.realtime.send(.addReaction(
-          emoji: emoji,
-          message: fullMessage.message,
-        ))
+        do {
+          try await Api.realtime.send(.addReaction(
+            emoji: emoji,
+            message: targetMessage,
+          ))
+        } catch {
+          self.log.error("Failed to add reaction from message gesture", error: error)
+        }
       }
     }
   }
@@ -4035,7 +4074,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
        event.type == .leftMouseDown,
        event.clickCount == 2
     {
-      // Do the ACK work at the second mouse-down boundary. Returning false keeps
+      // Run the configured double-click action at the second mouse-down boundary. Returning false keeps
       // the recognizer action fallback from firing a duplicate when it does work.
       if handledDoubleClickEventNumber == event.eventNumber {
         MessageGestureTrace.debug(
@@ -4049,7 +4088,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       MessageGestureTrace.debug(
         "MessageView.delegate.shouldAttempt messageId=\(message.messageId) recognizer=doubleClick eventNumber=\(event.eventNumber) action=handleDoubleClickInDelegate"
       )
-      performDoubleClickAck(at: location, source: "delegate")
+      performConfiguredDoubleClickAction(at: location, source: "delegate")
       return false
     }
 

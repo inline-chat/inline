@@ -167,6 +167,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       "showSidebarMessagePreview": true,
       "includeSpaceChatsInHomeSidebar": true,
       AppSettings.sidebarCleanupIntervalKey: SidebarCleanupInterval.defaultValue.rawValue,
+      AppSettings.messageDoubleClickActionKey: MessageGestureAction.defaultDoubleClick.rawValue,
+      AppSettings.messageHoldActionKey: MessageGestureAction.defaultHold.rawValue,
       ExperimentalFeatureFlags.voiceMessagesKey: false,
       ExperimentalFeatureFlags.sidebarAsInboxKey: true,
     ])
