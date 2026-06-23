@@ -2,7 +2,7 @@ import * as stylex from "@stylexjs/stylex"
 import { PageContainer } from "./Page"
 import { SUPPORT_EMAIL, emailValue } from "~/lib/email"
 
-const AVAILABILITY = "Available for macOS and iOS in alpha • Web coming soon • Open-source."
+const AVAILABILITY = "Available for macOS and iOS in alpha • Web coming soon"
 const COPYRIGHT = "© 2026 Inline Chat"
 
 export const PageFooter = () => {

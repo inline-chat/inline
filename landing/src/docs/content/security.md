@@ -10,7 +10,6 @@ Inline is in alpha and this page is still evolving. We're actively tightening se
 - Traffic is encrypted in transit (HTTPS/WSS over TLS).
 - Sensitive cloud data is encrypted at rest.
 - Local app data on Apple devices is encrypted.
-- Client apps are open source.
 
 ## What We Do Today
 

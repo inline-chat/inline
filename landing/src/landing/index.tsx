@@ -68,7 +68,7 @@ const COPY = {
     },
   ],
   footer: {
-    availability: "Available for macOS and iOS in alpha • Web coming soon • Open-source.",
+    availability: "Available for macOS and iOS in alpha • Web coming soon",
     links: {
       twitter: "X",
       github: "GitHub",
