@@ -13,10 +13,11 @@ struct MainContentView: View {
 private extension View {
   @ViewBuilder
   func contentScrollEdgeEffect() -> some View {
-    if #available(macOS 26.0, *) {
-      // Disabled while investigating macOS 27 beta AppKit/SwiftUI stack overflows on app open.
-      // scrollEdgeEffectStyle(.soft, for: .all)
+    if #available(macOS 27.0, *) {
+      // Disabled on macOS 27 while investigating AppKit/SwiftUI stack overflows on app open.
       self
+    } else if #available(macOS 26.0, *) {
+      scrollEdgeEffectStyle(.soft, for: .all)
     } else {
       self
     }

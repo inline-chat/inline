@@ -14,6 +14,13 @@ struct RouteWindowAppearance {
     titlebarAppearsTransparent: true
   )
 
+  static var chat: Self {
+    if #available(macOS 27.0, *) {
+      return .transparentTitlebar
+    }
+    return .standard
+  }
+
   static let emptyPage = Self(
     windowBackground: .clear,
     titlebarAppearsTransparent: true
@@ -44,7 +51,7 @@ extension Nav3Route {
     case .empty:
       .emptyPage
     case .chat:
-      .transparentTitlebar
+      .chat
     default:
       .standard
     }

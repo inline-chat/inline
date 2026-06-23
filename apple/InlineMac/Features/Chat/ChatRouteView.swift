@@ -233,8 +233,6 @@ private extension View {
     if #available(macOS 27.0, *) {
       scrollEdgeEffectStyle(.hard, for: .top)
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-    } else if #available(macOS 26.0, *) {
-      scrollEdgeEffectStyle(.soft, for: .all)
     } else {
       self
     }
