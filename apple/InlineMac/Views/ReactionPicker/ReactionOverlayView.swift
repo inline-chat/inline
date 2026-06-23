@@ -40,6 +40,7 @@ struct ReactionOverlayView: View {
   @State private var isSelectingCustomEmoji = false
 
   private let pageWidth: CGFloat = 280 // Width of one page of reactions
+  private static let buttonSize: CGFloat = 32
   private static let moreReactionsKey = "__more_reactions"
 
   private func handleReactionSelected(_ emoji: String) {
@@ -135,11 +136,11 @@ struct ReactionOverlayView: View {
     }) {
       Text(emoji)
         .font(.system(size: 22))
-        .frame(width: 24, height: 24)
+        .frame(width: Self.buttonSize, height: Self.buttonSize)
     }
     .buttonStyle(.plain)
-    .padding(4)
     .background(buttonBackground(key: emoji))
+    .contentShape(Circle())
     .scaleEffect(isHovered[emoji] == true ? 1.1 : 1.0)
     .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isHovered[emoji])
     .onHover { hovering in
@@ -152,11 +153,11 @@ struct ReactionOverlayView: View {
       Image(systemName: "plus")
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(.secondary)
-        .frame(width: 24, height: 24)
+        .frame(width: Self.buttonSize, height: Self.buttonSize)
     }
     .buttonStyle(.plain)
-    .padding(4)
     .background(buttonBackground(key: Self.moreReactionsKey))
+    .contentShape(Circle())
     .scaleEffect(isHovered[Self.moreReactionsKey] == true ? 1.1 : 1.0)
     .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isHovered[Self.moreReactionsKey])
     .onHover { hovering in
