@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/bot-api",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": false,
   "type": "module",
   "files": [
@@ -21,7 +21,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@inline-chat/bot-api-types": "^0.0.1"
+    "@inline-chat/bot-api-types": "^0.0.2"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

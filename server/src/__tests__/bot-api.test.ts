@@ -50,6 +50,25 @@ describe("Bot HTTP API", () => {
     expect(text).not.toContain("peer_user_id")
     expect(text).not.toContain("parseMarkdown")
     expect(text).not.toContain("thread_id")
+
+    const richSourceInputs: any[] = []
+    const collectRichSourceInputs = (value: unknown) => {
+      if (!value || typeof value !== "object") return
+      const record = value as Record<string, any>
+      const properties = record["properties"]
+      if (properties?.markdown && properties?.html && properties?.rich_message && properties?.rich_text) {
+        richSourceInputs.push(record)
+      }
+      for (const child of Object.values(record)) {
+        collectRichSourceInputs(child)
+      }
+    }
+    collectRichSourceInputs(spec.paths?.["/bot/sendRichMessage"]?.post?.requestBody)
+    expect(richSourceInputs.some((schema) => schema["properties"].direction)).toBe(true)
+
+    const sendRichMessageDraftBody = JSON.stringify(spec.paths?.["/bot/sendRichMessageDraft"]?.post?.requestBody)
+    expect(sendRichMessageDraftBody).toContain('"draft_id"')
+    expect(sendRichMessageDraftBody).toContain('"maxLength":256')
   })
 
   it("returns documented Bot API errors for malformed requests", async () => {
@@ -440,6 +459,121 @@ describe("Bot HTTP API", () => {
     expect(camelMarkdownJson.ok).toBe(true)
   })
 
+  it("uses UTF-16 offsets for Bot API entity ranges with emoji", async () => {
+    const { bot, token } = await createBotSession("utf16entitybot")
+
+    const [human] = await db
+      .insert(users)
+      .values({
+        firstName: "UtfHuman",
+        username: "utfhuman",
+        bot: false,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    expect(bot).toBeDefined()
+    expect(human).toBeDefined()
+
+    const sendRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "A😀BC",
+          entities: [
+            { type: "bold", offset: 1, length: 2 },
+            { type: "italic", offset: 3, length: 2 },
+          ],
+        }),
+      }),
+    )
+
+    expect(sendRes.status).toBe(200)
+    const sendJson = await sendRes.json()
+    expect(sendJson.ok).toBe(true)
+    expect(sendJson.result.message.text).toBe("A😀BC")
+    expect(sendJson.result.message.entities).toEqual([
+      { type: "bold", offset: 1, length: 2 },
+      { type: "italic", offset: 3, length: 2 },
+    ])
+
+    const invalidSplitStartRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "A😀BC",
+          entities: [{ type: "bold", offset: 2, length: 1 }],
+        }),
+      }),
+    )
+
+    expect(invalidSplitStartRes.status).toBe(400)
+
+    const invalidSplitEndRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "A😀BC",
+          entities: [{ type: "bold", offset: 1, length: 1 }],
+        }),
+      }),
+    )
+
+    expect(invalidSplitEndRes.status).toBe(400)
+
+    const invalidRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "A😀BC",
+          entities: [{ type: "bold", offset: 4, length: 2 }],
+        }),
+      }),
+    )
+
+    expect(invalidRes.status).toBe(400)
+
+    const invalidEditRes = await app.handle(
+      new Request("http://localhost/bot/editMessageText", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          message_id: sendJson.result.message.message_id,
+          text: "A😀BC",
+          entities: [{ type: "italic", offset: 2, length: 1 }],
+        }),
+      }),
+    )
+
+    expect(invalidEditRes.status).toBe(400)
+  })
+
   it("parses inline markdown mention links on sendMessage when requested", async () => {
     const [bot] = await db
       .insert(users)
@@ -505,6 +639,627 @@ describe("Bot HTTP API", () => {
         },
       },
     ])
+  })
+
+  it("supports rich markdown on sendMessage and editMessageText", async () => {
+    const { bot, token } = await createBotSession("richmarkdownbot")
+
+    const [human] = await db
+      .insert(users)
+      .values({
+        firstName: "RichHuman",
+        username: "richhuman",
+        bot: false,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    expect(bot).toBeDefined()
+    expect(human).toBeDefined()
+
+    const sendRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "## Title\n\nSee [docs](https://example.com/docs) and **ship**",
+          parse_rich_markdown: true,
+        }),
+      }),
+    )
+
+    expect(sendRes.status).toBe(200)
+    const sendJson = await sendRes.json()
+    expect(sendJson.ok).toBe(true)
+    expect(sendJson.result.message.text).toBe("Title\n\nSee docs and ship")
+    expect(sendJson.result.message.rich_text).toMatchObject({
+      fallback_text: "Title\n\nSee docs and ship",
+      blocks: [
+        { type: "heading", level: 2 },
+        { type: "paragraph" },
+      ],
+    })
+    expect(sendJson.result.message.entities.map((entity: any) => entity.type)).toContain("text_link")
+    expect(sendJson.result.message.entities.map((entity: any) => entity.type)).toContain("bold")
+
+    const inlineOnlyRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "See [docs](https://example.com/docs), **ship**, <u>under</u>, and ~~struck~~",
+          parse_rich_markdown: true,
+        }),
+      }),
+    )
+
+    expect(inlineOnlyRes.status).toBe(200)
+    const inlineOnlyJson = await inlineOnlyRes.json()
+    expect(inlineOnlyJson.ok).toBe(true)
+    expect(inlineOnlyJson.result.message.text).toBe("See docs, ship, under, and struck")
+    expect(inlineOnlyJson.result.message.rich_text).toBeUndefined()
+    expect(inlineOnlyJson.result.message.entities.map((entity: any) => entity.type)).toEqual(
+      expect.arrayContaining(["text_link", "bold", "underline", "strikethrough"]),
+    )
+
+    const unicodeRichRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "### Hi 😀 [docs](https://example.com/docs) and **ship**",
+          parse_rich_markdown: true,
+        }),
+      }),
+    )
+
+    expect(unicodeRichRes.status).toBe(200)
+    const unicodeRichJson = await unicodeRichRes.json()
+    expect(unicodeRichJson.ok).toBe(true)
+    expect(unicodeRichJson.result.message.text).toBe("Hi 😀 docs and ship")
+    expect(unicodeRichJson.result.message.rich_text).toMatchObject({
+      fallback_text: "Hi 😀 docs and ship",
+      blocks: [{ type: "heading", level: 3 }],
+    })
+    expect(unicodeRichJson.result.message.entities).toEqual(
+      expect.arrayContaining([
+        { type: "text_link", offset: 6, length: 4, url: "https://example.com/docs" },
+        { type: "bold", offset: 15, length: 4 },
+      ]),
+    )
+
+    const editRes = await app.handle(
+      new Request("http://localhost/bot/editMessageText", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          message_id: sendJson.result.message.message_id,
+          text: "### Edited\n\nUse `code`",
+          parse_rich_markdown: true,
+        }),
+      }),
+    )
+
+    expect(editRes.status).toBe(200)
+    const editJson = await editRes.json()
+    expect(editJson.ok).toBe(true)
+    expect(editJson.result.message.text).toBe("Edited\n\nUse code")
+    expect(editJson.result.message.rich_text).toMatchObject({
+      fallback_text: "Edited\n\nUse code",
+      blocks: [
+        { type: "heading", level: 3 },
+        { type: "paragraph" },
+      ],
+    })
+    expect(editJson.result.message.entities.map((entity: any) => entity.type)).toContain("code")
+
+    const structuredRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_text: {
+            fallback_text: "",
+            blocks: [
+              {
+                type: "heading",
+                level: 2,
+                text: [{ text: "Structured title", styles: ["bold"] }],
+              },
+              {
+                type: "paragraph",
+                text: [{ text: "Body copy" }],
+              },
+              {
+                type: "list",
+                items: [
+                  { type: "list_item", checked: false, children: [{ type: "paragraph", text: [{ text: "Todo" }] }] },
+                  { type: "list_item", checked: true, children: [{ type: "paragraph", text: [{ text: "Done" }] }] },
+                ],
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(structuredRes.status).toBe(200)
+    const structuredJson = await structuredRes.json()
+    expect(structuredJson.ok).toBe(true)
+    expect(structuredJson.result.message.text).toBe("Structured title\n\nBody copy\n\n- [ ] Todo\n- [x] Done")
+    expect(structuredJson.result.message.rich_text).toMatchObject({
+      fallback_text: "Structured title\n\nBody copy\n\n- [ ] Todo\n- [x] Done",
+      blocks: [
+        { type: "heading", level: 2 },
+        { type: "paragraph" },
+        {
+          type: "list",
+          items: [
+            { type: "list_item", checked: false },
+            { type: "list_item", checked: true },
+          ],
+        },
+      ],
+    })
+    expect(structuredJson.result.message.entities.map((entity: any) => entity.type)).toContain("bold")
+
+    const sendRichRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            fallback_text: "",
+            blocks: [
+              {
+                type: "paragraph",
+                text: [{ text: "Sent via alias", styles: ["bold"] }],
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(sendRichRes.status).toBe(200)
+    const sendRichJson = await sendRichRes.json()
+    expect(sendRichJson.ok).toBe(true)
+    expect(sendRichJson.result.message.text).toBe("Sent via alias")
+    expect(sendRichJson.result.message.rich_text).toMatchObject({
+      fallback_text: "Sent via alias",
+      blocks: [{ type: "paragraph" }],
+    })
+    expect(sendRichJson.result.message.entities.map((entity: any) => entity.type)).toContain("bold")
+
+    const inputRichMarkdownRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            markdown: "## Wrapped\n\n/run",
+            direction: "rtl",
+            skip_entity_detection: true,
+          },
+        }),
+      }),
+    )
+
+    expect(inputRichMarkdownRes.status).toBe(200)
+    const inputRichMarkdownJson = await inputRichMarkdownRes.json()
+    expect(inputRichMarkdownJson.ok).toBe(true)
+    expect(inputRichMarkdownJson.result.message.text).toBe("Wrapped\n\n/run")
+    expect(inputRichMarkdownJson.result.message.rich_text).toMatchObject({
+      direction: "rtl",
+      fallback_text: "Wrapped\n\n/run",
+      blocks: [
+        { type: "heading", level: 2 },
+        { type: "paragraph" },
+      ],
+    })
+    expect(inputRichMarkdownJson.result.message.entities ?? []).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "bot_command" })]),
+    )
+
+    const inputRichHtmlRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            html: '<h2>HTML Wrapped</h2><p>Read <a href="https://example.com/docs"><strong>docs</strong></a>, <u>under</u>, <s>struck</s>, and <tg-spoiler>secret</tg-spoiler></p>',
+            is_rtl: true,
+          },
+        }),
+      }),
+    )
+
+    expect(inputRichHtmlRes.status).toBe(200)
+    const inputRichHtmlJson = await inputRichHtmlRes.json()
+    expect(inputRichHtmlJson.ok).toBe(true)
+    expect(inputRichHtmlJson.result.message.text).toBe("HTML Wrapped\n\nRead docs, under, struck, and secret")
+    expect(inputRichHtmlJson.result.message.rich_text).toMatchObject({
+      direction: "rtl",
+      fallback_text: "HTML Wrapped\n\nRead docs, under, struck, and secret",
+      blocks: [
+        { type: "heading", level: 2 },
+        { type: "paragraph" },
+      ],
+    })
+    expect(inputRichHtmlJson.result.message.entities.map((entity: any) => entity.type)).toEqual(
+      expect.arrayContaining(["text_link", "bold", "underline", "strikethrough"]),
+    )
+
+    const unicodeHtmlRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            html: '<p>Hi 😀 <a href="https://example.com/docs">docs</a> and <u>under</u></p>',
+          },
+        }),
+      }),
+    )
+
+    expect(unicodeHtmlRes.status).toBe(200)
+    const unicodeHtmlJson = await unicodeHtmlRes.json()
+    expect(unicodeHtmlJson.ok).toBe(true)
+    expect(unicodeHtmlJson.result.message.text).toBe("Hi 😀 docs and under")
+    expect(unicodeHtmlJson.result.message.rich_text).toBeUndefined()
+    expect(unicodeHtmlJson.result.message.entities).toEqual(
+      expect.arrayContaining([
+        { type: "text_link", offset: 6, length: 4, url: "https://example.com/docs" },
+        { type: "underline", offset: 15, length: 5 },
+      ]),
+    )
+
+    const inlineOnlyHtmlRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            html: '<p>Read <a href="https://example.com/docs"><strong>docs</strong></a>, <u>under</u>, and <s>struck</s></p>',
+          },
+        }),
+      }),
+    )
+
+    expect(inlineOnlyHtmlRes.status).toBe(200)
+    const inlineOnlyHtmlJson = await inlineOnlyHtmlRes.json()
+    expect(inlineOnlyHtmlJson.ok).toBe(true)
+    expect(inlineOnlyHtmlJson.result.message.text).toBe("Read docs, under, and struck")
+    expect(inlineOnlyHtmlJson.result.message.rich_text).toBeUndefined()
+    expect(inlineOnlyHtmlJson.result.message.entities.map((entity: any) => entity.type)).toEqual(
+      expect.arrayContaining(["text_link", "bold", "underline", "strikethrough"]),
+    )
+
+    const unsafeHtmlRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            html: '<p onclick="bad()">Unsafe</p>',
+          },
+        }),
+      }),
+    )
+
+    expect(unsafeHtmlRes.status).toBe(400)
+
+    const finalThinkingRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            fallback_text: "",
+            blocks: [
+              {
+                type: "thinking",
+                initially_collapsed: true,
+                children: [{ type: "paragraph", text: [{ text: "private reasoning" }] }],
+              },
+              {
+                type: "paragraph",
+                text: [{ text: "visible answer" }],
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(finalThinkingRes.status).toBe(200)
+    const finalThinkingJson = await finalThinkingRes.json()
+    expect(finalThinkingJson.ok).toBe(true)
+    expect(finalThinkingJson.result.message.text).toBe("visible answer")
+    expect(finalThinkingJson.result.message.rich_text).toMatchObject({
+      fallback_text: "visible answer",
+      blocks: [{ type: "paragraph" }],
+    })
+    expect(finalThinkingJson.result.message.rich_text.blocks.map((block: any) => block.type)).not.toContain("thinking")
+
+    const finalThinkingOnlyRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            fallback_text: "private reasoning",
+            blocks: [
+              {
+                type: "thinking",
+                initially_collapsed: true,
+                children: [{ type: "paragraph", text: [{ text: "private reasoning" }] }],
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(finalThinkingOnlyRes.status).toBe(400)
+
+    const draftThinkingRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessageDraft", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          draft_id: "bot-rich-draft-1",
+          message_id: finalThinkingJson.result.message.message_id,
+          rich_text: {
+            fallback_text: "private reasoning",
+            blocks: [
+              {
+                type: "thinking",
+                initially_collapsed: true,
+                children: [{ type: "paragraph", text: [{ text: "private reasoning" }] }],
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(draftThinkingRes.status).toBe(200)
+    const draftThinkingJson = await draftThinkingRes.json()
+    expect(draftThinkingJson).toEqual({ ok: true, result: {} })
+
+    const draftPublicMediaRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessageDraft", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          draft_id: "bot-rich-draft-public-media",
+          message_id: finalThinkingJson.result.message.message_id,
+          rich_message: {
+            fallback_text: "[Image: draft]",
+            blocks: [
+              {
+                type: "photo",
+                media: {
+                  alt: "draft",
+                  public_url: "https://example.com/draft.png",
+                },
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(draftPublicMediaRes.status).toBe(400)
+    const draftPublicMediaJson = await draftPublicMediaRes.json()
+    expect(draftPublicMediaJson.ok).toBe(false)
+
+    const oversizedDraftIdRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessageDraft", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          draft_id: "x".repeat(257),
+          message_id: finalThinkingJson.result.message.message_id,
+          clear: true,
+        }),
+      }),
+    )
+
+    expect(oversizedDraftIdRes.status).toBe(400)
+    const oversizedDraftIdJson = await oversizedDraftIdRes.json()
+    expect(oversizedDraftIdJson.ok).toBe(false)
+
+    const clearDraftRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessageDraft", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          draft_id: "bot-rich-draft-1",
+          message_id: finalThinkingJson.result.message.message_id,
+          clear: true,
+        }),
+      }),
+    )
+
+    expect(clearDraftRes.status).toBe(200)
+
+    const ambiguousInputRes = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            markdown: "Ambiguous",
+            rich_message: {
+              fallback_text: "Ambiguous",
+              blocks: [{ type: "paragraph", text: [{ text: "Ambiguous" }] }],
+            },
+          },
+        }),
+      }),
+    )
+
+    expect(ambiguousInputRes.status).toBe(400)
+
+    const richOnlyEditRes = await app.handle(
+      new Request("http://localhost/bot/editMessageText", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          message_id: structuredJson.result.message.message_id,
+          rich_message: {
+            fallback_text: "",
+            blocks: [
+              {
+                type: "paragraph",
+                text: [{ text: "Rich-only bot edit", styles: ["italic"] }],
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(richOnlyEditRes.status).toBe(200)
+    const richOnlyEditJson = await richOnlyEditRes.json()
+    expect(richOnlyEditJson.ok).toBe(true)
+    expect(richOnlyEditJson.result.message.text).toBe("Rich-only bot edit")
+    expect(richOnlyEditJson.result.message.rich_text).toMatchObject({
+      fallback_text: "Rich-only bot edit",
+      blocks: [{ type: "paragraph" }],
+    })
+    expect(richOnlyEditJson.result.message.entities.map((entity: any) => entity.type)).toContain("italic")
+  })
+
+  it("rejects oversized generated rich fallback through the public Bot API", async () => {
+    const { token } = await createBotSession("richoversizebot")
+
+    const [human] = await db
+      .insert(users)
+      .values({
+        firstName: "RichOversizeHuman",
+        username: "richoversizehuman",
+        bot: false,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    expect(human).toBeDefined()
+
+    const res = await app.handle(
+      new Request("http://localhost/bot/sendRichMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          rich_message: {
+            fallback_text: "",
+            blocks: [
+              {
+                type: "paragraph",
+                text: [{ text: "x".repeat(32_767) }],
+              },
+              {
+                type: "paragraph",
+                text: [{ text: "y" }],
+              },
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      ok: false,
+      error_code: 400,
+    })
   })
 
   it("prefers POST JSON body values over query values when both are provided", async () => {

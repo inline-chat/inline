@@ -5,6 +5,7 @@ export type {
   InlineSdkGetMessagesParams,
   InlineSdkInvokeMessageActionParams,
   InlineSdkAnswerMessageActionParams,
+  InlineSdkSendRichMessageDraftParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
   InlineSdkSetBotPresenceStateParams,

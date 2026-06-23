@@ -1,6 +1,7 @@
 import { db } from "@in/server/db"
 import { voices } from "@in/server/db/schema"
 import { getVoiceMetadataAndValidate } from "@in/server/modules/files/metadata"
+import { getSignedUrl } from "@in/server/modules/files/path"
 import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
 import { Log } from "@in/server/utils/log"
 import { uploadFile } from "./uploadAFile"
@@ -19,7 +20,7 @@ export async function uploadVoice(
 ): Promise<UploadFileResult> {
   try {
     const metadata = await getVoiceMetadataAndValidate(file, inputMetadata.duration, inputMetadata.waveform)
-    const { dbFile, fileUniqueId } = await uploadFile(file, FileTypes.VOICE, metadata, context)
+    const { dbFile, fileUniqueId, path } = await uploadFile(file, FileTypes.VOICE, metadata, context)
 
     const [voice] = await db
       .insert(voices)
@@ -35,7 +36,7 @@ export async function uploadVoice(
       throw new Error("Failed to save voice to DB")
     }
 
-    return { fileUniqueId, voiceId: voice.id }
+    return { fileUniqueId, voiceId: voice.id, cdnUrl: getSignedUrl(path) ?? undefined }
   } catch (error) {
     log.error("Voice upload failed", {
       error,

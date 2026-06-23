@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import { MessageEntity_Type } from "@inline-chat/protocol/core"
+import { MessageEntity_Type, RichTextStyle } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { RichTextValidationError } from "@in/server/modules/message/richText"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { eq } from "drizzle-orm"
 
@@ -60,6 +61,67 @@ describe("processOutgoingText", () => {
       throw new Error("Expected mention entity")
     }
     expect(mention.entity.mention.userId).toBe(BigInt(user.id))
+  })
+
+  test("resolves official internal bot aliases to canonical mention entities", async () => {
+    const bot = await testUtils.createUser(nextEmail("chatgpt-alias-bot"))
+    await db.update(users).set({ username: "chatgpt", bot: true, botCreatorId: null }).where(eq(users.id, bot.id)).execute()
+
+    const conflictingUser = await testUtils.createUser(nextEmail("chat-alias-conflict"))
+    await db.update(users).set({ username: "chat" }).where(eq(users.id, conflictingUser.id)).execute()
+
+    const text = "@gpt help and @chat too"
+    const result = await processOutgoingText({
+      text,
+      entities: undefined,
+    })
+
+    expect(result.text).toBe(text)
+    expect(result.entities?.entities).toHaveLength(2)
+
+    for (const mention of result.entities?.entities ?? []) {
+      expect(mention.type).toBe(MessageEntity_Type.MENTION)
+      expect(mention.entity.oneofKind).toBe("mention")
+      if (mention.entity.oneofKind !== "mention") {
+        throw new Error("Expected mention entity")
+      }
+      expect(mention.entity.mention.userId).toBe(BigInt(bot.id))
+    }
+
+    expect(result.entities?.entities[0]).toMatchObject({ offset: 0n, length: 4n })
+    expect(result.entities?.entities[1]).toMatchObject({ offset: BigInt(text.indexOf("@chat")), length: 5n })
+  })
+
+  test("replaces client username mention entities with resolved internal bot aliases", async () => {
+    const bot = await testUtils.createUser(nextEmail("chatgpt-client-username-mention"))
+    await db.update(users).set({ username: "chatgpt", bot: true, botCreatorId: null }).where(eq(users.id, bot.id)).execute()
+
+    const result = await processOutgoingText({
+      text: "@gpt help",
+      entities: {
+        entities: [
+          {
+            type: MessageEntity_Type.USERNAME_MENTION,
+            offset: 0n,
+            length: 4n,
+            entity: { oneofKind: undefined },
+          },
+        ],
+      },
+    })
+
+    expect(result.entities?.entities).toHaveLength(1)
+    const mention = result.entities!.entities[0]!
+    expect(mention).toMatchObject({
+      type: MessageEntity_Type.MENTION,
+      offset: 0n,
+      length: 4n,
+    })
+    expect(mention.entity.oneofKind).toBe("mention")
+    if (mention.entity.oneofKind !== "mention") {
+      throw new Error("Expected mention entity")
+    }
+    expect(mention.entity.mention.userId).toBe(BigInt(bot.id))
   })
 
   test("converts markdown inline chat links to thread entities", async () => {
@@ -304,6 +366,17 @@ describe("processOutgoingText", () => {
     expect(command.entity.oneofKind).toBeUndefined()
   })
 
+  test("can skip automatic bot command detection", async () => {
+    const result = await processOutgoingText({
+      text: "/start please",
+      entities: undefined,
+      skipEntityDetection: true,
+    })
+
+    expect(result.text).toBe("/start please")
+    expect(result.entities).toBeUndefined()
+  })
+
   test("parses bot commands after whitespace with bot username suffix", async () => {
     const result = await processOutgoingText({
       text: "run /deploy@buildbot now",
@@ -349,5 +422,284 @@ describe("processOutgoingText", () => {
     expect(result.text).toBe("Use /start today")
     expect(result.entities?.entities).toHaveLength(1)
     expect(result.entities?.entities[0]?.type).toBe(MessageEntity_Type.CODE)
+  })
+
+  test("parses rich markdown into fallback text, rich blocks, and flat entities", async () => {
+    const result = await processOutgoingText({
+      text: "# Release notes\n\nShip **rich** <u>underlined</u> and ~~struck~~ text with [docs](https://example.com/docs)",
+      entities: undefined,
+      parseRichMarkdown: true,
+    })
+
+    expect(result.text).toBe("Release notes\n\nShip rich underlined and struck text with docs")
+    expect(result.richText?.fallbackText).toBe(result.text)
+    expect(result.richText?.blocks.map((block) => block.block.oneofKind)).toEqual(["heading", "paragraph"])
+    expect(result.entities?.entities.map((entity) => entity.type)).toContain(MessageEntity_Type.BOLD)
+    expect(result.entities?.entities.map((entity) => entity.type)).toContain(MessageEntity_Type.UNDERLINE)
+    expect(result.entities?.entities.map((entity) => entity.type)).toContain(MessageEntity_Type.STRIKETHROUGH)
+
+    const link = result.entities?.entities.find((entity) => entity.type === MessageEntity_Type.TEXT_URL)
+    expect(link?.entity).toEqual({
+      oneofKind: "textUrl",
+      textUrl: { url: "https://example.com/docs" },
+    })
+  })
+
+  test("demotes inline-only rich markdown to normal fallback entities", async () => {
+    const result = await processOutgoingText({
+      text: "Ship **bold**, <u>under</u>, ~~struck~~, `code`, and [docs](https://example.com/docs)",
+      entities: undefined,
+      parseRichMarkdown: true,
+    })
+
+    expect(result.text).toBe("Ship bold, under, struck, code, and docs")
+    expect(result.richText).toBeUndefined()
+    expect(result.entities?.entities.map((entity) => entity.type)).toEqual(
+      expect.arrayContaining([
+        MessageEntity_Type.BOLD,
+        MessageEntity_Type.UNDERLINE,
+        MessageEntity_Type.STRIKETHROUGH,
+        MessageEntity_Type.CODE,
+        MessageEntity_Type.TEXT_URL,
+      ]),
+    )
+  })
+
+  test("keeps rich markdown when inline content needs rich-only spoiler state", async () => {
+    const result = await processOutgoingText({
+      text: "Reveal ||secret|| later",
+      entities: undefined,
+      parseRichMarkdown: true,
+    })
+
+    expect(result.text).toBe("Reveal secret later")
+    expect(result.richText?.blocks.map((block) => block.block.oneofKind)).toEqual(["paragraph"])
+  })
+
+  test("normalizes structured rich text and derives fallback text", async () => {
+    const result = await processOutgoingText({
+      text: "fallback from caller",
+      entities: undefined,
+      richText: {
+        blocks: [
+          {
+            blockId: "",
+            block: {
+              oneofKind: "paragraph",
+              paragraph: {
+                text: [
+                  {
+                    text: "structured",
+                    children: [],
+                    styles: [RichTextStyle.STYLE_BOLD],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        fallbackText: "",
+        version: 1,
+      },
+    })
+
+    expect(result.text).toBe("structured")
+    expect(result.richText?.fallbackText).toBe("structured")
+    expect(result.entities?.entities).toEqual([
+      {
+        type: MessageEntity_Type.BOLD,
+        offset: 0n,
+        length: 10n,
+        entity: { oneofKind: undefined },
+      },
+    ])
+  })
+
+  test("normalizes structured rich text without separate text input", async () => {
+    const result = await processOutgoingText({
+      entities: undefined,
+      richText: {
+        blocks: [
+          {
+            blockId: "",
+            block: {
+              oneofKind: "paragraph",
+              paragraph: {
+                text: [
+                  {
+                    text: "rich only",
+                    children: [],
+                    styles: [RichTextStyle.STYLE_ITALIC],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        fallbackText: "",
+        version: 1,
+      },
+    })
+
+    expect(result.text).toBe("rich only")
+    expect(result.richText?.fallbackText).toBe("rich only")
+    expect(result.entities?.entities).toEqual([
+      {
+        type: MessageEntity_Type.ITALIC,
+        offset: 0n,
+        length: 9n,
+        entity: { oneofKind: undefined },
+      },
+    ])
+  })
+
+  test("demotes source-shaped structured rich text only when requested", async () => {
+    const richText = {
+      blocks: [
+        {
+          blockId: "",
+          block: {
+            oneofKind: "paragraph" as const,
+            paragraph: {
+              text: [{ text: "inline", children: [], styles: [RichTextStyle.STYLE_BOLD] }],
+            },
+          },
+        },
+      ],
+      fallbackText: "",
+      version: 1,
+    }
+
+    const kept = await processOutgoingText({
+      entities: undefined,
+      richText,
+    })
+    const demoted = await processOutgoingText({
+      entities: undefined,
+      richText,
+      demoteInlineOnlyRichText: true,
+    })
+
+    expect(kept.richText?.fallbackText).toBe("inline")
+    expect(demoted.richText).toBeUndefined()
+    expect(demoted.entities?.entities[0]?.type).toBe(MessageEntity_Type.BOLD)
+  })
+
+  test("strips structured thinking blocks unless explicitly allowed", async () => {
+    const richText = {
+      blocks: [
+        {
+          blockId: "thinking",
+          block: {
+            oneofKind: "thinking" as const,
+            thinking: {
+              initiallyCollapsed: true,
+              blocks: [
+                {
+                  blockId: "",
+                  block: {
+                    oneofKind: "paragraph" as const,
+                    paragraph: { text: [{ text: "private", children: [], styles: [] }] },
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          blockId: "",
+          block: {
+            oneofKind: "paragraph" as const,
+            paragraph: { text: [{ text: "public", children: [], styles: [] }] },
+          },
+        },
+      ],
+      fallbackText: "",
+      version: 1,
+    }
+
+    const stripped = await processOutgoingText({
+      text: "fallback",
+      entities: undefined,
+      richText,
+    })
+    const allowed = await processOutgoingText({
+      text: "fallback",
+      entities: undefined,
+      richText,
+      allowThinking: true,
+    })
+
+    expect(stripped.text).toBe("public")
+    expect(stripped.richText?.blocks.map((block) => block.block.oneofKind)).toEqual(["paragraph"])
+    expect(allowed.text).toBe("public")
+    expect(allowed.richText?.blocks.map((block) => block.block.oneofKind)).toEqual(["thinking", "paragraph"])
+  })
+
+  test("rejects final thinking-only rich text instead of leaking supplied fallback", async () => {
+    await expect(
+      processOutgoingText({
+        text: "private fallback",
+        entities: undefined,
+        richText: {
+          blocks: [
+            {
+              blockId: "thinking",
+              block: {
+                oneofKind: "thinking" as const,
+                thinking: {
+                  initiallyCollapsed: true,
+                  blocks: [
+                    {
+                      blockId: "",
+                      block: {
+                        oneofKind: "paragraph" as const,
+                        paragraph: { text: [{ text: "private reasoning", children: [], styles: [] }] },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          fallbackText: "private fallback",
+          version: 1,
+        },
+      }),
+    ).rejects.toThrow(RichTextValidationError)
+  })
+
+  test("rejects rich markdown combined with legacy markdown or entities", async () => {
+    await expect(
+      processOutgoingText({
+        text: "**bold**",
+        entities: undefined,
+        parseMarkdown: true,
+        parseRichMarkdown: true,
+      }),
+    ).rejects.toThrow(RichTextValidationError)
+
+    await expect(
+      processOutgoingText({
+        text: "**bold**",
+        entities: { entities: [] },
+        parseRichMarkdown: true,
+      }),
+    ).rejects.toThrow(RichTextValidationError)
+  })
+
+  test("rejects structured rich text combined with rich markdown parsing", async () => {
+    await expect(
+      processOutgoingText({
+        text: "rich",
+        entities: undefined,
+        parseRichMarkdown: true,
+        richText: {
+          blocks: [],
+          fallbackText: "rich",
+          version: 1,
+        },
+      }),
+    ).rejects.toThrow(RichTextValidationError)
   })
 })

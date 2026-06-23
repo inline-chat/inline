@@ -1,4 +1,4 @@
-import type { InputPeer, MessageActions, MessageEntities, Update } from "@inline-chat/protocol/core"
+import type { InputPeer, MessageActions, MessageEntities, RichMessage, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
@@ -15,14 +15,21 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { RichTextValidationError } from "@in/server/modules/message/richText"
+import { resolveRichMediaPublicUrls, shouldResolveRichMediaUploads } from "@in/server/modules/mediaUploader"
+import { validateInternalRichMediaRefs } from "@in/server/modules/message/richMediaValidation"
 
 type Input = {
   messageId: bigint
   peer: InputPeer
-  text: string
+  text?: string
   entities?: MessageEntities
+  richText?: RichMessage
   actions?: MessageActions
   parseMarkdown?: boolean
+  parseRichMarkdown?: boolean
+  demoteInlineOnlyRichText?: boolean
+  skipEntityDetection?: boolean
 }
 
 type Output = {
@@ -40,17 +47,42 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
       throw RealtimeRpcError.BadRequest()
     }
   }
-  const outgoingText = await processOutgoingText({
-    text: input.text,
-    entities: input.entities,
-    parseMarkdown: input.parseMarkdown,
-  })
+  let outgoingText: Awaited<ReturnType<typeof processOutgoingText>>
+  try {
+    outgoingText = await processOutgoingText({
+      text: input.text,
+      entities: input.entities,
+      parseMarkdown: input.parseMarkdown,
+      richText: input.richText,
+      parseRichMarkdown: input.parseRichMarkdown,
+      demoteInlineOnlyRichText: input.demoteInlineOnlyRichText,
+      skipEntityDetection: input.skipEntityDetection,
+    })
+  } catch (error) {
+    if (error instanceof RichTextValidationError) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    throw error
+  }
+  let richText = outgoingText.richText
+  if (richText && shouldResolveRichMediaUploads()) {
+    richText = (await resolveRichMediaPublicUrls({ richText, userId: currentUserId })).richText
+  }
+  try {
+    await validateInternalRichMediaRefs(richText, { ownerUserId: currentUserId })
+  } catch (error) {
+    if (error instanceof RichTextValidationError) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    throw error
+  }
 
   const { message, update } = await MessageModel.editMessage({
     messageId: Number(input.messageId),
     chatId,
     text: outgoingText.text,
     entities: outgoingText.entities,
+    richText: richText ?? null,
     actions: normalizedActions,
   })
 

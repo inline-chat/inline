@@ -18,6 +18,10 @@ const TBotMessageEntityType = t.Union([
   t.Literal("thread"),
   t.Literal("thread_title"),
   t.Literal("bot_command"),
+  t.Literal("underline"),
+  t.Literal("strikethrough"),
+  t.Literal("blockquote"),
+  t.Literal("expandable_blockquote"),
 ])
 
 export const TBotMessageEntityInput = t.Object({
@@ -73,6 +77,9 @@ export const TBotMessageEntitiesOutput = t.Array(TBotMessageEntityOutput)
 
 export type BotUserJson = BotUser
 type BotEntityJson = BotMessageEntityOutput
+type ParseBotEntitiesOptions = {
+  text?: string
+}
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -81,8 +88,8 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
 const toBigInt = (value: unknown, error: InlineError): bigint => {
   if (typeof value === "bigint") return value
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw error
-    return BigInt(Math.trunc(value))
+    if (!Number.isSafeInteger(value)) throw error
+    return BigInt(value)
   }
   if (typeof value === "string") {
     if (!value.trim()) throw error
@@ -120,7 +127,7 @@ const parseEntityType = (value: unknown): MessageEntity_Type => {
   const normalized = normalizeType(value)
 
   if (typeof normalized === "number") {
-    if (normalized === MessageEntity_Type.THREAD || normalized === MessageEntity_Type.THREAD_TITLE) {
+    if (!numericInputEntityTypes.has(normalized as MessageEntity_Type)) {
       throw new InlineError(InlineError.ApiError.BAD_REQUEST)
     }
     // 2026-06-03: Deprecated compatibility for existing production bot clients.
@@ -158,6 +165,14 @@ const parseEntityType = (value: unknown): MessageEntity_Type => {
       return MessageEntity_Type.PHONE_NUMBER
     case "bot_command":
       return MessageEntity_Type.BOT_COMMAND
+    case "underline":
+      return MessageEntity_Type.UNDERLINE
+    case "strikethrough":
+      return MessageEntity_Type.STRIKETHROUGH
+    case "blockquote":
+      return MessageEntity_Type.BLOCKQUOTE
+    case "expandable_blockquote":
+      return MessageEntity_Type.EXPANDABLE_BLOCKQUOTE
     case "thread":
       rejectNonCanonicalThreadType()
       return MessageEntity_Type.THREAD
@@ -168,6 +183,34 @@ const parseEntityType = (value: unknown): MessageEntity_Type => {
       throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 }
+
+const numericInputEntityTypes = new Set<MessageEntity_Type>([
+  MessageEntity_Type.MENTION,
+  MessageEntity_Type.URL,
+  MessageEntity_Type.TEXT_URL,
+  MessageEntity_Type.EMAIL,
+  MessageEntity_Type.BOLD,
+  MessageEntity_Type.ITALIC,
+  MessageEntity_Type.USERNAME_MENTION,
+  MessageEntity_Type.CODE,
+  MessageEntity_Type.PRE,
+  MessageEntity_Type.PHONE_NUMBER,
+  MessageEntity_Type.BOT_COMMAND,
+  MessageEntity_Type.UNDERLINE,
+  MessageEntity_Type.STRIKETHROUGH,
+])
+
+const nestedStyleEntityTypes = new Set<MessageEntity_Type>([
+  MessageEntity_Type.BOLD,
+  MessageEntity_Type.ITALIC,
+  MessageEntity_Type.UNDERLINE,
+  MessageEntity_Type.STRIKETHROUGH,
+])
+
+const exclusiveEntityTypes = new Set<MessageEntity_Type>([
+  MessageEntity_Type.CODE,
+  MessageEntity_Type.PRE,
+])
 
 const rejectThreadEntityAliasFields = (item: Record<string, unknown>): void => {
   if (Object.prototype.hasOwnProperty.call(item, "thread_id")) {
@@ -199,6 +242,14 @@ const typeToString = (type: MessageEntity_Type): BotMessageEntityOutput["type"] 
       return "phone_number"
     case MessageEntity_Type.BOT_COMMAND:
       return "bot_command"
+    case MessageEntity_Type.UNDERLINE:
+      return "underline"
+    case MessageEntity_Type.STRIKETHROUGH:
+      return "strikethrough"
+    case MessageEntity_Type.BLOCKQUOTE:
+      return "blockquote"
+    case MessageEntity_Type.EXPANDABLE_BLOCKQUOTE:
+      return "expandable_blockquote"
     case MessageEntity_Type.THREAD:
       return "thread"
     case MessageEntity_Type.THREAD_TITLE:
@@ -208,7 +259,7 @@ const typeToString = (type: MessageEntity_Type): BotMessageEntityOutput["type"] 
   }
 }
 
-export const parseBotEntities = (raw: unknown): MessageEntities | undefined => {
+export const parseBotEntities = (raw: unknown, options: ParseBotEntitiesOptions = {}): MessageEntities | undefined => {
   if (raw === undefined || raw === null) return undefined
   if (!Array.isArray(raw)) throw new InlineError(InlineError.ApiError.BAD_REQUEST)
 
@@ -289,7 +340,77 @@ export const parseBotEntities = (raw: unknown): MessageEntities | undefined => {
     return base
   })
 
+  validateBotEntityRanges(entities, options.text)
   return { entities }
+}
+
+const validateBotEntityRanges = (entities: MessageEntity[], text: string | undefined): void => {
+  if (entities.length === 0) {
+    return
+  }
+
+  const ranges = entities.map((entity) => {
+    const start = entity.offset
+    const length = entity.length
+    const end = start + length
+
+    if (start < 0n || length <= 0n) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+
+    return { entity, start, end }
+  })
+
+  if (text !== undefined) {
+    const textLength = BigInt(text.length)
+    for (const range of ranges) {
+      if (range.start > textLength || range.end > textLength) {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+      if (!isUtf16Boundary(text, Number(range.start)) || !isUtf16Boundary(text, Number(range.end))) {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+    }
+  }
+
+  for (let i = 0; i < ranges.length; i++) {
+    for (let j = i + 1; j < ranges.length; j++) {
+      assertBotEntityPairCanOverlap(ranges[i]!, ranges[j]!)
+    }
+  }
+}
+
+const assertBotEntityPairCanOverlap = (
+  left: { entity: MessageEntity; start: bigint; end: bigint },
+  right: { entity: MessageEntity; start: bigint; end: bigint },
+): void => {
+  if (left.end <= right.start || right.end <= left.start) {
+    return
+  }
+
+  const leftContainsRight = left.start <= right.start && left.end >= right.end
+  const rightContainsLeft = right.start <= left.start && right.end >= left.end
+  if (!leftContainsRight && !rightContainsLeft) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  if (exclusiveEntityTypes.has(left.entity.type) || exclusiveEntityTypes.has(right.entity.type)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  if (!nestedStyleEntityTypes.has(left.entity.type) && !nestedStyleEntityTypes.has(right.entity.type)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+}
+
+const isUtf16Boundary = (text: string, index: number): boolean => {
+  if (index <= 0 || index >= text.length) {
+    return true
+  }
+
+  const prev = text.charCodeAt(index - 1)
+  const current = text.charCodeAt(index)
+  return !(prev >= 0xd800 && prev <= 0xdbff && current >= 0xdc00 && current <= 0xdfff)
 }
 
 export const encodeBotEntities = (

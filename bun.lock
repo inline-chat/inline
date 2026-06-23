@@ -101,9 +101,23 @@
         "typescript": "^5.7.2",
       },
     },
+    "packages/agent-chatgpt": {
+      "name": "@inline-chat/agent-chatgpt",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.8.3",
+      },
+    },
+    "packages/agent-core": {
+      "name": "@inline-chat/agent-core",
+      "version": "0.0.1",
+      "devDependencies": {
+        "typescript": "^5.8.3",
+      },
+    },
     "packages/bot-api": {
       "name": "@inline-chat/bot-api",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "dependencies": {
         "@inline-chat/bot-api-types": "workspace:*",
       },
@@ -116,9 +130,16 @@
     },
     "packages/bot-api-types": {
       "name": "@inline-chat/bot-api-types",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "devDependencies": {
         "@types/node": "^20.11.30",
+        "typescript": "^5.8.3",
+      },
+    },
+    "packages/markdown": {
+      "name": "@inline-chat/markdown",
+      "version": "0.0.1",
+      "devDependencies": {
         "typescript": "^5.8.3",
       },
     },
@@ -149,9 +170,9 @@
     },
     "packages/openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.47",
+      "version": "0.0.48",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.11",
+        "@inline-chat/realtime-sdk": "0.0.12",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -170,7 +191,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.5",
+      "version": "0.0.6",
       "dependencies": {
         "@protobuf-ts/runtime": "^2.11.1",
       },
@@ -180,9 +201,9 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.11",
+      "version": "0.0.12",
       "dependencies": {
-        "@inline-chat/protocol": "^0.0.5",
+        "@inline-chat/protocol": "^0.0.6",
         "ws": "^8.18.3",
       },
       "devDependencies": {
@@ -225,8 +246,11 @@
         "@elysiajs/cors": "1.4.2",
         "@elysiajs/html": "1.4.2",
         "@elysiajs/swagger": "1.3.1",
+        "@inline-chat/agent-chatgpt": "workspace:*",
+        "@inline-chat/agent-core": "workspace:*",
         "@inline-chat/bot-api-types": "workspace:*",
         "@inline-chat/email-templates": "workspace:*",
+        "@inline-chat/markdown": "workspace:*",
         "@inline-chat/oauth-core": "workspace:*",
         "@inline-chat/protocol": "workspace:*",
         "@inline-chat/url-preview": "workspace:*",
@@ -616,6 +640,10 @@
 
     "@in/protocol": ["@in/protocol@workspace:landing/packages/protocol"],
 
+    "@inline-chat/agent-chatgpt": ["@inline-chat/agent-chatgpt@workspace:packages/agent-chatgpt"],
+
+    "@inline-chat/agent-core": ["@inline-chat/agent-core@workspace:packages/agent-core"],
+
     "@inline-chat/bot-api": ["@inline-chat/bot-api@workspace:packages/bot-api"],
 
     "@inline-chat/bot-api-types": ["@inline-chat/bot-api-types@workspace:packages/bot-api-types"],
@@ -627,6 +655,8 @@
     "@inline-chat/email-templates": ["@inline-chat/email-templates@workspace:server/packages/email-templates"],
 
     "@inline-chat/landing": ["@inline-chat/landing@workspace:landing"],
+
+    "@inline-chat/markdown": ["@inline-chat/markdown@workspace:packages/markdown"],
 
     "@inline-chat/mcp": ["@inline-chat/mcp@workspace:packages/mcp"],
 

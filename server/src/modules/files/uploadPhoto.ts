@@ -125,18 +125,22 @@ async function normalizePhotoUpload(
   file: File
   metadata: Awaited<ReturnType<typeof getPhotoMetadataAndValidate>>
 }> {
-  if (metadata.mimeType !== "image/webp") {
+  if (!shouldNormalizePhotoUpload(metadata.mimeType)) {
     return { file, metadata }
   }
 
   const png = await sharp(await file.arrayBuffer()).png().toBuffer()
-  const normalizedFile = new File([png], pngFileName(metadata.fileName), { type: "image/png" })
+  const normalizedFile = new File([png], normalizedPngFileName(metadata.fileName), { type: "image/png" })
   const normalizedMetadata = await getPhotoMetadataAndValidate(normalizedFile)
   return { file: normalizedFile, metadata: normalizedMetadata }
 }
 
-function pngFileName(fileName: string): string {
-  const trimmed = fileName.trim() || "photo.webp"
+function shouldNormalizePhotoUpload(mimeType: string): boolean {
+  return mimeType === "image/webp" || mimeType === "image/avif"
+}
+
+function normalizedPngFileName(fileName: string): string {
+  const trimmed = fileName.trim() || "photo"
   if (trimmed.includes(".")) {
     return trimmed.replace(/\.[^.]+$/, ".png")
   }

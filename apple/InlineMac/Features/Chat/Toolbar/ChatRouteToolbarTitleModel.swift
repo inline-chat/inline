@@ -67,6 +67,7 @@ final class ChatRouteToolbarTitleModel {
   var iconPeer: ChatIcon.PeerType?
   var breadcrumb: Breadcrumb?
   var status: Status = .none
+  var isVerified = false
   var canRename = false
   var isEditingTitle = false
   var isSavingTitle = false
@@ -246,6 +247,7 @@ final class ChatRouteToolbarTitleModel {
       emojiDraft = resolvedEmoji() ?? ""
     }
     iconPeer = resolvedIconPeer()
+    isVerified = resolvedIsVerified()
     updateParentChatSubscription()
     updateSpaceSubscription()
     breadcrumb = resolvedBreadcrumb()
@@ -298,6 +300,12 @@ final class ChatRouteToolbarTitleModel {
     }
 
     return nil
+  }
+
+  private func resolvedIsVerified() -> Bool {
+    guard let user = resolvedUserInfo()?.user else { return false }
+    guard !user.isCurrentUser() else { return false }
+    return user.verified
   }
 
   private func resolvedEmoji() -> String? {

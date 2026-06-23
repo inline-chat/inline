@@ -21,7 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var didHandleInitialActivation = false
 
   @MainActor private let appBridge = AppBridge(app: NSApp)
-  @MainActor private let dockBadgeService = DockBadgeService()
+  @MainActor private lazy var dockBadgeService = DockBadgeService()
 
   // Common Dependencies
   @MainActor private(set) lazy var dependencies: AppDependencies = {
@@ -66,6 +66,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     initializeServices()
     setupAppearanceSetting()
     setupMainMenu()
+#if DEBUG
+    openRichTextTestBookIfRequested()
+#endif
     presentInstallLocationPromptIfNeeded()
     registerMainWindowCoordinator()
     setupRealtimeConnectionFailureObserver()
@@ -91,6 +94,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       andEventID: AEEventID(kAEGetURL)
     )
   }
+
+#if DEBUG
+  @MainActor private func openRichTextTestBookIfRequested() {
+    let args = CommandLine.arguments
+    if args.contains("--rich-text-testbook") {
+      RichMessageTestBookWindowController.show(sender: self)
+    }
+  }
+#endif
 
   @MainActor
   @objc func openNewMainWindow(_ sender: Any?) {
@@ -167,6 +179,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       "showSidebarMessagePreview": true,
       "includeSpaceChatsInHomeSidebar": true,
       AppSettings.sidebarCleanupIntervalKey: SidebarCleanupInterval.defaultValue.rawValue,
+      AppSettings.messageDoubleClickActionKey: MessageGestureAction.defaultDoubleClick.rawValue,
+      AppSettings.messageHoldActionKey: MessageGestureAction.defaultHold.rawValue,
       ExperimentalFeatureFlags.voiceMessagesKey: false,
       ExperimentalFeatureFlags.sidebarAsInboxKey: true,
     ])

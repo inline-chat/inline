@@ -73,9 +73,52 @@ final class MessageActionRowsView: NSView {
       rowsStack.addArrangedSubview(rowStack)
     }
   }
+
+#if DEBUG
+  func debugActionMetricsForTestBook() -> (
+    rowCount: Int,
+    actionCount: Int,
+    hitTestableActionCount: Int,
+    hoverResponsiveActionCount: Int,
+    pressResponsiveActionCount: Int,
+    restoredInteractionActionCount: Int
+  ) {
+    layoutSubtreeIfNeeded()
+    let rowViews = rowsStack.arrangedSubviews.compactMap { $0 as? NSStackView }
+    let actionViews = rowViews.flatMap { $0.arrangedSubviews }
+    let hitTestableActionCount = actionViews.reduce(into: 0) { count, actionView in
+      guard actionView.bounds.width > 0, actionView.bounds.height > 0 else { return }
+      let center = NSPoint(x: actionView.bounds.midX, y: actionView.bounds.midY)
+      if actionView.hitTest(center) != nil {
+        count += 1
+      }
+    }
+    let interactionMetrics = actionViews
+      .compactMap { $0 as? MessageActionButtonView }
+      .map { $0.debugExerciseInteractionForTestBook() }
+    return (
+      rowCount: rowViews.count,
+      actionCount: actionViews.count,
+      hitTestableActionCount: hitTestableActionCount,
+      hoverResponsiveActionCount: interactionMetrics.filter { $0.hoverChanged }.count,
+      pressResponsiveActionCount: interactionMetrics.filter { $0.pressChanged }.count,
+      restoredInteractionActionCount: interactionMetrics.filter { $0.restored }.count
+    )
+  }
+#endif
 }
 
 final class MessageActionButtonView: NSView {
+  #if DEBUG
+  private struct DebugInteractionState {
+    let isHovered: Bool
+    let isPressed: Bool
+    let backgroundComponents: [CGFloat]
+    let transformScaleX: CGFloat
+    let transformScaleY: CGFloat
+  }
+  #endif
+
   private struct AppearanceStyle {
     var title: String
     var isLoading: Bool
@@ -289,6 +332,53 @@ final class MessageActionButtonView: NSView {
     PressScaleAnimator.setPressed(pressed, on: self)
     applyAppearance()
   }
+
+#if DEBUG
+  func debugExerciseInteractionForTestBook() -> (hoverChanged: Bool, pressChanged: Bool, restored: Bool) {
+    isHovered = false
+    setPressed(false)
+    applyAppearance()
+    let idle = debugInteractionState()
+
+    isHovered = true
+    applyAppearance()
+    let hovered = debugInteractionState()
+
+    setPressed(true)
+    let pressed = debugInteractionState()
+
+    isHovered = false
+    setPressed(false)
+    applyAppearance()
+    let restored = debugInteractionState()
+
+    return (
+      hoverChanged: debugComponentsDiffer(idle.backgroundComponents, hovered.backgroundComponents),
+      pressChanged: pressed.isPressed && pressed.transformScaleX < 0.99 && pressed.transformScaleY < 0.99,
+      restored: !restored.isHovered &&
+        !restored.isPressed &&
+        abs(restored.transformScaleX - 1) < 0.001 &&
+        abs(restored.transformScaleY - 1) < 0.001 &&
+        !debugComponentsDiffer(idle.backgroundComponents, restored.backgroundComponents)
+    )
+  }
+
+  private func debugInteractionState() -> DebugInteractionState {
+    let transform = layer?.transform ?? CATransform3DIdentity
+    return DebugInteractionState(
+      isHovered: isHovered,
+      isPressed: isPressed,
+      backgroundComponents: layer?.backgroundColor?.components ?? [],
+      transformScaleX: transform.m11,
+      transformScaleY: transform.m22
+    )
+  }
+
+  private func debugComponentsDiffer(_ lhs: [CGFloat], _ rhs: [CGFloat]) -> Bool {
+    guard lhs.count == rhs.count else { return true }
+    return zip(lhs, rhs).contains { abs($0 - $1) > 0.0001 }
+  }
+#endif
 
   @objc private func handleTap() {
     guard let action else {

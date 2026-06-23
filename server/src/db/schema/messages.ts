@@ -36,6 +36,11 @@ export const messages = pgTable(
     entitiesIv: bytea("entities_iv"),
     entitiesTag: bytea("entities_tag"),
 
+    /** block rich text payload */
+    richTextEncrypted: bytea("rich_text_encrypted"),
+    richTextIv: bytea("rich_text_iv"),
+    richTextTag: bytea("rich_text_tag"),
+
     /** interactive message actions */
     actionsEncrypted: bytea("actions_encrypted"),
     actionsIv: bytea("actions_iv"),

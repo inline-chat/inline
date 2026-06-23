@@ -1438,7 +1438,8 @@ extension NewVideoView {
     downloadProgressSnapshot = currentDownloadProgressSnapshot()
     updateDurationLabel()
     updateOverlay()
-    FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] result in
+    let ownerMessage = isSyntheticRichMessage(fullMessage.message) ? nil : fullMessage.message
+    FileDownloader.shared.downloadVideo(video: videoInfo, for: ownerMessage) { [weak self] result in
       // Capture any local file presence before hopping to main to avoid type resolution issues.
       let localUrl: URL?
       let localPath: String?
@@ -1475,6 +1476,10 @@ extension NewVideoView {
         completion(result)
       }
     }
+  }
+
+  private func isSyntheticRichMessage(_ message: Message) -> Bool {
+    message.chatId == 0 && message.messageId < 0
   }
 
   @objc func saveVideo() {

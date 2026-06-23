@@ -6,6 +6,7 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
 import { getMessages } from "@in/server/functions/messages.getMessages"
+import { CHATGPT_AGENT_KEY, CHATGPT_CONNECTION_PROVIDER } from "@inline-chat/agent-chatgpt"
 import { setupTestLifecycle, testUtils } from "../setup"
 
 describe("messages.deleteMessage", () => {
@@ -233,6 +234,60 @@ describe("messages.deleteMessage", () => {
     expect(parentMessageIds.get(retainedChild.id)).toBe(3)
   })
 
+  test("cascades rich media index rows when deleting messages", async () => {
+    const currentUser = await testUtils.createUser("rich-media-delete-owner@example.com")
+    const chat = await testUtils.createChat(null, "Rich Media Delete", "thread", false, currentUser.id)
+    if (!chat) {
+      throw new Error("Chat not created")
+    }
+
+    await testUtils.addParticipant(chat.id, currentUser.id)
+
+    const [message] = await db
+      .insert(schema.messages)
+      .values({
+        chatId: chat.id,
+        messageId: 1,
+        fromId: currentUser.id,
+        text: "rich media",
+      })
+      .returning()
+    if (!message) {
+      throw new Error("Message not created")
+    }
+
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, chat.id))
+    await db.insert(schema.messageRichMedia).values({
+      messageGlobalId: message.globalId,
+      chatId: chat.id,
+      messageId: 1,
+      blockId: "photo",
+      blockPath: "0",
+      sortOrder: 0,
+      kind: "public_url",
+      status: "pending",
+    })
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(chat.id) },
+          },
+        },
+        messageIds: [1n],
+      },
+      testUtils.functionContext({ userId: currentUser.id }),
+    )
+
+    const rows = await db
+      .select()
+      .from(schema.messageRichMedia)
+      .where(eq(schema.messageRichMedia.messageGlobalId, message.globalId))
+    expect(rows).toHaveLength(0)
+  })
+
   test("refreshes parent replies summary when deleting a reply-thread message", async () => {
     const currentUser = await testUtils.createUser("reply-delete-owner@example.com")
     const firstReplier = await testUtils.createUser("reply-delete-first@example.com")
@@ -369,5 +424,112 @@ describe("messages.deleteMessage", () => {
       expect(Number(decrypted.payload.update.editMessage.chatId)).toBe(parentChat.id)
       expect(Number(decrypted.payload.update.editMessage.msgId)).toBe(1)
     }
+  })
+
+  test("clears internal agent message references when deleting agent chat messages", async () => {
+    const currentUser = await testUtils.createUser("agent-delete-owner@example.com")
+    const bot = await testUtils.createUser("agent-delete-bot@example.com")
+    const chat = await testUtils.createChat(null, "Agent Delete", "thread", false, currentUser.id)
+    if (!chat) {
+      throw new Error("Chat not created")
+    }
+
+    await db.update(schema.users).set({ bot: true, username: "chatgpt-delete-test" }).where(eq(schema.users.id, bot.id))
+    await testUtils.addParticipant(chat.id, currentUser.id)
+    await testUtils.addParticipant(chat.id, bot.id)
+
+    const [trigger, output] = await db
+      .insert(schema.messages)
+      .values([
+        {
+          chatId: chat.id,
+          messageId: 1,
+          fromId: currentUser.id,
+          text: "ask",
+        },
+        {
+          chatId: chat.id,
+          messageId: 2,
+          fromId: bot.id,
+          text: "answer",
+        },
+      ])
+      .returning()
+    if (!trigger || !output) {
+      throw new Error("Messages not created")
+    }
+    await db.update(schema.chats).set({ lastMsgId: 2 }).where(eq(schema.chats.id, chat.id))
+
+    const runId = "chatgpt_delete_message_refs_test"
+    await db.insert(schema.internalAgentRuns).values({
+      id: runId,
+      agentKey: CHATGPT_AGENT_KEY,
+      runKey: "delete-message-refs",
+      scopeType: "user",
+      scopeUserId: currentUser.id,
+      actorUserId: currentUser.id,
+      botUserId: bot.id,
+      chatId: chat.id,
+      triggerMsgGlobalId: trigger.globalId,
+      outputMsgGlobalId: output.globalId,
+      status: "succeeded",
+    })
+    await db.insert(schema.internalAgentProviderStates).values({
+      runId,
+      provider: CHATGPT_CONNECTION_PROVIDER,
+      issuer: "chatgpt_codex",
+      model: "test-model",
+      outputMsgGlobalId: output.globalId,
+      encryptedStateCiphertext: Buffer.from("test"),
+      encryptedItemCount: 1,
+    })
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(chat.id) },
+          },
+        },
+        messageIds: [1n],
+      },
+      testUtils.functionContext({ userId: currentUser.id }),
+    )
+
+    const [runAfterTriggerDelete] = await db
+      .select()
+      .from(schema.internalAgentRuns)
+      .where(eq(schema.internalAgentRuns.id, runId))
+      .limit(1)
+    expect(runAfterTriggerDelete?.triggerMsgGlobalId).toBeNull()
+    expect(runAfterTriggerDelete?.outputMsgGlobalId).toBe(output.globalId)
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(chat.id) },
+          },
+        },
+        messageIds: [2n],
+      },
+      testUtils.functionContext({ userId: currentUser.id }),
+    )
+
+    const [runAfterOutputDelete] = await db
+      .select()
+      .from(schema.internalAgentRuns)
+      .where(eq(schema.internalAgentRuns.id, runId))
+      .limit(1)
+    expect(runAfterOutputDelete?.outputMsgGlobalId).toBeNull()
+
+    const [providerState] = await db
+      .select()
+      .from(schema.internalAgentProviderStates)
+      .where(eq(schema.internalAgentProviderStates.runId, runId))
+      .limit(1)
+    expect(providerState).toBeUndefined()
   })
 })

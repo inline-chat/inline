@@ -472,6 +472,70 @@ public actor RealtimeV2 {
     return sessionsResult
   }
 
+  public func connectionsList() async throws -> InlineProtocol.ConnectionsListResult {
+    let result = try await callRpcDirect(
+      method: .connectionsList,
+      input: .connectionsList(.with { _ in })
+    )
+
+    guard case let .connectionsList(connectionsResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected connectionsList response", code: 500)
+    }
+
+    return connectionsResult
+  }
+
+  public func openAICodexStartDeviceAuth(
+    scope: InlineProtocol.InputScope? = nil
+  ) async throws -> InlineProtocol.OpenAICodexStartDeviceAuthResult {
+    let result = try await callRpcDirect(
+      method: .openaiCodexStartDeviceAuth,
+      input: .openaiCodexStartDeviceAuth(.with {
+        if let scope {
+          $0.scope = scope
+        }
+      })
+    )
+
+    guard case let .openaiCodexStartDeviceAuth(authResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected openaiCodexStartDeviceAuth response", code: 500)
+    }
+
+    return authResult
+  }
+
+  public func openAICodexPollDeviceAuth(
+    pendingID: String
+  ) async throws -> InlineProtocol.OpenAICodexPollDeviceAuthResult {
+    let result = try await callRpcDirect(
+      method: .openaiCodexPollDeviceAuth,
+      input: .openaiCodexPollDeviceAuth(.with {
+        $0.pendingID = pendingID
+      })
+    )
+
+    guard case let .openaiCodexPollDeviceAuth(authResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected openaiCodexPollDeviceAuth response", code: 500)
+    }
+
+    return authResult
+  }
+
+  public func connectionsDisconnect(_ connectionID: Int64) async throws -> InlineProtocol.ConnectionsDisconnectResult {
+    let result = try await callRpcDirect(
+      method: .connectionsDisconnect,
+      input: .connectionsDisconnect(.with {
+        $0.connectionID = connectionID
+      })
+    )
+
+    guard case let .connectionsDisconnect(disconnectResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected connectionsDisconnect response", code: 500)
+    }
+
+    return disconnectResult
+  }
+
   public func checkUsername(_ username: String) async throws -> InlineProtocol.CheckUsernameResult {
     let result = try await callRpcDirect(
       method: .checkUsername,

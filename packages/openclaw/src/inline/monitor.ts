@@ -79,6 +79,7 @@ import {
   type Message,
   type MessageActions,
   type MessageActionResponseUi,
+  type RichMessage,
   type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
@@ -89,6 +90,14 @@ import {
 } from "./config-schema.js"
 import { isInlineExecApprovalHandlerConfigured } from "./exec-approvals.js"
 import { buildInlineSystemPrompt, sanitizeInlineOutgoingText } from "./message-formatting.js"
+import {
+  buildInlineProgressDraftRichTextFromLines,
+  inlineCaptionParseOptions,
+  inlineTextParseOptions,
+  prepareInlineStreamingTextDraft,
+  type InlineStreamingTextOptions,
+  type InlineTextParseOptions,
+} from "./rich-text.js"
 import {
   resolveInlineGroupAllowFrom,
   resolveInlineGroupAccessPolicy,
@@ -240,6 +249,7 @@ type InlineEditStreamState = {
   accumulatedText: string
   lastPartialText: string
   finalTextAccumulator: string
+  needsFinalRichParse: boolean
   failed: boolean
   opChain: Promise<void>
 }
@@ -248,6 +258,7 @@ type InlineProgressPlaceholderState = {
   messageId: bigint | null
   text: string
   lines: Array<string | ChannelProgressDraftLine>
+  draftUnavailable: boolean
   opChain: Promise<void>
   closing: boolean
 }
@@ -1456,6 +1467,17 @@ function shouldStartInlineProgressPlaceholderNow(
   line: string | ChannelProgressDraftLine | undefined,
 ): boolean {
   return typeof line === "object" && line?.kind === "patch" && Boolean(line.detail)
+}
+
+function withInlineProgressLineId(
+  line: ChannelProgressDraftLine | undefined,
+  id: string | undefined,
+): ChannelProgressDraftLine | undefined {
+  const normalizedId = id?.trim()
+  if (!line || !normalizedId || line.id?.trim()) {
+    return line
+  }
+  return { ...line, id: normalizedId }
 }
 
 function resolveInlineCommandMenuModelContext(params: {
@@ -3861,7 +3883,23 @@ export async function monitorInlineProvider(params: {
       return
     }
 
-    const parseMarkdown = account.config.parseMarkdown ?? true
+    const parseOptions = inlineTextParseOptions(account)
+    type InlineRichDeliveryOptions = InlineTextParseOptions | InlineStreamingTextOptions | Record<string, never>
+    const logInlineRichDelivery = (input: {
+      phase: string
+      method: "send" | "edit"
+      messageId?: bigint | null
+      options: InlineRichDeliveryOptions
+    }): void => {
+      const parseRichMarkdown = "parseRichMarkdown" in input.options && input.options.parseRichMarkdown === true
+      const richText = "richText" in input.options && input.options.richText !== undefined
+      if (!parseRichMarkdown && !richText) {
+        return
+      }
+      log?.info(
+        `[${account.accountId}] openclaw inline rich final delivery phase=${input.phase} method=${input.method} messageId=${String(input.messageId ?? "")} parseRichMarkdown=${String(parseRichMarkdown)} richText=${String(richText)}`,
+      )
+    }
     if (
       isInlineThreadReplyCommandBody(normalizedCommandBody) &&
       !hostInlinePluginCommandRegistered
@@ -3922,7 +3960,7 @@ export async function monitorInlineProvider(params: {
                   peerId: buildChatPeer(chatId),
                   text,
                   ...(actions ? { actions } : {}),
-                  parseMarkdown,
+                  ...parseOptions,
                 },
               })
               if (editResult.oneofKind !== "editMessage") {
@@ -3940,7 +3978,7 @@ export async function monitorInlineProvider(params: {
               chatId,
               text,
               ...(actions ? { actions } : {}),
-              parseMarkdown,
+              ...parseOptions,
             })
             rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
           }
@@ -3989,7 +4027,7 @@ export async function monitorInlineProvider(params: {
             peerId: buildChatPeer(chatId),
             text,
             actions,
-            parseMarkdown,
+            ...parseOptions,
           },
         })
         if (result.oneofKind !== "editMessage") {
@@ -4003,7 +4041,7 @@ export async function monitorInlineProvider(params: {
           chatId,
           text,
           actions,
-          parseMarkdown,
+          ...parseOptions,
         })
         rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
       }
@@ -4036,7 +4074,7 @@ export async function monitorInlineProvider(params: {
               peerId: buildChatPeer(chatId),
               text: menuText,
               ...(menuActions ? { actions: menuActions } : {}),
-              parseMarkdown,
+              ...parseOptions,
             },
           })
           if (result.oneofKind !== "editMessage") {
@@ -4089,7 +4127,7 @@ export async function monitorInlineProvider(params: {
               peerId: buildChatPeer(chatId),
               text: outboundText,
               actions,
-              parseMarkdown,
+              ...parseOptions,
             },
           })
           if (result.oneofKind !== "editMessage") {
@@ -4103,7 +4141,7 @@ export async function monitorInlineProvider(params: {
             chatId,
             text: outboundText,
             actions,
-            parseMarkdown,
+            ...parseOptions,
           })
           rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
         }
@@ -4616,6 +4654,7 @@ export async function monitorInlineProvider(params: {
       accumulatedText: callbackTargetMessage?.message ?? "",
       lastPartialText: "",
       finalTextAccumulator: "",
+      needsFinalRichParse: false,
       failed: false,
       opChain: Promise.resolve(),
     }
@@ -4624,8 +4663,32 @@ export async function monitorInlineProvider(params: {
       messageId: null,
       text: "",
       lines: [],
+      draftUnavailable: false,
       opChain: Promise.resolve(),
       closing: false,
+    }
+    const progressDraftId = `openclaw:${account.accountId}:${String(deliveryChatId)}:${String(msg.id)}`
+    const sendInlineProgressDraft = async (input: {
+      messageId: bigint
+      richText?: RichMessage
+      clear?: boolean
+    }): Promise<boolean> => {
+      if (progressState.draftUnavailable) return false
+      try {
+        await client.sendRichMessageDraft({
+          chatId: deliveryChatId,
+          draftId: progressDraftId,
+          messageId: input.messageId,
+          ...(input.richText !== undefined ? { richText: input.richText } : {}),
+          ...(input.clear !== undefined ? { clear: input.clear } : {}),
+          ttlSeconds: 30,
+        })
+        return true
+      } catch (error) {
+        progressState.draftUnavailable = true
+        runtime.error?.(`inline progress draft failed; falling back to editMessage (${String(error)})`)
+        return false
+      }
     }
     const renderInlineProgressPlaceholder = async (): Promise<void> => {
       if (!progressPlaceholderEnabled || progressState.closing) return
@@ -4656,19 +4719,29 @@ export async function monitorInlineProvider(params: {
               messageId: sent.messageId,
               replyThreadContext: deliveryReplyThreadContext,
             })
-          } else {
-            const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
-              oneofKind: "editMessage",
-              editMessage: {
-                messageId: progressState.messageId,
-                peerId: buildChatPeer(deliveryChatId),
-                text,
-              },
+            await sendInlineProgressDraft({
+              messageId: sent.messageId,
+              richText: buildInlineProgressDraftRichTextFromLines(text, progressState.lines),
             })
-            if (result.oneofKind !== "editMessage") {
-              throw new Error(
-                `inline progress placeholder: expected editMessage result, got ${String(result.oneofKind)}`,
-              )
+          } else {
+            const draftSent = await sendInlineProgressDraft({
+              messageId: progressState.messageId,
+              richText: buildInlineProgressDraftRichTextFromLines(text, progressState.lines),
+            })
+            if (!draftSent) {
+              const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                oneofKind: "editMessage",
+                editMessage: {
+                  messageId: progressState.messageId,
+                  peerId: buildChatPeer(deliveryChatId),
+                  text,
+                },
+              })
+              if (result.oneofKind !== "editMessage") {
+                throw new Error(
+                  `inline progress placeholder: expected editMessage result, got ${String(result.oneofKind)}`,
+                )
+              }
             }
           }
           progressState.text = text
@@ -4722,6 +4795,9 @@ export async function monitorInlineProvider(params: {
       if (messageId == null) return
 
       try {
+        if (!progressState.draftUnavailable) {
+          await sendInlineProgressDraft({ messageId, clear: true })
+        }
         const result = await client.invokeRaw(Method.DELETE_MESSAGES, {
           oneofKind: "deleteMessages",
           deleteMessages: {
@@ -4754,6 +4830,7 @@ export async function monitorInlineProvider(params: {
       editStreamState.accumulatedText = ""
       editStreamState.lastPartialText = ""
       editStreamState.finalTextAccumulator = ""
+      editStreamState.needsFinalRichParse = false
       editStreamState.failed = false
       finalDeliveredForCurrentAssistantMessage = false
     }
@@ -4776,19 +4853,21 @@ export async function monitorInlineProvider(params: {
           senderProfilesById,
         ),
       ).trim()
-      if (!nextText || nextText === editStreamState.accumulatedText) return
+      const preparedDraft = prepareInlineStreamingTextDraft(account, nextText)
+      if (!preparedDraft || preparedDraft.text === editStreamState.accumulatedText) return
 
       editStreamState.opChain = editStreamState.opChain.then(async () => {
         if (editStreamState.failed) return
-        if (!nextText || nextText === editStreamState.accumulatedText) return
+        if (preparedDraft.text === editStreamState.accumulatedText) return
 
         try {
+          const usedStreamingRich = "richText" in preparedDraft.options
           if (editStreamState.messageId == null) {
             const sent = await client.sendMessage({
               chatId: deliveryChatId,
-              text: nextText,
+              text: preparedDraft.text,
               ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
-              parseMarkdown,
+              ...preparedDraft.options,
             })
             if (sent.messageId == null) {
               throw new Error("inline edit stream: sendMessage returned no messageId")
@@ -4805,8 +4884,8 @@ export async function monitorInlineProvider(params: {
               editMessage: {
                 messageId: editStreamState.messageId,
                 peerId: buildChatPeer(deliveryChatId),
-                text: nextText,
-                parseMarkdown,
+                text: preparedDraft.text,
+                ...preparedDraft.options,
               },
             })
             if (result.oneofKind !== "editMessage") {
@@ -4815,7 +4894,10 @@ export async function monitorInlineProvider(params: {
               )
             }
           }
-          editStreamState.accumulatedText = nextText
+          editStreamState.accumulatedText = preparedDraft.text
+          if (usedStreamingRich) {
+            editStreamState.needsFinalRichParse = true
+          }
           statusSink?.({ lastOutboundAt: Date.now() })
         } catch (error) {
           editStreamState.failed = true
@@ -4827,8 +4909,11 @@ export async function monitorInlineProvider(params: {
     const buildInlineProgressLineForEntry = (
       input: Parameters<typeof buildChannelProgressDraftLineForEntry>[1],
       options?: Parameters<typeof buildChannelProgressDraftLineForEntry>[2],
-    ): ChannelProgressDraftLine | undefined =>
-      buildChannelProgressDraftLineForEntry(account.config, input, options)
+    ): ChannelProgressDraftLine | undefined => {
+      const line = buildChannelProgressDraftLineForEntry(account.config, input, options)
+      const itemId = input.event === "item" ? input.itemId?.trim() : undefined
+      return withInlineProgressLineId(line, itemId)
+    }
 
     const replyOptions = {
       ...(onModelSelected ? { onModelSelected: onModelSelected as (ctx: unknown) => void } : {}),
@@ -5090,6 +5175,7 @@ export async function monitorInlineProvider(params: {
                 text: string,
                 includeReplyTo: boolean,
                 includeActions: boolean,
+                phase: string,
               ): Promise<void> => {
                 const outbound = sanitizeInlineDeliveryText(text)
                 if (!outbound.trim()) return
@@ -5098,13 +5184,23 @@ export async function monitorInlineProvider(params: {
                   text: outbound,
                   ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
                   ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
-                  parseMarkdown,
+                  ...parseOptions,
+                })
+                logInlineRichDelivery({
+                  phase,
+                  method: "send",
+                  messageId: sent.messageId,
+                  options: parseOptions,
                 })
                 rememberSent(sent.messageId)
                 delivered = true
               }
 
-              const updateStreamedMessage = async (text: string, actions?: MessageActions): Promise<boolean> => {
+              const updateStreamedMessage = async (
+                text: string,
+                actions: MessageActions | undefined,
+                phase: string,
+              ): Promise<boolean> => {
                 await editStreamState.opChain
                 if (editStreamState.messageId == null) return false
                 const nextText = sanitizeInlineDeliveryText(text).trim()
@@ -5112,7 +5208,13 @@ export async function monitorInlineProvider(params: {
                 if (!textForEdit && actions === undefined) return true
                 const shouldSkipTextUpdate =
                   !editStreamState.failed && textForEdit === editStreamState.accumulatedText
-                if (shouldSkipTextUpdate && actions === undefined) return true
+                if (
+                  shouldSkipTextUpdate &&
+                  actions === undefined &&
+                  !editStreamState.needsFinalRichParse
+                ) {
+                  return true
+                }
 
                 const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
                   oneofKind: "editMessage",
@@ -5120,7 +5222,7 @@ export async function monitorInlineProvider(params: {
                     messageId: editStreamState.messageId,
                     peerId: buildChatPeer(deliveryChatId),
                     text: textForEdit,
-                    parseMarkdown,
+                    ...parseOptions,
                     ...(actions !== undefined ? { actions } : {}),
                   },
                 })
@@ -5129,10 +5231,17 @@ export async function monitorInlineProvider(params: {
                     `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
                   )
                 }
+                logInlineRichDelivery({
+                  phase,
+                  method: "edit",
+                  messageId: editStreamState.messageId,
+                  options: parseOptions,
+                })
                 if (!shouldSkipTextUpdate) {
                   editStreamState.accumulatedText = textForEdit
                   editStreamState.lastPartialText = textForEdit
                 }
+                editStreamState.needsFinalRichParse = false
                 editStreamState.failed = false
                 return true
               }
@@ -5143,7 +5252,7 @@ export async function monitorInlineProvider(params: {
                   if (!outboundText.trim() && outboundActions === undefined) {
                     return
                   }
-                  await updateStreamedMessage(outboundText, callbackEditActions)
+                  await updateStreamedMessage(outboundText, callbackEditActions, "callback")
                   delivered = true
                   statusSink?.({ lastOutboundAt: Date.now() })
                   return
@@ -5163,7 +5272,11 @@ export async function monitorInlineProvider(params: {
                   if (!editStreamState.finalTextAccumulator.trim() && outboundActions === undefined) {
                     return
                   }
-                  await updateStreamedMessage(editStreamState.finalTextAccumulator, outboundActions)
+                  await updateStreamedMessage(
+                    editStreamState.finalTextAccumulator,
+                    outboundActions,
+                    infoKind === "final" ? "final" : "stream",
+                  )
                   delivered = true
                   if (infoKind === "final") {
                     finalDeliveredForCurrentAssistantMessage = true
@@ -5172,13 +5285,13 @@ export async function monitorInlineProvider(params: {
                   return
                 }
                 if (!outboundText.trim()) return
-                await sendTextFallback(outboundText, true, true)
+                await sendTextFallback(outboundText, true, true, infoKind === "final" ? "final" : "reply")
                 statusSink?.({ lastOutboundAt: Date.now() })
                 return
               }
 
               if (streamViaEditMessage && editStreamState.messageId != null && outboundText.trim()) {
-                await updateStreamedMessage(outboundText, outboundActions)
+                await updateStreamedMessage(outboundText, outboundActions, "media-caption")
               }
 
               for (let index = 0; index < mediaList.length; index++) {
@@ -5196,6 +5309,7 @@ export async function monitorInlineProvider(params: {
                     accountId: account.accountId,
                     mediaUrl,
                   })
+                  const captionParseOptions = inlineCaptionParseOptions(account, caption)
                   const sent = await client.sendMessage({
                     chatId: deliveryChatId,
                     ...(caption ? { text: caption } : {}),
@@ -5204,7 +5318,13 @@ export async function monitorInlineProvider(params: {
                     ...(shouldAttachActionsToMedia && outboundActions !== undefined
                       ? { actions: outboundActions }
                       : {}),
-                    ...(caption ? { parseMarkdown } : {}),
+                    ...captionParseOptions,
+                  })
+                  logInlineRichDelivery({
+                    phase: "media-caption",
+                    method: "send",
+                    messageId: sent.messageId,
+                    options: captionParseOptions,
                   })
                   rememberSent(sent.messageId)
                   delivered = true
@@ -5213,7 +5333,7 @@ export async function monitorInlineProvider(params: {
                   const fallbackText = caption
                     ? `${caption}\n\nAttachment: ${mediaUrl}`
                     : `Attachment: ${mediaUrl}`
-                  await sendTextFallback(fallbackText, isFirst, isFirst)
+                  await sendTextFallback(fallbackText, isFirst, isFirst, "media-fallback")
                 }
               }
 
@@ -5252,7 +5372,13 @@ export async function monitorInlineProvider(params: {
           chatId: deliveryChatId,
           text: fallbackText,
           ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
-          parseMarkdown,
+          ...parseOptions,
+        })
+        logInlineRichDelivery({
+          phase: "error-fallback",
+          method: "send",
+          messageId: sent.messageId,
+          options: parseOptions,
         })
         rememberSentBotMessage({
           chatId: deliveryChatId,

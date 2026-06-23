@@ -474,11 +474,6 @@ class DocumentView: NSView {
   }
 
   private func downloadAction() {
-    guard let fullMessage else {
-      Log.shared.warning("Cannot download document without a message")
-      return
-    }
-
     // Prevent overlapping downloads for the same document by cancelling any existing task
     cancelExistingDownloadIfAny()
 
@@ -494,7 +489,7 @@ class DocumentView: NSView {
     startMonitoringProgress()
 
     // Start the download
-    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
+    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage?.message) { [weak self] result in
       guard let self else { return }
 
       switch result {

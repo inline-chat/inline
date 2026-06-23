@@ -853,6 +853,26 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("user verified") { db in
+      guard try !db.columns(in: "user").contains(where: { $0.name == "verified" }) else {
+        return
+      }
+
+      try db.alter(table: "user") { t in
+        t.add(column: "verified", .boolean).notNull().defaults(to: false)
+      }
+    }
+
+    migrator.registerMigration("message rich text") { db in
+      guard try !db.columns(in: "message").contains(where: { $0.name == "richText" }) else {
+        return
+      }
+
+      try db.alter(table: "message") { t in
+        t.add(column: "richText", .blob)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

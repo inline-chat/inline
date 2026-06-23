@@ -9,6 +9,7 @@ import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageActionRow
 import struct InlineProtocol.MessageEntities
 import struct InlineProtocol.MessageEntity
+import struct InlineProtocol.RichMessage
 import InlineMacUI
 import InlineUI
 import Logger
@@ -872,6 +873,85 @@ class MessageViewAppKit: NSView {
     }
   }()
 
+  private var richTextBlockView: RichMessageBlockAppKitView?
+
+  private var activeRichText: RichMessage? {
+    MessageSizeCalculator.shared.effectiveRichText(for: fullMessage)
+  }
+
+  private var shouldUseRichBlockRenderer: Bool {
+    ExperimentalFeatureFlags.richTextMessagesEnabled &&
+      fullMessage.displayText == fullMessage.message.text &&
+      activeRichText != nil
+  }
+
+  private var activeTextSlotView: NSView {
+    if shouldUseRichBlockRenderer {
+      return ensureRichTextBlockView()
+    }
+    return textView
+  }
+
+  private var richBlockStyle: RichMessageBlockStyle {
+    RichMessageBlockStyle.message(
+      fontSize: props.layout.fontSize,
+      primary: textColor,
+      secondary: secondaryTextColor,
+      link: linkColor
+    )
+  }
+
+  private func ensureRichTextBlockView() -> RichMessageBlockAppKitView {
+    if let richTextBlockView {
+      return richTextBlockView
+    }
+
+    let view = RichMessageBlockAppKitView(frame: .zero)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layerContentsRedrawPolicy = .onSetNeedsDisplay
+    richTextBlockView = view
+    view.setScrollState(scrollState)
+    updateRichTextBlockRenderer()
+    return view
+  }
+
+  private func richBlockLayoutPlan() -> RichMessageLayoutPlan? {
+    MessageSizeCalculator.shared.richBlockLayout(
+      for: fullMessage,
+      width: props.layout.text?.size.width ?? 1,
+      style: richBlockStyle,
+      styleKey: richTextStyleKey
+    )
+  }
+
+  private func updateRichTextBlockRenderer() {
+    guard let richTextBlockView,
+          let layout = richBlockLayoutPlan(),
+          let richText = activeRichText
+    else { return }
+
+    richTextBlockView.configure(
+      richText: richText,
+      layout: layout,
+      style: richBlockStyle,
+      state: MessageSizeCalculator.shared.richBlockState(for: fullMessage.id),
+      selectionIdentity: "\(fullMessage.id)",
+      stateDidChange: { [weak self] snapshot in
+        self?.handleRichBlockStateChange(snapshot)
+      }
+    )
+  }
+
+  private func handleRichBlockStateChange(_ snapshot: RichMessageBlockStateSnapshot) {
+    MessageSizeCalculator.shared.setRichBlockState(snapshot, for: fullMessage.id)
+    NotificationCenter.default.post(
+      name: .richMessageBlockStateDidChange,
+      object: self,
+      userInfo: ["messageStableId": fullMessage.id]
+    )
+  }
+
   private var reactionsView: MessageReactionsView?
   // The second mouse-down event is a reliable double-click boundary even when
   // AppKit admits NSClickGestureRecognizer but never calls its target action.
@@ -1130,9 +1210,28 @@ class MessageViewAppKit: NSView {
   }
 
   private func syncTextViewForCurrentProps() {
+    if hasText, shouldUseRichBlockRenderer {
+      (textView as? MessageTextView)?.onEntityClick = nil
+      (textView as? MessageTextView)?.onTextLongPress = nil
+      textView.removeFromSuperview()
+      detectedLinks = []
+
+      let host = ensureRichTextBlockView()
+      updateRichTextBlockRenderer()
+      if host.superview == nil {
+        contentView.addSubview(host)
+        clearTextViewConstraints()
+        MessageGestureTrace.debug("MessageView.syncTextView messageId=\(message.messageId) action=attachRichTextView")
+      }
+      return
+    }
+
+    detachRichTextBlockView()
+
     if hasText {
       if textView.superview == nil {
         contentView.addSubview(textView)
+        clearTextViewConstraints()
         MessageGestureTrace.debug("MessageView.syncTextView messageId=\(message.messageId) action=attachTextView")
       }
       if let messageTextView = textView as? MessageTextView {
@@ -1150,8 +1249,14 @@ class MessageViewAppKit: NSView {
     (textView as? MessageTextView)?.onEntityClick = nil
     (textView as? MessageTextView)?.onTextLongPress = nil
     textView.removeFromSuperview()
+    detachRichTextBlockView()
     clearTextViewConstraints()
     detectedLinks = []
+  }
+
+  private func detachRichTextBlockView() {
+    richTextBlockView?.resetInteractionStateForReuse()
+    richTextBlockView?.removeFromSuperview()
   }
 
   private func clearTextViewConstraints() {
@@ -1166,6 +1271,123 @@ class MessageViewAppKit: NSView {
     textViewTopConstraint = nil
     textViewLeadingConstraint = nil
   }
+
+#if DEBUG
+  func debugRichTextSlotSnapshotForTestBook() -> RichTextSlotDebugSnapshot {
+    syncTextViewForCurrentProps()
+    needsUpdateConstraints = true
+    updateConstraintsForSubtreeIfNeeded()
+    return RichTextSlotDebugSnapshot(
+      usesRichBlockRenderer: shouldUseRichBlockRenderer,
+      textViewAttached: textView.superview != nil,
+      richViewAttached: richTextBlockView?.superview != nil,
+      widthConstraintActive: textViewWidthConstraint?.isActive == true,
+      heightConstraintActive: textViewHeightConstraint?.isActive == true,
+      topConstraintActive: textViewTopConstraint?.isActive == true,
+      leadingConstraintActive: textViewLeadingConstraint?.isActive == true,
+      widthConstraintConstant: textViewWidthConstraint?.constant,
+      heightConstraintConstant: textViewHeightConstraint?.constant
+    )
+  }
+
+  func debugRichTextInteractionSnapshotForTestBook() -> RichTextInteractionDebugSnapshot? {
+    guard shouldUseRichBlockRenderer else { return nil }
+    let view = ensureRichTextBlockView()
+    updateRichTextBlockRenderer()
+    layoutSubtreeIfNeeded()
+    let copy = view.debugSelectAllRichTextCopySnapshotForTestBook()
+    let dragDidStart = view.debugDragSelectRichTextForTestBook()
+    let dragDiagnostics = view.debugSelectionDiagnosticsForTestBook()
+    let dragSelectedText = view.debugSelectedRichTextForTestBook()
+    return RichTextInteractionDebugSnapshot(
+      copiedText: copy.text,
+      copiedHasRTF: copy.hasRTF,
+      dragDidStart: dragDidStart,
+      dragSelectedText: dragSelectedText,
+      dragSelectionDiagnostics: dragDiagnostics,
+      spoilerDiagnostics: view.debugSpoilerDiagnosticsForTestBook(),
+      contextMenuTitles: view.debugContextMenuTitlesForTestBook(),
+      contextCopyActions: view.debugContextCopyActionSnapshotsForTestBook(),
+      copyableBlocks: view.debugCopyableBlockSnapshotsForTestBook(),
+      mediaClicks: view.debugRichMediaClickSnapshotForTestBook()
+    )
+  }
+
+  func debugSelectedRichTextForTestBook() -> String {
+    richTextBlockView?.debugSelectedRichTextForTestBook() ?? ""
+  }
+
+  func debugRichMediaScrollSnapshotForTestBook() -> RichMediaScrollDebugSnapshot? {
+    guard shouldUseRichBlockRenderer else { return nil }
+    let view = ensureRichTextBlockView()
+    updateRichTextBlockRenderer()
+    layoutSubtreeIfNeeded()
+    return view.debugRichMediaScrollSnapshotForTestBook()
+  }
+
+  func debugRichRendererReuseDiagnosticsForTestBook() -> RichRendererReuseDiagnostics? {
+    guard shouldUseRichBlockRenderer else { return nil }
+    layoutSubtreeIfNeeded()
+    return richTextBlockView?.debugReuseDiagnosticsForTestBook()
+  }
+
+  func debugMessageActionRowsSnapshotForTestBook() -> RichMessageActionRowsDebugSnapshot {
+    syncMessageActionRowsView(message: fullMessage, props: props)
+    needsUpdateConstraints = true
+    updateConstraintsForSubtreeIfNeeded()
+    layoutSubtreeIfNeeded()
+    let metrics = messageActionRowsView?.debugActionMetricsForTestBook()
+    return RichMessageActionRowsDebugSnapshot(
+      attached: messageActionRowsView?.superview != nil,
+      rowCount: metrics?.rowCount ?? 0,
+      actionCount: metrics?.actionCount ?? 0,
+      hitTestableActionCount: metrics?.hitTestableActionCount ?? 0,
+      hoverResponsiveActionCount: metrics?.hoverResponsiveActionCount ?? 0,
+      pressResponsiveActionCount: metrics?.pressResponsiveActionCount ?? 0,
+      restoredInteractionActionCount: metrics?.restoredInteractionActionCount ?? 0,
+      widthConstraintActive: messageActionRowsWidthConstraint?.isActive == true,
+      heightConstraintActive: messageActionRowsHeightConstraint?.isActive == true,
+      topConstraintActive: messageActionRowsTopConstraint?.isActive == true,
+      sideConstraintActive: messageActionRowsSideConstraint?.isActive == true,
+      widthConstraintConstant: messageActionRowsWidthConstraint?.constant,
+      heightConstraintConstant: messageActionRowsHeightConstraint?.constant,
+      topConstraintConstant: messageActionRowsTopConstraint?.constant,
+      frameWidth: messageActionRowsView?.frame.width ?? 0,
+      frameHeight: messageActionRowsView?.frame.height ?? 0
+    )
+  }
+
+  func debugTimeStatusSnapshotForTestBook() -> RichMessageTimeStatusDebugSnapshot {
+    needsUpdateConstraints = true
+    updateConstraintsForSubtreeIfNeeded()
+    layoutSubtreeIfNeeded()
+    let sourceView = timeAndStateView.superview
+    let frameInRow = sourceView.map { convert(timeAndStateView.frame, from: $0) } ?? .zero
+    let frameInBubble = sourceView.map { bubbleView.convert(timeAndStateView.frame, from: $0) } ?? .zero
+    let frameInContent = sourceView.map { contentView.convert(timeAndStateView.frame, from: $0) } ?? .zero
+    return RichMessageTimeStatusDebugSnapshot(
+      attached: timeAndStateView.superview != nil,
+      hidden: timeAndStateView.isHidden,
+      frameInRow: frameInRow,
+      frameInBubble: frameInBubble,
+      frameInContent: frameInContent,
+      widthConstraintActive: timeViewWidthConstraint?.isActive == true,
+      heightConstraintActive: timeViewHeightConstraint?.isActive == true,
+      topConstraintActive: timeViewTopConstraint?.isActive == true,
+      bottomConstraintActive: timeViewBottomConstraint?.isActive == true,
+      leadingConstraintActive: false,
+      trailingConstraintActive: timeViewTrailingConstraint?.isActive == true,
+      centerYConstraintActive: false,
+      widthConstraintConstant: timeViewWidthConstraint?.constant,
+      heightConstraintConstant: timeViewHeightConstraint?.constant,
+      topConstraintConstant: timeViewTopConstraint?.constant,
+      bottomConstraintConstant: timeViewBottomConstraint?.constant,
+      leadingConstraintConstant: nil,
+      trailingConstraintConstant: timeViewTrailingConstraint?.constant,
+      centerYConstraintConstant: nil
+    )
+  }
+#endif
 
   @discardableResult
   private func handleEntityClick(at location: NSPoint, event: NSEvent? = nil) -> Bool {
@@ -1390,9 +1612,7 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-    MessageGestureTrace.debug("MessageView.handleTextLongPress messageId=\(message.messageId) action=showReactionOverlay")
-    showReactionOverlay()
+    performConfiguredHoldAction(at: locationInSelf, source: "textHold")
   }
 
   private func openThreadLink(_ target: ThreadLinkTarget) {
@@ -1737,12 +1957,8 @@ class MessageViewAppKit: NSView {
         return
       }
 
-      // Provide haptic feedback
-      NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-
-      // Show reaction overlay
-      MessageGestureTrace.debug("MessageView.handleLongPress messageId=\(message.messageId) action=showReactionOverlay")
-      showReactionOverlay()
+      // Run the configured hold action after interactive hit-testing.
+      performConfiguredHoldAction(at: location, source: "recognizer")
     }
   }
 
@@ -1752,56 +1968,101 @@ class MessageViewAppKit: NSView {
       "MessageView.handleDoubleClick messageId=\(message.messageId) state=\(gesture.state.rawValue) point=\(MessageGestureTrace.point(location))"
     )
     guard gesture.state == .ended else { return }
-    performDoubleClickAck(at: location, source: "recognizer")
+    performConfiguredDoubleClickAction(at: location, source: "recognizer")
   }
 
-  private func performDoubleClickAck(at location: NSPoint, source: String) {
+  private func performConfiguredDoubleClickAction(at location: NSPoint, source: String) {
+    performMessageGestureAction(
+      AppSettings.shared.messageDoubleClickAction,
+      at: location,
+      source: "doubleClick.\(source)",
+      blocksText: true
+    )
+  }
+
+  private func performConfiguredHoldAction(at location: NSPoint, source: String) {
+    performMessageGestureAction(
+      AppSettings.shared.messageHoldAction,
+      at: location,
+      source: "hold.\(source)",
+      blocksText: false
+    )
+  }
+
+  private func performMessageGestureAction(
+    _ action: MessageGestureAction,
+    at location: NSPoint,
+    source: String,
+    blocksText: Bool
+  ) {
     MessageGestureTrace.debug(
-      "MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) point=\(MessageGestureTrace.point(location))"
+      "MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) point=\(MessageGestureTrace.point(location))"
     )
     if let result = interactiveHitTestResult(location) {
       MessageGestureTrace.debug(
-        "MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=interactive target=\(result.name)"
+        "MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=interactive target=\(result.name)"
       )
       return
     }
 
-    if isTextPoint(location) {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=textPoint")
+    if blocksText, isTextPoint(location) {
+      MessageGestureTrace.debug("MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=textPoint")
+      return
+    }
+
+    if action == .reply, (!fullMessage.canReply || isAnchorMessage) {
+      MessageGestureTrace.debug("MessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=replyUnavailable")
       return
     }
 
     // Provide haptic feedback
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
+    switch action {
+    case .reply:
+      reply()
+    case .reactionsMenu:
+      showReactionOverlay()
+    case .toggleAck, .toggleHeart, .toggleThumbsUp:
+      guard let emoji = action.reactionEmoji else { return }
+      toggleReaction(emoji, action: action, source: source)
+    }
+  }
+
+  private func toggleReaction(_ emoji: String, action: MessageGestureAction, source: String) {
     guard let currentUserId = Auth.shared.getCurrentUserId() else {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) blocked=noCurrentUser")
+      MessageGestureTrace.debug("MessageView.toggleReaction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) blocked=noCurrentUser")
       return
     }
-    let emoji = "✔️"
+    let targetMessage = fullMessage.message
     let weReacted = fullMessage.groupedReactions
       .first(where: { $0.emoji == emoji })?
       .reactions
       .contains(where: { $0.reaction.userId == currentUserId }) ?? false
 
-    // Set reaction
     if weReacted {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) action=deleteAckReaction")
-      // Remove reaction
+      MessageGestureTrace.debug("MessageView.toggleReaction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) rpc=deleteReaction")
       Task(priority: .userInitiated) {
-        try await Api.realtime.send(.deleteReaction(
-          emoji: emoji,
-          message: fullMessage.message,
-        ))
+        do {
+          try await Api.realtime.send(.deleteReaction(
+            emoji: emoji,
+            message: targetMessage,
+          ))
+        } catch {
+          self.log.error("Failed to delete reaction from message gesture", error: error)
+        }
       }
     } else {
-      MessageGestureTrace.debug("MessageView.performDoubleClickAck messageId=\(message.messageId) source=\(source) action=addAckReaction")
-      // Add reaction
+      MessageGestureTrace.debug("MessageView.toggleReaction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) rpc=addReaction")
       Task(priority: .userInitiated) {
-        try await Api.realtime.send(.addReaction(
-          emoji: emoji,
-          message: fullMessage.message,
-        ))
+        do {
+          try await Api.realtime.send(.addReaction(
+            emoji: emoji,
+            message: targetMessage,
+          ))
+        } catch {
+          self.log.error("Failed to add reaction from message gesture", error: error)
+        }
       }
     }
   }
@@ -2011,15 +2272,16 @@ class MessageViewAppKit: NSView {
     // Text
 
     if let text = layout.text {
-      textViewWidthConstraint = textView.widthAnchor
+      let textSlotView = activeTextSlotView
+      textViewWidthConstraint = textSlotView.widthAnchor
         .constraint(equalToConstant: text.size.width)
-      textViewHeightConstraint = textView.heightAnchor
+      textViewHeightConstraint = textSlotView.heightAnchor
         .constraint(equalToConstant: text.size.height)
-      textViewTopConstraint = textView.topAnchor.constraint(
+      textViewTopConstraint = textSlotView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
         constant: layout.textContentViewTop
       )
-      textViewLeadingConstraint = textView.leadingAnchor.constraint(
+      textViewLeadingConstraint = textSlotView.leadingAnchor.constraint(
         equalTo: contentView.leadingAnchor,
         constant: text.spacing.left
       )
@@ -2084,23 +2346,23 @@ class MessageViewAppKit: NSView {
 
     // Time
     if let time = layout.time {
-      let timeWidthConstraint = timeAndStateView.widthAnchor.constraint(
+      timeViewWidthConstraint = timeAndStateView.widthAnchor.constraint(
         equalToConstant: time.size.width
       )
-      let timeHeightConstraint = timeAndStateView.heightAnchor.constraint(
+      timeViewHeightConstraint = timeAndStateView.heightAnchor.constraint(
         equalToConstant: time.size.height
       )
-      let timeTrailingConstraint = timeAndStateView.trailingAnchor
+      timeViewTrailingConstraint = timeAndStateView.trailingAnchor
         .constraint(
           equalTo: bubbleView.trailingAnchor,
           constant: -time.spacing.right
         )
 
       constraints.append(contentsOf: [
-        timeWidthConstraint,
-        timeHeightConstraint,
-        timeTrailingConstraint,
-      ])
+        timeViewWidthConstraint,
+        timeViewHeightConstraint,
+        timeViewTrailingConstraint,
+      ].compactMap(\.self))
 
       if layout.placesTimeAboveReactions {
         timeViewTopConstraint = timeAndStateView.topAnchor.constraint(
@@ -2301,6 +2563,9 @@ class MessageViewAppKit: NSView {
   private var reactionViewLeadingConstraint: NSLayoutConstraint?
   private var reactionViewTrailingConstraint: NSLayoutConstraint?
 
+  private var timeViewWidthConstraint: NSLayoutConstraint?
+  private var timeViewHeightConstraint: NSLayoutConstraint?
+  private var timeViewTrailingConstraint: NSLayoutConstraint?
   private var timeViewTopConstraint: NSLayoutConstraint?
   private var timeViewBottomConstraint: NSLayoutConstraint?
 
@@ -2383,25 +2648,26 @@ class MessageViewAppKit: NSView {
 
     // Text can appear/disappear when a view is reused for a different message.
     syncTextViewForCurrentProps()
-    if let text = props.layout.text, textView.superview != nil {
+    let textSlotView = activeTextSlotView
+    if let text = props.layout.text, textSlotView.superview != nil {
       var constraintsToActivate: [NSLayoutConstraint] = []
       if textViewWidthConstraint == nil {
-        textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: text.size.width)
+        textViewWidthConstraint = textSlotView.widthAnchor.constraint(equalToConstant: text.size.width)
         constraintsToActivate.append(textViewWidthConstraint!)
       }
       if textViewHeightConstraint == nil {
-        textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: text.size.height)
+        textViewHeightConstraint = textSlotView.heightAnchor.constraint(equalToConstant: text.size.height)
         constraintsToActivate.append(textViewHeightConstraint!)
       }
       if textViewTopConstraint == nil {
-        textViewTopConstraint = textView.topAnchor.constraint(
+        textViewTopConstraint = textSlotView.topAnchor.constraint(
           equalTo: contentView.topAnchor,
           constant: props.layout.textContentViewTop
         )
         constraintsToActivate.append(textViewTopConstraint!)
       }
       if textViewLeadingConstraint == nil {
-        textViewLeadingConstraint = textView.leadingAnchor.constraint(
+        textViewLeadingConstraint = textSlotView.leadingAnchor.constraint(
           equalTo: contentView.leadingAnchor,
           constant: text.spacing.left
         )
@@ -2734,6 +3000,16 @@ class MessageViewAppKit: NSView {
     }
 
     if let time = props.layout.time {
+      if timeViewWidthConstraint?.constant != time.size.width {
+        timeViewWidthConstraint?.constant = time.size.width
+      }
+      if timeViewHeightConstraint?.constant != time.size.height {
+        timeViewHeightConstraint?.constant = time.size.height
+      }
+      let trailingConstant = -time.spacing.right
+      if timeViewTrailingConstraint?.constant != trailingConstant {
+        timeViewTrailingConstraint?.constant = trailingConstant
+      }
       if props.layout.placesTimeAboveReactions {
         if let timeViewTopConstraint {
           if timeViewTopConstraint.constant != props.layout.timeViewTop {
@@ -2790,6 +3066,11 @@ class MessageViewAppKit: NSView {
 
   private func setupMessageText() {
     guard hasText else { return }
+    if shouldUseRichBlockRenderer {
+      syncTextViewForCurrentProps()
+      updateRichTextBlockRenderer()
+      return
+    }
 
     // Get display text which handles translations
     // TODO: Instead of using multiple computed properties, we should have do a single check here
@@ -2818,6 +3099,7 @@ class MessageViewAppKit: NSView {
 
     let codeBlockBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.05)
     let inlineCodeBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.06)
+    let font = NSFont.systemFont(ofSize: props.layout.fontSize)
 
     /// Apply entities to text and create an NSAttributedString
     let attributedString = ProcessEntities.toAttributedString(
@@ -2825,13 +3107,21 @@ class MessageViewAppKit: NSView {
       entities: entities,
       configuration: .init(
         // FIXME: Extract to a variable
-        font: .systemFont(ofSize: props.layout.fontSize),
+        font: font,
         boldWeight: .semibold,
         palette: richTextPalette,
         codeBlockBackgroundColor: codeBlockBackgroundColor,
         inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
     )
+
+    if let richText = activeRichText {
+      RichMessageTextStyler.applyBlockStyles(
+        to: attributedString,
+        richText: richText,
+        baseFont: font
+      )
+    }
 
     // Detect and add links using centralized LinkDetector
     let linkMatches = LinkDetector.shared.applyLinkStyling(
@@ -3487,7 +3777,7 @@ class MessageViewAppKit: NSView {
     // update internal props (must update so contentView is recalced)
     self.props = props
 
-    if textView.textContainer?.size != props.layout.text?.size ?? .zero {
+    if textView.superview != nil, textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
       textView.textContainer?.size = props.layout.text?.size ?? .zero
     }
@@ -3872,6 +4162,7 @@ class MessageViewAppKit: NSView {
     // Cancel translation state observation
     translationStateCancellable?.cancel()
     translationStateCancellable = nil
+    richTextBlockView?.resetInteractionStateForReuse()
 
     // Remove shine effect
     shineEffectView?.stopAnimation()
@@ -3968,6 +4259,7 @@ extension MessageViewAppKit {
 
   private func handleScrollStateChange(_ state: MessageListScrollState) {
     scrollState = state
+    richTextBlockView?.setScrollState(state)
     switch state {
       case .scrolling:
         // Clear hover state
@@ -4035,7 +4327,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
        event.type == .leftMouseDown,
        event.clickCount == 2
     {
-      // Do the ACK work at the second mouse-down boundary. Returning false keeps
+      // Run the configured double-click action at the second mouse-down boundary. Returning false keeps
       // the recognizer action fallback from firing a duplicate when it does work.
       if handledDoubleClickEventNumber == event.eventNumber {
         MessageGestureTrace.debug(
@@ -4049,7 +4341,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       MessageGestureTrace.debug(
         "MessageView.delegate.shouldAttempt messageId=\(message.messageId) recognizer=doubleClick eventNumber=\(event.eventNumber) action=handleDoubleClickInDelegate"
       )
-      performDoubleClickAck(at: location, source: "delegate")
+      performConfiguredDoubleClickAction(at: location, source: "delegate")
       return false
     }
 

@@ -83,15 +83,22 @@ public class MessagesProgressiveViewModel {
   private lazy var initialLimit: Int = Self.defaultInitialLimit()
 
   private let log = Log.scoped("MessagesViewModel", level: .info)
-  private let db = AppDatabase.shared
+  private let injectedDb: AppDatabase?
+  private lazy var db: AppDatabase = injectedDb ?? .shared
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
-  public init(peer: Peer, reversed: Bool = false, initialState: InitialState? = nil) {
+  public init(
+    peer: Peer,
+    reversed: Bool = false,
+    initialState: InitialState? = nil,
+    db: AppDatabase? = nil
+  ) {
     self.peer = peer
     self.reversed = reversed
+    injectedDb = db
     if let initialState {
       applyInitialState(initialState)
       if threadAnchor == nil {
@@ -1071,7 +1078,7 @@ public final class MessagesPublisher {
 
   private init() {}
 
-  private let db = AppDatabase.shared
+  private lazy var db = AppDatabase.shared
   let publisher = PassthroughSubject<UpdateType, Never>()
 
 #if os(iOS)

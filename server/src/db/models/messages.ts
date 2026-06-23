@@ -1,4 +1,4 @@
-import { MessageActions, MessageEntities, type InputPeer } from "@inline-chat/protocol/core"
+import { MessageActions, MessageEntities, RichMessage, type InputPeer } from "@inline-chat/protocol/core"
 import { cleanPreviewText } from "@inline-chat/url-preview"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
@@ -35,6 +35,9 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { persistChatMetadataUpdates, type ChatMetadataUpdate } from "@in/server/modules/chatMetadataUpdates"
+import { replaceMessageRichMediaIndex } from "@in/server/modules/message/richMediaIndex"
+import { normalizeRichMessage } from "@in/server/modules/message/richText"
+import { validateInternalRichMediaRefs } from "@in/server/modules/message/richMediaValidation"
 
 const log = new Log("MessageModel", LogLevel.INFO)
 
@@ -80,7 +83,7 @@ export type DbInputFullMessage = DbMessage & {
   messageAttachments?: DbInputFullAttachment[]
 }
 
-export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links"
+export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "voice" | "links"
 
 export type ProcessedMessage = Omit<
   DbMessage,
@@ -90,12 +93,16 @@ export type ProcessedMessage = Omit<
   | "entitiesEncrypted"
   | "entitiesIv"
   | "entitiesTag"
+  | "richTextEncrypted"
+  | "richTextIv"
+  | "richTextTag"
   | "actionsEncrypted"
   | "actionsIv"
   | "actionsTag"
 > & {
   text: string | null
   entities: MessageEntities | null
+  richText: RichMessage | null
   actions?: MessageActions | null
 }
 
@@ -121,11 +128,15 @@ export type DbFullMessage = Omit<
   | "entitiesEncrypted"
   | "entitiesIv"
   | "entitiesTag"
+  | "richTextEncrypted"
+  | "richTextIv"
+  | "richTextTag"
   | "actionsEncrypted"
   | "actionsIv"
   | "actionsTag"
 > & {
   entities: MessageEntities | null
+  richText: RichMessage | null
   actions?: MessageActions | null
   from: DbUser
   reactions: DbReaction[]
@@ -184,6 +195,68 @@ export type ProcessedMessageAttachment = Omit<DbMessageAttachment, "externalTask
 
 function cleanStoredPreviewText(value: string | null | undefined, maxLength: number): string | null {
   return cleanPreviewText(value, maxLength)
+}
+
+function decryptStoredRichText(
+  message: Pick<DbMessage, "richTextEncrypted" | "richTextIv" | "richTextTag">,
+): RichMessage | null {
+  if (!message.richTextEncrypted || !message.richTextIv || !message.richTextTag) {
+    return null
+  }
+
+  return RichMessage.fromBinary(
+    decryptBinary({
+      encrypted: message.richTextEncrypted,
+      iv: message.richTextIv,
+      authTag: message.richTextTag,
+    }),
+  )
+}
+
+type DurableRichTextInput = {
+  richText?: RichMessage | null
+  richTextEncrypted?: Buffer | null
+  richTextIv?: Buffer | null
+  richTextTag?: Buffer | null
+}
+
+function prepareDurableRichText(input: DurableRichTextInput): {
+  richText: RichMessage | null
+  encrypted?: ReturnType<typeof encryptBinary>
+} {
+  const source = input.richText ?? decryptDurableRichTextInput(input)
+  if (!source) {
+    return { richText: null }
+  }
+
+  const richText = normalizeRichMessage(source)
+  if (richText.blocks.length === 0) {
+    return { richText: null }
+  }
+
+  const binary = RichMessage.toBinary(richText)
+  if (binary.length === 0) {
+    return { richText: null }
+  }
+
+  return {
+    richText,
+    encrypted: encryptBinary(binary),
+  }
+}
+
+function decryptDurableRichTextInput(input: DurableRichTextInput): RichMessage | null {
+  if (!input.richTextEncrypted || !input.richTextIv || !input.richTextTag) {
+    return null
+  }
+
+  return RichMessage.fromBinary(
+    decryptBinary({
+      encrypted: input.richTextEncrypted,
+      iv: input.richTextIv,
+      authTag: input.richTextTag,
+    }),
+  )
 }
 
 type GetMessagesMode = "latest" | "older" | "newer" | "around"
@@ -448,16 +521,33 @@ async function getMessagesWithMediaFilter(input: {
 function buildMediaFilterClause(filter: MessageMediaFilter) {
   switch (filter) {
     case "photos":
-      return not(isNull(messages.photoId))
+      return or(not(isNull(messages.photoId)), richMediaExistsClause("photo"))
     case "videos":
-      return not(isNull(messages.videoId))
+      return or(not(isNull(messages.videoId)), richMediaExistsClause("video"))
     case "photo_video":
-      return or(not(isNull(messages.photoId)), not(isNull(messages.videoId)))
+      return or(
+        not(isNull(messages.photoId)),
+        not(isNull(messages.videoId)),
+        richMediaExistsClause("photo"),
+        richMediaExistsClause("video"),
+      )
     case "documents":
-      return not(isNull(messages.documentId))
+      return or(not(isNull(messages.documentId)), richMediaExistsClause("document"))
+    case "voice":
+      return or(not(isNull(messages.voiceId)), richMediaExistsClause("voice"))
     case "links":
       return eq(messages.hasLink, true)
   }
+}
+
+function richMediaExistsClause(kind: "photo" | "video" | "document" | "voice") {
+  return sql`exists (
+    select 1
+    from message_rich_media
+    where message_rich_media.message_global_id = messages.global_id
+      and message_rich_media.kind = ${kind}
+      and message_rich_media.status = 'resolved'
+  )`
 }
 
 function processMessage(message: DbInputFullMessage): DbFullMessage {
@@ -478,6 +568,16 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
               encrypted: message.entitiesEncrypted,
               iv: message.entitiesIv,
               authTag: message.entitiesTag,
+            }),
+          )
+        : null,
+    richText:
+      message.richTextEncrypted && message.richTextIv && message.richTextTag
+        ? RichMessage.fromBinary(
+            decryptBinary({
+              encrypted: message.richTextEncrypted,
+              iv: message.richTextIv,
+              authTag: message.richTextTag,
             }),
           )
         : null,
@@ -504,7 +604,22 @@ type InsertMessageOutput = {
   update: UpdateSeqAndDate
 }
 
-async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<InsertMessageOutput> {
+type InsertMessageInput = Omit<DbNewMessage, "messageId"> & {
+  richTextIndex?: RichMessage | null
+}
+
+async function insertMessage(input: InsertMessageInput): Promise<InsertMessageOutput> {
+  const { richTextIndex, ...message } = input
+  const durableRichText = prepareDurableRichText({
+    richText: richTextIndex,
+    richTextEncrypted: message.richTextEncrypted,
+    richTextIv: message.richTextIv,
+    richTextTag: message.richTextTag,
+  })
+  await validateInternalRichMediaRefs(durableRichText.richText, ownerValidationOptions(message.fromId))
+  message.richTextEncrypted = durableRichText.encrypted?.encrypted ?? null
+  message.richTextIv = durableRichText.encrypted?.iv ?? null
+  message.richTextTag = durableRichText.encrypted?.authTag ?? null
   let chatId = message.chatId
 
   // Insert new message with nested select for messageId sequence
@@ -532,6 +647,18 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
         messageId: nextId,
       })
       .returning()
+
+    if (!newDbMessage) {
+      throw ModelError.Failed
+    }
+
+    await replaceMessageRichMediaIndex({
+      tx,
+      messageGlobalId: newDbMessage.globalId,
+      chatId,
+      messageId: nextId,
+      richText: durableRichText.richText,
+    })
 
     // Insert update
     const update = await UpdatesModel.insertUpdate(tx, {
@@ -696,6 +823,7 @@ type EditMessageInput = {
   chatId: number
   text: string
   entities?: MessageEntities
+  richText?: RichMessage | null
   actions?: MessageActions
 }
 
@@ -703,11 +831,15 @@ async function editMessage(input: EditMessageInput): Promise<{
   message: DbMessage
   update: UpdateSeqAndDate
 }> {
-  let { messageId, chatId, text, entities, actions } = input
+  let { messageId, chatId, text, entities, richText, actions } = input
 
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities?.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const durableRichText = prepareDurableRichText({ richText })
+  const richTextOwnerUserId = durableRichText.richText ? await getMessageSenderId(chatId, messageId) : undefined
+  await validateInternalRichMediaRefs(durableRichText.richText, ownerValidationOptions(richTextOwnerUserId))
+  const encryptedRichText = durableRichText.encrypted
   const binaryActions = actions ? MessageActions.toBinary(actions) : undefined
   const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
   const hasLink = detectHasLink({ entities })
@@ -746,9 +878,12 @@ async function editMessage(input: EditMessageInput): Promise<{
       textIv: encryptedMessage?.iv,
       textTag: encryptedMessage?.authTag,
       // entities
-      entitiesEncrypted: encryptedEntities?.encrypted,
-      entitiesIv: encryptedEntities?.iv,
-      entitiesTag: encryptedEntities?.authTag,
+      entitiesEncrypted: encryptedEntities?.encrypted ?? null,
+      entitiesIv: encryptedEntities?.iv ?? null,
+      entitiesTag: encryptedEntities?.authTag ?? null,
+      richTextEncrypted: encryptedRichText?.encrypted ?? null,
+      richTextIv: encryptedRichText?.iv ?? null,
+      richTextTag: encryptedRichText?.authTag ?? null,
       hasLink: hasLink,
     }
 
@@ -770,7 +905,7 @@ async function editMessage(input: EditMessageInput): Promise<{
 
     let [msgs] = await Promise.all([
       // Edit message
-      db
+      tx
         .update(messages)
         .set(updatePayload)
         .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
@@ -786,7 +921,18 @@ async function editMessage(input: EditMessageInput): Promise<{
         .where(eq(chats.id, chatId)),
     ])
 
-    return { message: msgs[0], update }
+    const updatedMessage = msgs[0]
+    if (updatedMessage) {
+      await replaceMessageRichMediaIndex({
+        tx,
+        messageGlobalId: updatedMessage.globalId,
+        chatId,
+        messageId,
+        richText: durableRichText.richText,
+      })
+    }
+
+    return { message: updatedMessage, update }
   })
 
   if (!message) {
@@ -795,6 +941,20 @@ async function editMessage(input: EditMessageInput): Promise<{
   }
 
   return { message, update }
+}
+
+function ownerValidationOptions(ownerUserId: number | null | undefined): { ownerUserId?: number } {
+  return typeof ownerUserId === "number" ? { ownerUserId } : {}
+}
+
+async function getMessageSenderId(chatId: number, messageId: number): Promise<number | undefined> {
+  const [message] = await db
+    .select({ fromId: messages.fromId })
+    .from(messages)
+    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+    .limit(1)
+
+  return message?.fromId ?? undefined
 }
 
 async function getMessageByRandomId(randomId: bigint, fromId: number): Promise<DbMessage> {
@@ -997,6 +1157,7 @@ async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: 
             decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
           )
         : null,
+    richText: decryptStoredRichText(msg),
     actions:
       msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
         ? MessageActions.fromBinary(
@@ -1036,6 +1197,7 @@ async function getNonFullMessagesFromNewToOld(input: {
             decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
           )
         : null,
+    richText: decryptStoredRichText(msg),
     actions:
       msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
         ? MessageActions.fromBinary(
@@ -1089,6 +1251,7 @@ async function getMessagesAroundTarget(
             decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
           )
         : null,
+    richText: decryptStoredRichText(msg),
     actions:
       msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
         ? MessageActions.fromBinary(

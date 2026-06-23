@@ -4,6 +4,7 @@ import { db } from "@in/server/db"
 import { uploadFile } from "./uploadAFile"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { getDocumentMetadataAndValidate } from "@in/server/modules/files/metadata"
+import { getSignedUrl } from "@in/server/modules/files/path"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("modules/files/uploadDocument")
@@ -15,7 +16,7 @@ export async function uploadDocument(
 ): Promise<UploadFileResult> {
   try {
     const metadata = await getDocumentMetadataAndValidate(file)
-    const { dbFile, fileUniqueId } = await uploadFile(file, FileTypes.DOCUMENT, metadata, context)
+    const { dbFile, fileUniqueId, path } = await uploadFile(file, FileTypes.DOCUMENT, metadata, context)
 
     // Encrypt the file name for documents table
     const encryptedFileName = encrypt(metadata.fileName)
@@ -37,7 +38,7 @@ export async function uploadDocument(
       throw new Error("Failed to save document to DB")
     }
 
-    return { fileUniqueId, documentId: document.id }
+    return { fileUniqueId, cdnUrl: getSignedUrl(path) ?? undefined, documentId: document.id }
   } catch (error) {
     log.error("Document upload failed", {
       error,

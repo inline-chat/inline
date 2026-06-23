@@ -3,6 +3,7 @@ import { videos } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { uploadFile } from "./uploadAFile"
 import { getVideoMetadataAndValidate } from "@in/server/modules/files/metadata"
+import { getSignedUrl } from "@in/server/modules/files/path"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("modules/files/uploadVideo")
@@ -47,7 +48,7 @@ export async function uploadVideo(
       })
     }
 
-    const { dbFile, fileUniqueId } = await uploadFile(file, FileTypes.VIDEO, metadata, context)
+    const { dbFile, fileUniqueId, path } = await uploadFile(file, FileTypes.VIDEO, metadata, context)
 
     // Save video metadata
     const [video] = await db
@@ -66,7 +67,7 @@ export async function uploadVideo(
       throw new Error("Failed to save video to DB")
     }
 
-    return { fileUniqueId, videoId: video.id }
+    return { fileUniqueId, cdnUrl: getSignedUrl(path) ?? undefined, videoId: video.id }
   } catch (error) {
     log.error("Video upload failed", {
       error,

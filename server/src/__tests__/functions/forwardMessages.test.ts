@@ -1,10 +1,21 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import { InputPeer } from "@inline-chat/protocol/core"
+import { InputPeer, type RichMessage } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { chatParticipants, chats, files, members, messages, voices } from "@in/server/db/schema"
+import {
+  chatParticipants,
+  chats,
+  files,
+  members,
+  messageRichMedia,
+  messages,
+  photos,
+  photoSizes,
+  voices,
+} from "@in/server/db/schema"
 import type { DbUser } from "@in/server/db/schema"
 import { MessageModel } from "@in/server/db/models/messages"
 import { forwardMessages } from "@in/server/functions/messages.forwardMessages"
+import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -129,6 +140,72 @@ const createVoiceForUser = async (userId: number) => {
   return voice
 }
 
+const createPhotoForUser = async (userId: number) => {
+  const [file] = await db
+    .insert(files)
+    .values({
+      fileUniqueId: `INP-forward-${runId}-${userIndex++}`,
+      userId,
+      fileType: "photo",
+      mimeType: "image/jpeg",
+      fileSize: 1234,
+      width: 320,
+      height: 180,
+    })
+    .returning()
+
+  const [photo] = await db
+    .insert(photos)
+    .values({
+      format: "jpeg",
+      width: 320,
+      height: 180,
+    })
+    .returning()
+
+  if (!file || !photo) {
+    throw new Error("Failed to create test photo")
+  }
+
+  await db.insert(photoSizes).values({
+    fileId: file.id,
+    photoId: photo.id,
+    size: "f",
+    width: 320,
+    height: 180,
+  })
+
+  return photo
+}
+
+const richPhotoMessage = (photoId: number): RichMessage => ({
+  version: 1,
+  fallbackText: "Embedded rich photo",
+  blocks: [
+    {
+      blockId: "rich-photo",
+      block: {
+        oneofKind: "photo",
+        photo: {
+          media: {
+            alt: "Forwarded embedded photo",
+            width: 320,
+            height: 180,
+            media: { oneofKind: "photoId", photoId: BigInt(photoId) },
+          },
+          caption: [
+            {
+              text: "Forwarded rich photo caption",
+              children: [],
+              styles: [],
+            },
+          ],
+        },
+      },
+    },
+  ],
+})
+
 describe("forwardMessages DM -> private thread", () => {
   beforeEach(() => {
     userIndex = 0
@@ -216,5 +293,64 @@ describe("forwardMessages DM -> private thread", () => {
     expect(forwarded.voice?.duration).toBe(9)
     expect(forwarded.voice?.waveform).toEqual(Buffer.from([8, 6, 7, 5]))
     expect(forwarded.fwdFromPeerUserId).toBe(scenario.dmPeerUser.id)
+  })
+
+  test("forwards embedded rich media without promoting it to a top-level attachment", async () => {
+    const scenario = await createScenario({ sourceFromCurrentUser: true })
+    await db.update(chats).set({ lastMsgId: 1 }).where(eq(chats.id, scenario.sourceChatId))
+
+    const photo = await createPhotoForUser(scenario.currentUser.id)
+
+    const richText = richPhotoMessage(photo.id)
+    const context = testUtils.functionContext({ userId: scenario.currentUser.id, sessionId: 1 })
+    await sendMessage(
+      {
+        peerId: scenario.fromPeerId,
+        message: richText.fallbackText,
+        richText,
+        skipLinkProcessing: true,
+      },
+      context,
+    )
+
+    const source = await MessageModel.getMessage(2, scenario.sourceChatId)
+    expect(source.photoId).toBeNull()
+    expect(source.richText?.blocks[0]?.block.oneofKind).toBe("photo")
+    expect(source.text).toBe("[Image: Forwarded embedded photo] Forwarded rich photo caption")
+
+    await forwardMessages(
+      {
+        fromPeerId: scenario.fromPeerId,
+        toPeerId: scenario.toPeerId,
+        messageIds: [2n],
+      },
+      context,
+    )
+
+    const forwarded = await forwardedMessageFromDestination(scenario.destinationThreadId)
+    expect(forwarded.text).toBe(source.text)
+    expect(forwarded.photoId).toBeNull()
+    expect(forwarded.mediaType).toBeNull()
+    expect(forwarded.richText?.blocks[0]?.block.oneofKind).toBe("photo")
+
+    if (forwarded.richText?.blocks[0]?.block.oneofKind !== "photo") {
+      throw new Error("Expected forwarded rich photo block")
+    }
+
+    const media = forwarded.richText.blocks[0].block.photo.media?.media
+    expect(media?.oneofKind).toBe("photoId")
+    if (media?.oneofKind !== "photoId") {
+      throw new Error("Expected forwarded rich photo media ref")
+    }
+    expect(media.photoId).not.toBe(BigInt(photo.id))
+
+    const forwardedRichMediaRows = await db
+      .select()
+      .from(messageRichMedia)
+      .where(eq(messageRichMedia.messageGlobalId, forwarded.globalId))
+
+    expect(forwardedRichMediaRows).toHaveLength(1)
+    expect(forwardedRichMediaRows[0]?.photoId).toBe(Number(media.photoId))
+    expect(forwardedRichMediaRows[0]?.photoId).not.toBe(photo.id)
   })
 })

@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineProtocol
 import Translation
 
 class CacheAttrs {
@@ -19,29 +20,37 @@ class CacheAttrs {
   struct CacheKey: Hashable {
     // TODO: cache language?
     var isTranslated: Bool
-    var textCount: Int
-    var textHash: Int
+    var textSignature: String
     var stableId: Int64
-    var entitiesHash: Int?
+    var entitiesSignature: String
+    var richTextSignature: String?
     var renderStyle: MessageRenderStyle
     var styleKey: String
 
     var stringValue: String {
-      "\(isTranslated ? "T" : "")_\(textCount)_\(textHash)_\(stableId)_\(entitiesHash)_\(renderStyle.rawValue)_\(styleKey)"
+      "\(isTranslated ? "T" : "")_\(textSignature)_\(stableId)_\(entitiesSignature)_\(richTextSignature ?? "rich-off")_\(renderStyle.rawValue)_\(styleKey)"
     }
   }
 
   func getKey(_ message: FullMessage, renderStyle: MessageRenderStyle = .bubble, styleKey: String = "") -> CacheKey {
-    CacheKey(
-      // TODO: Optimize
-      isTranslated: message.translationText != nil,
-      textCount: message.displayText?.count ?? 0,
-      textHash: message.message.text?.hashValue ?? 0,
+    let rendersOriginalText = message.displayText == message.message.text
+    return CacheKey(
+      isTranslated: !rendersOriginalText,
+      textSignature: MessageRenderCacheSignature.content(for: message),
       stableId: message.message.stableId,
-      entitiesHash: message.message.entities?.hashValue ?? 0,
+      entitiesSignature: MessageRenderCacheSignature.entities(for: message.message.entities),
+      richTextSignature: richTextSignature(for: message, rendersOriginalText: rendersOriginalText),
       renderStyle: renderStyle,
       styleKey: styleKey
     )
+  }
+
+  private func richTextSignature(for message: FullMessage, rendersOriginalText: Bool) -> String? {
+    guard rendersOriginalText,
+          let richText = MessageSizeCalculator.shared.effectiveRichText(for: message)
+    else { return nil }
+
+    return richText.stableSignature
   }
 
   func get(message: FullMessage, renderStyle: MessageRenderStyle = .bubble, styleKey: String = "") -> NSAttributedString? {
@@ -62,5 +71,103 @@ class CacheAttrs {
 
   func invalidate() {
     cache.removeAllObjects()
+  }
+}
+
+enum MessageRenderCacheSignature {
+  static func content(for message: FullMessage, fallback: String? = nil) -> String {
+    let displayText = message.displayText ?? fallback
+    if let translation = message.currentTranslation,
+       displayText == translation.translation
+    {
+      return [
+        "t",
+        "\(message.id)",
+        translation.language,
+        "\(translation.msgRev)",
+        "\(milliseconds(translation.date))",
+        edgeSignature(for: displayText),
+        entities(for: translation.entities),
+      ].joined(separator: ":")
+    }
+
+    return [
+      "m",
+      "\(message.id)",
+      "\(message.message.messageId)",
+      "\(message.message.rev)",
+      "\(milliseconds(message.message.date))",
+      "\(milliseconds(message.message.editDate))",
+      edgeSignature(for: displayText),
+      entities(for: message.message.entities),
+      message.message.hasVoice ? "voice" : "text",
+    ].joined(separator: ":")
+  }
+
+  static func entities(for entities: MessageEntities?) -> String {
+    guard let entities, !entities.entities.isEmpty else { return "0" }
+    var hash = fnvOffset
+    append(entities.entities.count, to: &hash)
+    for entity in entities.entities {
+      append(entity.type.rawValue, to: &hash)
+      append(entity.offset, to: &hash)
+      append(entity.length, to: &hash)
+      switch entity.entity {
+      case let .mention(value):
+        append("mention", to: &hash)
+        append(value.userID, to: &hash)
+      case let .textURL(value):
+        append("textURL", to: &hash)
+        append(value.url, to: &hash)
+      case let .pre(value):
+        append("pre", to: &hash)
+        append(value.language, to: &hash)
+      case let .thread(value):
+        append("thread", to: &hash)
+        append(value.chatID, to: &hash)
+      case let .threadTitle(value):
+        append("threadTitle", to: &hash)
+        append(value.spaceID, to: &hash)
+        append(value.title, to: &hash)
+      case .none:
+        append("none", to: &hash)
+      }
+    }
+    return "\(entities.entities.count):\(String(hash, radix: 16))"
+  }
+
+  private static func milliseconds(_ date: Date?) -> Int64 {
+    guard let date else { return 0 }
+    return Int64((date.timeIntervalSince1970 * 1000).rounded())
+  }
+
+  private static func edgeSignature(for text: String?) -> String {
+    guard let text, !text.isEmpty else { return "0:0:0" }
+    let prefix = text.prefix(48)
+    let suffix = text.suffix(48)
+    return "\(text.utf8.count):\(fingerprint(prefix)):\(fingerprint(suffix))"
+  }
+
+  private static let fnvOffset: UInt64 = 14_695_981_039_346_656_037
+  private static let fnvPrime: UInt64 = 1_099_511_628_211
+
+  private static func fingerprint(_ text: Substring) -> String {
+    var hash = fnvOffset
+    for byte in text.utf8 {
+      update(&hash, byte)
+    }
+    return String(hash, radix: 16)
+  }
+
+  private static func append(_ value: some CustomStringConvertible, to hash: inout UInt64) {
+    for byte in value.description.utf8 {
+      update(&hash, byte)
+    }
+    update(&hash, 0xff)
+  }
+
+  private static func update(_ hash: inout UInt64, _ byte: UInt8) {
+    hash ^= UInt64(byte)
+    hash &*= fnvPrime
   }
 }

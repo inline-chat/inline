@@ -162,6 +162,9 @@ public actor UpdatesEngine: Sendable {
         case let .botPresence(botPresence):
           BotPresenceNotifications.post(botPresence)
 
+        case let .richMessageDraft(richMessageDraft):
+          RichMessageDraftNotifications.post(richMessageDraft)
+
         default:
           break
       }

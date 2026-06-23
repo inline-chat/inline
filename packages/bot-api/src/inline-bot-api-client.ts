@@ -5,21 +5,16 @@ import type {
   BotMethodResultByName,
   DeleteMessageParams,
   EditMessageTextParams,
-  EditMessageTextResult,
-  EmptyResult,
   GetChatHistoryParams,
-  GetChatHistoryResult,
   GetChatParams,
-  GetChatResult,
-  GetMeResult,
-  GetMyCommandsResult,
   InlineBotApiClientOptions,
   InlineBotApiMethodOptions,
   InlineBotApiRequestOptions,
   InlineBotApiResponse,
   SetMyCommandsParams,
   SendMessageParams,
-  SendMessageResult,
+  SendRichMessageParams,
+  SendRichMessageDraftParams,
   SendReactionParams,
 } from "./types.js"
 
@@ -189,6 +184,14 @@ export class InlineBotApiClient {
 
   sendMessage(params: SendMessageParams, options?: InlineBotApiMethodOptions) {
     return this.method("sendMessage", params, options)
+  }
+
+  sendRichMessage(params: SendRichMessageParams, options?: InlineBotApiMethodOptions) {
+    return this.method("sendRichMessage", params, options)
+  }
+
+  sendRichMessageDraft(params: SendRichMessageDraftParams, options?: InlineBotApiMethodOptions) {
+    return this.method("sendRichMessageDraft", params, options)
   }
 
   editMessageText(params: EditMessageTextParams, options?: InlineBotApiMethodOptions) {

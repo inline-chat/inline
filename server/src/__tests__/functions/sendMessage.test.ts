@@ -5,6 +5,7 @@ import {
   InputPeer,
   Message,
   MessageEntity_Type,
+  type RichMessage,
   SendMessageResult,
 } from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
@@ -12,7 +13,7 @@ import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { chats, dialogs, files, messages, users, voices } from "@in/server/db/schema"
+import { chats, dialogs, files, messageRichMedia, messages, photos, photoSizes, users, voices } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -70,6 +71,101 @@ async function createVoiceForUser(userId: number) {
   }
 
   return voice
+}
+
+async function createPhotoForUser(userId: number) {
+  const [file] = await db
+    .insert(files)
+    .values({
+      fileUniqueId: `INP-TEST-${runId}-${userIndex++}`,
+      userId,
+      fileType: "photo",
+      mimeType: "image/jpeg",
+      fileSize: 1234,
+      width: 320,
+      height: 180,
+    })
+    .returning()
+
+  const [photo] = await db
+    .insert(photos)
+    .values({
+      format: "jpeg",
+      width: 320,
+      height: 180,
+    })
+    .returning()
+
+  if (!file || !photo) {
+    throw new Error("Failed to create test photo")
+  }
+
+  await db.insert(photoSizes).values({
+    fileId: file.id,
+    photoId: photo.id,
+    size: "f",
+    width: 320,
+    height: 180,
+  })
+
+  return photo
+}
+
+function richPhotoMessage(photoId: number): RichMessage {
+  return {
+    version: 1,
+    fallbackText: "Embedded rich photo",
+    blocks: [
+      {
+        blockId: "send-rich-photo",
+        block: {
+          oneofKind: "photo",
+          photo: {
+            media: {
+              alt: "Send-as-new embedded photo",
+              width: 320,
+              height: 180,
+              media: { oneofKind: "photoId", photoId: BigInt(photoId) },
+            },
+            caption: [
+              {
+                text: "Rich photo caption",
+                children: [],
+                styles: [],
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }
+}
+
+function thinkingOnlyRichText(): RichMessage {
+  return {
+    version: 1,
+    fallbackText: "private reasoning",
+    blocks: [
+      {
+        blockId: "thinking",
+        block: {
+          oneofKind: "thinking",
+          thinking: {
+            initiallyCollapsed: true,
+            blocks: [
+              {
+                blockId: "",
+                block: {
+                  oneofKind: "paragraph",
+                  paragraph: { text: [{ text: "private reasoning", children: [], styles: [] }] },
+                },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }
 }
 
 describe("sendMessage", () => {
@@ -214,6 +310,140 @@ describe("sendMessage", () => {
     expect(message!.entities!.entities[0]!.type).toBe(MessageEntity_Type.MENTION)
     expect(message!.entities!.entities[0]!.offset).toBe(0n)
     expect(message!.entities!.entities[0]!.length).toBe(3n)
+  })
+
+  test("should create a rich text message from markdown with fallback text", async () => {
+    const result = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "## Release\n\nSee [docs](https://example.com/docs) and **ship**",
+        parseRichMarkdown: true,
+        skipLinkProcessing: true,
+      },
+      context,
+    )
+
+    const message = extractMessage(result)
+    expect(message).toBeTruthy()
+    expect(message?.message).toBe("Release\n\nSee docs and ship")
+    expect(message?.richText?.fallbackText).toBe("Release\n\nSee docs and ship")
+    expect(message?.richText?.blocks.map((block) => block.block.oneofKind)).toEqual(["heading", "paragraph"])
+    expect(message?.entities?.entities.map((entity) => entity.type)).toContain(MessageEntity_Type.TEXT_URL)
+    expect(message?.entities?.entities.map((entity) => entity.type)).toContain(MessageEntity_Type.BOLD)
+  })
+
+  test("indexes rich text public URL media dependencies", async () => {
+    const result = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "![Chart](https://example.com/chart.png)",
+        parseRichMarkdown: true,
+        skipLinkProcessing: true,
+      },
+      context,
+    )
+
+    const message = extractMessage(result)
+    expect(message).toBeTruthy()
+    expect(message?.richText?.blocks[0]?.block.oneofKind).toBe("photo")
+
+    const rows = await db
+      .select()
+      .from(messageRichMedia)
+      .where(and(eq(messageRichMedia.chatId, privateChat.id), eq(messageRichMedia.messageId, Number(message!.id))))
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.kind).toBe("public_url")
+    expect(rows[0]?.status).toBe("pending")
+    expect(rows[0]?.publicUrlHash?.byteLength).toBe(32)
+    expect(rows[0]?.publicUrl).toBeTruthy()
+  })
+
+  test("sends embedded internal rich media without promoting it to a top-level attachment", async () => {
+    const photo = await createPhotoForUser(currentUser.id)
+
+    const richText = richPhotoMessage(photo.id)
+    const result = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: richText.fallbackText,
+        richText,
+        skipLinkProcessing: true,
+      },
+      context,
+    )
+
+    const message = extractMessage(result)
+    expect(message).toBeTruthy()
+    expect(message?.message).toBe("[Image: Send-as-new embedded photo] Rich photo caption")
+    expect(message?.media).toBeUndefined()
+    expect(message?.richText?.blocks[0]?.block.oneofKind).toBe("photo")
+
+    const [stored] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(message!.id))))
+      .limit(1)
+
+    expect(stored?.mediaType).toBeNull()
+    expect(stored?.photoId).toBeNull()
+    expect(stored?.videoId).toBeNull()
+    expect(stored?.documentId).toBeNull()
+    expect(stored?.voiceId).toBeNull()
+
+    const rows = await db
+      .select()
+      .from(messageRichMedia)
+      .where(and(eq(messageRichMedia.chatId, privateChat.id), eq(messageRichMedia.messageId, Number(message!.id))))
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.kind).toBe("photo")
+    expect(rows[0]?.photoId).toBe(photo.id)
+  })
+
+  test("rejects final thinking-only rich text instead of sending an empty durable message", async () => {
+    await expect(
+      sendMessage(
+        {
+          peerId: privateChatPeerId,
+          message: "private reasoning",
+          richText: thinkingOnlyRichText(),
+          skipLinkProcessing: true,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects rich text with internal media refs owned by another user", async () => {
+    const otherUser = await testUtils.createUser(nextEmail("rich-media-owner"))
+    const photo = await createPhotoForUser(otherUser!.id)
+
+    await expect(
+      sendMessage(
+        {
+          peerId: privateChatPeerId,
+          message: "not my media",
+          richText: richPhotoMessage(photo.id),
+          skipLinkProcessing: true,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects rich text with invalid internal media refs before persistence", async () => {
+    await expect(
+      sendMessage(
+        {
+          peerId: privateChatPeerId,
+          message: "invalid rich media",
+          richText: richPhotoMessage(9_999_999),
+          skipLinkProcessing: true,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
 
   test("should create a voice message", async () => {

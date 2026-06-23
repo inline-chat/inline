@@ -9,6 +9,7 @@ export type FileType = FileTypes.PHOTO | FileTypes.VIDEO | FileTypes.DOCUMENT | 
 
 export type UploadFileResult = {
   fileUniqueId: string
+  cdnUrl?: string
 
   photoId?: number
   videoId?: number

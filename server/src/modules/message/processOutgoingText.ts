@@ -1,18 +1,32 @@
-import { MessageEntities, MessageEntity_Type, type MessageEntity } from "@inline-chat/protocol/core"
+import { MessageEntities, MessageEntity_Type, type MessageEntity, type RichMessage } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { lower, userNotDeleted, users } from "@in/server/db/schema"
+import { resolveInternalAgentAlias } from "@in/server/modules/internalAgents/aliases"
 import { processMessageText } from "@in/server/modules/message/processText"
+import {
+  RichTextValidationError,
+  entitiesFromRichMessage,
+  needsRichBlocks,
+  normalizeRichMessage,
+  parseRichMarkdown,
+} from "@in/server/modules/message/richText"
 import { and, inArray } from "drizzle-orm"
 
 type ProcessOutgoingTextInput = {
-  text: string
+  text?: string
   entities: MessageEntities | undefined
   parseMarkdown?: boolean
+  richText?: RichMessage
+  parseRichMarkdown?: boolean
+  allowThinking?: boolean
+  skipEntityDetection?: boolean
+  demoteInlineOnlyRichText?: boolean
 }
 
 type ProcessOutgoingTextOutput = {
   text: string
   entities: MessageEntities | undefined
+  richText: RichMessage | undefined
 }
 
 type MentionCandidate = {
@@ -103,7 +117,7 @@ const extractBotCommandCandidates = (text: string): BotCommandCandidate[] => {
   return candidates
 }
 
-const extractMentionCandidates = (text: string): MentionCandidate[] => {
+export const extractMentionCandidates = (text: string): MentionCandidate[] => {
   const candidates: MentionCandidate[] = []
 
   for (let i = 0; i < text.length; i++) {
@@ -592,7 +606,7 @@ const parseMissingMentionEntitiesByUsername = async ({
     return entities
   }
 
-  const clientEntityRanges = getClientEntityRanges(entities)
+  const clientEntityRanges = getClientEntityRangesWithoutUsernameMentions(entities)
   const unresolvedMentionCandidates = mentionCandidates.filter((candidate) => {
     return !isRangeOverlappingClientEntity(
       { start: candidate.offset, end: candidate.offset + candidate.length },
@@ -609,13 +623,29 @@ const parseMissingMentionEntitiesByUsername = async ({
     return entities
   }
 
+  const lookupUsernameByMention = new Map<string, string>()
+  const lookupUsernames = new Set<string>()
+  for (const username of normalizedUsernames) {
+    const registration = resolveInternalAgentAlias(username)
+    const lookupUsername = normalizeUsername(registration?.botUsername ?? username)
+    if (!lookupUsername) {
+      continue
+    }
+    lookupUsernameByMention.set(username, lookupUsername)
+    lookupUsernames.add(lookupUsername)
+  }
+
+  if (lookupUsernames.size === 0) {
+    return entities
+  }
+
   const matchedUsers = await db
     .select({
       id: users.id,
       username: users.username,
     })
     .from(users)
-    .where(and(inArray(lower(users.username), normalizedUsernames), userNotDeleted()))
+    .where(and(inArray(lower(users.username), [...lookupUsernames]), userNotDeleted()))
 
   if (matchedUsers.length === 0) {
     return entities
@@ -631,7 +661,8 @@ const parseMissingMentionEntitiesByUsername = async ({
 
   const parsedMentionEntities: MessageEntity[] = []
   for (const candidate of unresolvedMentionCandidates) {
-    const userId = userIdByUsername.get(candidate.username.toLowerCase())
+    const lookupUsername = lookupUsernameByMention.get(candidate.username.toLowerCase())
+    const userId = lookupUsername ? userIdByUsername.get(lookupUsername) : undefined
     if (!userId) {
       continue
     }
@@ -653,21 +684,87 @@ const parseMissingMentionEntitiesByUsername = async ({
     return entities
   }
 
-  const existingEntities = (entities?.entities ?? []).filter((entity): entity is MessageEntity => entity !== undefined)
+  const resolvedRanges = parsedMentionEntities.map((entity) => ({
+    start: Number(entity.offset),
+    end: Number(entity.offset + entity.length),
+  }))
+  const existingEntities = (entities?.entities ?? []).filter((entity): entity is MessageEntity => {
+    if (!entity) {
+      return false
+    }
+    if (entity.type !== MessageEntity_Type.USERNAME_MENTION) {
+      return true
+    }
+    return !isRangeOverlappingClientEntity(
+      { start: Number(entity.offset), end: Number(entity.offset + entity.length) },
+      resolvedRanges,
+    )
+  })
 
   return {
     entities: sortEntities([...existingEntities, ...parsedMentionEntities]),
   }
 }
 
+const getClientEntityRangesWithoutUsernameMentions = (
+  entities: MessageEntities | undefined,
+): Array<{ start: number; end: number }> => {
+  if (!entities || entities.entities.length === 0) {
+    return []
+  }
+
+  return getClientEntityRanges({
+    entities: entities.entities.filter((entity): entity is MessageEntity => {
+      return entity !== undefined && entity.type !== MessageEntity_Type.USERNAME_MENTION
+    }),
+  })
+}
+
 export const processOutgoingText = async (
   input: ProcessOutgoingTextInput,
 ): Promise<ProcessOutgoingTextOutput> => {
-  let text = input.text
-  let entities = input.entities
+  if (input.parseRichMarkdown && typeof input.text !== "string") {
+    throw new RichTextValidationError("parseRichMarkdown requires text")
+  }
 
-  if (input.parseMarkdown) {
-    const processed = processMessageText({ text: input.text, entities: input.entities })
+  if (!input.richText && typeof input.text !== "string") {
+    throw new RichTextValidationError("message text or rich text is required")
+  }
+
+  let text = input.text ?? input.richText?.fallbackText ?? ""
+  let entities = input.entities
+  let richText: RichMessage | undefined
+
+  if (input.parseRichMarkdown && input.richText) {
+    throw new RichTextValidationError("provide either richText or parseRichMarkdown, not both")
+  }
+
+  if ((input.parseRichMarkdown || input.richText) && (input.parseMarkdown || input.entities)) {
+    throw new RichTextValidationError("rich text input cannot be combined with parseMarkdown or entities")
+  }
+
+  if (input.parseRichMarkdown) {
+    richText = parseRichMarkdown(text)
+    text = richText.fallbackText
+    entities = entitiesFromRichMessage(richText)
+    if (!needsRichBlocks(richText, { ignoreParagraphDirection: true })) {
+      richText = undefined
+    }
+  } else if (input.richText) {
+    richText = normalizeRichMessage(input.richText, {
+      fallbackText: input.text,
+      allowThinking: input.allowThinking,
+    })
+    if (richText.blocks.length === 0) {
+      throw new RichTextValidationError("rich text has no final content")
+    }
+    text = richText.fallbackText
+    entities = entitiesFromRichMessage(richText)
+    if (input.demoteInlineOnlyRichText && !needsRichBlocks(richText, { ignoreParagraphDirection: true })) {
+      richText = undefined
+    }
+  } else if (input.parseMarkdown) {
+    const processed = processMessageText({ text, entities: input.entities })
     text = processed.text
     entities = processed.entities
   }
@@ -675,14 +772,23 @@ export const processOutgoingText = async (
   entities = await resolveInlineMentionLinks(entities)
   entities = normalizeMentionRanges(text, entities)
   entities = resolveInlineThreadLinks(text, entities)
-  entities = parseMissingBotCommandEntities({
-    text,
-    entities,
-  })
-  entities = await parseMissingMentionEntitiesByUsername({
-    text,
-    entities,
-  })
+  if (!input.skipEntityDetection) {
+    entities = parseMissingBotCommandEntities({
+      text,
+      entities,
+    })
+    entities = await parseMissingMentionEntitiesByUsername({
+      text,
+      entities,
+    })
+  }
 
-  return { text, entities }
+  if (richText) {
+    richText = {
+      ...richText,
+      fallbackText: text,
+    }
+  }
+
+  return { text, entities, richText }
 }

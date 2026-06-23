@@ -37,6 +37,7 @@ struct SettingsSidebarView: View {
 
     if auth.isLoggedIn {
       categories.append(.bots)
+      categories.append(.connections)
     }
     categories.append(.debug)
 

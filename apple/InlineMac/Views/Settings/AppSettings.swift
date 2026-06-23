@@ -130,9 +130,52 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   }
 }
 
+enum MessageGestureAction: String, CaseIterable, Identifiable {
+  case toggleAck
+  case reply
+  case toggleHeart
+  case toggleThumbsUp
+  case reactionsMenu
+
+  static let defaultDoubleClick: Self = .toggleAck
+  static let defaultHold: Self = .reactionsMenu
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .toggleAck:
+      return "Toggle ACK"
+    case .reply:
+      return "Reply"
+    case .toggleHeart:
+      return "Toggle heart"
+    case .toggleThumbsUp:
+      return "Toggle thumbs up"
+    case .reactionsMenu:
+      return "Reactions menu"
+    }
+  }
+
+  var reactionEmoji: String? {
+    switch self {
+    case .toggleAck:
+      return "✔️"
+    case .toggleHeart:
+      return "❤️"
+    case .toggleThumbsUp:
+      return "👍"
+    case .reply, .reactionsMenu:
+      return nil
+    }
+  }
+}
+
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
+  static let messageDoubleClickActionKey = "messageDoubleClickAction"
+  static let messageHoldActionKey = "messageHoldAction"
 
   // MARK: - General Settings
 
@@ -198,6 +241,18 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var messageDoubleClickAction: MessageGestureAction {
+    didSet {
+      UserDefaults.standard.set(messageDoubleClickAction.rawValue, forKey: Self.messageDoubleClickActionKey)
+    }
+  }
+
+  @Published var messageHoldAction: MessageGestureAction {
+    didSet {
+      UserDefaults.standard.set(messageHoldAction.rawValue, forKey: Self.messageHoldActionKey)
+    }
+  }
+
   // MARK: - Sidebar
 
   @Published var showSidebarMessagePreview: Bool {
@@ -243,6 +298,12 @@ final class AppSettings: ObservableObject {
   @Published var enableVoiceMessages: Bool {
     didSet {
       UserDefaults.standard.set(enableVoiceMessages, forKey: ExperimentalFeatureFlags.voiceMessagesKey)
+    }
+  }
+
+  @Published var enableRichTextMessages: Bool {
+    didSet {
+      UserDefaults.standard.set(enableRichTextMessages, forKey: ExperimentalFeatureFlags.richTextMessagesKey)
     }
   }
 
@@ -296,6 +357,20 @@ final class AppSettings: ObservableObject {
       messageRenderStyle = .bubble
     }
 
+    if let storedDoubleClickAction = UserDefaults.standard.string(forKey: Self.messageDoubleClickActionKey),
+       let action = MessageGestureAction(rawValue: storedDoubleClickAction) {
+      messageDoubleClickAction = action
+    } else {
+      messageDoubleClickAction = .defaultDoubleClick
+    }
+
+    if let storedHoldAction = UserDefaults.standard.string(forKey: Self.messageHoldActionKey),
+       let action = MessageGestureAction(rawValue: storedHoldAction) {
+      messageHoldAction = action
+    } else {
+      messageHoldAction = .defaultHold
+    }
+
     if let storedShowPreview = UserDefaults.standard.object(forKey: "showSidebarMessagePreview") as? Bool {
       showSidebarMessagePreview = storedShowPreview
     } else {
@@ -313,6 +388,7 @@ final class AppSettings: ObservableObject {
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     enableVoiceMessages = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.voiceMessagesKey)
+    enableRichTextMessages = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.richTextMessagesKey)
     sidebarAsInbox = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
     if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
        !storedChannel.isEmpty,

@@ -9,6 +9,10 @@ import Quartz
 final class NewPhotoView: NSView {
   private static let imageFadeDuration: TimeInterval = 0.22
 
+  private enum PrimaryClickAction: String {
+    case quickLook
+  }
+
   private let imageView: NSView = {
     let view = NSView()
     view.wantsLayer = true
@@ -528,18 +532,24 @@ final class NewPhotoView: NSView {
   }
 
   private func handleClickAction() {
+    switch primaryClickAction {
+    case .quickLook:
+      openQuickLook()
+    }
+  }
+
+  private var primaryClickAction: PrimaryClickAction {
+    .quickLook
+  }
+
+  private func openQuickLook() {
     guard let panel = QLPreviewPanel.shared() else { return }
 
-    if panel.isVisible {
-      MessageGestureTrace.debug("NewPhotoView.handleClickAction action=closeQuickLook")
-      panel.orderOut(nil)
-    } else {
-      // Update the responder chain
-      MessageGestureTrace.debug("NewPhotoView.handleClickAction action=openQuickLook")
-      window?.makeFirstResponder(self)
-      panel.updateController()
-      panel.makeKeyAndOrderFront(nil)
-    }
+    MessageGestureTrace.debug("NewPhotoView.handleClickAction action=openQuickLook")
+    window?.makeFirstResponder(self)
+    panel.updateController()
+    panel.reloadData()
+    panel.makeKeyAndOrderFront(nil)
   }
 
   @objc private func handleClick(_ gesture: NSClickGestureRecognizer) {
@@ -549,6 +559,30 @@ final class NewPhotoView: NSView {
     handleClickAction()
   }
 }
+
+#if DEBUG
+struct NewPhotoViewClickDebugSnapshot: Equatable {
+  let primaryAction: String
+  let controlsQuickLook: Bool
+  let opensSourceURL: Bool
+  let closesVisiblePreviewPanel: Bool
+
+  var isPreviewOnly: Bool {
+    primaryAction == "quickLook" && controlsQuickLook && !opensSourceURL && !closesVisiblePreviewPanel
+  }
+}
+
+extension NewPhotoView {
+  static func debugPrimaryClickSnapshotForTestBook() -> NewPhotoViewClickDebugSnapshot {
+    NewPhotoViewClickDebugSnapshot(
+      primaryAction: PrimaryClickAction.quickLook.rawValue,
+      controlsQuickLook: true,
+      opensSourceURL: false,
+      closesVisiblePreviewPanel: false
+    )
+  }
+}
+#endif
 
 // MARK: - QLPreviewPanel
 

@@ -28,6 +28,10 @@ export type BotMessageEntityType =
   | "thread"
   | "thread_title"
   | "bot_command"
+  | "underline"
+  | "strikethrough"
+  | "blockquote"
+  | "expandable_blockquote"
 
 export type BotTargetInput = {
   chat_id?: BotInputId
@@ -84,6 +88,165 @@ export type BotMessageEntityOutput = {
   title?: string
 }
 
+export type BotRichDirection = "auto" | "ltr" | "rtl"
+
+export type BotRichTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "code" | "spoiler"
+
+export type BotRichText = {
+  text?: string
+  children?: BotRichText[]
+  styles?: BotRichTextStyle[]
+  url?: string
+}
+
+export type BotRichBlockType =
+  | "paragraph"
+  | "heading"
+  | "list"
+  | "list_item"
+  | "quote"
+  | "code"
+  | "divider"
+  | "thinking"
+  | "details"
+  | "photo"
+  | "video"
+  | "document"
+  | "audio"
+  | "table"
+  | "math"
+  | "map"
+  | "embed"
+  | "embed_post"
+  | "link_preview"
+  | "collage"
+
+export type BotRichMediaRef = {
+  alt?: string
+  file_name?: string
+  width?: number
+  height?: number
+  mime_type?: string
+  cdn_url?: string
+  file_unique_id?: string
+  photo_id?: BotInputId
+  video_id?: BotInputId
+  document_id?: BotInputId
+  voice_id?: BotInputId
+  public_url?: string
+}
+
+export type BotRichTableCell = {
+  text?: BotRichText[]
+  header?: boolean
+  colspan?: number
+  rowspan?: number
+  align?: "left" | "center" | "right"
+  valign?: "top" | "middle" | "bottom"
+}
+
+export type BotRichTableRow = {
+  cells: BotRichTableCell[]
+}
+
+export type BotRichBlock = {
+  block_id?: string
+  type: BotRichBlockType
+  text?: BotRichText[]
+  children?: BotRichBlock[]
+  blocks?: BotRichBlock[]
+  items?: BotRichBlock[]
+  level?: number
+  language?: string
+  direction?: BotRichDirection
+  ordered?: boolean
+  start?: number
+  checked?: boolean
+  expandable?: boolean
+  initially_collapsed?: boolean
+  title?: BotRichText[] | string
+  initially_open?: boolean
+  media?: BotRichMediaRef
+  poster?: BotRichMediaRef
+  author_photo?: BotRichMediaRef
+  caption?: BotRichText[]
+  duration?: number
+  performer?: string
+  source?: string
+  display?: boolean
+  fallback?: string
+  rows?: BotRichTableRow[]
+  bordered?: boolean
+  striped?: boolean
+  latitude?: number
+  longitude?: number
+  zoom?: number
+  address?: string
+  open_url?: string
+  aspect_ratio?: number
+  url?: string
+  html?: string
+  width?: number
+  height?: number
+  full_width?: boolean
+  allow_scrolling?: boolean
+  provider?: string
+  author?: string
+  date?: BotInputId
+  display_url?: string
+  site_name?: string
+  description?: string
+  media_aspect_ratio?: number
+  compact?: boolean
+  layout?: "grid" | "masonry"
+}
+
+export type BotRichMessage = {
+  blocks: BotRichBlock[]
+  direction?: BotRichDirection
+  fallback_text: string
+}
+
+export type BotRichInputOptions = {
+  direction?: BotRichDirection
+  is_rtl?: boolean
+  skip_entity_detection?: boolean
+}
+
+/**
+ * Preferred stable rich-message input. The server parses Markdown into a
+ * canonical rich payload and keeps fallback text readable for older clients.
+ */
+export type BotRichMarkdownInput = BotRichInputOptions & {
+  markdown: string
+}
+
+/**
+ * Preferred stable rich-message input for the allowlisted HTML subset.
+ */
+export type BotRichHtmlInput = BotRichInputOptions & {
+  html: string
+}
+
+/**
+ * Beta/internal structured rich block input. Prefer `BotRichMarkdownInput` or
+ * `BotRichHtmlInput` for public bot integrations unless Inline owns both ends
+ * of the payload contract.
+ */
+export type BotStructuredRichMessageInput =
+  | BotRichMessage
+  | (BotRichInputOptions & {
+      rich_message: BotRichMessage
+    })
+  | (BotRichInputOptions & {
+      rich_text: BotRichMessage
+    })
+
+export type BotInputRichMessage =
+  | BotRichMarkdownInput
+  | BotRichHtmlInput
+  | BotStructuredRichMessageInput
+
 export type BotChatLastMessage = {
   message_id: number
   from_id: number
@@ -91,6 +254,7 @@ export type BotChatLastMessage = {
   date: number
   text?: string
   entities?: BotMessageEntityOutput[]
+  rich_text?: BotRichMessage
 }
 
 export type BotChat = {
@@ -113,6 +277,7 @@ export type BotMessageLite = {
   date: number
   text?: string
   entities?: BotMessageEntityOutput[]
+  rich_text?: BotRichMessage
 }
 
 export type BotMessage = BotMessageLite & {
@@ -134,23 +299,61 @@ export type EditMessageTextResult = { message: BotMessage }
 export type EmptyResult = Record<string, never>
 
 export type SendMessageParams = BotTargetInput & {
-  text: string
+  text?: string
   reply_to_message_id?: BotInputId
   entities?: BotMessageEntityInput[]
   parse_markdown?: boolean
+  /** Prefer `{ markdown }` or `{ html }`; structured block JSON is beta/internal. */
+  rich_text?: BotInputRichMessage
+  /** Prefer `{ markdown }` or `{ html }`; structured block JSON is beta/internal. */
+  rich_message?: BotInputRichMessage
+  parse_rich_markdown?: boolean
+  skip_entity_detection?: boolean
   // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
   // Remove after confirming no production use in the previous month.
   parseMarkdown?: boolean
+  parseRichMarkdown?: boolean
+}
+
+export type SendRichMessageParams = BotTargetInput & {
+  text?: string
+  reply_to_message_id?: BotInputId
+  /** Prefer `{ markdown }` or `{ html }`; structured block JSON is beta/internal. */
+  rich_message?: BotInputRichMessage
+  /** Prefer `{ markdown }` or `{ html }`; structured block JSON is beta/internal. */
+  rich_text?: BotInputRichMessage
+  parse_rich_markdown?: boolean
+  skip_entity_detection?: boolean
+  parseRichMarkdown?: boolean
+}
+
+export type SendRichMessageDraftParams = BotTargetInput & {
+  /** Stable transient draft key. Maximum 256 UTF-16 code units. */
+  draft_id: string
+  message_id?: BotInputId
+  /** Streaming drafts may use structured rich JSON for Inline-owned progress UI. */
+  rich_message?: BotInputRichMessage
+  /** Streaming drafts may use structured rich JSON for Inline-owned progress UI. */
+  rich_text?: BotInputRichMessage
+  clear?: boolean
+  ttl_seconds?: number
 }
 
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
-  text: string
+  text?: string
   entities?: BotMessageEntityInput[]
   parse_markdown?: boolean
+  /** Prefer `{ markdown }` or `{ html }`; structured block JSON is beta/internal. */
+  rich_text?: BotInputRichMessage
+  /** Prefer `{ markdown }` or `{ html }`; structured block JSON is beta/internal. */
+  rich_message?: BotInputRichMessage
+  parse_rich_markdown?: boolean
+  skip_entity_detection?: boolean
   // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
   // Remove after confirming no production use in the previous month.
   parseMarkdown?: boolean
+  parseRichMarkdown?: boolean
 }
 
 export type DeleteMessageParams = BotTargetInput & {
@@ -181,6 +384,8 @@ export type BotMethodName =
   | "setMyCommands"
   | "deleteMyCommands"
   | "sendMessage"
+  | "sendRichMessage"
+  | "sendRichMessageDraft"
   | "editMessageText"
   | "deleteMessage"
   | "sendReaction"
@@ -193,6 +398,8 @@ export type BotMethodParamsByName = {
   setMyCommands: SetMyCommandsParams
   deleteMyCommands: undefined
   sendMessage: SendMessageParams
+  sendRichMessage: SendRichMessageParams
+  sendRichMessageDraft: SendRichMessageDraftParams
   editMessageText: EditMessageTextParams
   deleteMessage: DeleteMessageParams
   sendReaction: SendReactionParams
@@ -206,6 +413,8 @@ export type BotMethodResultByName = {
   setMyCommands: EmptyResult
   deleteMyCommands: EmptyResult
   sendMessage: SendMessageResult
+  sendRichMessage: SendMessageResult
+  sendRichMessageDraft: EmptyResult
   editMessageText: EditMessageTextResult
   deleteMessage: EmptyResult
   sendReaction: EmptyResult

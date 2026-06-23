@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["bun", "node"]
   },
-  "include": ["*.ts", "docker/**/*.ts", "macos/**/*.ts", "tools/**/*.ts"]
+  "include": ["*.ts", "docker/**/*.ts", "helpers/**/*.ts", "macos/**/*.ts", "tools/**/*.ts"]
 }

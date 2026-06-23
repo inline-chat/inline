@@ -116,6 +116,30 @@ struct ProcessEntitiesTests {
     return entity
   }
 
+  private func createUnderlineEntity(offset: Int64, length: Int64) -> MessageEntity {
+    var entity = MessageEntity()
+    entity.type = .underline
+    entity.offset = offset
+    entity.length = length
+    return entity
+  }
+
+  private func createStrikethroughEntity(offset: Int64, length: Int64) -> MessageEntity {
+    var entity = MessageEntity()
+    entity.type = .strikethrough
+    entity.offset = offset
+    entity.length = length
+    return entity
+  }
+
+  private func createBlockquoteEntity(offset: Int64, length: Int64, expandable: Bool = false) -> MessageEntity {
+    var entity = MessageEntity()
+    entity.type = expandable ? .expandableBlockquote : .blockquote
+    entity.offset = offset
+    entity.length = length
+    return entity
+  }
+
   private func createPreEntity(offset: Int64, length: Int64) -> MessageEntity {
     var entity = MessageEntity()
     entity.type = .pre
@@ -566,6 +590,77 @@ struct ProcessEntitiesTests {
     let hasInlineCodeAttribute = attributes[.inlineCode] != nil
 
     #expect(hasInlineCodeAttribute == true)
+  }
+
+  @Test("Underline and strikethrough")
+  func testUnderlineAndStrikethrough() {
+    let text = "This is under and struck text"
+    let under = createUnderlineEntity(offset: 8, length: 5)
+    let struck = createStrikethroughEntity(offset: 18, length: 6)
+    var entities = MessageEntities()
+    entities.entities = [under, struck]
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    #expect(result.string == text)
+
+    let underlineAttributes = result.attributes(at: 8, effectiveRange: nil)
+    let strikeAttributes = result.attributes(at: 18, effectiveRange: nil)
+
+    #expect(underlineAttributes[.underlineStyle] as? Int == NSUnderlineStyle.single.rawValue)
+    #expect(strikeAttributes[.strikethroughStyle] as? Int == NSUnderlineStyle.single.rawValue)
+  }
+
+  @Test("Blockquote fallback entity")
+  func testBlockquoteFallbackEntity() throws {
+    let text = "Intro\nQuoted line\nSecond line\nOutro"
+    let quoteRange = rangeOfSubstring("Quoted line\nSecond line", in: text)
+    let entities = createMessageEntities([
+      createBlockquoteEntity(offset: Int64(quoteRange.location), length: Int64(quoteRange.length)),
+    ])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    #expect(result.string == text)
+
+    let firstQuoteAttributes = result.attributes(at: quoteRange.location, effectiveRange: nil)
+    let firstQuoteStyle = try #require(firstQuoteAttributes[.paragraphStyle] as? NSParagraphStyle)
+    #expect(firstQuoteAttributes[.blockquote] as? Bool == true)
+    #expect(firstQuoteAttributes[.expandableBlockquote] as? Bool == false)
+    #expect(firstQuoteStyle.firstLineHeadIndent > 0)
+    #expect(firstQuoteStyle.headIndent == firstQuoteStyle.firstLineHeadIndent)
+
+    let secondLineLocation = rangeOfSubstring("Second line", in: text).location
+    let secondQuoteAttributes = result.attributes(at: secondLineLocation, effectiveRange: nil)
+    #expect(secondQuoteAttributes[.blockquote] as? Bool == true)
+  }
+
+  @Test("Expandable blockquote fallback entity")
+  func testExpandableBlockquoteFallbackEntity() throws {
+    let text = "Visible\nHidden"
+    let entities = createMessageEntities([
+      createBlockquoteEntity(offset: 0, length: Int64((text as NSString).length), expandable: true),
+    ])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let attributes = result.attributes(at: 0, effectiveRange: nil)
+    let paragraphStyle = try #require(attributes[.paragraphStyle] as? NSParagraphStyle)
+    #expect(attributes[.blockquote] as? Bool == true)
+    #expect(attributes[.expandableBlockquote] as? Bool == true)
+    #expect(paragraphStyle.headIndent > 0)
   }
 
   @Test("Mention with bold")

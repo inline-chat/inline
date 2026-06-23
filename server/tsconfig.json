@@ -10,6 +10,15 @@
       "path": "../packages/oauth-core"
     },
     {
+      "path": "../packages/agent-core"
+    },
+    {
+      "path": "../packages/agent-chatgpt"
+    },
+    {
+      "path": "../packages/markdown"
+    },
+    {
       "path": "../packages/protocol"
     },
     {

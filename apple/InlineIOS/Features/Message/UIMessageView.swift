@@ -1780,10 +1780,11 @@ class UIMessageView: UIView {
 
   func setupAppearance() {
     let cacheKey = [
-      "\(fullMessage.message.entities)",
+      String(describing: fullMessage.message.entities),
       "\(message.stableId)",
       fullMessage.displayText ?? "",
       MessageRichTextRenderer.cacheKey(for: outgoing),
+      richTextCacheKey(),
     ].joined(separator: "-")
     bubbleView.backgroundColor = bubbleColor
 
@@ -1815,11 +1816,31 @@ class UIMessageView: UIView {
       )
     )
 
+    if ExperimentalFeatureFlags.richTextMessagesEnabled,
+       fullMessage.displayText == fullMessage.message.text,
+       let richText = fullMessage.message.richText
+    {
+      MessageRichTextRenderer.applyRichBlockStyles(
+        to: attributedString,
+        richText: richText,
+        baseFont: font
+      )
+    }
+
     detectAndStyleLinks(in: text, attributedString: attributedString)
 
     Self.attributedCache.setObject(attributedString, forKey: cacheKey as NSString)
 
     messageLabel.attributedText = attributedString
+  }
+
+  private func richTextCacheKey() -> String {
+    guard ExperimentalFeatureFlags.richTextMessagesEnabled,
+          fullMessage.displayText == fullMessage.message.text,
+          let richText = fullMessage.message.richText
+    else { return "rich-off" }
+
+    return "rich-\(richText.stableSignature)"
   }
 
   func detectAndStyleLinks(in text: String, attributedString: NSMutableAttributedString) {

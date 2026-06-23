@@ -72,6 +72,7 @@ import {
   normalizeInlineAllowEntry,
 } from "./shared.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
+import { inlineCaptionParseOptions, inlineTextParseOptions } from "./rich-text.js"
 import { inlineSetupAdapter } from "./setup-core.js"
 import { inlineSetupWizard } from "./setup-surface.js"
 import { inlineSecrets } from "./secret-contract.js"
@@ -819,7 +820,7 @@ async function notifyPairingApprovedInline(params: {
     await client.sendMessage({
       userId,
       text: PAIRING_APPROVED_MESSAGE,
-      parseMarkdown: account.config.parseMarkdown ?? true,
+      ...inlineTextParseOptions(account),
     })
   } finally {
     await client.close().catch(() => {})
@@ -884,7 +885,7 @@ async function sendMessageInline(params: {
         text,
         ...(params.actions !== undefined ? { actions: params.actions } : {}),
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
-        parseMarkdown: account.config.parseMarkdown ?? true,
+        ...inlineTextParseOptions(account),
       })
       .catch((error: unknown) => {
         throw wrapInlineTargetError({
@@ -978,7 +979,7 @@ async function sendMediaInline(params: {
         media,
         ...(params.actions !== undefined ? { actions: params.actions } : {}),
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
-        ...(caption ? { parseMarkdown: account.config.parseMarkdown ?? true } : {}),
+        ...inlineCaptionParseOptions(account, caption),
       })
       .catch((error: unknown) => {
         throw wrapInlineTargetError({

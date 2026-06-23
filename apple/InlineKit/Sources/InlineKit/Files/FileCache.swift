@@ -266,13 +266,15 @@ public actor FileCache: Sendable {
   }
 
   /// Save a downloaded video to the cache and update the database
-  public func saveVideoDownload(video: VideoInfo, localPath: String, message: Message) async throws {
+  public func saveVideoDownload(video: VideoInfo, localPath: String, message: Message? = nil) async throws {
     try await database.dbWriter.write { db in
       try Video.filter(id: video.id).updateAll(db, [Video.Columns.localPath.set(to: localPath)])
       self.log.debug("Updated video \(video.id) with local path \(localPath)")
     }
 
-    triggerMessageReload(message: message)
+    if let message {
+      triggerMessageReload(message: message)
+    }
   }
 
   /// Save a downloaded voice message to the cache and update the message payload.

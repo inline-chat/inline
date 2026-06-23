@@ -510,7 +510,7 @@ async function promptPickChannel(): Promise<"stable" | "beta"> {
 }
 
 function ansiStrip(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+  return s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
 }
 
 const color = {
@@ -683,7 +683,7 @@ async function runStreaming(
 ): Promise<void> {
   const proc = Bun.spawn(cmd, {
     cwd: opts.cwd,
-    env: { ...process.env, ...(opts.env ?? {}) },
+    env: { ...process.env, ...opts.env },
     stdout: "pipe",
     stderr: "pipe",
   });

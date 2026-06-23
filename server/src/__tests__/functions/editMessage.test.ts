@@ -3,6 +3,8 @@ import {
   InputPeer,
   Message,
   MessageEntity_Type,
+  type RichMessage,
+  RichTextStyle,
   type EditMessageResult,
 } from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
@@ -11,8 +13,9 @@ import { editMessage } from "@in/server/functions/messages.editMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { files, users, voices } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
+import { files, messageRichMedia, photos, photoSizes, users, voices } from "@in/server/db/schema"
+import { and, eq } from "drizzle-orm"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 let currentUser: DbUser
 let privateChat: DbChat
@@ -63,6 +66,101 @@ async function createVoiceForUser(userId: number) {
   return voice
 }
 
+async function createPhotoForUser(userId: number) {
+  const [file] = await db
+    .insert(files)
+    .values({
+      fileUniqueId: `EDIT-PHOTO-${runId}-${userIndex++}`,
+      userId,
+      fileType: "photo",
+      mimeType: "image/jpeg",
+      fileSize: 1234,
+      width: 320,
+      height: 180,
+    })
+    .returning()
+
+  const [photo] = await db
+    .insert(photos)
+    .values({
+      format: "jpeg",
+      width: 320,
+      height: 180,
+    })
+    .returning()
+
+  if (!file || !photo) {
+    throw new Error("Failed to create test photo")
+  }
+
+  await db.insert(photoSizes).values({
+    fileId: file.id,
+    photoId: photo.id,
+    size: "f",
+    width: 320,
+    height: 180,
+  })
+
+  return photo
+}
+
+function richPhotoMessage(photoId: number): RichMessage {
+  return {
+    version: 1,
+    fallbackText: "Embedded rich photo",
+    blocks: [
+      {
+        blockId: "edit-rich-photo",
+        block: {
+          oneofKind: "photo",
+          photo: {
+            media: {
+              alt: "Edited embedded photo",
+              width: 320,
+              height: 180,
+              media: { oneofKind: "photoId", photoId: BigInt(photoId) },
+            },
+            caption: [
+              {
+                text: "Edited rich photo caption",
+                children: [],
+                styles: [],
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }
+}
+
+function thinkingOnlyRichText(): RichMessage {
+  return {
+    version: 1,
+    fallbackText: "private reasoning",
+    blocks: [
+      {
+        blockId: "thinking",
+        block: {
+          oneofKind: "thinking",
+          thinking: {
+            initiallyCollapsed: true,
+            blocks: [
+              {
+                blockId: "",
+                block: {
+                  oneofKind: "paragraph",
+                  paragraph: { text: [{ text: "private reasoning", children: [], styles: [] }] },
+                },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }
+}
+
 describe("editMessage function", () => {
   beforeAll(async () => {
     await setupTestDatabase()
@@ -107,6 +205,255 @@ describe("editMessage function", () => {
     expect(message?.entities?.entities[1]?.type).toBe(MessageEntity_Type.CODE)
     expect(message?.entities?.entities[1]?.offset).toBe(16n)
     expect(message?.entities?.entities[1]?.length).toBe(4n)
+  })
+
+  test("parses rich markdown edits and returns fallback text plus rich blocks", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "initial rich edit",
+      },
+      context,
+    )
+    const messageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(messageId).toBeTruthy()
+
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: "### Edited\n\nUse `code` and **bold**",
+        parseRichMarkdown: true,
+      },
+      context,
+    )
+
+    const message = extractEditedMessage(result)
+    expect(message).toBeTruthy()
+    expect(message?.message).toBe("Edited\n\nUse code and bold")
+    expect(message?.richText?.fallbackText).toBe("Edited\n\nUse code and bold")
+    expect(message?.richText?.blocks.map((block) => block.block.oneofKind)).toEqual(["heading", "paragraph"])
+    expect(message?.entities?.entities.map((entity) => entity.type)).toContain(MessageEntity_Type.CODE)
+    expect(message?.entities?.entities.map((entity) => entity.type)).toContain(MessageEntity_Type.BOLD)
+  })
+
+  test("edits with structured rich text without separate text", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "initial rich-only edit",
+      },
+      context,
+    )
+    const messageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(messageId).toBeTruthy()
+
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        richText: {
+          blocks: [
+            {
+              blockId: "",
+              block: {
+                oneofKind: "paragraph",
+                paragraph: {
+                  text: [
+                    {
+                      text: "rich-only edit",
+                      children: [],
+                      styles: [RichTextStyle.STYLE_BOLD],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          fallbackText: "",
+          version: 1,
+        },
+      },
+      context,
+    )
+
+    const message = extractEditedMessage(result)
+    expect(message?.message).toBe("rich-only edit")
+    expect(message?.richText?.fallbackText).toBe("rich-only edit")
+    expect(message?.entities?.entities).toContainEqual({
+      type: MessageEntity_Type.BOLD,
+      offset: 0n,
+      length: 14n,
+      entity: { oneofKind: undefined },
+    })
+  })
+
+  test("rejects final thinking-only rich text edits instead of writing an empty durable message", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "initial thinking-only edit",
+      },
+      context,
+    )
+    const messageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(messageId).toBeTruthy()
+
+    await expect(
+      editMessage(
+        {
+          messageId: messageId!,
+          peer: privateChatPeerId,
+          text: "private reasoning",
+          richText: thinkingOnlyRichText(),
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("clears stale rich text when editing back to plain text", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "## Rich first",
+        parseRichMarkdown: true,
+      },
+      context,
+    )
+    const messageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(messageId).toBeTruthy()
+
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: "plain now",
+      },
+      context,
+    )
+
+    const message = extractEditedMessage(result)
+    expect(message?.message).toBe("plain now")
+    expect(message?.richText).toBeUndefined()
+    expect(message?.entities).toBeUndefined()
+  })
+
+  test("rebuilds rich text media dependency index on edits", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "![Chart](https://example.com/chart.png)",
+        parseRichMarkdown: true,
+        skipLinkProcessing: true,
+      },
+      context,
+    )
+    const messageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(messageId).toBeTruthy()
+
+    const initialRows = await db
+      .select()
+      .from(messageRichMedia)
+      .where(and(eq(messageRichMedia.chatId, privateChat.id), eq(messageRichMedia.messageId, Number(messageId))))
+    expect(initialRows).toHaveLength(1)
+
+    await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: "plain now",
+      },
+      context,
+    )
+
+    const clearedRows = await db
+      .select()
+      .from(messageRichMedia)
+      .where(and(eq(messageRichMedia.chatId, privateChat.id), eq(messageRichMedia.messageId, Number(messageId))))
+    expect(clearedRows).toHaveLength(0)
+
+    await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: "![Updated](https://example.com/updated.png)",
+        parseRichMarkdown: true,
+      },
+      context,
+    )
+
+    const rebuiltRows = await db
+      .select()
+      .from(messageRichMedia)
+      .where(and(eq(messageRichMedia.chatId, privateChat.id), eq(messageRichMedia.messageId, Number(messageId))))
+    expect(rebuiltRows).toHaveLength(1)
+    expect(rebuiltRows[0]?.blockId).toContain("photo")
+  })
+
+  test("rejects rich text edits with invalid internal media refs before persistence", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "before invalid rich edit",
+      },
+      context,
+    )
+    const messageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(messageId).toBeTruthy()
+
+    await expect(
+      editMessage(
+        {
+          messageId: messageId!,
+          peer: privateChatPeerId,
+          text: "invalid rich edit",
+          richText: richPhotoMessage(9_999_999),
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects rich text edits with internal media refs owned by another user", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "before foreign rich edit",
+      },
+      context,
+    )
+    const messageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(messageId).toBeTruthy()
+
+    const otherUser = await testUtils.createUser(nextEmail("edit-rich-media-owner"))
+    const photo = await createPhotoForUser(otherUser!.id)
+
+    await expect(
+      editMessage(
+        {
+          messageId: messageId!,
+          peer: privateChatPeerId,
+          text: "not my media",
+          richText: richPhotoMessage(photo.id),
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
 
   test("resolves @username mentions while parsing markdown edits", async () => {

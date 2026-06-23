@@ -7,8 +7,9 @@ struct ExperimentalSettingsDetailView: View {
     Form {
       Section("Experimental") {
         Toggle("Enable voice messages", isOn: $appSettings.enableVoiceMessages)
+        Toggle("Enable rich text messages", isOn: $appSettings.enableRichTextMessages)
 
-        Text("Voice features may require an app restart.")
+        Text("Rich rendering is gated for beta; older clients keep using fallback text. Toggling it reloads visible messages.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }

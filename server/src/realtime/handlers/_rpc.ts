@@ -7,6 +7,7 @@ import { deleteMessage } from "@in/server/realtime/handlers/messages.deleteMessa
 import { deleteMessageAttachment } from "@in/server/realtime/handlers/messages.deleteMessageAttachment"
 import { clearChatHistoryHandler } from "@in/server/realtime/handlers/messages.clearChatHistory"
 import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
+import { sendRichMessageDraft } from "@in/server/realtime/handlers/messages.sendRichMessageDraft"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
 import { getMessages } from "@in/server/realtime/handlers/messages.getMessages"
 import { getChat } from "@in/server/realtime/handlers/messages.getChat"
@@ -72,6 +73,12 @@ import {
   getSpaceUrlPreviewExclusionsHandler,
   removeSpaceUrlPreviewExclusionHandler,
 } from "@in/server/realtime/handlers/space.urlPreviewExclusions"
+import {
+  connectionsDisconnectHandler,
+  connectionsListHandler,
+  openaiCodexPollDeviceAuthHandler,
+  openaiCodexStartDeviceAuthHandler,
+} from "@in/server/realtime/handlers/connections"
 
 const log = new Log("rpc")
 
@@ -118,6 +125,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await sendMessage(call.input.sendMessage, handlerContext)
       return { oneofKind: "sendMessage", sendMessage: result }
+    }
+
+    case Method.SEND_RICH_MESSAGE_DRAFT: {
+      if (call.input.oneofKind !== "sendRichMessageDraft") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await sendRichMessageDraft(call.input.sendRichMessageDraft, handlerContext)
+      return { oneofKind: "sendRichMessageDraft", sendRichMessageDraft: result }
     }
 
     case Method.GET_CHAT_HISTORY: {
@@ -233,6 +248,38 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
         handlerContext,
       )
       return { oneofKind: "removeSpaceUrlPreviewExclusion", removeSpaceUrlPreviewExclusion: result }
+    }
+
+    case Method.CONNECTIONS_LIST: {
+      if (call.input.oneofKind !== "connectionsList") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await connectionsListHandler(call.input.connectionsList, handlerContext)
+      return { oneofKind: "connectionsList", connectionsList: result }
+    }
+
+    case Method.OPENAI_CODEX_START_DEVICE_AUTH: {
+      if (call.input.oneofKind !== "openaiCodexStartDeviceAuth") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await openaiCodexStartDeviceAuthHandler(call.input.openaiCodexStartDeviceAuth, handlerContext)
+      return { oneofKind: "openaiCodexStartDeviceAuth", openaiCodexStartDeviceAuth: result }
+    }
+
+    case Method.OPENAI_CODEX_POLL_DEVICE_AUTH: {
+      if (call.input.oneofKind !== "openaiCodexPollDeviceAuth") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await openaiCodexPollDeviceAuthHandler(call.input.openaiCodexPollDeviceAuth, handlerContext)
+      return { oneofKind: "openaiCodexPollDeviceAuth", openaiCodexPollDeviceAuth: result }
+    }
+
+    case Method.CONNECTIONS_DISCONNECT: {
+      if (call.input.oneofKind !== "connectionsDisconnect") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await connectionsDisconnectHandler(call.input.connectionsDisconnect, handlerContext)
+      return { oneofKind: "connectionsDisconnect", connectionsDisconnect: result }
     }
 
     case Method.DELETE_CHAT: {

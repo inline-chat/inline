@@ -329,6 +329,88 @@ export interface PeerUser {
     userId: bigint;
 }
 /**
+ * @generated from protobuf message InputScope
+ */
+export interface InputScope {
+    /**
+     * @generated from protobuf oneof: type
+     */
+    type: {
+        oneofKind: "user";
+        /**
+         * @generated from protobuf field: InputScopeUser user = 1;
+         */
+        user: InputScopeUser;
+    } | {
+        oneofKind: "space";
+        /**
+         * @generated from protobuf field: InputScopeSpace space = 2;
+         */
+        space: InputScopeSpace;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message InputScopeUser
+ */
+export interface InputScopeUser {
+    /**
+     * @generated from protobuf field: int64 user_id = 1;
+     */
+    userId: bigint;
+}
+/**
+ * @generated from protobuf message InputScopeSpace
+ */
+export interface InputScopeSpace {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message Scope
+ */
+export interface Scope {
+    /**
+     * @generated from protobuf oneof: type
+     */
+    type: {
+        oneofKind: "user";
+        /**
+         * @generated from protobuf field: ScopeUser user = 1;
+         */
+        user: ScopeUser;
+    } | {
+        oneofKind: "space";
+        /**
+         * @generated from protobuf field: ScopeSpace space = 2;
+         */
+        space: ScopeSpace;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message ScopeUser
+ */
+export interface ScopeUser {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+}
+/**
+ * @generated from protobuf message ScopeSpace
+ */
+export interface ScopeSpace {
+    /**
+     * @generated from protobuf field: Space space = 1;
+     */
+    space?: Space;
+}
+/**
  * @generated from protobuf message BotAvatar
  */
 export interface BotAvatar {
@@ -491,6 +573,10 @@ export interface User {
      * @generated from protobuf field: optional string bio = 15;
      */
     bio?: string;
+    /**
+     * @generated from protobuf field: optional bool verified = 16;
+     */
+    verified?: boolean;
 }
 /**
  * @generated from protobuf message UserProfilePhoto
@@ -959,6 +1045,13 @@ export interface Message {
      * @generated from protobuf field: optional int64 rev = 21;
      */
     rev?: bigint;
+    /**
+     * Optional block rich text payload. `message` remains the fallback text
+     * for clients that do not support rich messages.
+     *
+     * @generated from protobuf field: optional RichMessage rich_text = 22;
+     */
+    richText?: RichMessage;
 }
 /**
  * @generated from protobuf message MessageFwdHeader
@@ -1153,7 +1246,695 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_BOT_COMMAND = 13;
      */
-    BOT_COMMAND = 13
+    BOT_COMMAND = 13,
+    /**
+     * @generated from protobuf enum value: TYPE_UNDERLINE = 14;
+     */
+    UNDERLINE = 14,
+    /**
+     * @generated from protobuf enum value: TYPE_STRIKETHROUGH = 15;
+     */
+    STRIKETHROUGH = 15,
+    /**
+     * @generated from protobuf enum value: TYPE_BLOCKQUOTE = 16;
+     */
+    BLOCKQUOTE = 16,
+    /**
+     * @generated from protobuf enum value: TYPE_EXPANDABLE_BLOCKQUOTE = 17;
+     */
+    EXPANDABLE_BLOCKQUOTE = 17
+}
+/**
+ * @generated from protobuf message RichText
+ */
+export interface RichText {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
+    /**
+     * @generated from protobuf field: repeated RichText children = 2;
+     */
+    children: RichText[];
+    /**
+     * @generated from protobuf field: repeated RichTextStyle styles = 3;
+     */
+    styles: RichTextStyle[];
+    /**
+     * @generated from protobuf field: optional string url = 4;
+     */
+    url?: string;
+}
+/**
+ * @generated from protobuf message RichBlock
+ */
+export interface RichBlock {
+    /**
+     * @generated from protobuf field: string block_id = 1;
+     */
+    blockId: string;
+    /**
+     * @generated from protobuf field: optional RichDirection direction = 2;
+     */
+    direction?: RichDirection;
+    /**
+     * @generated from protobuf oneof: block
+     */
+    block: {
+        oneofKind: "paragraph";
+        /**
+         * @generated from protobuf field: RichParagraphBlock paragraph = 10;
+         */
+        paragraph: RichParagraphBlock;
+    } | {
+        oneofKind: "heading";
+        /**
+         * @generated from protobuf field: RichHeadingBlock heading = 11;
+         */
+        heading: RichHeadingBlock;
+    } | {
+        oneofKind: "list";
+        /**
+         * @generated from protobuf field: RichListBlock list = 12;
+         */
+        list: RichListBlock;
+    } | {
+        oneofKind: "listItem";
+        /**
+         * @generated from protobuf field: RichListItemBlock list_item = 13;
+         */
+        listItem: RichListItemBlock;
+    } | {
+        oneofKind: "quote";
+        /**
+         * @generated from protobuf field: RichQuoteBlock quote = 14;
+         */
+        quote: RichQuoteBlock;
+    } | {
+        oneofKind: "code";
+        /**
+         * @generated from protobuf field: RichCodeBlock code = 15;
+         */
+        code: RichCodeBlock;
+    } | {
+        oneofKind: "divider";
+        /**
+         * @generated from protobuf field: RichDividerBlock divider = 16;
+         */
+        divider: RichDividerBlock;
+    } | {
+        oneofKind: "thinking";
+        /**
+         * @generated from protobuf field: RichThinkingBlock thinking = 17;
+         */
+        thinking: RichThinkingBlock;
+    } | {
+        oneofKind: "details";
+        /**
+         * @generated from protobuf field: RichDetailsBlock details = 18;
+         */
+        details: RichDetailsBlock;
+    } | {
+        oneofKind: "photo";
+        /**
+         * @generated from protobuf field: RichPhotoBlock photo = 19;
+         */
+        photo: RichPhotoBlock;
+    } | {
+        oneofKind: "video";
+        /**
+         * @generated from protobuf field: RichVideoBlock video = 20;
+         */
+        video: RichVideoBlock;
+    } | {
+        oneofKind: "document";
+        /**
+         * @generated from protobuf field: RichDocumentBlock document = 21;
+         */
+        document: RichDocumentBlock;
+    } | {
+        oneofKind: "audio";
+        /**
+         * @generated from protobuf field: RichAudioBlock audio = 22;
+         */
+        audio: RichAudioBlock;
+    } | {
+        oneofKind: "table";
+        /**
+         * @generated from protobuf field: RichTableBlock table = 23;
+         */
+        table: RichTableBlock;
+    } | {
+        oneofKind: "math";
+        /**
+         * @generated from protobuf field: RichMathBlock math = 24;
+         */
+        math: RichMathBlock;
+    } | {
+        oneofKind: "map";
+        /**
+         * @generated from protobuf field: RichMapBlock map = 25;
+         */
+        map: RichMapBlock;
+    } | {
+        oneofKind: "embed";
+        /**
+         * @generated from protobuf field: RichEmbedBlock embed = 26;
+         */
+        embed: RichEmbedBlock;
+    } | {
+        oneofKind: "embedPost";
+        /**
+         * @generated from protobuf field: RichEmbedPostBlock embed_post = 27;
+         */
+        embedPost: RichEmbedPostBlock;
+    } | {
+        oneofKind: "linkPreview";
+        /**
+         * @generated from protobuf field: RichLinkPreviewBlock link_preview = 28;
+         */
+        linkPreview: RichLinkPreviewBlock;
+    } | {
+        oneofKind: "collage";
+        /**
+         * @generated from protobuf field: RichCollageBlock collage = 29;
+         */
+        collage: RichCollageBlock;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message RichParagraphBlock
+ */
+export interface RichParagraphBlock {
+    /**
+     * @generated from protobuf field: repeated RichText text = 1;
+     */
+    text: RichText[];
+}
+/**
+ * @generated from protobuf message RichHeadingBlock
+ */
+export interface RichHeadingBlock {
+    /**
+     * @generated from protobuf field: repeated RichText text = 1;
+     */
+    text: RichText[];
+    /**
+     * @generated from protobuf field: int32 level = 2;
+     */
+    level: number;
+}
+/**
+ * @generated from protobuf message RichListBlock
+ */
+export interface RichListBlock {
+    /**
+     * @generated from protobuf field: bool ordered = 1;
+     */
+    ordered: boolean;
+    /**
+     * @generated from protobuf field: int32 start = 2;
+     */
+    start: number;
+    /**
+     * @generated from protobuf field: repeated RichListItemBlock items = 3;
+     */
+    items: RichListItemBlock[];
+}
+/**
+ * @generated from protobuf message RichListItemBlock
+ */
+export interface RichListItemBlock {
+    /**
+     * @generated from protobuf field: repeated RichBlock blocks = 1;
+     */
+    blocks: RichBlock[];
+    /**
+     * @generated from protobuf field: optional bool checked = 2;
+     */
+    checked?: boolean;
+}
+/**
+ * @generated from protobuf message RichQuoteBlock
+ */
+export interface RichQuoteBlock {
+    /**
+     * @generated from protobuf field: repeated RichBlock blocks = 1;
+     */
+    blocks: RichBlock[];
+    /**
+     * @generated from protobuf field: bool expandable = 2;
+     */
+    expandable: boolean;
+    /**
+     * @generated from protobuf field: bool initially_collapsed = 3;
+     */
+    initiallyCollapsed: boolean;
+}
+/**
+ * @generated from protobuf message RichCodeBlock
+ */
+export interface RichCodeBlock {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
+    /**
+     * @generated from protobuf field: optional string language = 2;
+     */
+    language?: string;
+}
+/**
+ * @generated from protobuf message RichDividerBlock
+ */
+export interface RichDividerBlock {
+}
+/**
+ * @generated from protobuf message RichThinkingBlock
+ */
+export interface RichThinkingBlock {
+    /**
+     * @generated from protobuf field: repeated RichBlock blocks = 1;
+     */
+    blocks: RichBlock[];
+    /**
+     * @generated from protobuf field: bool initially_collapsed = 2;
+     */
+    initiallyCollapsed: boolean;
+}
+/**
+ * @generated from protobuf message RichDetailsBlock
+ */
+export interface RichDetailsBlock {
+    /**
+     * @generated from protobuf field: repeated RichText title = 1;
+     */
+    title: RichText[];
+    /**
+     * @generated from protobuf field: repeated RichBlock blocks = 2;
+     */
+    blocks: RichBlock[];
+    /**
+     * @generated from protobuf field: bool initially_open = 3;
+     */
+    initiallyOpen: boolean;
+}
+/**
+ * @generated from protobuf message RichMediaRef
+ */
+export interface RichMediaRef {
+    /**
+     * @generated from protobuf field: string alt = 1;
+     */
+    alt: string;
+    /**
+     * @generated from protobuf field: optional string file_name = 2;
+     */
+    fileName?: string;
+    /**
+     * @generated from protobuf field: optional int32 width = 3;
+     */
+    width?: number;
+    /**
+     * @generated from protobuf field: optional int32 height = 4;
+     */
+    height?: number;
+    /**
+     * @generated from protobuf field: optional string mime_type = 5;
+     */
+    mimeType?: string;
+    /**
+     * @generated from protobuf field: optional string cdn_url = 6;
+     */
+    cdnUrl?: string;
+    /**
+     * @generated from protobuf field: optional string file_unique_id = 7;
+     */
+    fileUniqueId?: string;
+    /**
+     * @generated from protobuf oneof: media
+     */
+    media: {
+        oneofKind: "photoId";
+        /**
+         * @generated from protobuf field: int64 photo_id = 10;
+         */
+        photoId: bigint;
+    } | {
+        oneofKind: "videoId";
+        /**
+         * @generated from protobuf field: int64 video_id = 11;
+         */
+        videoId: bigint;
+    } | {
+        oneofKind: "documentId";
+        /**
+         * @generated from protobuf field: int64 document_id = 12;
+         */
+        documentId: bigint;
+    } | {
+        oneofKind: "voiceId";
+        /**
+         * @generated from protobuf field: int64 voice_id = 13;
+         */
+        voiceId: bigint;
+    } | {
+        oneofKind: "publicUrl";
+        /**
+         * @generated from protobuf field: string public_url = 14;
+         */
+        publicUrl: string;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message RichPhotoBlock
+ */
+export interface RichPhotoBlock {
+    /**
+     * @generated from protobuf field: RichMediaRef media = 1;
+     */
+    media?: RichMediaRef;
+    /**
+     * @generated from protobuf field: repeated RichText caption = 2;
+     */
+    caption: RichText[];
+}
+/**
+ * @generated from protobuf message RichVideoBlock
+ */
+export interface RichVideoBlock {
+    /**
+     * @generated from protobuf field: RichMediaRef media = 1;
+     */
+    media?: RichMediaRef;
+    /**
+     * @generated from protobuf field: repeated RichText caption = 2;
+     */
+    caption: RichText[];
+    /**
+     * @generated from protobuf field: optional int32 duration = 3;
+     */
+    duration?: number;
+}
+/**
+ * @generated from protobuf message RichDocumentBlock
+ */
+export interface RichDocumentBlock {
+    /**
+     * @generated from protobuf field: RichMediaRef media = 1;
+     */
+    media?: RichMediaRef;
+    /**
+     * @generated from protobuf field: repeated RichText caption = 2;
+     */
+    caption: RichText[];
+}
+/**
+ * @generated from protobuf message RichAudioBlock
+ */
+export interface RichAudioBlock {
+    /**
+     * @generated from protobuf field: RichMediaRef media = 1;
+     */
+    media?: RichMediaRef;
+    /**
+     * @generated from protobuf field: repeated RichText caption = 2;
+     */
+    caption: RichText[];
+    /**
+     * @generated from protobuf field: optional int32 duration = 3;
+     */
+    duration?: number;
+    /**
+     * @generated from protobuf field: optional string title = 4;
+     */
+    title?: string;
+    /**
+     * @generated from protobuf field: optional string performer = 5;
+     */
+    performer?: string;
+}
+/**
+ * @generated from protobuf message RichTableBlock
+ */
+export interface RichTableBlock {
+    /**
+     * @generated from protobuf field: repeated RichTableRow rows = 1;
+     */
+    rows: RichTableRow[];
+    /**
+     * @generated from protobuf field: repeated RichText caption = 2;
+     */
+    caption: RichText[];
+    /**
+     * @generated from protobuf field: bool bordered = 3;
+     */
+    bordered: boolean;
+    /**
+     * @generated from protobuf field: bool striped = 4;
+     */
+    striped: boolean;
+}
+/**
+ * @generated from protobuf message RichTableRow
+ */
+export interface RichTableRow {
+    /**
+     * @generated from protobuf field: repeated RichTableCell cells = 1;
+     */
+    cells: RichTableCell[];
+}
+/**
+ * @generated from protobuf message RichTableCell
+ */
+export interface RichTableCell {
+    /**
+     * @generated from protobuf field: repeated RichText text = 1;
+     */
+    text: RichText[];
+    /**
+     * @generated from protobuf field: bool header = 2;
+     */
+    header: boolean;
+    /**
+     * @generated from protobuf field: int32 colspan = 3;
+     */
+    colspan: number;
+    /**
+     * @generated from protobuf field: int32 rowspan = 4;
+     */
+    rowspan: number;
+    /**
+     * @generated from protobuf field: optional RichHorizontalAlign align = 5;
+     */
+    align?: RichHorizontalAlign;
+    /**
+     * @generated from protobuf field: optional RichVerticalAlign valign = 6;
+     */
+    valign?: RichVerticalAlign;
+}
+/**
+ * @generated from protobuf message RichMathBlock
+ */
+export interface RichMathBlock {
+    /**
+     * @generated from protobuf field: string source = 1;
+     */
+    source: string;
+    /**
+     * @generated from protobuf field: bool display = 2;
+     */
+    display: boolean;
+    /**
+     * @generated from protobuf field: optional string fallback = 3;
+     */
+    fallback?: string;
+}
+/**
+ * @generated from protobuf message RichMapBlock
+ */
+export interface RichMapBlock {
+    /**
+     * @generated from protobuf field: double latitude = 1;
+     */
+    latitude: number;
+    /**
+     * @generated from protobuf field: double longitude = 2;
+     */
+    longitude: number;
+    /**
+     * @generated from protobuf field: int32 zoom = 3;
+     */
+    zoom: number;
+    /**
+     * @generated from protobuf field: repeated RichText caption = 4;
+     */
+    caption: RichText[];
+    /**
+     * @generated from protobuf field: optional string title = 5;
+     */
+    title?: string;
+    /**
+     * @generated from protobuf field: optional string address = 6;
+     */
+    address?: string;
+    /**
+     * @generated from protobuf field: optional string open_url = 7;
+     */
+    openUrl?: string;
+    /**
+     * @generated from protobuf field: optional float aspect_ratio = 8;
+     */
+    aspectRatio?: number;
+}
+/**
+ * @generated from protobuf message RichEmbedBlock
+ */
+export interface RichEmbedBlock {
+    /**
+     * @generated from protobuf field: optional string url = 1;
+     */
+    url?: string;
+    /**
+     * @generated from protobuf field: optional string html = 2;
+     */
+    html?: string;
+    /**
+     * @generated from protobuf field: optional RichMediaRef poster = 3;
+     */
+    poster?: RichMediaRef;
+    /**
+     * @generated from protobuf field: optional int32 width = 4;
+     */
+    width?: number;
+    /**
+     * @generated from protobuf field: optional int32 height = 5;
+     */
+    height?: number;
+    /**
+     * @generated from protobuf field: repeated RichText caption = 6;
+     */
+    caption: RichText[];
+    /**
+     * @generated from protobuf field: bool full_width = 7;
+     */
+    fullWidth: boolean;
+    /**
+     * @generated from protobuf field: bool allow_scrolling = 8;
+     */
+    allowScrolling: boolean;
+    /**
+     * @generated from protobuf field: optional string provider = 9;
+     */
+    provider?: string;
+}
+/**
+ * @generated from protobuf message RichEmbedPostBlock
+ */
+export interface RichEmbedPostBlock {
+    /**
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: string author = 2;
+     */
+    author: string;
+    /**
+     * @generated from protobuf field: optional RichMediaRef author_photo = 3;
+     */
+    authorPhoto?: RichMediaRef;
+    /**
+     * @generated from protobuf field: optional int64 date = 4;
+     */
+    date?: bigint;
+    /**
+     * @generated from protobuf field: repeated RichBlock blocks = 5;
+     */
+    blocks: RichBlock[];
+    /**
+     * @generated from protobuf field: repeated RichText caption = 6;
+     */
+    caption: RichText[];
+}
+/**
+ * @generated from protobuf message RichLinkPreviewBlock
+ */
+export interface RichLinkPreviewBlock {
+    /**
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: optional string display_url = 2;
+     */
+    displayUrl?: string;
+    /**
+     * @generated from protobuf field: optional string site_name = 3;
+     */
+    siteName?: string;
+    /**
+     * @generated from protobuf field: optional string title = 4;
+     */
+    title?: string;
+    /**
+     * @generated from protobuf field: optional string description = 5;
+     */
+    description?: string;
+    /**
+     * @generated from protobuf field: optional RichMediaRef media = 6;
+     */
+    media?: RichMediaRef;
+    /**
+     * @generated from protobuf field: optional float media_aspect_ratio = 7;
+     */
+    mediaAspectRatio?: number;
+    /**
+     * @generated from protobuf field: bool compact = 8;
+     */
+    compact: boolean;
+}
+/**
+ * @generated from protobuf message RichCollageBlock
+ */
+export interface RichCollageBlock {
+    /**
+     * @generated from protobuf field: repeated RichBlock items = 1;
+     */
+    items: RichBlock[];
+    /**
+     * @generated from protobuf field: repeated RichText caption = 2;
+     */
+    caption: RichText[];
+    /**
+     * @generated from protobuf field: optional RichCollageLayout layout = 3;
+     */
+    layout?: RichCollageLayout;
+}
+/**
+ * @generated from protobuf message RichMessage
+ */
+export interface RichMessage {
+    /**
+     * @generated from protobuf field: repeated RichBlock blocks = 1;
+     */
+    blocks: RichBlock[];
+    /**
+     * @generated from protobuf field: optional RichDirection direction = 2;
+     */
+    direction?: RichDirection;
+    /**
+     * @generated from protobuf field: string fallback_text = 3;
+     */
+    fallbackText: string;
+    /**
+     * @generated from protobuf field: int32 version = 4;
+     */
+    version: number;
 }
 /**
  * @generated from protobuf message MessageReactions
@@ -2594,6 +3375,36 @@ export interface RpcCall {
          */
         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput;
     } | {
+        oneofKind: "connectionsList";
+        /**
+         * @generated from protobuf field: ConnectionsListInput connectionsList = 69;
+         */
+        connectionsList: ConnectionsListInput;
+    } | {
+        oneofKind: "openaiCodexStartDeviceAuth";
+        /**
+         * @generated from protobuf field: OpenAICodexStartDeviceAuthInput openaiCodexStartDeviceAuth = 70;
+         */
+        openaiCodexStartDeviceAuth: OpenAICodexStartDeviceAuthInput;
+    } | {
+        oneofKind: "openaiCodexPollDeviceAuth";
+        /**
+         * @generated from protobuf field: OpenAICodexPollDeviceAuthInput openaiCodexPollDeviceAuth = 71;
+         */
+        openaiCodexPollDeviceAuth: OpenAICodexPollDeviceAuthInput;
+    } | {
+        oneofKind: "connectionsDisconnect";
+        /**
+         * @generated from protobuf field: ConnectionsDisconnectInput connectionsDisconnect = 72;
+         */
+        connectionsDisconnect: ConnectionsDisconnectInput;
+    } | {
+        oneofKind: "sendRichMessageDraft";
+        /**
+         * @generated from protobuf field: SendRichMessageDraftInput sendRichMessageDraft = 73;
+         */
+        sendRichMessageDraft: SendRichMessageDraftInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3010,6 +3821,36 @@ export interface RpcResult {
          * @generated from protobuf field: RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
          */
         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult;
+    } | {
+        oneofKind: "connectionsList";
+        /**
+         * @generated from protobuf field: ConnectionsListResult connectionsList = 69;
+         */
+        connectionsList: ConnectionsListResult;
+    } | {
+        oneofKind: "openaiCodexStartDeviceAuth";
+        /**
+         * @generated from protobuf field: OpenAICodexStartDeviceAuthResult openaiCodexStartDeviceAuth = 70;
+         */
+        openaiCodexStartDeviceAuth: OpenAICodexStartDeviceAuthResult;
+    } | {
+        oneofKind: "openaiCodexPollDeviceAuth";
+        /**
+         * @generated from protobuf field: OpenAICodexPollDeviceAuthResult openaiCodexPollDeviceAuth = 71;
+         */
+        openaiCodexPollDeviceAuth: OpenAICodexPollDeviceAuthResult;
+    } | {
+        oneofKind: "connectionsDisconnect";
+        /**
+         * @generated from protobuf field: ConnectionsDisconnectResult connectionsDisconnect = 72;
+         */
+        connectionsDisconnect: ConnectionsDisconnectResult;
+    } | {
+        oneofKind: "sendRichMessageDraft";
+        /**
+         * @generated from protobuf field: SendRichMessageDraftResult sendRichMessageDraft = 73;
+         */
+        sendRichMessageDraft: SendRichMessageDraftResult;
     } | {
         oneofKind: undefined;
     };
@@ -3875,6 +4716,160 @@ export interface UpdateProfileResult {
     updates: Update[];
 }
 /**
+ * @generated from protobuf message OAuthConnectionInfo
+ */
+export interface OAuthConnectionInfo {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: string provider = 2;
+     */
+    provider: string;
+    /**
+     * @generated from protobuf field: InputScope scope = 3;
+     */
+    scope?: InputScope;
+    /**
+     * @generated from protobuf field: OAuthConnectionStatus status = 4;
+     */
+    status: OAuthConnectionStatus;
+    /**
+     * @generated from protobuf field: optional string display_name = 5;
+     */
+    displayName?: string;
+    /**
+     * @generated from protobuf field: optional string email = 6;
+     */
+    email?: string;
+    /**
+     * @generated from protobuf field: optional string plan = 7;
+     */
+    plan?: string;
+    /**
+     * @generated from protobuf field: optional int64 expires_at = 8;
+     */
+    expiresAt?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 last_used_at = 9;
+     */
+    lastUsedAt?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 error_at = 10;
+     */
+    errorAt?: bigint;
+    /**
+     * @generated from protobuf field: optional string error_code = 11;
+     */
+    errorCode?: string;
+}
+/**
+ * @generated from protobuf message ConnectionsListInput
+ */
+export interface ConnectionsListInput {
+}
+/**
+ * @generated from protobuf message ConnectionsListResult
+ */
+export interface ConnectionsListResult {
+    /**
+     * @generated from protobuf field: repeated OAuthConnectionInfo connections = 1;
+     */
+    connections: OAuthConnectionInfo[];
+}
+/**
+ * @generated from protobuf message OpenAICodexStartDeviceAuthInput
+ */
+export interface OpenAICodexStartDeviceAuthInput {
+    /**
+     * @generated from protobuf field: InputScope scope = 1;
+     */
+    scope?: InputScope;
+}
+/**
+ * @generated from protobuf message OpenAICodexDeviceAuthPrompt
+ */
+export interface OpenAICodexDeviceAuthPrompt {
+    /**
+     * @generated from protobuf field: string pending_id = 1;
+     */
+    pendingId: string;
+    /**
+     * @generated from protobuf field: string verification_url = 2;
+     */
+    verificationUrl: string;
+    /**
+     * @generated from protobuf field: string user_code = 3;
+     */
+    userCode: string;
+    /**
+     * @generated from protobuf field: int64 expires_at = 4;
+     */
+    expiresAt: bigint;
+    /**
+     * @generated from protobuf field: int32 interval_seconds = 5;
+     */
+    intervalSeconds: number;
+}
+/**
+ * @generated from protobuf message OpenAICodexStartDeviceAuthResult
+ */
+export interface OpenAICodexStartDeviceAuthResult {
+    /**
+     * @generated from protobuf field: OpenAICodexDeviceAuthPrompt auth = 1;
+     */
+    auth?: OpenAICodexDeviceAuthPrompt;
+}
+/**
+ * @generated from protobuf message OpenAICodexPollDeviceAuthInput
+ */
+export interface OpenAICodexPollDeviceAuthInput {
+    /**
+     * @generated from protobuf field: string pending_id = 1;
+     */
+    pendingId: string;
+}
+/**
+ * @generated from protobuf message OpenAICodexPollDeviceAuthResult
+ */
+export interface OpenAICodexPollDeviceAuthResult {
+    /**
+     * @generated from protobuf field: OpenAICodexDeviceAuthStatus status = 1;
+     */
+    status: OpenAICodexDeviceAuthStatus;
+    /**
+     * @generated from protobuf field: optional OAuthConnectionInfo connection = 2;
+     */
+    connection?: OAuthConnectionInfo;
+    /**
+     * @generated from protobuf field: optional string error_code = 3;
+     */
+    errorCode?: string;
+    /**
+     * @generated from protobuf field: optional string error_message = 4;
+     */
+    errorMessage?: string;
+}
+/**
+ * @generated from protobuf message ConnectionsDisconnectInput
+ */
+export interface ConnectionsDisconnectInput {
+    /**
+     * @generated from protobuf field: int64 connection_id = 1;
+     */
+    connectionId: bigint;
+}
+/**
+ * @generated from protobuf message ConnectionsDisconnectResult
+ */
+export interface ConnectionsDisconnectResult {
+    /**
+     * @generated from protobuf field: bool disconnected = 1;
+     */
+    disconnected: boolean;
+}
+/**
  * @generated from protobuf message BotCommand
  */
 export interface BotCommand {
@@ -4699,6 +5694,14 @@ export interface EditMessageInput {
      * @generated from protobuf field: optional MessageActions actions = 9;
      */
     actions?: MessageActions;
+    /**
+     * @generated from protobuf field: optional RichMessage rich_text = 10;
+     */
+    richText?: RichMessage;
+    /**
+     * @generated from protobuf field: optional bool parse_rich_markdown = 11;
+     */
+    parseRichMarkdown?: boolean;
 }
 /**
  * @generated from protobuf message EditMessageResult
@@ -4873,6 +5876,18 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional MessageActions actions = 10;
      */
     actions?: MessageActions;
+    /**
+     * Optional block rich text payload. `message` remains the fallback text.
+     *
+     * @generated from protobuf field: optional RichMessage rich_text = 11;
+     */
+    richText?: RichMessage;
+    /**
+     * Parse message as Markdown and store the resulting rich text payload.
+     *
+     * @generated from protobuf field: optional bool parse_rich_markdown = 12;
+     */
+    parseRichMarkdown?: boolean;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -4882,6 +5897,40 @@ export interface SendMessageResult {
      * @generated from protobuf field: repeated Update updates = 2;
      */
     updates: Update[];
+}
+/**
+ * @generated from protobuf message SendRichMessageDraftInput
+ */
+export interface SendRichMessageDraftInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: string draft_id = 2;
+     */
+    draftId: string;
+    /**
+     * @generated from protobuf field: optional int64 message_id = 3;
+     */
+    messageId?: bigint;
+    /**
+     * @generated from protobuf field: optional RichMessage rich_text = 4;
+     */
+    richText?: RichMessage;
+    /**
+     * @generated from protobuf field: optional bool clear = 5;
+     */
+    clear?: boolean;
+    /**
+     * @generated from protobuf field: optional int32 ttl_seconds = 6;
+     */
+    ttlSeconds?: number;
+}
+/**
+ * @generated from protobuf message SendRichMessageDraftResult
+ */
+export interface SendRichMessageDraftResult {
 }
 /**
  * @generated from protobuf message InvokeMessageActionInput
@@ -5529,6 +6578,12 @@ export interface Update {
          */
         updatedUser: UpdateUpdatedUser;
     } | {
+        oneofKind: "richMessageDraft";
+        /**
+         * @generated from protobuf field: UpdateRichMessageDraft rich_message_draft = 41;
+         */
+        richMessageDraft: UpdateRichMessageDraft;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -6004,6 +7059,42 @@ export interface UpdateEditMessage {
      * @generated from protobuf field: Message message = 1;
      */
     message?: Message;
+}
+/**
+ * Transient rich draft/progress snapshot. This is not persisted in the update
+ * log and is meant for temporary agent/bot progress UI such as thinking blocks.
+ *
+ * @generated from protobuf message UpdateRichMessageDraft
+ */
+export interface UpdateRichMessageDraft {
+    /**
+     * @generated from protobuf field: string draft_id = 1;
+     */
+    draftId: string;
+    /**
+     * @generated from protobuf field: Peer peer_id = 2;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: int64 sender_user_id = 3;
+     */
+    senderUserId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 message_id = 4;
+     */
+    messageId?: bigint;
+    /**
+     * @generated from protobuf field: optional RichMessage rich_text = 5;
+     */
+    richText?: RichMessage;
+    /**
+     * @generated from protobuf field: int64 expires_at = 6;
+     */
+    expiresAt: bigint;
+    /**
+     * @generated from protobuf field: bool clear = 7;
+     */
+    clear: boolean;
 }
 /**
  * Update when messages are deleted
@@ -6617,6 +7708,10 @@ export interface DraftMessage {
      * @generated from protobuf field: optional MessageEntities entities = 2;
      */
     entities?: MessageEntities;
+    /**
+     * @generated from protobuf field: optional RichMessage rich_text = 3;
+     */
+    richText?: RichMessage;
 }
 /**
  * @generated from protobuf enum DialogFollowMode
@@ -6643,6 +7738,119 @@ export enum MessageSendMode {
      * @generated from protobuf enum value: MODE_SILENT = 1;
      */
     MODE_SILENT = 1
+}
+/**
+ * @generated from protobuf enum RichDirection
+ */
+export enum RichDirection {
+    /**
+     * @generated from protobuf enum value: DIRECTION_UNSPECIFIED = 0;
+     */
+    DIRECTION_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: DIRECTION_AUTO = 1;
+     */
+    DIRECTION_AUTO = 1,
+    /**
+     * @generated from protobuf enum value: DIRECTION_LTR = 2;
+     */
+    DIRECTION_LTR = 2,
+    /**
+     * @generated from protobuf enum value: DIRECTION_RTL = 3;
+     */
+    DIRECTION_RTL = 3
+}
+/**
+ * @generated from protobuf enum RichTextStyle
+ */
+export enum RichTextStyle {
+    /**
+     * @generated from protobuf enum value: STYLE_UNSPECIFIED = 0;
+     */
+    STYLE_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: STYLE_BOLD = 1;
+     */
+    STYLE_BOLD = 1,
+    /**
+     * @generated from protobuf enum value: STYLE_ITALIC = 2;
+     */
+    STYLE_ITALIC = 2,
+    /**
+     * @generated from protobuf enum value: STYLE_UNDERLINE = 3;
+     */
+    STYLE_UNDERLINE = 3,
+    /**
+     * @generated from protobuf enum value: STYLE_STRIKETHROUGH = 4;
+     */
+    STYLE_STRIKETHROUGH = 4,
+    /**
+     * @generated from protobuf enum value: STYLE_CODE = 5;
+     */
+    STYLE_CODE = 5,
+    /**
+     * @generated from protobuf enum value: STYLE_SPOILER = 6;
+     */
+    STYLE_SPOILER = 6
+}
+/**
+ * @generated from protobuf enum RichHorizontalAlign
+ */
+export enum RichHorizontalAlign {
+    /**
+     * @generated from protobuf enum value: HORIZONTAL_ALIGN_UNSPECIFIED = 0;
+     */
+    HORIZONTAL_ALIGN_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: HORIZONTAL_ALIGN_LEFT = 1;
+     */
+    HORIZONTAL_ALIGN_LEFT = 1,
+    /**
+     * @generated from protobuf enum value: HORIZONTAL_ALIGN_CENTER = 2;
+     */
+    HORIZONTAL_ALIGN_CENTER = 2,
+    /**
+     * @generated from protobuf enum value: HORIZONTAL_ALIGN_RIGHT = 3;
+     */
+    HORIZONTAL_ALIGN_RIGHT = 3
+}
+/**
+ * @generated from protobuf enum RichVerticalAlign
+ */
+export enum RichVerticalAlign {
+    /**
+     * @generated from protobuf enum value: VERTICAL_ALIGN_UNSPECIFIED = 0;
+     */
+    VERTICAL_ALIGN_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: VERTICAL_ALIGN_TOP = 1;
+     */
+    VERTICAL_ALIGN_TOP = 1,
+    /**
+     * @generated from protobuf enum value: VERTICAL_ALIGN_MIDDLE = 2;
+     */
+    VERTICAL_ALIGN_MIDDLE = 2,
+    /**
+     * @generated from protobuf enum value: VERTICAL_ALIGN_BOTTOM = 3;
+     */
+    VERTICAL_ALIGN_BOTTOM = 3
+}
+/**
+ * @generated from protobuf enum RichCollageLayout
+ */
+export enum RichCollageLayout {
+    /**
+     * @generated from protobuf enum value: COLLAGE_LAYOUT_UNSPECIFIED = 0;
+     */
+    COLLAGE_LAYOUT_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: COLLAGE_LAYOUT_GRID = 1;
+     */
+    COLLAGE_LAYOUT_GRID = 1,
+    /**
+     * @generated from protobuf enum value: COLLAGE_LAYOUT_MASONRY = 2;
+     */
+    COLLAGE_LAYOUT_MASONRY = 2
 }
 /**
  * @generated from protobuf enum Method
@@ -6919,7 +8127,27 @@ export enum Method {
     /**
      * @generated from protobuf enum value: REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
      */
-    REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67
+    REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67,
+    /**
+     * @generated from protobuf enum value: CONNECTIONS_LIST = 68;
+     */
+    CONNECTIONS_LIST = 68,
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_START_DEVICE_AUTH = 69;
+     */
+    OPENAI_CODEX_START_DEVICE_AUTH = 69,
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_POLL_DEVICE_AUTH = 70;
+     */
+    OPENAI_CODEX_POLL_DEVICE_AUTH = 70,
+    /**
+     * @generated from protobuf enum value: CONNECTIONS_DISCONNECT = 71;
+     */
+    CONNECTIONS_DISCONNECT = 71,
+    /**
+     * @generated from protobuf enum value: SEND_RICH_MESSAGE_DRAFT = 72;
+     */
+    SEND_RICH_MESSAGE_DRAFT = 72
 }
 /**
  * @generated from protobuf enum UsernameAvailability
@@ -6949,6 +8177,56 @@ export enum UsernameAvailability {
      * @generated from protobuf enum value: USERNAME_INVALID = 5;
      */
     USERNAME_INVALID = 5
+}
+/**
+ * @generated from protobuf enum OAuthConnectionStatus
+ */
+export enum OAuthConnectionStatus {
+    /**
+     * @generated from protobuf enum value: OAUTH_CONNECTION_STATUS_UNSPECIFIED = 0;
+     */
+    OAUTH_CONNECTION_STATUS_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: OAUTH_CONNECTION_ACTIVE = 1;
+     */
+    OAUTH_CONNECTION_ACTIVE = 1,
+    /**
+     * @generated from protobuf enum value: OAUTH_CONNECTION_ERROR = 2;
+     */
+    OAUTH_CONNECTION_ERROR = 2,
+    /**
+     * @generated from protobuf enum value: OAUTH_CONNECTION_REVOKED = 3;
+     */
+    OAUTH_CONNECTION_REVOKED = 3
+}
+/**
+ * @generated from protobuf enum OpenAICodexDeviceAuthStatus
+ */
+export enum OpenAICodexDeviceAuthStatus {
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_DEVICE_AUTH_STATUS_UNSPECIFIED = 0;
+     */
+    OPENAI_CODEX_DEVICE_AUTH_STATUS_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_DEVICE_AUTH_PENDING = 1;
+     */
+    OPENAI_CODEX_DEVICE_AUTH_PENDING = 1,
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_DEVICE_AUTH_CONNECTED = 2;
+     */
+    OPENAI_CODEX_DEVICE_AUTH_CONNECTED = 2,
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_DEVICE_AUTH_EXPIRED = 3;
+     */
+    OPENAI_CODEX_DEVICE_AUTH_EXPIRED = 3,
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_DEVICE_AUTH_DENIED = 4;
+     */
+    OPENAI_CODEX_DEVICE_AUTH_DENIED = 4,
+    /**
+     * @generated from protobuf enum value: OPENAI_CODEX_DEVICE_AUTH_ERROR = 5;
+     */
+    OPENAI_CODEX_DEVICE_AUTH_ERROR = 5
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -7019,7 +8297,11 @@ export enum SearchMessagesFilter {
     /**
      * @generated from protobuf enum value: FILTER_LINKS = 5;
      */
-    FILTER_LINKS = 5
+    FILTER_LINKS = 5,
+    /**
+     * @generated from protobuf enum value: FILTER_VOICE = 6;
+     */
+    FILTER_VOICE = 6
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -7964,6 +9246,312 @@ class PeerUser$Type extends MessageType<PeerUser> {
  */
 export const PeerUser = new PeerUser$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class InputScope$Type extends MessageType<InputScope> {
+    constructor() {
+        super("InputScope", [
+            { no: 1, name: "user", kind: "message", oneof: "type", T: () => InputScopeUser },
+            { no: 2, name: "space", kind: "message", oneof: "type", T: () => InputScopeSpace }
+        ]);
+    }
+    create(value?: PartialMessage<InputScope>): InputScope {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.type = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<InputScope>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputScope): InputScope {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputScopeUser user */ 1:
+                    message.type = {
+                        oneofKind: "user",
+                        user: InputScopeUser.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).user)
+                    };
+                    break;
+                case /* InputScopeSpace space */ 2:
+                    message.type = {
+                        oneofKind: "space",
+                        space: InputScopeSpace.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).space)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputScope, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputScopeUser user = 1; */
+        if (message.type.oneofKind === "user")
+            InputScopeUser.internalBinaryWrite(message.type.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* InputScopeSpace space = 2; */
+        if (message.type.oneofKind === "space")
+            InputScopeSpace.internalBinaryWrite(message.type.space, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputScope
+ */
+export const InputScope = new InputScope$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputScopeUser$Type extends MessageType<InputScopeUser> {
+    constructor() {
+        super("InputScopeUser", [
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputScopeUser>): InputScopeUser {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputScopeUser>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputScopeUser): InputScopeUser {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputScopeUser, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.userId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputScopeUser
+ */
+export const InputScopeUser = new InputScopeUser$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputScopeSpace$Type extends MessageType<InputScopeSpace> {
+    constructor() {
+        super("InputScopeSpace", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputScopeSpace>): InputScopeSpace {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputScopeSpace>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputScopeSpace): InputScopeSpace {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputScopeSpace, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputScopeSpace
+ */
+export const InputScopeSpace = new InputScopeSpace$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Scope$Type extends MessageType<Scope> {
+    constructor() {
+        super("Scope", [
+            { no: 1, name: "user", kind: "message", oneof: "type", T: () => ScopeUser },
+            { no: 2, name: "space", kind: "message", oneof: "type", T: () => ScopeSpace }
+        ]);
+    }
+    create(value?: PartialMessage<Scope>): Scope {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.type = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<Scope>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Scope): Scope {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ScopeUser user */ 1:
+                    message.type = {
+                        oneofKind: "user",
+                        user: ScopeUser.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).user)
+                    };
+                    break;
+                case /* ScopeSpace space */ 2:
+                    message.type = {
+                        oneofKind: "space",
+                        space: ScopeSpace.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).space)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Scope, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ScopeUser user = 1; */
+        if (message.type.oneofKind === "user")
+            ScopeUser.internalBinaryWrite(message.type.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* ScopeSpace space = 2; */
+        if (message.type.oneofKind === "space")
+            ScopeSpace.internalBinaryWrite(message.type.space, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Scope
+ */
+export const Scope = new Scope$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ScopeUser$Type extends MessageType<ScopeUser> {
+    constructor() {
+        super("ScopeUser", [
+            { no: 1, name: "user", kind: "message", T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<ScopeUser>): ScopeUser {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ScopeUser>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ScopeUser): ScopeUser {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ScopeUser, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ScopeUser
+ */
+export const ScopeUser = new ScopeUser$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ScopeSpace$Type extends MessageType<ScopeSpace> {
+    constructor() {
+        super("ScopeSpace", [
+            { no: 1, name: "space", kind: "message", T: () => Space }
+        ]);
+    }
+    create(value?: PartialMessage<ScopeSpace>): ScopeSpace {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ScopeSpace>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ScopeSpace): ScopeSpace {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Space space */ 1:
+                    message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ScopeSpace, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Space space = 1; */
+        if (message.space)
+            Space.internalBinaryWrite(message.space, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ScopeSpace
+ */
+export const ScopeSpace = new ScopeSpace$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class BotAvatar$Type extends MessageType<BotAvatar> {
     constructor() {
         super("BotAvatar", [
@@ -8110,7 +9698,8 @@ class User$Type extends MessageType<User> {
             { no: 12, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 13, name: "bot", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 14, name: "bot_avatar", kind: "message", T: () => BotAvatar },
-            { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 16, name: "verified", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -8167,6 +9756,9 @@ class User$Type extends MessageType<User> {
                 case /* optional string bio */ 15:
                     message.bio = reader.string();
                     break;
+                case /* optional bool verified */ 16:
+                    message.verified = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8221,6 +9813,9 @@ class User$Type extends MessageType<User> {
         /* optional string bio = 15; */
         if (message.bio !== undefined)
             writer.tag(15, WireType.LengthDelimited).string(message.bio);
+        /* optional bool verified = 16; */
+        if (message.verified !== undefined)
+            writer.tag(16, WireType.Varint).bool(message.verified);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9053,7 +10648,8 @@ class Message$Type extends MessageType<Message> {
             { no: 18, name: "fwd_from", kind: "message", T: () => MessageFwdHeader },
             { no: 19, name: "replies", kind: "message", T: () => MessageReplies },
             { no: 20, name: "actions", kind: "message", T: () => MessageActions },
-            { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 22, name: "rich_text", kind: "message", T: () => RichMessage }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -9138,6 +10734,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional int64 rev */ 21:
                     message.rev = reader.int64().toBigInt();
                     break;
+                case /* optional RichMessage rich_text */ 22:
+                    message.richText = RichMessage.internalBinaryRead(reader, reader.uint32(), options, message.richText);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9216,6 +10815,9 @@ class Message$Type extends MessageType<Message> {
         /* optional int64 rev = 21; */
         if (message.rev !== undefined)
             writer.tag(21, WireType.Varint).int64(message.rev);
+        /* optional RichMessage rich_text = 22; */
+        if (message.richText)
+            RichMessage.internalBinaryWrite(message.richText, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9692,6 +11294,1985 @@ class MessageEntity_MessageEntityThreadTitle$Type extends MessageType<MessageEnt
  * @generated MessageType for protobuf message MessageEntity.MessageEntityThreadTitle
  */
 export const MessageEntity_MessageEntityThreadTitle = new MessageEntity_MessageEntityThreadTitle$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichText$Type extends MessageType<RichText> {
+    constructor() {
+        super("RichText", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 3, name: "styles", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["RichTextStyle", RichTextStyle] },
+            { no: 4, name: "url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichText>): RichText {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        message.children = [];
+        message.styles = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichText>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichText): RichText {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                case /* repeated RichText children */ 2:
+                    message.children.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated RichTextStyle styles */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.styles.push(reader.int32());
+                    else
+                        message.styles.push(reader.int32());
+                    break;
+                case /* optional string url */ 4:
+                    message.url = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichText, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        /* repeated RichText children = 2; */
+        for (let i = 0; i < message.children.length; i++)
+            RichText.internalBinaryWrite(message.children[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichTextStyle styles = 3; */
+        if (message.styles.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.styles.length; i++)
+                writer.int32(message.styles[i]);
+            writer.join();
+        }
+        /* optional string url = 4; */
+        if (message.url !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.url);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichText
+ */
+export const RichText = new RichText$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichBlock$Type extends MessageType<RichBlock> {
+    constructor() {
+        super("RichBlock", [
+            { no: 1, name: "block_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "direction", kind: "enum", opt: true, T: () => ["RichDirection", RichDirection] },
+            { no: 10, name: "paragraph", kind: "message", oneof: "block", T: () => RichParagraphBlock },
+            { no: 11, name: "heading", kind: "message", oneof: "block", T: () => RichHeadingBlock },
+            { no: 12, name: "list", kind: "message", oneof: "block", T: () => RichListBlock },
+            { no: 13, name: "list_item", kind: "message", oneof: "block", T: () => RichListItemBlock },
+            { no: 14, name: "quote", kind: "message", oneof: "block", T: () => RichQuoteBlock },
+            { no: 15, name: "code", kind: "message", oneof: "block", T: () => RichCodeBlock },
+            { no: 16, name: "divider", kind: "message", oneof: "block", T: () => RichDividerBlock },
+            { no: 17, name: "thinking", kind: "message", oneof: "block", T: () => RichThinkingBlock },
+            { no: 18, name: "details", kind: "message", oneof: "block", T: () => RichDetailsBlock },
+            { no: 19, name: "photo", kind: "message", oneof: "block", T: () => RichPhotoBlock },
+            { no: 20, name: "video", kind: "message", oneof: "block", T: () => RichVideoBlock },
+            { no: 21, name: "document", kind: "message", oneof: "block", T: () => RichDocumentBlock },
+            { no: 22, name: "audio", kind: "message", oneof: "block", T: () => RichAudioBlock },
+            { no: 23, name: "table", kind: "message", oneof: "block", T: () => RichTableBlock },
+            { no: 24, name: "math", kind: "message", oneof: "block", T: () => RichMathBlock },
+            { no: 25, name: "map", kind: "message", oneof: "block", T: () => RichMapBlock },
+            { no: 26, name: "embed", kind: "message", oneof: "block", T: () => RichEmbedBlock },
+            { no: 27, name: "embed_post", kind: "message", oneof: "block", T: () => RichEmbedPostBlock },
+            { no: 28, name: "link_preview", kind: "message", oneof: "block", T: () => RichLinkPreviewBlock },
+            { no: 29, name: "collage", kind: "message", oneof: "block", T: () => RichCollageBlock }
+        ]);
+    }
+    create(value?: PartialMessage<RichBlock>): RichBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.blockId = "";
+        message.block = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<RichBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichBlock): RichBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string block_id */ 1:
+                    message.blockId = reader.string();
+                    break;
+                case /* optional RichDirection direction */ 2:
+                    message.direction = reader.int32();
+                    break;
+                case /* RichParagraphBlock paragraph */ 10:
+                    message.block = {
+                        oneofKind: "paragraph",
+                        paragraph: RichParagraphBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).paragraph)
+                    };
+                    break;
+                case /* RichHeadingBlock heading */ 11:
+                    message.block = {
+                        oneofKind: "heading",
+                        heading: RichHeadingBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).heading)
+                    };
+                    break;
+                case /* RichListBlock list */ 12:
+                    message.block = {
+                        oneofKind: "list",
+                        list: RichListBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).list)
+                    };
+                    break;
+                case /* RichListItemBlock list_item */ 13:
+                    message.block = {
+                        oneofKind: "listItem",
+                        listItem: RichListItemBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).listItem)
+                    };
+                    break;
+                case /* RichQuoteBlock quote */ 14:
+                    message.block = {
+                        oneofKind: "quote",
+                        quote: RichQuoteBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).quote)
+                    };
+                    break;
+                case /* RichCodeBlock code */ 15:
+                    message.block = {
+                        oneofKind: "code",
+                        code: RichCodeBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).code)
+                    };
+                    break;
+                case /* RichDividerBlock divider */ 16:
+                    message.block = {
+                        oneofKind: "divider",
+                        divider: RichDividerBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).divider)
+                    };
+                    break;
+                case /* RichThinkingBlock thinking */ 17:
+                    message.block = {
+                        oneofKind: "thinking",
+                        thinking: RichThinkingBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).thinking)
+                    };
+                    break;
+                case /* RichDetailsBlock details */ 18:
+                    message.block = {
+                        oneofKind: "details",
+                        details: RichDetailsBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).details)
+                    };
+                    break;
+                case /* RichPhotoBlock photo */ 19:
+                    message.block = {
+                        oneofKind: "photo",
+                        photo: RichPhotoBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).photo)
+                    };
+                    break;
+                case /* RichVideoBlock video */ 20:
+                    message.block = {
+                        oneofKind: "video",
+                        video: RichVideoBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).video)
+                    };
+                    break;
+                case /* RichDocumentBlock document */ 21:
+                    message.block = {
+                        oneofKind: "document",
+                        document: RichDocumentBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).document)
+                    };
+                    break;
+                case /* RichAudioBlock audio */ 22:
+                    message.block = {
+                        oneofKind: "audio",
+                        audio: RichAudioBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).audio)
+                    };
+                    break;
+                case /* RichTableBlock table */ 23:
+                    message.block = {
+                        oneofKind: "table",
+                        table: RichTableBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).table)
+                    };
+                    break;
+                case /* RichMathBlock math */ 24:
+                    message.block = {
+                        oneofKind: "math",
+                        math: RichMathBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).math)
+                    };
+                    break;
+                case /* RichMapBlock map */ 25:
+                    message.block = {
+                        oneofKind: "map",
+                        map: RichMapBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).map)
+                    };
+                    break;
+                case /* RichEmbedBlock embed */ 26:
+                    message.block = {
+                        oneofKind: "embed",
+                        embed: RichEmbedBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).embed)
+                    };
+                    break;
+                case /* RichEmbedPostBlock embed_post */ 27:
+                    message.block = {
+                        oneofKind: "embedPost",
+                        embedPost: RichEmbedPostBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).embedPost)
+                    };
+                    break;
+                case /* RichLinkPreviewBlock link_preview */ 28:
+                    message.block = {
+                        oneofKind: "linkPreview",
+                        linkPreview: RichLinkPreviewBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).linkPreview)
+                    };
+                    break;
+                case /* RichCollageBlock collage */ 29:
+                    message.block = {
+                        oneofKind: "collage",
+                        collage: RichCollageBlock.internalBinaryRead(reader, reader.uint32(), options, (message.block as any).collage)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string block_id = 1; */
+        if (message.blockId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.blockId);
+        /* optional RichDirection direction = 2; */
+        if (message.direction !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.direction);
+        /* RichParagraphBlock paragraph = 10; */
+        if (message.block.oneofKind === "paragraph")
+            RichParagraphBlock.internalBinaryWrite(message.block.paragraph, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* RichHeadingBlock heading = 11; */
+        if (message.block.oneofKind === "heading")
+            RichHeadingBlock.internalBinaryWrite(message.block.heading, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* RichListBlock list = 12; */
+        if (message.block.oneofKind === "list")
+            RichListBlock.internalBinaryWrite(message.block.list, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
+        /* RichListItemBlock list_item = 13; */
+        if (message.block.oneofKind === "listItem")
+            RichListItemBlock.internalBinaryWrite(message.block.listItem, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
+        /* RichQuoteBlock quote = 14; */
+        if (message.block.oneofKind === "quote")
+            RichQuoteBlock.internalBinaryWrite(message.block.quote, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
+        /* RichCodeBlock code = 15; */
+        if (message.block.oneofKind === "code")
+            RichCodeBlock.internalBinaryWrite(message.block.code, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
+        /* RichDividerBlock divider = 16; */
+        if (message.block.oneofKind === "divider")
+            RichDividerBlock.internalBinaryWrite(message.block.divider, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* RichThinkingBlock thinking = 17; */
+        if (message.block.oneofKind === "thinking")
+            RichThinkingBlock.internalBinaryWrite(message.block.thinking, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
+        /* RichDetailsBlock details = 18; */
+        if (message.block.oneofKind === "details")
+            RichDetailsBlock.internalBinaryWrite(message.block.details, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
+        /* RichPhotoBlock photo = 19; */
+        if (message.block.oneofKind === "photo")
+            RichPhotoBlock.internalBinaryWrite(message.block.photo, writer.tag(19, WireType.LengthDelimited).fork(), options).join();
+        /* RichVideoBlock video = 20; */
+        if (message.block.oneofKind === "video")
+            RichVideoBlock.internalBinaryWrite(message.block.video, writer.tag(20, WireType.LengthDelimited).fork(), options).join();
+        /* RichDocumentBlock document = 21; */
+        if (message.block.oneofKind === "document")
+            RichDocumentBlock.internalBinaryWrite(message.block.document, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
+        /* RichAudioBlock audio = 22; */
+        if (message.block.oneofKind === "audio")
+            RichAudioBlock.internalBinaryWrite(message.block.audio, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
+        /* RichTableBlock table = 23; */
+        if (message.block.oneofKind === "table")
+            RichTableBlock.internalBinaryWrite(message.block.table, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        /* RichMathBlock math = 24; */
+        if (message.block.oneofKind === "math")
+            RichMathBlock.internalBinaryWrite(message.block.math, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
+        /* RichMapBlock map = 25; */
+        if (message.block.oneofKind === "map")
+            RichMapBlock.internalBinaryWrite(message.block.map, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
+        /* RichEmbedBlock embed = 26; */
+        if (message.block.oneofKind === "embed")
+            RichEmbedBlock.internalBinaryWrite(message.block.embed, writer.tag(26, WireType.LengthDelimited).fork(), options).join();
+        /* RichEmbedPostBlock embed_post = 27; */
+        if (message.block.oneofKind === "embedPost")
+            RichEmbedPostBlock.internalBinaryWrite(message.block.embedPost, writer.tag(27, WireType.LengthDelimited).fork(), options).join();
+        /* RichLinkPreviewBlock link_preview = 28; */
+        if (message.block.oneofKind === "linkPreview")
+            RichLinkPreviewBlock.internalBinaryWrite(message.block.linkPreview, writer.tag(28, WireType.LengthDelimited).fork(), options).join();
+        /* RichCollageBlock collage = 29; */
+        if (message.block.oneofKind === "collage")
+            RichCollageBlock.internalBinaryWrite(message.block.collage, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichBlock
+ */
+export const RichBlock = new RichBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichParagraphBlock$Type extends MessageType<RichParagraphBlock> {
+    constructor() {
+        super("RichParagraphBlock", [
+            { no: 1, name: "text", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText }
+        ]);
+    }
+    create(value?: PartialMessage<RichParagraphBlock>): RichParagraphBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichParagraphBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichParagraphBlock): RichParagraphBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichText text */ 1:
+                    message.text.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichParagraphBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichText text = 1; */
+        for (let i = 0; i < message.text.length; i++)
+            RichText.internalBinaryWrite(message.text[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichParagraphBlock
+ */
+export const RichParagraphBlock = new RichParagraphBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichHeadingBlock$Type extends MessageType<RichHeadingBlock> {
+    constructor() {
+        super("RichHeadingBlock", [
+            { no: 1, name: "text", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 2, name: "level", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichHeadingBlock>): RichHeadingBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = [];
+        message.level = 0;
+        if (value !== undefined)
+            reflectionMergePartial<RichHeadingBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichHeadingBlock): RichHeadingBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichText text */ 1:
+                    message.text.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* int32 level */ 2:
+                    message.level = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichHeadingBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichText text = 1; */
+        for (let i = 0; i < message.text.length; i++)
+            RichText.internalBinaryWrite(message.text[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int32 level = 2; */
+        if (message.level !== 0)
+            writer.tag(2, WireType.Varint).int32(message.level);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichHeadingBlock
+ */
+export const RichHeadingBlock = new RichHeadingBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichListBlock$Type extends MessageType<RichListBlock> {
+    constructor() {
+        super("RichListBlock", [
+            { no: 1, name: "ordered", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "start", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "items", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichListItemBlock }
+        ]);
+    }
+    create(value?: PartialMessage<RichListBlock>): RichListBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.ordered = false;
+        message.start = 0;
+        message.items = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichListBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichListBlock): RichListBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool ordered */ 1:
+                    message.ordered = reader.bool();
+                    break;
+                case /* int32 start */ 2:
+                    message.start = reader.int32();
+                    break;
+                case /* repeated RichListItemBlock items */ 3:
+                    message.items.push(RichListItemBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichListBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool ordered = 1; */
+        if (message.ordered !== false)
+            writer.tag(1, WireType.Varint).bool(message.ordered);
+        /* int32 start = 2; */
+        if (message.start !== 0)
+            writer.tag(2, WireType.Varint).int32(message.start);
+        /* repeated RichListItemBlock items = 3; */
+        for (let i = 0; i < message.items.length; i++)
+            RichListItemBlock.internalBinaryWrite(message.items[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichListBlock
+ */
+export const RichListBlock = new RichListBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichListItemBlock$Type extends MessageType<RichListItemBlock> {
+    constructor() {
+        super("RichListItemBlock", [
+            { no: 1, name: "blocks", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichBlock },
+            { no: 2, name: "checked", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichListItemBlock>): RichListItemBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.blocks = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichListItemBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichListItemBlock): RichListItemBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichBlock blocks */ 1:
+                    message.blocks.push(RichBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool checked */ 2:
+                    message.checked = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichListItemBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichBlock blocks = 1; */
+        for (let i = 0; i < message.blocks.length; i++)
+            RichBlock.internalBinaryWrite(message.blocks[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool checked = 2; */
+        if (message.checked !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.checked);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichListItemBlock
+ */
+export const RichListItemBlock = new RichListItemBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichQuoteBlock$Type extends MessageType<RichQuoteBlock> {
+    constructor() {
+        super("RichQuoteBlock", [
+            { no: 1, name: "blocks", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichBlock },
+            { no: 2, name: "expandable", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "initially_collapsed", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichQuoteBlock>): RichQuoteBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.blocks = [];
+        message.expandable = false;
+        message.initiallyCollapsed = false;
+        if (value !== undefined)
+            reflectionMergePartial<RichQuoteBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichQuoteBlock): RichQuoteBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichBlock blocks */ 1:
+                    message.blocks.push(RichBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* bool expandable */ 2:
+                    message.expandable = reader.bool();
+                    break;
+                case /* bool initially_collapsed */ 3:
+                    message.initiallyCollapsed = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichQuoteBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichBlock blocks = 1; */
+        for (let i = 0; i < message.blocks.length; i++)
+            RichBlock.internalBinaryWrite(message.blocks[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool expandable = 2; */
+        if (message.expandable !== false)
+            writer.tag(2, WireType.Varint).bool(message.expandable);
+        /* bool initially_collapsed = 3; */
+        if (message.initiallyCollapsed !== false)
+            writer.tag(3, WireType.Varint).bool(message.initiallyCollapsed);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichQuoteBlock
+ */
+export const RichQuoteBlock = new RichQuoteBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichCodeBlock$Type extends MessageType<RichCodeBlock> {
+    constructor() {
+        super("RichCodeBlock", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "language", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichCodeBlock>): RichCodeBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<RichCodeBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichCodeBlock): RichCodeBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                case /* optional string language */ 2:
+                    message.language = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichCodeBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        /* optional string language = 2; */
+        if (message.language !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.language);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichCodeBlock
+ */
+export const RichCodeBlock = new RichCodeBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichDividerBlock$Type extends MessageType<RichDividerBlock> {
+    constructor() {
+        super("RichDividerBlock", []);
+    }
+    create(value?: PartialMessage<RichDividerBlock>): RichDividerBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<RichDividerBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichDividerBlock): RichDividerBlock {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: RichDividerBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichDividerBlock
+ */
+export const RichDividerBlock = new RichDividerBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichThinkingBlock$Type extends MessageType<RichThinkingBlock> {
+    constructor() {
+        super("RichThinkingBlock", [
+            { no: 1, name: "blocks", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichBlock },
+            { no: 2, name: "initially_collapsed", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichThinkingBlock>): RichThinkingBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.blocks = [];
+        message.initiallyCollapsed = false;
+        if (value !== undefined)
+            reflectionMergePartial<RichThinkingBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichThinkingBlock): RichThinkingBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichBlock blocks */ 1:
+                    message.blocks.push(RichBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* bool initially_collapsed */ 2:
+                    message.initiallyCollapsed = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichThinkingBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichBlock blocks = 1; */
+        for (let i = 0; i < message.blocks.length; i++)
+            RichBlock.internalBinaryWrite(message.blocks[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool initially_collapsed = 2; */
+        if (message.initiallyCollapsed !== false)
+            writer.tag(2, WireType.Varint).bool(message.initiallyCollapsed);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichThinkingBlock
+ */
+export const RichThinkingBlock = new RichThinkingBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichDetailsBlock$Type extends MessageType<RichDetailsBlock> {
+    constructor() {
+        super("RichDetailsBlock", [
+            { no: 1, name: "title", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 2, name: "blocks", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichBlock },
+            { no: 3, name: "initially_open", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichDetailsBlock>): RichDetailsBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.title = [];
+        message.blocks = [];
+        message.initiallyOpen = false;
+        if (value !== undefined)
+            reflectionMergePartial<RichDetailsBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichDetailsBlock): RichDetailsBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichText title */ 1:
+                    message.title.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated RichBlock blocks */ 2:
+                    message.blocks.push(RichBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* bool initially_open */ 3:
+                    message.initiallyOpen = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichDetailsBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichText title = 1; */
+        for (let i = 0; i < message.title.length; i++)
+            RichText.internalBinaryWrite(message.title[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichBlock blocks = 2; */
+        for (let i = 0; i < message.blocks.length; i++)
+            RichBlock.internalBinaryWrite(message.blocks[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* bool initially_open = 3; */
+        if (message.initiallyOpen !== false)
+            writer.tag(3, WireType.Varint).bool(message.initiallyOpen);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichDetailsBlock
+ */
+export const RichDetailsBlock = new RichDetailsBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichMediaRef$Type extends MessageType<RichMediaRef> {
+    constructor() {
+        super("RichMediaRef", [
+            { no: 1, name: "alt", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "file_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "width", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "height", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "mime_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "photo_id", kind: "scalar", oneof: "media", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 11, name: "video_id", kind: "scalar", oneof: "media", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 12, name: "document_id", kind: "scalar", oneof: "media", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 13, name: "voice_id", kind: "scalar", oneof: "media", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 14, name: "public_url", kind: "scalar", oneof: "media", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichMediaRef>): RichMediaRef {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.alt = "";
+        message.media = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<RichMediaRef>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichMediaRef): RichMediaRef {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string alt */ 1:
+                    message.alt = reader.string();
+                    break;
+                case /* optional string file_name */ 2:
+                    message.fileName = reader.string();
+                    break;
+                case /* optional int32 width */ 3:
+                    message.width = reader.int32();
+                    break;
+                case /* optional int32 height */ 4:
+                    message.height = reader.int32();
+                    break;
+                case /* optional string mime_type */ 5:
+                    message.mimeType = reader.string();
+                    break;
+                case /* optional string cdn_url */ 6:
+                    message.cdnUrl = reader.string();
+                    break;
+                case /* optional string file_unique_id */ 7:
+                    message.fileUniqueId = reader.string();
+                    break;
+                case /* int64 photo_id */ 10:
+                    message.media = {
+                        oneofKind: "photoId",
+                        photoId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* int64 video_id */ 11:
+                    message.media = {
+                        oneofKind: "videoId",
+                        videoId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* int64 document_id */ 12:
+                    message.media = {
+                        oneofKind: "documentId",
+                        documentId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* int64 voice_id */ 13:
+                    message.media = {
+                        oneofKind: "voiceId",
+                        voiceId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* string public_url */ 14:
+                    message.media = {
+                        oneofKind: "publicUrl",
+                        publicUrl: reader.string()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichMediaRef, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string alt = 1; */
+        if (message.alt !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.alt);
+        /* optional string file_name = 2; */
+        if (message.fileName !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.fileName);
+        /* optional int32 width = 3; */
+        if (message.width !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.width);
+        /* optional int32 height = 4; */
+        if (message.height !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.height);
+        /* optional string mime_type = 5; */
+        if (message.mimeType !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.mimeType);
+        /* optional string cdn_url = 6; */
+        if (message.cdnUrl !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.cdnUrl);
+        /* optional string file_unique_id = 7; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.fileUniqueId);
+        /* int64 photo_id = 10; */
+        if (message.media.oneofKind === "photoId")
+            writer.tag(10, WireType.Varint).int64(message.media.photoId);
+        /* int64 video_id = 11; */
+        if (message.media.oneofKind === "videoId")
+            writer.tag(11, WireType.Varint).int64(message.media.videoId);
+        /* int64 document_id = 12; */
+        if (message.media.oneofKind === "documentId")
+            writer.tag(12, WireType.Varint).int64(message.media.documentId);
+        /* int64 voice_id = 13; */
+        if (message.media.oneofKind === "voiceId")
+            writer.tag(13, WireType.Varint).int64(message.media.voiceId);
+        /* string public_url = 14; */
+        if (message.media.oneofKind === "publicUrl")
+            writer.tag(14, WireType.LengthDelimited).string(message.media.publicUrl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichMediaRef
+ */
+export const RichMediaRef = new RichMediaRef$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichPhotoBlock$Type extends MessageType<RichPhotoBlock> {
+    constructor() {
+        super("RichPhotoBlock", [
+            { no: 1, name: "media", kind: "message", T: () => RichMediaRef },
+            { no: 2, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText }
+        ]);
+    }
+    create(value?: PartialMessage<RichPhotoBlock>): RichPhotoBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.caption = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichPhotoBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichPhotoBlock): RichPhotoBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* RichMediaRef media */ 1:
+                    message.media = RichMediaRef.internalBinaryRead(reader, reader.uint32(), options, message.media);
+                    break;
+                case /* repeated RichText caption */ 2:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichPhotoBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* RichMediaRef media = 1; */
+        if (message.media)
+            RichMediaRef.internalBinaryWrite(message.media, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichText caption = 2; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichPhotoBlock
+ */
+export const RichPhotoBlock = new RichPhotoBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichVideoBlock$Type extends MessageType<RichVideoBlock> {
+    constructor() {
+        super("RichVideoBlock", [
+            { no: 1, name: "media", kind: "message", T: () => RichMediaRef },
+            { no: 2, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 3, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichVideoBlock>): RichVideoBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.caption = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichVideoBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichVideoBlock): RichVideoBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* RichMediaRef media */ 1:
+                    message.media = RichMediaRef.internalBinaryRead(reader, reader.uint32(), options, message.media);
+                    break;
+                case /* repeated RichText caption */ 2:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional int32 duration */ 3:
+                    message.duration = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichVideoBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* RichMediaRef media = 1; */
+        if (message.media)
+            RichMediaRef.internalBinaryWrite(message.media, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichText caption = 2; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional int32 duration = 3; */
+        if (message.duration !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.duration);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichVideoBlock
+ */
+export const RichVideoBlock = new RichVideoBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichDocumentBlock$Type extends MessageType<RichDocumentBlock> {
+    constructor() {
+        super("RichDocumentBlock", [
+            { no: 1, name: "media", kind: "message", T: () => RichMediaRef },
+            { no: 2, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText }
+        ]);
+    }
+    create(value?: PartialMessage<RichDocumentBlock>): RichDocumentBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.caption = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichDocumentBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichDocumentBlock): RichDocumentBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* RichMediaRef media */ 1:
+                    message.media = RichMediaRef.internalBinaryRead(reader, reader.uint32(), options, message.media);
+                    break;
+                case /* repeated RichText caption */ 2:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichDocumentBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* RichMediaRef media = 1; */
+        if (message.media)
+            RichMediaRef.internalBinaryWrite(message.media, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichText caption = 2; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichDocumentBlock
+ */
+export const RichDocumentBlock = new RichDocumentBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichAudioBlock$Type extends MessageType<RichAudioBlock> {
+    constructor() {
+        super("RichAudioBlock", [
+            { no: 1, name: "media", kind: "message", T: () => RichMediaRef },
+            { no: 2, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 3, name: "duration", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "performer", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichAudioBlock>): RichAudioBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.caption = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichAudioBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichAudioBlock): RichAudioBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* RichMediaRef media */ 1:
+                    message.media = RichMediaRef.internalBinaryRead(reader, reader.uint32(), options, message.media);
+                    break;
+                case /* repeated RichText caption */ 2:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional int32 duration */ 3:
+                    message.duration = reader.int32();
+                    break;
+                case /* optional string title */ 4:
+                    message.title = reader.string();
+                    break;
+                case /* optional string performer */ 5:
+                    message.performer = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichAudioBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* RichMediaRef media = 1; */
+        if (message.media)
+            RichMediaRef.internalBinaryWrite(message.media, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichText caption = 2; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional int32 duration = 3; */
+        if (message.duration !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.duration);
+        /* optional string title = 4; */
+        if (message.title !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.title);
+        /* optional string performer = 5; */
+        if (message.performer !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.performer);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichAudioBlock
+ */
+export const RichAudioBlock = new RichAudioBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichTableBlock$Type extends MessageType<RichTableBlock> {
+    constructor() {
+        super("RichTableBlock", [
+            { no: 1, name: "rows", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichTableRow },
+            { no: 2, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 3, name: "bordered", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "striped", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichTableBlock>): RichTableBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.rows = [];
+        message.caption = [];
+        message.bordered = false;
+        message.striped = false;
+        if (value !== undefined)
+            reflectionMergePartial<RichTableBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichTableBlock): RichTableBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichTableRow rows */ 1:
+                    message.rows.push(RichTableRow.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated RichText caption */ 2:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* bool bordered */ 3:
+                    message.bordered = reader.bool();
+                    break;
+                case /* bool striped */ 4:
+                    message.striped = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichTableBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichTableRow rows = 1; */
+        for (let i = 0; i < message.rows.length; i++)
+            RichTableRow.internalBinaryWrite(message.rows[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichText caption = 2; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* bool bordered = 3; */
+        if (message.bordered !== false)
+            writer.tag(3, WireType.Varint).bool(message.bordered);
+        /* bool striped = 4; */
+        if (message.striped !== false)
+            writer.tag(4, WireType.Varint).bool(message.striped);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichTableBlock
+ */
+export const RichTableBlock = new RichTableBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichTableRow$Type extends MessageType<RichTableRow> {
+    constructor() {
+        super("RichTableRow", [
+            { no: 1, name: "cells", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichTableCell }
+        ]);
+    }
+    create(value?: PartialMessage<RichTableRow>): RichTableRow {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.cells = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichTableRow>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichTableRow): RichTableRow {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichTableCell cells */ 1:
+                    message.cells.push(RichTableCell.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichTableRow, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichTableCell cells = 1; */
+        for (let i = 0; i < message.cells.length; i++)
+            RichTableCell.internalBinaryWrite(message.cells[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichTableRow
+ */
+export const RichTableRow = new RichTableRow$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichTableCell$Type extends MessageType<RichTableCell> {
+    constructor() {
+        super("RichTableCell", [
+            { no: 1, name: "text", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 2, name: "header", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "colspan", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "rowspan", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "align", kind: "enum", opt: true, T: () => ["RichHorizontalAlign", RichHorizontalAlign] },
+            { no: 6, name: "valign", kind: "enum", opt: true, T: () => ["RichVerticalAlign", RichVerticalAlign] }
+        ]);
+    }
+    create(value?: PartialMessage<RichTableCell>): RichTableCell {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = [];
+        message.header = false;
+        message.colspan = 0;
+        message.rowspan = 0;
+        if (value !== undefined)
+            reflectionMergePartial<RichTableCell>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichTableCell): RichTableCell {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichText text */ 1:
+                    message.text.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* bool header */ 2:
+                    message.header = reader.bool();
+                    break;
+                case /* int32 colspan */ 3:
+                    message.colspan = reader.int32();
+                    break;
+                case /* int32 rowspan */ 4:
+                    message.rowspan = reader.int32();
+                    break;
+                case /* optional RichHorizontalAlign align */ 5:
+                    message.align = reader.int32();
+                    break;
+                case /* optional RichVerticalAlign valign */ 6:
+                    message.valign = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichTableCell, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichText text = 1; */
+        for (let i = 0; i < message.text.length; i++)
+            RichText.internalBinaryWrite(message.text[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool header = 2; */
+        if (message.header !== false)
+            writer.tag(2, WireType.Varint).bool(message.header);
+        /* int32 colspan = 3; */
+        if (message.colspan !== 0)
+            writer.tag(3, WireType.Varint).int32(message.colspan);
+        /* int32 rowspan = 4; */
+        if (message.rowspan !== 0)
+            writer.tag(4, WireType.Varint).int32(message.rowspan);
+        /* optional RichHorizontalAlign align = 5; */
+        if (message.align !== undefined)
+            writer.tag(5, WireType.Varint).int32(message.align);
+        /* optional RichVerticalAlign valign = 6; */
+        if (message.valign !== undefined)
+            writer.tag(6, WireType.Varint).int32(message.valign);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichTableCell
+ */
+export const RichTableCell = new RichTableCell$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichMathBlock$Type extends MessageType<RichMathBlock> {
+    constructor() {
+        super("RichMathBlock", [
+            { no: 1, name: "source", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "display", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "fallback", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichMathBlock>): RichMathBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.source = "";
+        message.display = false;
+        if (value !== undefined)
+            reflectionMergePartial<RichMathBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichMathBlock): RichMathBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string source */ 1:
+                    message.source = reader.string();
+                    break;
+                case /* bool display */ 2:
+                    message.display = reader.bool();
+                    break;
+                case /* optional string fallback */ 3:
+                    message.fallback = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichMathBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string source = 1; */
+        if (message.source !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.source);
+        /* bool display = 2; */
+        if (message.display !== false)
+            writer.tag(2, WireType.Varint).bool(message.display);
+        /* optional string fallback = 3; */
+        if (message.fallback !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.fallback);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichMathBlock
+ */
+export const RichMathBlock = new RichMathBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichMapBlock$Type extends MessageType<RichMapBlock> {
+    constructor() {
+        super("RichMapBlock", [
+            { no: 1, name: "latitude", kind: "scalar", T: 1 /*ScalarType.DOUBLE*/ },
+            { no: 2, name: "longitude", kind: "scalar", T: 1 /*ScalarType.DOUBLE*/ },
+            { no: 3, name: "zoom", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 5, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "address", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "open_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "aspect_ratio", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichMapBlock>): RichMapBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.latitude = 0;
+        message.longitude = 0;
+        message.zoom = 0;
+        message.caption = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichMapBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichMapBlock): RichMapBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* double latitude */ 1:
+                    message.latitude = reader.double();
+                    break;
+                case /* double longitude */ 2:
+                    message.longitude = reader.double();
+                    break;
+                case /* int32 zoom */ 3:
+                    message.zoom = reader.int32();
+                    break;
+                case /* repeated RichText caption */ 4:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional string title */ 5:
+                    message.title = reader.string();
+                    break;
+                case /* optional string address */ 6:
+                    message.address = reader.string();
+                    break;
+                case /* optional string open_url */ 7:
+                    message.openUrl = reader.string();
+                    break;
+                case /* optional float aspect_ratio */ 8:
+                    message.aspectRatio = reader.float();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichMapBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* double latitude = 1; */
+        if (message.latitude !== 0)
+            writer.tag(1, WireType.Bit64).double(message.latitude);
+        /* double longitude = 2; */
+        if (message.longitude !== 0)
+            writer.tag(2, WireType.Bit64).double(message.longitude);
+        /* int32 zoom = 3; */
+        if (message.zoom !== 0)
+            writer.tag(3, WireType.Varint).int32(message.zoom);
+        /* repeated RichText caption = 4; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional string title = 5; */
+        if (message.title !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.title);
+        /* optional string address = 6; */
+        if (message.address !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.address);
+        /* optional string open_url = 7; */
+        if (message.openUrl !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.openUrl);
+        /* optional float aspect_ratio = 8; */
+        if (message.aspectRatio !== undefined)
+            writer.tag(8, WireType.Bit32).float(message.aspectRatio);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichMapBlock
+ */
+export const RichMapBlock = new RichMapBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichEmbedBlock$Type extends MessageType<RichEmbedBlock> {
+    constructor() {
+        super("RichEmbedBlock", [
+            { no: 1, name: "url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "html", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "poster", kind: "message", T: () => RichMediaRef },
+            { no: 4, name: "width", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "height", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 7, name: "full_width", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 8, name: "allow_scrolling", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 9, name: "provider", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichEmbedBlock>): RichEmbedBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.caption = [];
+        message.fullWidth = false;
+        message.allowScrolling = false;
+        if (value !== undefined)
+            reflectionMergePartial<RichEmbedBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichEmbedBlock): RichEmbedBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* optional string html */ 2:
+                    message.html = reader.string();
+                    break;
+                case /* optional RichMediaRef poster */ 3:
+                    message.poster = RichMediaRef.internalBinaryRead(reader, reader.uint32(), options, message.poster);
+                    break;
+                case /* optional int32 width */ 4:
+                    message.width = reader.int32();
+                    break;
+                case /* optional int32 height */ 5:
+                    message.height = reader.int32();
+                    break;
+                case /* repeated RichText caption */ 6:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* bool full_width */ 7:
+                    message.fullWidth = reader.bool();
+                    break;
+                case /* bool allow_scrolling */ 8:
+                    message.allowScrolling = reader.bool();
+                    break;
+                case /* optional string provider */ 9:
+                    message.provider = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichEmbedBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string url = 1; */
+        if (message.url !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* optional string html = 2; */
+        if (message.html !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.html);
+        /* optional RichMediaRef poster = 3; */
+        if (message.poster)
+            RichMediaRef.internalBinaryWrite(message.poster, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional int32 width = 4; */
+        if (message.width !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.width);
+        /* optional int32 height = 5; */
+        if (message.height !== undefined)
+            writer.tag(5, WireType.Varint).int32(message.height);
+        /* repeated RichText caption = 6; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* bool full_width = 7; */
+        if (message.fullWidth !== false)
+            writer.tag(7, WireType.Varint).bool(message.fullWidth);
+        /* bool allow_scrolling = 8; */
+        if (message.allowScrolling !== false)
+            writer.tag(8, WireType.Varint).bool(message.allowScrolling);
+        /* optional string provider = 9; */
+        if (message.provider !== undefined)
+            writer.tag(9, WireType.LengthDelimited).string(message.provider);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichEmbedBlock
+ */
+export const RichEmbedBlock = new RichEmbedBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichEmbedPostBlock$Type extends MessageType<RichEmbedPostBlock> {
+    constructor() {
+        super("RichEmbedPostBlock", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "author", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "author_photo", kind: "message", T: () => RichMediaRef },
+            { no: 4, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "blocks", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichBlock },
+            { no: 6, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText }
+        ]);
+    }
+    create(value?: PartialMessage<RichEmbedPostBlock>): RichEmbedPostBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        message.author = "";
+        message.blocks = [];
+        message.caption = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichEmbedPostBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichEmbedPostBlock): RichEmbedPostBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* string author */ 2:
+                    message.author = reader.string();
+                    break;
+                case /* optional RichMediaRef author_photo */ 3:
+                    message.authorPhoto = RichMediaRef.internalBinaryRead(reader, reader.uint32(), options, message.authorPhoto);
+                    break;
+                case /* optional int64 date */ 4:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                case /* repeated RichBlock blocks */ 5:
+                    message.blocks.push(RichBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated RichText caption */ 6:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichEmbedPostBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* string author = 2; */
+        if (message.author !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.author);
+        /* optional RichMediaRef author_photo = 3; */
+        if (message.authorPhoto)
+            RichMediaRef.internalBinaryWrite(message.authorPhoto, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 date = 4; */
+        if (message.date !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.date);
+        /* repeated RichBlock blocks = 5; */
+        for (let i = 0; i < message.blocks.length; i++)
+            RichBlock.internalBinaryWrite(message.blocks[i], writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichText caption = 6; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichEmbedPostBlock
+ */
+export const RichEmbedPostBlock = new RichEmbedPostBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichLinkPreviewBlock$Type extends MessageType<RichLinkPreviewBlock> {
+    constructor() {
+        super("RichLinkPreviewBlock", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "display_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "site_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "media", kind: "message", T: () => RichMediaRef },
+            { no: 7, name: "media_aspect_ratio", kind: "scalar", opt: true, T: 2 /*ScalarType.FLOAT*/ },
+            { no: 8, name: "compact", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichLinkPreviewBlock>): RichLinkPreviewBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        message.compact = false;
+        if (value !== undefined)
+            reflectionMergePartial<RichLinkPreviewBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichLinkPreviewBlock): RichLinkPreviewBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* optional string display_url */ 2:
+                    message.displayUrl = reader.string();
+                    break;
+                case /* optional string site_name */ 3:
+                    message.siteName = reader.string();
+                    break;
+                case /* optional string title */ 4:
+                    message.title = reader.string();
+                    break;
+                case /* optional string description */ 5:
+                    message.description = reader.string();
+                    break;
+                case /* optional RichMediaRef media */ 6:
+                    message.media = RichMediaRef.internalBinaryRead(reader, reader.uint32(), options, message.media);
+                    break;
+                case /* optional float media_aspect_ratio */ 7:
+                    message.mediaAspectRatio = reader.float();
+                    break;
+                case /* bool compact */ 8:
+                    message.compact = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichLinkPreviewBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* optional string display_url = 2; */
+        if (message.displayUrl !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.displayUrl);
+        /* optional string site_name = 3; */
+        if (message.siteName !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.siteName);
+        /* optional string title = 4; */
+        if (message.title !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.title);
+        /* optional string description = 5; */
+        if (message.description !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.description);
+        /* optional RichMediaRef media = 6; */
+        if (message.media)
+            RichMediaRef.internalBinaryWrite(message.media, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional float media_aspect_ratio = 7; */
+        if (message.mediaAspectRatio !== undefined)
+            writer.tag(7, WireType.Bit32).float(message.mediaAspectRatio);
+        /* bool compact = 8; */
+        if (message.compact !== false)
+            writer.tag(8, WireType.Varint).bool(message.compact);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichLinkPreviewBlock
+ */
+export const RichLinkPreviewBlock = new RichLinkPreviewBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichCollageBlock$Type extends MessageType<RichCollageBlock> {
+    constructor() {
+        super("RichCollageBlock", [
+            { no: 1, name: "items", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichBlock },
+            { no: 2, name: "caption", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichText },
+            { no: 3, name: "layout", kind: "enum", opt: true, T: () => ["RichCollageLayout", RichCollageLayout] }
+        ]);
+    }
+    create(value?: PartialMessage<RichCollageBlock>): RichCollageBlock {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.items = [];
+        message.caption = [];
+        if (value !== undefined)
+            reflectionMergePartial<RichCollageBlock>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichCollageBlock): RichCollageBlock {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichBlock items */ 1:
+                    message.items.push(RichBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated RichText caption */ 2:
+                    message.caption.push(RichText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional RichCollageLayout layout */ 3:
+                    message.layout = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichCollageBlock, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichBlock items = 1; */
+        for (let i = 0; i < message.items.length; i++)
+            RichBlock.internalBinaryWrite(message.items[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated RichText caption = 2; */
+        for (let i = 0; i < message.caption.length; i++)
+            RichText.internalBinaryWrite(message.caption[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional RichCollageLayout layout = 3; */
+        if (message.layout !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.layout);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichCollageBlock
+ */
+export const RichCollageBlock = new RichCollageBlock$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RichMessage$Type extends MessageType<RichMessage> {
+    constructor() {
+        super("RichMessage", [
+            { no: 1, name: "blocks", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => RichBlock },
+            { no: 2, name: "direction", kind: "enum", opt: true, T: () => ["RichDirection", RichDirection] },
+            { no: 3, name: "fallback_text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "version", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RichMessage>): RichMessage {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.blocks = [];
+        message.fallbackText = "";
+        message.version = 0;
+        if (value !== undefined)
+            reflectionMergePartial<RichMessage>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RichMessage): RichMessage {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated RichBlock blocks */ 1:
+                    message.blocks.push(RichBlock.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional RichDirection direction */ 2:
+                    message.direction = reader.int32();
+                    break;
+                case /* string fallback_text */ 3:
+                    message.fallbackText = reader.string();
+                    break;
+                case /* int32 version */ 4:
+                    message.version = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RichMessage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated RichBlock blocks = 1; */
+        for (let i = 0; i < message.blocks.length; i++)
+            RichBlock.internalBinaryWrite(message.blocks[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional RichDirection direction = 2; */
+        if (message.direction !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.direction);
+        /* string fallback_text = 3; */
+        if (message.fallbackText !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.fallbackText);
+        /* int32 version = 4; */
+        if (message.version !== 0)
+            writer.tag(4, WireType.Varint).int32(message.version);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RichMessage
+ */
+export const RichMessage = new RichMessage$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageReactions$Type extends MessageType<MessageReactions> {
     constructor() {
@@ -11744,7 +15325,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 65, name: "updateProfile", kind: "message", oneof: "input", T: () => UpdateProfileInput },
             { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "input", T: () => GetSpaceUrlPreviewExclusionsInput },
             { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => AddSpaceUrlPreviewExclusionInput },
-            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => RemoveSpaceUrlPreviewExclusionInput }
+            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => RemoveSpaceUrlPreviewExclusionInput },
+            { no: 69, name: "connectionsList", kind: "message", oneof: "input", T: () => ConnectionsListInput },
+            { no: 70, name: "openaiCodexStartDeviceAuth", kind: "message", oneof: "input", T: () => OpenAICodexStartDeviceAuthInput },
+            { no: 71, name: "openaiCodexPollDeviceAuth", kind: "message", oneof: "input", T: () => OpenAICodexPollDeviceAuthInput },
+            { no: 72, name: "connectionsDisconnect", kind: "message", oneof: "input", T: () => ConnectionsDisconnectInput },
+            { no: 73, name: "sendRichMessageDraft", kind: "message", oneof: "input", T: () => SendRichMessageDraftInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -12165,6 +15751,36 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).removeSpaceUrlPreviewExclusion)
                     };
                     break;
+                case /* ConnectionsListInput connectionsList */ 69:
+                    message.input = {
+                        oneofKind: "connectionsList",
+                        connectionsList: ConnectionsListInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).connectionsList)
+                    };
+                    break;
+                case /* OpenAICodexStartDeviceAuthInput openaiCodexStartDeviceAuth */ 70:
+                    message.input = {
+                        oneofKind: "openaiCodexStartDeviceAuth",
+                        openaiCodexStartDeviceAuth: OpenAICodexStartDeviceAuthInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).openaiCodexStartDeviceAuth)
+                    };
+                    break;
+                case /* OpenAICodexPollDeviceAuthInput openaiCodexPollDeviceAuth */ 71:
+                    message.input = {
+                        oneofKind: "openaiCodexPollDeviceAuth",
+                        openaiCodexPollDeviceAuth: OpenAICodexPollDeviceAuthInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).openaiCodexPollDeviceAuth)
+                    };
+                    break;
+                case /* ConnectionsDisconnectInput connectionsDisconnect */ 72:
+                    message.input = {
+                        oneofKind: "connectionsDisconnect",
+                        connectionsDisconnect: ConnectionsDisconnectInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).connectionsDisconnect)
+                    };
+                    break;
+                case /* SendRichMessageDraftInput sendRichMessageDraft */ 73:
+                    message.input = {
+                        oneofKind: "sendRichMessageDraft",
+                        sendRichMessageDraft: SendRichMessageDraftInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).sendRichMessageDraft)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12381,6 +15997,21 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68; */
         if (message.input.oneofKind === "removeSpaceUrlPreviewExclusion")
             RemoveSpaceUrlPreviewExclusionInput.internalBinaryWrite(message.input.removeSpaceUrlPreviewExclusion, writer.tag(68, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectionsListInput connectionsList = 69; */
+        if (message.input.oneofKind === "connectionsList")
+            ConnectionsListInput.internalBinaryWrite(message.input.connectionsList, writer.tag(69, WireType.LengthDelimited).fork(), options).join();
+        /* OpenAICodexStartDeviceAuthInput openaiCodexStartDeviceAuth = 70; */
+        if (message.input.oneofKind === "openaiCodexStartDeviceAuth")
+            OpenAICodexStartDeviceAuthInput.internalBinaryWrite(message.input.openaiCodexStartDeviceAuth, writer.tag(70, WireType.LengthDelimited).fork(), options).join();
+        /* OpenAICodexPollDeviceAuthInput openaiCodexPollDeviceAuth = 71; */
+        if (message.input.oneofKind === "openaiCodexPollDeviceAuth")
+            OpenAICodexPollDeviceAuthInput.internalBinaryWrite(message.input.openaiCodexPollDeviceAuth, writer.tag(71, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectionsDisconnectInput connectionsDisconnect = 72; */
+        if (message.input.oneofKind === "connectionsDisconnect")
+            ConnectionsDisconnectInput.internalBinaryWrite(message.input.connectionsDisconnect, writer.tag(72, WireType.LengthDelimited).fork(), options).join();
+        /* SendRichMessageDraftInput sendRichMessageDraft = 73; */
+        if (message.input.oneofKind === "sendRichMessageDraft")
+            SendRichMessageDraftInput.internalBinaryWrite(message.input.sendRichMessageDraft, writer.tag(73, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12462,7 +16093,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 65, name: "updateProfile", kind: "message", oneof: "result", T: () => UpdateProfileResult },
             { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "result", T: () => GetSpaceUrlPreviewExclusionsResult },
             { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => AddSpaceUrlPreviewExclusionResult },
-            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => RemoveSpaceUrlPreviewExclusionResult }
+            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => RemoveSpaceUrlPreviewExclusionResult },
+            { no: 69, name: "connectionsList", kind: "message", oneof: "result", T: () => ConnectionsListResult },
+            { no: 70, name: "openaiCodexStartDeviceAuth", kind: "message", oneof: "result", T: () => OpenAICodexStartDeviceAuthResult },
+            { no: 71, name: "openaiCodexPollDeviceAuth", kind: "message", oneof: "result", T: () => OpenAICodexPollDeviceAuthResult },
+            { no: 72, name: "connectionsDisconnect", kind: "message", oneof: "result", T: () => ConnectionsDisconnectResult },
+            { no: 73, name: "sendRichMessageDraft", kind: "message", oneof: "result", T: () => SendRichMessageDraftResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -12883,6 +16519,36 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).removeSpaceUrlPreviewExclusion)
                     };
                     break;
+                case /* ConnectionsListResult connectionsList */ 69:
+                    message.result = {
+                        oneofKind: "connectionsList",
+                        connectionsList: ConnectionsListResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).connectionsList)
+                    };
+                    break;
+                case /* OpenAICodexStartDeviceAuthResult openaiCodexStartDeviceAuth */ 70:
+                    message.result = {
+                        oneofKind: "openaiCodexStartDeviceAuth",
+                        openaiCodexStartDeviceAuth: OpenAICodexStartDeviceAuthResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).openaiCodexStartDeviceAuth)
+                    };
+                    break;
+                case /* OpenAICodexPollDeviceAuthResult openaiCodexPollDeviceAuth */ 71:
+                    message.result = {
+                        oneofKind: "openaiCodexPollDeviceAuth",
+                        openaiCodexPollDeviceAuth: OpenAICodexPollDeviceAuthResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).openaiCodexPollDeviceAuth)
+                    };
+                    break;
+                case /* ConnectionsDisconnectResult connectionsDisconnect */ 72:
+                    message.result = {
+                        oneofKind: "connectionsDisconnect",
+                        connectionsDisconnect: ConnectionsDisconnectResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).connectionsDisconnect)
+                    };
+                    break;
+                case /* SendRichMessageDraftResult sendRichMessageDraft */ 73:
+                    message.result = {
+                        oneofKind: "sendRichMessageDraft",
+                        sendRichMessageDraft: SendRichMessageDraftResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).sendRichMessageDraft)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13099,6 +16765,21 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68; */
         if (message.result.oneofKind === "removeSpaceUrlPreviewExclusion")
             RemoveSpaceUrlPreviewExclusionResult.internalBinaryWrite(message.result.removeSpaceUrlPreviewExclusion, writer.tag(68, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectionsListResult connectionsList = 69; */
+        if (message.result.oneofKind === "connectionsList")
+            ConnectionsListResult.internalBinaryWrite(message.result.connectionsList, writer.tag(69, WireType.LengthDelimited).fork(), options).join();
+        /* OpenAICodexStartDeviceAuthResult openaiCodexStartDeviceAuth = 70; */
+        if (message.result.oneofKind === "openaiCodexStartDeviceAuth")
+            OpenAICodexStartDeviceAuthResult.internalBinaryWrite(message.result.openaiCodexStartDeviceAuth, writer.tag(70, WireType.LengthDelimited).fork(), options).join();
+        /* OpenAICodexPollDeviceAuthResult openaiCodexPollDeviceAuth = 71; */
+        if (message.result.oneofKind === "openaiCodexPollDeviceAuth")
+            OpenAICodexPollDeviceAuthResult.internalBinaryWrite(message.result.openaiCodexPollDeviceAuth, writer.tag(71, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectionsDisconnectResult connectionsDisconnect = 72; */
+        if (message.result.oneofKind === "connectionsDisconnect")
+            ConnectionsDisconnectResult.internalBinaryWrite(message.result.connectionsDisconnect, writer.tag(72, WireType.LengthDelimited).fork(), options).join();
+        /* SendRichMessageDraftResult sendRichMessageDraft = 73; */
+        if (message.result.oneofKind === "sendRichMessageDraft")
+            SendRichMessageDraftResult.internalBinaryWrite(message.result.sendRichMessageDraft, writer.tag(73, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -16014,6 +19695,577 @@ class UpdateProfileResult$Type extends MessageType<UpdateProfileResult> {
  */
 export const UpdateProfileResult = new UpdateProfileResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class OAuthConnectionInfo$Type extends MessageType<OAuthConnectionInfo> {
+    constructor() {
+        super("OAuthConnectionInfo", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "provider", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "scope", kind: "message", T: () => InputScope },
+            { no: 4, name: "status", kind: "enum", T: () => ["OAuthConnectionStatus", OAuthConnectionStatus] },
+            { no: 5, name: "display_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "email", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "plan", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "expires_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 9, name: "last_used_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 10, name: "error_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 11, name: "error_code", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<OAuthConnectionInfo>): OAuthConnectionInfo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.provider = "";
+        message.status = 0;
+        if (value !== undefined)
+            reflectionMergePartial<OAuthConnectionInfo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: OAuthConnectionInfo): OAuthConnectionInfo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* string provider */ 2:
+                    message.provider = reader.string();
+                    break;
+                case /* InputScope scope */ 3:
+                    message.scope = InputScope.internalBinaryRead(reader, reader.uint32(), options, message.scope);
+                    break;
+                case /* OAuthConnectionStatus status */ 4:
+                    message.status = reader.int32();
+                    break;
+                case /* optional string display_name */ 5:
+                    message.displayName = reader.string();
+                    break;
+                case /* optional string email */ 6:
+                    message.email = reader.string();
+                    break;
+                case /* optional string plan */ 7:
+                    message.plan = reader.string();
+                    break;
+                case /* optional int64 expires_at */ 8:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 last_used_at */ 9:
+                    message.lastUsedAt = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 error_at */ 10:
+                    message.errorAt = reader.int64().toBigInt();
+                    break;
+                case /* optional string error_code */ 11:
+                    message.errorCode = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: OAuthConnectionInfo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* string provider = 2; */
+        if (message.provider !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.provider);
+        /* InputScope scope = 3; */
+        if (message.scope)
+            InputScope.internalBinaryWrite(message.scope, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* OAuthConnectionStatus status = 4; */
+        if (message.status !== 0)
+            writer.tag(4, WireType.Varint).int32(message.status);
+        /* optional string display_name = 5; */
+        if (message.displayName !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.displayName);
+        /* optional string email = 6; */
+        if (message.email !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.email);
+        /* optional string plan = 7; */
+        if (message.plan !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.plan);
+        /* optional int64 expires_at = 8; */
+        if (message.expiresAt !== undefined)
+            writer.tag(8, WireType.Varint).int64(message.expiresAt);
+        /* optional int64 last_used_at = 9; */
+        if (message.lastUsedAt !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.lastUsedAt);
+        /* optional int64 error_at = 10; */
+        if (message.errorAt !== undefined)
+            writer.tag(10, WireType.Varint).int64(message.errorAt);
+        /* optional string error_code = 11; */
+        if (message.errorCode !== undefined)
+            writer.tag(11, WireType.LengthDelimited).string(message.errorCode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message OAuthConnectionInfo
+ */
+export const OAuthConnectionInfo = new OAuthConnectionInfo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectionsListInput$Type extends MessageType<ConnectionsListInput> {
+    constructor() {
+        super("ConnectionsListInput", []);
+    }
+    create(value?: PartialMessage<ConnectionsListInput>): ConnectionsListInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ConnectionsListInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectionsListInput): ConnectionsListInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: ConnectionsListInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectionsListInput
+ */
+export const ConnectionsListInput = new ConnectionsListInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectionsListResult$Type extends MessageType<ConnectionsListResult> {
+    constructor() {
+        super("ConnectionsListResult", [
+            { no: 1, name: "connections", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => OAuthConnectionInfo }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectionsListResult>): ConnectionsListResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.connections = [];
+        if (value !== undefined)
+            reflectionMergePartial<ConnectionsListResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectionsListResult): ConnectionsListResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated OAuthConnectionInfo connections */ 1:
+                    message.connections.push(OAuthConnectionInfo.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectionsListResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated OAuthConnectionInfo connections = 1; */
+        for (let i = 0; i < message.connections.length; i++)
+            OAuthConnectionInfo.internalBinaryWrite(message.connections[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectionsListResult
+ */
+export const ConnectionsListResult = new ConnectionsListResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class OpenAICodexStartDeviceAuthInput$Type extends MessageType<OpenAICodexStartDeviceAuthInput> {
+    constructor() {
+        super("OpenAICodexStartDeviceAuthInput", [
+            { no: 1, name: "scope", kind: "message", T: () => InputScope }
+        ]);
+    }
+    create(value?: PartialMessage<OpenAICodexStartDeviceAuthInput>): OpenAICodexStartDeviceAuthInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<OpenAICodexStartDeviceAuthInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: OpenAICodexStartDeviceAuthInput): OpenAICodexStartDeviceAuthInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputScope scope */ 1:
+                    message.scope = InputScope.internalBinaryRead(reader, reader.uint32(), options, message.scope);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: OpenAICodexStartDeviceAuthInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputScope scope = 1; */
+        if (message.scope)
+            InputScope.internalBinaryWrite(message.scope, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message OpenAICodexStartDeviceAuthInput
+ */
+export const OpenAICodexStartDeviceAuthInput = new OpenAICodexStartDeviceAuthInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class OpenAICodexDeviceAuthPrompt$Type extends MessageType<OpenAICodexDeviceAuthPrompt> {
+    constructor() {
+        super("OpenAICodexDeviceAuthPrompt", [
+            { no: 1, name: "pending_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "verification_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "user_code", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "interval_seconds", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<OpenAICodexDeviceAuthPrompt>): OpenAICodexDeviceAuthPrompt {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.pendingId = "";
+        message.verificationUrl = "";
+        message.userCode = "";
+        message.expiresAt = 0n;
+        message.intervalSeconds = 0;
+        if (value !== undefined)
+            reflectionMergePartial<OpenAICodexDeviceAuthPrompt>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: OpenAICodexDeviceAuthPrompt): OpenAICodexDeviceAuthPrompt {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string pending_id */ 1:
+                    message.pendingId = reader.string();
+                    break;
+                case /* string verification_url */ 2:
+                    message.verificationUrl = reader.string();
+                    break;
+                case /* string user_code */ 3:
+                    message.userCode = reader.string();
+                    break;
+                case /* int64 expires_at */ 4:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                case /* int32 interval_seconds */ 5:
+                    message.intervalSeconds = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: OpenAICodexDeviceAuthPrompt, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string pending_id = 1; */
+        if (message.pendingId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.pendingId);
+        /* string verification_url = 2; */
+        if (message.verificationUrl !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.verificationUrl);
+        /* string user_code = 3; */
+        if (message.userCode !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.userCode);
+        /* int64 expires_at = 4; */
+        if (message.expiresAt !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.expiresAt);
+        /* int32 interval_seconds = 5; */
+        if (message.intervalSeconds !== 0)
+            writer.tag(5, WireType.Varint).int32(message.intervalSeconds);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message OpenAICodexDeviceAuthPrompt
+ */
+export const OpenAICodexDeviceAuthPrompt = new OpenAICodexDeviceAuthPrompt$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class OpenAICodexStartDeviceAuthResult$Type extends MessageType<OpenAICodexStartDeviceAuthResult> {
+    constructor() {
+        super("OpenAICodexStartDeviceAuthResult", [
+            { no: 1, name: "auth", kind: "message", T: () => OpenAICodexDeviceAuthPrompt }
+        ]);
+    }
+    create(value?: PartialMessage<OpenAICodexStartDeviceAuthResult>): OpenAICodexStartDeviceAuthResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<OpenAICodexStartDeviceAuthResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: OpenAICodexStartDeviceAuthResult): OpenAICodexStartDeviceAuthResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* OpenAICodexDeviceAuthPrompt auth */ 1:
+                    message.auth = OpenAICodexDeviceAuthPrompt.internalBinaryRead(reader, reader.uint32(), options, message.auth);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: OpenAICodexStartDeviceAuthResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* OpenAICodexDeviceAuthPrompt auth = 1; */
+        if (message.auth)
+            OpenAICodexDeviceAuthPrompt.internalBinaryWrite(message.auth, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message OpenAICodexStartDeviceAuthResult
+ */
+export const OpenAICodexStartDeviceAuthResult = new OpenAICodexStartDeviceAuthResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class OpenAICodexPollDeviceAuthInput$Type extends MessageType<OpenAICodexPollDeviceAuthInput> {
+    constructor() {
+        super("OpenAICodexPollDeviceAuthInput", [
+            { no: 1, name: "pending_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<OpenAICodexPollDeviceAuthInput>): OpenAICodexPollDeviceAuthInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.pendingId = "";
+        if (value !== undefined)
+            reflectionMergePartial<OpenAICodexPollDeviceAuthInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: OpenAICodexPollDeviceAuthInput): OpenAICodexPollDeviceAuthInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string pending_id */ 1:
+                    message.pendingId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: OpenAICodexPollDeviceAuthInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string pending_id = 1; */
+        if (message.pendingId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.pendingId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message OpenAICodexPollDeviceAuthInput
+ */
+export const OpenAICodexPollDeviceAuthInput = new OpenAICodexPollDeviceAuthInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class OpenAICodexPollDeviceAuthResult$Type extends MessageType<OpenAICodexPollDeviceAuthResult> {
+    constructor() {
+        super("OpenAICodexPollDeviceAuthResult", [
+            { no: 1, name: "status", kind: "enum", T: () => ["OpenAICodexDeviceAuthStatus", OpenAICodexDeviceAuthStatus] },
+            { no: 2, name: "connection", kind: "message", T: () => OAuthConnectionInfo },
+            { no: 3, name: "error_code", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "error_message", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<OpenAICodexPollDeviceAuthResult>): OpenAICodexPollDeviceAuthResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.status = 0;
+        if (value !== undefined)
+            reflectionMergePartial<OpenAICodexPollDeviceAuthResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: OpenAICodexPollDeviceAuthResult): OpenAICodexPollDeviceAuthResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* OpenAICodexDeviceAuthStatus status */ 1:
+                    message.status = reader.int32();
+                    break;
+                case /* optional OAuthConnectionInfo connection */ 2:
+                    message.connection = OAuthConnectionInfo.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                case /* optional string error_code */ 3:
+                    message.errorCode = reader.string();
+                    break;
+                case /* optional string error_message */ 4:
+                    message.errorMessage = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: OpenAICodexPollDeviceAuthResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* OpenAICodexDeviceAuthStatus status = 1; */
+        if (message.status !== 0)
+            writer.tag(1, WireType.Varint).int32(message.status);
+        /* optional OAuthConnectionInfo connection = 2; */
+        if (message.connection)
+            OAuthConnectionInfo.internalBinaryWrite(message.connection, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional string error_code = 3; */
+        if (message.errorCode !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.errorCode);
+        /* optional string error_message = 4; */
+        if (message.errorMessage !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.errorMessage);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message OpenAICodexPollDeviceAuthResult
+ */
+export const OpenAICodexPollDeviceAuthResult = new OpenAICodexPollDeviceAuthResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectionsDisconnectInput$Type extends MessageType<ConnectionsDisconnectInput> {
+    constructor() {
+        super("ConnectionsDisconnectInput", [
+            { no: 1, name: "connection_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectionsDisconnectInput>): ConnectionsDisconnectInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.connectionId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ConnectionsDisconnectInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectionsDisconnectInput): ConnectionsDisconnectInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 connection_id */ 1:
+                    message.connectionId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectionsDisconnectInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 connection_id = 1; */
+        if (message.connectionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.connectionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectionsDisconnectInput
+ */
+export const ConnectionsDisconnectInput = new ConnectionsDisconnectInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectionsDisconnectResult$Type extends MessageType<ConnectionsDisconnectResult> {
+    constructor() {
+        super("ConnectionsDisconnectResult", [
+            { no: 1, name: "disconnected", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectionsDisconnectResult>): ConnectionsDisconnectResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.disconnected = false;
+        if (value !== undefined)
+            reflectionMergePartial<ConnectionsDisconnectResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectionsDisconnectResult): ConnectionsDisconnectResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool disconnected */ 1:
+                    message.disconnected = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectionsDisconnectResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool disconnected = 1; */
+        if (message.disconnected !== false)
+            writer.tag(1, WireType.Varint).bool(message.disconnected);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectionsDisconnectResult
+ */
+export const ConnectionsDisconnectResult = new ConnectionsDisconnectResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class BotCommand$Type extends MessageType<BotCommand> {
     constructor() {
         super("BotCommand", [
@@ -18672,7 +22924,9 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
             { no: 3, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
             { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 9, name: "actions", kind: "message", T: () => MessageActions }
+            { no: 9, name: "actions", kind: "message", T: () => MessageActions },
+            { no: 10, name: "rich_text", kind: "message", T: () => RichMessage },
+            { no: 11, name: "parse_rich_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<EditMessageInput>): EditMessageInput {
@@ -18706,6 +22960,12 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
                 case /* optional MessageActions actions */ 9:
                     message.actions = MessageActions.internalBinaryRead(reader, reader.uint32(), options, message.actions);
                     break;
+                case /* optional RichMessage rich_text */ 10:
+                    message.richText = RichMessage.internalBinaryRead(reader, reader.uint32(), options, message.richText);
+                    break;
+                case /* optional bool parse_rich_markdown */ 11:
+                    message.parseRichMarkdown = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -18736,6 +22996,12 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
         /* optional MessageActions actions = 9; */
         if (message.actions)
             MessageActions.internalBinaryWrite(message.actions, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        /* optional RichMessage rich_text = 10; */
+        if (message.richText)
+            RichMessage.internalBinaryWrite(message.richText, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool parse_rich_markdown = 11; */
+        if (message.parseRichMarkdown !== undefined)
+            writer.tag(11, WireType.Varint).bool(message.parseRichMarkdown);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -19111,7 +23377,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
             { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 9, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] },
-            { no: 10, name: "actions", kind: "message", T: () => MessageActions }
+            { no: 10, name: "actions", kind: "message", T: () => MessageActions },
+            { no: 11, name: "rich_text", kind: "message", T: () => RichMessage },
+            { no: 12, name: "parse_rich_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -19161,6 +23429,12 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional MessageActions actions */ 10:
                     message.actions = MessageActions.internalBinaryRead(reader, reader.uint32(), options, message.actions);
                     break;
+                case /* optional RichMessage rich_text */ 11:
+                    message.richText = RichMessage.internalBinaryRead(reader, reader.uint32(), options, message.richText);
+                    break;
+                case /* optional bool parse_rich_markdown */ 12:
+                    message.parseRichMarkdown = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19209,6 +23483,12 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional MessageActions actions = 10; */
         if (message.actions)
             MessageActions.internalBinaryWrite(message.actions, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* optional RichMessage rich_text = 11; */
+        if (message.richText)
+            RichMessage.internalBinaryWrite(message.richText, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool parse_rich_markdown = 12; */
+        if (message.parseRichMarkdown !== undefined)
+            writer.tag(12, WireType.Varint).bool(message.parseRichMarkdown);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -19266,6 +23546,113 @@ class SendMessageResult$Type extends MessageType<SendMessageResult> {
  * @generated MessageType for protobuf message SendMessageResult
  */
 export const SendMessageResult = new SendMessageResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SendRichMessageDraftInput$Type extends MessageType<SendRichMessageDraftInput> {
+    constructor() {
+        super("SendRichMessageDraftInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "draft_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "rich_text", kind: "message", T: () => RichMessage },
+            { no: 5, name: "clear", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "ttl_seconds", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SendRichMessageDraftInput>): SendRichMessageDraftInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.draftId = "";
+        if (value !== undefined)
+            reflectionMergePartial<SendRichMessageDraftInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendRichMessageDraftInput): SendRichMessageDraftInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* string draft_id */ 2:
+                    message.draftId = reader.string();
+                    break;
+                case /* optional int64 message_id */ 3:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* optional RichMessage rich_text */ 4:
+                    message.richText = RichMessage.internalBinaryRead(reader, reader.uint32(), options, message.richText);
+                    break;
+                case /* optional bool clear */ 5:
+                    message.clear = reader.bool();
+                    break;
+                case /* optional int32 ttl_seconds */ 6:
+                    message.ttlSeconds = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SendRichMessageDraftInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string draft_id = 2; */
+        if (message.draftId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.draftId);
+        /* optional int64 message_id = 3; */
+        if (message.messageId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.messageId);
+        /* optional RichMessage rich_text = 4; */
+        if (message.richText)
+            RichMessage.internalBinaryWrite(message.richText, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool clear = 5; */
+        if (message.clear !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.clear);
+        /* optional int32 ttl_seconds = 6; */
+        if (message.ttlSeconds !== undefined)
+            writer.tag(6, WireType.Varint).int32(message.ttlSeconds);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendRichMessageDraftInput
+ */
+export const SendRichMessageDraftInput = new SendRichMessageDraftInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SendRichMessageDraftResult$Type extends MessageType<SendRichMessageDraftResult> {
+    constructor() {
+        super("SendRichMessageDraftResult", []);
+    }
+    create(value?: PartialMessage<SendRichMessageDraftResult>): SendRichMessageDraftResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SendRichMessageDraftResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendRichMessageDraftResult): SendRichMessageDraftResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: SendRichMessageDraftResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendRichMessageDraftResult
+ */
+export const SendRichMessageDraftResult = new SendRichMessageDraftResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class InvokeMessageActionInput$Type extends MessageType<InvokeMessageActionInput> {
     constructor() {
@@ -20590,7 +24977,8 @@ class Update$Type extends MessageType<Update> {
             { no: 37, name: "clear_chat_history", kind: "message", oneof: "update", T: () => UpdateClearChatHistory },
             { no: 38, name: "bot_presence", kind: "message", oneof: "update", T: () => UpdateBotPresence },
             { no: 39, name: "dialog_follow_mode", kind: "message", oneof: "update", T: () => UpdateDialogFollowMode },
-            { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser }
+            { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser },
+            { no: 41, name: "rich_message_draft", kind: "message", oneof: "update", T: () => UpdateRichMessageDraft }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -20833,6 +25221,12 @@ class Update$Type extends MessageType<Update> {
                         updatedUser: UpdateUpdatedUser.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).updatedUser)
                     };
                     break;
+                case /* UpdateRichMessageDraft rich_message_draft */ 41:
+                    message.update = {
+                        oneofKind: "richMessageDraft",
+                        richMessageDraft: UpdateRichMessageDraft.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).richMessageDraft)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -20962,6 +25356,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateUpdatedUser updated_user = 40; */
         if (message.update.oneofKind === "updatedUser")
             UpdateUpdatedUser.internalBinaryWrite(message.update.updatedUser, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateRichMessageDraft rich_message_draft = 41; */
+        if (message.update.oneofKind === "richMessageDraft")
+            UpdateRichMessageDraft.internalBinaryWrite(message.update.richMessageDraft, writer.tag(41, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22402,6 +26799,98 @@ class UpdateEditMessage$Type extends MessageType<UpdateEditMessage> {
  * @generated MessageType for protobuf message UpdateEditMessage
  */
 export const UpdateEditMessage = new UpdateEditMessage$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateRichMessageDraft$Type extends MessageType<UpdateRichMessageDraft> {
+    constructor() {
+        super("UpdateRichMessageDraft", [
+            { no: 1, name: "draft_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 3, name: "sender_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "rich_text", kind: "message", T: () => RichMessage },
+            { no: 6, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "clear", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateRichMessageDraft>): UpdateRichMessageDraft {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.draftId = "";
+        message.senderUserId = 0n;
+        message.expiresAt = 0n;
+        message.clear = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateRichMessageDraft>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateRichMessageDraft): UpdateRichMessageDraft {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string draft_id */ 1:
+                    message.draftId = reader.string();
+                    break;
+                case /* Peer peer_id */ 2:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 sender_user_id */ 3:
+                    message.senderUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 message_id */ 4:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* optional RichMessage rich_text */ 5:
+                    message.richText = RichMessage.internalBinaryRead(reader, reader.uint32(), options, message.richText);
+                    break;
+                case /* int64 expires_at */ 6:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                case /* bool clear */ 7:
+                    message.clear = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateRichMessageDraft, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string draft_id = 1; */
+        if (message.draftId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.draftId);
+        /* Peer peer_id = 2; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* int64 sender_user_id = 3; */
+        if (message.senderUserId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.senderUserId);
+        /* optional int64 message_id = 4; */
+        if (message.messageId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.messageId);
+        /* optional RichMessage rich_text = 5; */
+        if (message.richText)
+            RichMessage.internalBinaryWrite(message.richText, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* int64 expires_at = 6; */
+        if (message.expiresAt !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.expiresAt);
+        /* bool clear = 7; */
+        if (message.clear !== false)
+            writer.tag(7, WireType.Varint).bool(message.clear);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateRichMessageDraft
+ */
+export const UpdateRichMessageDraft = new UpdateRichMessageDraft$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateDeleteMessages$Type extends MessageType<UpdateDeleteMessages> {
     constructor() {
@@ -24352,7 +28841,8 @@ class DraftMessage$Type extends MessageType<DraftMessage> {
     constructor() {
         super("DraftMessage", [
             { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 2, name: "entities", kind: "message", T: () => MessageEntities }
+            { no: 2, name: "entities", kind: "message", T: () => MessageEntities },
+            { no: 3, name: "rich_text", kind: "message", T: () => RichMessage }
         ]);
     }
     create(value?: PartialMessage<DraftMessage>): DraftMessage {
@@ -24373,6 +28863,9 @@ class DraftMessage$Type extends MessageType<DraftMessage> {
                 case /* optional MessageEntities entities */ 2:
                     message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
                     break;
+                case /* optional RichMessage rich_text */ 3:
+                    message.richText = RichMessage.internalBinaryRead(reader, reader.uint32(), options, message.richText);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24391,6 +28884,9 @@ class DraftMessage$Type extends MessageType<DraftMessage> {
         /* optional MessageEntities entities = 2; */
         if (message.entities)
             MessageEntities.internalBinaryWrite(message.entities, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional RichMessage rich_text = 3; */
+        if (message.richText)
+            RichMessage.internalBinaryWrite(message.richText, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

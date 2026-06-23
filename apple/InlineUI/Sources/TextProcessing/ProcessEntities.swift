@@ -79,6 +79,30 @@ public struct CodeBlockStyle: Sendable {
   )
 }
 
+public struct QuoteBlockStyle: Sendable {
+  public var lineSpacing: CGFloat
+  public var textInsetLeft: CGFloat
+  public var textInsetRight: CGFloat
+  public var paragraphSpacingBefore: CGFloat
+  public var paragraphSpacing: CGFloat
+
+  public init(
+    lineSpacing: CGFloat = 4,
+    textInsetLeft: CGFloat = 10,
+    textInsetRight: CGFloat = 0,
+    paragraphSpacingBefore: CGFloat = 2,
+    paragraphSpacing: CGFloat = 2
+  ) {
+    self.lineSpacing = lineSpacing
+    self.textInsetLeft = textInsetLeft
+    self.textInsetRight = textInsetRight
+    self.paragraphSpacingBefore = paragraphSpacingBefore
+    self.paragraphSpacing = paragraphSpacing
+  }
+
+  public static let block = QuoteBlockStyle()
+}
+
 public class ProcessEntities {
   public struct Configuration {
     public struct Palette {
@@ -214,6 +238,7 @@ public class ProcessEntities {
     let blockCodeBackground = configuration.codeBlockBackgroundColor
       ?? configuration.primaryColor.withAlphaComponent(0.08)
     let codeBlockStyle = CodeBlockStyle.block
+    let quoteBlockStyle = QuoteBlockStyle.block
 
     let attributedString = NSMutableAttributedString(
       string: text,
@@ -451,6 +476,21 @@ public class ProcessEntities {
             .italic: true,
           ], range: range)
 
+        case .underline:
+          attributedString.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+
+        case .strikethrough:
+          attributedString.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+
+        case .blockquote, .expandableBlockquote:
+          applyBlockquoteStyle(
+            text: text,
+            blockRange: range,
+            attributedString: attributedString,
+            style: quoteBlockStyle,
+            isExpandable: entity.type == .expandableBlockquote
+          )
+
         case .code:
           // monospace font with custom marker
           let monospaceFont = createMonospaceFont(from: configuration.font)
@@ -551,6 +591,43 @@ public class ProcessEntities {
       let style = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
       style.paragraphSpacing = spacing
       attributedString.addAttribute(.paragraphStyle, value: style, range: lastIntersection)
+    }
+  }
+
+  private static func applyBlockquoteStyle(
+    text: String,
+    blockRange: NSRange,
+    attributedString: NSMutableAttributedString,
+    style: QuoteBlockStyle,
+    isExpandable: Bool
+  ) {
+    guard blockRange.length > 0 else { return }
+    let nsText = text as NSString
+    let end = min(NSMaxRange(blockRange), nsText.length)
+    var cursor = blockRange.location
+
+    while cursor < end {
+      let paragraphRange = nsText.paragraphRange(for: NSRange(location: cursor, length: 0))
+      let intersection = NSIntersectionRange(paragraphRange, blockRange)
+      if intersection.length > 0 {
+        let existing = attributedString.attribute(.paragraphStyle, at: intersection.location, effectiveRange: nil)
+          as? NSParagraphStyle
+        let paragraphStyle = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+        paragraphStyle.firstLineHeadIndent += style.textInsetLeft
+        paragraphStyle.headIndent += style.textInsetLeft
+        paragraphStyle.tailIndent -= style.textInsetRight
+        paragraphStyle.paragraphSpacingBefore = max(paragraphStyle.paragraphSpacingBefore, style.paragraphSpacingBefore)
+        paragraphStyle.paragraphSpacing = max(paragraphStyle.paragraphSpacing, style.paragraphSpacing)
+        attributedString.addAttributes([
+          .blockquote: true,
+          .expandableBlockquote: isExpandable,
+          .paragraphStyle: paragraphStyle,
+        ], range: intersection)
+      }
+
+      let next = NSMaxRange(paragraphRange)
+      guard next > cursor else { break }
+      cursor = next
     }
   }
 
@@ -1407,7 +1484,7 @@ public class ProcessEntities {
     guard rangesOverlap(lhs: entity, rhs: range) else { return false }
 
     switch entity.type {
-      case .bold, .italic:
+      case .bold, .italic, .underline, .strikethrough:
         return false
       default:
         return true

@@ -104,6 +104,28 @@ message PeerChat { int64 chat_id = 1; }
 
 message PeerUser { int64 user_id = 1; }
 
+message InputScope {
+  oneof type {
+    InputScopeUser user = 1;
+    InputScopeSpace space = 2;
+  }
+}
+
+message InputScopeUser { int64 user_id = 1; }
+
+message InputScopeSpace { int64 space_id = 1; }
+
+message Scope {
+  oneof type {
+    ScopeUser user = 1;
+    ScopeSpace space = 2;
+  }
+}
+
+message ScopeUser { User user = 1; }
+
+message ScopeSpace { Space space = 1; }
+
 message BotAvatar {
   enum Kind {
     KIND_UNSPECIFIED = 0;
@@ -163,6 +185,8 @@ message User {
   optional BotAvatar bot_avatar = 14;
 
   optional string bio = 15;
+
+  optional bool verified = 16;
 }
 
 message UserProfilePhoto {
@@ -370,6 +394,10 @@ message Message {
 
   // Monotonic edit revision for the message. Increments on every edit.
   optional int64 rev = 21;
+
+  // Optional block rich text payload. `message` remains the fallback text
+  // for clients that do not support rich messages.
+  optional RichMessage rich_text = 22;
 }
 
 enum MessageSendMode {
@@ -406,6 +434,10 @@ message MessageEntity {
     TYPE_THREAD = 11;
     TYPE_THREAD_TITLE = 12;
     TYPE_BOT_COMMAND = 13;
+    TYPE_UNDERLINE = 14;
+    TYPE_STRIKETHROUGH = 15;
+    TYPE_BLOCKQUOTE = 16;
+    TYPE_EXPANDABLE_BLOCKQUOTE = 17;
   }
 
   Type type = 1;
@@ -428,6 +460,242 @@ message MessageEntity {
     MessageEntityThread thread = 7;
     MessageEntityThreadTitle thread_title = 8;
   }
+}
+
+enum RichDirection {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_AUTO = 1;
+  DIRECTION_LTR = 2;
+  DIRECTION_RTL = 3;
+}
+
+enum RichTextStyle {
+  STYLE_UNSPECIFIED = 0;
+  STYLE_BOLD = 1;
+  STYLE_ITALIC = 2;
+  STYLE_UNDERLINE = 3;
+  STYLE_STRIKETHROUGH = 4;
+  STYLE_CODE = 5;
+  STYLE_SPOILER = 6;
+}
+
+message RichText {
+  string text = 1;
+  repeated RichText children = 2;
+  repeated RichTextStyle styles = 3;
+  optional string url = 4;
+}
+
+message RichBlock {
+  string block_id = 1;
+  optional RichDirection direction = 2;
+
+  oneof block {
+    RichParagraphBlock paragraph = 10;
+    RichHeadingBlock heading = 11;
+    RichListBlock list = 12;
+    RichListItemBlock list_item = 13;
+    RichQuoteBlock quote = 14;
+    RichCodeBlock code = 15;
+    RichDividerBlock divider = 16;
+    RichThinkingBlock thinking = 17;
+    RichDetailsBlock details = 18;
+    RichPhotoBlock photo = 19;
+    RichVideoBlock video = 20;
+    RichDocumentBlock document = 21;
+    RichAudioBlock audio = 22;
+    RichTableBlock table = 23;
+    RichMathBlock math = 24;
+    RichMapBlock map = 25;
+    RichEmbedBlock embed = 26;
+    RichEmbedPostBlock embed_post = 27;
+    RichLinkPreviewBlock link_preview = 28;
+    RichCollageBlock collage = 29;
+  }
+}
+
+message RichParagraphBlock { repeated RichText text = 1; }
+
+message RichHeadingBlock {
+  repeated RichText text = 1;
+  int32 level = 2;
+}
+
+message RichListBlock {
+  bool ordered = 1;
+  int32 start = 2;
+  repeated RichListItemBlock items = 3;
+}
+
+message RichListItemBlock {
+  repeated RichBlock blocks = 1;
+  optional bool checked = 2;
+}
+
+message RichQuoteBlock {
+  repeated RichBlock blocks = 1;
+  bool expandable = 2;
+  bool initially_collapsed = 3;
+}
+
+message RichCodeBlock {
+  string text = 1;
+  optional string language = 2;
+}
+
+message RichDividerBlock {}
+
+message RichThinkingBlock {
+  repeated RichBlock blocks = 1;
+  bool initially_collapsed = 2;
+}
+
+message RichDetailsBlock {
+  repeated RichText title = 1;
+  repeated RichBlock blocks = 2;
+  bool initially_open = 3;
+}
+
+message RichMediaRef {
+  string alt = 1;
+  optional string file_name = 2;
+  optional int32 width = 3;
+  optional int32 height = 4;
+  optional string mime_type = 5;
+  optional string cdn_url = 6;
+  optional string file_unique_id = 7;
+
+  oneof media {
+    int64 photo_id = 10;
+    int64 video_id = 11;
+    int64 document_id = 12;
+    int64 voice_id = 13;
+    string public_url = 14;
+  }
+}
+
+message RichPhotoBlock {
+  RichMediaRef media = 1;
+  repeated RichText caption = 2;
+}
+
+message RichVideoBlock {
+  RichMediaRef media = 1;
+  repeated RichText caption = 2;
+  optional int32 duration = 3;
+}
+
+message RichDocumentBlock {
+  RichMediaRef media = 1;
+  repeated RichText caption = 2;
+}
+
+message RichAudioBlock {
+  RichMediaRef media = 1;
+  repeated RichText caption = 2;
+  optional int32 duration = 3;
+  optional string title = 4;
+  optional string performer = 5;
+}
+
+enum RichHorizontalAlign {
+  HORIZONTAL_ALIGN_UNSPECIFIED = 0;
+  HORIZONTAL_ALIGN_LEFT = 1;
+  HORIZONTAL_ALIGN_CENTER = 2;
+  HORIZONTAL_ALIGN_RIGHT = 3;
+}
+
+enum RichVerticalAlign {
+  VERTICAL_ALIGN_UNSPECIFIED = 0;
+  VERTICAL_ALIGN_TOP = 1;
+  VERTICAL_ALIGN_MIDDLE = 2;
+  VERTICAL_ALIGN_BOTTOM = 3;
+}
+
+message RichTableBlock {
+  repeated RichTableRow rows = 1;
+  repeated RichText caption = 2;
+  bool bordered = 3;
+  bool striped = 4;
+}
+
+message RichTableRow { repeated RichTableCell cells = 1; }
+
+message RichTableCell {
+  repeated RichText text = 1;
+  bool header = 2;
+  int32 colspan = 3;
+  int32 rowspan = 4;
+  optional RichHorizontalAlign align = 5;
+  optional RichVerticalAlign valign = 6;
+}
+
+message RichMathBlock {
+  string source = 1;
+  bool display = 2;
+  optional string fallback = 3;
+}
+
+message RichMapBlock {
+  double latitude = 1;
+  double longitude = 2;
+  int32 zoom = 3;
+  repeated RichText caption = 4;
+  optional string title = 5;
+  optional string address = 6;
+  optional string open_url = 7;
+  optional float aspect_ratio = 8;
+}
+
+message RichEmbedBlock {
+  optional string url = 1;
+  optional string html = 2;
+  optional RichMediaRef poster = 3;
+  optional int32 width = 4;
+  optional int32 height = 5;
+  repeated RichText caption = 6;
+  bool full_width = 7;
+  bool allow_scrolling = 8;
+  optional string provider = 9;
+}
+
+message RichEmbedPostBlock {
+  string url = 1;
+  string author = 2;
+  optional RichMediaRef author_photo = 3;
+  optional int64 date = 4;
+  repeated RichBlock blocks = 5;
+  repeated RichText caption = 6;
+}
+
+message RichLinkPreviewBlock {
+  string url = 1;
+  optional string display_url = 2;
+  optional string site_name = 3;
+  optional string title = 4;
+  optional string description = 5;
+  optional RichMediaRef media = 6;
+  optional float media_aspect_ratio = 7;
+  bool compact = 8;
+}
+
+enum RichCollageLayout {
+  COLLAGE_LAYOUT_UNSPECIFIED = 0;
+  COLLAGE_LAYOUT_GRID = 1;
+  COLLAGE_LAYOUT_MASONRY = 2;
+}
+
+message RichCollageBlock {
+  repeated RichBlock items = 1;
+  repeated RichText caption = 2;
+  optional RichCollageLayout layout = 3;
+}
+
+message RichMessage {
+  repeated RichBlock blocks = 1;
+  optional RichDirection direction = 2;
+  string fallback_text = 3;
+  int32 version = 4;
 }
 
 message MessageReactions {
@@ -939,6 +1207,11 @@ enum Method {
   GET_SPACE_URL_PREVIEW_EXCLUSIONS = 65;
   ADD_SPACE_URL_PREVIEW_EXCLUSION = 66;
   REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
+  CONNECTIONS_LIST = 68;
+  OPENAI_CODEX_START_DEVICE_AUTH = 69;
+  OPENAI_CODEX_POLL_DEVICE_AUTH = 70;
+  CONNECTIONS_DISCONNECT = 71;
+  SEND_RICH_MESSAGE_DRAFT = 72;
 }
 
 message RpcCall {
@@ -1011,6 +1284,11 @@ message RpcCall {
     GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions = 66;
     AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion = 67;
     RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68;
+    ConnectionsListInput connectionsList = 69;
+    OpenAICodexStartDeviceAuthInput openaiCodexStartDeviceAuth = 70;
+    OpenAICodexPollDeviceAuthInput openaiCodexPollDeviceAuth = 71;
+    ConnectionsDisconnectInput connectionsDisconnect = 72;
+    SendRichMessageDraftInput sendRichMessageDraft = 73;
   }
 }
 
@@ -1085,6 +1363,11 @@ message RpcResult {
     GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions = 66;
     AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion = 67;
     RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
+    ConnectionsListResult connectionsList = 69;
+    OpenAICodexStartDeviceAuthResult openaiCodexStartDeviceAuth = 70;
+    OpenAICodexPollDeviceAuthResult openaiCodexPollDeviceAuth = 71;
+    ConnectionsDisconnectResult connectionsDisconnect = 72;
+    SendRichMessageDraftResult sendRichMessageDraft = 73;
   }
 }
 
@@ -1428,6 +1711,65 @@ message UpdateProfileResult {
   repeated Update updates = 2;
 }
 
+enum OAuthConnectionStatus {
+  OAUTH_CONNECTION_STATUS_UNSPECIFIED = 0;
+  OAUTH_CONNECTION_ACTIVE = 1;
+  OAUTH_CONNECTION_ERROR = 2;
+  OAUTH_CONNECTION_REVOKED = 3;
+}
+
+message OAuthConnectionInfo {
+  int64 id = 1;
+  string provider = 2;
+  InputScope scope = 3;
+  OAuthConnectionStatus status = 4;
+  optional string display_name = 5;
+  optional string email = 6;
+  optional string plan = 7;
+  optional int64 expires_at = 8;
+  optional int64 last_used_at = 9;
+  optional int64 error_at = 10;
+  optional string error_code = 11;
+}
+
+message ConnectionsListInput {}
+
+message ConnectionsListResult { repeated OAuthConnectionInfo connections = 1; }
+
+message OpenAICodexStartDeviceAuthInput { InputScope scope = 1; }
+
+message OpenAICodexDeviceAuthPrompt {
+  string pending_id = 1;
+  string verification_url = 2;
+  string user_code = 3;
+  int64 expires_at = 4;
+  int32 interval_seconds = 5;
+}
+
+message OpenAICodexStartDeviceAuthResult { OpenAICodexDeviceAuthPrompt auth = 1; }
+
+enum OpenAICodexDeviceAuthStatus {
+  OPENAI_CODEX_DEVICE_AUTH_STATUS_UNSPECIFIED = 0;
+  OPENAI_CODEX_DEVICE_AUTH_PENDING = 1;
+  OPENAI_CODEX_DEVICE_AUTH_CONNECTED = 2;
+  OPENAI_CODEX_DEVICE_AUTH_EXPIRED = 3;
+  OPENAI_CODEX_DEVICE_AUTH_DENIED = 4;
+  OPENAI_CODEX_DEVICE_AUTH_ERROR = 5;
+}
+
+message OpenAICodexPollDeviceAuthInput { string pending_id = 1; }
+
+message OpenAICodexPollDeviceAuthResult {
+  OpenAICodexDeviceAuthStatus status = 1;
+  optional OAuthConnectionInfo connection = 2;
+  optional string error_code = 3;
+  optional string error_message = 4;
+}
+
+message ConnectionsDisconnectInput { int64 connection_id = 1; }
+
+message ConnectionsDisconnectResult { bool disconnected = 1; }
+
 message BotCommand {
   string command = 1;
   string description = 2;
@@ -1743,6 +2085,8 @@ message EditMessageInput {
   // - present + empty rows: clear actions
   // - present + non-empty rows: replace actions
   optional MessageActions actions = 9;
+  optional RichMessage rich_text = 10;
+  optional bool parse_rich_markdown = 11;
 }
 
 message EditMessageResult { repeated Update updates = 1; }
@@ -1813,9 +2157,26 @@ message SendMessageInput {
 
   // Optional interactive actions (bot messages only).
   optional MessageActions actions = 10;
+
+  // Optional block rich text payload. `message` remains the fallback text.
+  optional RichMessage rich_text = 11;
+
+  // Parse message as Markdown and store the resulting rich text payload.
+  optional bool parse_rich_markdown = 12;
 }
 
 message SendMessageResult { repeated Update updates = 2; }
+
+message SendRichMessageDraftInput {
+  InputPeer peer_id = 1;
+  string draft_id = 2;
+  optional int64 message_id = 3;
+  optional RichMessage rich_text = 4;
+  optional bool clear = 5;
+  optional int32 ttl_seconds = 6;
+}
+
+message SendRichMessageDraftResult {}
 
 message InvokeMessageActionInput {
   InputPeer peer_id = 1;
@@ -1910,6 +2271,7 @@ enum SearchMessagesFilter {
   FILTER_PHOTO_VIDEO = 3;
   FILTER_DOCUMENTS = 4;
   FILTER_LINKS = 5;
+  FILTER_VOICE = 6;
 }
 
 message SearchMessagesInput {
@@ -2049,6 +2411,7 @@ message Update {
     UpdateBotPresence bot_presence = 38;
     UpdateDialogFollowMode dialog_follow_mode = 39;
     UpdateUpdatedUser updated_user = 40;
+    UpdateRichMessageDraft rich_message_draft = 41;
   }
 }
 
@@ -2251,6 +2614,18 @@ message UpdateNewMessage { Message message = 1; }
 
 // Update when a message is edited
 message UpdateEditMessage { Message message = 1; }
+
+// Transient rich draft/progress snapshot. This is not persisted in the update
+// log and is meant for temporary agent/bot progress UI such as thinking blocks.
+message UpdateRichMessageDraft {
+  string draft_id = 1;
+  Peer peer_id = 2;
+  int64 sender_user_id = 3;
+  optional int64 message_id = 4;
+  optional RichMessage rich_text = 5;
+  int64 expires_at = 6;
+  bool clear = 7;
+}
 
 // Update when messages are deleted
 message UpdateDeleteMessages {
@@ -2477,4 +2852,5 @@ message PinMessageResult { repeated Update updates = 1; }
 message DraftMessage {
   string text = 1;
   optional MessageEntities entities = 2;
+  optional RichMessage rich_text = 3;
 }

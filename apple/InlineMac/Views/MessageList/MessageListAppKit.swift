@@ -18,7 +18,7 @@ struct MessageListSelectionUpdate: Equatable, Sendable {
 
 class MessageListAppKit: NSViewController {
   // Data
-  private var dependencies: AppDependencies
+  private var dependencies: AppDependencies?
   private var peerId: Peer
   private var chat: Chat?
   private var chatId: Int64 { chat?.id ?? 0 }
@@ -95,8 +95,9 @@ class MessageListAppKit: NSViewController {
   private var needsUnreadUpdateOnActive = false
   private var didRunInitialUnreadSync = false
   private var appActivityObserverId: UUID?
+  private var richDraftExpiryTimer: Timer?
 
-  init(
+  convenience init(
     dependencies: AppDependencies,
     peerId: Peer,
     chat: Chat,
@@ -104,12 +105,64 @@ class MessageListAppKit: NSViewController {
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
     initialPinnedMessage: PreparedPinnedMessage? = nil
   ) {
+    self.init(
+      optionalDependencies: dependencies,
+      peerId: peerId,
+      chat: chat,
+      showUnreadAfter: showUnreadAfter,
+      initialState: initialState,
+      initialPinnedMessage: initialPinnedMessage
+    )
+  }
+
+  #if DEBUG
+  convenience init(
+    richTextTestBookPeerId peerId: Peer,
+    chat: Chat,
+    initialState: MessagesProgressiveViewModel.InitialState
+  ) {
+    self.init(
+      optionalDependencies: nil,
+      peerId: peerId,
+      chat: chat,
+      showUnreadAfter: nil,
+      initialState: initialState,
+      initialPinnedMessage: nil
+    )
+  }
+
+  convenience init(
+    richTextTestBookPeerId peerId: Peer,
+    chat: Chat,
+    db: AppDatabase
+  ) {
+    self.init(
+      optionalDependencies: nil,
+      peerId: peerId,
+      chat: chat,
+      showUnreadAfter: nil,
+      initialState: nil,
+      initialPinnedMessage: nil,
+      db: db
+    )
+  }
+  #endif
+
+  private init(
+    optionalDependencies dependencies: AppDependencies?,
+    peerId: Peer,
+    chat: Chat,
+    showUnreadAfter: Int64?,
+    initialState: MessagesProgressiveViewModel.InitialState?,
+    initialPinnedMessage: PreparedPinnedMessage?,
+    db: AppDatabase? = nil
+  ) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chat = chat
     self.showUnreadAfter = showUnreadAfter
     self.initialPinnedMessage = initialPinnedMessage
-    chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
+    chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState, db: db)
     messageRenderStyle = AppSettings.shared.messageRenderStyle
     state = ChatsManager
       .get(
@@ -194,6 +247,15 @@ class MessageListAppKit: NSViewController {
       }
       .store(in: &cancellables)
 
+    AppSettings.shared.$enableRichTextMessages
+      .removeDuplicates()
+      .dropFirst()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.richTextMessagesSettingDidChange()
+      }
+      .store(in: &cancellables)
+
     AppSettings.shared.$toolbarStyle
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
@@ -207,11 +269,15 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private lazy var toolbarBgView = ToolbarBackgroundView(dependencies: dependencies)
+  private lazy var toolbarBgView: ToolbarBackgroundView? = {
+    guard let dependencies else { return nil }
+    return ToolbarBackgroundView(dependencies: dependencies)
+  }()
   private var pinnedHeaderHeight: CGFloat = 0
   private var pinnedHeaderTopConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
-  private lazy var pinnedHeaderView: PinnedMessageHeaderView = {
+  private lazy var pinnedHeaderView: PinnedMessageHeaderView? = {
+    guard let dependencies else { return nil }
     let view = PinnedMessageHeaderView(
       dependencies: dependencies,
       peerId: peerId,
@@ -348,6 +414,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func setToolbarVisible(_ visible: Bool, animated: Bool) {
+    guard let toolbarBgView else { return }
     let alpha: CGFloat = visible ? 1 : 0
     guard isToolbarVisible != visible || toolbarBgView.alphaValue != alpha else { return }
     isToolbarVisible = visible
@@ -448,6 +515,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScrollObserver()
+    scheduleRichDraftExpiry()
     hideScrollbars() // until initial scroll is done
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -649,7 +717,7 @@ class MessageListAppKit: NSViewController {
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
 
-    if usesToolbarBgView {
+    if usesToolbarBgView, let toolbarBgView {
       view.addSubview(toolbarBgView)
       let heightConstraint = toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight)
       toolbarBgHeightConstraint = heightConstraint
@@ -662,16 +730,18 @@ class MessageListAppKit: NSViewController {
       ])
     }
 
-    view.addSubview(pinnedHeaderView)
-    pinnedHeaderTopConstraint = pinnedHeaderView.topAnchor.constraint(equalTo: view.topAnchor, constant: toolbarHeight)
-    pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: pinnedHeaderHeight)
+    if let pinnedHeaderView {
+      view.addSubview(pinnedHeaderView)
+      pinnedHeaderTopConstraint = pinnedHeaderView.topAnchor.constraint(equalTo: view.topAnchor, constant: toolbarHeight)
+      pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: pinnedHeaderHeight)
 
-    NSLayoutConstraint.activate([
-      pinnedHeaderTopConstraint!,
-      pinnedHeaderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      pinnedHeaderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      pinnedHeaderHeightConstraint!,
-    ])
+      NSLayoutConstraint.activate([
+        pinnedHeaderTopConstraint!,
+        pinnedHeaderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+        pinnedHeaderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        pinnedHeaderHeightConstraint!,
+      ])
+    }
 
     // Set column width to match scroll view width
     // updateColumnWidth()
@@ -873,6 +943,20 @@ class MessageListAppKit: NSViewController {
       name: NSWindow.didEndLiveResizeNotification,
       object: scrollView.window
     )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(richMessageBlockStateDidChange(_:)),
+      name: .richMessageBlockStateDidChange,
+      object: nil
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(richMessageDraftDidChange(_:)),
+      name: RichMessageDraftNotifications.didChange,
+      object: nil
+    )
   }
 
   private var scrollState: MessageListScrollState = .idle {
@@ -889,6 +973,96 @@ class MessageListAppKit: NSViewController {
     log.trace("scroll wheel began")
     isUserScrolling = true
     scrollState = .scrolling
+  }
+
+  @objc private func richMessageBlockStateDidChange(_ notification: Notification) {
+    guard let messageStableId = notification.userInfo?["messageStableId"] as? Int64 else { return }
+    guard let row = chatRows.rowIndex(forMessageStableId: messageStableId) else { return }
+    guard row >= 0, row < tableView.numberOfRows else { return }
+
+    let changedRows = IndexSet(integer: row)
+    let shouldStickToBottom = isAtBottom
+    updateHeightsForRows(at: changedRows, refreshText: true)
+    tableView.noteHeightOfRows(withIndexesChanged: changedRows)
+
+    if shouldStickToBottom {
+      tableView.scrollToBottomWithInset(cancel: false)
+    }
+  }
+
+  @objc private func richMessageDraftDidChange(_ notification: Notification) {
+    guard let change = RichMessageDraftNotifications.change(from: notification) else { return }
+    guard change.key.peer == peerId else { return }
+
+    updateRichDraftRow(messageId: change.key.messageId)
+    scheduleRichDraftExpiry()
+  }
+
+  private func updateRichDraftRow(messageId: Int64) {
+    guard let message = messages.first(where: { $0.message.peerId == peerId && $0.message.messageId == messageId }) else {
+      return
+    }
+    guard let row = chatRows.rowIndex(forMessageStableId: message.id) else { return }
+    guard row >= 0, row < tableView.numberOfRows else { return }
+
+    let changedRows = IndexSet(integer: row)
+    let shouldStickToBottom = isAtBottom
+    sizeCalculator.invalidateRichBlockLayouts(for: message.id)
+    updateHeightsForRows(at: changedRows, refreshText: true)
+    tableView.noteHeightOfRows(withIndexesChanged: changedRows)
+
+    if shouldStickToBottom {
+      tableView.scrollToBottomWithInset(cancel: false)
+    }
+  }
+
+  private func richTextMessagesSettingDidChange() {
+    CacheAttrs.shared.invalidate()
+    sizeCalculator.invalidateCache()
+    heightPrecalcTask?.cancel()
+    heightPrecalcTask = nil
+
+    guard isViewLoaded else { return }
+
+    let rowCount = tableView.numberOfRows
+    guard rowCount > 0 else {
+      tableView.reloadData()
+      return
+    }
+
+    let rows = IndexSet(integersIn: 0 ..< rowCount)
+    let shouldStickToBottom = isAtBottom
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    NSAnimationContext.beginGrouping()
+    NSAnimationContext.current.duration = 0
+
+    tableView.reloadData()
+    updateHeightsForRows(at: rows, refreshText: true)
+    tableView.noteHeightOfRows(withIndexesChanged: rows)
+
+    NSAnimationContext.endGrouping()
+    CATransaction.commit()
+
+    if shouldStickToBottom {
+      tableView.scrollToBottomWithInset(cancel: false)
+    }
+  }
+
+  private func scheduleRichDraftExpiry() {
+    richDraftExpiryTimer?.invalidate()
+    richDraftExpiryTimer = nil
+
+    guard let nextExpiry = RichMessageDraftNotifications.nextExpiryDate() else { return }
+
+    let delay = max(0.05, nextExpiry.timeIntervalSinceNow + 0.05)
+    let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+      RichMessageDraftNotifications.expireNow()
+      self?.scheduleRichDraftExpiry()
+    }
+    richDraftExpiryTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
   }
 
   @objc private func scrollWheelEnded() {
@@ -1844,7 +2018,7 @@ class MessageListAppKit: NSViewController {
     CATransaction.commit()
   }
 
-  private func updateHeightsForRows(at indexSet: IndexSet, width: CGFloat? = nil) {
+  private func updateHeightsForRows(at indexSet: IndexSet, width: CGFloat? = nil, refreshText: Bool = false) {
     guard let width = width ?? measurementWidth() else { return }
 
     for row in indexSet {
@@ -1872,7 +2046,11 @@ class MessageListAppKit: NSViewController {
             layout: plan,
           )
 
-          rowView.updateSizeWithProps(props: props)
+          if refreshText {
+            rowView.updateTextAndSizeWithProps(props: props)
+          } else {
+            rowView.updateSizeWithProps(props: props)
+          }
         }
       }
     }
@@ -2321,7 +2499,9 @@ extension MessageListAppKit: NSTableViewDelegate {
     let reusedView = tableView.makeView(withIdentifier: identifier, owner: nil)
     let cell = reusedView as? MessageTableCell ?? MessageTableCell()
     cell.identifier = identifier
-    cell.setDependencies(dependencies)
+    if let dependencies {
+      cell.setDependencies(dependencies)
+    }
 
     let inputProps = messageProps(for: row)
     let width = measurementWidth(using: tableView, renderStyle: inputProps.renderStyle)
@@ -2484,6 +2664,120 @@ enum MessageListScrollState {
     self == .scrolling
   }
 }
+
+#if DEBUG
+struct RichMessageListControllerDebugSnapshot {
+  let rowCount: Int
+  let messageRowCount: Int
+  let richRowCount: Int
+  let fallbackRowCount: Int
+  let constrainedRowCount: Int
+  let visibleRowCount: Int
+  let finiteHeightCount: Int
+  let contentHeight: CGFloat
+  let scrollOffsetY: CGFloat
+  let madeMessageCellCount: Int
+  let rowHeightQueryCount: Int
+}
+
+extension MessageListAppKit {
+  func debugPrepareRichTextControllerForTestBook(size: CGSize) {
+    view.frame = NSRect(origin: .zero, size: size)
+    scrollView.frame = view.bounds
+    tableView.frame = NSRect(origin: .zero, size: size)
+    tableView.tableColumns.first?.width = size.width
+    view.layoutSubtreeIfNeeded()
+    scrollView.layoutSubtreeIfNeeded()
+    applyInitialData()
+    if tableView.numberOfRows > 0 {
+      tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0 ..< tableView.numberOfRows))
+    }
+    tableView.layoutSubtreeIfNeeded()
+  }
+
+  func debugRefreshRichTextControllerForTestBook() {
+    richTextMessagesSettingDidChange()
+    tableView.layoutSubtreeIfNeeded()
+  }
+
+  func debugScrollRichTextControllerForTestBook(to row: Int) {
+    guard row >= 0, row < tableView.numberOfRows else { return }
+
+    let rowRect = tableView.rect(ofRow: row)
+    let viewportHeight = max(1, max(scrollView.contentView.bounds.height, scrollView.bounds.height))
+    let contentHeight = max(
+      scrollView.documentView?.frame.height ?? 0,
+      max(tableView.frame.height, tableView.bounds.height)
+    )
+    let maxOffset = max(0, contentHeight - viewportHeight)
+    let targetY = min(maxOffset, max(0, rowRect.midY - viewportHeight / 2))
+
+    scrollView.withoutScrollerFlash { [weak self] in
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      self?.scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: targetY))
+      CATransaction.commit()
+    }
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+    tableView.layoutSubtreeIfNeeded()
+  }
+
+  func debugRichTextControllerSnapshotForTestBook() -> RichMessageListControllerDebugSnapshot {
+    view.layoutSubtreeIfNeeded()
+    scrollView.layoutSubtreeIfNeeded()
+    tableView.layoutSubtreeIfNeeded()
+
+    let rowCount = tableView.numberOfRows
+    var messageRowCount = 0
+    var richRowCount = 0
+    var fallbackRowCount = 0
+    var constrainedRowCount = 0
+    var finiteHeightCount = 0
+
+    for row in 0 ..< rowCount {
+      let height = tableView(self.tableView, heightOfRow: row)
+      if height.isFinite, height > 0 {
+        finiteHeightCount += 1
+      }
+
+      guard messageStableId(forRow: row) != nil else { continue }
+      messageRowCount += 1
+
+      guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true) as? MessageTableCell,
+            let snapshot = cell.debugRichTextSlotSnapshotForTestBook()
+      else {
+        continue
+      }
+
+      if snapshot.usesRichBlockRenderer {
+        richRowCount += 1
+      }
+      if snapshot.textViewAttached {
+        fallbackRowCount += 1
+      }
+      if snapshot.hasActiveTextSlotConstraints {
+        constrainedRowCount += 1
+      }
+    }
+
+    let visibleRange = tableView.rows(in: tableView.visibleRect)
+    let visibleRowCount = visibleRange.location == NSNotFound ? 0 : visibleRange.length
+    return RichMessageListControllerDebugSnapshot(
+      rowCount: rowCount,
+      messageRowCount: messageRowCount,
+      richRowCount: richRowCount,
+      fallbackRowCount: fallbackRowCount,
+      constrainedRowCount: constrainedRowCount,
+      visibleRowCount: visibleRowCount,
+      finiteHeightCount: finiteHeightCount,
+      contentHeight: scrollView.documentView?.frame.height ?? 0,
+      scrollOffsetY: scrollView.contentView.bounds.origin.y,
+      madeMessageCellCount: madeMessageCellCount,
+      rowHeightQueryCount: rowHeightQueryCount
+    )
+  }
+}
+#endif
 
 extension MessageListAppKit {
   // MARK: - Scroll to message
@@ -2754,6 +3048,8 @@ extension MessageListAppKit {
     readAllTask = nil
     deferredTranslationTask?.cancel()
     deferredTranslationTask = nil
+    richDraftExpiryTimer?.invalidate()
+    richDraftExpiryTimer = nil
 
     // Remove all observers
     NotificationCenter.default.removeObserver(self)

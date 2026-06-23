@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
-import { GetUpdatesResult_ResultType, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
+import {
+  GetUpdatesResult_ResultType,
+  Method,
+  ServerProtocolMessage,
+  Update,
+  type RichMessage,
+} from "@inline-chat/protocol/core"
 import { InlineSdkClient } from "./inline-sdk-client.js"
 import { MockTransport } from "../realtime/mock-transport.js"
 import type { InlineSdkState, InlineSdkStateStore } from "./types.js"
@@ -39,6 +45,24 @@ class MemoryStateStore implements InlineSdkStateStore {
   async save(next: InlineSdkState) {
     this.saved.push(next)
     this.loaded = next
+  }
+}
+
+function richMessage(text = "rich body"): RichMessage {
+  return {
+    version: 1,
+    fallbackText: text,
+    blocks: [
+      {
+        blockId: "sdk_rich_1",
+        block: {
+          oneofKind: "paragraph",
+          paragraph: {
+            text: [{ text, children: [], styles: [] }],
+          },
+        },
+      },
+    ],
   }
 }
 
@@ -678,6 +702,88 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it("sendMessage() serializes structured rich text without fallback text", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const payloadRichText = richMessage("render me")
+    const p = client.sendMessage({
+      chatId: 7,
+      richText: payloadRichText,
+    })
+
+    await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "rpcCall").length > 0)
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.SEND_MESSAGE,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "sendMessage") throw new Error("missing sendMessage")
+    const payload = rpc.body.rpcCall.input.sendMessage
+    expect(payload.message).toBeUndefined()
+    expect(payload.richText).toEqual(payloadRichText)
+    expect(payload.parseRichMarkdown).toBeUndefined()
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 32n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: { reqMsgId: rpc.id, result: { oneofKind: "sendMessage", sendMessage: { updates: [] } } },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toEqual({ messageId: null })
+    await client.close()
+  })
+
+  it("sendMessage() serializes rich Markdown parse requests", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const p = client.sendMessage({
+      userId: 42,
+      text: "# Heading",
+      parseRichMarkdown: true,
+    })
+
+    await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "rpcCall").length > 0)
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.SEND_MESSAGE,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "sendMessage") throw new Error("missing sendMessage")
+    const payload = rpc.body.rpcCall.input.sendMessage
+    expect(payload.peerId?.type.oneofKind).toBe("user")
+    expect(payload.message).toBe("# Heading")
+    expect(payload.parseRichMarkdown).toBe(true)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 33n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: { reqMsgId: rpc.id, result: { oneofKind: "sendMessage", sendMessage: { updates: [] } } },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toEqual({ messageId: null })
+    await client.close()
+  })
+
   it("sendMessage() returns messageId when present in updates", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
@@ -734,6 +840,181 @@ describe("InlineSdkClient", () => {
 
     await expect(p).resolves.toEqual({ messageId: 123n })
     await client.close()
+  })
+
+  it("sendMessage() rejects conflicting rich text parse options", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    await expect(
+      client.sendMessage({
+        chatId: 7,
+        text: "hi",
+        richText: richMessage("hi"),
+        parseRichMarkdown: true,
+      } as any),
+    ).rejects.toThrow(/either `richText` or `parseRichMarkdown`/)
+
+    await expect(
+      client.sendMessage({
+        chatId: 7,
+        text: "hi",
+        parseMarkdown: true,
+        parseRichMarkdown: true,
+      } as any),
+    ).rejects.toThrow(/rich text cannot be combined/)
+
+    await expect(
+      client.sendMessage({
+        chatId: 7,
+        media: { kind: "photo", photoId: 9 },
+        parseRichMarkdown: true,
+      } as any),
+    ).rejects.toThrow(/parseRichMarkdown.*non-empty `text`/)
+
+    await client.close()
+  })
+
+  it("sendRichMessageDraft() sends structured rich draft updates", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const payloadRichText = richMessage("draft render")
+    const p = client.sendRichMessageDraft({
+      chatId: 7,
+      draftId: "  sdk:draft:1  ",
+      messageId: 99,
+      richText: payloadRichText,
+      ttlSeconds: 30,
+    })
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.SEND_RICH_MESSAGE_DRAFT))
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.SEND_RICH_MESSAGE_DRAFT,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing sendRichMessageDraft rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "sendRichMessageDraft") throw new Error("missing sendRichMessageDraft")
+    const payload = rpc.body.rpcCall.input.sendRichMessageDraft
+    expect(payload.peerId?.type.oneofKind).toBe("chat")
+    if (payload.peerId?.type.oneofKind === "chat") {
+      expect(payload.peerId.type.chat.chatId).toBe(7n)
+    }
+    expect(payload.draftId).toBe("sdk:draft:1")
+    expect(payload.messageId).toBe(99n)
+    expect(payload.richText).toEqual(payloadRichText)
+    expect(payload.ttlSeconds).toBe(30)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 34n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: { reqMsgId: rpc.id, result: { oneofKind: "sendRichMessageDraft", sendRichMessageDraft: {} } },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toBeUndefined()
+    await client.close()
+  })
+
+  it("sendRichMessageDraft() sends clear updates without rich text", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const p = client.sendRichMessageDraft({
+      userId: 42,
+      draftId: "sdk:draft:clear",
+      messageId: 100n,
+      clear: true,
+    })
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.SEND_RICH_MESSAGE_DRAFT))
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.SEND_RICH_MESSAGE_DRAFT,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing sendRichMessageDraft rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "sendRichMessageDraft") throw new Error("missing sendRichMessageDraft")
+    const payload = rpc.body.rpcCall.input.sendRichMessageDraft
+    expect(payload.peerId?.type.oneofKind).toBe("user")
+    if (payload.peerId?.type.oneofKind === "user") {
+      expect(payload.peerId.type.user.userId).toBe(42n)
+    }
+    expect(payload.draftId).toBe("sdk:draft:clear")
+    expect(payload.messageId).toBe(100n)
+    expect(payload.clear).toBe(true)
+    expect(payload.richText).toBeUndefined()
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 35n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: { reqMsgId: rpc.id, result: { oneofKind: "sendRichMessageDraft", sendRichMessageDraft: {} } },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toBeUndefined()
+    await client.close()
+  })
+
+  it("sendRichMessageDraft() rejects invalid draft requests", async () => {
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport: new MockTransport(),
+    })
+
+    await expect(
+      client.sendRichMessageDraft({
+        chatId: 7,
+        draftId: " \t\n ",
+        clear: true,
+      }),
+    ).rejects.toThrow(/draftId/)
+
+    await expect(
+      client.sendRichMessageDraft({
+        chatId: 7,
+        draftId: "x".repeat(257),
+        clear: true,
+      }),
+    ).rejects.toThrow(/at most 256/)
+
+    await expect(
+      client.sendRichMessageDraft({
+        chatId: 7,
+        draftId: "sdk:draft:empty",
+      }),
+    ).rejects.toThrow(/provide `richText` or set `clear`/)
+
+    await expect(
+      client.sendRichMessageDraft({
+        chatId: 7,
+        userId: 42,
+        draftId: "sdk:draft:target",
+        clear: true,
+      } as any),
+    ).rejects.toThrow(/exactly one of `chatId` or `userId`/)
   })
 
   it("sendMessage() rejects specifying both entities and parseMarkdown", async () => {

@@ -48,8 +48,8 @@ final class ChatRowListViewModel {
 
   // MARK: - Init
 
-  init(peer: Peer, initialState: MessagesProgressiveViewModel.InitialState?) {
-    progressiveViewModel = MessagesProgressiveViewModel(peer: peer, initialState: initialState)
+  init(peer: Peer, initialState: MessagesProgressiveViewModel.InitialState?, db: AppDatabase? = nil) {
+    progressiveViewModel = MessagesProgressiveViewModel(peer: peer, initialState: initialState, db: db)
     messages = progressiveViewModel.messages
     rebuildRows()
   }

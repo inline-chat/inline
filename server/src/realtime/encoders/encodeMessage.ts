@@ -9,10 +9,11 @@ import {
   type MessageAttachment,
   type MessageAttachments,
   type Peer,
-    type MessageReplies,
-    MessageActions,
-    MessageEntities,
+  type MessageReplies,
+  MessageActions,
+  MessageEntities,
   MessageSendMode,
+  RichMessage,
 } from "@inline-chat/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
@@ -70,6 +71,16 @@ export const encodeMessage = ({
       authTag: message.entitiesTag,
     })
     entities = MessageEntities.fromBinary(decryptedEntities)
+  }
+
+  let richText: RichMessage | undefined = undefined
+  if (message.richTextEncrypted && message.richTextIv && message.richTextTag) {
+    const decryptedRichText = decryptBinary({
+      encrypted: message.richTextEncrypted,
+      iv: message.richTextIv,
+      authTag: message.richTextTag,
+    })
+    richText = RichMessage.fromBinary(decryptedRichText)
   }
 
   const hasLink = message.hasLink ?? (detectHasLink({ entities }) ? true : undefined)
@@ -189,6 +200,7 @@ export const encodeMessage = ({
     fwdFrom: fwdFrom,
     replies,
     actions,
+    richText,
   }
 
   return messageProto
@@ -324,6 +336,7 @@ export const encodeFullMessage = ({
     fwdFrom: fwdFrom,
     replies,
     actions: message.actions ?? undefined,
+    richText: message.richText ?? undefined,
   }
 
   return messageProto

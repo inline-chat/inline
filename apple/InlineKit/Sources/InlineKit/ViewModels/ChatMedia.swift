@@ -12,7 +12,10 @@ public enum MediaKind: Hashable, Sendable {
 public struct MediaMessage: Codable, Equatable, Hashable, FetchableRecord, PersistableRecord, Sendable,
   Identifiable
 {
-  public var id: Int64 { message.messageId }
+  public var id: String {
+    mediaKey?.id ?? "message:\(message.messageId)"
+  }
+
   public var message: Message
   public var photo: PhotoInfo?
   public var video: VideoInfo?
@@ -74,11 +77,90 @@ public struct MediaMessage: Codable, Equatable, Hashable, FetchableRecord, Persi
       )
       .asRequest(of: MediaMessage.self)
   }
+
+  static func effectiveMessages(
+    in db: Database,
+    chatId: Int64,
+    excludingStickers: Bool = false
+  ) throws -> [MediaMessage] {
+    let hits = try MessageEffectiveMediaQuery.refs(
+      in: db,
+      chatId: chatId,
+      kinds: [.photo, .video],
+      excludingStickers: excludingStickers
+    )
+
+    var messages: [MediaMessage] = []
+    for hit in hits {
+      switch hit.ref {
+      case let .photo(photoId):
+        if let photo = try photoInfo(in: db, photoId: photoId) {
+          messages.append(MediaMessage(message: hit.message, photo: photo))
+        }
+      case let .video(videoId):
+        if let video = try videoInfo(in: db, videoId: videoId) {
+          messages.append(MediaMessage(message: hit.message, video: video))
+        }
+      case .document, .voice:
+        break
+      }
+    }
+
+    return deduped(messages)
+  }
+
+  private static func deduped(_ messages: [MediaMessage]) -> [MediaMessage] {
+    var seen: Set<MediaKey> = []
+    let sorted = messages.sorted { lhs, rhs in
+      if lhs.message.date != rhs.message.date {
+        return lhs.message.date > rhs.message.date
+      }
+      if lhs.message.messageId != rhs.message.messageId {
+        return lhs.message.messageId > rhs.message.messageId
+      }
+      return lhs.id < rhs.id
+    }
+
+    return sorted.compactMap { message -> MediaMessage? in
+      guard let key = message.mediaKey else { return nil }
+      let insert = seen.insert(key)
+      return insert.inserted ? message : nil
+    }
+  }
+
+  private static func photoInfo(in db: Database, photoId: Int64) throws -> PhotoInfo? {
+    try Photo
+      .filter(Photo.Columns.photoId == photoId)
+      .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+      .asRequest(of: PhotoInfo.self)
+      .fetchOne(db)
+  }
+
+  private static func videoInfo(in db: Database, videoId: Int64) throws -> VideoInfo? {
+    try Video
+      .filter(Video.Columns.videoId == videoId)
+      .including(
+        optional: Video.thumbnail
+          .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          .forKey(VideoInfo.CodingKeys.thumbnail)
+      )
+      .asRequest(of: VideoInfo.self)
+      .fetchOne(db)
+  }
 }
 
 private enum MediaKey: Hashable {
   case photo(Int64)
   case video(Int64)
+
+  var id: String {
+    switch self {
+    case let .photo(value):
+      return "photo:\(value)"
+    case let .video(value):
+      return "video:\(value)"
+    }
+  }
 }
 
 @MainActor
@@ -113,11 +195,11 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
     db.warnIfInMemoryDatabaseForObservation("ChatMediaViewModel.mediaMessages")
     messagesCancellable = ValueObservation
       .tracking { [chatId] db in
-        try MediaMessage
-          .queryRequest(excludingStickers: self.excludeStickerMedia)
-          .filter(Column("chatId") == chatId)
-          .order(Column("date").desc)
-          .fetchAll(db)
+        try MediaMessage.effectiveMessages(
+          in: db,
+          chatId: chatId,
+          excludingStickers: self.excludeStickerMedia
+        )
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -128,16 +210,10 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
         },
         receiveValue: { [weak self] messages in
           guard let self else { return }
-          var seen: Set<MediaKey> = []
-          let unique = messages.compactMap { message -> MediaMessage? in
-            guard let key = message.mediaKey else { return nil }
-            let insert = seen.insert(key)
-            return insert.inserted ? message : nil
-          }
           Log.shared.debug(
-            "Loaded chat media for chat \(self.chatId): raw=\(messages.count) unique=\(unique.count)"
+            "Loaded chat media for chat \(self.chatId): count=\(messages.count)"
           )
-          self.mediaMessages = unique
+          self.mediaMessages = messages
         }
       )
   }

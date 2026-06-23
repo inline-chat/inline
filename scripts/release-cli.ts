@@ -10,6 +10,7 @@ const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
 const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
 const githubTagPrefix = process.env.INLINE_CLI_GITHUB_TAG_PREFIX ?? "cli-v";
 const githubRemote = process.env.INLINE_CLI_GIT_REMOTE ?? "origin";
+const githubNotesFile = process.env.INLINE_CLI_RELEASE_NOTES_FILE;
 const homebrewTapPath =
   process.env.INLINE_HOMEBREW_TAP_PATH ?? resolve(rootDir, "..", "homebrew-inline");
 const homebrewTapRemote = process.env.INLINE_HOMEBREW_TAP_REMOTE ?? "origin";
@@ -22,7 +23,9 @@ const appleNotarizationKeyId = process.env.APPLE_NOTARIZATION_KEY_ID;
 const appleNotarizationIssuer = process.env.APPLE_NOTARIZATION_ISSUER;
 const skipNotarize =
   isTruthy(process.env.INLINE_SKIP_NOTARIZE) || isTruthy(process.env.SKIP_NOTARIZE);
+const skipGithubRelease = isTruthy(process.env.INLINE_CLI_SKIP_GITHUB_RELEASE);
 const resumeRelease = isTruthy(process.env.INLINE_CLI_RELEASE_RESUME);
+const releaseChannel = readReleaseChannel();
 const defaultTargets = [
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
@@ -71,7 +74,7 @@ function getR2Context() {
   const bucket = requireEnv("PUBLIC_RELEASES_R2_BUCKET");
   const endpoint = requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
   const publicBaseUrl = trimSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
-  const prefix = "cli";
+  const prefix = releaseChannel === "stable" ? "cli" : `cli-${releaseChannel}`;
 
   const r2 = new S3Client({
     accessKeyId,
@@ -175,6 +178,7 @@ type GitHubReleaseAsset = {
 
 async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
+  console.log(`Release channel: ${releaseChannel}`);
   await assertNoDuplicateVersion(context);
   await runBuild(context);
   await signAndNotarize(context);
@@ -188,6 +192,7 @@ async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
 
 async function runBuildArtifacts() {
   const context = await getReleaseContext();
+  console.log(`Release channel: ${releaseChannel}`);
   await runBuild(context);
   await signAndNotarize(context);
   console.log(`Built Inline CLI v${context.version} for ${context.targets.join(", ")}`);
@@ -195,6 +200,7 @@ async function runBuildArtifacts() {
 
 async function runPublish(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
+  console.log(`Release channel: ${releaseChannel}`);
   if (resumeRelease && (await resumePublishedRelease(context))) {
     console.log(`Resumed Inline CLI v${context.version}`);
     console.log(`Manifest: ${publicBaseUrl}/${prefix}/manifest.json`);
@@ -224,7 +230,11 @@ async function publishArtifacts(
   await runPackageManifest(r2, publicBaseUrl, prefix, context);
   await uploadInstall(r2, prefix);
   await createBundle(context);
-  await publishGitHubRelease(context);
+  if (skipGithubRelease) {
+    console.log("Skipping GitHub release (INLINE_CLI_SKIP_GITHUB_RELEASE=1).");
+  } else {
+    await publishGitHubRelease(context);
+  }
   await updateHomebrewCask(context);
 }
 
@@ -544,6 +554,14 @@ async function createBundle(context: ReleaseContext) {
 }
 
 async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHashes) {
+  if (releaseChannel !== "stable") {
+    console.log(`Skipping Homebrew cask update (${releaseChannel} channel).`);
+    return;
+  }
+  if (skipGithubRelease) {
+    console.log("Skipping Homebrew cask update because GitHub release assets were skipped.");
+    return;
+  }
   if (process.env.INLINE_SKIP_HOMEBREW === "1") {
     console.log("Skipping Homebrew cask update (INLINE_SKIP_HOMEBREW=1).");
     return;
@@ -689,22 +707,25 @@ async function publishGitHubRelease(context: ReleaseContext) {
   if (!(await remoteTagExists(tag))) {
     await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
   }
-  await runCommand(
-    "gh",
-    [
-      "release",
-      "create",
-      tag,
-      "--repo",
-      githubRepo,
-      "--title",
-      `Inline CLI v${context.version}`,
-      "--notes",
-      `Automated release for Inline CLI v${context.version}.`,
-      ...assets,
-    ],
-    { cwd: rootDir },
-  );
+  const args = [
+    "release",
+    "create",
+    tag,
+    "--repo",
+    githubRepo,
+    "--title",
+    `Inline CLI v${context.version}`,
+  ];
+  if (githubNotesFile) {
+    args.push("--notes-file", githubNotesFile);
+  } else {
+    args.push("--notes", `Automated release for Inline CLI v${context.version}.`);
+  }
+  if (releaseChannel === "beta") {
+    args.push("--prerelease");
+  }
+  args.push(...assets);
+  await runCommand("gh", args, { cwd: rootDir });
 }
 
 function githubReleaseAssetPaths(context: ReleaseContext): string[] {
@@ -817,6 +838,14 @@ function getReleaseTargets(): string[] {
   }
 
   return [...new Set(targets)];
+}
+
+function readReleaseChannel(): "stable" | "beta" {
+  const value = process.env.INLINE_CLI_RELEASE_CHANNEL ?? process.env.INLINE_RELEASE_CHANNEL ?? "stable";
+  if (value === "stable" || value === "beta") {
+    return value;
+  }
+  throw new Error(`Invalid INLINE_CLI_RELEASE_CHANNEL: ${value}. Expected stable or beta.`);
 }
 
 type UpdateManifest = {

@@ -21,6 +21,7 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var photo: [ApiPhoto]?
   public var timeZone: String?
   public var bot: Bool? = nil
+  public var verified: Bool? = nil
   public static let preview = Self(
     id: 1,
     email: "mo@inline.chat",
@@ -55,6 +56,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var profileLocalPath: String?
   public var profileFileUniqueId: String?
   public var bot: Bool = false
+  public var verified: Bool = false
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -74,6 +76,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let profileLocalPath = Column(CodingKeys.profileLocalPath)
     static let profileFileUniqueId = Column(CodingKeys.profileFileUniqueId)
     static let bot = Column(CodingKeys.bot)
+    static let verified = Column(CodingKeys.verified)
   }
 
   // Add hasMany for all files (including historical profile photos)
@@ -211,6 +214,7 @@ public extension User {
     phoneNumber = apiUser.phoneNumber ?? nil
     timeZone = apiUser.timeZone ?? nil
     bot = apiUser.bot ?? false
+    verified = apiUser.verified ?? false
   }
 
   static func fromTimestamp(from: Int) -> Date {
@@ -287,6 +291,7 @@ public extension ApiUser {
       user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
       user.timeZone = user.timeZone ?? existing.timeZone
       user.bot = bot ?? existing.bot
+      user.verified = verified ?? existing.verified
       user.profileCdnUrl = profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
       user.profileFileUniqueId = profileFileUniqueId ?? existing.profileFileUniqueId
@@ -327,6 +332,7 @@ public extension User {
     date = Date() // unused field
     // don't preserve pendingSetup
     bot = user.hasBot ? user.bot : false
+    verified = user.hasVerified ? user.verified : false
 
     if !min {
       email = user.hasEmail ? user.email : nil
@@ -383,6 +389,9 @@ public extension User {
       // Preserve bot flag if not present in the update payload.
       if protocolUser.hasBot == false {
         user.bot = existing.bot
+      }
+      if protocolUser.hasVerified == false {
+        user.verified = existing.verified
       }
 
       // Remove old cached file from disk if cache is being invalidated

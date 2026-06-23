@@ -1481,7 +1481,7 @@ describe("inline/actions", () => {
         editMessage: expect.objectContaining({
           messageId: 10n,
           text: "**edited** body",
-          parseMarkdown: true,
+          parseRichMarkdown: true,
         }),
       }),
     )

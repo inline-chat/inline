@@ -4,7 +4,7 @@ import { documents } from "@in/server/db/schema/media"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
-import { and, desc, eq, isNull, lt, not, or } from "drizzle-orm"
+import { and, desc, eq, isNull, lt, not, or, sql } from "drizzle-orm"
 
 const log = new Log("modules/search/messages")
 
@@ -34,7 +34,7 @@ export const MessageSearchModule = {
   searchMessagesInChat,
 }
 
-export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links"
+export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "voice" | "links"
 
 async function searchMessagesInChat(input: SearchMessagesInput): Promise<bigint[]> {
   if (input.maxResults <= 0 || input.keywordGroups.length === 0) {
@@ -107,18 +107,35 @@ async function fetchSearchBatch(
 function buildMediaFilterClause(filter: MessageMediaFilter | undefined) {
   switch (filter) {
     case "photos":
-      return not(isNull(messages.photoId))
+      return or(not(isNull(messages.photoId)), richMediaExistsClause("photo"))
     case "videos":
-      return not(isNull(messages.videoId))
+      return or(not(isNull(messages.videoId)), richMediaExistsClause("video"))
     case "photo_video":
-      return or(not(isNull(messages.photoId)), not(isNull(messages.videoId)))
+      return or(
+        not(isNull(messages.photoId)),
+        not(isNull(messages.videoId)),
+        richMediaExistsClause("photo"),
+        richMediaExistsClause("video"),
+      )
     case "documents":
-      return not(isNull(messages.documentId))
+      return or(not(isNull(messages.documentId)), richMediaExistsClause("document"))
+    case "voice":
+      return or(not(isNull(messages.voiceId)), richMediaExistsClause("voice"))
     case "links":
       return eq(messages.hasLink, true)
     default:
       return undefined
   }
+}
+
+function richMediaExistsClause(kind: "photo" | "video" | "document" | "voice") {
+  return sql`exists (
+    select 1
+    from message_rich_media
+    where message_rich_media.message_global_id = messages.global_id
+      and message_rich_media.kind = ${kind}
+      and message_rich_media.status = 'resolved'
+  )`
 }
 
 function getMessageText(row: SearchRow): string | null {

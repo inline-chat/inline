@@ -1,13 +1,13 @@
 {
-  "id" : "beb29837-b079-42d9-b67a-0f8bd9e20015",
-  "targets" : [
+  "id": "beb29837-b079-42d9-b67a-0f8bd9e20015",
+  "targets": [
     {
-      "id" : "BF0F7742-049D-4315-A6E1-0EB39E981549",
-      "name" : "Inline"
+      "id": "BF0F7742-049D-4315-A6E1-0EB39E981549",
+      "name": "Inline"
     },
     {
-      "id" : "10120BC6-8070-4807-B540-37572B9702E2",
-      "name" : "InlineIOS"
+      "id": "10120BC6-8070-4807-B540-37572B9702E2",
+      "name": "InlineIOS"
     }
   ]
 }

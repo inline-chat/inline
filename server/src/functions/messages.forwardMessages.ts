@@ -9,6 +9,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { cloneRichTextMediaForForward } from "@in/server/modules/message/richMediaForwarding"
 import { eq } from "drizzle-orm"
 
 const log = new Log("functions.forwardMessages")
@@ -227,11 +228,14 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
       voiceId = BigInt(clonedVoiceId)
     }
 
+    const richText = await cloneRichTextMediaForForward(sourceMessage.richText, currentUserId)
+
     const result = await sendMessage(
       {
         peerId: input.toPeerId,
         message: sourceMessage.text ?? undefined,
-        entities: sourceMessage.entities ?? undefined,
+        entities: richText ? undefined : sourceMessage.entities ?? undefined,
+        richText,
         photoId: photoId,
         videoId: videoId,
         documentId: documentId,

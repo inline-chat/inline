@@ -22,6 +22,22 @@ struct GeneralSettingsDetailView: View {
         Toggle("Check Spelling While Typing", isOn: $appSettings.checkSpellingWhileTyping)
       }
 
+      Section("Message Actions") {
+        Picker("Double-click", selection: $appSettings.messageDoubleClickAction) {
+          ForEach(MessageGestureAction.allCases) { action in
+            Text(action.title).tag(action)
+          }
+        }
+        .pickerStyle(.menu)
+
+        Picker("Hold", selection: $appSettings.messageHoldAction) {
+          ForEach(MessageGestureAction.allCases) { action in
+            Text(action.title).tag(action)
+          }
+        }
+        .pickerStyle(.menu)
+      }
+
       Section("Translation") {
         Toggle("Show translation controls", isOn: $appSettings.translationUIEnabled)
       }

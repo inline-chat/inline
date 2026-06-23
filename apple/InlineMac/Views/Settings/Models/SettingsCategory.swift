@@ -3,6 +3,7 @@ import Foundation
 enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
   case bots
+  case connections
   case dataStorage
   case general
   case hotkeys
@@ -30,6 +31,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "Account"
     case .bots:
       return "Bots"
+    case .connections:
+      return "Connections"
 #if SPARKLE
     case .updates:
       return "Updates"
@@ -57,6 +60,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "person.circle"
     case .bots:
       return "cpu"
+    case .connections:
+      return "link"
 #if SPARKLE
     case .updates:
       return "arrow.triangle.2.circlepath"

@@ -4,6 +4,7 @@ import SwiftUI
 struct ExperimentalView: View {
   @AppStorage("enableExperimentalView") private var enableExperimentalView = false
   @AppStorage(ExperimentalFeatureFlags.voiceMessagesKey) private var enableVoiceMessages = false
+  @AppStorage(ExperimentalFeatureFlags.richTextMessagesKey) private var enableRichTextMessages = false
 
   var body: some View {
     List {
@@ -28,7 +29,17 @@ struct ExperimentalView: View {
             .accessibilityLabel("Enable voice messages")
         }
 
-        Text("Experimental voice features and UI changes may require an app restart.")
+        SettingsItem(
+          icon: "text.alignleft",
+          iconColor: .blue,
+          title: "Enable rich text messages"
+        ) {
+          Toggle("", isOn: $enableRichTextMessages)
+            .labelsHidden()
+            .accessibilityLabel("Enable rich text messages")
+        }
+
+        Text("Rich rendering is gated for beta; older clients keep using fallback text.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }

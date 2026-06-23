@@ -5,6 +5,7 @@ import {
   MessageEntities,
   MessageEntity_Type,
   MessageSendMode,
+  RichMessage,
   Update,
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -45,6 +46,8 @@ import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { RichTextValidationError } from "@in/server/modules/message/richText"
+import { validateInternalRichMediaRefs } from "@in/server/modules/message/richMediaValidation"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
@@ -65,6 +68,8 @@ import {
   getFollowingDialogUserIds,
   setDialogFollowModeForUsers,
 } from "@in/server/modules/dialogFollow"
+import { maybeScheduleChatgptBot } from "@in/server/modules/chatgpt/bot/schedule"
+import { resolveRichMediaPublicUrls, shouldResolveRichMediaUploads } from "@in/server/modules/mediaUploader"
 
 type Input = {
   peerId: InputPeer
@@ -79,6 +84,10 @@ type Input = {
   sendDate?: number
   isSticker?: boolean
   entities?: MessageEntities
+  richText?: RichMessage
+  parseRichMarkdown?: boolean
+  demoteInlineOnlyRichText?: boolean
+  skipEntityDetection?: boolean
   actions?: MessageActions
   sendMode?: MessageSendMode
   forwardHeader?: {
@@ -120,15 +129,40 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // FIXME: create a helper function to get the layer
   const currentUserLayer = connectionManager.getConnectionBySession(currentUserId, context.currentSessionId)?.layer ?? 0
 
-  const outgoingText = input.message
-    ? await processOutgoingText({
-        text: input.message,
-        entities: input.entities,
-        parseMarkdown: input.parseMarkdown,
-      })
-    : undefined
+  const inputText = input.message ?? input.richText?.fallbackText
+  let outgoingText: Awaited<ReturnType<typeof processOutgoingText>> | undefined
+  try {
+    outgoingText = inputText !== undefined
+      ? await processOutgoingText({
+          text: inputText,
+          entities: input.entities,
+          parseMarkdown: input.parseMarkdown,
+          richText: input.richText,
+          parseRichMarkdown: input.parseRichMarkdown,
+          demoteInlineOnlyRichText: input.demoteInlineOnlyRichText,
+          skipEntityDetection: input.skipEntityDetection,
+        })
+      : undefined
+  } catch (error) {
+    if (error instanceof RichTextValidationError) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    throw error
+  }
   let text = outgoingText?.text
   let entities = outgoingText?.entities
+  let richText = outgoingText?.richText
+  if (richText && shouldResolveRichMediaUploads()) {
+    richText = (await resolveRichMediaPublicUrls({ richText, userId: currentUserId })).richText
+  }
+  try {
+    await validateInternalRichMediaRefs(richText, { ownerUserId: currentUserId })
+  } catch (error) {
+    if (error instanceof RichTextValidationError) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    throw error
+  }
 
   const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
   const previewRoutes = text && !input.skipLinkProcessing && !hasInputUrlPreview
@@ -172,6 +206,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // encrypt entities
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const binaryRichText = richText ? RichMessage.toBinary(richText) : undefined
+  const encryptedRichText = binaryRichText && binaryRichText.length > 0 ? encryptBinary(binaryRichText) : undefined
   const binaryActions = normalizedActions ? MessageActions.toBinary(normalizedActions) : undefined
   const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
 
@@ -227,6 +263,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       entitiesEncrypted: encryptedEntities?.encrypted ?? null,
       entitiesIv: encryptedEntities?.iv ?? null,
       entitiesTag: encryptedEntities?.authTag ?? null,
+      richTextEncrypted: encryptedRichText?.encrypted ?? null,
+      richTextIv: encryptedRichText?.iv ?? null,
+      richTextTag: encryptedRichText?.authTag ?? null,
+      richTextIndex: richText ?? null,
       actionsEncrypted: encryptedActions?.encrypted ?? null,
       actionsIv: encryptedActions?.iv ?? null,
       actionsTag: encryptedActions?.authTag ?? null,
@@ -237,6 +277,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
       // Just fetch the message from the database
       return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId) }
+    } else if (error instanceof RichTextValidationError) {
+      throw RealtimeRpcError.BadRequest()
     } else {
       log.error("error inserting message", error)
       throw RealtimeRpcError.InternalError()
@@ -426,6 +468,22 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       update: parentSummaryUpdate,
     })
   }
+
+  void maybeScheduleChatgptBot({
+    chat,
+    message: newMessage,
+    text,
+    entities,
+    inputPeer,
+    actorUserId: currentUserId,
+  }).catch((error) => {
+    log.error("Failed to schedule ChatGPT bot", {
+      error,
+      chatId,
+      messageId: newMessage.messageId,
+      currentUserId,
+    })
+  })
 
   // return new updates
   return { updates: selfUpdates }

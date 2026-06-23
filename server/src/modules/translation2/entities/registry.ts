@@ -16,6 +16,10 @@ export const entityPolicies: PolicyRegistry = {
   [MessageEntity_Type.THREAD]: "markdown",
   [MessageEntity_Type.THREAD_TITLE]: "markdown",
   [MessageEntity_Type.BOT_COMMAND]: "literalDetected",
+  [MessageEntity_Type.UNDERLINE]: "markdown",
+  [MessageEntity_Type.STRIKETHROUGH]: "markdown",
+  [MessageEntity_Type.BLOCKQUOTE]: "markdown",
+  [MessageEntity_Type.EXPANDABLE_BLOCKQUOTE]: "markdown",
 }
 
 export const policyFor = (type: MessageEntity_Type): EntityPolicy => {

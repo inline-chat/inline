@@ -75,10 +75,13 @@ describe("inline/channel", () => {
       nativeCommandsAutoEnabled: true,
       nativeSkillsAutoEnabled: true,
     })
-    expect(inlineChannelPlugin.agentPrompt?.inboundFormattingHints?.({})).toEqual({
+    expect(inlineChannelPlugin.agentPrompt?.inboundFormattingHints?.({})).toMatchObject({
       text_markup: "inline_markdown",
       rules: expect.arrayContaining([
-        "Prefer bullet lists over markdown tables.",
+        "Use Inline rich markdown.",
+        "Use Markdown tables when tabular comparison is clearer than bullets.",
+        "Use <details><summary>Title</summary>...</details> for optional long sections.",
+        "Use <blockquote expandable>...</blockquote> for long quoted or secondary context.",
         "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
         "Mention Inline users with markdown links like [@FirstName](inline://user?id=123); use inline://user?username=username only when the user id is unavailable.",
         "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",
@@ -1890,7 +1893,7 @@ describe("inline/channel", () => {
 
     expect(connect).toHaveBeenCalled()
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ chatId: 7n, text: "hi", parseMarkdown: true }),
+      expect.objectContaining({ chatId: 7n, text: "hi", parseRichMarkdown: true }),
     )
     expect(close).toHaveBeenCalled()
   })
@@ -1988,7 +1991,7 @@ describe("inline/channel", () => {
     } as any)
 
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 42n, text: "hi", parseMarkdown: true }),
+      expect.objectContaining({ userId: 42n, text: "hi", parseRichMarkdown: true }),
     )
     expect(sendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 42n }),
@@ -2052,7 +2055,7 @@ describe("inline/channel", () => {
 
     expect(invokeRaw).toHaveBeenCalled()
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 1600n, text: "hi", parseMarkdown: true }),
+      expect.objectContaining({ userId: 1600n, text: "hi", parseRichMarkdown: true }),
     )
     expect(sendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 1600n }),
@@ -2103,7 +2106,7 @@ describe("inline/channel", () => {
     } as any)
 
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ chatId: 1600n, text: "hi", parseMarkdown: true }),
+      expect.objectContaining({ chatId: 1600n, text: "hi", parseRichMarkdown: true }),
     )
     expect(invokeRaw).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalled()
@@ -2414,7 +2417,7 @@ describe("inline/channel", () => {
           kind: "photo",
           photoId: 101n,
         },
-        parseMarkdown: true,
+        parseRichMarkdown: true,
       }),
     )
     expect(close).toHaveBeenCalled()
@@ -2919,7 +2922,7 @@ describe("inline/channel", () => {
         chatId: 8n,
         text: "caption",
         replyToMsgId: 9n,
-        parseMarkdown: true,
+        parseRichMarkdown: true,
       }),
     )
     expect(sendMessage).toHaveBeenNthCalledWith(
@@ -2984,7 +2987,7 @@ describe("inline/channel", () => {
       expect.objectContaining({
         chatId: 7n,
         text: expect.stringContaining("Approve deploy?"),
-        parseMarkdown: true,
+        parseRichMarkdown: true,
       }),
     )
     expect(firstArg?.actions?.rows?.[0]?.actions?.[0]?.text).toBe("Approve")
@@ -3038,7 +3041,7 @@ describe("inline/channel", () => {
       expect.objectContaining({
         chatId: 7n,
         text: "- Approve",
-        parseMarkdown: true,
+        parseRichMarkdown: true,
       }),
     )
     expect(firstArg?.actions?.rows?.[0]?.actions?.[0]?.text).toBe("Approve")

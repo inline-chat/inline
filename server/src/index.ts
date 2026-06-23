@@ -40,6 +40,8 @@ import { admin } from "./controllers/admin"
 import { media } from "./controllers/media"
 import type { Server } from "bun"
 import { EventEmitter } from "events"
+import { provisionOfficialInternalBots } from "@in/server/modules/internalAgents/officialBots"
+import { recoverChatgptRunsOnStartup } from "@in/server/modules/chatgpt/harness/state/startupRecovery"
 
 const port = PORT
 const log = new Log("server", LogLevel.INFO)
@@ -64,6 +66,13 @@ if (NODE_ENV !== "development") {
 }
 
 export const app: any = new Elysia()
+
+if (NODE_ENV !== "test") {
+  app.onStart(async () => {
+    await provisionOfficialInternalBots()
+    await recoverChatgptRunsOnStartup()
+  })
+}
 
 app
   .use(health)

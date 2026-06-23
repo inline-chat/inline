@@ -19,6 +19,8 @@ export const editMessage = async (
       entities: input.entities,
       actions: input.actions,
       parseMarkdown: input.parseMarkdown ?? undefined,
+      richText: input.richText,
+      parseRichMarkdown: input.parseRichMarkdown ?? undefined,
     },
     {
       currentSessionId: handlerContext.sessionId,

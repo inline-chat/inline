@@ -264,7 +264,7 @@ describe("InlineBotApiClient", () => {
     })
   })
 
-  it("uses POST JSON for editMessageText and deleteMessage", async () => {
+  it("uses POST JSON for sendRichMessage, sendRichMessageDraft, editMessageText, and deleteMessage", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
 
     const client = new InlineBotApiClient({
@@ -282,16 +282,74 @@ describe("InlineBotApiClient", () => {
       }) as any,
     })
 
-    const edit = await client.editMessageText({ chat_id: 42, message_id: 7, text: "updated" })
+    const sent = await client.sendRichMessage({
+      chat_id: 42,
+      rich_message: {
+        markdown: "## rich",
+        direction: "rtl",
+        skip_entity_detection: true,
+      },
+    })
+    const edit = await client.editMessageText({
+      chat_id: 42,
+      message_id: 7,
+      rich_text: {
+        html: "<strong>updated</strong>",
+        direction: "ltr",
+      },
+    })
+    const draft = await client.sendRichMessageDraft({
+      chat_id: 42,
+      draft_id: "draft-1",
+      message_id: 7,
+      rich_text: {
+        fallback_text: "thinking",
+        blocks: [{ type: "thinking", children: [] }],
+      },
+    })
     const deleted = await client.deleteMessage({ chat_id: 42, message_id: 7 })
 
+    expect(sent.ok).toBe(true)
     expect(edit.ok).toBe(true)
+    expect(draft.ok).toBe(true)
     expect(deleted.ok).toBe(true)
     expect(calls).toEqual([
       {
+        url: "https://api.inline.chat/bot/sendRichMessage",
+        method: "POST",
+        body: {
+          chat_id: 42,
+          rich_message: {
+            markdown: "## rich",
+            direction: "rtl",
+            skip_entity_detection: true,
+          },
+        },
+      },
+      {
         url: "https://api.inline.chat/bot/editMessageText",
         method: "POST",
-        body: { chat_id: 42, message_id: 7, text: "updated" },
+        body: {
+          chat_id: 42,
+          message_id: 7,
+          rich_text: {
+            html: "<strong>updated</strong>",
+            direction: "ltr",
+          },
+        },
+      },
+      {
+        url: "https://api.inline.chat/bot/sendRichMessageDraft",
+        method: "POST",
+        body: {
+          chat_id: 42,
+          draft_id: "draft-1",
+          message_id: 7,
+          rich_text: {
+            fallback_text: "thinking",
+            blocks: [{ type: "thinking", children: [] }],
+          },
+        },
       },
       {
         url: "https://api.inline.chat/bot/deleteMessage",

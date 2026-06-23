@@ -63,6 +63,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case isSticker
     case hasLink
     case entities
+    case richText
   }
 
   // Locally autoincremented id
@@ -125,6 +126,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var isSticker: Bool?
   public var hasLink: Bool?
   public var entities: MessageEntities?
+  public var richText: RichMessage?
 
   public var actions: InlineProtocol.MessageActions? {
     get {
@@ -187,6 +189,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let contentPayload = Column(CodingKeys.contentPayload)
     public static let hasLink = Column(CodingKeys.hasLink)
     public static let entities = Column(CodingKeys.entities)
+    public static let richText = Column(CodingKeys.richText)
   }
 
   public static let chat = belongsTo(Chat.self)
@@ -332,7 +335,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     transactionId: String? = nil,
     isSticker: Bool? = nil,
     hasLink: Bool? = nil,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    richText: RichMessage? = nil
   ) {
     self.messageId = messageId
     self.randomId = randomId
@@ -365,6 +369,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.isSticker = isSticker
     self.hasLink = hasLink
     self.entities = entities
+    self.richText = richText
     updateHasLinkIfNeeded()
 
     if peerUserId == nil, peerThreadId == nil {
@@ -428,7 +433,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       actions: from.hasActions ? from.actions : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
-      entities: from.hasEntities ? from.entities : nil
+      entities: from.hasEntities ? from.entities : nil,
+      richText: from.hasRichText ? from.richText : nil
     )
   }
 
@@ -803,6 +809,7 @@ public extension Message {
         contentPayload = Message.mergedContentPayload(incoming: contentPayload, existing: existing.contentPayload)
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
+        richText = richText ?? existing.richText
         rev = max(rev, existing.rev)
         transactionId = existing.transactionId
         isExisting = true
@@ -855,6 +862,7 @@ public extension ApiMessage {
       message.text = existing.text
       message.contentPayload = existing.contentPayload
       message.actions = existing.actions
+      message.richText = existing.richText
       message.transactionId = existing.transactionId
       message.hasLink = existing.hasLink
       message.editDate = editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
@@ -940,6 +948,9 @@ public extension Message {
       )
       if !protocolMessage.hasActions {
         message.actions = nil
+      }
+      if !protocolMessage.hasRichText {
+        message.richText = nil
       }
 
       if protocolMessage.hasReactions {

@@ -144,6 +144,90 @@ class MessageTableCell: NSView {
     needsDisplay = true
   }
 
+  func updateTextAndSizeWithProps(props: MessageViewProps, animate: Bool = false) {
+    guard let messageView, let message = currentContent?.message else { return }
+    currentContent?.props = props
+    messageView.updateTextAndSize(fullMessage: message, props: props, animate: animate)
+    needsDisplay = true
+  }
+
+  #if DEBUG
+  func debugRichTextSlotSnapshotForTestBook() -> RichTextSlotDebugSnapshot? {
+    if let messageView = messageView as? MessageViewAppKit {
+      return messageView.debugRichTextSlotSnapshotForTestBook()
+    }
+    if let messageView = messageView as? MinimalMessageViewAppKit {
+      return messageView.debugRichTextSlotSnapshotForTestBook()
+    }
+    return nil
+  }
+
+  func debugRenderableViewIDForTestBook() -> ObjectIdentifier? {
+    guard let messageView else { return nil }
+    return ObjectIdentifier(messageView)
+  }
+
+  func debugRichTextInteractionSnapshotForTestBook() -> RichTextInteractionDebugSnapshot? {
+    if let messageView = messageView as? MessageViewAppKit {
+      return messageView.debugRichTextInteractionSnapshotForTestBook()
+    }
+    if let messageView = messageView as? MinimalMessageViewAppKit {
+      return messageView.debugRichTextInteractionSnapshotForTestBook()
+    }
+    return nil
+  }
+
+  func debugSelectedRichTextForTestBook() -> String {
+    if let messageView = messageView as? MessageViewAppKit {
+      return messageView.debugSelectedRichTextForTestBook()
+    }
+    if let messageView = messageView as? MinimalMessageViewAppKit {
+      return messageView.debugSelectedRichTextForTestBook()
+    }
+    return ""
+  }
+
+  func debugRichMediaScrollSnapshotForTestBook() -> RichMediaScrollDebugSnapshot? {
+    if let messageView = messageView as? MessageViewAppKit {
+      return messageView.debugRichMediaScrollSnapshotForTestBook()
+    }
+    if let messageView = messageView as? MinimalMessageViewAppKit {
+      return messageView.debugRichMediaScrollSnapshotForTestBook()
+    }
+    return nil
+  }
+
+  func debugRichRendererReuseDiagnosticsForTestBook() -> RichRendererReuseDiagnostics? {
+    if let messageView = messageView as? MessageViewAppKit {
+      return messageView.debugRichRendererReuseDiagnosticsForTestBook()
+    }
+    if let messageView = messageView as? MinimalMessageViewAppKit {
+      return messageView.debugRichRendererReuseDiagnosticsForTestBook()
+    }
+    return nil
+  }
+
+  func debugMessageActionRowsSnapshotForTestBook() -> RichMessageActionRowsDebugSnapshot? {
+    if let messageView = messageView as? MessageViewAppKit {
+      return messageView.debugMessageActionRowsSnapshotForTestBook()
+    }
+    if let messageView = messageView as? MinimalMessageViewAppKit {
+      return messageView.debugMessageActionRowsSnapshotForTestBook()
+    }
+    return nil
+  }
+
+  func debugTimeStatusSnapshotForTestBook() -> RichMessageTimeStatusDebugSnapshot? {
+    if let messageView = messageView as? MessageViewAppKit {
+      return messageView.debugTimeStatusSnapshotForTestBook()
+    }
+    if let messageView = messageView as? MinimalMessageViewAppKit {
+      return messageView.debugTimeStatusSnapshotForTestBook()
+    }
+    return nil
+  }
+  #endif
+
   func updateSize() {
     guard let content = currentContent else { return }
     guard let messageView else { return }

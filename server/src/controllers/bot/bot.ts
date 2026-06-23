@@ -14,11 +14,27 @@ import {
   TGetChatInput,
   TSetMyCommandsInput,
   TSendMessageInput,
+  TSendRichMessageInput,
+  TSendRichMessageDraftInput,
   TSendReactionInput,
 } from "./types"
 import { handler as getMeHandler } from "@in/server/methods/getMe"
 import { sendMessage as sendMessageFn } from "@in/server/functions/messages.sendMessage"
-import type { InputPeer, Peer } from "@inline-chat/protocol/core"
+import {
+  RichCollageLayout,
+  RichDirection,
+  RichHorizontalAlign,
+  RichTextStyle,
+  RichVerticalAlign,
+  type InputPeer,
+  type Peer,
+  type RichBlock,
+  type RichMediaRef,
+  type RichMessage,
+  type RichTableCell,
+  type RichTableRow,
+  type RichText,
+} from "@inline-chat/protocol/core"
 import { getChat as getChatFn } from "@in/server/functions/messages.getChat"
 import { getChatHistory as getChatHistoryFn } from "@in/server/functions/messages.getChatHistory"
 import { deleteMessage as deleteMessageFn } from "@in/server/functions/messages.deleteMessage"
@@ -32,12 +48,20 @@ import { ModelError } from "@in/server/db/models/_errors"
 import { encodeBotEntities, parseBotEntities, type BotUserJson } from "./entities"
 import { UsersModel } from "@in/server/db/models/users"
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
+import { parseRichHtml } from "@in/server/modules/message/richHtml"
+import { parseRichMarkdown, RichTextValidationError } from "@in/server/modules/message/richText"
+import { pushRichMessageDraftUpdate } from "@in/server/modules/message/richDraftUpdates"
 import type {
   BotChat,
   BotChatLastMessage,
   BotMessage,
   BotMessageLite,
   BotPeer,
+  BotRichBlock,
+  BotRichBlockType,
+  BotRichMessage,
+  BotRichText,
+  BotRichTextStyle,
   BotTargetInput,
   BotUser,
 } from "@inline-chat/bot-api-types"
@@ -268,6 +292,7 @@ const toBotChatLastMessageFromDb = (message: any, usersById?: Map<number, BotUse
     date: dateSeconds,
     text: message.text ?? undefined,
     entities: encodeBotEntities(message.entities, { usersById }),
+    rich_text: encodeBotRichMessage(message.richText),
   }
 }
 
@@ -312,6 +337,908 @@ const parseBotParseMarkdown = (input: Record<string, unknown>): boolean | undefi
   return parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
 }
 
+const parseBotParseRichMarkdown = (input: Record<string, unknown>): boolean | undefined => {
+  return parseBotBoolean(input["parse_rich_markdown"] ?? input["parseRichMarkdown"])
+}
+
+const parseBotSkipEntityDetection = (input: Record<string, unknown>): boolean | undefined => {
+  return parseBotBoolean(input["skip_entity_detection"] ?? input["skipEntityDetection"])
+}
+
+const parseBotRichDirection = (value: unknown): RichDirection | undefined => {
+  if (value === undefined || value === null || value === "") return undefined
+  if (typeof value !== "string") {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "auto":
+      return RichDirection.DIRECTION_AUTO
+    case "ltr":
+      return RichDirection.DIRECTION_LTR
+    case "rtl":
+      return RichDirection.DIRECTION_RTL
+    default:
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+}
+
+const encodeBotRichDirection = (direction: RichDirection | undefined): "auto" | "ltr" | "rtl" | undefined => {
+  switch (direction) {
+    case RichDirection.DIRECTION_AUTO:
+      return "auto"
+    case RichDirection.DIRECTION_LTR:
+      return "ltr"
+    case RichDirection.DIRECTION_RTL:
+      return "rtl"
+    default:
+      return undefined
+  }
+}
+
+const parseBotRichTextStyle = (value: unknown): RichTextStyle => {
+  if (typeof value !== "string") {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "bold":
+      return RichTextStyle.STYLE_BOLD
+    case "italic":
+      return RichTextStyle.STYLE_ITALIC
+    case "underline":
+      return RichTextStyle.STYLE_UNDERLINE
+    case "strikethrough":
+      return RichTextStyle.STYLE_STRIKETHROUGH
+    case "code":
+      return RichTextStyle.STYLE_CODE
+    case "spoiler":
+      return RichTextStyle.STYLE_SPOILER
+    default:
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+}
+
+const encodeBotRichTextStyle = (style: RichTextStyle): BotRichTextStyle | undefined => {
+  switch (style) {
+    case RichTextStyle.STYLE_BOLD:
+      return "bold"
+    case RichTextStyle.STYLE_ITALIC:
+      return "italic"
+    case RichTextStyle.STYLE_UNDERLINE:
+      return "underline"
+    case RichTextStyle.STYLE_STRIKETHROUGH:
+      return "strikethrough"
+    case RichTextStyle.STYLE_CODE:
+      return "code"
+    case RichTextStyle.STYLE_SPOILER:
+      return "spoiler"
+    default:
+      return undefined
+  }
+}
+
+const parseBotRichBlockType = (value: unknown): BotRichBlockType => {
+  if (typeof value !== "string") {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "paragraph":
+      return "paragraph"
+    case "heading":
+      return "heading"
+    case "list":
+      return "list"
+    case "list_item":
+      return "list_item"
+    case "quote":
+      return "quote"
+    case "code":
+      return "code"
+    case "divider":
+      return "divider"
+    case "thinking":
+      return "thinking"
+    case "details":
+      return "details"
+    case "photo":
+      return "photo"
+    case "video":
+      return "video"
+    case "document":
+      return "document"
+    case "audio":
+      return "audio"
+    case "table":
+      return "table"
+    case "math":
+      return "math"
+    case "map":
+      return "map"
+    case "embed":
+      return "embed"
+    case "embed_post":
+      return "embed_post"
+    case "link_preview":
+      return "link_preview"
+    case "collage":
+      return "collage"
+    default:
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+}
+
+const parseBotRichText = (value: unknown): RichText => {
+  if (!isRecord(value)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const text = value["text"]
+  const children = value["children"]
+  const styles = value["styles"]
+  const url = value["url"]
+
+  return {
+    text: typeof text === "string" ? text : "",
+    children: Array.isArray(children) ? children.map(parseBotRichText) : [],
+    styles: Array.isArray(styles) ? styles.map(parseBotRichTextStyle) : [],
+    url: typeof url === "string" ? url : undefined,
+  }
+}
+
+const encodeBotRichText = (node: RichText): BotRichText => {
+  const styles = (node.styles ?? []).map(encodeBotRichTextStyle).filter((style): style is BotRichTextStyle => style !== undefined)
+  return {
+    ...(node.text ? { text: node.text } : {}),
+    ...(node.children?.length ? { children: node.children.map(encodeBotRichText) } : {}),
+    ...(styles.length ? { styles } : {}),
+    ...(node.url ? { url: node.url } : {}),
+  }
+}
+
+const parseOptionalString = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined)
+const parseOptionalNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined
+const parseOptionalInt = (value: unknown): number | undefined => {
+  const number = parseOptionalNumber(value)
+  return number === undefined ? undefined : Math.trunc(number)
+}
+const parseOptionalBoolean = (value: unknown): boolean | undefined => (typeof value === "boolean" ? value : undefined)
+const parseOptionalBigInt = (value: unknown): bigint | undefined => {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return undefined
+  }
+
+  const id = normalizeInputId(value)
+  return id === undefined ? undefined : BigInt(id)
+}
+
+const parseBotRichTextList = (value: unknown): RichText[] => {
+  if (Array.isArray(value)) {
+    return value.map(parseBotRichText)
+  }
+  if (typeof value === "string") {
+    return [{ text: value, children: [], styles: [] }]
+  }
+  return []
+}
+
+const plainTextFromBotRichText = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value
+  }
+  if (!Array.isArray(value)) {
+    return ""
+  }
+
+  const flatten = (node: RichText): string => `${node.text}${node.children.map(flatten).join("")}`
+  return value.map(parseBotRichText).map(flatten).join("")
+}
+
+const parseBotRichBlockList = (value: Record<string, unknown>): RichBlock[] => {
+  const blocks = value["blocks"]
+  if (Array.isArray(blocks)) {
+    return blocks.map(parseBotRichBlock)
+  }
+
+  const children = value["children"]
+  if (Array.isArray(children)) {
+    return children.map(parseBotRichBlock)
+  }
+
+  const text = parseBotRichTextList(value["text"])
+  if (text.length === 0) {
+    return []
+  }
+
+  return [
+    {
+      blockId: "",
+      block: {
+        oneofKind: "paragraph",
+        paragraph: { text },
+      },
+    },
+  ]
+}
+
+const parseBotRichMediaRef = (value: unknown): RichMediaRef | undefined => {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  let media: RichMediaRef["media"] = { oneofKind: undefined }
+  const photoId = parseOptionalBigInt(value["photo_id"] ?? value["photoId"])
+  const videoId = parseOptionalBigInt(value["video_id"] ?? value["videoId"])
+  const documentId = parseOptionalBigInt(value["document_id"] ?? value["documentId"])
+  const voiceId = parseOptionalBigInt(value["voice_id"] ?? value["voiceId"])
+  const publicUrl = parseOptionalString(value["public_url"] ?? value["publicUrl"])
+
+  if (photoId !== undefined) {
+    media = { oneofKind: "photoId", photoId }
+  } else if (videoId !== undefined) {
+    media = { oneofKind: "videoId", videoId }
+  } else if (documentId !== undefined) {
+    media = { oneofKind: "documentId", documentId }
+  } else if (voiceId !== undefined) {
+    media = { oneofKind: "voiceId", voiceId }
+  } else if (publicUrl) {
+    media = { oneofKind: "publicUrl", publicUrl }
+  }
+
+  return {
+    alt: parseOptionalString(value["alt"]) ?? "",
+    fileName: parseOptionalString(value["file_name"] ?? value["fileName"]),
+    width: parseOptionalInt(value["width"]),
+    height: parseOptionalInt(value["height"]),
+    mimeType: parseOptionalString(value["mime_type"] ?? value["mimeType"]),
+    cdnUrl: parseOptionalString(value["cdn_url"] ?? value["cdnUrl"]),
+    fileUniqueId: parseOptionalString(value["file_unique_id"] ?? value["fileUniqueId"]),
+    media,
+  }
+}
+
+const encodeBotRichMediaRef = (ref: RichMediaRef | undefined): BotRichBlock["media"] | undefined => {
+  if (!ref) {
+    return undefined
+  }
+
+  return {
+    ...(ref.alt ? { alt: ref.alt } : {}),
+    ...(ref.fileName ? { file_name: ref.fileName } : {}),
+    ...(ref.width !== undefined ? { width: ref.width } : {}),
+    ...(ref.height !== undefined ? { height: ref.height } : {}),
+    ...(ref.mimeType ? { mime_type: ref.mimeType } : {}),
+    ...(ref.cdnUrl ? { cdn_url: ref.cdnUrl } : {}),
+    ...(ref.fileUniqueId ? { file_unique_id: ref.fileUniqueId } : {}),
+    ...(ref.media.oneofKind === "photoId" ? { photo_id: Number(ref.media.photoId) } : {}),
+    ...(ref.media.oneofKind === "videoId" ? { video_id: Number(ref.media.videoId) } : {}),
+    ...(ref.media.oneofKind === "documentId" ? { document_id: Number(ref.media.documentId) } : {}),
+    ...(ref.media.oneofKind === "voiceId" ? { voice_id: Number(ref.media.voiceId) } : {}),
+    ...(ref.media.oneofKind === "publicUrl" ? { public_url: ref.media.publicUrl } : {}),
+  }
+}
+
+const parseBotHorizontalAlign = (value: unknown): RichHorizontalAlign | undefined => {
+  if (typeof value !== "string") {
+    return undefined
+  }
+  switch (value.trim().toLowerCase()) {
+    case "left":
+      return RichHorizontalAlign.HORIZONTAL_ALIGN_LEFT
+    case "center":
+      return RichHorizontalAlign.HORIZONTAL_ALIGN_CENTER
+    case "right":
+      return RichHorizontalAlign.HORIZONTAL_ALIGN_RIGHT
+    default:
+      return undefined
+  }
+}
+
+const encodeBotHorizontalAlign = (value: RichHorizontalAlign | undefined): "left" | "center" | "right" | undefined => {
+  switch (value) {
+    case RichHorizontalAlign.HORIZONTAL_ALIGN_LEFT:
+      return "left"
+    case RichHorizontalAlign.HORIZONTAL_ALIGN_CENTER:
+      return "center"
+    case RichHorizontalAlign.HORIZONTAL_ALIGN_RIGHT:
+      return "right"
+    default:
+      return undefined
+  }
+}
+
+const parseBotVerticalAlign = (value: unknown): RichVerticalAlign | undefined => {
+  if (typeof value !== "string") {
+    return undefined
+  }
+  switch (value.trim().toLowerCase()) {
+    case "top":
+      return RichVerticalAlign.VERTICAL_ALIGN_TOP
+    case "middle":
+      return RichVerticalAlign.VERTICAL_ALIGN_MIDDLE
+    case "bottom":
+      return RichVerticalAlign.VERTICAL_ALIGN_BOTTOM
+    default:
+      return undefined
+  }
+}
+
+const encodeBotVerticalAlign = (value: RichVerticalAlign | undefined): "top" | "middle" | "bottom" | undefined => {
+  switch (value) {
+    case RichVerticalAlign.VERTICAL_ALIGN_TOP:
+      return "top"
+    case RichVerticalAlign.VERTICAL_ALIGN_MIDDLE:
+      return "middle"
+    case RichVerticalAlign.VERTICAL_ALIGN_BOTTOM:
+      return "bottom"
+    default:
+      return undefined
+  }
+}
+
+const parseBotTableCell = (value: unknown): RichTableCell => {
+  if (!isRecord(value)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  return {
+    text: parseBotRichTextList(value["text"]),
+    header: parseOptionalBoolean(value["header"]) ?? false,
+    colspan: parseOptionalInt(value["colspan"]) ?? 1,
+    rowspan: parseOptionalInt(value["rowspan"]) ?? 1,
+    align: parseBotHorizontalAlign(value["align"]),
+    valign: parseBotVerticalAlign(value["valign"]),
+  }
+}
+
+const parseBotTableRow = (value: unknown): RichTableRow => {
+  if (!isRecord(value) || !Array.isArray(value["cells"])) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  return {
+    cells: value["cells"].map(parseBotTableCell),
+  }
+}
+
+const encodeBotTableRows = (rows: RichTableRow[]): NonNullable<BotRichBlock["rows"]> =>
+  rows.map((row) => ({
+    cells: row.cells.map((cell) => ({
+      text: cell.text.map(encodeBotRichText),
+      ...(cell.header ? { header: true } : {}),
+      ...(cell.colspan !== 1 ? { colspan: cell.colspan } : {}),
+      ...(cell.rowspan !== 1 ? { rowspan: cell.rowspan } : {}),
+      ...(encodeBotHorizontalAlign(cell.align) ? { align: encodeBotHorizontalAlign(cell.align) } : {}),
+      ...(encodeBotVerticalAlign(cell.valign) ? { valign: encodeBotVerticalAlign(cell.valign) } : {}),
+    })),
+  }))
+
+const parseBotCollageLayout = (value: unknown): RichCollageLayout | undefined => {
+  if (typeof value !== "string") {
+    return undefined
+  }
+  switch (value.trim().toLowerCase()) {
+    case "grid":
+      return RichCollageLayout.COLLAGE_LAYOUT_GRID
+    case "masonry":
+      return RichCollageLayout.COLLAGE_LAYOUT_MASONRY
+    default:
+      return undefined
+  }
+}
+
+const encodeBotCollageLayout = (value: RichCollageLayout | undefined): "grid" | "masonry" | undefined => {
+  switch (value) {
+    case RichCollageLayout.COLLAGE_LAYOUT_GRID:
+      return "grid"
+    case RichCollageLayout.COLLAGE_LAYOUT_MASONRY:
+      return "masonry"
+    default:
+      return undefined
+  }
+}
+
+const parseBotRichBlock = (value: unknown): RichBlock => {
+  if (!isRecord(value)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const text = value["text"]
+  const children = value["children"]
+  const level = value["level"]
+  const language = value["language"]
+  const ordered = value["ordered"]
+  const start = value["start"]
+  const type = parseBotRichBlockType(value["type"])
+  const blockId = parseOptionalString(value["block_id"] ?? value["blockId"]) ?? ""
+  const direction = parseBotRichDirection(value["direction"])
+  const caption = parseBotRichTextList(value["caption"])
+  const media = parseBotRichMediaRef(value["media"])
+
+  const base = (block: RichBlock["block"]): RichBlock => ({
+    blockId,
+    direction,
+    block,
+  })
+
+  switch (type) {
+    case "heading":
+      return base({
+        oneofKind: "heading",
+        heading: {
+          text: parseBotRichTextList(text),
+          level: parseOptionalInt(level) ?? 1,
+        },
+      })
+    case "list": {
+      const rawItems = Array.isArray(value["items"]) ? value["items"] : Array.isArray(children) ? children : []
+      const items = rawItems.map((item) => {
+        if (isRecord(item)) {
+          if (item["type"] === "list_item") {
+            const parsed = parseBotRichBlock(item)
+            return parsed.block.oneofKind === "listItem" ? parsed.block.listItem : { blocks: [parsed] }
+          }
+          if (Array.isArray(item["blocks"]) || Array.isArray(item["children"]) || item["text"] !== undefined) {
+            const checked = parseOptionalBoolean(item["checked"])
+            return {
+              blocks: parseBotRichBlockList(item),
+              ...(checked !== undefined ? { checked } : {}),
+            }
+          }
+        }
+        return { blocks: [parseBotRichBlock(item)] }
+      })
+      return base({
+        oneofKind: "list",
+        list: {
+          ordered: parseOptionalBoolean(ordered) ?? false,
+          start: parseOptionalInt(start) ?? 1,
+          items,
+        },
+      })
+    }
+    case "list_item": {
+      const checked = parseOptionalBoolean(value["checked"])
+      return base({
+        oneofKind: "listItem",
+        listItem: {
+          blocks: parseBotRichBlockList(value),
+          ...(checked !== undefined ? { checked } : {}),
+        },
+      })
+    }
+    case "quote":
+      return base({
+        oneofKind: "quote",
+        quote: {
+          blocks: parseBotRichBlockList(value),
+          expandable: parseOptionalBoolean(value["expandable"]) ?? false,
+          initiallyCollapsed: parseOptionalBoolean(value["initially_collapsed"] ?? value["initiallyCollapsed"]) ?? false,
+        },
+      })
+    case "code":
+      return base({
+        oneofKind: "code",
+        code: {
+          text: plainTextFromBotRichText(value["code"] ?? text),
+          language: parseOptionalString(language),
+        },
+      })
+    case "divider":
+      return base({ oneofKind: "divider", divider: {} })
+    case "thinking":
+      return base({
+        oneofKind: "thinking",
+        thinking: {
+          blocks: parseBotRichBlockList(value),
+          initiallyCollapsed: parseOptionalBoolean(value["initially_collapsed"] ?? value["initiallyCollapsed"]) ?? true,
+        },
+      })
+    case "details":
+      return base({
+        oneofKind: "details",
+        details: {
+          title: parseBotRichTextList(value["title"] ?? text),
+          blocks: parseBotRichBlockList(value),
+          initiallyOpen: parseOptionalBoolean(value["initially_open"] ?? value["initiallyOpen"]) ?? false,
+        },
+      })
+    case "photo":
+      return base({ oneofKind: "photo", photo: { media, caption } })
+    case "video":
+      return base({
+        oneofKind: "video",
+        video: { media, caption, duration: parseOptionalInt(value["duration"]) },
+      })
+    case "document":
+      return base({ oneofKind: "document", document: { media, caption } })
+    case "audio":
+      return base({
+        oneofKind: "audio",
+        audio: {
+          media,
+          caption,
+          duration: parseOptionalInt(value["duration"]),
+          title: parseOptionalString(value["title"]),
+          performer: parseOptionalString(value["performer"]),
+        },
+      })
+    case "table":
+      return base({
+        oneofKind: "table",
+        table: {
+          rows: Array.isArray(value["rows"]) ? value["rows"].map(parseBotTableRow) : [],
+          caption,
+          bordered: parseOptionalBoolean(value["bordered"]) ?? true,
+          striped: parseOptionalBoolean(value["striped"]) ?? false,
+        },
+      })
+    case "math":
+      return base({
+        oneofKind: "math",
+        math: {
+          source: parseOptionalString(value["source"]) ?? plainTextFromBotRichText(text),
+          display: parseOptionalBoolean(value["display"]) ?? true,
+          fallback: parseOptionalString(value["fallback"]),
+        },
+      })
+    case "map":
+      return base({
+        oneofKind: "map",
+        map: {
+          latitude: parseOptionalNumber(value["latitude"]) ?? 0,
+          longitude: parseOptionalNumber(value["longitude"]) ?? 0,
+          zoom: parseOptionalInt(value["zoom"]) ?? 0,
+          caption,
+          title: parseOptionalString(value["title"]),
+          address: parseOptionalString(value["address"]),
+          openUrl: parseOptionalString(value["open_url"] ?? value["openUrl"]),
+          aspectRatio: parseOptionalNumber(value["aspect_ratio"] ?? value["aspectRatio"]),
+        },
+      })
+    case "embed":
+      return base({
+        oneofKind: "embed",
+        embed: {
+          url: parseOptionalString(value["url"]),
+          html: parseOptionalString(value["html"]),
+          poster: parseBotRichMediaRef(value["poster"]),
+          width: parseOptionalInt(value["width"]),
+          height: parseOptionalInt(value["height"]),
+          caption,
+          fullWidth: parseOptionalBoolean(value["full_width"] ?? value["fullWidth"]) ?? false,
+          allowScrolling: parseOptionalBoolean(value["allow_scrolling"] ?? value["allowScrolling"]) ?? false,
+          provider: parseOptionalString(value["provider"]),
+        },
+      })
+    case "embed_post":
+      return base({
+        oneofKind: "embedPost",
+        embedPost: {
+          url: parseOptionalString(value["url"]) ?? "",
+          author: parseOptionalString(value["author"]) ?? "",
+          authorPhoto: parseBotRichMediaRef(value["author_photo"] ?? value["authorPhoto"]),
+          date: parseOptionalBigInt(value["date"]),
+          blocks: parseBotRichBlockList(value),
+          caption,
+        },
+      })
+    case "link_preview":
+      return base({
+        oneofKind: "linkPreview",
+        linkPreview: {
+          url: parseOptionalString(value["url"]) ?? "",
+          displayUrl: parseOptionalString(value["display_url"] ?? value["displayUrl"]),
+          siteName: parseOptionalString(value["site_name"] ?? value["siteName"]),
+          title: parseOptionalString(value["title"]),
+          description: parseOptionalString(value["description"]),
+          media,
+          mediaAspectRatio: parseOptionalNumber(value["media_aspect_ratio"] ?? value["mediaAspectRatio"]),
+          compact: parseOptionalBoolean(value["compact"]) ?? false,
+        },
+      })
+    case "collage":
+      return base({
+        oneofKind: "collage",
+        collage: {
+          items: Array.isArray(value["items"]) ? value["items"].map(parseBotRichBlock) : [],
+          caption,
+          layout: parseBotCollageLayout(value["layout"]),
+        },
+      })
+    case "paragraph":
+    default:
+      return base({
+        oneofKind: "paragraph",
+        paragraph: { text: parseBotRichTextList(text) },
+      })
+  }
+}
+
+const encodeBotRichBlock = (block: RichBlock): BotRichBlock => {
+  const base = (value: BotRichBlock): BotRichBlock => ({
+    ...value,
+    ...(block.blockId ? { block_id: block.blockId } : {}),
+    ...(encodeBotRichDirection(block.direction) ? { direction: encodeBotRichDirection(block.direction) } : {}),
+  })
+
+  switch (block.block.oneofKind) {
+    case "heading":
+      return base({
+        type: "heading",
+        text: block.block.heading.text.map(encodeBotRichText),
+        level: block.block.heading.level,
+      })
+    case "list":
+      return base({
+        type: "list",
+        ordered: block.block.list.ordered,
+        start: block.block.list.start,
+        items: block.block.list.items.map((item) => ({
+          type: "list_item",
+          children: item.blocks.map(encodeBotRichBlock),
+          ...(item.checked !== undefined ? { checked: item.checked } : {}),
+        })),
+      })
+    case "listItem":
+      return base({
+        type: "list_item",
+        children: block.block.listItem.blocks.map(encodeBotRichBlock),
+        ...(block.block.listItem.checked !== undefined ? { checked: block.block.listItem.checked } : {}),
+      })
+    case "quote":
+      return base({
+        type: "quote",
+        children: block.block.quote.blocks.map(encodeBotRichBlock),
+        ...(block.block.quote.expandable ? { expandable: true } : {}),
+        ...(block.block.quote.initiallyCollapsed ? { initially_collapsed: true } : {}),
+      })
+    case "code":
+      return base({
+        type: "code",
+        text: [{ text: block.block.code.text }],
+        ...(block.block.code.language ? { language: block.block.code.language } : {}),
+      })
+    case "divider":
+      return base({ type: "divider" })
+    case "thinking":
+      return base({
+        type: "thinking",
+        children: block.block.thinking.blocks.map(encodeBotRichBlock),
+        ...(block.block.thinking.initiallyCollapsed ? { initially_collapsed: true } : {}),
+      })
+    case "details":
+      return base({
+        type: "details",
+        title: block.block.details.title.map(encodeBotRichText),
+        children: block.block.details.blocks.map(encodeBotRichBlock),
+        ...(block.block.details.initiallyOpen ? { initially_open: true } : {}),
+      })
+    case "photo":
+      return base({
+        type: "photo",
+        media: encodeBotRichMediaRef(block.block.photo.media),
+        ...(block.block.photo.caption.length ? { caption: block.block.photo.caption.map(encodeBotRichText) } : {}),
+      })
+    case "video":
+      return base({
+        type: "video",
+        media: encodeBotRichMediaRef(block.block.video.media),
+        ...(block.block.video.caption.length ? { caption: block.block.video.caption.map(encodeBotRichText) } : {}),
+        ...(block.block.video.duration !== undefined ? { duration: block.block.video.duration } : {}),
+      })
+    case "document":
+      return base({
+        type: "document",
+        media: encodeBotRichMediaRef(block.block.document.media),
+        ...(block.block.document.caption.length ? { caption: block.block.document.caption.map(encodeBotRichText) } : {}),
+      })
+    case "audio":
+      return base({
+        type: "audio",
+        media: encodeBotRichMediaRef(block.block.audio.media),
+        ...(block.block.audio.caption.length ? { caption: block.block.audio.caption.map(encodeBotRichText) } : {}),
+        ...(block.block.audio.duration !== undefined ? { duration: block.block.audio.duration } : {}),
+        ...(block.block.audio.title ? { title: block.block.audio.title } : {}),
+        ...(block.block.audio.performer ? { performer: block.block.audio.performer } : {}),
+      })
+    case "table":
+      return base({
+        type: "table",
+        rows: encodeBotTableRows(block.block.table.rows),
+        ...(block.block.table.caption.length ? { caption: block.block.table.caption.map(encodeBotRichText) } : {}),
+        ...(block.block.table.bordered ? { bordered: true } : {}),
+        ...(block.block.table.striped ? { striped: true } : {}),
+      })
+    case "math":
+      return base({
+        type: "math",
+        source: block.block.math.source,
+        display: block.block.math.display,
+        ...(block.block.math.fallback ? { fallback: block.block.math.fallback } : {}),
+      })
+    case "map":
+      return base({
+        type: "map",
+        latitude: block.block.map.latitude,
+        longitude: block.block.map.longitude,
+        zoom: block.block.map.zoom,
+        ...(block.block.map.caption.length ? { caption: block.block.map.caption.map(encodeBotRichText) } : {}),
+        ...(block.block.map.title ? { title: block.block.map.title } : {}),
+        ...(block.block.map.address ? { address: block.block.map.address } : {}),
+        ...(block.block.map.openUrl ? { open_url: block.block.map.openUrl } : {}),
+        ...(block.block.map.aspectRatio !== undefined ? { aspect_ratio: block.block.map.aspectRatio } : {}),
+      })
+    case "embed":
+      return base({
+        type: "embed",
+        ...(block.block.embed.url ? { url: block.block.embed.url } : {}),
+        ...(block.block.embed.html ? { html: block.block.embed.html } : {}),
+        ...(block.block.embed.poster ? { poster: encodeBotRichMediaRef(block.block.embed.poster) } : {}),
+        ...(block.block.embed.width !== undefined ? { width: block.block.embed.width } : {}),
+        ...(block.block.embed.height !== undefined ? { height: block.block.embed.height } : {}),
+        ...(block.block.embed.caption.length ? { caption: block.block.embed.caption.map(encodeBotRichText) } : {}),
+        ...(block.block.embed.fullWidth ? { full_width: true } : {}),
+        ...(block.block.embed.allowScrolling ? { allow_scrolling: true } : {}),
+        ...(block.block.embed.provider ? { provider: block.block.embed.provider } : {}),
+      })
+    case "embedPost":
+      return base({
+        type: "embed_post",
+        url: block.block.embedPost.url,
+        author: block.block.embedPost.author,
+        ...(block.block.embedPost.authorPhoto ? { author_photo: encodeBotRichMediaRef(block.block.embedPost.authorPhoto) } : {}),
+        ...(block.block.embedPost.date !== undefined ? { date: Number(block.block.embedPost.date) } : {}),
+        children: block.block.embedPost.blocks.map(encodeBotRichBlock),
+        ...(block.block.embedPost.caption.length ? { caption: block.block.embedPost.caption.map(encodeBotRichText) } : {}),
+      })
+    case "linkPreview":
+      return base({
+        type: "link_preview",
+        url: block.block.linkPreview.url,
+        ...(block.block.linkPreview.displayUrl ? { display_url: block.block.linkPreview.displayUrl } : {}),
+        ...(block.block.linkPreview.siteName ? { site_name: block.block.linkPreview.siteName } : {}),
+        ...(block.block.linkPreview.title ? { title: block.block.linkPreview.title } : {}),
+        ...(block.block.linkPreview.description ? { description: block.block.linkPreview.description } : {}),
+        ...(block.block.linkPreview.media ? { media: encodeBotRichMediaRef(block.block.linkPreview.media) } : {}),
+        ...(block.block.linkPreview.mediaAspectRatio !== undefined ? { media_aspect_ratio: block.block.linkPreview.mediaAspectRatio } : {}),
+        ...(block.block.linkPreview.compact ? { compact: true } : {}),
+      })
+    case "collage":
+      return base({
+        type: "collage",
+        items: block.block.collage.items.map(encodeBotRichBlock),
+        ...(block.block.collage.caption.length ? { caption: block.block.collage.caption.map(encodeBotRichText) } : {}),
+        ...(encodeBotCollageLayout(block.block.collage.layout) ? { layout: encodeBotCollageLayout(block.block.collage.layout) } : {}),
+      })
+    case "paragraph":
+    case undefined:
+    default:
+      return base({
+        type: "paragraph",
+        text: block.block.oneofKind === "paragraph" ? block.block.paragraph.text.map(encodeBotRichText) : [],
+      })
+  }
+}
+
+const parseBotRichMessage = (value: unknown): RichMessage | undefined => {
+  const parsed = parseMaybeJsonValue(value)
+  if (parsed === undefined || parsed === null || parsed === "") {
+    return undefined
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed["blocks"])) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const fallbackText = parsed["fallback_text"] ?? parsed["fallbackText"]
+  if (typeof fallbackText !== "string") {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  return {
+    blocks: parsed["blocks"].map(parseBotRichBlock),
+    direction: parseBotRichDirection(parsed["direction"]),
+    fallbackText,
+    version: 1,
+  }
+}
+
+type ParsedBotInputRichMessage = {
+  richText: RichMessage
+  text?: string
+  skipEntityDetection?: boolean
+  demoteInlineOnlyRichText?: boolean
+}
+
+const parseBotInputRichMessage = (value: unknown): ParsedBotInputRichMessage | undefined => {
+  const parsed = parseMaybeJsonValue(value)
+  if (parsed === undefined || parsed === null || parsed === "") {
+    return undefined
+  }
+  if (!isRecord(parsed)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const nested = parsed["rich_message"] ?? parsed["richMessage"] ?? parsed["rich_text"] ?? parsed["richText"]
+  const hasMarkdown = Object.hasOwn(parsed, "markdown")
+  const hasHtml = Object.hasOwn(parsed, "html")
+  const hasNestedRich = nested !== undefined
+  const hasDirectStructuredRich = Array.isArray(parsed["blocks"])
+  const sourceCount = [hasMarkdown, hasHtml, hasNestedRich, hasDirectStructuredRich].filter(Boolean).length
+
+  if (sourceCount !== 1) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  if (hasMarkdown && typeof parsed["markdown"] !== "string") {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  if (hasHtml && typeof parsed["html"] !== "string") {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const richText = hasNestedRich
+    ? parseBotRichMessage(nested)
+    : hasMarkdown
+    ? parseRichMarkdown(parsed["markdown"] as string)
+    : hasHtml
+    ? parseRichHtml(parsed["html"] as string)
+    : parseBotRichMessage(parsed)
+
+  if (!richText) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const skipEntityDetection = parseBotInputSkipEntityDetection(parsed)
+
+  return {
+    richText: applyBotInputRichOptions(richText, parsed),
+    ...(hasMarkdown || hasHtml ? { text: richText.fallbackText } : {}),
+    ...(hasMarkdown || hasHtml ? { demoteInlineOnlyRichText: true } : {}),
+    ...(skipEntityDetection !== undefined ? { skipEntityDetection } : {}),
+  }
+}
+
+const parseBotInputSkipEntityDetection = (input: Record<string, unknown>): boolean | undefined => {
+  return parseBotBoolean(input["skip_entity_detection"] ?? input["skipEntityDetection"])
+}
+
+const applyBotInputRichOptions = (message: RichMessage, input: Record<string, unknown>): RichMessage => {
+  const direction = parseBotInputRichDirection(input)
+  if (direction === undefined) {
+    return message
+  }
+  return {
+    ...message,
+    direction,
+  }
+}
+
+const parseBotInputRichDirection = (input: Record<string, unknown>): RichDirection | undefined => {
+  const direction = parseBotRichDirection(input["direction"])
+  if (direction !== undefined) {
+    return direction
+  }
+
+  const isRtl = parseBotBoolean(input["is_rtl"] ?? input["isRtl"])
+  if (isRtl === undefined) {
+    return undefined
+  }
+  return isRtl ? RichDirection.DIRECTION_RTL : RichDirection.DIRECTION_LTR
+}
+
+const encodeBotRichMessage = (message: RichMessage | undefined | null): BotRichMessage | undefined => {
+  if (!message) {
+    return undefined
+  }
+
+  return {
+    blocks: (message.blocks ?? []).map(encodeBotRichBlock),
+    ...(encodeBotRichDirection(message.direction) ? { direction: encodeBotRichDirection(message.direction) } : {}),
+    fallback_text: message.fallbackText,
+  }
+}
+
 const mentionUserIdsFromEntities = (entities: any): number[] => {
   if (!entities?.entities) return []
   const ids: number[] = []
@@ -354,6 +1281,7 @@ const toBotMessageLiteFromProto = (
     date: Number(message.date),
     text: message.message ?? undefined,
     entities: encodeBotEntities(message.entities, { usersById }),
+    rich_text: encodeBotRichMessage(message.richText),
   }
 }
 
@@ -377,6 +1305,7 @@ const toBotMessageLiteFromDb = (
     date: dateSeconds,
     text: message.text ?? undefined,
     entities: encodeBotEntities(message.entities, { usersById }),
+    rich_text: encodeBotRichMessage(message.richText),
   }
 }
 
@@ -445,6 +1374,9 @@ const queryDoc = (schema: TSchema) => {
 
 const throwInlineFromUnknown = (error: unknown): never => {
   if (error instanceof InlineError) throw error
+  if (error instanceof RichTextValidationError) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
 
   if (error instanceof ModelError) {
     switch (error.code) {
@@ -491,6 +1423,77 @@ const botMethods = (authPlugin: any): any => {
   const app: any = new Elysia({ tags: ["Bot"] })
   app.use(authPlugin)
 
+  const sendMessageHandler = async ({ body, query, store }: any) => {
+    try {
+      const input = mergePostInput(body, query)
+      const replyToMessageId = normalizeInputId(input["reply_to_message_id"] as any)
+      const parseMarkdown = parseBotParseMarkdown(input)
+      const inputRich = parseBotInputRichMessage(input["rich_message"] ?? input["rich_text"])
+      const richText = inputRich?.richText
+      const parseRichMarkdown = parseBotParseRichMarkdown(input)
+      const skipEntityDetection = parseBotSkipEntityDetection(input) ?? inputRich?.skipEntityDetection
+      if (parseRichMarkdown && richText) {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+      const inputText = input["text"]
+      if (typeof inputText !== "string" && !richText) {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+      if (parseRichMarkdown && typeof inputText !== "string") {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+      const text = inputRich?.text ?? (typeof inputText === "string" ? inputText : richText?.fallbackText)
+      const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]), { text })
+
+      const inputPeer = await makeInputPeerFromBotTarget(input, store.currentUserId)
+      const chatResult = await getChatFn({ peerId: inputPeer }, ctxFromStore(store))
+      const chatId = Number(chatResult.chat.id)
+      const botChat = toBotChat(chatResult.chat)
+
+      const randomId = randomId64()
+      await sendMessageFn(
+        {
+          peerId: inputPeer,
+          message: text,
+          replyToMessageId: replyToMessageId ? BigInt(replyToMessageId) : undefined,
+          entities,
+          parseMarkdown,
+          richText,
+          parseRichMarkdown,
+          demoteInlineOnlyRichText: inputRich?.demoteInlineOnlyRichText,
+          skipEntityDetection,
+          randomId,
+        },
+        ctxFromStore(store),
+      )
+
+      const sent = await MessageModel.getMessageByRandomId(randomId, store.currentUserId)
+      const full = await MessageModel.getMessage(sent.messageId, chatId)
+      const reply =
+        full.replyToMsgId && Number.isFinite(full.replyToMsgId)
+          ? await MessageModel.getMessage(full.replyToMsgId, chatId).catch(() => null)
+          : null
+
+      const mentionIds = [
+        ...mentionUserIdsFromEntities(full.entities),
+        ...mentionUserIdsFromEntities(reply?.entities),
+      ]
+      const fromIds = [
+        Number(full.fromId),
+        reply ? Number(reply.fromId) : undefined,
+      ].filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
+
+      const usersById = await loadUsersByIds([...mentionIds, ...fromIds])
+
+      return {
+        ok: true,
+        result: { message: toBotMessageFromDb(full, inputPeer, botChat, { usersById, replyMessage: reply }) },
+      }
+    } catch (error) {
+      throwInlineFromUnknown(error)
+    }
+  }
+
   app.get(
     "/getMe",
     async ({ store }: any) => {
@@ -504,64 +1507,65 @@ const botMethods = (authPlugin: any): any => {
 
   app.post(
     "/sendMessage",
+    sendMessageHandler,
+    {
+      detail: jsonBodyDoc(TSendMessageInput),
+      response: TApiEnvelope(t.Object({ message: TBotMessage })),
+    },
+  )
+
+  app.post(
+    "/sendRichMessage",
+    sendMessageHandler,
+    {
+      detail: jsonBodyDoc(TSendRichMessageInput),
+      response: TApiEnvelope(t.Object({ message: TBotMessage })),
+    },
+  )
+
+  app.post(
+    "/sendRichMessageDraft",
     async ({ body, query, store }: any) => {
       try {
         const input = mergePostInput(body, query)
-        const text = input["text"]
-        if (typeof text !== "string") {
+        const rawDraftId = input["draft_id"] ?? input["draftId"]
+        const draftId = typeof rawDraftId === "string" ? rawDraftId.trim() : ""
+        if (!draftId) {
           throw new InlineError(InlineError.ApiError.BAD_REQUEST)
         }
 
-        const replyToMessageId = normalizeInputId(input["reply_to_message_id"] as any)
-        const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
-        const parseMarkdown = parseBotParseMarkdown(input)
-        const inputPeer = await makeInputPeerFromBotTarget(input, store.currentUserId)
-        const chatResult = await getChatFn({ peerId: inputPeer }, ctxFromStore(store))
-        const chatId = Number(chatResult.chat.id)
-        const botChat = toBotChat(chatResult.chat)
-
-        const randomId = randomId64()
-        await sendMessageFn(
-          {
-            peerId: inputPeer,
-            message: text,
-            replyToMessageId: replyToMessageId ? BigInt(replyToMessageId) : undefined,
-            entities,
-            parseMarkdown,
-            randomId,
-          },
-          ctxFromStore(store),
-        )
-
-        const sent = await MessageModel.getMessageByRandomId(randomId, store.currentUserId)
-        const full = await MessageModel.getMessage(sent.messageId, chatId)
-        const reply =
-          full.replyToMsgId && Number.isFinite(full.replyToMsgId)
-            ? await MessageModel.getMessage(full.replyToMsgId, chatId).catch(() => null)
-            : null
-
-        const mentionIds = [
-          ...mentionUserIdsFromEntities(full.entities),
-          ...mentionUserIdsFromEntities(reply?.entities),
-        ]
-        const fromIds = [
-          Number(full.fromId),
-          reply ? Number(reply.fromId) : undefined,
-        ].filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
-
-        const usersById = await loadUsersByIds([...mentionIds, ...fromIds])
-
-        return {
-          ok: true,
-          result: { message: toBotMessageFromDb(full, inputPeer, botChat, { usersById, replyMessage: reply }) },
+        const clear = parseBotBoolean(input["clear"]) ?? false
+        const inputRich = parseBotInputRichMessage(input["rich_message"] ?? input["rich_text"])
+        const richText = inputRich?.richText
+        if (!clear && !richText) {
+          throw new InlineError(InlineError.ApiError.BAD_REQUEST)
         }
+
+        const peerId = await makeInputPeerFromBotTarget(input, store.currentUserId)
+        const chat = await ChatModel.getChatFromInputPeer(peerId, { currentUserId: store.currentUserId })
+        await AccessGuards.ensureChatAccess(chat, store.currentUserId)
+
+        const messageId = normalizeInputId(input["message_id"] as any)
+        const ttlSeconds = parseOptionalInt(input["ttl_seconds"] ?? input["ttlSeconds"])
+        await pushRichMessageDraftUpdate({
+          inputPeer: peerId,
+          currentUserId: store.currentUserId,
+          senderUserId: store.currentUserId,
+          draftId,
+          richText,
+          messageId: messageId ? BigInt(messageId) : undefined,
+          clear,
+          ttlSeconds,
+        })
+
+        return { ok: true, result: {} }
       } catch (error) {
         throwInlineFromUnknown(error)
       }
     },
     {
-      detail: jsonBodyDoc(TSendMessageInput),
-      response: TApiEnvelope(t.Object({ message: TBotMessage })),
+      detail: jsonBodyDoc(TSendRichMessageDraftInput),
+      response: TApiEnvelope(t.Object({})),
     },
   )
 
@@ -677,25 +1681,46 @@ const botMethods = (authPlugin: any): any => {
       try {
         const input = mergePostInput(body, query)
         const peerId = await makeInputPeerFromBotTarget(input, store.currentUserId)
-        const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
         const parseMarkdown = parseBotParseMarkdown(input)
+        const inputRich = parseBotInputRichMessage(input["rich_message"] ?? input["rich_text"])
+        const richText = inputRich?.richText
+        const parseRichMarkdown = parseBotParseRichMarkdown(input)
+        const skipEntityDetection = parseBotSkipEntityDetection(input) ?? inputRich?.skipEntityDetection
+        if (parseRichMarkdown && richText) {
+          throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+        }
 
         const messageId = normalizeInputId(input["message_id"] as any)
         if (!messageId) {
           throw new InlineError(InlineError.ApiError.MSG_ID_INVALID)
         }
 
-        const text = input["text"]
-        if (typeof text !== "string") {
+        const inputText = input["text"]
+        if (typeof inputText !== "string" && !richText) {
           throw new InlineError(InlineError.ApiError.BAD_REQUEST)
         }
+        if (parseRichMarkdown && typeof inputText !== "string") {
+          throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+        }
+        const text = inputRich?.text ?? (typeof inputText === "string" ? inputText : richText?.fallbackText)
+        const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]), { text })
 
         const chat = await ChatModel.getChatFromInputPeer(peerId, { currentUserId: store.currentUserId })
         await AccessGuards.ensureChatAccess(chat, store.currentUserId)
         const botChat = toBotChat(chat)
 
         await editMessageFn(
-          { messageId: BigInt(messageId), peer: peerId, text, entities, parseMarkdown },
+          {
+            messageId: BigInt(messageId),
+            peer: peerId,
+            text,
+            entities,
+            parseMarkdown,
+            richText,
+            parseRichMarkdown,
+            demoteInlineOnlyRichText: inputRich?.demoteInlineOnlyRichText,
+            skipEntityDetection,
+          },
           ctxFromStore(store),
         )
 

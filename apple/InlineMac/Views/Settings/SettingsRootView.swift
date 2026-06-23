@@ -154,6 +154,8 @@ struct SettingsDetailView: View {
           AppearanceSettingsDetailView()
         case .account:
           AccountSettingsDetailView()
+        case .connections:
+          ConnectionsSettingsDetailView()
         case .bots:
           BotsSettingsDetailView()
         case .notifications:

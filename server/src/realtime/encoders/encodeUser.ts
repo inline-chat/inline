@@ -3,6 +3,7 @@ import { User, UserStatus_Status } from "@inline-chat/protocol/core"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 import { encodeBotAvatar } from "@in/server/realtime/encoders/encodeBotAvatar"
+import { isVerifiedUsername } from "@in/server/modules/internalAgents/verifiedUsers"
 
 export const encodeUser = ({
   user,
@@ -40,6 +41,7 @@ export const encodeUser = ({
         },
     timeZone: min ? undefined : user.timeZone ?? undefined,
     bot: user.bot === true ? true : undefined,
+    verified: isVerifiedUsername(user.username) ? true : undefined,
     profilePhoto: cdnUrl
       ? {
           cdnUrl: cdnUrl,

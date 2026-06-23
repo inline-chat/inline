@@ -6,6 +6,7 @@ import type {
   MessageEntities,
   Peer,
   Reaction,
+  RichMessage,
   RpcCall,
   RpcResult,
   Update,
@@ -43,8 +44,10 @@ export type InlineSdkSendMessageParams =
       media?: InlineSdkSendMessageMedia
       replyToMsgId?: InlineIdLike
       parseMarkdown?: boolean
+      parseRichMarkdown?: boolean
       sendMode?: "silent"
       entities?: MessageEntities
+      richText?: RichMessage
       actions?: MessageActions
     }
   | {
@@ -54,9 +57,31 @@ export type InlineSdkSendMessageParams =
       media?: InlineSdkSendMessageMedia
       replyToMsgId?: InlineIdLike
       parseMarkdown?: boolean
+      parseRichMarkdown?: boolean
       sendMode?: "silent"
       entities?: MessageEntities
+      richText?: RichMessage
       actions?: MessageActions
+    }
+
+export type InlineSdkSendRichMessageDraftParams =
+  | {
+      chatId: InlineIdLike
+      userId?: never
+      draftId: string
+      messageId?: InlineIdLike
+      richText?: RichMessage
+      clear?: boolean
+      ttlSeconds?: number
+    }
+  | {
+      userId: InlineIdLike
+      chatId?: never
+      draftId: string
+      messageId?: InlineIdLike
+      richText?: RichMessage
+      clear?: boolean
+      ttlSeconds?: number
     }
 
 export type InlineSdkInvokeMessageActionParams =
@@ -282,6 +307,7 @@ export const rpcInputKindByMethod = {
   62: "checkUsername",
   63: "changeUsername",
   64: "updateProfile",
+  72: "sendRichMessageDraft",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -335,6 +361,7 @@ export const rpcResultKindByMethod = {
   62: "checkUsername",
   63: "changeUsername",
   64: "updateProfile",
+  72: "sendRichMessageDraft",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

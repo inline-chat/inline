@@ -143,6 +143,31 @@ describe("searchMessages", () => {
       })
       .execute()
 
+    const [richOnlyMessage] = await db
+      .insert(schema.messages)
+      .values({
+        messageId: 2,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: "embedded document",
+      })
+      .returning()
+
+    await db
+      .insert(schema.messageRichMedia)
+      .values({
+        messageGlobalId: richOnlyMessage!.globalId,
+        chatId: chat.id,
+        messageId: 2,
+        blockId: "document-1",
+        blockPath: "0",
+        sortOrder: 0,
+        kind: "document",
+        status: "resolved",
+        documentId: document!.id,
+      })
+      .execute()
+
     const result = await searchMessages(
       {
         peerId: {
@@ -154,7 +179,80 @@ describe("searchMessages", () => {
       makeFunctionContext(userA.id),
     )
 
-    expect(result.messages.map((message) => Number(message.id))).toEqual([1])
+    expect(result.messages.map((message) => Number(message.id))).toEqual([2, 1])
+  })
+
+  test("allows empty queries with voice filter", async () => {
+    const userA = (await testUtils.createUser("search-voice-filter-a@example.com"))!
+    const userB = (await testUtils.createUser("search-voice-filter-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    const [file] = await db
+      .insert(schema.files)
+      .values({
+        fileUniqueId: "file-search-voice-filter-1",
+        userId: userA.id,
+        mimeType: "audio/ogg",
+        fileSize: 10,
+      })
+      .returning()
+
+    const [voice] = await db
+      .insert(schema.voices)
+      .values({
+        fileId: file!.id,
+        duration: 3,
+      })
+      .returning()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: userA.id,
+        mediaType: "voice",
+        voiceId: voice!.id,
+      })
+      .execute()
+
+    const [richOnlyMessage] = await db
+      .insert(schema.messages)
+      .values({
+        messageId: 2,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: "embedded voice",
+      })
+      .returning()
+
+    await db
+      .insert(schema.messageRichMedia)
+      .values({
+        messageGlobalId: richOnlyMessage!.globalId,
+        chatId: chat.id,
+        messageId: 2,
+        blockId: "voice-1",
+        blockPath: "0",
+        sortOrder: 0,
+        kind: "voice",
+        status: "resolved",
+        voiceId: voice!.id,
+      })
+      .execute()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        queries: [],
+        filter: SearchMessagesFilter.FILTER_VOICE,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.map((message) => Number(message.id))).toEqual([2, 1])
   })
 
   test("allows empty queries with links filter", async () => {
@@ -233,6 +331,38 @@ describe("searchMessages", () => {
       })
       .execute()
 
+    const [richPhoto] = await db
+      .insert(schema.photos)
+      .values({
+        format: "jpeg",
+      })
+      .returning()
+
+    const [richOnlyMessage] = await db
+      .insert(schema.messages)
+      .values({
+        messageId: 3,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: "alpha",
+      })
+      .returning()
+
+    await db
+      .insert(schema.messageRichMedia)
+      .values({
+        messageGlobalId: richOnlyMessage!.globalId,
+        chatId: chat.id,
+        messageId: 3,
+        blockId: "photo-1",
+        blockPath: "0",
+        sortOrder: 0,
+        kind: "photo",
+        status: "resolved",
+        photoId: richPhoto!.id,
+      })
+      .execute()
+
     const result = await searchMessages(
       {
         peerId: {
@@ -244,7 +374,7 @@ describe("searchMessages", () => {
       makeFunctionContext(userA.id),
     )
 
-    expect(result.messages.map((message) => Number(message.id))).toEqual([2])
+    expect(result.messages.map((message) => Number(message.id))).toEqual([3, 2])
   })
 
   test("respects offset_id with media filters", async () => {

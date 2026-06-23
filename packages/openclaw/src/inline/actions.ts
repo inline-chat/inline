@@ -37,6 +37,7 @@ import {
   sanitizeInlineVisibleText,
 } from "./outbound-sanitize.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
+import { inlineCaptionParseOptions, inlineTextParseOptions } from "./rich-text.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 import {
   createActionGate,
@@ -3563,8 +3564,8 @@ export const inlineMessageActions = {
     }
 
     if (normalizedAction === "send" || normalizedAction === "sendAttachment" || normalizedAction === "upload-file") {
-      const parseMarkdown =
-        resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
+      const account = resolveInlineAccount({ cfg, accountId: accountId ?? null })
+      const parseOptions = inlineTextParseOptions(account)
       return await withInlineClient({
         cfg,
         accountId,
@@ -3604,7 +3605,7 @@ export const inlineMessageActions = {
               text: visibleMessage.text,
               ...(actions !== undefined ? { actions } : {}),
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
-              parseMarkdown,
+              ...parseOptions,
             })
             return jsonResult({
               ok: true,
@@ -3633,7 +3634,9 @@ export const inlineMessageActions = {
               media,
               ...(index === 0 && actions !== undefined ? { actions } : {}),
               ...(index === 0 && replyToMsgId != null ? { replyToMsgId } : {}),
-              ...(index === 0 && !caption.shouldSkip && caption.text ? { parseMarkdown } : {}),
+              ...(index === 0 && !caption.shouldSkip && caption.text
+                ? inlineCaptionParseOptions(account, caption.text)
+                : {}),
             })
           }
           return jsonResult({
@@ -3704,8 +3707,7 @@ export const inlineMessageActions = {
     }
 
     if (normalizedAction === "reply" || normalizedAction === "thread-reply") {
-      const parseMarkdown =
-        resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
+      const parseOptions = inlineTextParseOptions(resolveInlineAccount({ cfg, accountId: accountId ?? null }))
       const isThreadReply = normalizedAction === "thread-reply"
       return await withInlineClient({
         cfg,
@@ -3752,7 +3754,7 @@ export const inlineMessageActions = {
               text: visibleText.text,
               ...(actions !== undefined ? { actions } : {}),
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
-              parseMarkdown,
+              ...parseOptions,
             })
             if (target.parentChatId != null) {
               recordInlineThreadParticipation(
@@ -3794,7 +3796,7 @@ export const inlineMessageActions = {
             text: visibleText.text,
             ...(actions !== undefined ? { actions } : {}),
             replyToMsgId,
-            parseMarkdown,
+            ...parseOptions,
           })
           return jsonResult({
             ok: true,
@@ -4310,8 +4312,7 @@ export const inlineMessageActions = {
     }
 
     if (normalizedAction === "edit") {
-      const parseMarkdown =
-        resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
+      const parseOptions = inlineTextParseOptions(resolveInlineAccount({ cfg, accountId: accountId ?? null }))
       return await withInlineClient({
         cfg,
         accountId,
@@ -4335,7 +4336,7 @@ export const inlineMessageActions = {
               peerId: buildChatPeer(chatId),
               text: visibleText.text,
               ...(actions !== undefined ? { actions } : {}),
-              parseMarkdown,
+              ...parseOptions,
             },
           })
           if (result.oneofKind !== "editMessage") {
@@ -4347,7 +4348,7 @@ export const inlineMessageActions = {
               chatId: String(chatId),
               messageId: String(messageId),
               text: visibleText.text,
-              parseMarkdown,
+              ...parseOptions,
             }),
           )
         },

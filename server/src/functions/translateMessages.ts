@@ -240,6 +240,7 @@ async function getContextMessages(input: {
               decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
             )
           : null,
+      richText: null,
     }))
   } catch (error) {
     log.error("Failed to get context messages", {
@@ -296,6 +297,7 @@ async function getMessagesAndTranslations(input: {
                 decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
               )
             : null,
+        richText: null,
 
         // Get translation in language
         translation: translation ? processMessageTranslation(translation) : null,

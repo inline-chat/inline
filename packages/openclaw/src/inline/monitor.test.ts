@@ -240,6 +240,7 @@ type MonitorSetup = {
     replyOptions: any
   }) => Promise<void> | void
   sendMessageDelayMs?: number
+  richDraftError?: boolean
   runtimeConfig?: Record<string, unknown>
   createSubthreadError?: string
   getMeError?: Error
@@ -473,6 +474,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }
       if (setup.itemEventBeforePayloadIndexes?.includes(index)) {
         await replyOptions?.onItemEvent?.({
+          itemId: "item-cmd-1",
           kind: "command",
           name: "exec",
           phase: "end",
@@ -524,6 +526,12 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
         text?: string
         parseMarkdown?: boolean
+      }
+      sendRichMessageDraft?: {
+        draftId?: string
+        messageId?: bigint
+        richText?: unknown
+        clear?: boolean
       }
       getMessages?: {
         peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
@@ -656,6 +664,15 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         editMessage: { updates: [] },
       }
     }
+    if (method === 72 && input?.oneofKind === "sendRichMessageDraft") {
+      if (setup.richDraftError) {
+        throw new Error("draft unsupported")
+      }
+      return {
+        oneofKind: "sendRichMessageDraft",
+        sendRichMessageDraft: {},
+      }
+    }
     if (method === 4 && input?.oneofKind === "deleteMessages") {
       return {
         oneofKind: "deleteMessages",
@@ -664,6 +681,34 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
     return { oneofKind: undefined }
   })
+  const sendRichMessageDraft = vi.fn(
+    async (params: {
+      chatId?: bigint
+      userId?: bigint
+      draftId: string
+      messageId?: bigint
+      richText?: unknown
+      clear?: boolean
+      ttlSeconds?: number
+    }) => {
+      return await invokeRaw(72, {
+        oneofKind: "sendRichMessageDraft",
+        sendRichMessageDraft: {
+          peerId:
+            params.chatId != null
+              ? { type: { oneofKind: "chat", chat: { chatId: params.chatId } } }
+              : params.userId != null
+                ? { type: { oneofKind: "user", user: { userId: params.userId } } }
+                : undefined,
+          draftId: params.draftId,
+          messageId: params.messageId,
+          richText: params.richText,
+          clear: params.clear,
+          ttlSeconds: params.ttlSeconds,
+        },
+      })
+    },
+  )
 
   vi.doMock("@inline-chat/realtime-sdk", () => {
     async function* eventsGenerator() {
@@ -768,6 +813,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         GET_CHAT_PARTICIPANTS: 13,
         GET_CHATS: 17,
         EDIT_MESSAGE: 8,
+        SEND_RICH_MESSAGE_DRAFT: 72,
         CREATE_SUBTHREAD: 42,
         GET_MESSAGES: 38,
         INVOKE_MESSAGE_ACTION: 48,
@@ -783,6 +829,12 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         WAITING: BOT_PRESENCE_WAITING,
         RUNNING: BOT_PRESENCE_RUNNING,
         REVIEW: BOT_PRESENCE_REVIEW,
+      },
+      RichDirection: {
+        DIRECTION_UNSPECIFIED: 0,
+        DIRECTION_AUTO: 1,
+        DIRECTION_LTR: 2,
+        DIRECTION_RTL: 3,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -809,6 +861,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         sendMessage = sendMessage
         uploadFile = uploadFile
         sendTyping = sendTyping
+        sendRichMessageDraft = sendRichMessageDraft
         answerMessageAction = answerMessageAction
         invokeRaw = invokeRaw
         invokeUncheckedRaw = this.invokeRaw
@@ -2424,7 +2477,7 @@ describe("inline/monitor", () => {
           chatId: 7n,
           text: "agent reply",
           replyToMsgId: 555n,
-          parseMarkdown: true,
+          parseRichMarkdown: true,
         }),
       )
     })
@@ -4186,7 +4239,7 @@ describe("inline/monitor", () => {
           editMessage: expect.objectContaining({
             messageId: 1001n,
             text: "received",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
           }),
         }),
       )
@@ -4280,7 +4333,7 @@ describe("inline/monitor", () => {
           editMessage: expect.objectContaining({
             messageId: 1002n,
             text: "saved",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
           }),
         }),
       )
@@ -4624,7 +4677,7 @@ describe("inline/monitor", () => {
           editMessage: expect.objectContaining({
             messageId: 1005n,
             text: "verbose enabled",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
           }),
         }),
       )
@@ -4690,7 +4743,7 @@ describe("inline/monitor", () => {
           editMessage: expect.objectContaining({
             messageId: 1007n,
             text: "Models (openai) — 12 available",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
             actions: expect.any(Object),
           }),
         }),
@@ -4756,7 +4809,7 @@ describe("inline/monitor", () => {
           editMessage: expect.objectContaining({
             messageId: 1007n,
             text: "✅ Model reset to default\n\nThis model will be used for your next message.",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
             actions: { rows: [] },
           }),
         }),
@@ -4889,7 +4942,7 @@ describe("inline/monitor", () => {
             messageId: 1008n,
             text: expect.stringContaining("/subagents"),
             actions: expect.any(Object),
-            parseMarkdown: true,
+            parseRichMarkdown: true,
           }),
         }),
       )
@@ -5374,10 +5427,61 @@ describe("inline/monitor", () => {
             kind: "photo",
             photoId: 200n,
           },
-          parseMarkdown: true,
+          parseRichMarkdown: true,
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("keeps markdown image embeds on the final rich markdown send path", async () => {
+    const text = [
+      "Here is the final image:",
+      "",
+      "![Cockatiel](https://commons.wikimedia.org/wiki/Special:FilePath/Cockatiel_(Nymphicus_hollandicus).jpg)",
+    ].join("\n")
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 701n,
+          message: {
+            id: 1202n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "send markdown image",
+          },
+        },
+      ],
+      chats: {
+        "701": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text,
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 701n,
+          text,
+          parseRichMarkdown: true,
+        }),
+      )
+    })
+
+    expect(harness.calls.uploadFile).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage.mock.calls[0]?.[0]).not.toHaveProperty("media")
 
     await handle.stop()
   })
@@ -5485,7 +5589,7 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           chatId: 17n,
           text: "cc @alice thanks",
-          parseMarkdown: true,
+          parseRichMarkdown: true,
         }),
       )
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(17, {
@@ -5908,7 +6012,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("sends, edits, and deletes a silent progress placeholder before the final reply", async () => {
+  it("sends a silent progress placeholder and updates it through rich drafts before the final reply", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -5957,12 +6061,35 @@ describe("inline/monitor", () => {
         }),
       )
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        72,
+        expect.objectContaining({
+          oneofKind: "sendRichMessageDraft",
+          sendRichMessageDraft: expect.objectContaining({
+            draftId: "openclaw:default:773:5558",
+            messageId: 1n,
+            richText: expect.objectContaining({
+              blocks: [
+                expect.objectContaining({
+                  block: expect.objectContaining({ oneofKind: "thinking" }),
+                }),
+              ],
+            }),
+          }),
+        }),
+      )
+      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
         8,
         expect.objectContaining({
           oneofKind: "editMessage",
-          editMessage: expect.objectContaining({
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        72,
+        expect.objectContaining({
+          oneofKind: "sendRichMessageDraft",
+          sendRichMessageDraft: expect.objectContaining({
             messageId: 1n,
-            text: expect.stringContaining("listed files"),
+            clear: true,
           }),
         }),
       )
@@ -5984,6 +6111,17 @@ describe("inline/monitor", () => {
       )
     })
 
+    const richDraftCalls = harness.calls.invokeRaw.mock.calls.filter((call) => {
+      const input = call[1] as any
+      return call[0] === 72 && input?.oneofKind === "sendRichMessageDraft" && input.sendRichMessageDraft?.richText
+    })
+    const draftBlockIds = richDraftCalls.flatMap((call) => {
+      const richText = (call[1] as any).sendRichMessageDraft.richText
+      const thinking = richText.blocks?.[0]?.block?.oneofKind === "thinking" ? richText.blocks[0].block.thinking : undefined
+      return Array.isArray(thinking?.blocks) ? thinking.blocks.map((block: any) => block.blockId) : []
+    })
+    expect(draftBlockIds).toContain("openclaw_progress_item-cmd-1")
+
     const deleteCallIndex = harness.calls.invokeRaw.mock.calls.findIndex(
       (call) => call[0] === 4 && call[1]?.oneofKind === "deleteMessages",
     )
@@ -5991,6 +6129,64 @@ describe("inline/monitor", () => {
     expect(harness.calls.invokeRaw.mock.invocationCallOrder[deleteCallIndex]).toBeLessThan(
       harness.calls.sendMessage.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
     )
+
+    await handle.stop()
+  })
+
+  it("falls back to editing the progress placeholder when rich drafts are unavailable", async () => {
+    const harness = await setupMonitorHarness({
+      richDraftError: true,
+      events: [
+        {
+          kind: "message.new",
+          chatId: 774n,
+          message: {
+            id: 5559n,
+            date: 1_700_000_004n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "774": { kind: "direct", title: "Alice" },
+      },
+      toolStartBeforePayloadIndexes: [0],
+      itemEventBeforePayloadIndexes: [0],
+      dispatchReplyPayload: {
+        text: "visible after tool",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        streaming: { mode: "progress" },
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        72,
+        expect.objectContaining({
+          oneofKind: "sendRichMessageDraft",
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1n,
+            text: expect.stringContaining("listed files"),
+          }),
+        }),
+      )
+    })
 
     await handle.stop()
   })
@@ -6112,7 +6308,7 @@ describe("inline/monitor", () => {
       },
       partialReplies: [
         { text: "first **paragraph**\n\n" },
-        { text: "second paragraph" },
+        { text: "first **paragraph**\n\nsecond paragraph\n\n" },
       ],
       dispatchReplyPayload: {
         text: "first **paragraph**\n\nsecond paragraph",
@@ -6136,9 +6332,38 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           chatId: 67n,
           text: "first **paragraph**",
-          parseMarkdown: true,
+          richText: expect.objectContaining({
+            fallbackText: "first **paragraph**",
+            blocks: [
+              expect.objectContaining({
+                blockId: "openclaw_stream_visible_0",
+              }),
+            ],
+          }),
         }),
       )
+      expect(harness.calls.sendMessage.mock.calls[0]?.[0]).not.toHaveProperty("parseRichMarkdown")
+      const richEditCall = harness.calls.invokeRaw.mock.calls.find((call) => {
+        const input = call[1] as any
+        return call[0] === 8 && input?.editMessage?.richText
+      })
+      const richEdit = (richEditCall?.[1] as any)?.editMessage
+      expect(richEdit).toMatchObject({
+        messageId: 1n,
+        text: "first **paragraph**\n\nsecond paragraph",
+        richText: {
+          fallbackText: "first **paragraph**\n\nsecond paragraph",
+          blocks: [
+            expect.objectContaining({
+              blockId: "openclaw_stream_visible_0",
+            }),
+            expect.objectContaining({
+              blockId: "openclaw_stream_visible_1",
+            }),
+          ],
+        },
+      })
+      expect(richEdit).not.toHaveProperty("parseRichMarkdown")
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
         8,
         expect.objectContaining({
@@ -6146,7 +6371,138 @@ describe("inline/monitor", () => {
           editMessage: expect.objectContaining({
             messageId: 1n,
             text: "first **paragraph**\n\nsecond paragraph",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
+          }),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("skips image-only streaming partials and sends the final markdown image through rich parsing", async () => {
+    const text = [
+      "Final image:",
+      "",
+      "![Preview](https://commons.wikimedia.org/wiki/Special:FilePath/Cockatiel_(Nymphicus_hollandicus).jpg)",
+    ].join("\n")
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 671n,
+          message: {
+            id: 5702n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "671": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [
+        {
+          text: "![Preview](https://commons.wikimedia.org/wiki/Special:FilePath/Cockatiel_(Nymphicus_hollandicus).jpg)\n\n",
+        },
+      ],
+      dispatchReplyPayload: {
+        text,
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 671n,
+          text,
+          parseRichMarkdown: true,
+        }),
+      )
+      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({ oneofKind: "editMessage" }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("skips stripped image-only streaming deltas after visible text", async () => {
+    const text = [
+      "Intro",
+      "",
+      "![Preview](https://commons.wikimedia.org/wiki/Special:FilePath/Cockatiel_(Nymphicus_hollandicus).jpg)",
+    ].join("\n")
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 672n,
+          message: {
+            id: 5703n,
+            date: 1_700_000_012n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "672": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [
+        { text: "Intro\n\n" },
+        {
+          text,
+        },
+      ],
+      dispatchReplyPayload: {
+        text,
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 672n,
+          text: "Intro",
+          richText: expect.objectContaining({
+            fallbackText: "Intro",
+          }),
+        }),
+      )
+      const richEditCalls = harness.calls.invokeRaw.mock.calls.filter((call) => {
+        const input = call[1] as any
+        return call[0] === 8 && input?.editMessage?.richText
+      })
+      expect(richEditCalls).toHaveLength(0)
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1n,
+            text,
+            parseRichMarkdown: true,
           }),
         }),
       )
@@ -6858,7 +7214,7 @@ describe("inline/monitor", () => {
           oneofKind: "editMessage",
           editMessage: expect.objectContaining({
             text: "first paragraph\n\nsecond paragraph",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
           }),
         }),
       )
@@ -6914,7 +7270,7 @@ describe("inline/monitor", () => {
           oneofKind: "editMessage",
           editMessage: expect.objectContaining({
             text: "first paragraph\n\nsecond paragraph\n\nthird paragraph",
-            parseMarkdown: true,
+            parseRichMarkdown: true,
           }),
         }),
       )
@@ -8463,7 +8819,7 @@ describe("inline/monitor", () => {
           actions: expect.objectContaining({
             rows: expect.any(Array),
           }),
-          parseMarkdown: true,
+          parseRichMarkdown: true,
         }),
       )
     })

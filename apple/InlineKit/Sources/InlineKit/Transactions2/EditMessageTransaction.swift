@@ -17,6 +17,7 @@ public struct EditMessageTransaction: Transaction2 {
     public var chatId: Int64
     public var peerId: Peer
     public var entities: MessageEntities?
+    public var richText: RichMessage?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -26,18 +27,33 @@ public struct EditMessageTransaction: Transaction2 {
   // Private
   private var log = Log.scoped("Transactions/EditMessage")
 
-  public init(message: InlineKit.Message, text: String, entities: MessageEntities? = nil) {
+  public init(message: InlineKit.Message, text: String, entities: MessageEntities? = nil, richText: RichMessage? = nil) {
     self.init(
       messageId: message.messageId,
       text: text,
       chatId: message.chatId,
       peerId: message.peerId,
-      entities: entities
+      entities: entities,
+      richText: richText
     )
   }
 
-  public init(messageId: Int64, text: String, chatId: Int64, peerId: Peer, entities: MessageEntities? = nil) {
-    context = Context(messageId: messageId, text: text, chatId: chatId, peerId: peerId, entities: entities)
+  public init(
+    messageId: Int64,
+    text: String,
+    chatId: Int64,
+    peerId: Peer,
+    entities: MessageEntities? = nil,
+    richText: RichMessage? = nil
+  ) {
+    context = Context(
+      messageId: messageId,
+      text: text,
+      chatId: chatId,
+      peerId: peerId,
+      entities: entities,
+      richText: richText
+    )
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -47,6 +63,9 @@ public struct EditMessageTransaction: Transaction2 {
       $0.text = context.text
       if let entities = context.entities {
         $0.entities = entities
+      }
+      if let richText = context.richText {
+        $0.richText = richText
       }
     })
   }
@@ -58,6 +77,7 @@ public struct EditMessageTransaction: Transaction2 {
   var chatId: Int64 { context.chatId }
   var peerId: Peer { context.peerId }
   var entities: MessageEntities? { context.entities }
+  var richText: RichMessage? { context.richText }
 
   // Methods
   public func optimistic() async {
@@ -72,6 +92,7 @@ public struct EditMessageTransaction: Transaction2 {
           message?.editDate = Date()
           message?.text = text
           message?.entities = entities
+          message?.richText = richText
         }
         try message?.saveMessage(db)
       }
@@ -108,9 +129,10 @@ public extension Transaction2 where Self == EditMessageTransaction {
   static func editMessage(
     message: InlineKit.Message,
     text: String,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    richText: RichMessage? = nil
   ) -> EditMessageTransaction {
-    EditMessageTransaction(message: message, text: text, entities: entities)
+    EditMessageTransaction(message: message, text: text, entities: entities, richText: richText)
   }
 
   static func editMessage(
@@ -118,8 +140,16 @@ public extension Transaction2 where Self == EditMessageTransaction {
     text: String,
     chatId: Int64,
     peerId: Peer,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    richText: RichMessage? = nil
   ) -> EditMessageTransaction {
-    EditMessageTransaction(messageId: messageId, text: text, chatId: chatId, peerId: peerId, entities: entities)
+    EditMessageTransaction(
+      messageId: messageId,
+      text: text,
+      chatId: chatId,
+      peerId: peerId,
+      entities: entities,
+      richText: richText
+    )
   }
 }

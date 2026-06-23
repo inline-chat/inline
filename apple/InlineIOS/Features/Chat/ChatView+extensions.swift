@@ -56,6 +56,12 @@ struct ChatToolbarLeadingView: View {
     return "Not Loaded Title"
   }
 
+  private var isVerified: Bool {
+    guard case .user = peerId else { return false }
+    guard !isCurrentUser else { return false }
+    return fullChatViewModel.peerUserInfo?.user.verified == true
+  }
+
   private var isPrivateChat: Bool {
     fullChatViewModel.peer.isPrivate
   }
@@ -211,6 +217,25 @@ struct ChatToolbarLeadingView: View {
     .accessibilityLabel(accessibilityLabel)
   }
 
+  private var titleView: some View {
+    HStack(spacing: 4) {
+      Text(title)
+        .font(.body)
+        .fontWeight(.medium)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .allowsTightening(true)
+        .layoutPriority(1)
+
+      if isVerified {
+        VerifiedBadge(size: 13)
+          .fixedSize()
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(isVerified ? "\(title), verified" : title)
+  }
+
   var body: some View {
     HStack(spacing: 8) {
       if isThreadChat {
@@ -247,12 +272,7 @@ struct ChatToolbarLeadingView: View {
       }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(title)
-          .font(.body)
-          .fontWeight(.medium)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .allowsTightening(true)
+        titleView
           .onTapGesture(perform: openChatInfo)
         subtitleView
       }

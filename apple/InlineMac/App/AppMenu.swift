@@ -43,6 +43,9 @@ final class AppMenu: NSObject {
     setupEditMenu()
     setupViewMenu()
     setupWindowMenu()
+#if DEBUG
+    setupDebugMenu()
+#endif
     setupHelpMenu()
   }
 
@@ -593,6 +596,17 @@ final class AppMenu: NSObject {
     macDevtoolsItem.image = NSImage(systemSymbolName: "ladybug", accessibilityDescription: nil)
     windowMenu.addItem(macDevtoolsItem)
 
+#if DEBUG
+    let richTextTestBookItem = NSMenuItem(
+      title: "Rich Text Testbook",
+      action: #selector(openRichTextTestBook(_:)),
+      keyEquivalent: ""
+    )
+    richTextTestBookItem.target = self
+    richTextTestBookItem.image = NSImage(systemSymbolName: "text.badge.checkmark", accessibilityDescription: nil)
+    windowMenu.addItem(richTextTestBookItem)
+#endif
+
     windowMenu.addItem(NSMenuItem.separator())
 
     windowMenu.addItem(
@@ -677,6 +691,25 @@ final class AppMenu: NSObject {
     statusPageItem.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: nil)
     helpMenu.addItem(statusPageItem)
   }
+
+#if DEBUG
+  private func setupDebugMenu() {
+    let debugMenu = NSMenu(title: "Debug")
+    let debugMenuItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+    debugMenuItem.submenu = debugMenu
+    mainMenu.addItem(debugMenuItem)
+
+    let richTextTestBookItem = NSMenuItem(
+      title: "Rich Text Testbook",
+      action: #selector(openRichTextTestBook(_:)),
+      keyEquivalent: "r"
+    )
+    richTextTestBookItem.keyEquivalentModifierMask = [.command, .option]
+    richTextTestBookItem.target = self
+    richTextTestBookItem.image = NSImage(systemSymbolName: "text.badge.checkmark", accessibilityDescription: nil)
+    debugMenu.addItem(richTextTestBookItem)
+  }
+#endif
 
   @objc private func showPreferences(_ sender: Any?) {
     guard let dependencies else { return }
@@ -801,6 +834,12 @@ final class AppMenu: NSObject {
   @objc private func openMacDevtools(_ sender: Any?) {
     MacDevtoolsWindowController.show(sender: sender)
   }
+
+#if DEBUG
+  @objc private func openRichTextTestBook(_ sender: Any?) {
+    RichMessageTestBookWindowController.show(sender: sender)
+  }
+#endif
 
   @objc private func showAllTabs(_ sender: Any?) {
     guard let window = tabOverviewWindow() else { return }

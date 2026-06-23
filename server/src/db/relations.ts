@@ -20,6 +20,7 @@ export const relations = defineRelations(
     reactions: schema.reactions,
     photoSizes: schema.photoSizes,
     messageAttachments: schema.messageAttachments,
+    messageRichMedia: schema.messageRichMedia,
     urlPreview: schema.urlPreview,
     urlPreviewCache: schema.urlPreviewCache,
     externalTasks: schema.externalTasks,
@@ -137,6 +138,7 @@ export const relations = defineRelations(
       }),
       reactions: r.many.reactions(),
       messageAttachments: r.many.messageAttachments(),
+      richMedia: r.many.messageRichMedia(),
       translations: r.many.translations(),
 
       // Media relations
@@ -221,6 +223,37 @@ export const relations = defineRelations(
       linkEmbed: r.one.urlPreview({
         from: r.messageAttachments.urlPreviewId,
         to: r.urlPreview.id,
+        optional: true,
+      }),
+    },
+
+    messageRichMedia: {
+      message: r.one.messages({
+        from: r.messageRichMedia.messageGlobalId,
+        to: r.messages.globalId,
+      }),
+      chat: r.one.chats({
+        from: r.messageRichMedia.chatId,
+        to: r.chats.id,
+      }),
+      photo: r.one.photos({
+        from: r.messageRichMedia.photoId,
+        to: r.photos.id,
+        optional: true,
+      }),
+      video: r.one.videos({
+        from: r.messageRichMedia.videoId,
+        to: r.videos.id,
+        optional: true,
+      }),
+      document: r.one.documents({
+        from: r.messageRichMedia.documentId,
+        to: r.documents.id,
+        optional: true,
+      }),
+      voice: r.one.voices({
+        from: r.messageRichMedia.voiceId,
+        to: r.voices.id,
         optional: true,
       }),
     },

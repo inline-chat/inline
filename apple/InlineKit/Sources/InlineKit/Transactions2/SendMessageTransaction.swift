@@ -26,6 +26,7 @@ public struct SendMessageTransaction: Transaction2 {
     public var isSticker: Bool?
     public var isNudge: Bool
     public var entities: MessageEntities?
+    public var richText: RichMessage?
     public var sendMode: MessageSendMode?
     public var randomId: Int64
     public var temporaryMessageId: Int64
@@ -38,6 +39,7 @@ public struct SendMessageTransaction: Transaction2 {
       case isSticker
       case isNudge
       case entities
+      case richText
       case sendMode
       case randomId
       case temporaryMessageId
@@ -51,6 +53,7 @@ public struct SendMessageTransaction: Transaction2 {
       isSticker: Bool?,
       isNudge: Bool,
       entities: MessageEntities?,
+      richText: RichMessage?,
       sendMode: MessageSendMode?,
       randomId: Int64,
       temporaryMessageId: Int64
@@ -62,6 +65,7 @@ public struct SendMessageTransaction: Transaction2 {
       self.isSticker = isSticker
       self.isNudge = isNudge
       self.entities = entities
+      self.richText = richText
       self.sendMode = sendMode
       self.randomId = randomId
       self.temporaryMessageId = temporaryMessageId
@@ -76,6 +80,7 @@ public struct SendMessageTransaction: Transaction2 {
       isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
       isNudge = try container.decodeIfPresent(Bool.self, forKey: .isNudge) ?? false
       entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
+      richText = try container.decodeIfPresent(RichMessage.self, forKey: .richText)
       if let rawValue = try container.decodeIfPresent(Int.self, forKey: .sendMode) {
         sendMode = MessageSendMode(rawValue: rawValue) ?? .modeUnspecified
       } else {
@@ -96,6 +101,7 @@ public struct SendMessageTransaction: Transaction2 {
         try container.encode(isNudge, forKey: .isNudge)
       }
       try container.encodeIfPresent(entities, forKey: .entities)
+      try container.encodeIfPresent(richText, forKey: .richText)
       if let sendMode = sendMode {
         try container.encode(sendMode.rawValue, forKey: .sendMode)
       }
@@ -112,6 +118,7 @@ public struct SendMessageTransaction: Transaction2 {
     isSticker: Bool? = nil,
     isNudge: Bool = false,
     entities: MessageEntities? = nil,
+    richText: RichMessage? = nil,
     sendMode: MessageSendMode? = nil
   ) {
     let randomId = Int64.random(in: 0 ... Int64.max)
@@ -123,6 +130,7 @@ public struct SendMessageTransaction: Transaction2 {
       isSticker: isSticker,
       isNudge: isNudge,
       entities: entities,
+      richText: richText,
       sendMode: sendMode,
       randomId: randomId,
       temporaryMessageId: -1 * randomId
@@ -139,6 +147,7 @@ public struct SendMessageTransaction: Transaction2 {
       if let text = context.text { $0.message = text }
       if let replyToMsgId = context.replyToMsgId { $0.replyToMsgID = replyToMsgId }
       if let entities = context.entities { $0.entities = entities }
+      if let richText = context.richText { $0.richText = richText }
       if let sendMode = context.sendMode { $0.sendMode = sendMode }
       if context.isNudge { $0.media = InputMedia.fromNudge() }
     })
@@ -191,7 +200,8 @@ public struct SendMessageTransaction: Transaction2 {
       documentId: nil,
       transactionId: nil, // No longer using transaction ID in new system
       isSticker: context.isSticker,
-      entities: context.entities
+      entities: context.entities,
+      richText: context.richText
     )
 
     // Clear typing status
@@ -316,6 +326,7 @@ public extension Transaction2 where Self == SendMessageTransaction {
     isSticker: Bool? = nil,
     isNudge: Bool = false,
     entities: MessageEntities? = nil,
+    richText: RichMessage? = nil,
     sendMode: MessageSendMode? = nil
   ) -> SendMessageTransaction {
     SendMessageTransaction(
@@ -326,6 +337,7 @@ public extension Transaction2 where Self == SendMessageTransaction {
       isSticker: isSticker,
       isNudge: isNudge,
       entities: entities,
+      richText: richText,
       sendMode: sendMode
     )
   }

@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import InlineMacUI
+import InlineUI
 import Observation
 import SwiftUI
 
@@ -127,11 +128,21 @@ struct ChatRouteTitleBar: View {
   }
 
   private var titleLabel: some View {
-    Text(model.title)
-      .font(.system(size: toolbarLayout.titleFontSize, weight: .semibold))
-      .lineLimit(1)
-      .truncationMode(.tail)
-      .frame(minWidth: 0, alignment: .leading)
+    HStack(spacing: 4) {
+      Text(model.title)
+        .font(.system(size: toolbarLayout.titleFontSize, weight: .semibold))
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .layoutPriority(1)
+
+      if model.isVerified {
+        VerifiedBadge(size: max(toolbarLayout.titleFontSize - 1, 10))
+          .fixedSize()
+      }
+    }
+    .frame(minWidth: 0, alignment: .leading)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(model.isVerified ? "\(model.title), verified" : model.title)
   }
 
   private var renamePopover: some View {

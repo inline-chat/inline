@@ -23,6 +23,27 @@ describe("getPhotoMetadataAndValidate", () => {
     expect(metadata.mimeType).toBe("image/jpeg")
   })
 
+  test("accepts avif photos for server-side normalization", async () => {
+    const data = await sharp({
+      create: {
+        width: 640,
+        height: 360,
+        channels: 3,
+        background: { r: 40, g: 80, b: 120 },
+      },
+    })
+      .avif()
+      .toBuffer()
+
+    const file = new File([data], "photo.avif", { type: "image/avif" })
+    const metadata = await getPhotoMetadataAndValidate(file)
+
+    expect(metadata.width).toBe(640)
+    expect(metadata.height).toBe(360)
+    expect(metadata.mimeType).toBe("image/avif")
+    expect(metadata.extension).toBe("avif")
+  })
+
   test("rejects ultra-wide photos with an actionable message", async () => {
     const data = await sharp({
       create: {

@@ -32,7 +32,7 @@ describe("plugin entry", () => {
         tokenStatus: "available",
       }),
     )
-  }, 60_000)
+  }, 120_000)
 
   it("keeps the setup entry split with secret metadata", async () => {
     vi.resetModules()

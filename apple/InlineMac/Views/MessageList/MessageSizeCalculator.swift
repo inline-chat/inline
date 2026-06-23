@@ -22,6 +22,18 @@ class MessageSizeCalculator {
   private let minTextWidthForSingleLine = NSCache<NSString, NSValue>()
   /// cache of last view height for row by id
   private let lastHeightForRow = NSCache<NSString, NSValue>()
+  private let richBlockStateLock = NSLock()
+  private var richBlockStates: [Int64: RichMessageBlockStateSnapshot] = [:]
+  private var richBlockLayouts: [RichBlockLayoutCacheKey: RichMessageLayoutPlan] = [:]
+
+  private struct RichBlockLayoutCacheKey: Hashable {
+    let messageStableId: Int64
+    let richSignature: String
+    let width: Int
+    let fontSize: Int
+    let styleKey: String
+    let stateSignature: String
+  }
 
   /// Using "" empty string gives a zero height which messes up our layout when somehow an empty text-only message gets
   /// in due to a bug
@@ -157,6 +169,160 @@ class MessageSizeCalculator {
     }
   }
 
+  private func richBlockStyle(
+    for style: RenderStyle,
+    fontSize: CGFloat,
+    usesOutgoingBubbleStyle: Bool
+  ) -> RichMessageBlockStyle {
+    RichMessageBlockStyle.message(
+      fontSize: fontSize,
+      primary: primaryColor(for: style, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
+      secondary: secondaryColor(for: style, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
+      link: linkColor(for: style, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
+    )
+  }
+
+  func effectiveRichText(for message: FullMessage) -> RichMessage? {
+    guard ExperimentalFeatureFlags.richTextMessagesEnabled,
+          message.displayText == message.message.text
+    else { return nil }
+
+    if let draftRichText = RichMessageDraftStore.shared.richText(
+      for: message.message.peerId,
+      messageId: message.message.messageId
+    ) {
+      return draftRichText
+    }
+
+    return message.message.richText
+  }
+
+  private func shouldRenderRichText(for message: FullMessage) -> Bool {
+    ExperimentalFeatureFlags.richTextMessagesEnabled &&
+      message.displayText == message.message.text &&
+      effectiveRichText(for: message) != nil
+  }
+
+  private func richTextCacheKey(for message: FullMessage) -> String {
+    guard shouldRenderRichText(for: message),
+          let richText = effectiveRichText(for: message)
+    else { return "rich-off" }
+
+    return "rich-\(richTextSignature(for: richText))-\(richBlockState(for: message.id).layoutSignature)"
+  }
+
+  func richBlockState(for messageStableId: Int64) -> RichMessageBlockStateSnapshot {
+    richBlockStateLock.lock()
+    defer { richBlockStateLock.unlock() }
+    return richBlockStates[messageStableId] ?? .initial
+  }
+
+  func setRichBlockState(_ state: RichMessageBlockStateSnapshot, for messageStableId: Int64) {
+    richBlockStateLock.lock()
+    let oldLayoutSignature = richBlockStates[messageStableId]?.layoutSignature ?? RichMessageBlockStateSnapshot.initial.layoutSignature
+    if state.overrides.isEmpty, state.revealedSpoilers.isEmpty {
+      richBlockStates.removeValue(forKey: messageStableId)
+    } else {
+      richBlockStates[messageStableId] = state
+    }
+    if oldLayoutSignature != state.layoutSignature {
+      invalidateRichBlockLayoutsLocked(for: messageStableId)
+    }
+    richBlockStateLock.unlock()
+  }
+
+  func invalidateRichBlockLayouts(for messageStableId: Int64) {
+    richBlockStateLock.lock()
+    invalidateRichBlockLayoutsLocked(for: messageStableId)
+    richBlockStateLock.unlock()
+  }
+
+  #if DEBUG
+  func debugRichBlockLayoutCacheCount(for messageStableId: Int64) -> Int {
+    richBlockStateLock.lock()
+    let count = richBlockLayouts.keys.filter { $0.messageStableId == messageStableId }.count
+    richBlockStateLock.unlock()
+    return count
+  }
+
+  func debugClearRichBlockStateAndLayouts(for messageStableId: Int64) {
+    richBlockStateLock.lock()
+    richBlockStates.removeValue(forKey: messageStableId)
+    invalidateRichBlockLayoutsLocked(for: messageStableId)
+    richBlockStateLock.unlock()
+  }
+  #endif
+
+  func richBlockLayout(
+    for message: FullMessage,
+    width: CGFloat,
+    style: RichMessageBlockStyle,
+    styleKey: String
+  ) -> RichMessageLayoutPlan? {
+    guard shouldRenderRichText(for: message),
+          let richText = effectiveRichText(for: message)
+    else { return nil }
+
+    let state = richBlockState(for: message.id)
+    let key = richBlockLayoutCacheKey(
+      for: message,
+      richText: richText,
+      width: width,
+      fontSize: style.baseFont.pointSize,
+      styleKey: styleKey,
+      state: state
+    )
+
+    richBlockStateLock.lock()
+    if let cached = richBlockLayouts[key] {
+      richBlockStateLock.unlock()
+      return cached
+    }
+    richBlockStateLock.unlock()
+
+    let plan = RichMessageBlockSizeCalculator.layout(
+      for: richText,
+      width: width,
+      style: style,
+      state: state
+    )
+
+    richBlockStateLock.lock()
+    if richBlockLayouts.count > 1_000 {
+      richBlockLayouts.removeAll(keepingCapacity: true)
+    }
+    richBlockLayouts[key] = plan
+    richBlockStateLock.unlock()
+
+    return plan
+  }
+
+  private func richBlockLayoutCacheKey(
+    for message: FullMessage,
+    richText: RichMessage,
+    width: CGFloat,
+    fontSize: CGFloat,
+    styleKey: String,
+    state: RichMessageBlockStateSnapshot
+  ) -> RichBlockLayoutCacheKey {
+    return RichBlockLayoutCacheKey(
+      messageStableId: message.id,
+      richSignature: richTextSignature(for: richText),
+      width: Int(ceil(width)),
+      fontSize: Int((fontSize * 100).rounded()),
+      styleKey: styleKey,
+      stateSignature: state.layoutSignature
+    )
+  }
+
+  private func invalidateRichBlockLayoutsLocked(for messageStableId: Int64) {
+    richBlockLayouts = richBlockLayouts.filter { $0.key.messageStableId != messageStableId }
+  }
+
+  private func richTextSignature(for richText: RichMessage) -> String {
+    return richText.stableSignature
+  }
+
   static func minimalTextFontSize(for emojiInfo: (count: Int, isAllEmojis: Bool)) -> Double {
     switch emojiInfo {
     case let (count, true) where count == 1:
@@ -190,7 +356,6 @@ class MessageSizeCalculator {
   }
 
   init() {
-    // TODO: Use message id or a fast hash for the keys instead of text
     cache.countLimit = 5_000
     textHeightCache.countLimit = 10_000
     minTextWidthForSingleLine.countLimit = 5_000
@@ -264,9 +429,7 @@ class MessageSizeCalculator {
     // know we don't need to recalc. since this function is used in message list to bypass unneccessary calcs.
     guard !fullMessage.hasMedia else { return nil }
 
-    // let text = fullMessage.message.text ?? emptyFallback
-    let text = fullMessage.displayText ?? emptyFallback
-    let minTextSize = minTextWidthForSingleLine.object(forKey: text as NSString) as? CGSize
+    let minTextSize = minTextWidthForSingleLine.object(forKey: singleLineCacheKey(for: fullMessage)) as? CGSize
 
     // This is just text size, we need to take bubble paddings into account as well
     // we can probably refactor this to be more maintainable
@@ -655,10 +818,21 @@ class MessageSizeCalculator {
   }
 
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
-    // Hash-based approach is faster than string concatenation
-    let hashValue =
-      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(message.message.entities?.entities.count ?? 0)_\(actionRowsSignature(for: message))"
-    return NSString(string: "\(hashValue)")
+    NSString(
+      string: [
+        "\(message.id)",
+        MessageRenderCacheSignature.content(for: message, fallback: emptyFallback),
+        "\(Int(width))",
+        props.toString(),
+        "\(message.message.entities?.entities.count ?? 0)",
+        richTextCacheKey(for: message),
+        actionRowsSignature(for: message),
+      ].joined(separator: "_")
+    )
+  }
+
+  private func singleLineCacheKey(for message: FullMessage) -> NSString {
+    NSString(string: "single_\(MessageRenderCacheSignature.content(for: message, fallback: emptyFallback))")
   }
 
   private var singleLineDiff = 4.0
@@ -741,6 +915,7 @@ class MessageSizeCalculator {
     let usesOutgoingBubbleStyle = isOutgoing && hasBubbleColor
     let richTextStyleKey = richTextStyleKey(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
     let bubbleContentHorizontalInset = horizontalBubbleInset(for: .bubble)
+    let rendersRichBlockText = shouldRenderRichText(for: message)
 
     // Font size
     var fontSize: Double = switch emojiInfo {
@@ -771,6 +946,13 @@ class MessageSizeCalculator {
           palette: richTextPalette(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
         )
       )
+      if let richText = effectiveRichText(for: message), !rendersRichBlockText {
+        RichMessageTextStyler.applyBlockStyles(
+          to: processed,
+          richText: richText,
+          baseFont: font
+        )
+      }
       // cache processed string
       CacheAttrs.shared.set(message: message, renderStyle: .bubble, styleKey: richTextStyleKey, value: processed)
       attributedString = processed
@@ -902,6 +1084,7 @@ class MessageSizeCalculator {
 
     // Shared logic
     if hasText,
+       !rendersRichBlockText,
        textSize == nil,
        !emojiMessage,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
@@ -912,9 +1095,21 @@ class MessageSizeCalculator {
       isSingleLine = true
       textSize = CGSize(width: minTextWidth, height: heightForSingleLineText())
     } else {
-      // remove from single line cache. possibly logic can be improved
-      // FIXME: Optimize this line, it's hit too often with the whole text
-      minTextWidthForSingleLine.removeObject(forKey: text as NSString)
+      minTextWidthForSingleLine.removeObject(forKey: singleLineCacheKey(for: message))
+    }
+
+    if hasText, rendersRichBlockText, textSize == nil {
+      textSize = richBlockLayout(
+        for: message,
+        width: availableWidth,
+        style: richBlockStyle(
+          for: .bubble,
+          fontSize: font.pointSize,
+          usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+        ),
+        styleKey: richTextStyleKey
+      )?.size
+      isSingleLine = false
     }
 
     if hasText, textSize == nil {
@@ -926,7 +1121,7 @@ class MessageSizeCalculator {
         isSingleLine = true
         minTextWidthForSingleLine.setObject(
           NSValue(size: textSize_),
-          forKey: text as NSString
+          forKey: singleLineCacheKey(for: message)
         )
       }
     }
@@ -1523,6 +1718,7 @@ class MessageSizeCalculator {
     let font = MessageTextConfiguration.font.withSize(fontSize)
     let usesOutgoingBubbleStyle = false
     let richTextStyleKey = richTextStyleKey(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
+    let rendersRichBlockText = shouldRenderRichText(for: message)
 
     let attributedString: NSAttributedString
     if let cached = CacheAttrs.shared.get(message: message, renderStyle: .minimal, styleKey: richTextStyleKey) {
@@ -1537,6 +1733,13 @@ class MessageSizeCalculator {
           palette: richTextPalette(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
         )
       )
+      if let richText = effectiveRichText(for: message), !rendersRichBlockText {
+        RichMessageTextStyler.applyBlockStyles(
+          to: processed,
+          richText: richText,
+          baseFont: font
+        )
+      }
       CacheAttrs.shared.set(message: message, renderStyle: .minimal, styleKey: richTextStyleKey, value: processed)
       attributedString = processed
     }
@@ -1624,6 +1827,19 @@ class MessageSizeCalculator {
 
     if hasText, text.isEmpty {
       textSize = CGSize(width: 1, height: heightForSingleLineText())
+    }
+
+    if hasText, rendersRichBlockText, textSize == nil {
+      textSize = richBlockLayout(
+        for: message,
+        width: textAvailableWidth,
+        style: richBlockStyle(
+          for: .minimal,
+          fontSize: font.pointSize,
+          usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+        ),
+        styleKey: richTextStyleKey
+      )?.size
     }
 
     if hasText, textSize == nil {
@@ -2039,6 +2255,10 @@ class MessageSizeCalculator {
     textHeightCache.removeAllObjects()
     minTextWidthForSingleLine.removeAllObjects()
     lastHeightForRow.removeAllObjects()
+    richBlockStateLock.lock()
+    richBlockStates.removeAll()
+    richBlockLayouts.removeAll(keepingCapacity: true)
+    richBlockStateLock.unlock()
   }
 
   func heightForSingleLineText() -> CGFloat {
@@ -2162,6 +2382,10 @@ class MessageSizeCalculator {
     let boundedWidth = ceil(boundedHeight * aspectRatio)
     return CGSize(width: boundedWidth, height: boundedHeight)
   }
+}
+
+extension Notification.Name {
+  static let richMessageBlockStateDidChange = Notification.Name("richMessageBlockStateDidChange")
 }
 
 enum MessageTextConfiguration {

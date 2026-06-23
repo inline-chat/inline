@@ -24,7 +24,7 @@ export async function uploadFile(
   fileType: FileTypes,
   metadata: FileMetadata,
   context: { userId: number },
-): Promise<{ dbFile: DbNewFile; fileUniqueId: string; prefix: string }> {
+): Promise<{ dbFile: DbNewFile; fileUniqueId: string; path: string; prefix: string }> {
   let normalizedMetadata = metadata
   try {
     normalizedMetadata = normalizeMetadata(metadata)
@@ -101,7 +101,7 @@ export async function uploadFile(
         throw new Error("No file returned from database")
       }
       log.info("File saved to database successfully", { fileUniqueId })
-      return { dbFile, fileUniqueId, prefix }
+      return { dbFile, fileUniqueId, path, prefix }
     } catch (error) {
       log.error("Failed to save file to database", { error, fileUniqueId })
       throw new Error("Failed to save file to database", { cause: error as Error })

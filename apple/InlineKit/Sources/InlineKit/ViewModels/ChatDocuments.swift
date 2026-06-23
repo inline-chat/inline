@@ -44,6 +44,58 @@ public struct DocumentMessage: Codable, Equatable, Hashable, FetchableRecord, Pe
       )
       .asRequest(of: DocumentMessage.self)
   }
+
+  static func effectiveMessages(in db: Database, chatId: Int64) throws -> [DocumentMessage] {
+    let hits = try MessageEffectiveMediaQuery.refs(
+      in: db,
+      chatId: chatId,
+      kinds: [.document]
+    )
+
+    var messages: [DocumentMessage] = []
+    for hit in hits {
+      switch hit.ref {
+      case let .document(documentId):
+        if let document = try documentInfo(in: db, documentId: documentId) {
+          messages.append(DocumentMessage(message: hit.message, document: document))
+        }
+      case .photo, .video, .voice:
+        break
+      }
+    }
+
+    return deduped(messages)
+  }
+
+  private static func deduped(_ messages: [DocumentMessage]) -> [DocumentMessage] {
+    var seen: Set<Int64> = []
+    let sorted = messages.sorted { lhs, rhs in
+      if lhs.message.date != rhs.message.date {
+        return lhs.message.date > rhs.message.date
+      }
+      if lhs.message.messageId != rhs.message.messageId {
+        return lhs.message.messageId > rhs.message.messageId
+      }
+      return lhs.document.id < rhs.document.id
+    }
+
+    return sorted.filter { message in
+      let insert = seen.insert(message.document.id)
+      return insert.inserted
+    }
+  }
+
+  private static func documentInfo(in db: Database, documentId: Int64) throws -> DocumentInfo? {
+    try Document
+      .filter(Document.Columns.documentId == documentId)
+      .including(
+        optional: Document.thumbnail
+          .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          .forKey(DocumentInfo.CodingKeys.thumbnail)
+      )
+      .asRequest(of: DocumentInfo.self)
+      .fetchOne(db)
+  }
 }
 
 @MainActor
@@ -80,36 +132,13 @@ public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable
     db.warnIfInMemoryDatabaseForObservation("ChatDocumentsViewModel.documents")
     cancellable = ValueObservation
       .tracking { [chatId] db in
-        // 1. Pick all messages from the chat that have an associated document.
-        try Message
-          .filter(Column("chatId") == chatId)
-          .filter(Column("documentId") != nil)
-          // 2. Bring the underlying `Document` (and its thumbnail) into the row
-          //    so that GRDB can build a `DocumentInfo` value for us.
-          .including(
-            optional: Message.document
-              .forKey(DocumentInfo.CodingKeys.document) // map to `document` property
-              .including(
-                optional: Document.thumbnail
-                  .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
-                  .forKey(DocumentInfo.CodingKeys.thumbnail) // map to `thumbnail` property
-              )
-          )
-          // 3. We only care about the `DocumentInfo` portion of each row.
-          .asRequest(of: DocumentInfo.self)
-          .fetchAll(db)
+        try DocumentMessage.effectiveMessages(in: db, chatId: chatId).map(\.document)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
         receiveCompletion: { Log.shared.error("Failed to load chat documents \($0)") },
         receiveValue: { [weak self] infos in
-          // Remove duplicates (same underlying document) while keeping order
-          var seen: Set<Int64> = []
-          let unique = infos.filter { info in
-            let insert = seen.insert(info.id)
-            return insert.inserted
-          }
-          self?.documents = unique.sorted { $0.document.date > $1.document.date }
+          self?.documents = infos.sorted { $0.document.date > $1.document.date }
         }
       )
   }
@@ -118,22 +147,13 @@ public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable
     db.warnIfInMemoryDatabaseForObservation("ChatDocumentsViewModel.documentMessages")
     messagesCancellable = ValueObservation
       .tracking { [chatId] db in
-        try DocumentMessage.queryRequest()
-          .filter(Column("chatId") == chatId)
-          .order(Column("date").desc)
-          .fetchAll(db)
+        try DocumentMessage.effectiveMessages(in: db, chatId: chatId)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
         receiveCompletion: { Log.shared.error("Failed to load document messages \($0)") },
         receiveValue: { [weak self] messages in
-          // Remove duplicates (same underlying document) while keeping order
-          var seen: Set<Int64> = []
-          let unique = messages.filter { message in
-            let insert = seen.insert(message.document.id)
-            return insert.inserted
-          }
-          self?.documentMessages = unique
+          self?.documentMessages = messages
         }
       )
   }

@@ -30,6 +30,7 @@ import type {
   InlineInboundEvent,
   InlineSdkGetMessagesParams,
   InlineSdkInvokeMessageActionParams,
+  InlineSdkSendRichMessageDraftParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
   InlineSdkSetBotPresenceStateParams,
@@ -52,6 +53,7 @@ const defaultVideoHeight = 720
 const defaultVideoDuration = 1
 const defaultCatchUpPageLimit = 200
 const defaultCatchUpTotalLimit = 1_000
+const maxRichDraftIdLength = 256
 const defaultColdStartCatchUpWindow = defaultCatchUpTotalLimit
 type UpdateSource = "live" | "chat" | "space" | "user"
 
@@ -285,9 +287,15 @@ export class InlineSdkClient {
     if (params.entities != null && params.parseMarkdown != null) {
       throw new Error("sendMessage: provide either `entities` or `parseMarkdown`, not both")
     }
+    if (params.richText != null && params.parseRichMarkdown != null) {
+      throw new Error("sendMessage: provide either `richText` or `parseRichMarkdown`, not both")
+    }
+    if ((params.richText != null || params.parseRichMarkdown != null) && (params.entities != null || params.parseMarkdown != null)) {
+      throw new Error("sendMessage: rich text cannot be combined with `entities` or `parseMarkdown`")
+    }
 
     const hasText = typeof params.text === "string" && params.text.length > 0
-    if (!hasText && params.media == null) {
+    if (!hasText && params.media == null && params.richText == null) {
       throw new Error("sendMessage: provide `text` and/or `media`")
     }
     if (params.parseMarkdown != null && !hasText) {
@@ -295,6 +303,9 @@ export class InlineSdkClient {
     }
     if (params.entities != null && !hasText) {
       throw new Error("sendMessage: `entities` requires non-empty `text`")
+    }
+    if (params.parseRichMarkdown != null && !hasText) {
+      throw new Error("sendMessage: `parseRichMarkdown` requires non-empty `text`")
     }
 
     const peerId = this.inputPeerFromTarget(params, "sendMessage")
@@ -310,7 +321,9 @@ export class InlineSdkClient {
           ...(media != null ? { media } : {}),
           ...(params.replyToMsgId != null ? { replyToMsgId: asInlineId(params.replyToMsgId, "replyToMsgId") } : {}),
           ...(params.parseMarkdown != null ? { parseMarkdown: params.parseMarkdown } : {}),
+          ...(params.parseRichMarkdown != null ? { parseRichMarkdown: params.parseRichMarkdown } : {}),
           ...(params.entities != null ? { entities: params.entities } : {}),
+          ...(params.richText != null ? { richText: params.richText } : {}),
           ...(params.actions != null ? { actions: params.actions } : {}),
           ...(params.sendMode === "silent" ? { sendMode: MessageSendMode.MODE_SILENT } : {}),
         },
@@ -328,6 +341,32 @@ export class InlineSdkClient {
 
     const messageId = extractFirstMessageId(result.sendMessage.updates)
     return { messageId }
+  }
+
+  async sendRichMessageDraft(params: InlineSdkSendRichMessageDraftParams): Promise<void> {
+    const draftId = params.draftId.trim()
+    if (!draftId) {
+      throw new Error("sendRichMessageDraft: `draftId` must be non-empty")
+    }
+    if (draftId.length > maxRichDraftIdLength) {
+      throw new Error(`sendRichMessageDraft: \`draftId\` must be at most ${maxRichDraftIdLength} characters`)
+    }
+    if (!params.clear && params.richText == null) {
+      throw new Error("sendRichMessageDraft: provide `richText` or set `clear`")
+    }
+
+    const peerId = this.inputPeerFromTarget(params, "sendRichMessageDraft")
+    await this.invoke(Method.SEND_RICH_MESSAGE_DRAFT, {
+      oneofKind: "sendRichMessageDraft",
+      sendRichMessageDraft: {
+        peerId,
+        draftId,
+        ...(params.messageId != null ? { messageId: asInlineId(params.messageId, "messageId") } : {}),
+        ...(params.richText != null ? { richText: params.richText } : {}),
+        ...(params.clear != null ? { clear: params.clear } : {}),
+        ...(params.ttlSeconds != null ? { ttlSeconds: params.ttlSeconds } : {}),
+      },
+    })
   }
 
   async uploadFile(params: InlineSdkUploadFileParams): Promise<InlineSdkUploadFileResult> {

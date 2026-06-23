@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import InlineProtocol
 import Logger
 import Nuke
 
@@ -198,7 +199,7 @@ public final class FileDownloader: NSObject, Sendable {
   /// Download a video file
   public func downloadVideo(
     video: VideoInfo,
-    for message: Message,
+    for message: Message? = nil,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
     guard let urlString = video.video.cdnUrl, let url = URL(string: urlString) else {
@@ -311,6 +312,51 @@ public final class FileDownloader: NSObject, Sendable {
     )
   }
 
+  public func downloadRichVoice(
+    voice: Client_MessageVoiceContent,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
+    guard let url = URL(string: voice.cdnURL) else {
+      let error = NSError(
+        domain: "FileDownloader",
+        code: 404,
+        userInfo: [NSLocalizedDescriptionKey: "No remote URL found"]
+      )
+      log.warning("No remote URL found for rich voice \(voice.voiceID)")
+      completion(.failure(error))
+      return
+    }
+
+    let voiceID = voice.voiceID
+    let downloadId = "voice_\(voiceID)"
+    guard let fileExtension = Self.voiceFileExtension(mimeType: voice.mimeType) else {
+      let error = NSError(
+        domain: "FileDownloader",
+        code: 415,
+        userInfo: [NSLocalizedDescriptionKey: "Unsupported voice MIME type"]
+      )
+      log.warning("Unsupported voice MIME type \(voice.mimeType) for rich voice \(voiceID)")
+      completion(.failure(error))
+      return
+    }
+
+    let localPath = Self.richVoiceLocalPath(voiceID: voiceID, fileExtension: fileExtension)
+    let localUrl = FileCache.getUrl(for: .voices, localPath: localPath)
+    if FileManager.default.fileExists(atPath: localUrl.path) {
+      publishProgress(.completed(id: downloadId, totalBytes: max(0, voice.size)))
+      completion(.success(localUrl))
+      return
+    }
+
+    downloadFile(
+      id: downloadId,
+      url: url,
+      localUrl: localUrl,
+      expectedBytes: voice.size,
+      completion: completion
+    )
+  }
+
   /// Cancel a download by document ID
   public func cancelDocumentDownload(documentId: Int64) {
     cancelDownload(id: "doc_\(documentId)")
@@ -361,6 +407,11 @@ public final class FileDownloader: NSObject, Sendable {
       default:
         return nil
     }
+  }
+
+  private static func richVoiceLocalPath(voiceID: Int64, fileExtension: String) -> String {
+    let sanitizedID = "\(voiceID)".replacingOccurrences(of: "-", with: "m")
+    return "rich_voice_\(sanitizedID).\(fileExtension)"
   }
 
   // MARK: - Private Methods
