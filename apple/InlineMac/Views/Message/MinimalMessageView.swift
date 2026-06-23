@@ -301,6 +301,7 @@ class MinimalMessageViewAppKit: NSView {
   // Add gesture recognizer property
   private var longPressGesture: NSPressGestureRecognizer?
   private var doubleClickGesture: NSClickGestureRecognizer?
+  private lazy var holdFallback = MessageHoldFallback(view: self, name: "MinimalMessageView")
 
   // MARK: Views
 
@@ -4133,6 +4134,11 @@ extension MinimalMessageViewAppKit {
     return nil
   }
 
+  private func isTextViewPoint(_ point: NSPoint) -> Bool {
+    guard textView.superview != nil, !textView.isHidden else { return false }
+    return textView.bounds.contains(textView.convert(point, from: self))
+  }
+
   private func isTextPoint(_ point: NSPoint) -> Bool {
     guard textView.superview != nil, !textView.isHidden else {
       MessageGestureTrace.trace("MinimalMessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) result=false reason=noTextView")
@@ -4275,6 +4281,18 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
     )
 
     if result,
+       gestureRecognizer === longPressGesture,
+       event.type == .leftMouseDown,
+       event.clickCount == 1
+    {
+      let location = convert(event.locationInWindow, from: nil)
+      holdFallback.start(at: location, event: event) { [weak self] location in
+        self?.performConfiguredHoldAction(at: location, source: "fallback")
+      }
+      return false
+    }
+
+    if result,
        gestureRecognizer === doubleClickGesture,
        event.type == .leftMouseDown,
        event.clickCount == 2
@@ -4310,7 +4328,7 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
       return false
     }
 
-    if gestureRecognizer === longPressGesture, isTextPoint(locationInSelf) {
+    if gestureRecognizer === longPressGesture, isTextViewPoint(locationInSelf) {
       MessageGestureTrace.debug(
         "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textHoldFallback"
       )
