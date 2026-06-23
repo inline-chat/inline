@@ -2,6 +2,7 @@
   "name": "@inline-chat/bot-api-types",
   "version": "0.0.1",
   "private": false,
+  "license": "Apache-2.0",
   "type": "module",
   "files": [
     "dist"
