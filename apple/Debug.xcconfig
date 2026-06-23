@@ -1,4 +1,4 @@
-// Edit Local.xcconfig to customize
+// Copy Local.xcconfig.sample to Local.xcconfig to customize local debug builds.
 #include "Local.default.xcconfig"
 #include? "Local.xcconfig"
 

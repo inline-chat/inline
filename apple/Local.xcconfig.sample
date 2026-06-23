@@ -1,0 +1,7 @@
+// Copy to Local.xcconfig for local debug builds.
+// Local.xcconfig is gitignored and can contain machine-specific values.
+// For a physical iOS device, replace localhost with your Mac's LAN IP.
+
+DEV_HOST = localhost
+USE_PRODUCTION_API = NO
+INLINE_USER_PROFILE = debug
