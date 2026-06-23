@@ -64,6 +64,13 @@ struct ComposeInteractionStateTests {
     #expect(urlString == "https://inline.chat/docs")
   }
 
+  @Test("link paste accepts app deep links")
+  func linkPasteAcceptsAppDeepLinks() async throws {
+    let urlString = ComposeLinkPaste.normalizedURLString(from: "omnifocus:///task/psa9Li_Hd3r")
+
+    #expect(urlString == "omnifocus:///task/psa9Li_Hd3r")
+  }
+
   @Test("link paste rejects surrounding prose")
   func linkPasteRejectsSurroundingProse() async throws {
     let urlString = ComposeLinkPaste.normalizedURLString(from: "go to https://inline.chat")

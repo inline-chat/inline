@@ -931,6 +931,52 @@ struct ProcessEntitiesTests {
     #expect(entity.textURL.url == "https://example.com")
   }
 
+  @Test("Extract app deep link text_url from attributed string link attribute")
+  func testExtractAppDeepLinkTextURLFromAttributedString() {
+    let text = "OmniFocus"
+    let urlString = "omnifocus:///task/psa9Li_Hd3r"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
+    )
+
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    attributedString.addAttribute(.link, value: urlString, range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .textURL)
+    #expect(entity.offset == 0)
+    #expect(entity.length == Int64(range.length))
+    #expect(entity.textURL.url == urlString)
+  }
+
+  @Test("Extract app deep link URL entity when visible text is URL")
+  func testExtractAppDeepLinkURLFromAttributedString() {
+    let text = "x-devonthink-item://441A5597-9300-4995-9EEF-92B1076E6D42"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
+    )
+
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    attributedString.addAttribute(.link, value: text, range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .url)
+    #expect(entity.offset == 0)
+    #expect(entity.length == Int64(range.length))
+  }
+
   @Test("Extract email from mailto link attributes")
   func testExtractEmailFromMailtoLinkAttributes() {
     let text = "reach me"

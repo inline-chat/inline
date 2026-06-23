@@ -196,6 +196,24 @@ struct LinkDetectorTests {
     #expect(matches.isEmpty, "ftp URLs should not be detected")
   }
 
+  @Test("Detects app deep link URLs")
+  func detectsAppDeepLinkURLs() async throws {
+    let omnifocus = "omnifocus:///task/psa9Li_Hd3r"
+    let devonthink = "x-devonthink-item://441A5597-9300-4995-9EEF-92B1076E6D42"
+    let text = "Tasks: \(omnifocus), note: \(devonthink)"
+    let matches = detector.detectLinks(in: text)
+
+    #expect(matches.count == 2, "Should detect both app deep links")
+    #expect(matches.map(\.url.absoluteString) == [omnifocus, devonthink])
+  }
+
+  @Test("Does not detect Apple data detector pseudo URLs")
+  func doesNotDetectAppleDataDetectorPseudoURLs() async throws {
+    let text = "Detector x-apple-data-detectors://0 should not become a link."
+    let matches = detector.detectLinks(in: text)
+    #expect(matches.isEmpty, "Apple data-detector pseudo URLs should not be detected")
+  }
+
   @Test("Does not detect file scheme URLs")
   func doesNotDetectFileScheme() async throws {
     let text = "Open the file file:///Users/test/report.pdf for details"

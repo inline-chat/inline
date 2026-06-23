@@ -14,9 +14,7 @@ public enum ComposeLinkPaste {
 
     let fullRange = NSRange(location: 0, length: (trimmed as NSString).length)
     guard NSEqualRanges(match.range, fullRange) else { return nil }
-    guard let scheme = match.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
-      return nil
-    }
+    guard LinkDetector.isSupportedLinkURL(match.url) else { return nil }
 
     return match.url.absoluteString
   }

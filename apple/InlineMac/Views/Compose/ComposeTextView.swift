@@ -635,10 +635,7 @@ class ComposeNSTextView: NSTextView {
   }
 
   private func isAllowedExternalLink(_ urlString: String) -> Bool {
-    guard let url = URL(string: urlString),
-          let scheme = url.scheme?.lowercased()
-    else { return false }
-    return Self.allowedExternalLinkSchemes.contains(scheme)
+    LinkDetector.isSupportedLinkURLString(urlString)
   }
 
   private func applyTraits(to baseFont: NSFont, bold: Bool, italic: Bool) -> NSFont {

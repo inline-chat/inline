@@ -1562,10 +1562,7 @@ class UIMessageView: UIView {
 
   private func resolveLinkURL(from value: Any?) -> URL? {
     if let url = value as? URL {
-      if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
-        return url
-      }
-      if Self.inlineUserId(from: url) != nil {
+      if LinkDetector.isSupportedLinkURL(url) {
         return url
       }
     }
@@ -1575,10 +1572,7 @@ class UIMessageView: UIView {
     }
 
     if let url = URL(string: urlString) {
-      if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {
-        return url
-      }
-      if Self.inlineUserId(from: url) != nil {
+      if LinkDetector.isSupportedLinkURL(url) {
         return url
       }
     }

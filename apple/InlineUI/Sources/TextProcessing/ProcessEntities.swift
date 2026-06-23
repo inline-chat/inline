@@ -747,7 +747,7 @@ public class ProcessEntities {
         return
       }
 
-      // Ignore data-detector / non-web link targets (we only support actual URLs as entities).
+      // Ignore data-detector and unsafe link targets.
       guard isAllowedExternalLink(urlString) else { return }
 
       // Prefer URL entity when the visible text is the URL itself; otherwise use text_url.
@@ -932,13 +932,8 @@ public class ProcessEntities {
     return CharacterSet.whitespacesAndNewlines.contains(scalar)
   }
 
-  private static let allowedExternalLinkSchemes: Set<String> = ["http", "https"]
-
   private static func isAllowedExternalLink(_ urlString: String) -> Bool {
-    guard let url = URL(string: urlString),
-          let scheme = url.scheme?.lowercased()
-    else { return false }
-    return allowedExternalLinkSchemes.contains(scheme)
+    LinkDetector.isSupportedLinkURLString(urlString)
   }
 
   private static func inlineUserId(from urlString: String) -> Int64? {

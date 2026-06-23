@@ -24,16 +24,27 @@ public final class LinkDetector: Sendable {
   // We removed the built-in `NSDataDetector` to rely fully on our own regular-expression-based detectors for
   // both performance and flexibility.
 
-  /// Generic regex for detecting any http or https URL (supports very long paths and query strings)
+  /// Generic regex for detecting URLs with an explicit scheme (supports app deep links).
   /// RFC 3986 unreserved + reserved characters are allowed after the scheme delimiter until a whitespace
-  private static let fullURLRegex: NSRegularExpression = {
-    // This pattern matches "http" or "https", followed by "://", then any combination of
+  private static let explicitSchemeURLRegex: NSRegularExpression = {
+    // This pattern matches RFC 3986 URL schemes followed by "://", then any combination of
     // unreserved (A–Z a–z 0–9 -._~) and reserved characters (:/?#[]@!$&'()*+,;=%) until it hits
     // a whitespace character. This intentionally excludes angle brackets and other punctuation
     // that typically terminates URLs in plain text. Parentheses are allowed within URLs.
-    let pattern = "https?://[^\\s<>\\[\\]{}\"']+"
+    let pattern = "[A-Za-z][A-Za-z0-9+.-]*://[^\\s<>\\[\\]{}\"']+"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
+
+  private static let unsupportedLinkSchemes: Set<String> = [
+    "data",
+    "file",
+    "ftp",
+    "javascript",
+    "mailto",
+    "tel",
+    "vbscript",
+    "x-apple-data-detectors",
+  ]
 
   /// Whitelisted TLDs that should be detected as links
   /// These are modern TLDs that might not be recognized by NSDataDetector
@@ -123,9 +134,9 @@ public final class LinkDetector: Sendable {
     var matches: [LinkMatch] = []
     var handledRanges: Set<NSRange> = []
 
-    // First, detect full http/https URLs using custom regex (handles very long or exotic URLs)
-    let fullURLMatches = detectFullURLLinks(in: text, excluding: handledRanges)
-    log.trace("Full URL detector found \(fullURLMatches.count) matches")
+    // First, detect explicit-scheme URLs using custom regex (handles very long or exotic URLs).
+    let fullURLMatches = detectExplicitSchemeLinks(in: text, excluding: handledRanges)
+    log.trace("Explicit-scheme URL detector found \(fullURLMatches.count) matches")
     matches.append(contentsOf: fullURLMatches)
     for match in fullURLMatches {
       handledRanges.insert(match.range)
@@ -180,11 +191,27 @@ public final class LinkDetector: Sendable {
 
   // MARK: - Private Methods
 
-  // Detects http/https URLs using custom regex (covers very long query strings and exotic cases)
-  private func detectFullURLLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] {
+  public static func isSupportedLinkURLString(_ urlString: String) -> Bool {
+    guard let url = URL(string: urlString) else { return false }
+    return isSupportedLinkURL(url)
+  }
+
+  public static func isSupportedLinkURL(_ url: URL) -> Bool {
+    guard let scheme = url.scheme?.lowercased(),
+          !unsupportedLinkSchemes.contains(scheme)
+    else { return false }
+
+    return url.absoluteString.range(
+      of: #"^[A-Za-z][A-Za-z0-9+.-]*://"#,
+      options: .regularExpression
+    ) != nil
+  }
+
+  // Detects explicit-scheme URLs using custom regex (covers app deep links and long query strings)
+  private func detectExplicitSchemeLinks(in text: String, excluding handledRanges: Set<NSRange>) -> [LinkMatch] {
     let nsText = text as NSString
     let searchRange = NSRange(location: 0, length: nsText.length)
-    let matches = Self.fullURLRegex.matches(in: text, options: [], range: searchRange)
+    let matches = Self.explicitSchemeURLRegex.matches(in: text, options: [], range: searchRange)
 
     return matches.compactMap { match in
       // Skip overlaps with already handled ranges
@@ -201,7 +228,7 @@ public final class LinkDetector: Sendable {
       let trimmedCount = match.range.length - urlString.utf16.count
       let adjustedRange = NSRange(location: match.range.location, length: match.range.length - trimmedCount)
 
-      guard let url = URL(string: urlString), isValidURL(url) else {
+      guard let url = URL(string: urlString), Self.isSupportedLinkURL(url) else {
         return nil
       }
 
@@ -345,31 +372,6 @@ public final class LinkDetector: Sendable {
     }
 
     return result
-  }
-
-  /// Validates if a URL should be detected as a link
-  private func isValidURL(_ url: URL) -> Bool {
-    // Skip file:// URLs as they're not web links
-    if url.scheme == "file" {
-      return false
-    }
-
-    // Skip data: URLs as they're not web links
-    if url.scheme == "data" {
-      return false
-    }
-
-    // Skip mailto: URLs as they're handled separately
-    if url.scheme == "mailto" {
-      return false
-    }
-
-    // Skip tel: URLs as they're handled separately
-    if url.scheme == "tel" {
-      return false
-    }
-
-    return true
   }
 
   // MARK: - Testing
