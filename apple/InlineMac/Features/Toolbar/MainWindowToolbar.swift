@@ -7,9 +7,8 @@ struct MainWindowToolbar: ToolbarContent {
   let nav: Nav3
 
   var body: some ToolbarContent {
-    ToolbarItem(placement: .navigation) {
+    MacToolbarItem(placement: .navigation, priority: .low, label: "Back/Forward") {
       BackForwardToolbarButtons(nav: nav)
-        .toolbarVisibilityPriority(.low, label: "Back/Forward")
     }
   }
 }

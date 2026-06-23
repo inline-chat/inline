@@ -92,12 +92,11 @@ struct ChatRouteView: View {
       }
       .toolbar {
         let mainItem =
-          ToolbarItem(placement: .navigation) {
+          MacToolbarItem(placement: .navigation, priority: .high, label: "") {
             ChatRouteTitleBar(peer: peer, db: db, contextSpaceId: nav.selectedSpaceId) { title in
               navigationTitle = title
             }
             .macToolbarLayout(toolbarLayout)
-            .toolbarVisibilityPriority(.high, label: "")
             .id(peer.toString())
             .modifier(ChatToolbarTranslationPresentations(
               peer: peer,

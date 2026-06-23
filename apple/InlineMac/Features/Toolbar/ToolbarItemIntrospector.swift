@@ -1,39 +1,121 @@
 import AppKit
 import SwiftUI
 
-/// Applies AppKit `NSToolbarItem` configuration to the toolbar item generated for the modified SwiftUI view.
-///
-/// Use this only for toolbar-item properties that SwiftUI does not expose directly, such as
-/// `visibilityPriority` or `isNavigational`. The modifier keeps the SwiftUI toolbar declaration intact
-/// and uses a tiny hidden AppKit probe to locate the backing `NSToolbarItem`.
-extension View {
-  /// Sets the backing `NSToolbarItem` visibility priority for this toolbar view.
-  ///
-  /// - Parameters:
-  ///   - priority: The AppKit visibility priority to apply to the generated toolbar item.
-  ///   - label: An optional toolbar item label to apply alongside the priority.
-  ///   - isNavigational: Whether the generated toolbar item should be marked as navigational.
-  /// - Returns: A view that applies the requested AppKit toolbar-item configuration.
-  func toolbarVisibilityPriority(
-    _ priority: NSToolbarItem.VisibilityPriority,
-    label: String? = nil,
-    isNavigational: Bool = false
-  ) -> some View {
-    background {
-      ToolbarItemIntrospector { item in
-        item.visibilityPriority = priority
-        item.isNavigational = isNavigational
+enum MacToolbarVisibilityPriority {
+  case high
+  case low
 
-        if let label {
-          item.label = label
-        }
-      }
-      .frame(width: 0, height: 0)
+  var appKit: NSToolbarItem.VisibilityPriority {
+    switch self {
+    case .high:
+      return .high
+    case .low:
+      return .low
+    }
+  }
+
+  @available(macOS 27.0, *)
+  var swiftUI: ToolbarItemVisibilityPriority {
+    switch self {
+    case .high:
+      return .high
+    case .low:
+      return .low
     }
   }
 }
 
-struct ToolbarItemIntrospector: NSViewRepresentable {
+/// Wraps toolbar items so macOS 27 can use SwiftUI priority while older macOS keeps the AppKit fallback.
+@MainActor
+struct MacToolbarItem<Content: View>: ToolbarContent {
+  private let placement: ToolbarItemPlacement
+  private let priority: MacToolbarVisibilityPriority
+  private let label: String?
+  private let isNavigational: Bool
+  private let content: () -> Content
+
+  init(
+    placement: ToolbarItemPlacement = .automatic,
+    priority: MacToolbarVisibilityPriority,
+    label: String? = nil,
+    isNavigational: Bool = false,
+    @ViewBuilder content: @escaping () -> Content
+  ) {
+    self.placement = placement
+    self.priority = priority
+    self.label = label
+    self.isNavigational = isNavigational
+    self.content = content
+  }
+
+  var body: some ToolbarContent {
+    if #available(macOS 27.0, *) {
+      ToolbarItem(placement: placement) {
+        content()
+          .toolbarItemAppKitConfiguration(
+            label: label,
+            isNavigational: isNavigational
+          )
+      }
+      .visibilityPriority(priority.swiftUI)
+    } else {
+      ToolbarItem(placement: placement) {
+        content()
+          .toolbarItemAppKitConfiguration(
+            priority: priority.appKit,
+            label: label,
+            isNavigational: isNavigational
+          )
+      }
+    }
+  }
+}
+
+/// Applies AppKit-only toolbar item configuration through a hidden probe view.
+private extension View {
+  func toolbarItemAppKitConfiguration(
+    priority: NSToolbarItem.VisibilityPriority? = nil,
+    label: String? = nil,
+    isNavigational: Bool = false
+  ) -> some View {
+    modifier(ToolbarItemAppKitConfigurationModifier(
+      priority: priority,
+      label: label,
+      isNavigational: isNavigational
+    ))
+  }
+}
+
+private struct ToolbarItemAppKitConfigurationModifier: ViewModifier {
+  let priority: NSToolbarItem.VisibilityPriority?
+  let label: String?
+  let isNavigational: Bool
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if priority == nil, label == nil, isNavigational == false {
+      content
+    } else {
+      content
+        .background {
+          ToolbarItemIntrospector { item in
+            if let priority {
+              item.visibilityPriority = priority
+            }
+
+            item.isNavigational = isNavigational
+
+            if let label {
+              item.label = label
+            }
+          }
+          .frame(width: 0, height: 0)
+        }
+    }
+  }
+}
+
+private struct ToolbarItemIntrospector: NSViewRepresentable {
   let apply: (NSToolbarItem) -> Void
 
   func makeNSView(context: Context) -> ProbeView {
@@ -48,7 +130,7 @@ struct ToolbarItemIntrospector: NSViewRepresentable {
   }
 }
 
-final class ProbeView: NSView {
+private final class ProbeView: NSView {
   var apply: ((NSToolbarItem) -> Void)?
 
   override init(frame frameRect: NSRect) {

@@ -42,9 +42,8 @@ struct AllChatsRouteView: View {
     .toolbar(removing: .title)
     .toolbar {
       let titleItem =
-        ToolbarItem(placement: .navigation) {
+        MacToolbarItem(placement: .navigation, priority: .high, label: "") {
           RouteToolbarTitleItem(title: title)
-            .toolbarVisibilityPriority(.high, label: "")
         }
 
       if #available(macOS 26.0, *) {
