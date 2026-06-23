@@ -21,21 +21,27 @@ struct ComposeAutoPairEditingTests {
     #expect(result?.selectedRange == NSRange(location: 1, length: 0))
   }
 
-  @Test("typing nested opening brackets nests the generated pairs")
-  func typingNestedOpeningBracketsNestsPairs() {
+  @Test("typing a nested opening bracket before an existing closer falls back to normal insertion")
+  func nestedOpeningBracketBeforeExistingCloserDoesNotAutoClose() {
     let first = applyInsertion("[", to: "", cursor: 0)
     let second = first.flatMap { applyInsertion("[", to: $0.text, cursor: $0.selectedRange.location) }
 
-    #expect(second?.text == "[[]]")
-    #expect(second?.selectedRange == NSRange(location: 2, length: 0))
+    #expect(second == nil)
   }
 
-  @Test("typing an opening pair preserves surrounding text")
-  func openingPairPreservesSurroundingText() {
+  @Test("typing an opening pair at the end of existing text inserts the closing pair")
+  func openingPairAtEndInsertsClosingPair() {
+    let result = applyInsertion("(", to: "abc", cursor: 3)
+
+    #expect(result?.text == "abc()")
+    #expect(result?.selectedRange == NSRange(location: 4, length: 0))
+  }
+
+  @Test("typing an opening pair before existing text falls back to normal insertion")
+  func openingPairBeforeExistingTextDoesNotAutoClose() {
     let result = applyInsertion("(", to: "a b", cursor: 2)
 
-    #expect(result?.text == "a ()b")
-    #expect(result?.selectedRange == NSRange(location: 3, length: 0))
+    #expect(result == nil)
   }
 
   @Test("typing a closing parenthesis before the same next character skips over it")
@@ -65,15 +71,31 @@ struct ComposeAutoPairEditingTests {
     #expect(replacement == nil)
   }
 
-  @Test("typing an opening pair over selected text falls back to normal replacement")
-  func openingPairDoesNotWrapSelection() {
+  @Test("typing an opening parenthesis over selected text wraps the selection")
+  func openingParenthesisWrapsSelection() {
     let replacement = ComposeAutoPairEditing.insertionReplacement(
       in: "hello",
       selectedRange: NSRange(location: 1, length: 3),
       insertedText: "("
     )
 
-    #expect(replacement == nil)
+    #expect(replacement?.range == NSRange(location: 1, length: 3))
+    #expect(replacement?.text == "(ell)")
+    #expect(replacement?.selectedRange == NSRange(location: 2, length: 3))
+    #expect(replacement?.preservedTextRange == NSRange(location: 1, length: 3))
+  }
+
+  @Test("typing an opening bracket over selected text wraps the selection")
+  func openingBracketWrapsSelection() {
+    let replacement = ComposeAutoPairEditing.insertionReplacement(
+      in: "hello",
+      selectedRange: NSRange(location: 1, length: 3),
+      insertedText: "["
+    )
+
+    #expect(replacement?.text == "[ell]")
+    #expect(replacement?.selectedRange == NSRange(location: 2, length: 3))
+    #expect(replacement?.preservedTextRange == NSRange(location: 1, length: 3))
   }
 
   @Test("backspace between an auto pair deletes both characters")

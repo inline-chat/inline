@@ -163,10 +163,27 @@ class ComposeNSTextView: NSTextView {
       return
     }
 
-    let attributed = NSAttributedString(string: replacement.text, attributes: typingAttributes)
+    let attributed = attributedString(for: replacement, in: textStorage)
     textStorage.replaceCharacters(in: replacement.range, with: attributed)
     setSelectedRange(replacement.selectedRange)
     didChangeText()
+  }
+
+  private func attributedString(
+    for replacement: ComposeAutoPairEditing.Replacement,
+    in textStorage: NSTextStorage
+  ) -> NSAttributedString {
+    let attributed = NSMutableAttributedString(string: replacement.text, attributes: typingAttributes)
+
+    if let preservedTextRange = replacement.preservedTextRange,
+       NSMaxRange(preservedTextRange) <= attributed.length,
+       NSMaxRange(replacement.range) <= textStorage.length
+    {
+      let preserved = textStorage.attributedSubstring(from: replacement.range)
+      attributed.replaceCharacters(in: preservedTextRange, with: preserved)
+    }
+
+    return attributed
   }
 
   override func didChangeText() {

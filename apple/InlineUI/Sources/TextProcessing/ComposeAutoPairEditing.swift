@@ -5,6 +5,19 @@ public enum ComposeAutoPairEditing {
     public let range: NSRange
     public let text: String
     public let selectedRange: NSRange
+    public let preservedTextRange: NSRange?
+
+    public init(
+      range: NSRange,
+      text: String,
+      selectedRange: NSRange,
+      preservedTextRange: NSRange? = nil
+    ) {
+      self.range = range
+      self.text = text
+      self.selectedRange = selectedRange
+      self.preservedTextRange = preservedTextRange
+    }
   }
 
   private static let pairs: [String: String] = [
@@ -18,19 +31,33 @@ public enum ComposeAutoPairEditing {
     replacementRange: NSRange? = nil,
     insertedText: String
   ) -> Replacement? {
-    guard let range = effectiveRange(selectedRange: selectedRange, replacementRange: replacementRange, text: text),
-          range.length == 0
-    else {
+    guard let range = effectiveRange(selectedRange: selectedRange, replacementRange: replacementRange, text: text) else {
       return nil
     }
 
     if let closer = pairs[insertedText] {
+      let insertedLength = (insertedText as NSString).length
+
+      if range.length > 0 {
+        let selectedText = (text as NSString).substring(with: range)
+        return Replacement(
+          range: range,
+          text: insertedText + selectedText + closer,
+          selectedRange: NSRange(location: range.location + insertedLength, length: range.length),
+          preservedTextRange: NSRange(location: insertedLength, length: range.length)
+        )
+      }
+
+      guard nextCharacter(in: text, at: range.location) == nil else { return nil }
+
       return Replacement(
         range: range,
         text: insertedText + closer,
-        selectedRange: NSRange(location: range.location + (insertedText as NSString).length, length: 0)
+        selectedRange: NSRange(location: range.location + insertedLength, length: 0)
       )
     }
+
+    guard range.length == 0 else { return nil }
 
     guard pairs.values.contains(insertedText),
           nextCharacter(in: text, at: range.location) == insertedText
