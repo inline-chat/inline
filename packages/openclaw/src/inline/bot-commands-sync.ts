@@ -1,0 +1,311 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import { listNativeCommandSpecsForConfig } from "openclaw/plugin-sdk/native-command-registry"
+import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
+import { resolveAgentRoute } from "openclaw/plugin-sdk/routing"
+import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
+import {
+  findInlineTokenOwnerAccountId,
+  formatDuplicateInlineTokenReason,
+  listInlineAccountIds,
+  resolveInlineAccount,
+  resolveInlineToken,
+  type ResolvedInlineAccount,
+} from "./accounts.js"
+import { callInlineBotApi, type InlineBotCommand } from "./bot-commands-api.js"
+import { adaptInlineVisibleCopy } from "./message-formatting.js"
+import { listInlineBuiltinCommandSpecs } from "./threadreply-command.js"
+
+type InlineCommandsSyncLogger = {
+  info?: (message: string) => void
+  warn?: (message: string) => void
+}
+
+type InlineCommandsConfig = {
+  native?: boolean | "auto"
+  nativeSkills?: boolean | "auto"
+}
+
+const INLINE_COMMAND_NAME_RE = /^[a-z0-9_]{1,32}$/
+const INLINE_COMMAND_LIMIT = 100
+const INLINE_COMMAND_DESCRIPTION_LIMIT = 256
+const INLINE_COMMAND_RETRY_RATIO = 0.8
+const INLINE_NATIVE_COMMAND_PROVIDER = "inline"
+
+function resolveInlineChannelCommands(cfg: OpenClawConfig): InlineCommandsConfig | undefined {
+  const inline = cfg.channels?.inline
+  if (typeof inline !== "object" || inline === null || Array.isArray(inline)) return undefined
+  const commands = (inline as { commands?: InlineCommandsConfig }).commands
+  return typeof commands === "object" && commands !== null && !Array.isArray(commands) ? commands : undefined
+}
+
+function normalizeDynamicCommandName(raw: string): string {
+  const trimmed = raw.trim().toLowerCase()
+  const withoutSlash = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed
+  return withoutSlash.trim()
+}
+
+function readErrorTextField(value: unknown, key: "description" | "message"): string | undefined {
+  if (!value || typeof value !== "object" || !(key in value)) return undefined
+  const raw = (value as Record<"description" | "message", unknown>)[key]
+  return typeof raw === "string" ? raw : undefined
+}
+
+function isInlineBotCommandsTooMuchError(err: unknown): boolean {
+  const pattern = /\bBOT_COMMANDS_TOO_MUCH\b/i
+  if (typeof err === "string") return pattern.test(err)
+  if (err instanceof Error && pattern.test(err.message)) return true
+  const description = readErrorTextField(err, "description")
+  if (description && pattern.test(description)) return true
+  const message = readErrorTextField(err, "message")
+  return Boolean(message && pattern.test(message))
+}
+
+async function setInlineBotCommandsWithRetry(params: {
+  baseUrl: string
+  token: string
+  accountId: string
+  commands: InlineBotCommand[]
+  logger?: InlineCommandsSyncLogger
+}): Promise<InlineBotCommand[]> {
+  try {
+    await callInlineBotApi<Record<string, never>>({
+      baseUrl: params.baseUrl,
+      token: params.token,
+      methodName: "setMyCommands",
+      method: "POST",
+      body: { commands: params.commands },
+    })
+    return params.commands
+  } catch (err) {
+    if (!isInlineBotCommandsTooMuchError(err) || params.commands.length <= 1) {
+      throw err
+    }
+
+    const retryCount = Math.max(1, Math.floor(params.commands.length * INLINE_COMMAND_RETRY_RATIO))
+    if (retryCount >= params.commands.length) {
+      throw err
+    }
+
+    const retryCommands = params.commands.slice(0, retryCount)
+    params.logger?.warn?.(
+      `[inline] bot command sync rejected ${params.commands.length} commands for account "${params.accountId}" (BOT_COMMANDS_TOO_MUCH); retrying with ${retryCommands.length}`,
+    )
+    await callInlineBotApi<Record<string, never>>({
+      baseUrl: params.baseUrl,
+      token: params.token,
+      methodName: "setMyCommands",
+      method: "POST",
+      body: { commands: retryCommands },
+    })
+    params.logger?.warn?.(
+      `[inline] bot command sync accepted ${retryCommands.length} commands for account "${params.accountId}" after BOT_COMMANDS_TOO_MUCH (started with ${params.commands.length}; omitted ${params.commands.length - retryCommands.length}). Reduce plugin/skill/custom commands to expose more menu entries.`,
+    )
+    return retryCommands
+  }
+}
+
+function appendUniqueCommand(
+  out: InlineBotCommand[],
+  seen: Set<string>,
+  command: string,
+  description: string,
+  logger?: InlineCommandsSyncLogger,
+): void {
+  const normalized = normalizeDynamicCommandName(command)
+  if (!INLINE_COMMAND_NAME_RE.test(normalized) || seen.has(normalized)) return
+  const rawDescription = adaptInlineVisibleCopy(description).trim()
+  const trimmedDescription =
+    rawDescription.length > INLINE_COMMAND_DESCRIPTION_LIMIT
+      ? rawDescription.slice(0, INLINE_COMMAND_DESCRIPTION_LIMIT).trimEnd()
+      : rawDescription
+  if (!trimmedDescription) return
+  if (trimmedDescription.length !== rawDescription.length) {
+    logger?.warn?.(
+      `[inline] bot command sync truncated description for /${normalized} to ${INLINE_COMMAND_DESCRIPTION_LIMIT} characters`,
+    )
+  }
+  seen.add(normalized)
+  out.push({ command: normalized, description: trimmedDescription })
+}
+
+export function shouldSyncInlineNativeCommands(cfg: OpenClawConfig): boolean {
+  const inlineNativeSetting = resolveInlineChannelCommands(cfg)?.native
+  const effective = inlineNativeSetting ?? cfg.commands?.native ?? "auto"
+  return effective !== false
+}
+
+export function shouldSyncInlineNativeCommandsForAccount(params: {
+  cfg: OpenClawConfig
+  account: ResolvedInlineAccount
+}): boolean {
+  const effective =
+    params.account.config.commands?.native ??
+    resolveInlineChannelCommands(params.cfg)?.native ??
+    params.cfg.commands?.native ??
+    "auto"
+  return effective !== false
+}
+
+export function shouldSyncInlineNativeSkillsForAccount(params: {
+  cfg: OpenClawConfig
+  account: ResolvedInlineAccount
+}): boolean {
+  const effective =
+    params.account.config.commands?.nativeSkills ??
+    resolveInlineChannelCommands(params.cfg)?.nativeSkills ??
+    params.cfg.commands?.nativeSkills ??
+    "auto"
+  return effective !== false
+}
+
+async function buildInlineNativeCommandsForConfig(params: {
+  cfg: OpenClawConfig
+  account: ResolvedInlineAccount
+  logger?: InlineCommandsSyncLogger
+}): Promise<InlineBotCommand[]> {
+  const route = shouldSyncInlineNativeSkillsForAccount({ cfg: params.cfg, account: params.account })
+    ? resolveAgentRoute({
+        cfg: params.cfg,
+        channel: INLINE_NATIVE_COMMAND_PROVIDER,
+        accountId: params.account.accountId,
+      })
+    : null
+  const skillCommands =
+    route
+      ? listSkillCommandsForAgents({
+          cfg: params.cfg,
+          agentIds: [route.agentId],
+        })
+      : []
+  const nativeSpecs = listNativeCommandSpecsForConfig(params.cfg, {
+    skillCommands,
+    provider: INLINE_NATIVE_COMMAND_PROVIDER,
+  })
+  const pluginSpecs = [
+    ...getPluginCommandSpecs("inline", { config: params.cfg }),
+    ...listInlineBuiltinCommandSpecs(),
+  ]
+  const seen = new Set<string>()
+
+  const resolved: InlineBotCommand[] = []
+  for (const spec of nativeSpecs) {
+    appendUniqueCommand(resolved, seen, spec.name, spec.description, params.logger)
+  }
+
+  for (const spec of pluginSpecs) {
+    appendUniqueCommand(resolved, seen, spec.name, spec.description, params.logger)
+  }
+
+  return resolved
+}
+
+export async function syncInlineNativeCommands(params: {
+  cfg: OpenClawConfig
+  logger?: InlineCommandsSyncLogger
+}): Promise<{ attempted: number; synced: number; failed: number }> {
+  const accountIds = listInlineAccountIds(params.cfg)
+  if (!accountIds.length) {
+    params.logger?.info?.("[inline] bot command sync disabled")
+    return { attempted: 0, synced: 0, failed: 0 }
+  }
+
+  let attempted = 0
+  let synced = 0
+  let failed = 0
+
+  for (const accountId of accountIds) {
+    const account = resolveInlineAccount({ cfg: params.cfg, accountId })
+    const nativeEnabled = shouldSyncInlineNativeCommandsForAccount({ cfg: params.cfg, account })
+    attempted += 1
+    if (!account.enabled || !account.configured || !account.baseUrl) {
+      continue
+    }
+    const ownerAccountId = findInlineTokenOwnerAccountId({
+      cfg: params.cfg,
+      accountId: account.accountId,
+    })
+    if (ownerAccountId) {
+      failed += 1
+      params.logger?.warn?.(
+        `[inline] bot command sync skipped for account "${account.accountId}": ${formatDuplicateInlineTokenReason({
+          accountId: account.accountId,
+          ownerAccountId,
+        })}`,
+      )
+      continue
+    }
+
+    let token: string
+    try {
+      token = await resolveInlineToken(account)
+    } catch (err) {
+      failed += 1
+      params.logger?.warn?.(
+        `[inline] bot command sync skipped for account "${account.accountId}": ${String(err)}`,
+      )
+      continue
+    }
+
+    if (!nativeEnabled) {
+      try {
+        await callInlineBotApi<Record<string, never>>({
+          baseUrl: account.baseUrl,
+          token,
+          methodName: "deleteMyCommands",
+          method: "POST",
+        })
+        synced += 1
+        params.logger?.info?.(`[inline] bot commands cleared for account "${account.accountId}"`)
+      } catch (err) {
+        failed += 1
+        params.logger?.warn?.(
+          `[inline] bot command clear failed for account "${account.accountId}": ${String(err)}`,
+        )
+      }
+      continue
+    }
+
+    const allCommands = await buildInlineNativeCommandsForConfig({
+      cfg: params.cfg,
+      account,
+      ...(params.logger ? { logger: params.logger } : {}),
+    })
+    const commands = allCommands.slice(0, INLINE_COMMAND_LIMIT)
+    if (allCommands.length > INLINE_COMMAND_LIMIT) {
+      params.logger?.warn?.(
+        `[inline] bot command sync truncating ${allCommands.length} commands to ${INLINE_COMMAND_LIMIT}`,
+      )
+    }
+    if (commands.length === 0) {
+      params.logger?.warn?.(
+        `[inline] bot command sync skipped for account "${account.accountId}": no valid commands resolved`,
+      )
+      continue
+    }
+
+    try {
+      const syncedCommands = await setInlineBotCommandsWithRetry({
+        baseUrl: account.baseUrl,
+        token,
+        accountId: account.accountId,
+        commands,
+        ...(params.logger ? { logger: params.logger } : {}),
+      })
+      synced += 1
+      params.logger?.info?.(
+        `[inline] bot commands synced for account "${account.accountId}" (${syncedCommands.length} command${syncedCommands.length === 1 ? "" : "s"})`,
+      )
+    } catch (err) {
+      failed += 1
+      params.logger?.warn?.(
+        `[inline] bot command sync failed for account "${account.accountId}": ${String(err)}`,
+      )
+    }
+  }
+
+  return {
+    attempted,
+    synced,
+    failed,
+  }
+}

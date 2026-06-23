@@ -1,0 +1,31 @@
+{
+  "name": "@inline-chat/bot-api-types",
+  "version": "0.0.1",
+  "private": false,
+  "license": "Apache-2.0",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
+    "test": "echo \"No tests yet for @inline-chat/bot-api-types\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.8.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,10 @@
+.git
+.vscode
+**/.DS_Store
+**/.tmp
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/target
+*.tsbuildinfo

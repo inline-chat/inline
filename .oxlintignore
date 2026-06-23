@@ -1,0 +1,11 @@
+# Dependencies
+**/node_modules/
+
+# Build outputs / generated artifacts
+**/dist/
+**/build/
+**/coverage/
+**/.cache/
+
+# Generated sources
+**/*.tsbuildinfo

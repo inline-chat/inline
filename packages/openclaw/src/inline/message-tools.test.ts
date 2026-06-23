@@ -1,0 +1,850 @@
+import { describe, expect, it, vi } from "vitest"
+import type { OpenClawConfig } from "openclaw/plugin-sdk"
+
+describe("inline/message-tools", () => {
+  it("nudges the current Inline chat when no target is provided", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
+      if (method !== 2) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "sendMessage",
+        sendMessage: {
+          updates: [
+            {
+              update: {
+                oneofKind: "newMessage",
+                newMessage: {
+                  message: { id: 901n },
+                },
+              },
+            },
+          ],
+        },
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          SEND_MESSAGE: 2,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_nudge")
+    expect(tool).toBeDefined()
+
+    const result = await tool?.execute("tool-1", {
+      message: "ping",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        nudged: true,
+        target: "77",
+        usedCurrentChatDefault: true,
+        messageId: "901",
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({
+        oneofKind: "sendMessage",
+        sendMessage: expect.objectContaining({
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 77n },
+            },
+          },
+          message: "ping",
+          media: {
+            media: {
+              oneofKind: "nudge",
+              nudge: {},
+            },
+          },
+        }),
+      }),
+    )
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("nudges the current live Inline group session when no target is provided", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "sendMessage",
+      sendMessage: {
+        updates: [],
+      },
+    }))
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          SEND_MESSAGE: 2,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = vi.fn(async () => {})
+          close = vi.fn(async () => {})
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:group:1022",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_nudge")
+    const result = await tool?.execute("tool-1", {})
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        target: "1022",
+        usedCurrentChatDefault: true,
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({
+        sendMessage: expect.objectContaining({
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 1022n },
+            },
+          },
+        }),
+      }),
+    )
+  })
+
+  it("nudges the current Inline reply-thread chat when no target is provided", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "sendMessage",
+      sendMessage: {
+        updates: [],
+      },
+    }))
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          SEND_MESSAGE: 2,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = vi.fn(async () => {})
+          close = vi.fn(async () => {})
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:group:1022:thread:2044",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_nudge")
+    const result = await tool?.execute("tool-1", {})
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        target: "2044",
+        usedCurrentChatDefault: true,
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({
+        sendMessage: expect.objectContaining({
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 2044n },
+            },
+          },
+        }),
+      }),
+    )
+  })
+
+  it("suppresses copied OpenClaw runtime text on nudges", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "sendMessage",
+      sendMessage: {
+        updates: [
+          {
+            update: {
+              oneofKind: "newMessage",
+              newMessage: {
+                message: { id: 901n },
+              },
+            },
+          },
+        ],
+      },
+    }))
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          SEND_MESSAGE: 2,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_nudge")
+    await tool?.execute("tool-1", {
+      message: [
+        "OpenClaw runtime context for the immediately preceding user message.",
+        "This context is runtime-generated, not user-authored. Keep internal details private.",
+        "",
+        "Read HEARTBEAT.md if it exists. If nothing needs attention, reply HEARTBEAT_OK.",
+      ].join("\n"),
+    })
+
+    expect(invokeRaw).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({
+        sendMessage: expect.not.objectContaining({
+          message: expect.any(String),
+        }),
+      }),
+    )
+  })
+
+  it("sets bot presence for the current Inline chat", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
+      if (method !== 59) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "setBotPresenceState",
+        setBotPresenceState: {},
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          SET_BOT_PRESENCE_STATE: 59,
+        },
+        BotPresenceState_Kind: {
+          IDLE: 2,
+          HAPPY: 3,
+          WAVING: 4,
+          JUMPING: 5,
+          FAILED: 6,
+          WAITING: 7,
+          RUNNING: 8,
+          REVIEW: 9,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_bot_presence")
+    expect(tool).toBeDefined()
+
+    const result = await tool?.execute("tool-4", {
+      kind: "jumping",
+      comment: "Done",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        target: "77",
+        usedCurrentChatDefault: true,
+        kind: "jumping",
+        comment: "Done",
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      59,
+      expect.objectContaining({
+        oneofKind: "setBotPresenceState",
+        setBotPresenceState: {
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 77n },
+            },
+          },
+          state: {
+            kind: 5,
+            comment: "Done",
+          },
+        },
+      }),
+    )
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("reads bot presence for the current Inline chat", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
+      if (method !== 58) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "getBotPresence",
+        getBotPresence: {
+          botUserId: 42n,
+          avatar: {
+            id: "avatar-1",
+            displayName: "Inline Bot",
+          },
+          state: {
+            kind: 8,
+            comment: "working",
+          },
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 77n },
+            },
+          },
+        },
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          GET_BOT_PRESENCE: 58,
+        },
+        BotPresenceState_Kind: {
+          IDLE: 2,
+          HAPPY: 3,
+          WAVING: 4,
+          JUMPING: 5,
+          FAILED: 6,
+          WAITING: 7,
+          RUNNING: 8,
+          REVIEW: 9,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_bot_presence")
+    const result = await tool?.execute("tool-presence-get", {
+      action: "get",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        action: "get",
+        target: "77",
+        usedCurrentChatDefault: true,
+        botUserId: "42",
+        kind: "running",
+        comment: "working",
+        avatar: {
+          id: "avatar-1",
+          displayName: "Inline Bot",
+        },
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(58, {
+      oneofKind: "getBotPresence",
+      getBotPresence: {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: 77n },
+          },
+        },
+      },
+    })
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("forwards messages from an explicit source and defaults destination/account aliases correctly", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
+      if (method !== 29) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "forwardMessages",
+        forwardMessages: {
+          updates: [
+            {
+              update: {
+                oneofKind: "newMessage",
+                newMessage: {
+                  message: { id: 902n },
+                },
+              },
+            },
+          ],
+        },
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          FORWARD_MESSAGES: 29,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_forward")
+    expect(tool).toBeDefined()
+
+    const result = await tool?.execute("tool-2", {
+      to: "user:99",
+      from: "chat:55",
+      messageIds: ["10", "11"],
+      shareForwardHeader: false,
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        from: "55",
+        to: "user:99",
+        messageIds: ["10", "11"],
+        usedCurrentChatDefault: false,
+        forwardedMessageId: "902",
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      29,
+      expect.objectContaining({
+        oneofKind: "forwardMessages",
+        forwardMessages: {
+          fromPeerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 55n },
+            },
+          },
+          toPeerId: {
+            type: {
+              oneofKind: "user",
+              user: { userId: 99n },
+            },
+          },
+          messageIds: [10n, 11n],
+          shareForwardHeader: false,
+        },
+      }),
+    )
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("defaults forward source chat from the current Inline session", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "forwardMessages",
+      forwardMessages: {
+        updates: [],
+      },
+    }))
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          FORWARD_MESSAGES: 29,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = vi.fn(async () => {})
+          close = vi.fn(async () => {})
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:user:42",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_forward")
+    expect(tool).toBeDefined()
+
+    const result = await tool?.execute("tool-3", {
+      to: "chat:77",
+      messageId: "10",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        from: "user:42",
+        to: "77",
+        messageIds: ["10"],
+        usedCurrentChatDefault: true,
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      29,
+      expect.objectContaining({
+        oneofKind: "forwardMessages",
+        forwardMessages: expect.objectContaining({
+          fromPeerId: {
+            type: {
+              oneofKind: "user",
+              user: { userId: 42n },
+            },
+          },
+          toPeerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 77n },
+            },
+          },
+          messageIds: [10n],
+        }),
+      }),
+    )
+  })
+
+  it("defaults forward source chat from the current Inline reply-thread session", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "forwardMessages",
+      forwardMessages: {
+        updates: [],
+      },
+    }))
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          FORWARD_MESSAGES: 29,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = vi.fn(async () => {})
+          close = vi.fn(async () => {})
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:group:77:thread:88",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_forward")
+    const result = await tool?.execute("tool-3", {
+      to: "chat:99",
+      messageId: "10",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        from: "88",
+        to: "99",
+        messageIds: ["10"],
+        usedCurrentChatDefault: true,
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      29,
+      expect.objectContaining({
+        forwardMessages: expect.objectContaining({
+          fromPeerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 88n },
+            },
+          },
+          toPeerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 99n },
+            },
+          },
+        }),
+      }),
+    )
+  })
+
+  it("defaults forward source user from the current live Inline DM session", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "forwardMessages",
+      forwardMessages: {
+        updates: [],
+      },
+    }))
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          FORWARD_MESSAGES: 29,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = vi.fn(async () => {})
+          close = vi.fn(async () => {})
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:direct:1600",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_forward")
+    const result = await tool?.execute("tool-4", {
+      to: "chat:77",
+      messageId: "10",
+    })
+
+    expect(result).toMatchObject({
+      details: {
+        ok: true,
+        from: "user:1600",
+        to: "77",
+        usedCurrentChatDefault: true,
+      },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(
+      29,
+      expect.objectContaining({
+        forwardMessages: expect.objectContaining({
+          fromPeerId: {
+            type: {
+              oneofKind: "user",
+              user: { userId: 1600n },
+            },
+          },
+        }),
+      }),
+    )
+  })
+
+})

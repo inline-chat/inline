@@ -1,0 +1,10 @@
+{
+  "name": "@inline-chat/cli",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "typecheck": "cargo check",
+    "lint": "cargo clippy --all-targets -- -D warnings",
+    "test": "cargo test"
+  }
+}

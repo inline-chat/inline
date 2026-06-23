@@ -1,0 +1,4 @@
+# Exclude generated protocol files from diff stats.
+*.pb.ts linguist-generated=true
+*.pb.d.ts linguist-generated=true
+packages/protocol/src/core.ts linguist-generated=true

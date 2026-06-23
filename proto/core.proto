@@ -1,0 +1,2480 @@
+syntax = "proto3";
+
+// --- Protocol Messages ---
+
+message ClientMessage {
+  uint64 id = 1;
+  uint32 seq = 2;
+
+  reserved 3;
+
+  oneof body {
+    ConnectionInit connection_init = 4;
+    RpcCall rpc_call = 5;
+    Ack ack = 6;
+    Ping ping = 7;
+  }
+}
+
+message ConnectionInit {
+  string token = 1;
+
+  // Build number of the client app
+  optional int32 build_number = 2;
+
+  // API layer, for specific API differentiation
+  optional uint32 layer = 3;
+
+  // Client version (semver)
+  optional string client_version = 4;
+
+  // OS version (semver)
+  optional string os_version = 5;
+}
+
+message ServerProtocolMessage {
+  uint64 id = 1;
+
+  reserved 2, 3;
+
+  oneof body {
+    ConnectionOpen connection_open = 4;
+    RpcResult rpc_result = 5;
+    RpcError rpc_error = 6;
+    ServerMessage message = 7;
+    Ack ack = 8;
+    Pong pong = 9;
+    ConnectionError connection_error = 10;
+  }
+}
+
+message ServerMessage {
+  reserved 1, 2, 3;
+
+  oneof payload { UpdatesPayload update = 4; }
+}
+
+message UpdatesPayload { repeated Update updates = 1; }
+
+message Ack { uint64 msg_id = 1; }
+
+message ConnectionOpen {}
+
+message ConnectionError {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    UNAUTHORIZED = 1;
+    INVALID_AUTH = 2;
+    SESSION_REVOKED = 3;
+  }
+
+  Reason reason = 1;
+}
+
+message Ping { uint64 nonce = 1; }
+
+message Pong { uint64 nonce = 1; }
+
+// --- Application Types ---
+
+message InputPeer {
+  reserved 1;
+  oneof type {
+    InputPeerSelf self = 2;
+    InputPeerChat chat = 3;
+    InputPeerUser user = 4;
+  }
+}
+
+message InputPeerSelf {}
+
+message InputPeerChat { int64 chat_id = 1; }
+
+message InputPeerUser { int64 user_id = 1; }
+
+message Peer {
+  reserved 1;
+  oneof type {
+    PeerChat chat = 2;
+    PeerUser user = 3;
+  }
+}
+
+message PeerChat { int64 chat_id = 1; }
+
+message PeerUser { int64 user_id = 1; }
+
+message BotAvatar {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    CODEX_ATLAS = 1;
+  }
+
+  Kind kind = 1;
+  string display_name = 2;
+  optional string description = 3;
+  optional string cdn_url = 4;
+  optional string file_unique_id = 5;
+}
+
+message BotPresenceState {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    HIDDEN = 1;
+    IDLE = 2;
+    HAPPY = 3;
+    WAVING = 4;
+    JUMPING = 5;
+    FAILED = 6;
+    WAITING = 7;
+    RUNNING = 8;
+    REVIEW = 9;
+  }
+
+  Kind kind = 1;
+  optional string comment = 2;
+}
+
+message User {
+  int64 id = 1;
+  optional string first_name = 2;
+  optional string last_name = 3;
+  optional string username = 4;
+  optional string phone_number = 5;
+  optional string email = 6;
+
+  // If true, certain fields such as email or phone_number will be missing
+  optional bool min = 7;
+
+  optional UserStatus status = 8;
+
+  optional UserProfilePhoto profile_photo = 9;
+
+  // Last message ID
+  // optional int64 last_msg_id = 10;
+
+  // If true, the user has not completed the setup process
+  optional bool pending_setup = 11;
+
+  optional string time_zone = 12;
+
+  optional bool bot = 13;
+
+  optional BotAvatar bot_avatar = 14;
+
+  optional string bio = 15;
+}
+
+message UserProfilePhoto {
+  // ID of the photo
+  optional int64 photo_id = 1;
+
+  // Stripped thumbnail of the photo
+  optional bytes stripped_thumb = 2;
+
+  // Photo
+  optional string cdn_url = 3;
+
+  // Unique identifier of the file for cache invalidation
+  optional string file_unique_id = 4;
+}
+
+message Dialog {
+  Peer peer = 1;
+  optional int64 space_id = 2;
+  optional bool archived = 3;
+  optional bool pinned = 4;
+  optional int64 read_max_id = 5;
+  optional int32 unread_count = 6;
+  optional int64 chat_id = 7;
+  optional bool unread_mark = 8;
+  optional DialogNotificationSettings notification_settings = 9;
+  // Deprecated wire field kept so old sidebar_visible=true does not decode as hidden.
+  optional bool sidebar_visible = 10 [deprecated = true];
+  // Hide noisy reply threads from normal chat lists; this is independent of sidebar inbox open state.
+  optional bool chat_list_hidden = 13;
+  // Stable sidebar inbox membership.
+  optional bool open = 11;
+  // Deprecated: sidebar ordering is now stored in order.
+  optional int64 opened_date = 12;
+  // Stable fractional order for normal sidebar inbox rows.
+  optional string order = 14;
+  // Stable fractional order for pinned sidebar rows.
+  optional string pinned_order = 15;
+  // Reply-thread automatic surfacing policy.
+  optional DialogFollowMode follow_mode = 16;
+}
+
+enum DialogFollowMode {
+  DIALOG_FOLLOW_MODE_UNSPECIFIED = 0;
+  FOLLOWING = 1;
+}
+
+// A thread
+message Chat {
+  int64 id = 1;
+
+  // Title
+  string title = 2;
+
+  // If it belongs to a space
+  optional int64 space_id = 3;
+
+  // Optional description
+  optional string description = 4;
+
+  // Emoji to show as the icon, can be null
+  optional string emoji = 5;
+
+  // If true, everyone in parent space can accces it
+  optional bool is_public = 6;
+
+  // Last message ID
+  optional int64 last_msg_id = 7;
+
+  // ID of the peer that this chat belongs to
+  Peer peer_id = 8;
+
+  // Date of creation
+  optional int64 date = 9;
+
+  // Creator user ID
+  optional int64 created_by = 10;
+
+  // Structural parent chat for linked subthreads.
+  optional int64 parent_chat_id = 11;
+
+  // Parent message anchor when this subthread is a reply thread.
+  optional int64 parent_message_id = 12;
+
+  // True when this thread has not been explicitly titled.
+  optional bool untitled = 13;
+
+  // Per-space thread number. Unset for home threads and pre-backfill space threads.
+  optional int32 number = 14;
+}
+
+message MessageReplies {
+  // Child chat ID for the reply thread.
+  int64 chat_id = 1;
+
+  // Number of messages currently in the reply thread.
+  int32 reply_count = 2;
+
+  // True when the viewer has durable unread state in the reply thread.
+  bool has_unread = 3;
+
+  // Recent distinct repliers in newest-first order. Limited server-side.
+  repeated int64 recent_replier_user_ids = 4;
+}
+
+message MessageActions { repeated MessageActionRow rows = 1; }
+
+message MessageActionRow { repeated MessageAction actions = 1; }
+
+message MessageAction {
+  // Bot-defined stable identifier for this button/action.
+  string action_id = 1;
+
+  // Display label.
+  string text = 2;
+
+  oneof action {
+    MessageActionCallback callback = 3;
+    MessageActionCopyText copy_text = 4;
+  }
+}
+
+message MessageActionCallback {
+  // Opaque payload parsed by bot.
+  bytes data = 1;
+}
+
+message MessageActionCopyText {
+  // Text copied client-side without notifying the bot.
+  string text = 1;
+}
+
+message MessageActionResponseUi {
+  oneof kind {
+    MessageActionToast toast = 1;
+    // Reserved for future expandability:
+    // 2 => alert
+    // 3 => open_url
+  }
+}
+
+message MessageActionToast { string text = 1; }
+
+message Message {
+  int64 id = 1;
+
+  // User ID of the sender
+  int64 from_id = 2;
+
+  // Peer ID of the recipient
+  Peer peer_id = 3;
+
+  // The "chat ID" of the message, for messages in a chat (deprecated)
+  int64 chat_id = 4;
+
+  // Message text
+  optional string message = 5;
+
+  // Whether the message is outgoing
+  bool out = 6;
+
+  // Date of the message
+  int64 date = 7;
+
+  // Whether user is mentioned
+  optional bool mentioned = 8;
+
+  // Message ID of the message being replied to
+  optional int64 reply_to_msg_id = 9;
+
+  // Media of the message
+  optional MessageMedia media = 10;
+
+  // Date of the last edit if edited
+  optional int64 edit_date = 11;
+
+  // ID of the grouped message if it's part of an album
+  optional int64 grouped_id = 12;
+
+  // Attachments of the message
+  optional MessageAttachments attachments = 13;
+
+  // Reactions of the message
+  optional MessageReactions reactions = 14;
+
+  // Whether the message is a sticker
+  optional bool is_sticker = 15;
+  optional bool has_link = 6000;
+
+  // Rich text entities
+  optional MessageEntities entities = 16;
+
+  // Send mode for this message, if any
+  optional MessageSendMode send_mode = 17;
+
+  // Forward header info
+  optional MessageFwdHeader fwd_from = 18;
+
+  // Replies shown under the parent message row when this message has an
+  // anchored child thread.
+  optional MessageReplies replies = 19;
+
+  // Optional interactive actions (bot messages only).
+  optional MessageActions actions = 20;
+
+  // Monotonic edit revision for the message. Increments on every edit.
+  optional int64 rev = 21;
+}
+
+enum MessageSendMode {
+  MODE_UNSPECIFIED = 0;
+  MODE_SILENT = 1;
+}
+
+message MessageFwdHeader {
+  // Original chat or user peer
+  Peer from_peer_id = 1;
+
+  // Original sender user ID
+  int64 from_id = 2;
+
+  // Original message ID
+  int64 from_message_id = 3;
+}
+
+message MessageEntities { repeated MessageEntity entities = 1; }
+
+message MessageEntity {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_MENTION = 1;
+    TYPE_URL = 2;
+    TYPE_TEXT_URL = 3;
+    TYPE_EMAIL = 4;
+    TYPE_BOLD = 5;
+    TYPE_ITALIC = 6;
+    TYPE_USERNAME_MENTION = 7;
+    TYPE_CODE = 8;
+    TYPE_PRE = 9;
+    TYPE_PHONE_NUMBER = 10;
+    TYPE_THREAD = 11;
+    TYPE_THREAD_TITLE = 12;
+    TYPE_BOT_COMMAND = 13;
+  }
+
+  Type type = 1;
+  int64 offset = 2;
+  int64 length = 3;
+
+  message MessageEntityMention { int64 user_id = 1; }
+  message MessageEntityTextUrl { string url = 1; }
+  message MessageEntityPre { string language = 1; }
+  message MessageEntityThread { int64 chat_id = 1; }
+  message MessageEntityThreadTitle {
+    int64 space_id = 1;
+    string title = 2;
+  }
+
+  oneof entity {
+    MessageEntityMention mention = 4;
+    MessageEntityTextUrl text_url = 5;
+    MessageEntityPre pre = 6;
+    MessageEntityThread thread = 7;
+    MessageEntityThreadTitle thread_title = 8;
+  }
+}
+
+message MessageReactions {
+  // Reactions of the message
+  repeated Reaction reactions = 1;
+}
+
+message Reaction {
+  // Emoji of the reaction
+  string emoji = 1;
+
+  // ID of the user who reacted
+  int64 user_id = 2;
+
+  // ID of the message that this reaction is for
+  int64 message_id = 3;
+
+  // ID of the chat that this reaction is for
+  int64 chat_id = 4;
+
+  // Date of the reaction
+  int64 date = 5;
+}
+
+message Member {
+  enum Role {
+    OWNER = 0;
+    ADMIN = 1;
+    MEMBER = 2;
+  }
+
+  int64 id = 1;
+  int64 space_id = 2;
+  int64 user_id = 3;
+  optional Role role = 4;
+
+  // Date of joining
+  int64 date = 5;
+
+  // Whether member can access public chats in the space
+  bool can_access_public_chats = 6;
+}
+
+message Space {
+  // ID
+  int64 id = 1;
+
+  // Name of the space
+  string name = 2;
+
+  // Whether the current user is the creator of the space
+  bool creator = 3;
+
+  // Date of creation
+  int64 date = 4;
+
+  // Whether this is a public community space with stricter member privacy.
+  optional bool is_public = 5;
+}
+
+// Add reaction input
+message AddReactionInput {
+  // Emoji of the reaction
+  string emoji = 1;
+
+  // ID of the message that this reaction is for
+  int64 message_id = 2;
+
+  // ID of the peer that this reaction is for
+  InputPeer peer_id = 3;
+}
+
+// Add reaction result
+message AddReactionResult { repeated Update updates = 1; }
+
+// Delete reaction input
+message DeleteReactionInput {
+  string emoji = 1;
+  InputPeer peer_id = 2;
+  int64 message_id = 3;
+}
+
+message DeleteReactionResult { repeated Update updates = 1; }
+
+message MessageAttachments { repeated MessageAttachment attachments = 1; }
+
+message MessageAttachment {
+  // was message id
+  reserved 1;
+
+  // ID
+  int64 id = 4;
+
+  oneof attachment {
+    MessageAttachmentExternalTask external_task = 2;
+    UrlPreview url_preview = 3;
+  }
+}
+
+message UrlPreview {
+  // Compatibility summary of the preview media.
+  enum MediaType {
+    // No typed preview media was detected.
+    MEDIA_TYPE_UNSPECIFIED = 0;
+
+    // Metadata explicitly identifies this link as an article.
+    MEDIA_TYPE_ARTICLE = 1;
+
+    // The preview's primary media is an image.
+    MEDIA_TYPE_IMAGE = 2;
+
+    // The preview's primary media is a video or video player.
+    MEDIA_TYPE_VIDEO = 3;
+
+    // The preview's primary media is a document or downloadable file.
+    MEDIA_TYPE_DOCUMENT = 4;
+
+    // The preview's primary media is a provider embed.
+    MEDIA_TYPE_EMBED = 5;
+  }
+
+  // ID of the URL preview row in our database.
+  int64 id = 1;
+
+  // URL of the link
+  optional string url = 2;
+
+  // Site name of the link
+  optional string site_name = 3;
+
+  // Title of the link
+  optional string title = 4;
+
+  // Description of the link
+  optional string description = 5;
+
+  // Image ID of the link
+  optional Photo photo = 6;
+
+  // Duration of the content
+  optional int64 duration = 7;
+
+  // Metadata-derived content type of the preview target
+  optional MediaType media_type = 8;
+
+  // Sanitized URL text for display only, not a fetch target.
+  optional string display_url = 9;
+
+  // Stable provider key from the preview pipeline, such as "youtube" or "loom".
+  optional string provider = 10;
+
+  // Author, channel, account, or publisher when provided by metadata.
+  optional string author = 11;
+
+  // Typed primary media for this preview.
+  optional UrlPreviewMedia media = 12;
+
+  // Server-provided layout hints that clients can adapt to available space.
+  optional UrlPreviewLayout layout = 13;
+}
+
+// Typed media attached to a URL preview.
+message UrlPreviewMedia {
+  // Exactly one primary preview media payload.
+  oneof media {
+    // Existing cached photo type, used for image links and static visual previews.
+    Photo photo = 1;
+
+    // Existing cached video type, used when we import and store the video ourselves.
+    Video video = 2;
+
+    // Existing cached document type, used for downloadable or file previews.
+    Document document = 3;
+
+    // Validated direct remote video stream that we do not own or cache as a Video yet.
+    UrlPreviewExternalVideo external_video = 4;
+
+    // Provider or player embed, such as YouTube or Loom when direct media is unavailable.
+    UrlPreviewEmbed embed = 5;
+  }
+}
+
+// Direct remote video metadata for playable previews without duplicating Video storage.
+message UrlPreviewExternalVideo {
+  // Validated public media stream URL, such as MP4 or HLS.
+  string url = 1;
+
+  // MIME type from metadata or response headers.
+  optional string mime_type = 2;
+
+  // Video width in pixels when known.
+  optional int32 w = 3;
+
+  // Video height in pixels when known.
+  optional int32 h = 4;
+
+  // Duration in seconds when known.
+  optional int32 duration = 5;
+}
+
+// Provider/player embed metadata.
+message UrlPreviewEmbed {
+  // Validated provider or player URL.
+  string url = 1;
+
+  // Provider/player type, such as "iframe", "player", or "video".
+  optional string type = 2;
+
+  // Embed width in pixels when known.
+  optional int32 w = 3;
+
+  // Embed height in pixels when known.
+  optional int32 h = 4;
+
+  // Duration in seconds when known.
+  optional int32 duration = 5;
+}
+
+// Layout hints for URL preview clients.
+message UrlPreviewLayout {
+  // True when metadata or dimensions support a large media preview.
+  bool has_large_media = 1;
+
+  // True when clients should prefer large media where appropriate.
+  bool show_large_media = 2;
+}
+
+message MessageAttachmentExternalTask {
+  // ID of external task in our database
+  int64 id = 1;
+
+  // ID of the task in the external application
+  string task_id = 2;
+
+  // Application name
+  string application = 3;
+
+  // Title of the task/issue
+  string title = 4;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_BACKLOG = 1;
+    STATUS_TODO = 2;
+    STATUS_IN_PROGRESS = 3;
+    STATUS_DONE = 4;
+    STATUS_CANCELLED = 5;
+  }
+
+  // Status of the task
+  Status status = 5;
+
+  // Assigned user ID in Inline
+  int64 assigned_user_id = 6;
+
+  // URL of the task/issue in the external application
+  string url = 7;
+
+  // Number/code of the task/issue in the external application
+  string number = 8;
+
+  // Date of creation/addition in Inline
+  int64 date = 9;
+}
+
+message MessageMedia {
+  // WIP: add richer media/filtering metadata.
+
+  oneof media {
+    MessagePhoto photo = 1;
+    MessageVideo video = 2;
+    MessageDocument document = 3;
+    MessageNudge nudge = 4;
+    MessageVoice voice = 5;
+  }
+}
+
+message MessagePhoto { Photo photo = 1; }
+
+message MessageVideo { Video video = 1; }
+
+message MessageDocument { Document document = 1; }
+
+message MessageVoice { Voice voice = 1; }
+
+// Nudge message (empty payload)
+message MessageNudge {}
+
+message Video {
+  int64 id = 1;
+
+  // Date of upload
+  int64 date = 2;
+
+  // Width of the video
+  int32 w = 3;
+
+  // Height of the video
+  int32 h = 4;
+
+  // Duration of the video in seconds
+  int32 duration = 5;
+
+  // File size
+  int32 size = 6;
+
+  // Thumbnail of the video
+  optional Photo photo = 7;
+
+  // CDN URL
+  optional string cdn_url = 8;
+}
+
+message Document {
+  int64 id = 1;
+
+  // Original file name
+  string file_name = 2;
+
+  // MIME type of the file
+  string mime_type = 3;
+
+  // File size
+  int32 size = 4;
+
+  // CDN URL
+  optional string cdn_url = 5;
+
+  // Date of upload
+  int64 date = 6;
+
+  // Thumbnail of the document
+  optional Photo photo = 7;
+}
+
+message Voice {
+  int64 id = 1;
+
+  // Date of upload
+  int64 date = 2;
+
+  // Duration of the voice message in seconds
+  int32 duration = 3;
+
+  // File size
+  int32 size = 4;
+
+  // MIME type of the file
+  string mime_type = 5;
+
+  // CDN URL
+  optional string cdn_url = 6;
+
+  // Waveform bytes for rendering
+  bytes waveform = 7;
+}
+
+// Photo for message media, profile photo, space photo, or chat photo
+message Photo {
+  // ID
+  int64 id = 1;
+
+  // Date of upload
+  int64 date = 2;
+
+  repeated PhotoSize sizes = 3;
+
+  enum Format {
+    FORMAT_UNSPECIFIED = 0;
+    FORMAT_JPEG = 1;
+    FORMAT_PNG = 2;
+  }
+
+  // Format of the photo
+  Format format = 4;
+
+  // Unique identifier of the file
+  optional string file_unique_id = 100;
+}
+
+message PhotoSize {
+  /** Thumbnail type.
+  Currently supported:
+  - "b" - small box 140x140
+  - "c" - medium box 320x320
+  - "d" - regular box 800x800
+  - "f" - large box 2560x2560
+  - "s" - stripped (tiny version embedded in bytes)
+  - "y" - ??
+  - "x" - small cropped ??
+  - "w" - medium cropped ??
+  - "v" - ??
+  */
+  string type = 1;
+
+  // Width in pixels
+  int32 w = 2;
+
+  // Height in pixels
+  int32 h = 3;
+
+  // File size
+  int32 size = 4;
+
+  // Bytes for stripped size used in blur thumbnails
+  optional bytes bytes = 5;
+
+  // CDN URL
+  optional string cdn_url = 6;
+}
+
+// --- Application RPC Functions ---
+
+message RpcError {
+  uint64 req_msg_id = 1;
+  Code error_code = 2;
+  string message = 3;
+  int32 code = 4;
+
+  // Type of error
+  enum Code {
+    UNKNOWN = 0;
+    BAD_REQUEST = 1;
+    UNAUTHENTICATED = 2;
+    RATE_LIMIT = 3;
+    INTERNAL_ERROR = 4;
+    PEER_ID_INVALID = 5;
+    MESSAGE_ID_INVALID = 6;
+    USER_ID_INVALID = 7;
+    USER_ALREADY_MEMBER = 8;
+    SPACE_ID_INVALID = 9;
+    CHAT_ID_INVALID = 10;
+    EMAIL_INVALID = 11;
+    PHONE_NUMBER_INVALID = 12;
+    SPACE_ADMIN_REQUIRED = 13;
+    SPACE_OWNER_REQUIRED = 14;
+    USERNAME_INVALID = 15;
+    USERNAME_TAKEN = 16;
+    FIRST_NAME_INVALID = 17;
+  }
+}
+
+enum Method {
+  UNSPECIFIED = 0;
+  GET_ME = 1;
+  SEND_MESSAGE = 2;
+  GET_PEER_PHOTO = 3;
+  DELETE_MESSAGES = 4;
+  GET_CHAT_HISTORY = 5;
+  ADD_REACTION = 6;
+  DELETE_REACTION = 7;
+  EDIT_MESSAGE = 8;
+  CREATE_CHAT = 9;
+  GET_SPACE_MEMBERS = 10;
+  DELETE_CHAT = 11;
+  INVITE_TO_SPACE = 12;
+  GET_CHAT_PARTICIPANTS = 13;
+  ADD_CHAT_PARTICIPANT = 14;
+  REMOVE_CHAT_PARTICIPANT = 15;
+  TRANSLATE_MESSAGES = 16;
+  GET_CHATS = 17;
+  UPDATE_USER_SETTINGS = 18;
+  GET_USER_SETTINGS = 19;
+  SEND_COMPOSE_ACTION = 20;
+  CREATE_BOT = 21;
+  DELETE_MEMBER = 22;
+  MARK_AS_UNREAD = 23;
+  GET_UPDATES_STATE = 24;
+  GET_CHAT = 25;
+  GET_UPDATES = 26;
+  UPDATE_MEMBER_ACCESS = 27;
+  SEARCH_MESSAGES = 28;
+  FORWARD_MESSAGES = 29;
+  UPDATE_CHAT_VISIBILITY = 30;
+  PIN_MESSAGE = 31;
+  UPDATE_CHAT_INFO = 32;
+  LIST_BOTS = 33;
+  REVEAL_BOT_TOKEN = 34;
+  MOVE_THREAD = 35;
+  ROTATE_BOT_TOKEN = 36;
+  UPDATE_BOT_PROFILE = 37;
+  GET_MESSAGES = 38;
+  UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
+  READ_MESSAGES = 40;
+  UPDATE_PUSH_NOTIFICATION_DETAILS = 41;
+  CREATE_SUBTHREAD = 42;
+  GET_BOT_COMMANDS = 43;
+  SET_BOT_COMMANDS = 44;
+  GET_PEER_BOT_COMMANDS = 45;
+  SHOW_IN_CHAT_LIST = 46;
+  RESERVE_CHAT_IDS = 47;
+  INVOKE_MESSAGE_ACTION = 48;
+  ANSWER_MESSAGE_ACTION = 49;
+  REVOKE_SESSION = 50;
+  UPDATE_DIALOG_OPEN = 51;
+  UPDATE_DIALOG_ORDER = 52;
+  CLEAR_CHAT_HISTORY = 53;
+  DELETE_BOT = 54;
+  DELETE_MESSAGE_ATTACHMENT = 55;
+  SET_BOT_AVATAR = 56;
+  CLEAR_BOT_AVATAR = 57;
+  GET_BOT_PRESENCE = 58;
+  SET_BOT_PRESENCE_STATE = 59;
+  UPDATE_DIALOG_FOLLOW_MODE = 60;
+  GET_SESSIONS = 61;
+  CHECK_USERNAME = 62;
+  CHANGE_USERNAME = 63;
+  UPDATE_PROFILE = 64;
+  GET_SPACE_URL_PREVIEW_EXCLUSIONS = 65;
+  ADD_SPACE_URL_PREVIEW_EXCLUSION = 66;
+  REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
+}
+
+message RpcCall {
+  Method method = 1;
+  oneof input {
+    GetMeInput getMe = 2;
+    GetPeerPhotoInput getPeerPhoto = 3;
+    DeleteMessagesInput deleteMessages = 4;
+    SendMessageInput sendMessage = 5;
+    GetChatHistoryInput getChatHistory = 6;
+    AddReactionInput addReaction = 7;
+    DeleteReactionInput deleteReaction = 8;
+    EditMessageInput editMessage = 9;
+    CreateChatInput createChat = 10;
+    GetSpaceMembersInput getSpaceMembers = 11;
+    DeleteChatInput deleteChat = 12;
+    InviteToSpaceInput inviteToSpace = 13;
+    GetChatParticipantsInput getChatParticipants = 14;
+    AddChatParticipantInput addChatParticipant = 15;
+    RemoveChatParticipantInput removeChatParticipant = 16;
+    TranslateMessagesInput translateMessages = 17;
+    GetChatsInput getChats = 18;
+    UpdateUserSettingsInput updateUserSettings = 19;
+    GetUserSettingsInput getUserSettings = 20;
+    SendComposeActionInput sendComposeAction = 21;
+    CreateBotInput createBot = 22;
+    DeleteMemberInput deleteMember = 23;
+    MarkAsUnreadInput markAsUnread = 24;
+    GetUpdatesStateInput getUpdatesState = 25;
+    GetChatInput getChat = 26;
+    GetUpdatesInput getUpdates = 27;
+    UpdateMemberAccessInput updateMemberAccess = 28;
+    SearchMessagesInput searchMessages = 29;
+    ForwardMessagesInput forwardMessages = 30;
+    UpdateChatVisibilityInput updateChatVisibility = 31;
+    PinMessageInput pinMessage = 32;
+    UpdateChatInfoInput updateChatInfo = 33;
+    ListBotsInput listBots = 34;
+    RevealBotTokenInput revealBotToken = 35;
+    MoveThreadInput moveThread = 36;
+    RotateBotTokenInput rotateBotToken = 37;
+    UpdateBotProfileInput updateBotProfile = 38;
+    GetMessagesInput getMessages = 39;
+    UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40;
+    ReadMessagesInput readMessages = 41;
+    UpdatePushNotificationDetailsInput updatePushNotificationDetails = 42;
+    CreateSubthreadInput createSubthread = 43;
+    GetBotCommandsInput getBotCommands = 44;
+    SetBotCommandsInput setBotCommands = 45;
+    GetPeerBotCommandsInput getPeerBotCommands = 46;
+    ShowInChatListInput showInChatList = 47;
+    ReserveChatIdsInput reserveChatIds = 48;
+    InvokeMessageActionInput invokeMessageAction = 49;
+    AnswerMessageActionInput answerMessageAction = 50;
+    RevokeSessionInput revokeSession = 51;
+    UpdateDialogOpenInput updateDialogOpen = 52;
+    UpdateDialogOrderInput updateDialogOrder = 53;
+    ClearChatHistoryInput clearChatHistory = 54;
+    DeleteBotInput deleteBot = 55;
+    DeleteMessageAttachmentInput deleteMessageAttachment = 56;
+    SetBotAvatarInput setBotAvatar = 57;
+    ClearBotAvatarInput clearBotAvatar = 58;
+    GetBotPresenceInput getBotPresence = 59;
+    SetBotPresenceStateInput setBotPresenceState = 60;
+    UpdateDialogFollowModeInput updateDialogFollowMode = 61;
+    GetSessionsInput getSessions = 62;
+    CheckUsernameInput checkUsername = 63;
+    ChangeUsernameInput changeUsername = 64;
+    UpdateProfileInput updateProfile = 65;
+    GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions = 66;
+    AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion = 67;
+    RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68;
+  }
+}
+
+message RpcResult {
+  uint64 req_msg_id = 1;
+
+  oneof result {
+    GetMeResult getMe = 2;
+    GetPeerPhotoResult getPeerPhoto = 3;
+    DeleteMessagesResult deleteMessages = 4;
+    SendMessageResult sendMessage = 5;
+    GetChatHistoryResult getChatHistory = 6;
+    AddReactionResult addReaction = 7;
+    DeleteReactionResult deleteReaction = 8;
+    EditMessageResult editMessage = 9;
+    CreateChatResult createChat = 10;
+    GetSpaceMembersResult getSpaceMembers = 11;
+    DeleteChatResult deleteChat = 12;
+    InviteToSpaceResult inviteToSpace = 13;
+    GetChatParticipantsResult getChatParticipants = 14;
+    AddChatParticipantResult addChatParticipant = 15;
+    RemoveChatParticipantResult removeChatParticipant = 16;
+    TranslateMessagesResult translateMessages = 17;
+    GetChatsResult getChats = 18;
+    UpdateUserSettingsResult updateUserSettings = 19;
+    GetUserSettingsResult getUserSettings = 20;
+    SendComposeActionResult sendComposeAction = 21;
+    CreateBotResult createBot = 22;
+    DeleteMemberResult deleteMember = 23;
+    MarkAsUnreadResult markAsUnread = 24;
+    GetUpdatesStateResult getUpdatesState = 25;
+    GetChatResult getChat = 26;
+    GetUpdatesResult getUpdates = 27;
+    UpdateMemberAccessResult updateMemberAccess = 28;
+    SearchMessagesResult searchMessages = 29;
+    ForwardMessagesResult forwardMessages = 30;
+    UpdateChatVisibilityResult updateChatVisibility = 31;
+    PinMessageResult pinMessage = 32;
+    UpdateChatInfoResult updateChatInfo = 33;
+    ListBotsResult listBots = 34;
+    RevealBotTokenResult revealBotToken = 35;
+    MoveThreadResult moveThread = 36;
+    RotateBotTokenResult rotateBotToken = 37;
+    UpdateBotProfileResult updateBotProfile = 38;
+    GetMessagesResult getMessages = 39;
+    UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
+    ReadMessagesResult readMessages = 41;
+    UpdatePushNotificationDetailsResult updatePushNotificationDetails = 42;
+    CreateSubthreadResult createSubthread = 43;
+    GetBotCommandsResult getBotCommands = 44;
+    SetBotCommandsResult setBotCommands = 45;
+    GetPeerBotCommandsResult getPeerBotCommands = 46;
+    ShowInChatListResult showInChatList = 47;
+    ReserveChatIdsResult reserveChatIds = 48;
+    InvokeMessageActionResult invokeMessageAction = 49;
+    AnswerMessageActionResult answerMessageAction = 50;
+    RevokeSessionResult revokeSession = 51;
+    UpdateDialogOpenResult updateDialogOpen = 52;
+    UpdateDialogOrderResult updateDialogOrder = 53;
+    ClearChatHistoryResult clearChatHistory = 54;
+    DeleteBotResult deleteBot = 55;
+    DeleteMessageAttachmentResult deleteMessageAttachment = 56;
+    SetBotAvatarResult setBotAvatar = 57;
+    ClearBotAvatarResult clearBotAvatar = 58;
+    GetBotPresenceResult getBotPresence = 59;
+    SetBotPresenceStateResult setBotPresenceState = 60;
+    UpdateDialogFollowModeResult updateDialogFollowMode = 61;
+    GetSessionsResult getSessions = 62;
+    CheckUsernameResult checkUsername = 63;
+    ChangeUsernameResult changeUsername = 64;
+    UpdateProfileResult updateProfile = 65;
+    GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions = 66;
+    AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion = 67;
+    RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
+  }
+}
+
+message UpdateBucket {
+  oneof type {
+    UpdateBucketUser user = 1;
+    UpdateBucketSpace space = 2;
+    UpdateBucketChat chat = 3;
+  }
+}
+
+message UpdateBucketUser {}
+
+message UpdateBucketSpace { int64 space_id = 1; }
+
+message UpdateBucketChat { InputPeer peer_id = 1; }
+
+message GetUpdatesInput {
+  UpdateBucket bucket = 1;
+
+  int64 start_seq = 2;
+
+  // unsure about these
+  // int64 start_date = 3;
+
+  // if the difference with the start_seq is greater than this, the result will
+  // contain "too long" result type
+  int32 total_limit = 3;
+
+  // optional inclusive upper bound for slicing
+  int64 seq_end = 4;
+
+  // max number of updates to return in this response
+  int32 limit = 5;
+}
+
+message UpdateSidecars {
+  repeated User users = 1;
+  repeated Chat chats = 2;
+  repeated Dialog dialogs = 3;
+  repeated Space spaces = 4;
+}
+
+message GetUpdatesResult {
+
+  repeated Update updates = 1;
+
+  // Final sequence of the updates slice
+  int64 seq = 2;
+
+  // Final date of the updates slice
+  int64 date = 3;
+
+  // Whether this is the final slice of updates
+  optional bool final = 4;
+
+  enum ResultType {
+    RESULT_TYPE_UNSPECIFIED = 0;
+    RESULT_TYPE_EMPTY = 1;
+    RESULT_TYPE_SLICE = 2;
+    RESULT_TYPE_TOO_LONG = 3;
+  }
+
+  // Type of the result
+  ResultType result_type = 5;
+
+  // Entities required to apply this update slice.
+  UpdateSidecars sidecars = 6;
+}
+
+// Remove member from space
+message DeleteMemberInput {
+  // Space ID
+  int64 space_id = 1;
+
+  // Member ID
+  int64 user_id = 2;
+}
+
+// Remove member from space result
+message DeleteMemberResult { repeated Update updates = 1; }
+
+// Update an existing member's access/role within a space
+message UpdateMemberAccessInput {
+  // Space ID
+  int64 space_id = 1;
+
+  // Member user ID
+  int64 user_id = 2;
+
+  // Updated role/options
+  SpaceMemberRole role = 3;
+}
+
+message UpdateMemberAccessResult { repeated Update updates = 1; }
+
+message SpaceUrlPreviewExclusion {
+  int64 id = 1;
+  int64 space_id = 2;
+  string host = 3;
+  optional string path_prefix = 4;
+  int64 created_by = 5;
+  int64 date = 6;
+}
+
+message GetSpaceUrlPreviewExclusionsInput {
+  int64 space_id = 1;
+}
+
+message GetSpaceUrlPreviewExclusionsResult {
+  repeated SpaceUrlPreviewExclusion exclusions = 1;
+}
+
+message AddSpaceUrlPreviewExclusionInput {
+  int64 space_id = 1;
+  string host = 2;
+  optional string path_prefix = 3;
+  optional InputPeer peer_id = 4;
+  optional int64 message_id = 5;
+}
+
+message AddSpaceUrlPreviewExclusionResult {
+  SpaceUrlPreviewExclusion exclusion = 1;
+  repeated Update updates = 2;
+}
+
+message RemoveSpaceUrlPreviewExclusionInput {
+  int64 space_id = 1;
+  int64 exclusion_id = 2;
+}
+
+message RemoveSpaceUrlPreviewExclusionResult {}
+
+message GetUpdatesStateInput {
+  reserved 1;
+
+  // Local date of state
+  int64 date = 2;
+}
+
+message GetUpdatesStateResult {
+  // Current date of the state
+  int64 date = 1;
+
+  // Set by newer servers to tell clients whether discovery found any bucket work.
+  optional bool updates_found = 2;
+}
+
+message GetChatInput {
+  // Peer ID to get chat for
+  InputPeer peer_id = 1;
+}
+
+message GetChatResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  repeated int64 pinned_message_ids = 3;
+  Message anchor_message = 4;
+}
+
+message ShowInChatListInput {
+  // Peer ID to surface in the chat list.
+  InputPeer peer_id = 1;
+}
+
+message ShowInChatListResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+}
+
+message UpdateDialogOpenInput {
+  // Peer ID to open or close in the sidebar inbox.
+  InputPeer peer_id = 1;
+
+  // Whether this dialog should appear in the sidebar inbox.
+  bool open = 2;
+
+  // Client-generated fractional order for local-first open transitions.
+  optional string order = 3;
+}
+
+message UpdateDialogOpenResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  optional User user = 3;
+  // True when closing the sidebar item deleted a safe empty untitled thread.
+  optional bool deleted_chat = 4;
+}
+
+message UpdateDialogOrderInput {
+  // Peer ID to reorder in the sidebar inbox.
+  InputPeer peer_id = 1;
+
+  // New normal sidebar fractional order.
+  optional string order = 2;
+
+  // New pinned sidebar fractional order.
+  optional string pinned_order = 3;
+
+  // Optional pin state change when reordering across sidebar lanes.
+  optional bool pinned = 4;
+}
+
+message UpdateDialogOrderResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  optional User user = 3;
+}
+
+message UpdateDialogFollowModeInput {
+  // Peer to update follow mode for.
+  InputPeer peer_id = 1;
+
+  // If unset, reply thread uses default relevance mode.
+  optional DialogFollowMode follow_mode = 2;
+}
+
+message UpdateDialogFollowModeResult { repeated Update updates = 1; }
+
+// Mark dialog as unread
+message MarkAsUnreadInput {
+  // Peer ID to mark as unread
+  InputPeer peer_id = 1;
+}
+
+// Mark dialog as unread result
+message MarkAsUnreadResult { repeated Update updates = 1; }
+
+// Read dialog history up to max_id (Telegram-style: peer + optional max_id).
+message ReadMessagesInput {
+  // Peer ID to mark as read
+  InputPeer peer_id = 1;
+
+  // If unset, server resolves to the latest message id for the peer.
+  optional int64 max_id = 2;
+}
+
+message ReadMessagesResult { repeated Update updates = 1; }
+
+message CreateBotInput {
+  // Name of the bot
+  string name = 1;
+
+  // Username of the bot
+  string username = 2;
+
+  // If not null, add the bot to this space
+  optional int64 add_to_space = 3;
+}
+
+message CreateBotResult {
+  User bot = 1;
+
+  // Token to use for the bot
+  string token = 2;
+}
+
+message ListBotsInput {}
+
+message ListBotsResult { repeated User bots = 1; }
+
+message DeleteBotInput { int64 bot_user_id = 1; }
+
+message DeleteBotResult { int64 bot_user_id = 1; }
+
+// Request to remove a single message attachment from a message.
+message DeleteMessageAttachmentInput {
+  // Peer containing the message.
+  InputPeer peer_id = 1;
+
+  // Per-chat message id containing the attachment.
+  int64 message_id = 2;
+
+  // Stable server attachment id from MessageAttachment.id.
+  int64 attachment_id = 3;
+}
+
+// Result for removing a single message attachment.
+message DeleteMessageAttachmentResult {
+  // Updates generated by the mutation for the calling client to apply.
+  repeated Update updates = 1;
+}
+
+message RevokeSessionInput { int64 session_id = 1; }
+
+message RevokeSessionResult {
+  bool revoked = 1;
+  bool already_revoked = 2;
+}
+
+message GetSessionsInput {}
+
+message AccountSession {
+  int64 id = 1;
+  string client_type = 2;
+  optional string client_version = 3;
+  optional string os_version = 4;
+  optional string device_name = 5;
+  optional string city = 6;
+  optional string country = 7;
+  optional string timezone = 8;
+  int64 created_at = 9;
+  int64 last_active_at = 10;
+  bool active = 11;
+  bool current = 12;
+}
+
+message GetSessionsResult { repeated AccountSession sessions = 1; }
+
+enum UsernameAvailability {
+  USERNAME_AVAILABILITY_UNSPECIFIED = 0;
+  USERNAME_AVAILABLE = 1;
+  USERNAME_CURRENT = 2;
+  USERNAME_TAKEN = 3;
+  USERNAME_RESERVED = 4;
+  USERNAME_INVALID = 5;
+}
+
+message CheckUsernameInput { string username = 1; }
+
+message CheckUsernameResult {
+  string username = 1;
+  UsernameAvailability availability = 2;
+}
+
+message ChangeUsernameInput { string username = 1; }
+
+message ChangeUsernameResult {
+  User user = 1;
+  repeated Update updates = 2;
+}
+
+message UpdateProfileInput {
+  optional string first_name = 1;
+  optional string last_name = 2;
+  optional string bio = 3;
+}
+
+message UpdateProfileResult {
+  User user = 1;
+  repeated Update updates = 2;
+}
+
+message BotCommand {
+  string command = 1;
+  string description = 2;
+  optional int32 sort_order = 3;
+}
+
+message PeerBotCommands {
+  User bot = 1;
+  repeated BotCommand commands = 2;
+}
+
+message GetBotCommandsInput { int64 bot_user_id = 1; }
+
+message GetBotCommandsResult { repeated BotCommand commands = 1; }
+
+message SetBotCommandsInput {
+  int64 bot_user_id = 1;
+  repeated BotCommand commands = 2;
+}
+
+message SetBotCommandsResult { repeated BotCommand commands = 1; }
+
+message GetPeerBotCommandsInput { InputPeer peer_id = 1; }
+
+message GetPeerBotCommandsResult { repeated PeerBotCommands bots = 1; }
+
+message RevealBotTokenInput { int64 bot_user_id = 1; }
+
+message RevealBotTokenResult { string token = 1; }
+
+message RotateBotTokenInput { int64 bot_user_id = 1; }
+
+message RotateBotTokenResult {
+  // New token to use for the bot. Previous token will be revoked.
+  string token = 1;
+}
+
+message UpdateBotProfileInput {
+  int64 bot_user_id = 1;
+
+  // Full display name for the bot.
+  optional string name = 2;
+
+  // Profile photo to use for the bot, from the /uploadFile REST API.
+  optional string photo_file_unique_id = 3;
+}
+
+message UpdateBotProfileResult { User bot = 1; }
+
+message SetBotAvatarInput {
+  int64 bot_user_id = 1;
+  BotAvatar.Kind kind = 2;
+  string display_name = 3;
+  optional string description = 4;
+  string file_unique_id = 5;
+}
+
+message SetBotAvatarResult { User bot = 1; }
+
+message ClearBotAvatarInput { int64 bot_user_id = 1; }
+
+message ClearBotAvatarResult { User bot = 1; }
+
+message GetBotPresenceInput { InputPeer peer_id = 1; }
+
+message GetBotPresenceResult {
+  optional int64 bot_user_id = 1;
+  optional BotAvatar avatar = 2;
+  BotPresenceState state = 3;
+  Peer peer_id = 4;
+}
+
+message SetBotPresenceStateInput {
+  InputPeer peer_id = 1;
+  BotPresenceState state = 2;
+}
+
+message SetBotPresenceStateResult {}
+
+message GetUserSettingsInput {}
+
+message GetUserSettingsResult { UserSettings user_settings = 1; }
+
+message UserSettings {
+  optional NotificationSettings notification_settings = 1;
+}
+
+message NotificationSettings {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    MODE_ALL = 1;
+    MODE_NONE = 2;
+    MODE_MENTIONS = 3;
+    MODE_IMPORTANT_ONLY = 4;
+    MODE_ONLY_MENTIONS = 5;
+  }
+
+  optional Mode mode = 1;
+
+  // If true, no sound will be played for notifications
+  optional bool silent = 2;
+
+  // If true, the notification requires mentioning the user
+  optional bool zen_mode_requires_mention = 3;
+
+  // If true, the default rules will be used
+  optional bool zen_mode_uses_default_rules = 4;
+
+  // Custom rules for notifications
+  optional string zen_mode_custom_rules = 5;
+
+  // If true, direct message notifications are disabled
+  optional bool disable_dm_notifications = 6;
+}
+
+message DialogNotificationSettings {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    MODE_ALL = 1;
+    MODE_MENTIONS = 2;
+    MODE_NONE = 3;
+  }
+
+  optional Mode mode = 1;
+}
+
+message UpdateUserSettingsInput { UserSettings user_settings = 1; }
+
+message UpdateUserSettingsResult { repeated Update updates = 1; }
+
+message UpdateDialogNotificationSettingsInput {
+  // Peer to update settings for
+  InputPeer peer_id = 1;
+
+  // If unset, chat follows global notification settings
+  optional DialogNotificationSettings notification_settings = 2;
+}
+
+message UpdateDialogNotificationSettingsResult { repeated Update updates = 1; }
+
+message SendComposeActionInput {
+  // Peer - where user is typing/uploading
+  InputPeer peer_id = 1;
+
+  // Compose action (optional, null means stop action)
+  optional UpdateComposeAction.ComposeAction action = 2;
+}
+
+message SendComposeActionResult {}
+
+message PushContentEncryptionKey {
+  enum Algorithm {
+    ALGORITHM_UNSPECIFIED = 0;
+    ALGORITHM_X25519_HKDF_SHA256_AES256_GCM = 1;
+  }
+
+  // Raw public key bytes for the receiving device/session.
+  bytes public_key = 1;
+
+  // Optional key identifier to support rotation and debugging.
+  optional string key_id = 2;
+
+  // Public-key algorithm/cipher-suite descriptor.
+  Algorithm algorithm = 3;
+}
+
+enum PushNotificationProvider {
+  PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED = 0;
+  PUSH_NOTIFICATION_PROVIDER_APNS = 1;
+  PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID = 2;
+}
+
+message ApnsNotificationMethod {
+  // APNs device token.
+  string device_token = 1;
+}
+
+message ExpoAndroidNotificationMethod {
+  // Expo push token (ExponentPushToken[...] format).
+  string expo_push_token = 1;
+}
+
+message PushNotificationMethod {
+  // Selected push transport/provider for the session.
+  PushNotificationProvider provider = 1;
+
+  // Exactly one notification method should be set for each session.
+  oneof method {
+    ApnsNotificationMethod apns = 2;
+    ExpoAndroidNotificationMethod expo_android = 3;
+  }
+}
+
+// Register/update push notification details for the current session.
+message UpdatePushNotificationDetailsInput {
+  // Legacy APNs token for old clients. Kept for gradual migration/fallback.
+  string apple_push_token = 1 [deprecated = true];
+
+  // Optional metadata for encrypted push content rollout.
+  optional PushContentEncryptionKey push_content_encryption_key = 2;
+
+  // Optional encrypted payload schema version/capability marker.
+  optional uint32 push_content_version = 3;
+
+  // New provider-specific method payload.
+  optional PushNotificationMethod notification_method = 4;
+}
+
+message UpdatePushNotificationDetailsResult {}
+
+message GetChatsInput {}
+
+message GetChatsResult {
+  // Dialogs
+  repeated Dialog dialogs = 1;
+
+  // Chats
+  repeated Chat chats = 2;
+
+  // Spaces referenced in the chats
+  repeated Space spaces = 3;
+
+  // Users referenced in the chats or messages
+  repeated User users = 4;
+
+  // Messages referenced in the chats
+  repeated Message messages = 5;
+}
+
+message TranslateMessagesInput {
+  // ID of the peer
+  InputPeer peer_id = 1;
+
+  // IDs of the messages to translate, these must not have gaps of more than 50
+  // messages
+  repeated int64 message_ids = 2;
+
+  // // Only return messages starting from the specified message ID
+  // int32 offset_id = 2;
+
+  // // Number of messages to return
+  // int32 limit = 3;
+
+  // Language code to translate to
+  string language = 4;
+}
+
+message TranslateMessagesResult {
+  // Translated messages
+  repeated MessageTranslation translations = 1;
+}
+
+message MessageTranslation {
+  // ID of the message
+  int64 message_id = 1;
+
+  // Language code of the translation
+  string language = 2;
+
+  // Translation of the message
+  string translation = 3;
+
+  // Date of translation
+  int64 date = 4;
+
+  // Entities in the translation
+  optional MessageEntities entities = 5;
+
+  // Source message edit revision used for staleness checks.
+  int64 msg_rev = 6;
+}
+
+message GetMeInput {}
+message GetMeResult { User user = 1; }
+
+message GetPeerPhotoInput {
+  InputPeer peer_id = 1;
+  int64 photo_id = 2;
+}
+message GetPeerPhotoResult { Photo photo = 1; }
+
+message DeleteMessagesInput {
+  repeated int64 message_ids = 1;
+  InputPeer peer_id = 2;
+}
+message DeleteMessagesResult { repeated Update updates = 1; }
+
+message ClearChatHistoryInput {
+  // Exactly one target must be set: peer_id for one chat/DM, or space_id for all chats in a space.
+  oneof target {
+    InputPeer peer_id = 1;
+    int64 space_id = 4;
+  }
+
+  // 0 deletes all messages. Positive values keep the last N days and delete older messages.
+  int32 keep_last_days = 2;
+
+  // If true, reply-thread subthreads anchored to deleted messages are deleted too.
+  // If false, those subthreads are left orphaned.
+  bool delete_reply_threads = 3;
+}
+
+message ClearChatHistoryResult { repeated Update updates = 1; }
+
+message EditMessageInput {
+  int64 message_id = 1;
+  InputPeer peer_id = 2;
+  string text = 3;
+  optional MessageEntities entities = 7;
+  optional bool parse_markdown = 8;
+  // Optional action replacement:
+  // - absent: keep current actions
+  // - present + empty rows: clear actions
+  // - present + non-empty rows: replace actions
+  optional MessageActions actions = 9;
+}
+
+message EditMessageResult { repeated Update updates = 1; }
+
+message InputMedia {
+  oneof media {
+    InputMediaPhoto photo = 1;
+    InputMediaVideo video = 2;
+    InputMediaDocument document = 3;
+    InputMediaNudge nudge = 4;
+    InputMediaVoice voice = 5;
+  }
+}
+
+message InputMediaPhoto {
+  // ID of the photo that we have uploaded
+  int64 photo_id = 1;
+}
+
+message InputMediaVideo {
+  // ID of the video that we have uploaded
+  int64 video_id = 1;
+}
+
+message InputMediaDocument {
+  // ID of the document that we have uploaded
+  int64 document_id = 1;
+}
+
+message InputMediaVoice {
+  // ID of the voice message that we have uploaded
+  int64 voice_id = 1;
+}
+
+// Nudge message (empty payload)
+message InputMediaNudge {}
+
+message SendMessageInput {
+  InputPeer peer_id = 1;
+
+  // Message text or caption
+  optional string message = 2;
+
+  // Message ID of the message being replied to
+  optional int64 reply_to_msg_id = 3;
+
+  // Random ID to prevent duplicate messages
+  optional int64 random_id = 4;
+
+  // Media to send
+  optional InputMedia media = 5;
+
+  // Date of sending (until we fix the client reordering)
+  optional int64 temporary_send_date = 1000;
+
+  // Whether the message is a sticker
+  optional bool is_sticker = 6;
+  optional bool has_link = 6000;
+
+  // Entities in the message (bold, italic, mention, etc)
+  optional MessageEntities entities = 7;
+
+  // Parse markdown in message text and derive entities.
+  optional bool parse_markdown = 8;
+
+  // Special send mode for this message
+  optional MessageSendMode send_mode = 9;
+
+  // Optional interactive actions (bot messages only).
+  optional MessageActions actions = 10;
+}
+
+message SendMessageResult { repeated Update updates = 2; }
+
+message InvokeMessageActionInput {
+  InputPeer peer_id = 1;
+  int64 message_id = 2;
+  string action_id = 3;
+}
+
+message InvokeMessageActionResult {
+  // Scoped to the target bot (its user bucket seq).
+  int64 interaction_id = 1;
+}
+
+message AnswerMessageActionInput {
+  int64 interaction_id = 1;
+  optional MessageActionResponseUi ui = 2;
+}
+
+message AnswerMessageActionResult {}
+
+message ForwardMessagesInput {
+  // Source chat/user peer
+  InputPeer from_peer_id = 1;
+
+  // Message IDs to forward from the source peer
+  repeated int64 message_ids = 2;
+
+  // Destination chat/user peer
+  InputPeer to_peer_id = 3;
+
+  // Whether to include forward header (defaults to true on server)
+  optional bool share_forward_header = 4;
+}
+
+message ForwardMessagesResult { repeated Update updates = 1; }
+
+enum GetChatHistoryMode {
+  HISTORY_MODE_UNSPECIFIED = 0;
+  HISTORY_MODE_LATEST = 1;
+  HISTORY_MODE_OLDER = 2;
+  HISTORY_MODE_NEWER = 3;
+  HISTORY_MODE_AROUND = 4;
+}
+
+message GetChatHistoryInput {
+  InputPeer peer_id = 1;
+
+  // Legacy older-history cursor.
+  // When `mode` is not provided, this preserves old behavior and fetches messages with ID < offset_id.
+  optional int64 offset_id = 2;
+
+  // Number of messages to return.
+  // For `mode = HISTORY_MODE_AROUND`, this acts as a fallback split if before/after limits are not provided.
+  optional int32 limit = 3;
+
+  // Explicit fetch mode for history pagination/windowing.
+  optional GetChatHistoryMode mode = 4;
+
+  // Around mode anchor message ID.
+  optional int64 anchor_id = 5;
+
+  // Older mode cursor (messages with ID < before_id).
+  optional int64 before_id = 6;
+
+  // Newer mode cursor (messages with ID > after_id).
+  optional int64 after_id = 7;
+
+  // Around mode count for messages older than anchor.
+  optional int32 before_limit = 8;
+
+  // Around mode count for messages newer than anchor.
+  optional int32 after_limit = 9;
+
+  // Around mode include anchor row in response.
+  optional bool include_anchor = 10;
+}
+
+message GetChatHistoryResult { repeated Message messages = 1; }
+
+message GetMessagesInput {
+  InputPeer peer_id = 1;
+
+  // Message IDs to fetch from the given peer/chat.
+  repeated int64 message_ids = 2;
+}
+
+message GetMessagesResult { repeated Message messages = 1; }
+
+enum SearchMessagesFilter {
+  FILTER_UNSPECIFIED = 0;
+  FILTER_PHOTOS = 1;
+  FILTER_VIDEOS = 2;
+  FILTER_PHOTO_VIDEO = 3;
+  FILTER_DOCUMENTS = 4;
+  FILTER_LINKS = 5;
+}
+
+message SearchMessagesInput {
+  InputPeer peer_id = 1;
+
+  // Queries to match in message text (space-separated terms ANDed within a
+  // query, ORed across queries)
+  repeated string queries = 2;
+
+  // Max number of results to return
+  optional int32 limit = 3;
+
+  // ID of the message to start from
+  optional int64 offset_id = 4;
+
+  // Optional filter for media/doc messages
+  optional SearchMessagesFilter filter = 5;
+}
+
+message SearchMessagesResult { repeated Message messages = 1; }
+
+message InputChatParticipant { int64 user_id = 1; }
+
+message ReserveChatIdsInput { int32 count = 1; }
+
+message ReservedChatId {
+  int64 chat_id = 1;
+  int64 expires_at = 2;
+}
+
+message ReserveChatIdsResult { repeated ReservedChatId reservations = 1; }
+
+message CreateChatInput {
+  // Optional explicit title. Omit or send empty to create an untitled thread.
+  optional string title = 1;
+
+  // Parent space ID
+  optional int64 space_id = 2;
+
+  // Optional description of the thread
+  optional string description = 3;
+
+  // Emoji to show as the icon, can be null
+  optional string emoji = 4;
+
+  // If true, everyone in parent space can accces it
+  bool is_public = 5;
+
+  // For public threads, it must be an empty list
+  repeated InputChatParticipant participants = 6;
+
+  // Optional previously reserved chat id to claim during creation.
+  optional int64 reserved_chat_id = 7;
+}
+
+message CreateChatResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+}
+
+message CreateSubthreadInput {
+  // Required parent chat for inherited access and navigation.
+  int64 parent_chat_id = 1;
+
+  // Optional parent message anchor. When set, this subthread is also a reply thread.
+  optional int64 parent_message_id = 2;
+
+  // Optional explicit title. Defaults to a reply-derived title when omitted.
+  optional string title = 3;
+
+  // Optional explicit description.
+  optional string description = 4;
+
+  // Optional explicit emoji.
+  optional string emoji = 5;
+
+  // Optional direct child participants.
+  repeated InputChatParticipant participants = 6;
+}
+
+message CreateSubthreadResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  Message anchor_message = 3;
+}
+
+message GetSpaceMembersInput { int64 space_id = 1; }
+
+message GetSpaceMembersResult {
+  repeated Member members = 1;
+  repeated User users = 2;
+}
+
+/// ------------------------------
+// Updates Subsystem
+message Update {
+  optional int32 seq = 1;
+  optional int64 date = 2;
+
+  reserved 3;
+
+  oneof update {
+    UpdateNewMessage new_message = 4;   // this
+    UpdateEditMessage edit_message = 5; // this
+    UpdateMessageId update_message_id = 6;
+    UpdateDeleteMessages delete_messages = 7; // this
+    UpdateComposeAction update_compose_action = 8;
+    UpdateUserStatus update_user_status = 9;
+    UpdateMessageAttachment message_attachment = 10; // this
+    UpdateReaction update_reaction = 11;
+    UpdateDeleteReaction delete_reaction = 12;
+    UpdateChatParticipantAdd participant_add = 13;       // this
+    UpdateChatParticipantDelete participant_delete = 14; // this
+    UpdateNewChat new_chat = 15;                         // this
+    UpdateDeleteChat delete_chat = 16;                   // this
+    UpdateSpaceMemberAdd space_member_add = 17;
+    UpdateSpaceMemberDelete space_member_delete = 18; // this
+    UpdateJoinSpace join_space = 19;                  // this
+    UpdateReadMaxId update_read_max_id = 20;
+    UpdateUserSettings update_user_settings = 21;
+    UpdateNewMessageNotification new_message_notification = 22;
+    UpdateMarkAsUnread mark_as_unread = 23;
+    UpdateChatSkipPts chat_skip_pts = 24;
+    UpdateChatHasNewUpdates chat_has_new_updates = 25;
+    UpdateSpaceHasNewUpdates space_has_new_updates = 26;
+    UpdateSpaceMemberUpdate space_member_update = 27;
+    UpdateChatVisibility chat_visibility = 28;
+    UpdateDialogArchived dialog_archived = 29;
+    UpdateChatInfo chat_info = 30;
+    UpdatePinnedMessages pinned_messages = 31;
+    UpdateChatMoved chat_moved = 32;
+    UpdateDialogNotificationSettings dialog_notification_settings = 33;
+    UpdateChatOpen chat_open = 34;
+    UpdateMessageActionInvoked message_action_invoked = 35;
+    UpdateMessageActionAnswered message_action_answered = 36;
+    UpdateClearChatHistory clear_chat_history = 37;
+    UpdateBotPresence bot_presence = 38;
+    UpdateDialogFollowMode dialog_follow_mode = 39;
+    UpdateUpdatedUser updated_user = 40;
+  }
+}
+
+message UpdateSpaceHasNewUpdates {
+  // Space ID
+  int64 space_id = 1;
+
+  // Current sequence of the space
+  int32 update_seq = 2;
+}
+
+// Update when a chat has new updates and client should fetch them
+message UpdateChatHasNewUpdates {
+  // Chat ID
+  int64 chat_id = 1;
+
+  // Peer ID of the chat
+  Peer peer_id = 3;
+
+  // Current PTS of the chat
+  int32 update_seq = 2;
+}
+
+message UpdateChatSkipPts { int64 chat_id = 1; }
+
+// Update when chat visibility changes (public/private)
+message UpdateChatVisibility {
+  int64 chat_id = 1;
+  bool is_public = 2;
+}
+
+// Update when chat title or emoji changes
+message UpdateChatInfo {
+  int64 chat_id = 1;
+  optional string title = 2;
+  optional string emoji = 3;
+  optional bool untitled = 4;
+}
+
+// Update when pinned messages change for a chat
+message UpdatePinnedMessages {
+  // Peer ID of the chat
+  Peer peer_id = 1;
+
+  // Ordered list of pinned message IDs (latest first)
+  repeated int64 message_ids = 2;
+}
+
+// Update when a thread is moved between home and a space.
+//
+// NOTE: v1 only supports private threads and only home <-> space moves.
+// Keep this payload flexible for future:
+// - moving across spaces
+// - moving public threads out of a space (would likely convert members to participants)
+// - allowing external participants in space threads
+message UpdateChatMoved {
+  // Updated chat record (includes new space_id if moved into a space).
+  Chat chat = 1;
+
+  // Optional old/new space IDs for convenience. new_space_id is unset when moved to home.
+  optional int64 old_space_id = 2;
+  optional int64 new_space_id = 3;
+}
+
+message UpdateNewMessageNotification {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REASON_MENTION = 1;
+    REASON_IMPORTANT = 2;
+  }
+
+  // Message that triggered the notification
+  Message message = 1;
+
+  // Reason for the notification
+  Reason reason = 2;
+}
+
+message UpdateUserSettings { UserSettings settings = 1; }
+
+// Update when a user's profile/account fields change.
+message UpdateUpdatedUser { User user = 1; }
+
+// Update when a new space member is added
+message UpdateSpaceMemberAdd {
+  Member member = 1;
+  User user = 2;
+}
+
+// Update when a space member is removed
+message UpdateSpaceMemberDelete {
+  // Space ID
+  int64 space_id = 1;
+
+  // User ID
+  int64 user_id = 2;
+}
+
+// Update when a space member's access/role changes
+message UpdateSpaceMemberUpdate { Member member = 1; }
+
+// Update when we joined a space
+message UpdateJoinSpace {
+  Space space = 1;
+  Member member = 2;
+}
+
+// Update when we read up to a certain message ID
+message UpdateReadMaxId {
+  // Peer ID
+  Peer peer_id = 1;
+
+  // Chat ID
+  // int64 chat_id = 2;
+
+  // Read max ID
+  int64 read_max_id = 3;
+
+  // Still unread count
+  int32 unread_count = 4;
+}
+
+// Update when a dialog is marked as unread
+message UpdateMarkAsUnread {
+  // Peer ID of the dialog that was marked as unread
+  Peer peer_id = 1;
+
+  // Whether it's marked as unread (true) or not (false)
+  bool unread_mark = 2;
+}
+
+// Update when a dialog is archived or unarchived
+message UpdateDialogArchived {
+  // Peer ID of the dialog that changed
+  Peer peer_id = 1;
+
+  // Whether it's archived (true) or unarchived (false)
+  bool archived = 2;
+}
+
+// Update when per-chat notification settings change
+message UpdateDialogNotificationSettings {
+  // Peer ID of the dialog that changed
+  Peer peer_id = 1;
+
+  // If unset, chat follows global notification settings
+  optional DialogNotificationSettings notification_settings = 2;
+}
+
+// Update when reply-thread follow mode changes.
+message UpdateDialogFollowMode {
+  // Peer ID of the dialog that changed.
+  Peer peer_id = 1;
+
+  // If unset, the reply thread uses default relevance mode.
+  optional DialogFollowMode follow_mode = 2;
+}
+
+// Update when a new chat is created either in space or a private chat
+message UpdateNewChat {
+  // Chat
+  Chat chat = 1;
+
+  // Dialog for the chat
+  // Dialog dialog = 2;
+
+  // If private chat
+  optional User user = 3;
+}
+
+// Update when a chat becomes chat-list-visible for a specific user.
+message UpdateChatOpen {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  optional User user = 3;
+}
+
+message UpdateMessageActionInvoked {
+  int64 interaction_id = 1;
+  int64 chat_id = 2;
+  int64 message_id = 3;
+  int64 actor_user_id = 4;
+  string action_id = 5;
+  bytes data = 6;
+}
+
+message UpdateMessageActionAnswered {
+  int64 interaction_id = 1;
+  optional MessageActionResponseUi ui = 2;
+}
+
+// Update when a chat is deleted
+message UpdateDeleteChat {
+  // Peer ID
+  Peer peer_id = 1;
+}
+
+// Update when a new message is created
+message UpdateNewMessage { Message message = 1; }
+
+// Update when a message is edited
+message UpdateEditMessage { Message message = 1; }
+
+// Update when messages are deleted
+message UpdateDeleteMessages {
+  // Message IDs
+  repeated int64 message_ids = 1;
+
+  // Peer ID
+  Peer peer_id = 2;
+}
+
+message UpdateClearChatHistory {
+  // Exactly one target is set: a single chat/DM peer, or every chat/thread in a space.
+  oneof target {
+    Peer peer_id = 1;
+    int64 space_id = 4;
+  }
+
+  // If unset, all local messages for the chat should be removed.
+  // If set, remove messages with date older than this Unix timestamp.
+  optional int64 before_date = 2;
+
+  // Mirrors the RPC option for UI/state observers.
+  bool delete_reply_threads = 3;
+
+  // Reply-thread chats deleted as a direct side effect of this clear.
+  repeated int64 deleted_chat_ids = 5;
+
+  // Reply-thread chats kept but detached from the deleted parent message.
+  repeated int64 orphaned_chat_ids = 6;
+
+  // Reply-thread chats kept but detached from both parent chat and parent message.
+  repeated int64 detached_chat_ids = 7;
+}
+
+message UpdateBotPresence {
+  int64 bot_user_id = 1;
+  Peer peer_id = 2;
+  BotPresenceState state = 3;
+  optional BotAvatar avatar = 4;
+  bool avatar_changed = 5;
+}
+
+// Update when a message ID is updated after sending
+message UpdateMessageId {
+  int64 message_id = 1;
+  int64 random_id = 2;
+}
+
+// Update when a user starts or stops composing a message for typing, uploading
+// a photo, etc
+message UpdateComposeAction {
+  enum ComposeAction {
+    NONE = 0;
+    TYPING = 1;
+    UPLOADING_PHOTO = 2;
+    UPLOADING_DOCUMENT = 3;
+    UPLOADING_VIDEO = 4;
+    RECORDING_VOICE = 5;
+  }
+
+  // User ID of the user who is composing the message
+  int64 user_id = 1;
+
+  // Peer ID of the peer user is composing the message to
+  Peer peer_id = 2;
+
+  // Action of the user (typing, etc)
+  ComposeAction action = 3;
+}
+
+message UpdateMessageAttachment {
+  MessageAttachment attachment = 1;
+  int64 message_id = 2;
+  Peer peer_id = 3;
+  int64 chat_id = 50;
+}
+
+message UpdateReaction { Reaction reaction = 1; }
+
+message UpdateDeleteReaction {
+  string emoji = 1;
+  int64 chat_id = 2;
+  int64 message_id = 3;
+  int64 user_id = 4;
+}
+
+message UpdateUserStatus {
+  int64 user_id = 1;
+  UserStatus status = 2;
+}
+
+message ChatParticipant {
+  int64 user_id = 1;
+  int64 date = 2;
+}
+
+message UpdateChatParticipantAdd {
+  int64 chat_id = 1;
+  ChatParticipant participant = 2;
+}
+
+message UpdateChatParticipantDelete {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+}
+
+message UserStatus {
+  enum Status {
+    UNKNOWN = 0;
+    ONLINE = 1;
+    OFFLINE = 2;
+  }
+
+  Status online = 1;
+  LastOnline last_online = 2;
+}
+
+message LastOnline {
+  // Date of the last online if exact last online is permitted by the user
+  optional int64 date = 1;
+}
+
+message DeleteChatInput { InputPeer peer_id = 1; }
+
+message DeleteChatResult {}
+
+message SpaceMemberOptions { bool can_access_public_chats = 1; }
+message SpaceAdminOptions {}
+message SpaceMemberRole {
+  oneof role {
+    SpaceMemberOptions member = 1;
+    SpaceAdminOptions admin = 2;
+  }
+}
+
+message InviteToSpaceInput {
+  // ID of the space to invite to
+  int64 space_id = 1;
+
+  // Role of the user to invite
+  // @deprecated
+  // Member.Role role = 2;
+  reserved 2;
+
+  SpaceMemberRole role = 6;
+
+  oneof via {
+    // ID of the user to invite
+    int64 user_id = 3;
+
+    // Email of the user to invite
+    string email = 4;
+
+    // Phone number of the user to invite
+    string phone_number = 5;
+  }
+}
+
+message InviteToSpaceResult {
+  User user = 1;
+  Member member = 2;
+  Chat chat = 3;
+  Dialog dialog = 4;
+}
+
+message GetChatParticipantsInput { int64 chat_id = 1; }
+
+message GetChatParticipantsResult {
+  repeated ChatParticipant participants = 1;
+  repeated User users = 2;
+}
+
+message AddChatParticipantInput {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+}
+
+message AddChatParticipantResult { ChatParticipant participant = 1; }
+
+message RemoveChatParticipantInput {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+}
+
+message RemoveChatParticipantResult {}
+
+message UpdateChatVisibilityInput {
+  int64 chat_id = 1;
+  bool is_public = 2;
+  repeated InputChatParticipant participants = 3;
+}
+
+message UpdateChatVisibilityResult { Chat chat = 1; }
+
+message UpdateChatInfoInput {
+  int64 chat_id = 1;
+  optional string title = 2;
+  optional string emoji = 3;
+}
+
+message UpdateChatInfoResult { Chat chat = 1; }
+
+// Move a private thread between home (space_id unset) and a space (space_id set).
+// v1 does NOT support cross-space moves or public threads.
+message MoveThreadInput {
+  int64 chat_id = 1;
+
+  // Target space. If unset, moves to home.
+  optional int64 space_id = 2;
+}
+
+message MoveThreadResult { Chat chat = 1; }
+
+// Pin or unpin a message for everyone
+message PinMessageInput {
+  InputPeer peer_id = 1;
+  int64 message_id = 2;
+  bool unpin = 3;
+}
+
+message PinMessageResult { repeated Update updates = 1; }
+
+// Apple only types
+message DraftMessage {
+  string text = 1;
+  optional MessageEntities entities = 2;
+}

@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": {
+      "@inline-chat/oauth-core": ["../oauth-core/src/index.ts"],
+      "@inline-chat/oauth-core/*": ["../oauth-core/src/*"]
+    }
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../oauth-core"
+    }
+  ]
+}

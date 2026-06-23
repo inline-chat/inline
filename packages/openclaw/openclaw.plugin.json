@@ -1,0 +1,1123 @@
+{
+  "id": "inline",
+  "name": "Inline",
+  "description": "Use OpenClaw from Inline DMs and chats with an Inline bot token.",
+  "channels": ["inline"],
+  "contracts": {
+    "tools": [
+      "inline_members",
+      "inline_update_profile",
+      "inline_bot_avatar",
+      "inline_bot_commands",
+      "inline_nudge",
+      "inline_forward",
+      "inline_bot_presence",
+      "inline_parent_context"
+    ]
+  },
+  "channelEnvVars": {
+    "inline": ["INLINE_TOKEN", "INLINE_BOT_TOKEN"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "channelConfigs": {
+    "inline": {
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "baseUrl": { "type": "string" },
+          "token": {
+            "anyOf": [
+              { "type": "string" },
+              {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "source": { "type": "string", "const": "env" },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    },
+                    "required": ["source", "provider", "id"]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "source": { "type": "string", "const": "file" },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    },
+                    "required": ["source", "provider", "id"]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "source": { "type": "string", "const": "exec" },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    },
+                    "required": ["source", "provider", "id"]
+                  }
+                ]
+              }
+            ]
+          },
+          "tokenFile": { "type": "string" },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "replyThreads": { "type": "boolean" }
+            }
+          },
+          "dmPolicy": {
+            "default": "pairing",
+            "type": "string",
+            "enum": ["pairing", "allowlist", "open", "disabled"]
+          },
+          "allowFrom": {
+            "type": "array",
+            "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+          },
+          "defaultTo": {
+            "anyOf": [{ "type": "string" }, { "type": "number" }]
+          },
+          "systemPrompt": { "type": "string" },
+          "groupAllowFrom": {
+            "type": "array",
+            "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+          },
+          "groupPolicy": {
+            "default": "open",
+            "type": "string",
+            "enum": ["open", "disabled", "allowlist"]
+          },
+          "groups": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "requireMention": { "type": "boolean" },
+                "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
+                "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
+                "replyThreadRequireExplicitMention": { "type": "boolean" },
+                "replyThreadParentHistoryLimit": { "type": "integer", "minimum": 0 },
+                "allowFrom": {
+                  "type": "array",
+                  "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+                },
+                "systemPrompt": { "type": "string" },
+                "tools": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "allow": { "type": "array", "items": { "type": "string" } },
+                    "alsoAllow": { "type": "array", "items": { "type": "string" } },
+                    "deny": { "type": "array", "items": { "type": "string" } }
+                  }
+                },
+                "toolsBySender": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "allow": { "type": "array", "items": { "type": "string" } },
+                      "alsoAllow": { "type": "array", "items": { "type": "string" } },
+                      "deny": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "requireMention": { "type": "boolean" },
+          "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
+          "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
+          "replyThreadRequireExplicitMention": { "type": "boolean" },
+          "replyThreadParentHistoryLimit": { "type": "integer", "minimum": 0 },
+          "replyToBotWithoutMention": { "type": "boolean" },
+          "historyLimit": { "type": "integer", "minimum": 0 },
+          "dmHistoryLimit": { "type": "integer", "minimum": 0 },
+          "parseMarkdown": { "type": "boolean" },
+          "mediaMaxMb": { "type": "number", "exclusiveMinimum": 0 },
+          "debounceMs": { "type": "integer", "minimum": 0 },
+          "voiceTranscriptWaitMs": { "type": "integer", "minimum": 0, "maximum": 60000 },
+          "reactionNotifications": { "type": "string", "enum": ["off", "own", "all", "allowlist"] },
+          "reactionAllowlist": {
+            "type": "array",
+            "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+          },
+          "actions": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "send": { "type": "boolean" },
+              "reply": { "type": "boolean" },
+              "reactions": { "type": "boolean" },
+              "read": { "type": "boolean" },
+              "search": { "type": "boolean" },
+              "translate": { "type": "boolean" },
+              "edit": { "type": "boolean" },
+              "channels": { "type": "boolean" },
+              "participants": { "type": "boolean" },
+              "delete": { "type": "boolean" },
+              "pins": { "type": "boolean" },
+              "permissions": { "type": "boolean" }
+            }
+          },
+          "textChunkLimit": { "type": "integer", "exclusiveMinimum": 0 },
+          "chunkMode": { "type": "string", "enum": ["length", "newline"] },
+          "streaming": {
+            "anyOf": [
+              { "type": "boolean" },
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "mode": { "type": "string", "enum": ["off", "partial", "block", "progress"] },
+                  "chunkMode": { "type": "string", "enum": ["length", "newline"] },
+                  "preview": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                      "chunk": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "minChars": { "type": "integer", "exclusiveMinimum": 0 },
+                          "maxChars": { "type": "integer", "exclusiveMinimum": 0 },
+                          "breakPreference": {
+                            "type": "string",
+                            "enum": ["paragraph", "newline", "sentence"]
+                          }
+                        }
+                      },
+                      "toolProgress": { "type": "boolean" },
+                      "commandText": { "type": "string", "enum": ["raw", "status"] }
+                    }
+                  },
+                  "progress": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                      "label": {
+                        "anyOf": [{ "type": "string" }, { "type": "boolean", "const": false }]
+                      },
+                      "labels": { "type": "array", "items": { "type": "string" } },
+                      "maxLines": { "type": "integer", "exclusiveMinimum": 0 },
+                      "maxLineChars": { "type": "integer", "exclusiveMinimum": 0 },
+                      "render": { "type": "string", "enum": ["text", "rich"] },
+                      "toolProgress": { "type": "boolean" },
+                      "commandText": { "type": "string", "enum": ["raw", "status"] }
+                    }
+                  },
+                  "block": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                      "enabled": { "type": "boolean" },
+                      "coalesce": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "minChars": { "type": "integer", "exclusiveMinimum": 0 },
+                          "maxChars": { "type": "integer", "exclusiveMinimum": 0 },
+                          "idleMs": { "type": "integer", "minimum": 0 }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "streamMode": { "type": "string", "enum": ["off", "partial", "block", "progress"] },
+          "draftChunk": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "minChars": { "type": "integer", "exclusiveMinimum": 0 },
+              "maxChars": { "type": "integer", "exclusiveMinimum": 0 },
+              "breakPreference": { "type": "string", "enum": ["paragraph", "newline", "sentence"] }
+            }
+          },
+          "blockStreaming": { "type": "boolean" },
+          "streamViaEditMessage": { "type": "boolean" },
+          "blockStreamingCoalesce": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "minChars": { "type": "integer", "exclusiveMinimum": 0 },
+              "maxChars": { "type": "integer", "exclusiveMinimum": 0 },
+              "idleMs": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "commands": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "native": {
+                "anyOf": [{ "type": "boolean" }, { "type": "string", "const": "auto" }]
+              },
+              "nativeSkills": {
+                "anyOf": [{ "type": "boolean" }, { "type": "string", "const": "auto" }]
+              }
+            }
+          },
+          "execApprovals": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "anyOf": [{ "type": "boolean" }, { "type": "string", "const": "auto" }]
+              },
+              "approvers": {
+                "type": "array",
+                "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+              },
+              "agentFilter": { "type": "array", "items": { "type": "string" } },
+              "sessionFilter": { "type": "array", "items": { "type": "string" } },
+              "target": { "type": "string", "enum": ["dm", "channel", "both"] }
+            }
+          },
+          "accounts": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "baseUrl": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "const": "env"
+                              },
+                              "provider": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "source",
+                              "provider",
+                              "id"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "const": "file"
+                              },
+                              "provider": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "source",
+                              "provider",
+                              "id"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "const": "exec"
+                              },
+                              "provider": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "source",
+                              "provider",
+                              "id"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "tokenFile": {
+                    "type": "string"
+                  },
+                  "capabilities": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "replyThreads": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "dmPolicy": {
+                    "default": "pairing",
+                    "type": "string",
+                    "enum": [
+                      "pairing",
+                      "allowlist",
+                      "open",
+                      "disabled"
+                    ]
+                  },
+                  "allowFrom": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    }
+                  },
+                  "defaultTo": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "systemPrompt": {
+                    "type": "string"
+                  },
+                  "groupAllowFrom": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    }
+                  },
+                  "groupPolicy": {
+                    "default": "open",
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "disabled",
+                      "allowlist"
+                    ]
+                  },
+                  "groups": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requireMention": {
+                          "type": "boolean"
+                        },
+                        "replyThreadMode": {
+                          "type": "string",
+                          "enum": [
+                            "auto",
+                            "thread",
+                            "main"
+                          ]
+                        },
+                        "replyThreadAutoCreateMinMessages": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "replyThreadRequireExplicitMention": {
+                          "type": "boolean"
+                        },
+                        "replyThreadParentHistoryLimit": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "allowFrom": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        },
+                        "systemPrompt": {
+                          "type": "string"
+                        },
+                        "tools": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "allow": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "alsoAllow": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "deny": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "toolsBySender": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "allow": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "alsoAllow": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "deny": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "requireMention": {
+                    "type": "boolean"
+                  },
+                  "replyThreadMode": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "thread",
+                      "main"
+                    ]
+                  },
+                  "replyThreadAutoCreateMinMessages": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "replyThreadRequireExplicitMention": {
+                    "type": "boolean"
+                  },
+                  "replyThreadParentHistoryLimit": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "replyToBotWithoutMention": {
+                    "type": "boolean"
+                  },
+                  "historyLimit": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "dmHistoryLimit": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "parseMarkdown": {
+                    "type": "boolean"
+                  },
+                  "mediaMaxMb": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "debounceMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "voiceTranscriptWaitMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60000
+                  },
+                  "reactionNotifications": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "own",
+                      "all",
+                      "allowlist"
+                    ]
+                  },
+                  "reactionAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    }
+                  },
+                  "actions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "send": {
+                        "type": "boolean"
+                      },
+                      "reply": {
+                        "type": "boolean"
+                      },
+                      "reactions": {
+                        "type": "boolean"
+                      },
+                      "read": {
+                        "type": "boolean"
+                      },
+                      "search": {
+                        "type": "boolean"
+                      },
+                      "translate": {
+                        "type": "boolean"
+                      },
+                      "edit": {
+                        "type": "boolean"
+                      },
+                      "channels": {
+                        "type": "boolean"
+                      },
+                      "participants": {
+                        "type": "boolean"
+                      },
+                      "delete": {
+                        "type": "boolean"
+                      },
+                      "pins": {
+                        "type": "boolean"
+                      },
+                      "permissions": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "textChunkLimit": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "chunkMode": {
+                    "type": "string",
+                    "enum": [
+                      "length",
+                      "newline"
+                    ]
+                  },
+                  "streaming": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "partial",
+                              "block",
+                              "progress"
+                            ]
+                          },
+                          "chunkMode": {
+                            "type": "string",
+                            "enum": [
+                              "length",
+                              "newline"
+                            ]
+                          },
+                          "preview": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                              "chunk": {
+                                "type": "object",
+                                "additionalProperties": true,
+                                "properties": {
+                                  "minChars": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "maxChars": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "breakPreference": {
+                                    "type": "string",
+                                    "enum": [
+                                      "paragraph",
+                                      "newline",
+                                      "sentence"
+                                    ]
+                                  }
+                                }
+                              },
+                              "toolProgress": {
+                                "type": "boolean"
+                              },
+                              "commandText": {
+                                "type": "string",
+                                "enum": [
+                                  "raw",
+                                  "status"
+                                ]
+                              }
+                            }
+                          },
+                          "progress": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                              "label": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "boolean",
+                                    "const": false
+                                  }
+                                ]
+                              },
+                              "labels": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "maxLines": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
+                              "maxLineChars": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
+                              "render": {
+                                "type": "string",
+                                "enum": [
+                                  "text",
+                                  "rich"
+                                ]
+                              },
+                              "toolProgress": {
+                                "type": "boolean"
+                              },
+                              "commandText": {
+                                "type": "string",
+                                "enum": [
+                                  "raw",
+                                  "status"
+                                ]
+                              }
+                            }
+                          },
+                          "block": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "coalesce": {
+                                "type": "object",
+                                "additionalProperties": true,
+                                "properties": {
+                                  "minChars": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "maxChars": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "idleMs": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "streamMode": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "partial",
+                      "block",
+                      "progress"
+                    ]
+                  },
+                  "draftChunk": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "minChars": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      },
+                      "maxChars": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      },
+                      "breakPreference": {
+                        "type": "string",
+                        "enum": [
+                          "paragraph",
+                          "newline",
+                          "sentence"
+                        ]
+                      }
+                    }
+                  },
+                  "blockStreaming": {
+                    "type": "boolean"
+                  },
+                  "streamViaEditMessage": {
+                    "type": "boolean"
+                  },
+                  "blockStreamingCoalesce": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "minChars": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      },
+                      "maxChars": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      },
+                      "idleMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "commands": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "native": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "string",
+                            "const": "auto"
+                          }
+                        ]
+                      },
+                      "nativeSkills": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "string",
+                            "const": "auto"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "execApprovals": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "enabled": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "string",
+                            "const": "auto"
+                          }
+                        ]
+                      },
+                      "approvers": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        }
+                      },
+                      "agentFilter": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "sessionFilter": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "dm",
+                          "channel",
+                          "both"
+                        ]
+                      }
+                    }
+                  }
+              }
+            }
+          }
+        }
+      },
+      "label": "Inline",
+      "description": "Use OpenClaw from Inline DMs and chats with an Inline bot token.",
+      "uiHints": {
+        "": {
+          "label": "Inline",
+          "help": "Inline channel configuration for bot tokens, direct messages, group chats, and Inline-specific reply behavior."
+        },
+        "baseUrl": {
+          "label": "Inline API Base URL",
+          "help": "Inline API base URL. Defaults to https://api.inline.chat."
+        },
+        "token": {
+          "label": "Inline Bot Token",
+          "help": "Inline bot token. Use tokenFile, INLINE_TOKEN, or INLINE_BOT_TOKEN if you prefer not to store the token in config."
+        },
+        "tokenFile": {
+          "label": "Inline Bot Token File",
+          "help": "Path to a file containing the Inline bot token."
+        },
+        "dmPolicy": {
+          "label": "Inline DM Policy",
+          "help": "Controls direct-message access: pairing, allowlist, open, or disabled."
+        },
+        "allowFrom": {
+          "label": "Inline DM Allowlist",
+          "help": "Inline user IDs allowed to direct-message the bot. Use * only with dmPolicy=open."
+        },
+        "defaultTo": {
+          "label": "Inline Default Target",
+          "help": "Default Inline chat target used by outbound message sends when no explicit target is provided."
+        },
+        "groupPolicy": {
+          "label": "Inline Group Policy",
+          "help": "Controls group chat access: open by default with mention gating, allowlist, or disabled."
+        },
+        "groupAllowFrom": {
+          "label": "Inline Group Sender Allowlist",
+          "help": "Inline user IDs allowed to trigger the bot inside allowed groups. Leave empty to allow any sender in an allowed group."
+        },
+        "requireMention": {
+          "label": "Inline Require Mention",
+          "help": "Require an explicit bot mention in group chats before routing a message to the agent."
+        },
+        "replyToBotWithoutMention": {
+          "label": "Inline Reply Mention Bypass",
+          "help": "Allow replies to bot-authored messages to bypass group mention requirements."
+        },
+        "capabilities.replyThreads": {
+          "label": "Inline Reply Threads (Legacy)",
+          "help": "Legacy compatibility flag. Inline reply-thread tools are available for bot accounts; use replyThreadMode to control automatic routing."
+        },
+        "replyThreadMode": {
+          "label": "Inline Reply Thread Mode",
+          "help": "Controls automatic routing for Inline group replies that start from parent-chat messages: \"auto\" keeps small/new conversations in the parent chat, \"thread\" moves eligible parent-chat replies into child reply threads anchored to the triggering parent messages, and \"main\" keeps automatic replies in the parent chat. Explicit thread tools remain available."
+        },
+        "replyThreadAutoCreateMinMessages": {
+          "label": "Inline Reply Thread Parent Size",
+          "help": "Minimum inbound chat-local message ID before \"thread\" mode auto-creates a child reply thread from a parent-chat message. Defaults to 50; set to 0 to allow immediate thread routing. Existing reply-thread chats always stay in their current thread."
+        },
+        "replyThreadRequireExplicitMention": {
+          "label": "Inline Reply Thread Mentions",
+          "help": "When false (default), bot-participated Inline reply threads can continue without explicitly mentioning the bot, matching Slack thread behavior. Recent bot participation is persisted for sparse follow-ups. Set true to require an explicit mention on every reply-thread message."
+        },
+        "replyThreadParentHistoryLimit": {
+          "label": "Inline Reply Thread Parent History",
+          "help": "Number of parent-chat messages before the anchor to include in reply-thread context. Defaults to 10, so reply threads receive nearby parent discussion plus the anchor and thread-local history. Set 0 to disable parent history."
+        },
+        "groups": {
+          "label": "Inline Group Overrides",
+          "help": "Per-group settings keyed by Inline chat ID, including sender allowlist, mention, reply-thread mode, reply-thread mention/history policy, parent-size threshold, and tool policy overrides."
+        },
+        "accounts": {
+          "label": "Inline Accounts",
+          "help": "Named Inline bot accounts. Account entries accept the same token, access, group, reply-thread, command, and streaming fields as channels.inline."
+        },
+        "actions": {
+          "label": "Inline Message Actions",
+          "help": "Enable or disable Inline message-tool action groups such as send, reactions, read, search, translate, edit, participants, message pins, and permissions."
+        },
+        "reactionNotifications": {
+          "label": "Inline Reaction Notifications",
+          "help": "Controls passive reaction notifications queued into the agent session: \"off\", \"own\" for bot-authored messages, \"all\" for any authorized message, or \"allowlist\" for reactionAllowlist senders."
+        },
+        "reactionAllowlist": {
+          "label": "Inline Reaction Sender Allowlist",
+          "help": "Inline user IDs allowed to queue passive reaction notifications when reactionNotifications is \"allowlist\". Supports the same ID/access-group entries as allowFrom."
+        },
+        "debounceMs": {
+          "label": "Inline Inbound Debounce",
+          "help": "Coalesce rapid same-sender Inline text messages into one agent turn. Overrides messages.inbound.byChannel.inline for this Inline account when set."
+        },
+        "voiceTranscriptWaitMs": {
+          "label": "Inline Voice Transcript Wait",
+          "help": "Milliseconds to wait for Inline's server voice-message transcript edit before falling back to raw audio handling. Set 0 to disable the wait."
+        },
+        "commands.native": {
+          "label": "Inline Bot Command Sync",
+          "help": "Controls startup sync for Inline bot commands."
+        },
+        "commands.nativeSkills": {
+          "label": "Inline Skill Command Sync",
+          "help": "Controls whether skill bot commands are included in startup command sync."
+        },
+        "execApprovals": {
+          "label": "Inline Exec Approvals",
+          "help": "Inline-native exec approval routing and approver authorization. When unset, OpenClaw auto-enables DM-first native approvals if approvers can be resolved for this bot account."
+        },
+        "execApprovals.enabled": {
+          "label": "Inline Exec Approvals Enabled",
+          "help": "Controls Inline native exec approvals for this account: unset or \"auto\" enables DM-first native approvals when approvers can be resolved, true forces native approvals on, and false disables them."
+        },
+        "execApprovals.approvers": {
+          "label": "Inline Exec Approval Approvers",
+          "help": "Inline user IDs allowed to approve exec requests for this bot account. Use numeric Inline user IDs or user targets such as 123, user:123, or inline:user:123. If unset, OpenClaw falls back to numeric owner IDs inferred from commands.ownerAllowFrom when possible."
+        },
+        "execApprovals.agentFilter": {
+          "label": "Inline Exec Approval Agent Filter",
+          "help": "Optional allowlist of agent IDs eligible for Inline exec approvals, for example [\"main\", \"ops-agent\"]. Use this to keep approval prompts scoped to the agents you actually operate from Inline."
+        },
+        "execApprovals.sessionFilter": {
+          "label": "Inline Exec Approval Session Filter",
+          "help": "Optional session-key filters matched as substring or regex-style patterns before Inline approval routing is used. Use narrow patterns so Inline approvals only appear for intended sessions."
+        },
+        "execApprovals.target": {
+          "label": "Inline Exec Approval Target",
+          "help": "Controls where Inline approval prompts are sent: \"dm\" sends to approver DMs (default), \"channel\" sends to the originating Inline chat/reply thread, and \"both\" sends to both. Channel delivery exposes the command text to the chat, so only use it in trusted groups."
+        },
+        "streaming": {
+          "label": "Inline Streaming Mode",
+          "help": "Unified Inline stream mode: \"off\" | \"partial\" | \"block\" | \"progress\". \"partial\" edits visible answer previews; \"progress\" sends a silent temporary progress message, edits it while OpenClaw works, and deletes it before the final reply."
+        },
+        "streaming.mode": {
+          "label": "Inline Streaming Mode",
+          "help": "Canonical Inline stream mode: \"off\" | \"partial\" | \"block\" | \"progress\". Use \"progress\" for the separate temporary working indicator; it is independent from final answer streaming."
+        },
+        "streaming.preview.toolProgress": {
+          "label": "Inline Draft Tool Progress",
+          "help": "Controls shared preview tool-progress compatibility. Inline answer edit previews stay answer-only; live tool details belong in the temporary progress message."
+        },
+        "streaming.progress.toolProgress": {
+          "label": "Inline Progress Tool Lines",
+          "help": "Show compact tool, plan, command, approval, and patch lines inside the temporary progress message while OpenClaw is working."
+        },
+        "streaming.block.enabled": {
+          "label": "Inline Block Streaming",
+          "help": "Enable chunked block-style delivery when channels.inline.streaming.mode=\"block\"."
+        },
+        "streaming.block.coalesce": {
+          "label": "Inline Block Streaming Coalesce",
+          "help": "Merge streamed Inline block replies before delivery."
+        }
+      }
+    }
+  }
+}

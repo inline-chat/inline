@@ -1,0 +1,416 @@
+import { randomUUID } from "node:crypto"
+import { mkdir, writeFile } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import type { InlineSdkClient, InlineSdkSendMessageMedia } from "@inline-chat/realtime-sdk"
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import { resolveChannelMediaMaxBytes } from "../openclaw-compat.js"
+import { extensionForMimeCompat } from "../sdk-runtime-compat.js"
+import { getInlineRuntime } from "../runtime.js"
+
+const DEFAULT_MEDIA_MAX_MB = 300
+const SUPPORTED_INLINE_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif"])
+const SUPPORTED_INLINE_VIDEO_MIME = new Set(["video/mp4"])
+const DEFAULT_VIDEO_WIDTH = 1280
+const DEFAULT_VIDEO_HEIGHT = 720
+const DEFAULT_VIDEO_DURATION = 1
+
+type InlineUploadType = "photo" | "video" | "document"
+type InlineLoadedMedia = Awaited<ReturnType<ReturnType<typeof getInlineRuntime>["media"]["loadWebMedia"]>>
+export type InlineDownloadedMedia = {
+  path: string
+  sourceUrl: string
+  fileName: string
+  sizeBytes: number
+  contentType?: string
+  kind?: string
+}
+type InlineMediaReadFile = (filePath: string) => Promise<Buffer>
+type InlineMediaLocalRoots = readonly string[] | "any"
+type InlineMediaAccess = {
+  localRoots?: readonly string[]
+  readFile?: InlineMediaReadFile
+  workspaceDir?: string
+}
+type InlineMediaLoadContext = {
+  mediaAccess?: InlineMediaAccess
+  mediaLocalRoots?: InlineMediaLocalRoots
+  mediaReadFile?: InlineMediaReadFile
+}
+type InlineWebMediaOptions = {
+  maxBytes?: number
+  localRoots?: InlineMediaLocalRoots
+  readFile?: InlineMediaReadFile
+  hostReadCapability?: boolean
+  workspaceDir?: string
+}
+type LoadWebMediaCompat = (
+  mediaUrl: string,
+  maxBytesOrOptions?: number | InlineWebMediaOptions,
+) => Promise<InlineLoadedMedia>
+
+function normalizeMime(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim().toLowerCase()
+  return trimmed || undefined
+}
+
+function normalizeExt(rawFileName: string | undefined): string | undefined {
+  const ext = path.extname(rawFileName ?? "").trim().toLowerCase()
+  if (!ext) return undefined
+  return ext.replace(/^\./, "")
+}
+
+function isSupportedPhoto(params: { mime?: string; ext?: string }): boolean {
+  if (params.mime && SUPPORTED_INLINE_PHOTO_MIME.has(params.mime)) return true
+  return params.ext === "jpg" || params.ext === "jpeg" || params.ext === "png" || params.ext === "gif"
+}
+
+function isSupportedVideo(params: { mime?: string; ext?: string }): boolean {
+  if (params.mime && SUPPORTED_INLINE_VIDEO_MIME.has(params.mime)) return true
+  return params.ext === "mp4"
+}
+
+function chooseUploadType(params: {
+  kind: "image" | "audio" | "video" | "document" | "unknown"
+  mime?: string
+  ext?: string
+}): InlineUploadType {
+  // Prefer explicit MIME/extension compatibility when available.
+  if (isSupportedPhoto(params)) return "photo"
+  if (isSupportedVideo(params)) return "video"
+
+  // Fall back to loader-detected media kind when MIME/extension is unavailable.
+  if (params.kind === "image") return "photo"
+  if (params.kind === "video") return "video"
+
+  // Fallback to document when Inline media validators would reject the file.
+  return "document"
+}
+
+function ensureUploadFileName(params: {
+  fileName?: string
+  uploadType: InlineUploadType
+  mime?: string
+  ext?: string
+}): string {
+  const trimmed = params.fileName?.trim()
+  if (trimmed) {
+    const baseName = sanitizeUploadFileName(trimmed)
+    const ext = normalizeExt(baseName)
+    if (ext) return baseName
+  }
+
+  const inferredExt = params.ext ?? extensionForMimeCompat(params.mime) ?? undefined
+  const fallbackExt =
+    inferredExt ??
+    (params.uploadType === "photo" ? "jpg" : params.uploadType === "video" ? "mp4" : "bin")
+  return `attachment.${fallbackExt}`
+}
+
+function fileNameFromMediaUrl(mediaUrl: string): string | undefined {
+  try {
+    const url = new URL(mediaUrl)
+    const pathname = decodeURIComponent(url.pathname)
+    const fileName = sanitizeUploadFileName(pathname)
+    return fileName === "attachment" ? undefined : fileName
+  } catch {
+    const fileName = sanitizeUploadFileName(mediaUrl)
+    return fileName === "attachment" ? undefined : fileName
+  }
+}
+
+function ensureDownloadFileName(params: {
+  fileName?: string
+  mediaUrl: string
+  mime?: string
+}): string {
+  const candidate = params.fileName?.trim() || fileNameFromMediaUrl(params.mediaUrl)
+  if (candidate) {
+    const baseName = sanitizeUploadFileName(candidate)
+    if (normalizeExt(baseName)) return baseName
+    const inferredExt = extensionForMimeCompat(params.mime) ?? "bin"
+    return `${baseName}.${inferredExt}`
+  }
+
+  const inferredExt = extensionForMimeCompat(params.mime) ?? "bin"
+  return `download.${inferredExt}`
+}
+
+function sanitizeUploadFileName(raw: string): string {
+  const normalized = raw.trim().replace(/\\/g, "/")
+  const leaf = normalized.split("/").pop() ?? normalized
+  const noQuery = leaf.split(/[?#]/, 1)[0] ?? leaf
+  const safe = noQuery.trim()
+  return safe || "attachment"
+}
+
+function redactMediaSource(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return "<empty>"
+  if (!/^https?:\/\//i.test(trimmed)) {
+    const normalized = trimmed.replace(/\\/g, "/")
+    const leaf = normalized.split("/").pop() ?? normalized
+    return leaf || "<local>"
+  }
+  try {
+    const url = new URL(trimmed)
+    url.search = ""
+    url.hash = ""
+    return url.toString()
+  } catch {
+    return trimmed.split(/[?#]/, 1)[0] ?? trimmed
+  }
+}
+
+function describeInlineMediaContext(params: {
+  accountId?: string | null
+  mediaUrl: string
+  maxBytes: number
+  loadKind?: string
+  loadedFileName?: string
+  loadedSize?: number
+  detectedMime?: string
+  uploadType?: InlineUploadType
+  uploadFileName?: string
+}): string {
+  const parts = [
+    `accountId=${params.accountId ?? "default"}`,
+    `mediaUrl=${redactMediaSource(params.mediaUrl)}`,
+    `maxBytes=${params.maxBytes}`,
+  ]
+  if (params.loadKind) parts.push(`loadKind=${params.loadKind}`)
+  if (params.loadedFileName) parts.push(`loadedFileName=${params.loadedFileName}`)
+  if (params.loadedSize != null) parts.push(`loadedSize=${params.loadedSize}`)
+  if (params.detectedMime) parts.push(`detectedMime=${params.detectedMime}`)
+  if (params.uploadType) parts.push(`uploadType=${params.uploadType}`)
+  if (params.uploadFileName) parts.push(`uploadFileName=${params.uploadFileName}`)
+  return parts.join(", ")
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+function resolveMediaMaxBytes(params: {
+  cfg: OpenClawConfig
+  accountId?: string | null
+}): number {
+  return (
+    resolveChannelMediaMaxBytes({
+      cfg: params.cfg,
+      ...(params.accountId != null ? { accountId: params.accountId } : {}),
+      resolveChannelLimitMb: ({ cfg, accountId }) =>
+        cfg.channels?.inline?.accounts?.[accountId]?.mediaMaxMb ??
+        cfg.channels?.inline?.mediaMaxMb,
+    }) ??
+    DEFAULT_MEDIA_MAX_MB * 1024 * 1024
+  )
+}
+
+function buildInlineMediaLoadOptions(params: {
+  maxBytes: number
+} & InlineMediaLoadContext): number | InlineWebMediaOptions {
+  const explicitLocalRoots = params.mediaAccess?.localRoots ?? params.mediaLocalRoots
+  const readFile = params.mediaAccess?.readFile ?? params.mediaReadFile
+  const workspaceDir = params.mediaAccess?.workspaceDir
+  const localRoots =
+    explicitLocalRoots === "any" || explicitLocalRoots?.length
+      ? explicitLocalRoots
+      : readFile
+        ? "any"
+        : undefined
+  if (!localRoots && !readFile && !workspaceDir) {
+    return params.maxBytes
+  }
+  return {
+    maxBytes: params.maxBytes,
+    ...(localRoots ? { localRoots } : {}),
+    ...(readFile ? { readFile, hostReadCapability: true } : {}),
+    ...(workspaceDir ? { workspaceDir } : {}),
+  }
+}
+
+function mediaFromUploadResult(params: {
+  uploadType: InlineUploadType
+  result: {
+    photoId?: bigint
+    videoId?: bigint
+    documentId?: bigint
+  }
+}): InlineSdkSendMessageMedia {
+  if (params.uploadType === "photo" && params.result.photoId != null) {
+    return { kind: "photo", photoId: params.result.photoId }
+  }
+  if (params.uploadType === "video" && params.result.videoId != null) {
+    return { kind: "video", videoId: params.result.videoId }
+  }
+  if (params.result.documentId != null) {
+    return { kind: "document", documentId: params.result.documentId }
+  }
+  throw new Error(`inline media upload: missing ${params.uploadType} id in upload response`)
+}
+
+export async function uploadInlineMediaFromUrl(params: {
+  client: InlineSdkClient
+  cfg: OpenClawConfig
+  accountId?: string | null
+  mediaUrl: string
+  mediaAccess?: InlineMediaAccess
+  mediaLocalRoots?: readonly string[]
+  mediaReadFile?: InlineMediaReadFile
+}): Promise<InlineSdkSendMessageMedia> {
+  const maxBytes = resolveMediaMaxBytes({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+  })
+  const runtimeMedia = getInlineRuntime().media
+  const loadWebMediaCompat = runtimeMedia.loadWebMedia as unknown as LoadWebMediaCompat
+  let loaded: InlineLoadedMedia | undefined
+  let detectedMime: string | undefined
+  let uploadType: InlineUploadType | undefined
+  let fileName: string | undefined
+  try {
+    loaded = await loadWebMediaCompat(
+      params.mediaUrl,
+      buildInlineMediaLoadOptions({
+        maxBytes,
+        ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
+        ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
+        ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
+      }),
+    )
+    if (!loaded) {
+      throw new Error("inline media upload: media load returned no data")
+    }
+
+    detectedMime = normalizeMime(
+      loaded.contentType ??
+        (await runtimeMedia.detectMime({
+          buffer: loaded.buffer,
+          ...(loaded.fileName ? { filePath: loaded.fileName } : {}),
+        })),
+    )
+    const normalizedExt = normalizeExt(loaded.fileName)
+    uploadType = chooseUploadType({
+      kind: loaded.kind ?? "unknown",
+      ...(detectedMime ? { mime: detectedMime } : {}),
+      ...(normalizedExt ? { ext: normalizedExt } : {}),
+    })
+
+    fileName = ensureUploadFileName({
+      ...(loaded.fileName ? { fileName: loaded.fileName } : {}),
+      uploadType,
+      ...(detectedMime ? { mime: detectedMime } : {}),
+      ...(normalizedExt ? { ext: normalizedExt } : {}),
+    })
+    const upload = await params.client.uploadFile({
+      type: uploadType,
+      file: loaded.buffer,
+      fileName,
+      ...(detectedMime ? { contentType: detectedMime } : {}),
+      ...(uploadType === "video"
+        ? {
+            width: DEFAULT_VIDEO_WIDTH,
+            height: DEFAULT_VIDEO_HEIGHT,
+            duration: DEFAULT_VIDEO_DURATION,
+          }
+        : {}),
+    })
+
+    return mediaFromUploadResult({
+      uploadType,
+      result: upload,
+    })
+  } catch (error) {
+    const context = describeInlineMediaContext({
+      ...(params.accountId !== undefined ? { accountId: params.accountId } : {}),
+      mediaUrl: params.mediaUrl,
+      maxBytes,
+      ...(loaded?.kind ? { loadKind: loaded.kind } : {}),
+      ...(loaded?.fileName ? { loadedFileName: sanitizeUploadFileName(loaded.fileName) } : {}),
+      ...(loaded?.buffer ? { loadedSize: loaded.buffer.byteLength } : {}),
+      ...(detectedMime ? { detectedMime } : {}),
+      ...(uploadType ? { uploadType } : {}),
+      ...(fileName ? { uploadFileName: fileName } : {}),
+    })
+    throw new Error(`inline media upload failed (${extractErrorMessage(error)}; ${context})`, {
+      cause: error as Error,
+    })
+  }
+}
+
+export async function downloadInlineMediaFromUrl(params: {
+  cfg: OpenClawConfig
+  accountId?: string | null
+  mediaUrl: string
+  fileName?: string
+  mediaAccess?: InlineMediaAccess
+  mediaLocalRoots?: readonly string[]
+  mediaReadFile?: InlineMediaReadFile
+}): Promise<InlineDownloadedMedia> {
+  const maxBytes = resolveMediaMaxBytes({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+  })
+  const runtimeMedia = getInlineRuntime().media
+  const loadWebMediaCompat = runtimeMedia.loadWebMedia as unknown as LoadWebMediaCompat
+  let loaded: InlineLoadedMedia | undefined
+  let detectedMime: string | undefined
+  let fileName: string | undefined
+  try {
+    loaded = await loadWebMediaCompat(
+      params.mediaUrl,
+      buildInlineMediaLoadOptions({
+        maxBytes,
+        ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
+        ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
+        ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
+      }),
+    )
+    if (!loaded) {
+      throw new Error("inline media download: media load returned no data")
+    }
+
+    detectedMime = normalizeMime(
+      loaded.contentType ??
+        (await runtimeMedia.detectMime({
+          buffer: loaded.buffer,
+          ...(loaded.fileName ? { filePath: loaded.fileName } : {}),
+        })),
+    )
+    fileName = ensureDownloadFileName({
+      mediaUrl: params.mediaUrl,
+      ...(params.fileName ?? loaded.fileName ? { fileName: params.fileName ?? loaded.fileName } : {}),
+      ...(detectedMime ? { mime: detectedMime } : {}),
+    })
+
+    const dir = path.join(os.tmpdir(), "openclaw-inline-downloads")
+    await mkdir(dir, { recursive: true })
+    const filePath = path.join(dir, `${randomUUID()}-${fileName}`)
+    await writeFile(filePath, loaded.buffer, { flag: "wx" })
+
+    return {
+      path: filePath,
+      sourceUrl: params.mediaUrl,
+      fileName,
+      sizeBytes: loaded.buffer.byteLength,
+      ...(detectedMime ? { contentType: detectedMime } : {}),
+      ...(loaded.kind ? { kind: loaded.kind } : {}),
+    }
+  } catch (error) {
+    const context = describeInlineMediaContext({
+      ...(params.accountId !== undefined ? { accountId: params.accountId } : {}),
+      mediaUrl: params.mediaUrl,
+      maxBytes,
+      ...(loaded?.kind ? { loadKind: loaded.kind } : {}),
+      ...(loaded?.fileName ? { loadedFileName: sanitizeUploadFileName(loaded.fileName) } : {}),
+      ...(loaded?.buffer ? { loadedSize: loaded.buffer.byteLength } : {}),
+      ...(detectedMime ? { detectedMime } : {}),
+      ...(fileName ? { uploadFileName: fileName } : {}),
+    })
+    throw new Error(`inline media download failed (${extractErrorMessage(error)}; ${context})`, {
+      cause: error as Error,
+    })
+  }
+}
