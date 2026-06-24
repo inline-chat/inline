@@ -21,12 +21,22 @@ struct ComposeAutoPairEditingTests {
     #expect(result?.selectedRange == NSRange(location: 1, length: 0))
   }
 
-  @Test("typing a nested opening bracket before an existing closer falls back to normal insertion")
-  func nestedOpeningBracketBeforeExistingCloserDoesNotAutoClose() {
+  @Test("typing a nested opening bracket before an existing closer inserts a nested pair")
+  func nestedOpeningBracketBeforeExistingCloserInsertsPair() {
     let first = applyInsertion("[", to: "", cursor: 0)
     let second = first.flatMap { applyInsertion("[", to: $0.text, cursor: $0.selectedRange.location) }
 
-    #expect(second == nil)
+    #expect(second?.text == "[[]]")
+    #expect(second?.selectedRange == NSRange(location: 2, length: 0))
+  }
+
+  @Test("typing a nested opening parenthesis before an existing closer inserts a nested pair")
+  func nestedOpeningParenthesisBeforeExistingCloserInsertsPair() {
+    let first = applyInsertion("(", to: "", cursor: 0)
+    let second = first.flatMap { applyInsertion("(", to: $0.text, cursor: $0.selectedRange.location) }
+
+    #expect(second?.text == "(())")
+    #expect(second?.selectedRange == NSRange(location: 2, length: 0))
   }
 
   @Test("typing an opening pair at the end of existing text inserts the closing pair")

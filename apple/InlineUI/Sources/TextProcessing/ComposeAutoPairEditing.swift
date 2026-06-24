@@ -48,7 +48,7 @@ public enum ComposeAutoPairEditing {
         )
       }
 
-      guard nextCharacter(in: text, at: range.location) == nil else { return nil }
+      guard shouldInsertPair(before: nextCharacter(in: text, at: range.location)) else { return nil }
 
       return Replacement(
         range: range,
@@ -135,6 +135,11 @@ public enum ComposeAutoPairEditing {
     let nsText = text as NSString
     guard location >= 0, location < nsText.length else { return nil }
     return nsText.substring(with: NSRange(location: location, length: 1))
+  }
+
+  private static func shouldInsertPair(before next: String?) -> Bool {
+    guard let next else { return true }
+    return pairs.values.contains(next)
   }
 
   private static func isValid(_ range: NSRange, length: Int) -> Bool {
