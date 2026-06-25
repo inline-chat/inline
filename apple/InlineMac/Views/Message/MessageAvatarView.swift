@@ -10,6 +10,7 @@ class UserAvatarView: NSView {
   private var userInfo: UserInfo?
   private var size: CGFloat
   private var currentRenderSignature: RenderSignature?
+  private var currentBackingScale: CGFloat?
   private var isPressed = false
 
   private var hostingView: NSHostingView<UserAvatar>?
@@ -43,12 +44,12 @@ class UserAvatarView: NSView {
   func setupView() {
     // Layer optimization
     wantsLayer = true
-    layerContentsRedrawPolicy = .never
+    layerContentsRedrawPolicy = .onSetNeedsDisplay
     layer?.drawsAsynchronously = true
 
     // Only enable if content rarely changes
     layer?.shouldRasterize = true
-    layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+    updateLayerScaling()
 
     // 3. For manual layout, set this to true
     translatesAutoresizingMaskIntoConstraints = true
@@ -72,11 +73,17 @@ class UserAvatarView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func update(userInfo: UserInfo) {
+  func update(userInfo: UserInfo, size nextSize: CGFloat? = nil) {
     let nextRenderSignature = Self.renderSignature(for: userInfo)
-    guard currentRenderSignature != nextRenderSignature else { return }
+    let resolvedSize = nextSize ?? size
+    let sizeChanged = size != resolvedSize
+    guard currentRenderSignature != nextRenderSignature || sizeChanged else { return }
     self.userInfo = userInfo
     currentRenderSignature = nextRenderSignature
+    if sizeChanged {
+      size = resolvedSize
+      invalidateIntrinsicContentSize()
+    }
     updateAvatar()
   }
 
@@ -86,20 +93,42 @@ class UserAvatarView: NSView {
     let rootView = UserAvatar(
       userInfo: userInfo,
       size: size,
-      ignoresSafeArea: true
+      ignoresSafeArea: true,
+      displayScale: currentBackingScale ?? backingScale
     )
 
     if let hostingView {
       hostingView.rootView = rootView
+      hostingView.layer?.setNeedsDisplay()
     } else {
       let newHostingView = NSHostingView(rootView: rootView)
       newHostingView.translatesAutoresizingMaskIntoConstraints = true
       newHostingView.wantsLayer = true
+      newHostingView.layerContentsRedrawPolicy = .onSetNeedsDisplay
+      newHostingView.layer?.contentsScale = currentBackingScale ?? backingScale
       newHostingView.frame = bounds
       addSubview(newHostingView)
       hostingView = newHostingView
+      updateLayerScaling()
       applyPressedTransform()
     }
+
+    layer?.setNeedsDisplay()
+  }
+
+  private var backingScale: CGFloat {
+    max(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0, 1)
+  }
+
+  @discardableResult
+  private func updateLayerScaling() -> Bool {
+    let scale = backingScale
+    let scaleChanged = currentBackingScale != scale
+    currentBackingScale = scale
+    layer?.contentsScale = scale
+    layer?.rasterizationScale = scale
+    hostingView?.layer?.contentsScale = scale
+    return scaleChanged
   }
 
   private static func renderSignature(for userInfo: UserInfo) -> RenderSignature {
@@ -128,6 +157,9 @@ class UserAvatarView: NSView {
 
     // 7. Update hosting view frame during layout
     hostingView?.frame = bounds
+    if updateLayerScaling() {
+      updateAvatar()
+    }
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -185,11 +217,21 @@ class UserAvatarView: NSView {
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
+    let scaleChanged = updateLayerScaling()
     if window == nil {
       setPressed(false)
     } else {
-      layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+      if scaleChanged {
+        updateAvatar()
+      }
       PressScaleAnimator.prepare(self)
+    }
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    if updateLayerScaling() {
+      updateAvatar()
     }
   }
 
