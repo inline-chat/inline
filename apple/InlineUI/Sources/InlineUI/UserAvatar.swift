@@ -224,3 +224,23 @@ public struct UserAvatar: View, Equatable {
     return FileManager.default.fileExists(atPath: url.path) ? url : nil
   }
 }
+
+#Preview("UserAvatar") {
+  HStack(spacing: 16) {
+    UserAvatar(
+      user: User(id: 1, email: "ada@example.com", firstName: "Ada", lastName: "Lovelace"),
+      size: 64
+    )
+
+    UserAvatar(
+      user: User(id: 2, email: "grace@example.com", firstName: "Grace", lastName: "Hopper"),
+      size: 48
+    )
+
+    UserAvatar(
+      user: User(id: 3, email: nil, firstName: nil),
+      size: 32
+    )
+  }
+  .padding(24)
+}
