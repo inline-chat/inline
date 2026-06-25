@@ -71,9 +71,25 @@ final class MessageBubbleTailView: NSView {
     case trailing
   }
 
-  static let size = CGSize(width: 16, height: 15)
-  static let bubbleOverlap: CGFloat = 9
-  static let bottomOffset: CGFloat = 0
+  private static let sourceSize = CGSize(width: 42, height: 36)
+  private static let sourceTailBottomY: CGFloat = 35
+  private static let tailDrawScale: CGFloat = 0.80
+  private static let exposedTailWidth: CGFloat = 4.2
+
+  static var size: CGSize {
+    CGSize(
+      width: sourceSize.width * tailDrawScale,
+      height: sourceSize.height * tailDrawScale
+    )
+  }
+
+  static var bubbleOverlap: CGFloat {
+    size.width - exposedTailWidth
+  }
+
+  static var bottomOffset: CGFloat {
+    size.height - sourceTailBottomY * tailDrawScale
+  }
 
   private(set) var side: Side = .none
 
@@ -125,52 +141,50 @@ final class MessageBubbleTailView: NSView {
   }
 
   private func path(in rect: CGRect) -> NSBezierPath {
-    let width = rect.width
-    let height = rect.height
-    let sideEdge = width
-    let visibleJoinX = max(0, width - Self.bubbleOverlap)
-    let footX: CGFloat = 1.1
-    let footY = rect.maxY - 1.2
-    let lowerJoinX = max(0, visibleJoinX - 0.4)
-    let lowerControlX = max(0, lowerJoinX - 0.8)
-    let lowerJoinY = rect.maxY - 0.7
-    let bottomJoin = rect.maxY - 4.4
+    let scaleX = rect.width / Self.sourceSize.width
+    let scaleY = rect.height / Self.sourceSize.height
 
-    func x(_ value: CGFloat) -> CGFloat {
-      switch side {
+    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+      let resolvedX: CGFloat = switch side {
       case .none, .leading:
-        return rect.minX + value
+        rect.minX + x * scaleX
       case .trailing:
-        return rect.maxX - value
+        rect.maxX - x * scaleX
       }
+      return CGPoint(x: resolvedX, y: rect.minY + y * scaleY)
     }
 
     let path = NSBezierPath()
-    path.move(to: CGPoint(x: x(sideEdge), y: rect.minY + 1.0))
+    path.move(to: point(6, 17.5))
     path.curve(
-      to: CGPoint(x: x(visibleJoinX + 1.1), y: rect.minY + height * 0.48),
-      controlPoint1: CGPoint(x: x(sideEdge), y: rect.minY + height * 0.26),
-      controlPoint2: CGPoint(x: x(visibleJoinX + 3.8), y: rect.minY + height * 0.42)
+      to: point(23.5, 0.2),
+      controlPoint1: point(6, 7.9),
+      controlPoint2: point(13.85, 0.2)
     )
     path.curve(
-      to: CGPoint(x: x(footX + 1.4), y: footY - 0.65),
-      controlPoint1: CGPoint(x: x(visibleJoinX + 0.2), y: rect.minY + height * 0.68),
-      controlPoint2: CGPoint(x: x(footX + 2.6), y: footY - 1.15)
+      to: point(40.8, 17.5),
+      controlPoint1: point(33.05, 0.2),
+      controlPoint2: point(40.8, 7.95)
     )
     path.curve(
-      to: CGPoint(x: x(footX), y: footY),
-      controlPoint1: CGPoint(x: x(footX + 0.8), y: footY - 0.15),
-      controlPoint2: CGPoint(x: x(footX + 0.25), y: footY)
+      to: point(23.5, 34.8),
+      controlPoint1: point(40.8, 27.05),
+      controlPoint2: point(33.05, 34.8)
     )
     path.curve(
-      to: CGPoint(x: x(lowerJoinX), y: lowerJoinY),
-      controlPoint1: CGPoint(x: x(footX + 0.8), y: rect.maxY + 0.4),
-      controlPoint2: CGPoint(x: x(lowerControlX), y: lowerJoinY + 0.15)
+      to: point(12.4, 31.05),
+      controlPoint1: point(19.3, 34.8),
+      controlPoint2: point(15.45, 33.35)
     )
     path.curve(
-      to: CGPoint(x: x(sideEdge), y: bottomJoin),
-      controlPoint1: CGPoint(x: x(visibleJoinX + 0.8), y: lowerJoinY - 0.15),
-      controlPoint2: CGPoint(x: x(sideEdge - 1.2), y: bottomJoin + 0.25)
+      to: point(0.15, 35),
+      controlPoint1: point(9.15, 34.75),
+      controlPoint2: point(0.45, 35)
+    )
+    path.curve(
+      to: point(6, 26.9),
+      controlPoint1: point(5.8, 31.7),
+      controlPoint2: point(6, 26.9)
     )
     path.close()
     return path
