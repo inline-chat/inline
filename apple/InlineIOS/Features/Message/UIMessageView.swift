@@ -322,7 +322,6 @@ class UIMessageView: UIView {
   // MARK: - UI Components
 
   let bubbleView = createBubbleView()
-  let bubbleTailView = createBubbleTailView()
   lazy var containerStack = createContainerStack()
   lazy var singleLineContainer = createSingleLineStack()
   lazy var multiLineContainer = createMultiLineStack()
@@ -464,9 +463,8 @@ class UIMessageView: UIView {
     multiLineContainer.isUserInteractionEnabled = true
     singleLineContainer.isUserInteractionEnabled = true
 
-    addSubview(bubbleTailView)
     addSubview(bubbleView)
-    bubbleView.addSubview(containerStack)
+    bubbleView.contentView.addSubview(containerStack)
 
     setupForwardHeaderIfNeeded()
     setupReplyViewIfNeeded()
@@ -501,17 +499,18 @@ class UIMessageView: UIView {
 
   private func startShineAnimation() {
     if shineEffectView == nil {
-      let shineView = ShineEffectView(frame: bubbleView.bounds)
+      let shineHost = bubbleView.contentView
+      let shineView = ShineEffectView(frame: shineHost.bounds)
       shineView.translatesAutoresizingMaskIntoConstraints = false
-      shineView.layer.cornerRadius = bubbleView.layer.cornerRadius
+      shineView.layer.cornerRadius = MessageBubbleView.cornerRadius
       shineView.layer.masksToBounds = true
-      bubbleView.addSubview(shineView)
+      shineHost.addSubview(shineView)
 
       NSLayoutConstraint.activate([
-        shineView.topAnchor.constraint(equalTo: bubbleView.topAnchor),
-        shineView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor),
-        shineView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor),
-        shineView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor),
+        shineView.topAnchor.constraint(equalTo: shineHost.topAnchor),
+        shineView.leadingAnchor.constraint(equalTo: shineHost.leadingAnchor),
+        shineView.trailingAnchor.constraint(equalTo: shineHost.trailingAnchor),
+        shineView.bottomAnchor.constraint(equalTo: shineHost.bottomAnchor),
       ])
 
       shineEffectView = shineView
@@ -539,7 +538,7 @@ class UIMessageView: UIView {
 
     // Reset appearance-related properties
     bubbleView.backgroundColor = bubbleColor
-    updateBubbleTail()
+    updateBubbleShape()
     messageLabel.textColor = textColor
 
     // Re-setup translation state observation
@@ -661,12 +660,12 @@ class UIMessageView: UIView {
   }
 
   func addFloatingMetadata(relativeTo mediaView: UIView) {
-    bubbleView.addSubview(floatingMetadataView)
+    bubbleView.contentView.addSubview(floatingMetadataView)
 
     let padding: CGFloat = 12
 
     NSLayoutConstraint.activate([
-      floatingMetadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -padding),
+      floatingMetadataView.trailingAnchor.constraint(equalTo: bubbleView.contentView.trailingAnchor, constant: -padding),
       floatingMetadataView.bottomAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: -10),
     ])
   }
@@ -695,15 +694,15 @@ class UIMessageView: UIView {
     var constraints: [NSLayoutConstraint] = [
       reactionsFlowView.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: spacing),
       reactionsFlowView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomPadding),
-      reactionsFlowView.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.widthAnchor),
+      reactionsFlowView.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.contentView.widthAnchor),
     ]
 
     if outgoing {
-      constraints.append(reactionsFlowView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor))
-      constraints.append(reactionsFlowView.leadingAnchor.constraint(greaterThanOrEqualTo: bubbleView.leadingAnchor))
+      constraints.append(reactionsFlowView.trailingAnchor.constraint(equalTo: bubbleView.contentView.trailingAnchor))
+      constraints.append(reactionsFlowView.leadingAnchor.constraint(greaterThanOrEqualTo: bubbleView.contentView.leadingAnchor))
     } else {
-      constraints.append(reactionsFlowView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor))
-      constraints.append(reactionsFlowView.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.trailingAnchor))
+      constraints.append(reactionsFlowView.leadingAnchor.constraint(equalTo: bubbleView.contentView.leadingAnchor))
+      constraints.append(reactionsFlowView.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.contentView.trailingAnchor))
     }
 
     NSLayoutConstraint.activate(constraints)
@@ -846,15 +845,15 @@ class UIMessageView: UIView {
   private func setupMessageActionsConstraints() {
     var constraints: [NSLayoutConstraint] = [
       messageActionsContainer.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: 4),
-      messageActionsContainer.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.widthAnchor),
+      messageActionsContainer.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.contentView.widthAnchor),
     ]
 
     if outgoing {
-      constraints.append(messageActionsContainer.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor))
-      constraints.append(messageActionsContainer.leadingAnchor.constraint(greaterThanOrEqualTo: bubbleView.leadingAnchor))
+      constraints.append(messageActionsContainer.trailingAnchor.constraint(equalTo: bubbleView.contentView.trailingAnchor))
+      constraints.append(messageActionsContainer.leadingAnchor.constraint(greaterThanOrEqualTo: bubbleView.contentView.leadingAnchor))
     } else {
-      constraints.append(messageActionsContainer.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor))
-      constraints.append(messageActionsContainer.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.trailingAnchor))
+      constraints.append(messageActionsContainer.leadingAnchor.constraint(equalTo: bubbleView.contentView.leadingAnchor))
+      constraints.append(messageActionsContainer.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.contentView.trailingAnchor))
     }
 
     NSLayoutConstraint.activate(constraints)
@@ -1687,65 +1686,62 @@ class UIMessageView: UIView {
 
     let baseConstraints: [NSLayoutConstraint] = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
-      bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
-      bubbleTailView.widthAnchor.constraint(equalToConstant: MessageBubbleTailView.size.width),
-      bubbleTailView.heightAnchor.constraint(equalToConstant: MessageBubbleTailView.size.height),
-      bubbleTailView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: MessageBubbleTailView.bottomOffset),
+      bubbleView.contentView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
     ]
 
     let withoutFileConstraints: [NSLayoutConstraint] = [
       containerStack.topAnchor.constraint(
-        equalTo: bubbleView.topAnchor,
+        equalTo: bubbleView.contentView.topAnchor,
         constant: padding.top
       ),
       containerStack.leadingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor,
+        equalTo: bubbleView.contentView.leadingAnchor,
         constant: padding.leading
       ),
       containerStack.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor,
+        equalTo: bubbleView.contentView.trailingAnchor,
         constant: -padding.trailing
       ),
       containerStack.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor,
+        equalTo: bubbleView.contentView.bottomAnchor,
         constant: -padding.bottom
       ).withPriority(.defaultHigh),
     ]
 
     let withFileConstraints: [NSLayoutConstraint] = [
       containerStack.topAnchor.constraint(
-        equalTo: bubbleView.topAnchor,
+        equalTo: bubbleView.contentView.topAnchor,
         constant: 0
       ),
       containerStack.leadingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor,
+        equalTo: bubbleView.contentView.leadingAnchor,
         constant: 0
       ),
       containerStack.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor,
+        equalTo: bubbleView.contentView.trailingAnchor,
         constant: 0
       ),
       containerStack.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor,
+        equalTo: bubbleView.contentView.bottomAnchor,
         constant: 0
       ).withPriority(.defaultHigh),
     ]
 
     let withFileAndTextConstraints: [NSLayoutConstraint] = [
       containerStack.topAnchor.constraint(
-        equalTo: bubbleView.topAnchor,
+        equalTo: bubbleView.contentView.topAnchor,
         constant: 0
       ),
       containerStack.leadingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor,
+        equalTo: bubbleView.contentView.leadingAnchor,
         constant: 0
       ),
       containerStack.trailingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor,
+        equalTo: bubbleView.contentView.trailingAnchor,
         constant: 0
       ),
       containerStack.bottomAnchor.constraint(
-        equalTo: bubbleView.bottomAnchor,
+        equalTo: bubbleView.contentView.bottomAnchor,
         constant: -padding.bottom
       ).withPriority(.defaultHigh),
     ]
@@ -1778,20 +1774,14 @@ class UIMessageView: UIView {
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     }
 
+    let tailWidth = MessageBubbleView.tailWidth(for: bubbleTailSide)
+
     switch resolvedBubbleTailSide {
     case .none, .trailing:
-      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2).isActive = true
-      bubbleTailView.leadingAnchor.constraint(
-        equalTo: bubbleView.trailingAnchor,
-        constant: -MessageBubbleTailView.bubbleOverlap
-      ).isActive = true
+      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2 + tailWidth).isActive = true
 
     case .leading:
-      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2).isActive = true
-      bubbleTailView.trailingAnchor.constraint(
-        equalTo: bubbleView.leadingAnchor,
-        constant: MessageBubbleTailView.bubbleOverlap
-      ).isActive = true
+      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2 - tailWidth).isActive = true
     }
   }
 
@@ -1803,7 +1793,7 @@ class UIMessageView: UIView {
       MessageRichTextRenderer.cacheKey(for: outgoing),
     ].joined(separator: "-")
     bubbleView.backgroundColor = bubbleColor
-    updateBubbleTail()
+    updateBubbleShape()
 
     guard let text = fullMessage.displayText else { return }
 
@@ -1840,11 +1830,8 @@ class UIMessageView: UIView {
     messageLabel.attributedText = attributedString
   }
 
-  private func updateBubbleTail() {
-    bubbleTailView.configure(
-      side: bubbleTailSide,
-      color: bubbleColor
-    )
+  private func updateBubbleShape() {
+    bubbleView.configure(side: bubbleTailSide)
   }
 
   private var resolvedBubbleTailSide: MessageBubbleTailSide {

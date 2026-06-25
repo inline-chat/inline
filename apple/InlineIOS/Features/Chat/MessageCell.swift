@@ -28,13 +28,23 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   var isThread: Bool = false
   var outgoing: Bool = false
-  var fromOtherSender: Bool = false
+  var firstInGroup: Bool = true
+  var lastInGroup: Bool = true
   var message: FullMessage!
   var spaceId: Int64?
   var displayMode: MessageDisplayMode = .normal
 
   private var usesThreadLayout: Bool {
     isThread || displayMode == .threadAnchor
+  }
+
+  var canShowAvatarOverlay: Bool {
+    MessageAvatarOverlayConfig.enabled && usesThreadLayout && !outgoing && message.senderInfo != nil
+  }
+
+  var avatarOverlayUserInfo: UserInfo? {
+    guard canShowAvatarOverlay else { return nil }
+    return message.senderInfo
   }
 
   // MARK: - Sizes
@@ -78,7 +88,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   func configure(
     with message: FullMessage,
-    fromOtherSender: Bool,
+    firstInGroup: Bool,
+    lastInGroup: Bool,
     spaceId: Int64?,
     displayMode: MessageDisplayMode = .normal
   ) {
@@ -86,8 +97,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
-         self.fromOtherSender == fromOtherSender, self.spaceId == spaceId,
-         outgoing == newOutgoing, self.displayMode == displayMode
+         self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
+         self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode
       {
         // skip only if everything is exact match including outgoing state
         return
@@ -97,7 +108,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // update it first
     prevText = message.displayText
     self.message = message
-    self.fromOtherSender = fromOtherSender
+    self.firstInGroup = firstInGroup
+    self.lastInGroup = lastInGroup
     self.spaceId = spaceId
     self.displayMode = displayMode
     isThread = message.peerId.isThread
@@ -108,7 +120,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     nameLabel.text = message.from?.firstName ?? "USER"
 
-    setupThreadHeaderViewsIfNeeded(fromOtherSender: fromOtherSender)
+    setupThreadHeaderViewsIfNeeded()
     setupBaseMessageConstraints()
 
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -128,7 +140,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     displayMode = .normal
     isThread = false
     outgoing = false
-    fromOtherSender = false
+    firstInGroup = true
+    lastInGroup = true
 
     // Clear cached values to force reconfiguration
     prevText = nil
@@ -372,11 +385,11 @@ extension MessageCollectionViewCell {
     contentView.setContentHuggingPriority(.defaultLow, for: .horizontal)
   }
 
-  func setupThreadHeaderViewsIfNeeded(fromOtherSender: Bool) {
+  func setupThreadHeaderViewsIfNeeded() {
     guard usesThreadLayout, !outgoing else { return }
 
     let avatarOrSpacer: UIView
-    if fromOtherSender, let from = message.senderInfo {
+    if showsCellAvatar, let from = message.senderInfo {
       let avatar = UserAvatarView()
       UIView.performWithoutAnimation {
         avatar.configure(with: from, size: avatarSize)
@@ -397,7 +410,7 @@ extension MessageCollectionViewCell {
     avatarSpacerView = avatarOrSpacer
     contentView.addSubview(avatarOrSpacer)
 
-    NSLayoutConstraint.activate([
+    var avatarConstraints = [
       avatarOrSpacer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
       avatarOrSpacer.leadingAnchor.constraint(
         equalTo: contentView.leadingAnchor,
@@ -405,9 +418,13 @@ extension MessageCollectionViewCell {
       ),
       avatarOrSpacer.widthAnchor.constraint(equalToConstant: avatarSize),
       avatarOrSpacer.heightAnchor.constraint(equalToConstant: avatarSize),
-    ])
+    ]
+    if showsCellAvatar {
+      avatarConstraints[0] = avatarOrSpacer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+    }
+    NSLayoutConstraint.activate(avatarConstraints)
 
-    if fromOtherSender {
+    if firstInGroup {
       contentView.addSubview(nameLabel)
       NSLayoutConstraint.activate([
         nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: nameLabelTop),
@@ -419,15 +436,52 @@ extension MessageCollectionViewCell {
 
   /// Space between bubble's top to contentView's top (includes name height)
   private var topBubblePadding: CGFloat {
-    if usesThreadLayout, fromOtherSender, !outgoing {
+    if usesThreadLayout, firstInGroup, !outgoing {
       nameLabelHeight + nameLabelTop
     } else {
-      fromOtherSender ? 6 : 1
+      firstInGroup ? 6 : 1
     }
   }
 
-  private var showsThreadAvatarTail: Bool {
-    usesThreadLayout && !outgoing && fromOtherSender && message.senderInfo != nil
+  private var bubbleTailSide: MessageBubbleTailSide {
+    guard lastInGroup else { return .none }
+    return outgoing ? .trailing : .leading
+  }
+
+  private var showsCellAvatar: Bool {
+    usesThreadLayout && !outgoing && lastInGroup && message.senderInfo != nil && !MessageAvatarOverlayConfig.enabled
+  }
+
+  func avatarOverlayFrame(in view: UIView) -> CGRect? {
+    guard canShowAvatarOverlay, contentView.bounds.width > 0, contentView.bounds.height > 0 else {
+      return nil
+    }
+
+    let localFrame = CGRect(
+      x: avatarLeading + horizontalPadding,
+      y: max(0, contentView.bounds.maxY - avatarSize),
+      width: avatarSize,
+      height: avatarSize
+    )
+    return contentView.convert(localFrame, to: view)
+  }
+
+  func avatarOverlayLimitFrame(in view: UIView) -> CGRect? {
+    guard canShowAvatarOverlay,
+          contentView.bounds.width > 0,
+          contentView.bounds.height > 0
+    else {
+      return nil
+    }
+
+    let bubbleTop = max(contentView.bounds.minY, topBubblePadding)
+    let localFrame = CGRect(
+      x: contentView.bounds.minX,
+      y: bubbleTop,
+      width: contentView.bounds.width,
+      height: max(0, contentView.bounds.maxY - bubbleTop)
+    )
+    return contentView.convert(localFrame, to: view)
   }
 
   func setupBaseMessageConstraints() {
@@ -435,7 +489,7 @@ extension MessageCollectionViewCell {
       fullMessage: message,
       spaceId: spaceId,
       displayMode: displayMode,
-      bubbleTailSide: showsThreadAvatarTail ? .leading : .none
+      bubbleTailSide: bubbleTailSide
     )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
@@ -457,7 +511,7 @@ extension MessageCollectionViewCell {
       leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 3)
       trailingConstraint = newMessageView.trailingAnchor.constraint(
         equalTo: contentView.trailingAnchor,
-        constant: fromOtherSender ? -(10 + horizontalPadding) : -horizontalPadding
+        constant: firstInGroup ? -(10 + horizontalPadding) : -horizontalPadding
       )
     } else {
       leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding)

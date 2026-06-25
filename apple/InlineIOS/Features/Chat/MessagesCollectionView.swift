@@ -83,6 +83,17 @@ final class MessagesCollectionView: UICollectionView {
 
   override func didMoveToWindow() {
     updateContentInsets()
+    if window == nil {
+      coordinator.detachAvatarOverlay()
+    } else {
+      coordinator.attachAvatarOverlay(over: self, parent: findViewController())
+      coordinator.syncAvatarOverlay(animate: false)
+    }
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    coordinator.syncAvatarOverlay(animate: false)
   }
 
   deinit {
@@ -173,6 +184,7 @@ final class MessagesCollectionView: UICollectionView {
     scrollIndicatorInsets = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset, right: 0)
     contentInset = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset + topContentPadding, right: 0)
     layoutIfNeeded()
+    coordinator.syncAvatarOverlay(animate: false)
   }
 
   private func updateContentInsetsAfterContextMenuIfNeeded(animated: Bool) {
@@ -566,6 +578,26 @@ private extension MessagesCollectionView {
     private var noRemoteOlderBeforeMessageId: Int64?
     private var lastRemoteOlderCursor: Int64?
     private var isPresentingImageViewer = false
+    private let groupCalendar = Calendar.current
+    private let avatarOverlayController = MessageAvatarOverlayViewController()
+    private var groupInfoByItem: [MessageListItem: MessageGroupInfo] = [:]
+
+    private struct MessageGroupInfo {
+      let ownerItem: MessageListItem
+      let isFirst: Bool
+      let isLast: Bool
+    }
+
+    private struct AvatarOverlayDraft {
+      let stableId: Int64
+      let userInfo: UserInfo
+      let avatarX: CGFloat
+      let avatarSize: CGFloat
+      let viewportFrame: CGRect
+      let onTap: () -> Void
+      var frame: CGRect?
+      var limitFrame: CGRect
+    }
 
     // MARK: - Date Separator Visibility Handling
 
@@ -630,6 +662,45 @@ private extension MessagesCollectionView {
 
     private func rebuildListSections() {
       listSections = makeListSections()
+      rebuildMessageGroups()
+    }
+
+    private func rebuildMessageGroups() {
+      var info: [MessageListItem: MessageGroupInfo] = [:]
+
+      for section in listSections {
+        let items = section.items
+        var index = items.startIndex
+
+        while index < items.endIndex {
+          guard case .message = items[index], message(for: items[index]) != nil else {
+            index += 1
+            continue
+          }
+
+          var end = index
+          while end + 1 < items.endIndex,
+                let earlier = message(for: items[end + 1]),
+                let later = message(for: items[end]),
+                canGroup(earlier, later)
+          {
+            end += 1
+          }
+
+          let ownerItem = items[index]
+          for itemIndex in index ... end {
+            info[items[itemIndex]] = MessageGroupInfo(
+              ownerItem: ownerItem,
+              isFirst: itemIndex == end,
+              isLast: itemIndex == index
+            )
+          }
+
+          index = end + 1
+        }
+      }
+
+      groupInfoByItem = info
     }
 
     private func makeListSections() -> [MessageListSection] {
@@ -762,6 +833,7 @@ private extension MessagesCollectionView {
       viewModel.dispose()
       cancellables.forEach { $0.cancel() }
       cancellables.removeAll()
+      detachAvatarOverlay()
     }
 
     private func setupNotionTaskManager() {
@@ -911,11 +983,13 @@ private extension MessagesCollectionView {
         guard case let .message(message, displayMode) = model.content else {
           return
         }
-        let isFromDifferentSender = item.isThreadAnchor ? true : isMessageFromDifferentSender(at: indexPath)
+        let firstInGroup = item.isThreadAnchor ? true : isFirstInGroup(at: indexPath)
+        let lastInGroup = item.isThreadAnchor ? true : isLastInGroup(at: indexPath)
 
         cell.configure(
           with: message,
-          fromOtherSender: isFromDifferentSender,
+          firstInGroup: firstInGroup,
+          lastInGroup: lastInGroup,
           spaceId: spaceId,
           displayMode: displayMode
         )
@@ -1003,32 +1077,22 @@ private extension MessagesCollectionView {
       setInitialData()
     }
 
-    private func isMessageFromDifferentSender(at indexPath: IndexPath) -> Bool {
-      guard let currentMessage = message(at: indexPath) else { return true }
+    private func isFirstInGroup(at indexPath: IndexPath) -> Bool {
+      guard let item = item(at: indexPath), let info = groupInfoByItem[item] else { return true }
+      return info.isFirst
+    }
 
-      // Check previous message within the same section
-      let previousIndexPath = IndexPath(item: indexPath.item + 1, section: indexPath.section)
+    private func isLastInGroup(at indexPath: IndexPath) -> Bool {
+      guard let item = item(at: indexPath), let info = groupInfoByItem[item] else { return true }
+      return info.isLast
+    }
 
-      // Ensure the previous index path is valid before checking
-      if previousIndexPath.item < numberOfItems(in: indexPath.section),
-         let previousMessage = message(at: previousIndexPath)
-      {
-        return currentMessage.message.fromId != previousMessage.message.fromId
-      }
+    private func canGroup(_ earlier: FullMessage, _ later: FullMessage) -> Bool {
+      guard earlier.message.fromId == later.message.fromId else { return false }
+      guard groupCalendar.isDate(earlier.message.date, inSameDayAs: later.message.date) else { return false }
 
-      // If no previous message in this section, check last message of previous section
-      if indexPath.section > 0 {
-        let previousSection = indexPath.section - 1
-        let previousSectionItemCount = numberOfItems(in: previousSection)
-        if previousSectionItemCount > 0 {
-          let lastMessageInPreviousSection = IndexPath(item: 0, section: previousSection)
-          if let lastMessage = message(at: lastMessageInPreviousSection) {
-            return currentMessage.message.fromId != lastMessage.message.fromId
-          }
-        }
-      }
-
-      return true
+      let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
+      return gapSeconds >= 0 && gapSeconds <= 300
     }
 
     private func setInitialData(animated: Bool? = false, reconfigureExisting: Bool = true) {
@@ -1048,19 +1112,31 @@ private extension MessagesCollectionView {
         snapshot.appendItems(section.items, toSection: section.id)
       }
 
-      // Reconfigure only items that already exist in both snapshots so reused cells
-      // rebuild their content when underlying data changes (e.g., replies load later).
-      let currentIds = Set(dataSource.snapshot().itemIdentifiers)
+      // Reconfigure only existing items: either all shared items for data refreshes,
+      // or group-boundary neighbors for structural updates that should keep layout stable.
+      let currentSnapshot = dataSource.snapshot()
+      let currentIds = Set(currentSnapshot.itemIdentifiers)
       let nextIds = Set(snapshot.itemIdentifiers)
       var idsToReconfigure: [MessageListItem] = []
       if reconfigureExisting {
         idsToReconfigure = Array(currentIds.intersection(nextIds))
-      } else if let anchor = viewModel.threadAnchor {
-        let anchorItem = MessageListItem.threadAnchor(id: anchor.id)
-        if currentIds.contains(anchorItem), nextIds.contains(anchorItem) {
-          idsToReconfigure = [anchorItem]
+      } else {
+        let insertedItems = Array(nextIds.subtracting(currentIds))
+        let deletedItems = Array(currentIds.subtracting(nextIds))
+
+        idsToReconfigure += groupBoundaryItems(around: insertedItems, in: snapshot)
+          .filter { currentIds.contains($0) && nextIds.contains($0) }
+        idsToReconfigure += groupBoundaryItems(around: deletedItems, in: currentSnapshot)
+          .filter { currentIds.contains($0) && nextIds.contains($0) }
+
+        if let anchor = viewModel.threadAnchor {
+          let anchorItem = MessageListItem.threadAnchor(id: anchor.id)
+          if currentIds.contains(anchorItem), nextIds.contains(anchorItem) {
+            idsToReconfigure.append(anchorItem)
+          }
         }
       }
+      idsToReconfigure = Array(Set(idsToReconfigure))
       if !idsToReconfigure.isEmpty {
         snapshot.reconfigureItems(idsToReconfigure)
       }
@@ -1143,12 +1219,169 @@ private extension MessagesCollectionView {
             "animated": animatingDifferences,
           ]
         )
+        self.syncAvatarOverlay(animate: false)
         completion?()
       }
 
       if withCustomTiming, animatingDifferences {
         CATransaction.commit()
       }
+    }
+
+    private func groupBoundaryItems(
+      around changedItems: [MessageListItem],
+      in snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>
+    ) -> [MessageListItem] {
+      guard !changedItems.isEmpty else { return [] }
+
+      let changedSet = Set(changedItems)
+      var boundary = Set<MessageListItem>()
+
+      for sectionId in snapshot.sectionIdentifiers {
+        let sectionItems = snapshot.itemIdentifiers(inSection: sectionId)
+
+        for index in sectionItems.indices where changedSet.contains(sectionItems[index]) {
+          if index > sectionItems.startIndex {
+            boundary.insert(sectionItems[index - 1])
+          }
+
+          let nextIndex = index + 1
+          if nextIndex < sectionItems.endIndex {
+            boundary.insert(sectionItems[nextIndex])
+          }
+        }
+      }
+
+      boundary.subtract(changedSet)
+      return boundary.filter { $0.messageStableId != nil }
+    }
+
+    private func reconfigureGroupBoundaryItems(
+      around changedItems: [MessageListItem],
+      in snapshot: inout NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>
+    ) {
+      let items = groupBoundaryItems(around: changedItems, in: snapshot)
+        .filter { snapshot.itemIdentifiers.contains($0) }
+
+      guard !items.isEmpty else { return }
+      snapshot.reconfigureItems(items)
+    }
+
+    func attachAvatarOverlay(over collectionView: UICollectionView, parent: UIViewController?) {
+      avatarOverlayController.attach(over: collectionView, in: parent)
+    }
+
+    func detachAvatarOverlay() {
+      avatarOverlayController.detach()
+    }
+
+    func syncAvatarOverlay(animate: Bool) {
+      guard MessageAvatarOverlayConfig.enabled else {
+        avatarOverlayController.clear()
+        return
+      }
+
+      guard let collectionView = currentCollectionView else { return }
+      if !avatarOverlayController.isAttached {
+        let parent = (collectionView as? MessagesCollectionView)?.findViewController()
+        avatarOverlayController.attach(over: collectionView, in: parent)
+      }
+      guard avatarOverlayController.isAttached else { return }
+
+      guard let overlayView = avatarOverlayController.view else { return }
+      let viewportFrame = avatarOverlayViewport(collectionView: collectionView, overlayView: overlayView)
+      var drafts: [Int64: AvatarOverlayDraft] = [:]
+
+      for cell in collectionView.visibleCells {
+        guard let cell = cell as? MessageCollectionViewCell,
+              cell.canShowAvatarOverlay,
+              let userInfo = cell.avatarOverlayUserInfo,
+              let indexPath = collectionView.indexPath(for: cell),
+              let item = item(at: indexPath),
+              let groupInfo = groupInfoByItem[item],
+              let stableId = groupInfo.ownerItem.messageStableId,
+              let avatarFrame = cell.avatarOverlayFrame(in: overlayView),
+              let limitFrame = cell.avatarOverlayLimitFrame(in: overlayView)
+        else {
+          continue
+        }
+
+        let cellFrame = cell.convert(cell.bounds, to: overlayView)
+        guard isValidOverlayFrame(cellFrame),
+              isValidOverlayFrame(avatarFrame),
+              isValidOverlayFrame(limitFrame)
+        else { continue }
+
+        if var draft = drafts[stableId] {
+          draft.limitFrame = draft.limitFrame.union(limitFrame)
+          if groupInfo.isLast {
+            draft.frame = avatarFrame
+          }
+          drafts[stableId] = draft
+        } else {
+          drafts[stableId] = AvatarOverlayDraft(
+            stableId: stableId,
+            userInfo: userInfo,
+            avatarX: avatarFrame.minX,
+            avatarSize: avatarFrame.width,
+            viewportFrame: viewportFrame,
+            onTap: { [weak self] in
+              self?.navigateToUser(userInfo.user.id)
+            },
+            frame: groupInfo.isLast ? avatarFrame : nil,
+            limitFrame: limitFrame
+          )
+        }
+      }
+
+      let items = drafts.values.compactMap { draft -> MessageAvatarOverlayItem? in
+        let frame = draft.frame ?? CGRect(
+          x: draft.avatarX,
+          y: draft.limitFrame.maxY - draft.avatarSize,
+          width: draft.avatarSize,
+          height: draft.avatarSize
+        )
+
+        guard isValidOverlayFrame(frame), isValidOverlayFrame(draft.limitFrame) else {
+          return nil
+        }
+
+        return MessageAvatarOverlayItem(
+          stableId: draft.stableId,
+          userInfo: draft.userInfo,
+          frame: frame,
+          viewportFrame: draft.viewportFrame,
+          limitFrame: draft.limitFrame,
+          onTap: draft.onTap
+        )
+      }
+
+      avatarOverlayController.sync(items: items, animate: animate)
+    }
+
+    private func avatarOverlayViewport(
+      collectionView: UICollectionView,
+      overlayView: UIView
+    ) -> CGRect {
+      let bounds = overlayView.bounds
+      guard bounds.width > 0, bounds.height > 0 else { return bounds }
+
+      let topInset = min(max(0, collectionView.contentInset.bottom), bounds.height)
+      let bottomInset = min(max(0, collectionView.contentInset.top), max(0, bounds.height - topInset))
+      let frame = bounds.inset(by: UIEdgeInsets(top: topInset, left: 0, bottom: bottomInset, right: 0))
+      return frame.width > 0 && frame.height > 0 ? frame : bounds
+    }
+
+    private func isValidOverlayFrame(_ frame: CGRect) -> Bool {
+      !frame.isNull && !frame.isInfinite && frame.width > 0 && frame.height > 0
+    }
+
+    private func navigateToUser(_ userId: Int64) {
+      NotificationCenter.default.post(
+        name: Notification.Name("NavigateToUser"),
+        object: nil,
+        userInfo: ["userId": userId]
+      )
     }
 
     func applyUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
@@ -1191,6 +1424,7 @@ private extension MessagesCollectionView {
           } else {
             snapshot.appendItems(items, toSection: sectionId)
           }
+          reconfigureGroupBoundaryItems(around: items, in: &snapshot)
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return }
@@ -1213,7 +1447,12 @@ private extension MessagesCollectionView {
               MessageListItem.threadAnchor(id: id),
             ]
           }.filter { snapshot.itemIdentifiers.contains($0) }
+          let boundaryItems = groupBoundaryItems(around: deletedItems, in: snapshot)
           snapshot.deleteItems(deletedItems)
+          let existingBoundaryItems = boundaryItems.filter { snapshot.itemIdentifiers.contains($0) }
+          if !existingBoundaryItems.isEmpty {
+            snapshot.reconfigureItems(existingBoundaryItems)
+          }
           safeApplySnapshot(snapshot, animatingDifferences: true)
 
         case let .messagesUpdated(_, messageIds, animated):
@@ -1226,7 +1465,9 @@ private extension MessagesCollectionView {
             ]
           }.filter { snapshot.itemIdentifiers.contains($0) }
           if !existingItems.isEmpty {
-            snapshot.reconfigureItems(existingItems)
+            let boundaryItems = groupBoundaryItems(around: existingItems, in: snapshot)
+              .filter { snapshot.itemIdentifiers.contains($0) }
+            snapshot.reconfigureItems(existingItems + boundaryItems)
             safeApplySnapshot(snapshot, animatingDifferences: animated ?? false)
           }
 
@@ -2151,7 +2392,8 @@ private extension MessagesCollectionView {
             let messageView = cell.messageView?.bubbleView else { return nil }
 
       let parameters = UIPreviewParameters()
-      parameters.backgroundColor = messageView.backgroundColor
+      parameters.backgroundColor = .clear
+      parameters.visiblePath = messageView.visiblePath()
 
       let targetedPreview = UITargetedPreview(view: messageView, parameters: parameters)
       return targetedPreview
@@ -2230,6 +2472,8 @@ private extension MessagesCollectionView {
           loadOlderMessagesIfNeeded()
         }
       }
+
+      syncAvatarOverlay(animate: false)
     }
 
     private func loadOlderMessagesIfNeeded() {

@@ -13,45 +13,79 @@ enum MessageBubbleTailSide: Equatable {
   case trailing
 }
 
-final class MessageBubbleTailView: UIView {
-  static let size = CGSize(width: 16, height: 15)
-  static let bubbleOverlap: CGFloat = 9
-  static let bottomOffset: CGFloat = 0
+final class MessageBubbleView: UIView {
+  private static let sourceSize = CGSize(width: 42, height: 36)
+  private static let sourceTailBottomY: CGFloat = 35
+  private static let tailDrawScale: CGFloat = 1.08
+  private static let exposedTailWidth: CGFloat = 6.3
+  static let cornerRadius: CGFloat = 18
 
+  static func tailWidth(for side: MessageBubbleTailSide) -> CGFloat {
+    side == .none ? 0 : exposedTailWidth
+  }
+
+  let contentView = UIView()
+
+  private let fillLayer = CAShapeLayer()
   private var colorTraitRegistration: UITraitChangeRegistration?
+  private var contentLeadingConstraint: NSLayoutConstraint?
+  private var contentTrailingConstraint: NSLayoutConstraint?
 
   private(set) var side: MessageBubbleTailSide = .none
 
   private var fillColor: UIColor = .clear
 
+  override var backgroundColor: UIColor? {
+    get { fillColor }
+    set {
+      fillColor = newValue ?? .clear
+      super.backgroundColor = .clear
+      updateShape()
+    }
+  }
+
   override init(frame: CGRect) {
     super.init(frame: frame)
-    backgroundColor = .clear
+    super.backgroundColor = .clear
     isOpaque = false
-    isUserInteractionEnabled = false
+    layer.cornerRadius = Self.cornerRadius
+    fillLayer.contentsScale = UIScreen.main.scale
+    fillLayer.fillRule = .nonZero
+    layer.insertSublayer(fillLayer, at: 0)
+
+    contentView.translatesAutoresizingMaskIntoConstraints = false
+    contentView.backgroundColor = .clear
+    contentView.clipsToBounds = true
+    contentView.layer.cornerRadius = Self.cornerRadius
+    addSubview(contentView)
+
+    let leading = contentView.leadingAnchor.constraint(equalTo: leadingAnchor)
+    let trailing = contentView.trailingAnchor.constraint(equalTo: trailingAnchor)
+    contentLeadingConstraint = leading
+    contentTrailingConstraint = trailing
+    NSLayoutConstraint.activate([
+      contentView.topAnchor.constraint(equalTo: topAnchor),
+      leading,
+      trailing,
+      contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+
     colorTraitRegistration = registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
-      (view: MessageBubbleTailView, _: UITraitCollection) in
-      view.updateVisibility()
+      (view: MessageBubbleView, _: UITraitCollection) in
+      view.updateShape()
     }
-    updateVisibility()
   }
 
-  override func draw(_ rect: CGRect) {
-    guard side != .none else { return }
-
-    resolvedFillColor.setFill()
-    path(in: bounds).fill()
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    updateShape()
   }
 
-  func configure(side: MessageBubbleTailSide, color: UIColor) {
-    guard self.side != side || !fillColor.isEqual(color) else { return }
+  func configure(side: MessageBubbleTailSide) {
+    guard self.side != side else { return }
     self.side = side
-    fillColor = color
-    updateVisibility()
-  }
-
-  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-    false
+    updateContentInsets()
+    updateShape()
   }
 
   @available(*, unavailable)
@@ -59,84 +93,138 @@ final class MessageBubbleTailView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private func updateVisibility() {
-    let alpha = resolvedFillColor.cgColor.alpha
-    isHidden = side == .none || alpha <= 0.01
-    setNeedsDisplay()
+  func visiblePath() -> UIBezierPath {
+    bubblePath(in: bounds)
   }
 
   private var resolvedFillColor: UIColor {
     fillColor.resolvedColor(with: traitCollection)
   }
 
-  private func path(in rect: CGRect) -> UIBezierPath {
-    let width = rect.width
-    let height = rect.height
-    let sideEdge = width
-    let visibleJoinX = max(0, width - Self.bubbleOverlap)
-    let footX: CGFloat = 1.1
-    let footY = rect.maxY - 1.2
-    let lowerJoinX = max(0, visibleJoinX - 0.4)
-    let lowerControlX = max(0, lowerJoinX - 0.8)
-    let lowerJoinY = rect.maxY - 0.7
-    let bottomJoin = rect.maxY - 4.4
+  private var tailWidth: CGFloat {
+    Self.tailWidth(for: side)
+  }
 
-    func x(_ value: CGFloat) -> CGFloat {
-      switch side {
+  private var contentRect: CGRect {
+    bounds.inset(by: UIEdgeInsets(
+      top: 0,
+      left: side == .leading ? tailWidth : 0,
+      bottom: 0,
+      right: side == .trailing ? tailWidth : 0
+    ))
+  }
+
+  private func updateContentInsets() {
+    contentLeadingConstraint?.constant = side == .leading ? tailWidth : 0
+    contentTrailingConstraint?.constant = side == .trailing ? -tailWidth : 0
+  }
+
+  private func updateShape() {
+    let color = resolvedFillColor
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    fillLayer.frame = bounds
+    fillLayer.fillColor = color.cgColor
+    fillLayer.path = visiblePath().cgPath
+    fillLayer.isHidden = color.cgColor.alpha <= 0.01
+    CATransaction.commit()
+  }
+
+  private func bubblePath(in rect: CGRect) -> UIBezierPath {
+    let contentRect = contentRect.intersection(rect)
+    guard !contentRect.isNull, contentRect.width > 0, contentRect.height > 0 else {
+      return UIBezierPath()
+    }
+
+    let path = UIBezierPath(roundedRect: contentRect, cornerRadius: Self.cornerRadius)
+    guard side != .none else { return path }
+
+    let drawSize = CGSize(
+      width: Self.sourceSize.width * Self.tailDrawScale,
+      height: Self.sourceSize.height * Self.tailDrawScale
+    )
+    let tailY = contentRect.maxY - Self.sourceTailBottomY * Self.tailDrawScale
+
+    let tailRect: CGRect
+    switch side {
+    case .none:
+      return path
+    case .leading:
+      tailRect = CGRect(
+        x: contentRect.minX - Self.exposedTailWidth,
+        y: tailY,
+        width: drawSize.width,
+        height: drawSize.height
+      )
+    case .trailing:
+      tailRect = CGRect(
+        x: contentRect.maxX + Self.exposedTailWidth - drawSize.width,
+        y: tailY,
+        width: drawSize.width,
+        height: drawSize.height
+      )
+    }
+
+    path.append(tailPath(in: tailRect))
+    return path
+  }
+
+  private func tailPath(in rect: CGRect) -> UIBezierPath {
+    let scaleX = rect.width / Self.sourceSize.width
+    let scaleY = rect.height / Self.sourceSize.height
+
+    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+      let resolvedX: CGFloat = switch side {
       case .none, .leading:
-        return rect.minX + value
+        rect.minX + x * scaleX
       case .trailing:
-        return rect.maxX - value
+        rect.maxX - x * scaleX
       }
+      return CGPoint(x: resolvedX, y: rect.minY + y * scaleY)
     }
 
     let path = UIBezierPath()
-    path.move(to: CGPoint(x: x(sideEdge), y: rect.minY + 1.0))
+    path.move(to: point(6, 17.5))
     path.addCurve(
-      to: CGPoint(x: x(visibleJoinX + 1.1), y: rect.minY + height * 0.48),
-      controlPoint1: CGPoint(x: x(sideEdge), y: rect.minY + height * 0.26),
-      controlPoint2: CGPoint(x: x(visibleJoinX + 3.8), y: rect.minY + height * 0.42)
+      to: point(23.5, 0.2),
+      controlPoint1: point(6, 7.9),
+      controlPoint2: point(13.85, 0.2)
     )
     path.addCurve(
-      to: CGPoint(x: x(footX + 1.4), y: footY - 0.65),
-      controlPoint1: CGPoint(x: x(visibleJoinX + 0.2), y: rect.minY + height * 0.68),
-      controlPoint2: CGPoint(x: x(footX + 2.6), y: footY - 1.15)
+      to: point(40.8, 17.5),
+      controlPoint1: point(33.05, 0.2),
+      controlPoint2: point(40.8, 7.95)
     )
     path.addCurve(
-      to: CGPoint(x: x(footX), y: footY),
-      controlPoint1: CGPoint(x: x(footX + 0.8), y: footY - 0.15),
-      controlPoint2: CGPoint(x: x(footX + 0.25), y: footY)
+      to: point(23.5, 34.8),
+      controlPoint1: point(40.8, 27.05),
+      controlPoint2: point(33.05, 34.8)
     )
     path.addCurve(
-      to: CGPoint(x: x(lowerJoinX), y: lowerJoinY),
-      controlPoint1: CGPoint(x: x(footX + 0.8), y: rect.maxY + 0.4),
-      controlPoint2: CGPoint(x: x(lowerControlX), y: lowerJoinY + 0.15)
+      to: point(12.4, 31.05),
+      controlPoint1: point(19.3, 34.8),
+      controlPoint2: point(15.45, 33.35)
     )
     path.addCurve(
-      to: CGPoint(x: x(sideEdge), y: bottomJoin),
-      controlPoint1: CGPoint(x: x(visibleJoinX + 0.8), y: lowerJoinY - 0.15),
-      controlPoint2: CGPoint(x: x(sideEdge - 1.2), y: bottomJoin + 0.25)
+      to: point(0.15, 35),
+      controlPoint1: point(9.15, 34.75),
+      controlPoint2: point(0.45, 35)
+    )
+    path.addCurve(
+      to: point(6, 26.9),
+      controlPoint1: point(5.8, 31.7),
+      controlPoint2: point(6, 26.9)
     )
     path.close()
-    return path
+    return side == .trailing ? path.reversing() : path
   }
 }
 
 // MARK: - UI
 
 extension UIMessageView {
-  static func createBubbleView() -> UIView {
-    let view = UIView()
-    UIView.performWithoutAnimation {
-      view.layer.cornerRadius = 18
-    }
-    view.clipsToBounds = true
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }
-
-  static func createBubbleTailView() -> MessageBubbleTailView {
-    let view = MessageBubbleTailView()
+  static func createBubbleView() -> MessageBubbleView {
+    let view = MessageBubbleView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }
