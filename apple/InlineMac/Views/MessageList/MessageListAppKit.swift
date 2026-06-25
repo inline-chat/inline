@@ -29,6 +29,7 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { chatRows.messages }
   private var state: ChatState
   private let messageRenderStyle: MessageRenderStyle
+  private let usesAvatarOverlay: Bool
   private var messageSelection = MessageSelectionState()
   var onMessageSelectionChange: ((MessageListSelectionUpdate) -> Void)?
 
@@ -86,6 +87,12 @@ class MessageListAppKit: NSViewController {
   private var heightPrecalcTask: Task<Void, Never>?
   private var readAllTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
+  private var avatarOverlaySyncInProgress = false
+  private var avatarOverlaySyncPending = false
+  private var avatarOverlayNeedsRaise = false
+  private var lastAvatarOverlayVisibleRange: NSRange?
+  private var lastAvatarOverlayVisibleRect: CGRect?
+  private var isDisposed = false
 
   // Translation system
   private let translationViewModel: TranslationViewModel
@@ -110,7 +117,9 @@ class MessageListAppKit: NSViewController {
     self.showUnreadAfter = showUnreadAfter
     self.initialPinnedMessage = initialPinnedMessage
     chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
-    messageRenderStyle = AppSettings.shared.messageRenderStyle
+    let renderStyle = AppSettings.shared.messageRenderStyle
+    messageRenderStyle = renderStyle
+    usesAvatarOverlay = AppConfig.macMessageAvatarOverlayEnabled
     state = ChatsManager
       .get(
         for: peerId,
@@ -425,6 +434,18 @@ class MessageListAppKit: NSViewController {
     return scroll
   }()
 
+  private lazy var avatarOverlayView = MessageAvatarOverlayView()
+  private let avatarOverlayStickyViewportInset: CGFloat = 8
+  private var avatarOverlayStickyMode: MessageAvatarStickyMode {
+    switch messageRenderStyle {
+    case .bubble:
+      return .bottom
+    case .minimal:
+      return .top
+    }
+  }
+  private let avatarOverlayGroupCalendar = Calendar.autoupdatingCurrent
+
   private var scrollToBottomBottomConstraint: NSLayoutConstraint!
   private lazy var scrollToBottomButton: ScrollToBottomButtonHostingView = {
     let scrollToBottomButton = ScrollToBottomButtonHostingView()
@@ -485,6 +506,8 @@ class MessageListAppKit: NSViewController {
     if isAtBottom {
       tableView.scrollToBottomWithInset(cancel: false)
     }
+
+    scheduleAvatarOverlaySync()
   }
 
   private func setInsets() {
@@ -649,6 +672,8 @@ class MessageListAppKit: NSViewController {
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
 
+    installAvatarOverlayIfNeeded(raise: true)
+
     if usesToolbarBgView {
       view.addSubview(toolbarBgView)
       let heightConstraint = toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight)
@@ -693,6 +718,395 @@ class MessageListAppKit: NSViewController {
       scrollToBottomButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
       scrollToBottomButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
     ])
+  }
+
+  private func scheduleAvatarOverlaySync(force: Bool = true, animate: Bool = false) {
+    guard usesAvatarOverlay, isViewLoaded, !isDisposed else { return }
+
+    if avatarOverlaySyncInProgress {
+      avatarOverlaySyncPending = true
+      return
+    }
+
+    avatarOverlaySyncInProgress = true
+    repeat {
+      let shouldForce = force || avatarOverlaySyncPending
+      avatarOverlaySyncPending = false
+      syncAvatarOverlay(force: shouldForce, animate: animate)
+    } while avatarOverlaySyncPending && !isDisposed
+    avatarOverlaySyncInProgress = false
+  }
+
+  private func installAvatarOverlayIfNeeded(raise: Bool = false) {
+    guard usesAvatarOverlay else { return }
+
+    if avatarOverlayView.superview === tableView {
+      let frame = tableView.bounds
+      if avatarOverlayView.frame != frame {
+        avatarOverlayView.frame = frame
+      }
+
+      guard raise, tableView.subviews.last !== avatarOverlayView else { return }
+      tableView.addSubview(avatarOverlayView, positioned: .above, relativeTo: nil)
+      return
+    }
+
+    if avatarOverlayView.superview != nil {
+      avatarOverlayView.removeFromSuperview()
+    }
+    avatarOverlayView.frame = tableView.bounds
+    avatarOverlayView.autoresizingMask = [.width, .height]
+    tableView.addSubview(avatarOverlayView, positioned: .above, relativeTo: nil)
+  }
+
+  private func syncAvatarOverlay(force: Bool, animate: Bool) {
+    guard usesAvatarOverlay, isViewLoaded, !isDisposed else { return }
+
+    let visibleRect = tableView.visibleRect
+    let viewportRect = scrollView.effectiveVisibleRect()
+    let comparableVisibleRect = viewportRect
+    let range = tableView.rows(in: visibleRect)
+    guard range.location != NSNotFound, range.length > 0 else {
+      lastAvatarOverlayVisibleRange = nil
+      lastAvatarOverlayVisibleRect = nil
+      if tableView.numberOfRows == 0 {
+        avatarOverlayView.clearAvatars()
+      }
+      return
+    }
+    if !force,
+       !avatarOverlayNeedsRaise,
+       avatarOverlayView.superview === tableView,
+       let lastAvatarOverlayVisibleRange,
+       let lastAvatarOverlayVisibleRect,
+       NSEqualRanges(lastAvatarOverlayVisibleRange, range),
+       lastAvatarOverlayVisibleRect == comparableVisibleRect
+    {
+      return
+    }
+    lastAvatarOverlayVisibleRange = range
+    lastAvatarOverlayVisibleRect = comparableVisibleRect
+
+    installAvatarOverlayIfNeeded(raise: avatarOverlayNeedsRaise)
+    avatarOverlayNeedsRaise = false
+    guard avatarOverlayView.superview != nil else { return }
+    let viewportFrame = avatarOverlayView.convert(viewportRect, from: tableView)
+
+    let start = max(range.location, 0)
+    let end = min(range.location + range.length, tableView.numberOfRows)
+    guard start < end else {
+      if tableView.numberOfRows == 0 {
+        avatarOverlayView.clearAvatars()
+      }
+      return
+    }
+
+    var items: [MessageAvatarOverlayItem] = []
+    var processedAvatarStableIds = Set<Int64>()
+    items.reserveCapacity(end - start)
+
+    #if DEBUG
+    let startedAt = Date()
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    os_signpost(
+      .begin,
+      log: Self.signpostLog,
+      name: "MacAvatarOverlaySync",
+      signpostID: signpostID,
+      "%{public}s",
+      "force=\(force) animate=\(animate) rows=\(end - start)"
+    )
+    #endif
+
+    var row = start
+    while row < end {
+      guard let group = avatarOverlayGroup(forVisibleRow: row) else {
+        row += 1
+        continue
+      }
+      defer {
+        row = rowAfterAvatarGroup(currentRow: row, groupRange: group.range, visibleEnd: end)
+      }
+
+      let ownerIndex = avatarOwnerIndex(in: group.range)
+      let ownerStableId = messages[ownerIndex].id
+      guard processedAvatarStableIds.insert(ownerStableId).inserted else { continue }
+
+      guard let item = avatarOverlayItem(
+        groupRange: group.range,
+        visibleStart: start,
+        visibleEnd: end,
+        viewportFrame: viewportFrame
+      ) else {
+        continue
+      }
+      items.append(item)
+    }
+
+    let stats = avatarOverlayView.sync(
+      items: items,
+      animate: animate
+    )
+
+    #if DEBUG
+    os_signpost(
+      .end,
+      log: Self.signpostLog,
+      name: "MacAvatarOverlaySync",
+      signpostID: signpostID,
+      "%{public}s",
+      "rows=\(end - start) items=\(items.count) active_before=\(stats.active) created=\(stats.created) reused=\(stats.reused) removed=\(stats.removed) recycled=\(stats.recycled) frames=\(stats.frameUpdates) animated_frames=\(stats.animatedFrameUpdates) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: startedAt))"
+    )
+    #endif
+  }
+
+  private func avatarOverlayGroup(forVisibleRow row: Int) -> (messageIndex: Int, range: ClosedRange<Int>)? {
+    guard let stableId = messageStableId(forRow: row) else { return nil }
+    guard let messageIndex = chatRows.messageIndex(forStableMessageId: stableId) else { return nil }
+    guard messages.indices.contains(messageIndex) else { return nil }
+
+    let message = messages[messageIndex]
+    guard showsAvatarOverlay(for: message) else { return nil }
+
+    return (messageIndex, avatarGroupRange(containing: messageIndex))
+  }
+
+  private func rowAfterAvatarGroup(
+    currentRow: Int,
+    groupRange: ClosedRange<Int>,
+    visibleEnd: Int
+  ) -> Int {
+    guard let lastRow = chatRows.rowIndex(forMessageStableId: messages[groupRange.upperBound].id) else {
+      return currentRow + 1
+    }
+    return max(currentRow + 1, min(lastRow + 1, visibleEnd))
+  }
+
+  private func avatarOverlayItem(
+    groupRange: ClosedRange<Int>,
+    visibleStart: Int,
+    visibleEnd: Int,
+    viewportFrame: CGRect
+  ) -> MessageAvatarOverlayItem? {
+    guard let firstRow = chatRows.rowIndex(forMessageStableId: messages[groupRange.lowerBound].id),
+          let lastRow = chatRows.rowIndex(forMessageStableId: messages[groupRange.upperBound].id)
+    else {
+      return nil
+    }
+
+    let ownerMessage = messages[avatarOwnerIndex(in: groupRange)]
+    let limitFrame = avatarOverlayView.convert(
+      avatarStickyLimitFrame(groupRange: groupRange, firstRow: firstRow, lastRow: lastRow),
+      from: tableView
+    )
+    let sticky = MessageAvatarOverlaySticky(
+      mode: avatarOverlayStickyMode,
+      viewportFrame: viewportFrame,
+      limitFrame: limitFrame,
+      viewportEdgeInset: avatarOverlayStickyViewportInset
+    )
+
+    let anchorRow = avatarAnchorRow(firstRow: firstRow, lastRow: lastRow)
+    if anchorRow >= visibleStart,
+       anchorRow < visibleEnd,
+       let cell = tableView.view(atColumn: 0, row: anchorRow, makeIfNecessary: false) as? MessageTableCell,
+       var item = cell.avatarOverlayItem(in: avatarOverlayView)
+    {
+      item.sticky = sticky
+      return item
+    }
+
+    return syntheticAvatarOverlayItem(
+      for: ownerMessage,
+      firstRow: firstRow,
+      lastRow: lastRow,
+      sticky: sticky
+    )
+  }
+
+  private func avatarGroupRange(containing index: Int) -> ClosedRange<Int> {
+    var start = index
+    while start > messages.startIndex, canGroup(messages[start - 1], messages[start]) {
+      start -= 1
+    }
+
+    var end = index
+    while end < messages.index(before: messages.endIndex), canGroup(messages[end], messages[end + 1]) {
+      end += 1
+    }
+
+    return start ... end
+  }
+
+  private func avatarOwnerIndex(in groupRange: ClosedRange<Int>) -> Int {
+    switch avatarOverlayStickyMode {
+    case .bottom:
+      groupRange.upperBound
+    case .top:
+      groupRange.lowerBound
+    }
+  }
+
+  private func showsAvatarOverlay(for message: FullMessage) -> Bool {
+    switch messageRenderStyle {
+    case .bubble:
+      return chat?.type != .privateChat && message.message.out != true
+    case .minimal:
+      return true
+    }
+  }
+
+  private func canGroup(_ earlier: FullMessage, _ later: FullMessage) -> Bool {
+    guard earlier.message.fromId == later.message.fromId else { return false }
+
+    let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
+    guard gapSeconds <= 300 else { return false }
+
+    return avatarOverlayGroupCalendar.isDate(earlier.message.date, inSameDayAs: later.message.date)
+  }
+
+  private func avatarStickyLimitFrame(
+    groupRange: ClosedRange<Int>,
+    firstRow: Int,
+    lastRow: Int
+  ) -> CGRect {
+    var frame = avatarGroupFrame(firstRow: firstRow, lastRow: lastRow)
+
+    switch avatarOverlayStickyMode {
+    case .bottom:
+      let startOffset = avatarStickyStartOffset(groupRange: groupRange)
+      frame.origin.y += startOffset
+      frame.size.height = max(0, frame.height - startOffset)
+
+    case .top:
+      break
+    }
+
+    return frame
+  }
+
+  private func avatarGroupFrame(firstRow: Int, lastRow: Int) -> CGRect {
+    let firstFrame = tableView.rect(ofRow: firstRow)
+    let lastFrame = tableView.rect(ofRow: lastRow)
+    let minY = min(firstFrame.minY, lastFrame.minY)
+    let maxY = max(firstFrame.maxY, lastFrame.maxY)
+    return CGRect(x: 0, y: minY, width: tableView.bounds.width, height: max(0, maxY - minY))
+  }
+
+  private func avatarStickyStartOffset(groupRange: ClosedRange<Int>) -> CGFloat {
+    switch (messageRenderStyle, avatarOverlayStickyMode) {
+    case (.bubble, .bottom):
+      let firstMessage = messages[groupRange.lowerBound]
+      let nameHeight = avatarGroupShowsName(for: firstMessage) ? Theme.messageNameLabelHeight : 0
+      return bubbleGroupStartInset + nameHeight
+
+    case (.bubble, .top), (.minimal, _):
+      return 0
+    }
+  }
+
+  private var bubbleGroupStartInset: CGFloat {
+    Theme.messageGroupSpacing + Theme.messageOuterVerticalPadding
+  }
+
+  private func avatarGroupShowsName(for message: FullMessage) -> Bool {
+    chat?.type != .privateChat && message.message.out != true
+  }
+
+  private func syntheticAvatarOverlayItem(
+    for message: FullMessage,
+    firstRow: Int,
+    lastRow: Int,
+    sticky: MessageAvatarOverlaySticky
+  ) -> MessageAvatarOverlayItem? {
+    let anchorRow = avatarAnchorRow(firstRow: firstRow, lastRow: lastRow)
+    guard let frame = syntheticAvatarFrame(forRow: anchorRow) else { return nil }
+
+    return MessageAvatarOverlayItem(
+      stableId: message.id,
+      userInfo: avatarUserInfo(for: message),
+      frame: frame,
+      sticky: sticky
+    ) { [weak self] in
+      guard let self else { return }
+      guard let user = message.senderInfo?.user else { return }
+      Task { @MainActor in
+        self.dependencies.requestOpenChat(peer: .user(id: user.id))
+      }
+    }
+  }
+
+  private func avatarUserInfo(for message: FullMessage) -> UserInfo {
+    if let senderInfo = message.senderInfo {
+      return senderInfo
+    }
+
+    if messageRenderStyle == .minimal,
+       message.message.out == true,
+       let currentUserInfo = dependencies.rootData?.currentUserInfo
+    {
+      return currentUserInfo
+    }
+
+    return .deleted
+  }
+
+  private func avatarAnchorRow(firstRow: Int, lastRow: Int) -> Int {
+    switch avatarOverlayStickyMode {
+    case .bottom:
+      lastRow
+    case .top:
+      firstRow
+    }
+  }
+
+  private func syntheticAvatarFrame(forRow row: Int) -> CGRect? {
+    guard row >= 0, row < tableView.numberOfRows else { return nil }
+    let rowFrame = tableView.rect(ofRow: row)
+
+    let metrics = syntheticAvatarMetrics(rowFrame: rowFrame, row: row)
+    let origin = avatarOverlayView.convert(metrics.origin, from: tableView)
+    return CGRect(
+      x: origin.x,
+      y: origin.y,
+      width: metrics.size.width,
+      height: metrics.size.height
+    )
+  }
+
+  private func syntheticAvatarMetrics(rowFrame: CGRect, row: Int) -> (origin: CGPoint, size: CGSize) {
+    switch messageRenderStyle {
+    case .bubble:
+      let size = CGSize(width: Theme.messageAvatarSize, height: Theme.messageAvatarSize)
+      return (
+        origin: CGPoint(
+          x: Theme.messageSidePadding,
+          y: rowFrame.maxY - Theme.messageOuterVerticalPadding - size.height
+        ),
+        size: size
+      )
+
+    case .minimal:
+      let size = CGSize(
+        width: MessageSizeCalculator.minimalAvatarSize,
+        height: MessageSizeCalculator.minimalAvatarSize
+      )
+      let groupSpacing = if isFirstMessage(at: row) {
+        CGFloat(0)
+      } else if startsAfterDaySeparator(row: row) {
+        MessageSizeCalculator.minimalAfterDaySeparatorGroupSpacing
+      } else {
+        MessageSizeCalculator.minimalGroupSpacing
+      }
+      return (
+        origin: CGPoint(
+          x: MessageSizeCalculator.minimalContentLeadingInset,
+          y: rowFrame.minY + Theme.messageOuterVerticalPadding + groupSpacing +
+            MessageSizeCalculator.minimalNameAvatarOffset
+        ),
+        size: size
+      )
+    }
   }
 
   private var lastColumnWidthUpdate: CGFloat = 0
@@ -831,6 +1245,8 @@ class MessageListAppKit: NSViewController {
 //        }
       // }
     }
+
+    scheduleAvatarOverlaySync()
   }
 
   private func setupScrollObserver() {
@@ -949,6 +1365,8 @@ class MessageListAppKit: NSViewController {
   private var prevOffset: CGFloat = 0
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    scheduleAvatarOverlaySync(force: false)
+
     throttle(.milliseconds(32), identifier: "chat.scrollViewBoundsChanged", by: .mainActor, option: .default) { [
       weak self
     ] in
@@ -1033,6 +1451,7 @@ class MessageListAppKit: NSViewController {
 
   @objc func scrollViewFrameChanged(notification: Notification) {
     updateMessageViewColors()
+    scheduleAvatarOverlaySync()
 
     if suppressResizeScrollMaintenance {
       return
@@ -1147,6 +1566,10 @@ class MessageListAppKit: NSViewController {
     #if DEBUG
     log.trace("viewDidLayout() called, width=\(tableWidth())")
     #endif
+    defer {
+      scheduleAvatarOverlaySync()
+    }
+
 
     updateToolbar()
 
@@ -1183,6 +1606,7 @@ class MessageListAppKit: NSViewController {
         guard let self else { return }
         // Finalize heights one last time to ensure no broken heights on initial load
         needsInitialScroll = false
+        scheduleAvatarOverlaySync()
       }
     }
 
@@ -1207,6 +1631,7 @@ class MessageListAppKit: NSViewController {
     log.trace("viewDidAppear() called")
     updateScrollViewInsets()
     updateToolbar()
+    scheduleAvatarOverlaySync()
   }
 
   override func viewWillDisappear() {
@@ -1250,6 +1675,7 @@ class MessageListAppKit: NSViewController {
 
     NSAnimationContext.endGrouping()
     CATransaction.commit()
+    scheduleAvatarOverlaySync()
   }
 
   private var wasLastResizeAboveLimit = false
@@ -1401,9 +1827,11 @@ class MessageListAppKit: NSViewController {
     loadBatchTask?.cancel()
     loadBatchTask = Task { [weak self] in
       guard let self else { return }
-      defer { loadBatchTask = nil }
-      guard !Task.isCancelled else {
+      defer {
+        loadBatchTask = nil
         loadingBatch = false
+      }
+      guard !Task.isCancelled else {
         return
       }
 
@@ -1415,12 +1843,14 @@ class MessageListAppKit: NSViewController {
       }
       var didInsertRows = false
 
-      let applyLoad: () -> Bool? = { [weak self] in
+      log.trace("Loading \(loadDirectionLabel(direction)) batch")
+      let didLoadLocalBatch = await chatRows.loadBatchAsync(at: direction, publish: false)
+      guard !Task.isCancelled else { return }
+
+      let applyLoadedBatch: () -> Bool? = { [weak self] in
         guard let self else { return false }
         guard !Task.isCancelled else { return false }
 
-        log.trace("Loading \(loadDirectionLabel(direction)) batch")
-        chatRows.loadBatch(at: direction, publish: false)
         let rowUpdate = chatRows.syncFromViewModelAfterManualMutation()
         pruneMessageSelection()
 
@@ -1429,6 +1859,7 @@ class MessageListAppKit: NSViewController {
             tableView.beginUpdates()
             tableView.insertRows(at: inserted, withAnimation: .none)
             tableView.endUpdates()
+            scheduleAvatarOverlaySync()
             didInsertRows = true
             return true
 
@@ -1438,24 +1869,24 @@ class MessageListAppKit: NSViewController {
 
           case .reloadAll:
             tableView.reloadData()
+            scheduleAvatarOverlaySync()
             didInsertRows = true
             return true
 
           case .remove(_), .reloadRows(_), .insert(_):
             tableView.reloadData()
+            scheduleAvatarOverlaySync()
             didInsertRows = true
             return true
         }
       }
 
-      if direction == .older {
+      if didLoadLocalBatch, direction == .older {
         // Preserve scroll position from bottom if we're loading at top.
-        maintainingBottomScroll(applyLoad)
-      } else {
-        _ = applyLoad()
+        maintainingBottomScroll(applyLoadedBatch)
+      } else if didLoadLocalBatch {
+        _ = applyLoadedBatch()
       }
-
-      loadingBatch = false
 
       guard !Task.isCancelled else { return }
       guard !didInsertRows else { return }
@@ -1489,6 +1920,7 @@ class MessageListAppKit: NSViewController {
     rebuildRowItems()
     tableView.reloadData()
     pruneMessageSelection()
+    scheduleAvatarOverlaySync()
   }
 
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
@@ -1502,6 +1934,7 @@ class MessageListAppKit: NSViewController {
       "type=\(updateLabel) rows=\(beforeRows) messages=\(beforeMessages)"
     )
     defer {
+      scheduleAvatarOverlaySync()
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
       span.end(
         "type=\(updateLabel) rows_before=\(beforeRows) rows_after=\(tableView.numberOfRows) messages_before=\(beforeMessages) messages_after=\(messages.count) duration_ms=\(durationMs)"
@@ -1537,6 +1970,7 @@ class MessageListAppKit: NSViewController {
           guard let self else { return }
           context.duration = animationDuration
           tableView.reloadData()
+          scheduleAvatarOverlaySync(animate: true)
           if shouldScroll { scrollToBottom(animated: true) }
         } completionHandler: { [weak self] in
           self?.isPerformingUpdate = false
@@ -1549,11 +1983,15 @@ class MessageListAppKit: NSViewController {
     }
 
     func applyStructuralInsert(animated: Bool, inserted: IndexSet) {
+      let boundaryRows = groupBoundaryRefreshRows(aroundInsertedRows: inserted)
+
       if animated {
         NSAnimationContext.runAnimationGroup { [weak self] context in
           guard let self else { return }
           context.duration = animationDuration
           tableView.insertRows(at: inserted, withAnimation: .effectFade)
+          reloadGroupBoundaryRows(boundaryRows)
+          scheduleAvatarOverlaySync(animate: true)
           if shouldScroll { scrollToBottom(animated: true) }
         } completionHandler: { [weak self] in
           self?.isPerformingUpdate = false
@@ -1562,6 +2000,7 @@ class MessageListAppKit: NSViewController {
         tableView.beginUpdates()
         tableView.insertRows(at: inserted, withAnimation: .none)
         tableView.endUpdates()
+        reloadGroupBoundaryRows(boundaryRows)
         if shouldScroll { scrollToBottom(animated: false) }
         isPerformingUpdate = false
       }
@@ -1573,6 +2012,7 @@ class MessageListAppKit: NSViewController {
           guard let self else { return }
           context.duration = animationDuration
           tableView.removeRows(at: removed, withAnimation: .effectFade)
+          scheduleAvatarOverlaySync(animate: true)
           if shouldScroll { scrollToBottom(animated: true) }
         } completionHandler: { [weak self] in
           self?.isPerformingUpdate = false
@@ -1629,6 +2069,7 @@ class MessageListAppKit: NSViewController {
                 context.duration = animationDuration
                 tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
                 tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+                scheduleAvatarOverlaySync(animate: true)
                 if shouldScroll { scrollToBottom(animated: true) }
               } completionHandler: { [weak self] in
                 self?.isPerformingUpdate = false
@@ -1842,6 +2283,7 @@ class MessageListAppKit: NSViewController {
     apply?()
     NSAnimationContext.endGrouping()
     CATransaction.commit()
+    scheduleAvatarOverlaySync()
   }
 
   private func updateHeightsForRows(at indexSet: IndexSet, width: CGFloat? = nil) {
@@ -1859,6 +2301,7 @@ class MessageListAppKit: NSViewController {
 
           let props = MessageViewProps(
             firstInGroup: inputProps.firstInGroup,
+            lastInGroup: inputProps.lastInGroup,
             startsAfterDaySeparator: inputProps.startsAfterDaySeparator,
             isLastMessage: inputProps.isLastMessage,
             isFirstMessage: inputProps.isFirstMessage,
@@ -1876,6 +2319,61 @@ class MessageListAppKit: NSViewController {
         }
       }
     }
+  }
+
+  private func groupBoundaryRefreshRows(aroundInsertedRows inserted: IndexSet) -> IndexSet {
+    var rows = IndexSet()
+
+    for range in inserted.rangeView {
+      guard let firstInsertedRow = firstMessageRow(in: range),
+            let lastInsertedRow = lastMessageRow(in: range)
+      else {
+        continue
+      }
+
+      let previousRow = firstInsertedRow - 1
+      if previousRow >= 0, canGroupRows(previousRow, firstInsertedRow) {
+        rows.insert(previousRow)
+      }
+
+      let nextRow = range.upperBound
+      if nextRow < tableView.numberOfRows, canGroupRows(lastInsertedRow, nextRow) {
+        rows.insert(nextRow)
+      }
+    }
+
+    rows.subtract(inserted)
+    return rows
+  }
+
+  private func firstMessageRow(in range: Range<Int>) -> Int? {
+    range.first { messageStableId(forRow: $0) != nil }
+  }
+
+  private func lastMessageRow(in range: Range<Int>) -> Int? {
+    range.reversed().first { messageStableId(forRow: $0) != nil }
+  }
+
+  private func reloadGroupBoundaryRows(_ rows: IndexSet) {
+    guard !rows.isEmpty else { return }
+
+    #if DEBUG
+    PerformanceTrace.event(
+      "MacMessagesGroupBoundaryRefresh",
+      category: .messages,
+      "rows=\(Array(rows))"
+    )
+    #endif
+
+    tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+    tableView.noteHeightOfRows(withIndexesChanged: rows)
+  }
+
+  private func canGroupRows(_ earlierRow: Int, _ laterRow: Int) -> Bool {
+    guard let earlier = message(forRow: earlierRow), let later = message(forRow: laterRow) else {
+      return false
+    }
+    return canGroup(earlier, later)
   }
 
   enum RowGroup {
@@ -1929,6 +2427,7 @@ class MessageListAppKit: NSViewController {
       let message = message(forRow: row)
       return MessageViewInputProps(
         firstInGroup: true,
+        lastInGroup: true,
         startsAfterDaySeparator: false,
         isLastMessage: true,
         isFirstMessage: true,
@@ -1944,6 +2443,7 @@ class MessageListAppKit: NSViewController {
     guard let message = message(forRow: row) else {
       return MessageViewInputProps(
         firstInGroup: true,
+        lastInGroup: true,
         startsAfterDaySeparator: false,
         isLastMessage: true,
         isFirstMessage: true,
@@ -1958,6 +2458,7 @@ class MessageListAppKit: NSViewController {
 
     return MessageViewInputProps(
       firstInGroup: isFirstInGroup(at: row),
+      lastInGroup: isLastInGroup(at: row),
       startsAfterDaySeparator: startsAfterDaySeparator(row: row),
       isLastMessage: isLastMessage(at: row),
       isFirstMessage: isFirstMessage(at: row),
@@ -2216,23 +2717,17 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     let current = messages[index]
     let previous = messages[index - 1]
-    if previous.message.fromId != current.message.fromId {
-      return true
-    }
+    return !canGroup(previous, current)
+  }
 
-    // Day boundary should start a new group (even for the same sender).
-    let calendar = Calendar.autoupdatingCurrent
-    if calendar.startOfDay(for: previous.message.date) != calendar.startOfDay(for: current.message.date) {
-      return true
-    }
+  func isLastInGroup(at row: Int) -> Bool {
+    guard let stableId = messageStableId(forRow: row) else { return true }
+    guard let index = chatRows.messageIndex(forStableMessageId: stableId) else { return true }
+    guard index < messages.count - 1 else { return true }
 
-    let gapSeconds = current.message.date.timeIntervalSince(previous.message.date)
-    // A quiet period should start a new visual group in both bubble and minimal styles.
-    if gapSeconds > 300 {
-      return true
-    }
-
-    return false
+    let current = messages[index]
+    let next = messages[index + 1]
+    return !canGroup(current, next)
   }
 
   func isLastMessage(at row: Int) -> Bool {
@@ -2334,6 +2829,7 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     let props = MessageViewProps(
       firstInGroup: inputProps.firstInGroup,
+      lastInGroup: inputProps.lastInGroup,
       startsAfterDaySeparator: inputProps.startsAfterDaySeparator,
       isLastMessage: inputProps.isLastMessage,
       isFirstMessage: inputProps.isFirstMessage,
@@ -2349,6 +2845,9 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     cell.setScrollState(scrollState)
     cell.configure(with: message, props: props, animate: animateUpdates)
+    if usesAvatarOverlay {
+      avatarOverlayNeedsRaise = true
+    }
     return cell
   }
 
@@ -2739,6 +3238,8 @@ extension MessageListAppKit {
 
 extension MessageListAppKit {
   func dispose() {
+    isDisposed = true
+
     // Cancel any tasks
     eventMonitorTask?.cancel()
     eventMonitorTask = nil
@@ -2754,6 +3255,11 @@ extension MessageListAppKit {
     readAllTask = nil
     deferredTranslationTask?.cancel()
     deferredTranslationTask = nil
+    avatarOverlaySyncInProgress = false
+    avatarOverlaySyncPending = false
+    if usesAvatarOverlay {
+      avatarOverlayView.clearAvatars()
+    }
 
     // Remove all observers
     NotificationCenter.default.removeObserver(self)

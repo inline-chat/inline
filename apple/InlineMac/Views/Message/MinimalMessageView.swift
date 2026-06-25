@@ -90,6 +90,14 @@ class MinimalMessageViewAppKit: NSView {
     chatHasAvatar && props.layout.hasAvatar
   }
 
+  private var showsInlineAvatar: Bool {
+    showsAvatar && !usesAvatarOverlay
+  }
+
+  private var usesAvatarOverlay: Bool {
+    props.renderStyle == .minimal && AppConfig.macMessageAvatarOverlayEnabled
+  }
+
   private var avatarUserInfo: UserInfo {
     if let senderInfo = fullMessage.senderInfo {
       return senderInfo
@@ -1015,7 +1023,7 @@ class MinimalMessageViewAppKit: NSView {
     addSubview(hoverBackgroundView)
     addSubview(bubbleView)
 
-    if showsAvatar {
+    if showsInlineAvatar {
       addSubview(avatarView)
     }
 
@@ -1706,7 +1714,7 @@ class MinimalMessageViewAppKit: NSView {
     }
     MessageGestureTrace.debug("MinimalMessageView.setupGestureRecognizers messageId=\(message.messageId) added=doubleClick")
 
-    if showsAvatar {
+    if showsInlineAvatar {
       avatarView.onClick = { [weak self] in
         if let self {
           MessageGestureTrace.debug("MinimalMessageView.avatarClick messageId=\(self.message.messageId)")
@@ -1847,6 +1855,36 @@ class MinimalMessageViewAppKit: NSView {
     }
   }
 
+  func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
+    guard usesAvatarOverlay, showsAvatar, let avatar = props.layout.avatar else { return nil }
+
+    let sourceHeight = bounds.height > 0 ? bounds.height : props.layout.totalHeight
+    guard sourceHeight > 0 else { return nil }
+
+    let top = props.layout.wrapper.spacing.top + avatar.spacing.top
+    let sourceY = isFlipped ? top : sourceHeight - top
+    let avatarOrigin = convert(NSPoint(x: avatar.spacing.left, y: sourceY), to: coordinateView)
+    let y = coordinateView.isFlipped ? avatarOrigin.y : avatarOrigin.y - avatar.size.height
+    let frame = NSRect(
+      x: avatarOrigin.x,
+      y: y,
+      width: avatar.size.width,
+      height: avatar.size.height
+    )
+
+    return MessageAvatarOverlayItem(
+      stableId: fullMessage.id,
+      userInfo: avatarUserInfo,
+      frame: frame,
+      sticky: nil
+    ) { [weak self] in
+      if let self {
+        MessageGestureTrace.debug("MinimalMessageView.avatarOverlayClick messageId=\(self.message.messageId)")
+      }
+      self?.handleAvatarClick()
+    }
+  }
+
   @objc private func handleNameClick() {
     MessageGestureTrace.debug("MinimalMessageView.handleNameClick messageId=\(message.messageId)")
     handleAvatarClick()
@@ -1948,7 +1986,7 @@ class MinimalMessageViewAppKit: NSView {
 //      right: 0
 //    )
 
-    if let avatar = layout.avatar, showsAvatar {
+    if let avatar = layout.avatar, showsInlineAvatar {
       avatarViewTopConstraint = avatarView.topAnchor
         .constraint(
           equalTo: topAnchor,
@@ -3625,7 +3663,7 @@ class MinimalMessageViewAppKit: NSView {
     // Update props and reflect changes
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
 
-    if showsAvatar {
+    if showsInlineAvatar {
       avatarView.update(userInfo: avatarUserInfo)
     }
 
@@ -4108,7 +4146,7 @@ extension MinimalMessageViewAppKit {
       }
     }
 
-    if showsAvatar, avatarView.superview != nil {
+    if showsInlineAvatar, avatarView.superview != nil {
       let pointInAvatar = avatarView.convert(point, from: self)
       if let hit = avatarView.hitTest(pointInAvatar) {
         MessageGestureTrace.trace(

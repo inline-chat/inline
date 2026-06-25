@@ -91,6 +91,14 @@ class MessageViewAppKit: NSView {
     chatHasAvatar && props.layout.hasAvatar && !outgoing
   }
 
+  private var showsInlineAvatar: Bool {
+    showsAvatar && !usesAvatarOverlay
+  }
+
+  private var usesAvatarOverlay: Bool {
+    props.renderStyle == .bubble && AppConfig.macMessageAvatarOverlayEnabled
+  }
+
   private var showsName: Bool {
     chatHasAvatar && props.layout.hasName
   }
@@ -173,6 +181,14 @@ class MessageViewAppKit: NSView {
 
   private var usesOutgoingBubbleStyle: Bool {
     usesOutgoingBubbleStyle(for: props)
+  }
+
+  private var bubbleTailSide: MessageBubbleTailView.Side {
+    guard props.renderStyle == .bubble, props.lastInGroup, props.layout.hasBubbleColor else {
+      return .none
+    }
+
+    return outgoing ? .trailing : .leading
   }
 
   private func usesOutgoingBubbleStyle(for props: MessageViewProps) -> Bool {
@@ -273,6 +289,20 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  private func syncBubbleTail() {
+    let side = bubbleTailSide
+    bubbleTailView.configure(
+      side: side,
+      color: bubbleBackgroundColor
+    )
+    syncBubbleTailSideConstraint(side)
+  }
+
+  private func syncBubbleTailSideConstraint(_ side: MessageBubbleTailView.Side) {
+    bubbleTailLeadingConstraint?.isActive = side == .leading
+    bubbleTailTrailingConstraint?.isActive = side == .trailing
+  }
+
   private var linkColor: NSColor {
     Self.linkColor(usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
   }
@@ -327,6 +357,12 @@ class MessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.cornerRadius = Theme.messageBubbleCornerRadius
     view.backgroundColor = bubbleBackgroundColor
+    return view
+  }()
+
+  private lazy var bubbleTailView: MessageBubbleTailView = {
+    let view = MessageBubbleTailView()
+    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -1024,9 +1060,11 @@ class MessageViewAppKit: NSView {
     layerContentsRedrawPolicy = .onSetNeedsDisplay
     layer?.drawsAsynchronously = true
 
+    addSubview(bubbleTailView)
     addSubview(bubbleView)
+    syncBubbleTail()
 
-    if showsAvatar {
+    if showsInlineAvatar {
       addSubview(avatarView)
     }
 
@@ -1713,7 +1751,7 @@ class MessageViewAppKit: NSView {
     }
     MessageGestureTrace.debug("MessageView.setupGestureRecognizers messageId=\(message.messageId) added=doubleClick")
 
-    if showsAvatar {
+    if showsInlineAvatar {
       avatarView.onClick = { [weak self] in
         if let self {
           MessageGestureTrace.debug("MessageView.avatarClick messageId=\(self.message.messageId)")
@@ -1855,6 +1893,36 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
+    guard usesAvatarOverlay, showsAvatar, let avatar = props.layout.avatar else { return nil }
+
+    let sourceHeight = bounds.height > 0 ? bounds.height : props.layout.totalHeight
+    guard sourceHeight > 0 else { return nil }
+
+    let top = props.layout.wrapper.spacing.top + avatar.spacing.top
+    let sourceY = isFlipped ? top : sourceHeight - top
+    let avatarOrigin = convert(NSPoint(x: avatar.spacing.left, y: sourceY), to: coordinateView)
+    let y = coordinateView.isFlipped ? avatarOrigin.y : avatarOrigin.y - avatar.size.height
+    let frame = NSRect(
+      x: avatarOrigin.x,
+      y: y,
+      width: avatar.size.width,
+      height: avatar.size.height
+    )
+
+    return MessageAvatarOverlayItem(
+      stableId: fullMessage.id,
+      userInfo: fullMessage.senderInfo ?? .deleted,
+      frame: frame,
+      sticky: nil
+    ) { [weak self] in
+      if let self {
+        MessageGestureTrace.debug("MessageView.avatarOverlayClick messageId=\(self.message.messageId)")
+      }
+      self?.handleAvatarClick()
+    }
+  }
+
   @objc private func handleNameClick() {
     MessageGestureTrace.debug("MessageView.handleNameClick messageId=\(message.messageId)")
     handleAvatarClick()
@@ -1932,7 +2000,7 @@ class MessageViewAppKit: NSView {
 //      right: 0
 //    )
 
-    if let avatar = layout.avatar, showsAvatar {
+    if let avatar = layout.avatar, showsInlineAvatar {
       constraints.append(
         contentsOf: [
           avatarView.leadingAnchor
@@ -2011,12 +2079,24 @@ class MessageViewAppKit: NSView {
       !outgoing ?
       bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading) :
       bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding)
+    bubbleTailLeadingConstraint = bubbleTailView.trailingAnchor.constraint(
+      equalTo: bubbleView.leadingAnchor,
+      constant: MessageBubbleTailView.bubbleOverlap
+    )
+    bubbleTailTrailingConstraint = bubbleTailView.leadingAnchor.constraint(
+      equalTo: bubbleView.trailingAnchor,
+      constant: -MessageBubbleTailView.bubbleOverlap
+    )
+    syncBubbleTailSideConstraint(bubbleTailSide)
 
     constraints.append(
       contentsOf: [
         bubbleViewHeightConstraint,
         bubbleViewWidthConstraint,
         bubbleViewSideAnchor,
+        bubbleTailView.widthAnchor.constraint(equalToConstant: MessageBubbleTailView.size.width),
+        bubbleTailView.heightAnchor.constraint(equalToConstant: MessageBubbleTailView.size.height),
+        bubbleTailView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: MessageBubbleTailView.bottomOffset),
 
         contentViewHeightConstraint,
         contentViewWidthConstraint,
@@ -2349,6 +2429,8 @@ class MessageViewAppKit: NSView {
 
   private var bubbleViewWidthConstraint: NSLayoutConstraint!
   private var bubbleViewHeightConstraint: NSLayoutConstraint!
+  private var bubbleTailLeadingConstraint: NSLayoutConstraint?
+  private var bubbleTailTrailingConstraint: NSLayoutConstraint?
 
   private var isInitialUpdateConstraint = true
 
@@ -3526,6 +3608,7 @@ class MessageViewAppKit: NSView {
   ) {
     // update internal props (must update so contentView is recalced)
     self.props = props
+    syncBubbleTail()
 
     if textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
@@ -3621,6 +3704,7 @@ class MessageViewAppKit: NSView {
 
     // Update bubble background
     bubbleView.backgroundColor = bubbleBackgroundColor
+    syncBubbleTail()
 
     syncForwardHeaderView(for: props)
 
@@ -4259,7 +4343,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if showsAvatar, avatarView.superview != nil {
+    if showsInlineAvatar, avatarView.superview != nil {
       let pointInAvatar = avatarView.convert(point, from: self)
       if let hit = avatarView.hitTest(pointInAvatar) {
         MessageGestureTrace.trace(

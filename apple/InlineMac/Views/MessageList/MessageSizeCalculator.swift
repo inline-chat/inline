@@ -374,6 +374,10 @@ class MessageSizeCalculator {
     var hasAttachments: Bool { attachments != nil }
     var hasActionsRows: Bool { actionsRows != nil }
     var hasTime: Bool { time != nil }
+    var bubbleTopOffset: CGFloat {
+      guard let name else { return wrapper.spacing.top }
+      return wrapper.spacing.top + name.spacing.top + name.size.height + name.spacing.bottom
+    }
     var placesTimeAboveReactions: Bool {
       timeInContentFlow && emojiMessage && hasReactions && !reactionsOutsideBubble
     }
@@ -1007,13 +1011,11 @@ class MessageSizeCalculator {
 
     // MARK: - Avatar
 
-    let hasName = namePlan != nil
-
-    if props.firstInGroup {
+    if props.lastInGroup, !isOutgoing, !props.isDM {
       avatarPlan = LayoutPlan(
         size: .init(width: Theme.messageAvatarSize, height: Theme.messageAvatarSize),
         spacing: .init(
-          top: hasName ? Theme.messageNameLabelHeight : 0,
+          top: 0,
           left: Theme.messageSidePadding,
           bottom: 0,
           right: Theme.messageHorizontalStackSpacing
@@ -1474,6 +1476,12 @@ class MessageSizeCalculator {
     // final pass
     plan.bubble.size.height += plan.topMostContentTopSpacing
     plan.wrapper.size.height += plan.topMostContentTopSpacing
+    if var avatar = plan.avatar {
+      let bubbleTop = (plan.name?.size.height ?? 0) + (plan.name?.spacing.verticalTotal ?? 0)
+      avatar.spacing.top = bubbleTop + max(0, plan.bubble.size.height - avatar.size.height)
+      plan.avatar = avatar
+      plan.wrapper.size.height = max(plan.wrapper.size.height, avatar.spacing.top + avatar.size.height)
+    }
 
     // Fitting width
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)

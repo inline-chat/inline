@@ -10,7 +10,14 @@ private protocol MessageTableRenderableView: AnyObject {
   func updateSize(props: MessageViewProps)
   func reflectBoundsChange(fraction: CGFloat)
   func setScrollState(_ state: MessageListScrollState)
+  func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem?
   func reset()
+}
+
+private extension MessageTableRenderableView where Self: NSView {
+  func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
+    nil
+  }
 }
 
 extension MessageViewAppKit: MessageTableRenderableView {}
@@ -192,6 +199,10 @@ class MessageTableCell: NSView {
 
   func reflectBoundsChange(fraction: CGFloat) {
     messageView?.reflectBoundsChange(fraction: fraction)
+  }
+
+  func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
+    messageView?.avatarOverlayItem(in: coordinateView)
   }
 
   private var scrollState: MessageListScrollState = .idle
