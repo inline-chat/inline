@@ -29,6 +29,7 @@ class UIMessageView: UIView {
   let fullMessage: FullMessage
   let spaceId: Int64?
   let displayMode: MessageDisplayMode
+  private let bubbleTailSide: MessageBubbleTailSide
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
@@ -321,6 +322,7 @@ class UIMessageView: UIView {
   // MARK: - UI Components
 
   let bubbleView = createBubbleView()
+  let bubbleTailView = createBubbleTailView()
   lazy var containerStack = createContainerStack()
   lazy var singleLineContainer = createSingleLineStack()
   lazy var multiLineContainer = createMultiLineStack()
@@ -379,10 +381,16 @@ class UIMessageView: UIView {
     messageActionAnsweredCancellable?.cancel()
   }
 
-  init(fullMessage: FullMessage, spaceId: Int64?, displayMode: MessageDisplayMode = .normal) {
+  init(
+    fullMessage: FullMessage,
+    spaceId: Int64?,
+    displayMode: MessageDisplayMode = .normal,
+    bubbleTailSide: MessageBubbleTailSide = .none
+  ) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
     self.displayMode = displayMode
+    self.bubbleTailSide = bubbleTailSide
 
     super.init(frame: .zero)
 
@@ -456,6 +464,7 @@ class UIMessageView: UIView {
     multiLineContainer.isUserInteractionEnabled = true
     singleLineContainer.isUserInteractionEnabled = true
 
+    addSubview(bubbleTailView)
     addSubview(bubbleView)
     bubbleView.addSubview(containerStack)
 
@@ -530,6 +539,7 @@ class UIMessageView: UIView {
 
     // Reset appearance-related properties
     bubbleView.backgroundColor = bubbleColor
+    updateBubbleTail()
     messageLabel.textColor = textColor
 
     // Re-setup translation state observation
@@ -1678,6 +1688,9 @@ class UIMessageView: UIView {
     let baseConstraints: [NSLayoutConstraint] = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
+      bubbleTailView.widthAnchor.constraint(equalToConstant: MessageBubbleTailView.size.width),
+      bubbleTailView.heightAnchor.constraint(equalToConstant: MessageBubbleTailView.size.height),
+      bubbleTailView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: MessageBubbleTailView.bottomOffset),
     ]
 
     let withoutFileConstraints: [NSLayoutConstraint] = [
@@ -1765,10 +1778,20 @@ class UIMessageView: UIView {
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     }
 
-    if outgoing {
+    switch resolvedBubbleTailSide {
+    case .none, .trailing:
       bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2).isActive = true
-    } else {
+      bubbleTailView.leadingAnchor.constraint(
+        equalTo: bubbleView.trailingAnchor,
+        constant: -MessageBubbleTailView.bubbleOverlap
+      ).isActive = true
+
+    case .leading:
       bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2).isActive = true
+      bubbleTailView.trailingAnchor.constraint(
+        equalTo: bubbleView.leadingAnchor,
+        constant: MessageBubbleTailView.bubbleOverlap
+      ).isActive = true
     }
   }
 
@@ -1780,6 +1803,7 @@ class UIMessageView: UIView {
       MessageRichTextRenderer.cacheKey(for: outgoing),
     ].joined(separator: "-")
     bubbleView.backgroundColor = bubbleColor
+    updateBubbleTail()
 
     guard let text = fullMessage.displayText else { return }
 
@@ -1814,6 +1838,20 @@ class UIMessageView: UIView {
     Self.attributedCache.setObject(attributedString, forKey: cacheKey as NSString)
 
     messageLabel.attributedText = attributedString
+  }
+
+  private func updateBubbleTail() {
+    bubbleTailView.configure(
+      side: bubbleTailSide,
+      color: bubbleColor
+    )
+  }
+
+  private var resolvedBubbleTailSide: MessageBubbleTailSide {
+    if bubbleTailSide != .none {
+      return bubbleTailSide
+    }
+    return outgoing ? .trailing : .leading
   }
 
   func detectAndStyleLinks(in text: String, attributedString: NSMutableAttributedString) {

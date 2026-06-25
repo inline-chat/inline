@@ -426,8 +426,17 @@ extension MessageCollectionViewCell {
     }
   }
 
+  private var showsThreadAvatarTail: Bool {
+    usesThreadLayout && !outgoing && fromOtherSender && message.senderInfo != nil
+  }
+
   func setupBaseMessageConstraints() {
-    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId, displayMode: displayMode)
+    let newMessageView = UIMessageView(
+      fullMessage: message,
+      spaceId: spaceId,
+      displayMode: displayMode,
+      bubbleTailSide: showsThreadAvatarTail ? .leading : .none
+    )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
       self?.onPhotoTap?(message, sourceView, sourceImage, url)

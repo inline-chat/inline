@@ -7,6 +7,121 @@ import Logger
 import SwiftUI
 import UIKit
 
+enum MessageBubbleTailSide: Equatable {
+  case none
+  case leading
+  case trailing
+}
+
+final class MessageBubbleTailView: UIView {
+  static let size = CGSize(width: 16, height: 15)
+  static let bubbleOverlap: CGFloat = 9
+  static let bottomOffset: CGFloat = 0
+
+  private var colorTraitRegistration: UITraitChangeRegistration?
+
+  private(set) var side: MessageBubbleTailSide = .none
+
+  private var fillColor: UIColor = .clear
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    backgroundColor = .clear
+    isOpaque = false
+    isUserInteractionEnabled = false
+    colorTraitRegistration = registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+      (view: MessageBubbleTailView, _: UITraitCollection) in
+      view.updateVisibility()
+    }
+    updateVisibility()
+  }
+
+  override func draw(_ rect: CGRect) {
+    guard side != .none else { return }
+
+    resolvedFillColor.setFill()
+    path(in: bounds).fill()
+  }
+
+  func configure(side: MessageBubbleTailSide, color: UIColor) {
+    guard self.side != side || !fillColor.isEqual(color) else { return }
+    self.side = side
+    fillColor = color
+    updateVisibility()
+  }
+
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    false
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func updateVisibility() {
+    let alpha = resolvedFillColor.cgColor.alpha
+    isHidden = side == .none || alpha <= 0.01
+    setNeedsDisplay()
+  }
+
+  private var resolvedFillColor: UIColor {
+    fillColor.resolvedColor(with: traitCollection)
+  }
+
+  private func path(in rect: CGRect) -> UIBezierPath {
+    let width = rect.width
+    let height = rect.height
+    let sideEdge = width
+    let visibleJoinX = max(0, width - Self.bubbleOverlap)
+    let footX: CGFloat = 1.1
+    let footY = rect.maxY - 1.2
+    let lowerJoinX = max(0, visibleJoinX - 0.4)
+    let lowerControlX = max(0, lowerJoinX - 0.8)
+    let lowerJoinY = rect.maxY - 0.7
+    let bottomJoin = rect.maxY - 4.4
+
+    func x(_ value: CGFloat) -> CGFloat {
+      switch side {
+      case .none, .leading:
+        return rect.minX + value
+      case .trailing:
+        return rect.maxX - value
+      }
+    }
+
+    let path = UIBezierPath()
+    path.move(to: CGPoint(x: x(sideEdge), y: rect.minY + 1.0))
+    path.addCurve(
+      to: CGPoint(x: x(visibleJoinX + 1.1), y: rect.minY + height * 0.48),
+      controlPoint1: CGPoint(x: x(sideEdge), y: rect.minY + height * 0.26),
+      controlPoint2: CGPoint(x: x(visibleJoinX + 3.8), y: rect.minY + height * 0.42)
+    )
+    path.addCurve(
+      to: CGPoint(x: x(footX + 1.4), y: footY - 0.65),
+      controlPoint1: CGPoint(x: x(visibleJoinX + 0.2), y: rect.minY + height * 0.68),
+      controlPoint2: CGPoint(x: x(footX + 2.6), y: footY - 1.15)
+    )
+    path.addCurve(
+      to: CGPoint(x: x(footX), y: footY),
+      controlPoint1: CGPoint(x: x(footX + 0.8), y: footY - 0.15),
+      controlPoint2: CGPoint(x: x(footX + 0.25), y: footY)
+    )
+    path.addCurve(
+      to: CGPoint(x: x(lowerJoinX), y: lowerJoinY),
+      controlPoint1: CGPoint(x: x(footX + 0.8), y: rect.maxY + 0.4),
+      controlPoint2: CGPoint(x: x(lowerControlX), y: lowerJoinY + 0.15)
+    )
+    path.addCurve(
+      to: CGPoint(x: x(sideEdge), y: bottomJoin),
+      controlPoint1: CGPoint(x: x(visibleJoinX + 0.8), y: lowerJoinY - 0.15),
+      controlPoint2: CGPoint(x: x(sideEdge - 1.2), y: bottomJoin + 0.25)
+    )
+    path.close()
+    return path
+  }
+}
+
 // MARK: - UI
 
 extension UIMessageView {
@@ -16,6 +131,12 @@ extension UIMessageView {
       view.layer.cornerRadius = 18
     }
     view.clipsToBounds = true
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }
+
+  static func createBubbleTailView() -> MessageBubbleTailView {
+    let view = MessageBubbleTailView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }
