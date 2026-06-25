@@ -22,6 +22,8 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   @Published private(set) var playbackProgress: Double = 0
   @Published private(set) var isSending = false
 
+  let inputController: VoiceInputController
+
   private let log = Log.scoped("ComposeVoiceRecordingViewModel")
 
   private var recorder: ComposeVoiceRecorder?
@@ -41,7 +43,16 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     phase == .review && recording != nil && !isSending
   }
 
-  init() {
+  var shouldConfirmCancel: Bool {
+    duration > Self.discardConfirmationDuration
+  }
+
+  convenience init() {
+    self.init(inputController: .shared)
+  }
+
+  init(inputController: VoiceInputController) {
+    self.inputController = inputController
     observeSystemEvents()
   }
 
@@ -124,6 +135,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       playbackProgress = 0
       isPlaying = false
       isSending = false
+      refreshInputState()
       phase = .recording
       stopRecordingAction = ComposeActions.shared.startVoiceRecording(for: peerId)
     } catch {
@@ -139,6 +151,34 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     guard phase == .recording else { return }
     Task { @MainActor in
       await finishRecording(showTooShortToast: true)
+    }
+  }
+
+  func selectInputDevice(_ deviceId: VoiceInputDevice.ID) {
+    log.debug("Voice input picker selected device id=\(deviceId) phase=\(String(describing: phase))")
+    guard phase == .recording else { return }
+
+    do {
+      try inputController.selectPreferredInput(deviceId: deviceId, persistence: .runtimeOnly)
+    } catch {
+      log.error("Failed to select voice recording input", error: error)
+      showError(error.localizedDescription)
+      refreshInputState()
+      return
+    }
+  }
+
+  func selectAutomaticInput() {
+    log.debug("Voice input picker selected auto phase=\(String(describing: phase))")
+    guard phase == .recording else { return }
+
+    do {
+      try inputController.selectAutomaticInput(persistence: .runtimeOnly)
+    } catch {
+      log.error("Failed to select automatic voice recording input", error: error)
+      showError(error.localizedDescription)
+      refreshInputState()
+      return
     }
   }
 
@@ -309,6 +349,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     phase = .starting
   }
 
+  private func refreshInputState() {
+    guard phase == .recording || phase == .starting else { return }
+    inputController.refresh()
+  }
+
   private func observeSystemEvents() {
     let center = NotificationCenter.default
 
@@ -326,10 +371,30 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     center.publisher(for: AVAudioSession.routeChangeNotification)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] notification in
-        guard Self.shouldStopForRouteChange(notification) else { return }
+        let reason = Self.routeChangeReason(notification)
         Task { @MainActor in
           guard let self else { return }
+          self.inputController.logRouteChange(reason: reason)
+
+          if let reason, Self.shouldApplyPreferredInput(for: reason) {
+            self.applyPreferredInput()
+          } else {
+            self.refreshInputState()
+          }
+
+          guard let reason, Self.shouldStopForRouteChange(reason) else { return }
           await self.handleSystemStop()
+        }
+      }
+      .store(in: &cancellables)
+
+    center.publisher(for: UIApplication.didBecomeActiveNotification)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        Task { @MainActor in
+          guard let self else { return }
+          self.applyPreferredInput()
+          self.refreshInputState()
         }
       }
       .store(in: &cancellables)
@@ -358,6 +423,17 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
+  private func applyPreferredInput() {
+    guard phase == .recording else { return }
+
+    do {
+      try inputController.applyPreferredInput()
+    } catch {
+      log.error("Failed to apply preferred voice recording input", error: error)
+      refreshInputState()
+    }
+  }
+
   private func handleAppBackground() async {
     switch phase {
     case .recording:
@@ -381,13 +457,28 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     return type == .began
   }
 
-  private nonisolated static func shouldStopForRouteChange(_ notification: Notification) -> Bool {
+  private nonisolated static func routeChangeReason(_ notification: Notification) -> AVAudioSession.RouteChangeReason? {
     guard let rawValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
           let reason = AVAudioSession.RouteChangeReason(rawValue: rawValue)
     else {
-      return false
+      return nil
     }
 
+    return reason
+  }
+
+  private nonisolated static func shouldApplyPreferredInput(for reason: AVAudioSession.RouteChangeReason) -> Bool {
+    switch reason {
+    case .newDeviceAvailable, .oldDeviceUnavailable, .categoryChange, .wakeFromSleep:
+      return true
+    case .noSuitableRouteForCategory, .override, .routeConfigurationChange, .unknown:
+      return false
+    @unknown default:
+      return false
+    }
+  }
+
+  private nonisolated static func shouldStopForRouteChange(_ reason: AVAudioSession.RouteChangeReason) -> Bool {
     switch reason {
     case .noSuitableRouteForCategory:
       return true
@@ -539,6 +630,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private static let minimumDuration: TimeInterval = 0.5
+  private static let discardConfirmationDuration: TimeInterval = 10
 }
 
 private enum ComposeVoicePlaybackError: LocalizedError {

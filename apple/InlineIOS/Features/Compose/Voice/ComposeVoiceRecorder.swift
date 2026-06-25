@@ -56,8 +56,7 @@ final class ComposeVoiceRecorder: NSObject {
       throw ComposeVoiceRecorderError.notRecording
     }
 
-    let elapsed = Date().timeIntervalSince(startedAt ?? Date())
-    let duration = max(recorder.currentTime, elapsed)
+    let duration = elapsedDuration
     let samples = samples
     recorder.stop()
     stopMetering()
@@ -93,6 +92,7 @@ final class ComposeVoiceRecorder: NSObject {
     try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .defaultToSpeaker])
     try? session.setPreferredSampleRate(Self.sampleRate)
     try session.setActive(true)
+    _ = try? VoiceInputController.shared.applyPreferredInput(to: session)
     sessionActive = true
   }
 
@@ -121,9 +121,12 @@ final class ComposeVoiceRecorder: NSObject {
     recorder.updateMeters()
     samples.append(Self.meterSample(fromAveragePower: recorder.averagePower(forChannel: 0)))
 
-    let elapsed = Date().timeIntervalSince(startedAt ?? Date())
-    let duration = max(recorder.currentTime, elapsed)
-    onUpdate?(duration, Self.liveSamples(from: samples))
+    onUpdate?(elapsedDuration, Self.liveSamples(from: samples))
+  }
+
+  private var elapsedDuration: TimeInterval {
+    guard let startedAt else { return 0 }
+    return max(0, Date().timeIntervalSince(startedAt))
   }
 
   nonisolated fileprivate static func normalizedPower(_ power: Float) -> Float {
@@ -169,7 +172,7 @@ final class ComposeVoiceRecorder: NSObject {
   }
 
   private nonisolated static func waveformData(from samples: [UInt8], targetCount: Int = 96) -> Data {
-    Data(reducedSamples(samples, targetCount: targetCount, emptyValue: 28))
+    Data(reducedSamples(samples, targetCount: targetCount, emptyValue: 0))
   }
 
   private nonisolated static func liveSamples(from samples: [UInt8]) -> [UInt8] {

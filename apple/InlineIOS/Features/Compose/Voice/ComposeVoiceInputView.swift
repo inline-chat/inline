@@ -7,7 +7,7 @@ struct ComposeVoiceInputView: View {
 
   let onStop: @MainActor () -> Void
   let onPlay: @MainActor () -> Void
-  let onCancel: @MainActor () -> Void
+  let onDiscard: @MainActor () -> Void
   let onSend: @MainActor () -> Void
   let onSendSilently: @MainActor () -> Void
 
@@ -24,38 +24,37 @@ struct ComposeVoiceInputView: View {
     HStack(spacing: 8) {
       switch viewModel.phase {
       case .starting:
-        iconButton("xmark", title: "Cancel voice message", action: onCancel)
         progressIndicator
         waveform(progress: 0)
         durationLabel.hidden()
         reservedIconSpace
 
       case .recording:
-        iconButton("xmark", title: "Cancel voice message", action: onCancel)
         recordingIndicator
         waveform(progress: 1)
         durationLabel
+        inputMenuButton
         iconButton("stop.fill", title: "Stop recording", action: onStop)
 
       case .finishing:
-        iconButton("xmark", title: "Cancel voice message", action: onCancel)
         progressIndicator
         waveform(progress: 1)
         durationLabel
         reservedIconSpace
 
       case .review:
-        iconButton(
-          viewModel.isPlaying ? "pause.fill" : "play.fill",
-          title: viewModel.isPlaying ? "Pause voice message" : "Play voice message",
-          isEnabled: !viewModel.isSending,
-          action: onPlay
-        )
+        if !viewModel.isSending {
+          iconButton(
+            "xmark",
+            title: "Discard voice message",
+            action: onDiscard
+          )
+        }
         waveform(progress: viewModel.playbackProgress) { progress in
           viewModel.seekPlayback(to: progress)
         }
         durationLabel
-        iconButton("xmark", title: "Cancel voice message", isEnabled: !viewModel.isSending, action: onCancel)
+        playButton
         sendButton
 
       case .idle:
@@ -110,6 +109,30 @@ struct ComposeVoiceInputView: View {
           }
       }
     }
+  }
+
+  private var playButton: some View {
+    iconButton(
+      viewModel.isPlaying ? "pause.fill" : "play.fill",
+      title: viewModel.isPlaying ? "Pause voice message" : "Play voice message",
+      isEnabled: !viewModel.isSending,
+      action: onPlay
+    )
+  }
+
+  private var inputMenuButton: some View {
+    VoiceInputPickerButton(
+      controller: viewModel.inputController,
+      isEnabled: viewModel.phase == .recording,
+      onSelectAuto: {
+        viewModel.selectAutomaticInput()
+      }
+    ) { deviceId in
+      viewModel.selectInputDevice(deviceId)
+    }
+    .buttonStyle(VoiceIconButtonStyle(isPrimary: false))
+    .frame(width: 30, height: 30)
+    .contentShape(Circle())
   }
 
   private var reservedIconSpace: some View {

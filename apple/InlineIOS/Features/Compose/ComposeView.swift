@@ -172,8 +172,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     onPlay: { [weak self] in
       self?.toggleVoicePlayback()
     },
-    onCancel: { [weak self] in
-      self?.cancelVoiceRecording()
+    onDiscard: { [weak self] in
+      self?.discardVoiceRecordingTapped()
     },
     onSend: { [weak self] in
       self?.sendVoiceRecording(sendMode: nil)
@@ -428,6 +428,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       .constraint(equalTo: plusButton.trailingAnchor, constant: composePlusSpacing)
     let composeLeadingExpandedConstraint = composeAndButtonContainer.leadingAnchor
       .constraint(equalTo: glassContent.leadingAnchor, constant: composeEdgeInset)
+    composeLeadingToPlusConstraint.identifier = "Compose.leadingToSideButton"
+    composeLeadingExpandedConstraint.identifier = "Compose.leadingExpanded"
+    composeLeadingExpandedConstraint.isActive = false
     embedContainerHeightConstraint = embedHeightConstraint
     attachmentContainerHeightConstraint = attachmentHeightConstraint
     self.composeLeadingToPlusConstraint = composeLeadingToPlusConstraint
@@ -714,8 +717,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func setupVoicePhaseObserver() {
     guard voiceControlsInstalled else { return }
 
-    voicePhaseObserver = voiceViewModel.$phase
-      .sink { [weak self] _ in
+    voicePhaseObserver = Publishers.CombineLatest(
+      voiceViewModel.$phase.removeDuplicates(),
+      voiceViewModel.$isSending.removeDuplicates()
+    )
+      .sink { [weak self] _, _ in
         self?.reconcileVoiceControls(animated: true)
       }
   }
@@ -740,7 +746,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     voiceInputView.isHidden = !voiceActive
     textView.isHidden = voiceActive
-    updateComposeWidth(expanded: voiceActive, animated: animated)
+    updateComposeWidth(showsSideButton: !voiceActive, animated: animated)
     updateVoiceButtonVisibility(visible: !voiceActive && shouldShowVoiceButton, animated: animated)
     sendButton.isHidden = voiceActive || shouldShowVoiceButton
 
@@ -756,37 +762,43 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     updateHeight(animated: animated)
   }
 
-  private func updateComposeWidth(expanded: Bool, animated: Bool) {
+  private func updateComposeWidth(showsSideButton: Bool, animated: Bool) {
     guard let composeLeadingToPlusConstraint, let composeLeadingExpandedConstraint else {
-      plusButton.isHidden = expanded
-      plusButton.alpha = expanded ? 0 : 1
+      plusButton.isHidden = !showsSideButton
+      plusButton.alpha = showsSideButton ? 1 : 0
+      plusButton.isUserInteractionEnabled = showsSideButton
       return
     }
 
-    let isExpanded = composeLeadingExpandedConstraint.isActive
-    guard isExpanded != expanded else {
-      plusButton.isHidden = expanded
-      plusButton.alpha = expanded ? 0 : 1
+    let expanded = !showsSideButton
+    let needsConstraintUpdate = composeLeadingToPlusConstraint.isActive != showsSideButton
+      || composeLeadingExpandedConstraint.isActive != expanded
+    guard needsConstraintUpdate else {
+      plusButton.isHidden = !showsSideButton
+      plusButton.alpha = showsSideButton ? 1 : 0
+      plusButton.isUserInteractionEnabled = showsSideButton
       return
     }
 
-    if !expanded {
+    if showsSideButton {
       plusButton.isHidden = false
       plusButton.alpha = 0
     }
 
     layoutIfNeeded()
-    composeLeadingToPlusConstraint.isActive = !expanded
+    composeLeadingToPlusConstraint.isActive = showsSideButton
     composeLeadingExpandedConstraint.isActive = expanded
+    plusButton.isUserInteractionEnabled = showsSideButton
 
     guard animated else {
-      plusButton.alpha = expanded ? 0 : 1
-      plusButton.isHidden = expanded
+      plusButton.alpha = showsSideButton ? 1 : 0
+      plusButton.isHidden = !showsSideButton
+      plusButton.isUserInteractionEnabled = showsSideButton
       layoutIfNeeded()
       return
     }
 
-    if expanded {
+    if !showsSideButton {
       plusButton.isHidden = false
     }
 
@@ -795,13 +807,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       delay: 0,
       options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
     ) {
-      self.plusButton.alpha = expanded ? 0 : 1
+      self.plusButton.alpha = showsSideButton ? 1 : 0
       self.layoutIfNeeded()
     } completion: { [weak self] _ in
       guard let self else { return }
-      let isVoiceActive = self.voiceViewModel.isActive
-      self.plusButton.alpha = isVoiceActive ? 0 : 1
-      self.plusButton.isHidden = isVoiceActive
+      let showsSideButton = !self.isVoiceActive
+      self.plusButton.alpha = showsSideButton ? 1 : 0
+      self.plusButton.isHidden = !showsSideButton
+      self.plusButton.isUserInteractionEnabled = showsSideButton
     }
   }
 
@@ -857,6 +870,48 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   private func toggleVoicePlayback() {
     voiceViewModel.togglePlayback()
+  }
+
+  private func discardVoiceRecordingTapped() {
+    guard voiceControlsInstalled, voiceViewModel.phase == .review else { return }
+
+    if voiceViewModel.shouldConfirmCancel {
+      presentVoiceDiscardConfirmation()
+      return
+    }
+
+    cancelVoiceRecording()
+  }
+
+  private func presentVoiceDiscardConfirmation() {
+    guard let presenter = attachmentFlowPresenter() else { return }
+
+    let alert = UIAlertController(
+      title: "Discard voice message?",
+      message: nil,
+      preferredStyle: .actionSheet
+    )
+    alert.addAction(UIAlertAction(title: "Discard", style: .destructive) { [weak self] _ in
+      self?.cancelVoiceRecording()
+    })
+    alert.addAction(UIAlertAction(title: "Keep", style: .cancel))
+
+    if let popover = alert.popoverPresentationController {
+      if plusButton.isHidden {
+        popover.sourceView = presenter.view
+        popover.sourceRect = CGRect(
+          x: presenter.view.bounds.midX,
+          y: presenter.view.bounds.maxY,
+          width: 1,
+          height: 1
+        )
+      } else {
+        popover.sourceView = plusButton
+        popover.sourceRect = plusButton.bounds
+      }
+    }
+
+    presenter.present(alert, animated: true)
   }
 
   private func cancelVoiceRecording() {

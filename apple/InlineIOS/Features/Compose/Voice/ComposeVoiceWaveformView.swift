@@ -117,18 +117,7 @@ struct ComposeVoiceWaveformView: View {
       count: count,
       padLeadingQuiet: motion == .recordingReel
     )
-    if motion == .recordingReel {
-      return reduced.map(normalizedAbsoluteBar)
-    }
-
-    let maxSample = max(CGFloat(reduced.max() ?? 0), 1)
-
-    return reduced.map { sample in
-      let absolute = CGFloat(sample) / 255
-      let relative = CGFloat(sample) / maxSample
-      let mixed = max(absolute, relative)
-      return normalizedBar(from: mixed)
-    }
+    return reduced.map(normalizedAbsoluteBar)
   }
 
   private static func reduce(samples: [UInt8], count: Int, padLeadingQuiet: Bool) -> [UInt8] {
@@ -154,7 +143,7 @@ struct ComposeVoiceWaveformView: View {
   }
 
   private static func placeholderBars(count: Int) -> [CGFloat] {
-    Array(repeating: 0.12, count: count)
+    Array(repeating: normalizedBar(from: 0), count: count)
   }
 
   private static func normalizedAbsoluteBar(from sample: UInt8) -> CGFloat {
@@ -162,10 +151,15 @@ struct ComposeVoiceWaveformView: View {
   }
 
   private static func normalizedBar(from value: CGFloat) -> CGFloat {
-    let curved = CGFloat(pow(Double(min(max(value, 0), 1)), 0.72))
-    return min(max(0.12 + curved * 0.88, 0.12), 1)
+    let clamped = min(max(value, 0), 1)
+    let ranged = min(max((clamped - noiseFloor) / (fullScaleLevel - noiseFloor), 0), 1)
+    let curved = CGFloat(pow(Double(ranged), 0.72))
+    return minBarScale + curved * (1 - minBarScale)
   }
 
+  private static let noiseFloor: CGFloat = 0.035
+  private static let fullScaleLevel: CGFloat = 0.85
+  private static let minBarScale: CGFloat = 0.04
   private static let seekCommitInterval: TimeInterval = 1.0 / 30.0
   private static let seekProgressThreshold: Double = 0.015
 }
