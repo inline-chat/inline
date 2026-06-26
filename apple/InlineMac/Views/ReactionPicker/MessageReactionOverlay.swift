@@ -139,7 +139,7 @@ class ReactionOverlayWindow: NSPanel {
   }
 
   private func setupMouseDownMonitor() {
-    mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+    mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
       guard let self else { return event }
 
       guard event.window === self else {

@@ -164,7 +164,17 @@ class MessageTextView: NSTextView {
     RunLoop.current.add(timer, forMode: .eventTracking)
     RunLoop.current.add(timer, forMode: .default)
 
-    textHoldMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] next in
+    textHoldMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+      .leftMouseDragged,
+      .rightMouseDragged,
+      .otherMouseDragged,
+      .leftMouseUp,
+      .rightMouseDown,
+      .rightMouseUp,
+      .otherMouseDown,
+      .otherMouseUp,
+      .scrollWheel,
+    ]) { [weak self] next in
       self?.updateTextHold(with: next)
       return next
     }
@@ -194,6 +204,18 @@ class MessageTextView: NSTextView {
     case .leftMouseUp:
       MessageGestureTrace.debug("MessageTextView.textHold action=cancel reason=mouseUp")
       cancelTextHold(reason: "mouseUp")
+    case .rightMouseDown, .rightMouseUp:
+      MessageGestureTrace.debug("MessageTextView.textHold action=cancel reason=rightMouse")
+      cancelTextHold(reason: "rightMouse")
+    case .otherMouseDown, .otherMouseUp:
+      MessageGestureTrace.debug("MessageTextView.textHold action=cancel reason=otherMouse")
+      cancelTextHold(reason: "otherMouse")
+    case .rightMouseDragged, .otherMouseDragged:
+      MessageGestureTrace.debug("MessageTextView.textHold action=cancel reason=otherDrag")
+      cancelTextHold(reason: "otherDrag")
+    case .scrollWheel:
+      MessageGestureTrace.debug("MessageTextView.textHold action=cancel reason=scroll")
+      cancelTextHold(reason: "scroll")
     default:
       break
     }

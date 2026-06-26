@@ -348,7 +348,6 @@ class MessageViewAppKit: NSView {
   // Add gesture recognizer property
   private var longPressGesture: NSPressGestureRecognizer?
   private var doubleClickGesture: NSClickGestureRecognizer?
-  private lazy var holdFallback = MessageHoldFallback(view: self, name: "MessageView")
 
   // MARK: Views
 
@@ -1734,6 +1733,7 @@ class MessageViewAppKit: NSView {
     longPressGesture = NSPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
     longPressGesture?.minimumPressDuration = 0.5
     longPressGesture?.allowableMovement = 10
+    longPressGesture?.buttonMask = 1
     longPressGesture?.delaysPrimaryMouseButtonEvents = false
     longPressGesture?.delegate = self
     if let gesture = longPressGesture {
@@ -1744,6 +1744,7 @@ class MessageViewAppKit: NSView {
     // Add double click gesture recognizer
     doubleClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
     doubleClickGesture?.numberOfClicksRequired = 2
+    doubleClickGesture?.buttonMask = 1
     doubleClickGesture?.delaysPrimaryMouseButtonEvents = false
     doubleClickGesture?.delegate = self
     if let gesture = doubleClickGesture {
@@ -1839,10 +1840,21 @@ class MessageViewAppKit: NSView {
     case .reply:
       reply()
     case .reactionsMenu:
+      resetGestureStateForReactionOverlay(source: source)
       showReactionOverlay()
     case .toggleAck, .toggleHeart, .toggleThumbsUp:
       guard let emoji = action.reactionEmoji else { return }
       toggleReaction(emoji, action: action, source: source)
+    }
+  }
+
+  private func resetGestureStateForReactionOverlay(source: String) {
+    MessageGestureTrace.debug("MessageView.resetGestureStateForReactionOverlay messageId=\(message.messageId) source=\(source)")
+    DispatchQueue.main.async { [weak self] in
+      self?.longPressGesture?.isEnabled = false
+      self?.longPressGesture?.isEnabled = true
+      self?.doubleClickGesture?.isEnabled = false
+      self?.doubleClickGesture?.isEnabled = true
     }
   }
 
@@ -4155,18 +4167,6 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
     )
 
     if result,
-       gestureRecognizer === longPressGesture,
-       event.type == .leftMouseDown,
-       event.clickCount == 1
-    {
-      let location = convert(event.locationInWindow, from: nil)
-      holdFallback.start(at: location, event: event) { [weak self] location in
-        self?.performConfiguredHoldAction(at: location, source: "fallback")
-      }
-      return false
-    }
-
-    if result,
        gestureRecognizer === doubleClickGesture,
        event.type == .leftMouseDown,
        event.clickCount == 2
@@ -4194,6 +4194,15 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
 
   private func shouldHandleMessageGesture(_ gestureRecognizer: NSGestureRecognizer, event: NSEvent) -> Bool {
     let locationInSelf = convert(event.locationInWindow, from: nil)
+
+    if (gestureRecognizer === longPressGesture || gestureRecognizer === doubleClickGesture),
+       event.type != .leftMouseDown
+    {
+      MessageGestureTrace.debug(
+        "MessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=nonPrimaryMouse"
+      )
+      return false
+    }
 
     if gestureRecognizer === longPressGesture, event.clickCount > 1 {
       MessageGestureTrace.debug(
