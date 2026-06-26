@@ -39,6 +39,7 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   case user(User)
   case space(Space)
   case command(QuickSearchCommand)
+  case registeredCommand(CommandBarItem)
   case createThread(title: String, spaceId: Int64, spaceName: String?)
   case message(LocalMessageSearchResult)
 
@@ -52,6 +53,8 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
         "space-\(space.id)"
       case let .command(command):
         "command-\(command.id)"
+      case let .registeredCommand(item):
+        "registered-command-\(item.id)"
       case let .createThread(title, spaceId, _):
         "create-thread-\(spaceId)-\(title.lowercased())"
       case let .message(result):
@@ -125,7 +128,6 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
 #endif
   case backHome
   case newThread
-  case renameThread
   case newSpace
 
   var id: String {
@@ -144,8 +146,6 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         "Back to Home"
       case .newThread:
         "New thread"
-      case .renameThread:
-        "Rename thread"
       case .newSpace:
         "New space"
     }
@@ -167,8 +167,6 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         "house"
       case .newThread:
         "bubble.left.and.bubble.right.fill"
-      case .renameThread:
-        "pencil"
       case .newSpace:
         "square.stack.3d.up.fill"
     }
@@ -186,8 +184,6 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         ["home", "back", "workspace", "space", "main"]
       case .newThread:
         ["new", "thread", "chat", "message", "conversation"]
-      case .renameThread:
-        ["rename", "thread", "chat", "title", "name"]
       case .newSpace:
         ["new", "space", "workspace", "team"]
     }
@@ -203,8 +199,6 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
 #endif
       case .backHome:
         .spaceSelected
-      case .renameThread:
-        .threadOpen
     }
   }
 
@@ -240,8 +234,6 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
           return true
         }
         return tokens.contains("start") && hasAny(["thread", "chat", "message", "conversation"])
-      case .renameThread:
-        return hasAny(["rename", "renaming", "title"])
       case .newSpace:
         return hasAny(["new", "create"])
     }
@@ -301,6 +293,7 @@ final class QuickSearchViewModel: ObservableObject {
 
   private let dependencies: AppDependencies
   private weak var nav3: Nav3?
+  private weak var commandRegistry: CommandBarRegistry?
   private var openSettings: (() -> Void)?
   @Published private var spaceResults: [Space] = []
   @Published private var isSpaceSearching: Bool = false
@@ -328,10 +321,18 @@ final class QuickSearchViewModel: ObservableObject {
     localSearchTask?.cancel()
   }
 
-  func attach(nav3: Nav3, openSettings: @escaping () -> Void) {
+  func attach(
+    nav3: Nav3,
+    commandRegistry: CommandBarRegistry?,
+    openSettings: @escaping () -> Void
+  ) {
     if self.nav3 !== nav3 {
       self.nav3 = nav3
       bindCommandContext()
+    }
+    if self.commandRegistry !== commandRegistry {
+      self.commandRegistry = commandRegistry
+      bindCommandRegistry()
     }
     self.openSettings = openSettings
   }
@@ -348,9 +349,11 @@ final class QuickSearchViewModel: ObservableObject {
 
     let spaces = supportsSpaceSelection ? spaceResults.map { QuickSearchLocalItem.space($0) } : []
     let commands = commandResults.map { QuickSearchLocalItem.command($0) }
+    let registeredCommands = registeredCommandResults.map { QuickSearchLocalItem.registeredCommand($0) }
     var items = locals
     items.append(contentsOf: spaces)
     items.append(contentsOf: commands)
+    items.append(contentsOf: registeredCommands)
 
     guard let preparedQuery = QuickSearchRanker.prepareQuery(activeSearchQuery) else {
       if let createThreadResult {
@@ -568,6 +571,8 @@ final class QuickSearchViewModel: ObservableObject {
         }
       case let .command(command):
         runCommand(command)
+      case let .registeredCommand(item):
+        commandRegistry?.perform(item.id)
       case let .createThread(title, spaceId, _):
         NewThreadAction.start(dependencies: dependencies, spaceId: spaceId, title: title)
       case let .message(result):
@@ -640,6 +645,18 @@ final class QuickSearchViewModel: ObservableObject {
       .store(in: &cancellables)
   }
 
+  private func bindCommandRegistry() {
+    withObservationTracking { [weak self] in
+      _ = self?.commandRegistry?.items
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        self?.objectWillChange.send()
+        self?.clampSelection()
+        self?.bindCommandRegistry()
+      }
+    }
+  }
+
   private var commandResults: [QuickSearchCommand] {
     guard let preparedQuery = QuickSearchRanker.prepareQuery(activeSearchQuery) else { return [] }
     let context = commandContext
@@ -663,6 +680,35 @@ final class QuickSearchViewModel: ObservableObject {
       .map(\.command)
   }
 
+  private var registeredCommandResults: [CommandBarItem] {
+    guard let preparedQuery = QuickSearchRanker.prepareQuery(activeSearchQuery) else { return [] }
+    let rankedCommands: [RankedRegisteredCommand] = registeredCommandItems
+      .compactMap { item -> RankedRegisteredCommand? in
+        guard let score = registeredCommandScore(for: item, query: preparedQuery) else { return nil }
+        return RankedRegisteredCommand(item: item, score: score)
+      }
+
+    return rankedCommands
+      .sorted { lhs, rhs in
+        if lhs.score != rhs.score {
+          return lhs.score > rhs.score
+        }
+        if lhs.item.priority != rhs.item.priority {
+          return lhs.item.priority > rhs.item.priority
+        }
+        let titleComparison = lhs.item.title.localizedCaseInsensitiveCompare(rhs.item.title)
+        if titleComparison != .orderedSame {
+          return titleComparison == .orderedAscending
+        }
+        return lhs.item.id < rhs.item.id
+      }
+      .map(\.item)
+  }
+
+  private var registeredCommandItems: [CommandBarItem] {
+    commandRegistry?.items.filter(\.isEnabled) ?? []
+  }
+
   private var createThreadResult: QuickSearchLocalItem? {
     let trimmedQuery = activeSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmedQuery.isEmpty == false else { return nil }
@@ -678,6 +724,7 @@ final class QuickSearchViewModel: ObservableObject {
     if spaceResults.isEmpty == false { return true }
     if renderedGlobalResults.isEmpty == false { return true }
     if commandResults.isEmpty == false { return true }
+    if registeredCommandResults.isEmpty == false { return true }
     return false
   }
 
@@ -859,10 +906,6 @@ final class QuickSearchViewModel: ObservableObject {
         } else {
           nav3?.open(.newChat(spaceId: commandContext.selectedSpaceId))
         }
-      case .renameThread:
-        if MainWindowOpenCoordinator.shared.renameThread() == false {
-          NotificationCenter.default.post(name: .renameThread, object: nil)
-        }
       case .newSpace:
         if let nav2 = dependencies.nav2 {
           nav2.navigate(to: .createSpace)
@@ -964,6 +1007,13 @@ final class QuickSearchViewModel: ObservableObject {
     return QuickSearchRanker.score(preparedQuery: query, fields: commandSearchFields(for: command))
   }
 
+  private func registeredCommandScore(
+    for item: CommandBarItem,
+    query: QuickSearchRanker.PreparedQuery
+  ) -> Int? {
+    QuickSearchRanker.score(preparedQuery: query, fields: commandSearchFields(for: item))
+  }
+
   private func localActivityBoost(for item: QuickSearchLocalItem) -> Int {
     switch item {
       case let .thread(threadInfo):
@@ -979,7 +1029,7 @@ final class QuickSearchViewModel: ObservableObject {
         return userActivity[user.id]?.boost ?? 0
       case let .space(space):
         return space.id == commandContext.selectedSpaceId ? 80 : 0
-      case .command, .createThread, .message:
+      case .command, .registeredCommand, .createThread, .message:
         return 0
     }
   }
@@ -1013,6 +1063,8 @@ final class QuickSearchViewModel: ObservableObject {
         ]
       case let .command(command):
         return commandSearchFields(for: command)
+      case let .registeredCommand(item):
+        return commandSearchFields(for: item)
       case let .createThread(title, _, spaceName):
         return [
           QuickSearchSearchField(value: title, boost: 200),
@@ -1050,6 +1102,13 @@ final class QuickSearchViewModel: ObservableObject {
     return fields
   }
 
+  private func commandSearchFields(for item: CommandBarItem) -> [QuickSearchSearchField] {
+    var fields = [QuickSearchSearchField(value: item.title, boost: 640 + item.priority)]
+    fields.append(contentsOf: item.keywords.map { QuickSearchSearchField(value: $0, boost: 420) })
+    fields.append(QuickSearchSearchField(value: ([item.title] + item.keywords).joined(separator: " "), boost: 260))
+    return fields
+  }
+
   private func usernameFields(for username: String?, plainBoost: Int, mentionBoost: Int) -> [QuickSearchSearchField] {
     guard let username, username.isEmpty == false else { return [] }
     return [
@@ -1068,6 +1127,8 @@ final class QuickSearchViewModel: ObservableObject {
         space.displayName
       case let .command(command):
         command.title
+      case let .registeredCommand(item):
+        item.title
       case let .createThread(title, _, _):
         title
       case let .message(result):
@@ -1092,10 +1153,12 @@ final class QuickSearchViewModel: ObservableObject {
         return "c-\(item.id)"
       case .command:
         return "d-\(item.id)"
-      case .createThread:
+      case .registeredCommand:
         return "e-\(item.id)"
-      case .message:
+      case .createThread:
         return "f-\(item.id)"
+      case .message:
+        return "g-\(item.id)"
     }
   }
 
@@ -1122,6 +1185,11 @@ final class QuickSearchViewModel: ObservableObject {
 
   private struct RankedCommand {
     let command: QuickSearchCommand
+    let score: Int
+  }
+
+  private struct RankedRegisteredCommand {
+    let item: CommandBarItem
     let score: Int
   }
 }
@@ -1705,6 +1773,22 @@ private struct QuickSearchRow: View {
                   .lineLimit(1)
                 Spacer(minLength: 0)
                 Text(command.typeLabel)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+
+            case let .registeredCommand(item):
+              InitialsCircle(name: item.title, size: QuickSearchLayout.iconSize, symbol: item.systemImage)
+                .frame(
+                  width: QuickSearchLayout.iconContainerSize,
+                  height: QuickSearchLayout.iconContainerSize,
+                  alignment: .center
+                )
+              HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+                Text(item.title)
+                  .lineLimit(1)
+                Spacer(minLength: 0)
+                Text(item.typeLabel)
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }

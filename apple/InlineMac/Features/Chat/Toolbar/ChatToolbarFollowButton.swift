@@ -6,18 +6,10 @@ import SwiftUI
 
 struct ChatToolbarFollowButton: View {
   let peer: Peer
-  let db: AppDatabase
-
-  @StateObject private var model: ChatToolbarFollowModel
-
-  init(peer: Peer, db: AppDatabase) {
-    self.peer = peer
-    self.db = db
-    _model = StateObject(wrappedValue: ChatToolbarFollowModel(peer: peer, db: db))
-  }
+  @ObservedObject var model: ChatToolbarFollowModel
 
   var body: some View {
-    if model.state.isReplyThread {
+    if model.observedPeer == peer, model.state.isReplyThread {
       Button {
         model.toggle()
       } label: {
@@ -32,25 +24,32 @@ struct ChatToolbarFollowButton: View {
 }
 
 @MainActor
-private final class ChatToolbarFollowModel: ObservableObject {
+final class ChatToolbarFollowModel: ObservableObject {
   @Published private(set) var state = ChatToolbarFollowState()
 
-  private let peer: Peer
-  private let db: AppDatabase
+  private var peer: Peer?
+  private weak var db: AppDatabase?
   private var cancellable: AnyCancellable?
+  private var observationID = UUID()
 
-  init(peer: Peer, db: AppDatabase) {
+  init(peer: Peer? = nil, db: AppDatabase? = nil) {
     self.peer = peer
     self.db = db
-    bindState()
+    if peer != nil, db != nil {
+      bindState()
+    }
   }
 
   deinit {
     cancellable?.cancel()
   }
 
+  var observedPeer: Peer? {
+    peer
+  }
+
   func toggle() {
-    guard state.isReplyThread else { return }
+    guard state.isReplyThread, let peer else { return }
 
     let previousState = state
     let selection: DialogFollowModeSelection = state.isFollowing ? .relevance : .following
@@ -72,6 +71,14 @@ private final class ChatToolbarFollowModel: ObservableObject {
     }
   }
 
+  func update(peer: Peer, db: AppDatabase) {
+    guard self.peer != peer || self.db !== db else { return }
+    self.peer = peer
+    self.db = db
+    state = ChatToolbarFollowState()
+    bindState()
+  }
+
   private static func successMessage(for selection: DialogFollowModeSelection) -> String {
     switch selection {
       case .following:
@@ -82,7 +89,13 @@ private final class ChatToolbarFollowModel: ObservableObject {
   }
 
   private func bindState() {
-    let peer = peer
+    cancellable?.cancel()
+    observationID = UUID()
+    let observationID = observationID
+    guard let peer, let db else {
+      state = ChatToolbarFollowState()
+      return
+    }
 
     db.warnIfInMemoryDatabaseForObservation("ChatToolbarFollowModel.state")
     cancellable = ValueObservation
@@ -100,6 +113,7 @@ private final class ChatToolbarFollowModel: ObservableObject {
         receiveCompletion: { _ in },
         receiveValue: { [weak self] state in
           Task { @MainActor in
+            guard self?.observationID == observationID else { return }
             guard self?.state != state else { return }
             self?.state = state
           }
@@ -108,7 +122,7 @@ private final class ChatToolbarFollowModel: ObservableObject {
   }
 }
 
-private struct ChatToolbarFollowState: Equatable {
+struct ChatToolbarFollowState: Equatable {
   var isReplyThread = false
   var isFollowing = false
 

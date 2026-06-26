@@ -13,6 +13,7 @@ struct ChatRouteView: View {
 
   @ObservedObject private var botPresenceController = BotPresenceController.shared
   @ObservedObject private var settings = AppSettings.shared
+  @StateObject private var followModel = ChatToolbarFollowModel()
   @State private var chatToolbarState = ChatToolbarState()
   @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
@@ -66,7 +67,37 @@ struct ChatRouteView: View {
       .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
       .chatScrollEdgeEffect()
       .navigationTitle(navigationTitle.isEmpty ? fallbackTitle : navigationTitle)
+      .commandBar {
+        if peer.isThread {
+          CommandBarAction(
+            "Rename Thread",
+            systemImage: "pencil",
+            id: "rename",
+            keywords: ["rename", "renaming", "title", "thread", "chat", "name"],
+            typeLabel: "Chat",
+            priority: 30
+          ) {
+            if MainWindowOpenCoordinator.shared.renameThread() == false {
+              NotificationCenter.default.post(name: .renameThread, object: nil)
+            }
+          }
+        }
+
+        if followModel.observedPeer == peer, followModel.state.isReplyThread {
+          CommandBarAction(
+            followModel.state.title,
+            systemImage: followModel.state.systemImage,
+            id: "follow",
+            keywords: ["follow", "unfollow", "thread", "replies", "sidebar"],
+            typeLabel: "Chat",
+            priority: 20
+          ) {
+            followModel.toggle()
+          }
+        }
+      }
       .onChange(of: peer.toString(), initial: true) { oldPeer, newPeer in
+        followModel.update(peer: peer, db: dependencies.database)
         navigationTitle = fallbackTitle
         if oldPeer != newPeer {
           chatToolbarState.dismissPresentation()
@@ -155,10 +186,7 @@ struct ChatRouteView: View {
 
         if peer.isThread {
           ToolbarItem {
-            ChatToolbarFollowButton(
-              peer: peer,
-              db: dependencies.database
-            )
+            ChatToolbarFollowButton(peer: peer, model: followModel)
             .id("follow-\(peer.toString())")
           }
         }

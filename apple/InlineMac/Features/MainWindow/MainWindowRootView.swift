@@ -12,6 +12,7 @@ struct MainWindowRootView: View {
   @State private var chatOpenPreloader = Nav3ChatOpenPreloadBridge()
   @State private var forwardMessages = ForwardMessagesPresenter()
   @State private var overlay = OverlayManager()
+  @State private var commandBarRegistry = CommandBarRegistry()
   @State private var sidebarViewModel: SidebarViewModel
   @State private var nativeTab = NativeWindowTabModel()
   @State private var nativeTabShortcutUnsubscribe: (() -> Void)?
@@ -54,6 +55,7 @@ struct MainWindowRootView: View {
     .environment(dependencies: windowDependencies)
     .environment(\.nav, nav3)
     .environment(\.mainWindowID, windowID)
+    .environment(\.commandBarRegistry, commandBarRegistry)
     .environment(sidebarViewModel)
     .registerMainWindow(id: windowID, toastPresenter: overlay) { destination in
       nav3.open(destination.route)

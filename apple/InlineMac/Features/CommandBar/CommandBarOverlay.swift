@@ -3,6 +3,7 @@ import SwiftUI
 
 struct CommandBar: View {
   @Environment(\.dependencies) private var dependencies
+  @Environment(\.commandBarRegistry) private var commandRegistry
   @Environment(\.nav) private var nav
   @State private var viewModel: QuickSearchViewModel?
 
@@ -34,7 +35,7 @@ struct CommandBar: View {
       model = QuickSearchViewModel(dependencies: dependencies)
       viewModel = model
     }
-    model.attach(nav3: nav) {
+    model.attach(nav3: nav, commandRegistry: commandRegistry) {
       dependencies.appBridge.openSettings(dependencies: dependencies)
     }
   }
