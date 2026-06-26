@@ -14,7 +14,7 @@ public final class MacDevtoolsWindowController: NSWindowController, NSWindowDele
 
   private init() {
     let window = NSWindow(
-      contentRect: NSRect(origin: .zero, size: NSSize(width: 980, height: 620)),
+      contentRect: NSRect(origin: .zero, size: NSSize(width: 1080, height: 680)),
       styleMask: [
         .titled,
         .closable,
@@ -49,7 +49,7 @@ public final class MacDevtoolsWindowController: NSWindowController, NSWindowDele
     window.title = "MacDevtools"
     window.titleVisibility = .visible
     window.toolbarStyle = .automatic
-    window.minSize = NSSize(width: 540, height: 360)
+    window.minSize = NSSize(width: 720, height: 460)
     window.setFrameAutosaveName("MacDevtoolsWindow")
     window.contentViewController = NSHostingController(rootView: MacDevtoolsView())
     window.delegate = self

@@ -10,7 +10,8 @@ public final class MacDevtoolsLogStore {
   public var filter = ""
   public var minimumLevel: LogLevel = .trace
   public var follow = true
-  public var selectedID: LogEntry.ID?
+  public var selectedIDs: Set<LogEntry.ID> = []
+  public var focusedEntryID: LogEntry.ID?
   public var captureEnabled: Bool
   public var statusMessage: String?
 
@@ -40,8 +41,19 @@ public final class MacDevtoolsLogStore {
   }
 
   public var selectedEntry: LogEntry? {
-    guard let selectedID else { return nil }
-    return filteredEntries.first { $0.id == selectedID }
+    let entries = selectedEntries
+    if let focusedEntryID,
+       let entry = entries.first(where: { $0.id == focusedEntryID })
+    {
+      return entry
+    }
+
+    return entries.first
+  }
+
+  public var selectedEntries: [LogEntry] {
+    guard selectedIDs.isEmpty == false else { return [] }
+    return filteredEntries.filter { selectedIDs.contains($0.id) }
   }
 
   public var countText: String {
@@ -78,6 +90,22 @@ public final class MacDevtoolsLogStore {
     }
   }
 
+  public func updateSelectionFocus() {
+    let entries = selectedEntries
+    guard entries.isEmpty == false else {
+      focusedEntryID = nil
+      return
+    }
+
+    if let focusedEntryID,
+       entries.contains(where: { $0.id == focusedEntryID })
+    {
+      return
+    }
+
+    focusedEntryID = entries.first?.id
+  }
+
   public func exportReport() {
     Task { [weak self] in
       guard let self else { return }
@@ -93,11 +121,28 @@ public final class MacDevtoolsLogStore {
     }
   }
 
-  public func copySelectedEntry() {
-    guard let selectedEntry else { return }
+  public func copySelectedEntries() {
+    let entries = selectedEntries
+    guard entries.isEmpty == false else { return }
+
     NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(rawText(for: selectedEntry), forType: .string)
-    statusMessage = "Copied selected log"
+    NSPasteboard.general.setString(
+      entries.map { rawText(for: $0) }.joined(separator: "\n\n"),
+      forType: .string
+    )
+    statusMessage = entries.count == 1 ? "Copied selected log" : "Copied \(entries.count) selected logs"
+  }
+
+  public func copyFilteredEntries() {
+    let entries = filteredEntries
+    guard entries.isEmpty == false else { return }
+
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(
+      entries.map { rawText(for: $0) }.joined(separator: "\n\n"),
+      forType: .string
+    )
+    statusMessage = "Copied \(entries.count) visible logs"
   }
 
   public func rawText(for entry: LogEntry) -> String {
@@ -121,6 +166,8 @@ public final class MacDevtoolsLogStore {
       let result = try await reader.readNewEntries(from: url)
       if resetExisting || result.didReset {
         entries = []
+        selectedIDs = []
+        focusedEntryID = nil
       }
       guard result.entries.isEmpty == false else { return }
 
@@ -128,8 +175,22 @@ public final class MacDevtoolsLogStore {
       if entries.count > maxVisibleEntries {
         entries.removeFirst(entries.count - maxVisibleEntries)
       }
+      pruneSelection()
     } catch {
       statusMessage = "Read failed: \(error.localizedDescription)"
     }
+  }
+
+  private func pruneSelection() {
+    let ids = Set(entries.map(\.id))
+    selectedIDs.formIntersection(ids)
+
+    if let focusedEntryID,
+       selectedIDs.contains(focusedEntryID)
+    {
+      return
+    }
+
+    focusedEntryID = selectedIDs.first
   }
 }

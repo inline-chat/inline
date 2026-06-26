@@ -425,23 +425,6 @@ public extension User {
     return URL(string: profileCdnUrl)
   }
 
-  static func cacheImage(userId: Int64, image: PlatformImage) async throws {
-    Log.shared.debug("Trying to cache image")
-
-    // Save image locally when loaded
-    let directory = User.getProfileCacheDirectory()
-    let fileName = "User\(UUID().uuidString).jpg"
-    if let (localPath, _) = try? image.save(
-      to: directory, withName: fileName, format: .jpeg
-    ) {
-      _ = try? await AppDatabase.shared.dbWriter.write { db in
-        try User.filter(id: userId).updateAll(db, [
-          Column("profileLocalPath").set(to: localPath),
-        ])
-      }
-    }
-  }
-
   static func cacheImageData(userId: Int64, data: Data) async throws {
     Log.shared.debug("Trying to cache image data")
 
@@ -450,12 +433,29 @@ public extension User {
     let localPath = "User\(UUID().uuidString).\(format.fileExtension)"
     let localUrl = directory.appendingPathComponent(localPath)
 
-    try data.write(to: localUrl, options: .atomic)
+    do {
+      try data.write(to: localUrl, options: .atomic)
 
-    _ = try await AppDatabase.shared.dbWriter.write { db in
-      try User.filter(id: userId).updateAll(db, [
-        Column("profileLocalPath").set(to: localPath),
-      ])
+      let oldLocalUrl = try await AppDatabase.shared.dbWriter.write { db -> URL? in
+        let oldLocalPath = try User.fetchOne(db, id: userId)?.profileLocalPath
+        let updateCount = try User.filter(id: userId).updateAll(db, [
+          Column("profileLocalPath").set(to: localPath),
+        ])
+
+        guard updateCount > 0 else {
+          throw UserAvatarCacheError.userNotFound(userId)
+        }
+
+        guard let oldLocalPath, oldLocalPath != localPath else { return nil }
+        return directory.appendingPathComponent(oldLocalPath)
+      }
+
+      if let oldLocalUrl, oldLocalUrl != localUrl {
+        try? FileManager.default.removeItem(at: oldLocalUrl)
+      }
+    } catch {
+      try? FileManager.default.removeItem(at: localUrl)
+      throw error
     }
   }
 
@@ -496,12 +496,14 @@ public extension User {
   /// Clear the local cache if the profile file unique ID has changed
   mutating func clearLocalCacheIfNeeded(newFileUniqueId: String?) {
     if shouldInvalidateLocalCache(newFileUniqueId: newFileUniqueId) {
+      let localURL = getLocalURL()
+
       // Clear local path to force re-download
       profileLocalPath = nil
       profileFileUniqueId = newFileUniqueId
 
       // Optionally remove the cached file from disk
-      if let localURL = getLocalURL() {
+      if let localURL {
         Task.detached {
           try? FileManager.default.removeItem(at: localURL)
         }
@@ -562,4 +564,8 @@ private func normalizedAvatarIdentityValue(_ value: String?) -> String? {
     return nil
   }
   return trimmed
+}
+
+private enum UserAvatarCacheError: Error {
+  case userNotFound(Int64)
 }

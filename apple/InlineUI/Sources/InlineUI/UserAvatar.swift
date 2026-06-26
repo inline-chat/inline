@@ -1,3 +1,4 @@
+import Foundation
 import InlineKit
 import Kingfisher
 import Logger
@@ -11,6 +12,8 @@ public struct UserAvatar: View, Equatable {
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
       && lhs.backgroundOpacity == rhs.backgroundOpacity
       && lhs.stableAvatarIdentity == rhs.stableAvatarIdentity
+      && lhs.remoteUrl == rhs.remoteUrl
+      && lhs.localUrl == rhs.localUrl
   }
 
   let firstName: String?
@@ -28,9 +31,12 @@ public struct UserAvatar: View, Equatable {
 
   let nameForInitials: String
 
+  private static let profilePhotoSizeKind = "f"
+
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.displayScale) private var displayScale
   @State private var avatarLoadFailed = false
+  @State private var startedRemoteCacheUrl: URL?
 
   public static func getNameForInitials(user: User) -> String {
     AvatarColorUtility.formatNameForHashing(
@@ -145,12 +151,20 @@ public struct UserAvatar: View, Equatable {
   }
 
   private var avatarCacheKey: String {
-    let identity = stableAvatarIdentity
-      ?? remoteUrl?.absoluteString
-      ?? localUrl?.absoluteString
-      ?? "user:\(userId)"
+    let scaleKey = Int((renderScale * 100).rounded())
+    return "user-avatar:\(Self.profilePhotoSizeKind):scale\(scaleKey):\(avatarIdentity)"
+  }
 
-    return "user-avatar:\(identity)"
+  private var avatarIdentity: String {
+    if let stableAvatarIdentity,
+       localUrl != nil || stableAvatarIdentity.hasPrefix("local:") == false
+    {
+      return stableAvatarIdentity
+    }
+
+    return remoteUrl?.absoluteString
+      ?? localUrl?.lastPathComponent
+      ?? "user:\(userId)"
   }
 
   private var targetSize: CGSize {
@@ -158,12 +172,16 @@ public struct UserAvatar: View, Equatable {
     return CGSize(width: side, height: side)
   }
 
+  private var renderScale: CGFloat {
+    max(displayScale, 1)
+  }
+
   @ViewBuilder
   public var avatar: some View {
     if let avatarUrl {
       KFImage.url(avatarUrl, cacheKey: avatarCacheKey)
         .setProcessor(DownsamplingImageProcessor(size: targetSize))
-        .scaleFactor(displayScale)
+        .scaleFactor(renderScale)
         .cacheOriginalImage()
         .loadDiskFileSynchronously()
         .cancelOnDisappear(true)
@@ -176,7 +194,8 @@ public struct UserAvatar: View, Equatable {
         }
         .onSuccess { result in
           avatarLoadFailed = false
-          cacheRemoteAvatarIfNeeded(result, sourceUrl: avatarUrl)
+          let downloadedData = result.cacheType == .none ? result.data() : nil
+          cacheRemoteAvatarIfNeeded(sourceUrl: avatarUrl, downloadedData: downloadedData)
         }
         .onFailure { _ in
           avatarLoadFailed = true
@@ -203,14 +222,30 @@ public struct UserAvatar: View, Equatable {
     }
   }
 
-  private func cacheRemoteAvatarIfNeeded(_ result: RetrieveImageResult, sourceUrl: URL) {
+  private func cacheRemoteAvatarIfNeeded(sourceUrl: URL, downloadedData: Data?) {
     guard sourceUrl.isFileURL == false else { return }
     guard localUrl == nil else { return }
-    guard result.cacheType == .none else { return }
-    guard let data = result.data(), data.isEmpty == false else { return }
+    guard startedRemoteCacheUrl != sourceUrl else { return }
 
-    Task.detached(priority: .utility) { [userId, data] in
+    startedRemoteCacheUrl = sourceUrl
+
+    Task.detached(priority: .utility) { [userId, sourceUrl, downloadedData] in
       do {
+        let data: Data
+
+        if let downloadedData, downloadedData.isEmpty == false {
+          data = downloadedData
+        } else {
+          let (remoteData, response) = try await URLSession.shared.data(from: sourceUrl)
+          if let httpResponse = response as? HTTPURLResponse,
+             (200 ... 299).contains(httpResponse.statusCode) == false
+          {
+            return
+          }
+          data = remoteData
+        }
+
+        guard data.isEmpty == false else { return }
         try await User.cacheImageData(userId: userId, data: data)
       } catch {
         Log.shared.error("Failed to cache image", error: error)

@@ -3,13 +3,39 @@ import Logger
 import SwiftUI
 
 public struct MacDevtoolsView: View {
-  @State private var store = MacDevtoolsLogStore()
+  @State private var selectedTab = MacDevtoolsTab.logs
+  @State private var logStore = MacDevtoolsLogStore()
+  @State private var mediaStore = MacDevtoolsMediaCacheStore()
 
   public init() {}
 
   public var body: some View {
-    @Bindable var store = store
+    TabView(selection: $selectedTab) {
+      MacDevtoolsLogsView(store: logStore)
+        .tabItem {
+          Label("Logs", systemImage: "list.bullet.rectangle")
+        }
+        .tag(MacDevtoolsTab.logs)
 
+      MacDevtoolsMediaCacheView(store: mediaStore)
+        .tabItem {
+          Label("Media Cache", systemImage: "externaldrive")
+        }
+        .tag(MacDevtoolsTab.mediaCache)
+    }
+    .frame(minWidth: 720, minHeight: 460)
+  }
+}
+
+private enum MacDevtoolsTab: Hashable {
+  case logs
+  case mediaCache
+}
+
+private struct MacDevtoolsLogsView: View {
+  @Bindable var store: MacDevtoolsLogStore
+
+  var body: some View {
     VStack(spacing: 0) {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 12) {
@@ -42,13 +68,22 @@ public struct MacDevtoolsView: View {
           Spacer(minLength: 8)
 
           Button {
-            store.copySelectedEntry()
+            store.copySelectedEntries()
           } label: {
             Label("Copy", systemImage: "doc.on.doc")
           }
           .labelStyle(.iconOnly)
-          .help("Copy selected log")
-          .disabled(store.selectedEntry == nil)
+          .help("Copy selected logs")
+          .disabled(store.selectedEntries.isEmpty)
+
+          Button {
+            store.copyFilteredEntries()
+          } label: {
+            Label("Copy Visible", systemImage: "doc.text")
+          }
+          .labelStyle(.iconOnly)
+          .help("Copy visible logs")
+          .disabled(store.filteredEntries.isEmpty)
 
           Button {
             store.exportReport()
@@ -67,15 +102,16 @@ public struct MacDevtoolsView: View {
 
       Divider()
 
-      HSplitView {
+      VSplitView {
         logList
-          .frame(minWidth: 320)
+          .frame(minHeight: 220)
 
         MacDevtoolsLogDetailView(
           entry: store.selectedEntry,
-          rawText: store.selectedEntry.map(store.rawText(for:)) ?? ""
+          rawText: store.selectedEntry.map(store.rawText(for:)) ?? "",
+          selectedCount: store.selectedEntries.count
         )
-        .frame(minWidth: 220, idealWidth: 320)
+        .frame(minHeight: 170, idealHeight: 240)
       }
 
       if let statusMessage = store.statusMessage {
@@ -98,30 +134,32 @@ public struct MacDevtoolsView: View {
   }
 
   private var logList: some View {
-    @Bindable var store = store
-
-    return VStack(spacing: 0) {
+    VStack(spacing: 0) {
       MacDevtoolsLogHeaderView()
 
       ScrollViewReader { proxy in
-        ScrollView {
-          LazyVStack(spacing: 0) {
-            ForEach(store.filteredEntries) { entry in
-              MacDevtoolsLogRowView(
-                entry: entry,
-                isSelected: entry.id == store.selectedID
-              )
-              .id(entry.id)
-              .onTapGesture {
-                store.selectedID = entry.id
-              }
-            }
+        List(selection: $store.selectedIDs) {
+          ForEach(store.filteredEntries) { entry in
+            MacDevtoolsLogRowView(entry: entry)
+            .tag(entry.id)
+            .id(entry.id)
+            .listRowInsets(EdgeInsets())
           }
         }
+        .listStyle(.plain)
         .background(Color(nsColor: .textBackgroundColor))
         .onChange(of: store.filteredEntries.last?.id) { _, id in
           guard store.follow, let id else { return }
           proxy.scrollTo(id, anchor: .bottom)
+        }
+        .onChange(of: store.selectedIDs) { _, _ in
+          store.updateSelectionFocus()
+        }
+        .onChange(of: store.filter) { _, _ in
+          store.updateSelectionFocus()
+        }
+        .onChange(of: store.minimumLevel) { _, _ in
+          store.updateSelectionFocus()
         }
       }
     }
@@ -150,7 +188,6 @@ private struct MacDevtoolsLogHeaderView: View {
 
 private struct MacDevtoolsLogRowView: View {
   let entry: LogEntry
-  let isSelected: Bool
 
   var body: some View {
     HStack(spacing: 10) {
@@ -174,7 +211,6 @@ private struct MacDevtoolsLogRowView: View {
     .font(.system(.caption, design: .monospaced))
     .padding(.horizontal, 10)
     .padding(.vertical, 5)
-    .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
     .contentShape(Rectangle())
   }
 
@@ -192,11 +228,18 @@ private struct MacDevtoolsLogRowView: View {
 private struct MacDevtoolsLogDetailView: View {
   let entry: LogEntry?
   let rawText: String
+  let selectedCount: Int
 
   var body: some View {
     ScrollView {
       if let entry {
         VStack(alignment: .leading, spacing: 14) {
+          if selectedCount > 1 {
+            Text("\(selectedCount) logs selected")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.secondary)
+          }
+
           detail("Timestamp", entry.timestamp.formatted(.dateTime.year().month().day().hour().minute().second()))
           detail("Level", entry.level.rawValue)
           detail("Scope", entry.scope)
@@ -226,7 +269,7 @@ private struct MacDevtoolsLogDetailView: View {
         }
         .padding(14)
       } else {
-        Text("Select a log entry")
+        Text("Select log entries")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
           .padding(14)
