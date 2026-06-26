@@ -232,6 +232,11 @@ export const relations = defineRelations(
         to: r.photos.id,
         optional: true,
       }),
+      authorPhoto: r.one.photos({
+        from: r.urlPreview.authorPhotoId,
+        to: r.photos.id,
+        optional: true,
+      }),
       video: r.one.videos({
         from: r.urlPreview.videoId,
         to: r.videos.id,
@@ -252,6 +257,11 @@ export const relations = defineRelations(
     urlPreviewCache: {
       photo: r.one.photos({
         from: r.urlPreviewCache.photoId,
+        to: r.photos.id,
+        optional: true,
+      }),
+      authorPhoto: r.one.photos({
+        from: r.urlPreviewCache.authorPhotoId,
         to: r.photos.id,
         optional: true,
       }),

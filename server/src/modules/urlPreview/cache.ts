@@ -44,6 +44,15 @@ export async function getCachedPreviewPhotoId(imageUrl: string | undefined): Pro
     return null
   }
 
+  const mainPhotoId = await getCachedMainPhotoId(normalized)
+  if (mainPhotoId) {
+    return mainPhotoId
+  }
+
+  return getCachedAuthorPhotoId(normalized)
+}
+
+async function getCachedMainPhotoId(normalized: string): Promise<number | null> {
   const [cache] = await db
     .select({
       id: urlPreviewCache.id,
@@ -61,13 +70,34 @@ export async function getCachedPreviewPhotoId(imageUrl: string | undefined): Pro
   return cache?.photoId ?? null
 }
 
+async function getCachedAuthorPhotoId(normalized: string): Promise<number | null> {
+  const [cache] = await db
+    .select({
+      id: urlPreviewCache.id,
+      photoId: urlPreviewCache.authorPhotoId,
+    })
+    .from(urlPreviewCache)
+    .where(
+      and(eq(urlPreviewCache.authorImageUrlHash, hashPreviewUrl(normalized)), isNotNull(urlPreviewCache.authorPhotoId)),
+    )
+    .orderBy(desc(urlPreviewCache.lastUsedAt))
+    .limit(1)
+
+  if (cache?.id) {
+    await touchPreviewCache(cache.id)
+  }
+
+  return cache?.photoId ?? null
+}
+
 export async function upsertPreviewCache(input: {
   metadata: UrlPreviewResult
   photoId: number | null
+  authorPhotoId?: number | null
   now?: Date
 }): Promise<DbUrlPreviewCache> {
   const now = input.now ?? new Date()
-  const values = buildCacheValues(input.metadata, input.photoId, now)
+  const values = buildCacheValues(input.metadata, input.photoId, input.authorPhotoId ?? null, now)
 
   const [cache] = await db
     .insert(urlPreviewCache)
@@ -97,8 +127,13 @@ export async function upsertPreviewCache(input: {
         imageUrl: values.imageUrl,
         imageUrlIv: values.imageUrlIv,
         imageUrlTag: values.imageUrlTag,
+        authorImageUrlHash: values.authorImageUrlHash,
+        authorImageUrl: values.authorImageUrl,
+        authorImageUrlIv: values.authorImageUrlIv,
+        authorImageUrlTag: values.authorImageUrlTag,
         mediaKind: values.mediaKind,
         photoId: values.photoId,
+        authorPhotoId: values.authorPhotoId,
         videoId: values.videoId,
         documentId: values.documentId,
         externalUrl: values.externalUrl,
@@ -133,7 +168,12 @@ export async function upsertPreviewCache(input: {
   return cache
 }
 
-function buildCacheValues(metadata: UrlPreviewResult, photoId: number | null, now: Date): DbNewUrlPreviewCache {
+function buildCacheValues(
+  metadata: UrlPreviewResult,
+  photoId: number | null,
+  authorPhotoId: number | null,
+  now: Date,
+): DbNewUrlPreviewCache {
   const url = normalizePreviewUrl(metadata.url)
   if (!url) {
     throw new Error("Cannot cache invalid URL preview URL")
@@ -141,12 +181,14 @@ function buildCacheValues(metadata: UrlPreviewResult, photoId: number | null, no
 
   const finalUrl = metadata.finalUrl ? normalizePreviewUrl(metadata.finalUrl) : null
   const imageUrl = metadata.imageUrl ? normalizePreviewUrl(metadata.imageUrl) : null
+  const authorImageUrl = metadata.authorPhotoUrl ? normalizePreviewUrl(metadata.authorPhotoUrl) : null
   const encryptedUrl = encryptRequired(url)
   const encryptedFinalUrl = finalUrl ? encryptMessage(finalUrl) : null
   const encryptedTitle = metadata.title ? encryptMessage(metadata.title) : null
   const encryptedDescription = metadata.description ? encryptMessage(metadata.description) : null
   const encryptedAuthor = metadata.author ? encryptMessage(metadata.author) : null
   const encryptedImageUrl = imageUrl ? encryptMessage(imageUrl) : null
+  const encryptedAuthorImageUrl = authorImageUrl ? encryptMessage(authorImageUrl) : null
   const externalUrl = metadata.media?.kind === "external_video" ? normalizePreviewUrl(metadata.media.url) : null
   const embedUrl = metadata.media?.kind === "embed" ? normalizePreviewUrl(metadata.media.url) : null
   const encryptedExternalUrl = externalUrl ? encryptMessage(externalUrl) : null
@@ -177,8 +219,13 @@ function buildCacheValues(metadata: UrlPreviewResult, photoId: number | null, no
     imageUrl: encryptedImageUrl?.encrypted ?? null,
     imageUrlIv: encryptedImageUrl?.iv ?? null,
     imageUrlTag: encryptedImageUrl?.authTag ?? null,
+    authorImageUrlHash: authorImageUrl ? hashPreviewUrl(authorImageUrl) : null,
+    authorImageUrl: encryptedAuthorImageUrl?.encrypted ?? null,
+    authorImageUrlIv: encryptedAuthorImageUrl?.iv ?? null,
+    authorImageUrlTag: encryptedAuthorImageUrl?.authTag ?? null,
     mediaKind,
     photoId,
+    authorPhotoId,
     videoId: null,
     documentId: null,
     externalUrl: encryptedExternalUrl?.encrypted ?? null,

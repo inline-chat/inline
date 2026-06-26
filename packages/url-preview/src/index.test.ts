@@ -4,9 +4,11 @@ import {
   extractPreviewUrls,
   fetchBinary,
   fetchUrlPreview,
+  isXStatusUrl,
   isYouTubeUrl,
   normalizePreviewUrl,
   normalizeYouTubeUrl,
+  resolvePreviewLayout,
   type FetchBinaryOptions,
   type FetchUrlPreviewOptions,
 } from "./index"
@@ -71,6 +73,54 @@ describe("url-preview", () => {
     ).toEqual(["https://entity.example/", "https://first.example/x", "https://second.example/a"])
   })
 
+  it("resolves single-link large preview layout for configured origins", () => {
+    expect(
+      resolvePreviewLayout({
+        url: "https://x.com/inline/status/123",
+        hasPhoto: true,
+        urlCount: 1,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: true,
+    })
+    expect(
+      resolvePreviewLayout({
+        url: "https://twitter.com/inline/status/123",
+        hasPhoto: true,
+        urlCount: 2,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: false,
+    })
+    expect(
+      resolvePreviewLayout({
+        url: "https://www.youtube.com/watch?v=abcDEF12345",
+        provider: "youtube",
+        mediaKind: "embed",
+        urlCount: 1,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: true,
+    })
+  })
+
+  it("preserves existing layout hints for unconfigured origins", () => {
+    expect(
+      resolvePreviewLayout({
+        url: "https://video.example.com/watch/1",
+        hasLargeMedia: true,
+        showLargeMedia: true,
+        urlCount: 2,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: true,
+    })
+  })
+
   it("parses generic html metadata with bounded description", async () => {
     let fetchedUrl: string | undefined
     const html = `
@@ -102,6 +152,144 @@ describe("url-preview", () => {
     expect(preview?.description?.length).toBeLessThanOrEqual(60)
     expect(preview?.imageUrl).toBe("https://example.com/preview.png")
     expect(preview?.mediaType).toBeUndefined()
+  })
+
+  it("keeps X profile images out of primary preview media", async () => {
+    expect(isXStatusUrl("https://mobile.twitter.com/inline/status/123")).toBe(true)
+
+    const html = `
+      <html>
+        <head>
+          <meta property="og:title" content="Inline (@inline) on X">
+          <meta property="og:description" content="A post without attached media">
+          <meta property="og:image" content="https://pbs.twimg.com/profile_images/123/avatar_normal.jpg">
+        </head>
+      </html>
+    `
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+
+    const preview = await fetchUrlPreview("https://x.com/inline/status/123", { fetchImpl, lookup: publicLookup })
+
+    expect(preview?.provider).toBe("x")
+    expect(preview?.title).toBe("Inline (@inline) on X")
+    expect(preview?.author).toBe("Inline")
+    expect(preview?.imageUrl).toBeUndefined()
+    expect(preview?.authorPhotoUrl).toBe("https://pbs.twimg.com/profile_images/123/avatar_normal.jpg")
+    expect(preview?.media).toBeUndefined()
+    expect(preview?.layout).toBeUndefined()
+  })
+
+  it("prefers X tweet media over the author profile image", async () => {
+    const html = `
+      <html>
+        <head>
+          <meta property="og:title" content="Inline on X">
+          <meta property="og:image" content="https://pbs.twimg.com/profile_images/123/avatar_normal.jpg">
+          <meta property="og:image" content="https://pbs.twimg.com/media/GQx_example.jpg?format=jpg&amp;name=large">
+          <meta property="og:type" content="photo">
+          <meta property="og:image:width" content="1200">
+          <meta property="og:image:height" content="675">
+        </head>
+      </html>
+    `
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+
+    const preview = await fetchUrlPreview("https://twitter.com/inline/status/123", { fetchImpl, lookup: publicLookup })
+
+    expect(preview?.imageUrl).toBe("https://pbs.twimg.com/media/GQx_example.jpg?format=jpg&name=large")
+    expect(preview?.authorPhotoUrl).toBe("https://pbs.twimg.com/profile_images/123/avatar_normal.jpg")
+    expect(preview?.media).toEqual({
+      kind: "photo",
+      url: "https://pbs.twimg.com/media/GQx_example.jpg?format=jpg&name=large",
+      width: 1200,
+      height: 675,
+    })
+  })
+
+  it("extracts X tweet video media from syndication payloads", async () => {
+    let fetchedUrl = ""
+    const payload = {
+      __typename: "Tweet",
+      text: "Maybe you weren't meant to have a boss.\n\nRead more https://t.co/ordinary https://t.co/x1KlUklH6L",
+      user: {
+        name: "Mo Rajabi",
+        screen_name: "morajabi",
+        profile_image_url_https: "https://pbs.twimg.com/profile_images/1928904602751057921/5PjsTnNE_normal.jpg",
+      },
+      entities: {
+        media: [
+          {
+            url: "https://t.co/x1KlUklH6L",
+          },
+        ],
+      },
+      mediaDetails: [
+        {
+          url: "https://t.co/x1KlUklH6L",
+          media_url_https: "https://pbs.twimg.com/amplify_video_thumb/2070457164825591808/img/7LL-BHEYURHK8Y74.jpg",
+          original_info: { width: 1714, height: 964 },
+          type: "video",
+          video_info: {
+            duration_millis: 19_201,
+            variants: [
+              {
+                content_type: "application/x-mpegURL",
+                url: "https://video.twimg.com/amplify_video/2070457164825591808/pl/kILfVVgY3F_XFHwH.m3u8",
+              },
+              {
+                bitrate: 832_000,
+                content_type: "video/mp4",
+                url: "https://video.twimg.com/amplify_video/2070457164825591808/vid/avc1/640x360/vm1IlIxsz-SnoTMr.mp4",
+              },
+              {
+                bitrate: 10_368_000,
+                content_type: "video/mp4",
+                url: "https://video.twimg.com/amplify_video/2070457164825591808/vid/avc1/1714x964/8SoDDtHMJD5h2aIH.mp4",
+              },
+            ],
+          },
+        },
+      ],
+    }
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      fetchedUrl = String(url)
+      return new Response(JSON.stringify(payload), {
+        headers: { "content-type": "application/json" },
+      })
+    }
+
+    const preview = await fetchUrlPreview("https://x.com/morajabi/status/2070457314524459100", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(fetchedUrl).toContain("cdn.syndication.twimg.com/tweet-result")
+    expect(fetchedUrl).toContain("id=2070457314524459100")
+    expect(preview).toMatchObject({
+      provider: "x",
+      siteName: "X",
+      title: "Mo Rajabi (@morajabi) on X",
+      author: "Mo Rajabi",
+      description: "Maybe you weren't meant to have a boss.\n\nRead more https://t.co/ordinary",
+      imageUrl: "https://pbs.twimg.com/amplify_video_thumb/2070457164825591808/img/7LL-BHEYURHK8Y74.jpg",
+      authorPhotoUrl: "https://pbs.twimg.com/profile_images/1928904602751057921/5PjsTnNE_200x200.jpg",
+      duration: 19,
+      mediaType: "video",
+      media: {
+        kind: "external_video",
+        url: "https://video.twimg.com/amplify_video/2070457164825591808/vid/avc1/1714x964/8SoDDtHMJD5h2aIH.mp4",
+        mimeType: "video/mp4",
+        width: 1714,
+        height: 964,
+        duration: 19,
+      },
+      layout: {
+        hasLargeMedia: true,
+        showLargeMedia: true,
+      },
+    })
   })
 
   it("decodes html entities in generic metadata", async () => {
@@ -357,21 +545,43 @@ describe("url-preview", () => {
 
   it("uses YouTube oEmbed metadata for YouTube watch, short and shortener links", async () => {
     expect(isYouTubeUrl("https://youtu.be/abcDEF12345?si=share")).toBe(true)
+    expect(isYouTubeUrl("https://www.youtube-nocookie.com/embed/abcDEF12345")).toBe(true)
     expect(normalizeYouTubeUrl("https://www.youtube.com/shorts/abcDEF12345?feature=share")).toBe(
       "https://www.youtube.com/watch?v=abcDEF12345",
     )
+    expect(normalizeYouTubeUrl("https://www.youtube-nocookie.com/embed/abcDEF12345")).toBe(
+      "https://www.youtube.com/watch?v=abcDEF12345",
+    )
 
+    const fetchedUrls: string[] = []
     const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      const urlString = String(url)
+      fetchedUrls.push(urlString)
+      if (!urlString.startsWith("https://www.youtube.com/oembed?")) {
+        expect(urlString).toBe("https://www.youtube.com/watch?v=abcDEF12345")
+        return new Response(
+          `<html><head></head><body>
+            <script>
+              var ytInitialData = {"videoSecondaryInfoRenderer":{"owner":{"videoOwnerRenderer":{"thumbnail":{"thumbnails":[
+                {"url":"https://yt3.ggpht.com/channel-avatar=s48-c-k-c0x00ffffff-no-rj","width":48,"height":48},
+                {"url":"https://yt3.ggpht.com/channel-avatar=s176-c-k-c0x00ffffff-no-rj","width":176,"height":176}
+              ]}}}}};
+            </script>
+          </body></html>`,
+          { headers: { "content-type": "text/html; charset=utf-8" } },
+        )
+      }
+
       const endpoint = new URL(String(url))
       expect(`${endpoint.origin}${endpoint.pathname}`).toBe("https://www.youtube.com/oembed")
       expect(endpoint.searchParams.get("url")).toBe("https://www.youtube.com/watch?v=abcDEF12345")
       return Response.json({
-      title: "Demo video",
-      author_name: "Inline",
-      thumbnail_url: "https://i.ytimg.com/vi/abcDEF12345/hqdefault.jpg",
-      width: 480,
-      height: 270,
-    })
+        title: "Demo video",
+        author_name: "Inline",
+        thumbnail_url: "https://i.ytimg.com/vi/abcDEF12345/hqdefault.jpg",
+        width: 480,
+        height: 270,
+      })
     }
 
     const preview = await fetchUrlPreview("https://youtu.be/abcDEF12345?si=share", { fetchImpl, lookup: publicLookup })
@@ -380,7 +590,8 @@ describe("url-preview", () => {
       siteName: "YouTube",
       author: "Inline",
       title: "Demo video",
-      imageUrl: "https://i.ytimg.com/vi/abcDEF12345/hqdefault.jpg",
+      imageUrl: "https://i.ytimg.com/vi/abcDEF12345/mqdefault.jpg",
+      authorPhotoUrl: "https://yt3.ggpht.com/channel-avatar=s176-c-k-c0x00ffffff-no-rj",
       mediaType: "video",
       media: {
         kind: "embed",
@@ -390,6 +601,7 @@ describe("url-preview", () => {
         height: 270,
       },
     })
+    expect(fetchedUrls).toHaveLength(2)
   })
 
   it("uses bounded YouTube page metadata when YouTube oEmbed is unavailable", async () => {
@@ -429,6 +641,38 @@ describe("url-preview", () => {
     })
   })
 
+  it("keeps YouTube channel avatars out of primary preview media", async () => {
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      const urlString = String(url)
+      if (urlString.startsWith("https://www.youtube.com/oembed?")) {
+        return new Response("forbidden", { status: 403, headers: { "content-type": "text/html" } })
+      }
+
+      return new Response(
+        `<html><head>
+          <meta property="og:title" content="Page title">
+          <meta property="og:image" content="https://yt3.ggpht.com/channel-avatar=s88-c-k-c0x00ffffff-no-rj">
+          <meta property="og:image" content="https://i.ytimg.com/vi/abcDEF12345/maxresdefault.jpg">
+        </head></html>`,
+        { headers: { "content-type": "text/html" } },
+      )
+    }
+
+    const preview = await fetchUrlPreview("https://www.youtube.com/watch?v=abcDEF12345", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(preview?.provider).toBe("youtube")
+    expect(preview?.imageUrl).toBe("https://i.ytimg.com/vi/abcDEF12345/maxresdefault.jpg")
+    expect(preview?.authorPhotoUrl).toBe("https://yt3.ggpht.com/channel-avatar=s88-c-k-c0x00ffffff-no-rj")
+    expect(preview?.media).toEqual({
+      kind: "embed",
+      url: "https://www.youtube.com/embed/abcDEF12345",
+      embedType: "iframe",
+    })
+  })
+
   it("falls back to YouTube page metadata when oEmbed returns invalid json", async () => {
     const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
       const urlString = String(url)
@@ -451,6 +695,35 @@ describe("url-preview", () => {
     })
 
     expect(preview?.title).toBe("Recovered page title")
+    expect(preview?.media?.kind).toBe("embed")
+  })
+
+  it("falls back to YouTube page metadata when oEmbed omits title", async () => {
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      const urlString = String(url)
+      if (urlString.startsWith("https://www.youtube.com/oembed?")) {
+        return Response.json({
+          author_name: "Inline",
+          thumbnail_url: "https://i.ytimg.com/vi/abcDEF12345/hqdefault.jpg",
+        })
+      }
+
+      return new Response(
+        `<html><head>
+          <meta property="og:title" content="Recovered title">
+          <meta property="og:image" content="https://i.ytimg.com/vi/abcDEF12345/maxresdefault.jpg">
+        </head></html>`,
+        { headers: { "content-type": "text/html" } },
+      )
+    }
+
+    const preview = await fetchUrlPreview("https://www.youtube.com/watch?v=abcDEF12345", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(preview?.title).toBe("Recovered title")
+    expect(preview?.imageUrl).toBe("https://i.ytimg.com/vi/abcDEF12345/maxresdefault.jpg")
     expect(preview?.media?.kind).toBe("embed")
   })
 
@@ -477,7 +750,7 @@ describe("url-preview", () => {
     expect(preview).toMatchObject({
       provider: "youtube",
       title: "YouTube video",
-      imageUrl: "https://i.ytimg.com/vi/abcDEF12345/hqdefault.jpg",
+      imageUrl: "https://i.ytimg.com/vi/abcDEF12345/mqdefault.jpg",
       media: {
         kind: "embed",
         url: "https://www.youtube.com/embed/abcDEF12345",
@@ -501,7 +774,7 @@ describe("url-preview", () => {
       provider: "youtube",
       siteName: "YouTube",
       title: "YouTube video",
-      imageUrl: "https://i.ytimg.com/vi/abcDEF12345/hqdefault.jpg",
+      imageUrl: "https://i.ytimg.com/vi/abcDEF12345/mqdefault.jpg",
       mediaType: "video",
       media: {
         kind: "embed",

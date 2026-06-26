@@ -1470,6 +1470,12 @@ export interface UrlPreview {
      * @generated from protobuf field: optional UrlPreviewLayout layout = 13;
      */
     layout?: UrlPreviewLayout;
+    /**
+     * Author, channel, account, or publisher avatar, separate from primary media.
+     *
+     * @generated from protobuf field: optional Photo author_photo = 14;
+     */
+    authorPhoto?: Photo;
 }
 /**
  * Compatibility summary of the preview media.
@@ -10331,7 +10337,8 @@ class UrlPreview$Type extends MessageType<UrlPreview> {
             { no: 10, name: "provider", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 11, name: "author", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 12, name: "media", kind: "message", T: () => UrlPreviewMedia },
-            { no: 13, name: "layout", kind: "message", T: () => UrlPreviewLayout }
+            { no: 13, name: "layout", kind: "message", T: () => UrlPreviewLayout },
+            { no: 14, name: "author_photo", kind: "message", T: () => Photo }
         ]);
     }
     create(value?: PartialMessage<UrlPreview>): UrlPreview {
@@ -10385,6 +10392,9 @@ class UrlPreview$Type extends MessageType<UrlPreview> {
                 case /* optional UrlPreviewLayout layout */ 13:
                     message.layout = UrlPreviewLayout.internalBinaryRead(reader, reader.uint32(), options, message.layout);
                     break;
+                case /* optional Photo author_photo */ 14:
+                    message.authorPhoto = Photo.internalBinaryRead(reader, reader.uint32(), options, message.authorPhoto);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10436,6 +10446,9 @@ class UrlPreview$Type extends MessageType<UrlPreview> {
         /* optional UrlPreviewLayout layout = 13; */
         if (message.layout)
             UrlPreviewLayout.internalBinaryWrite(message.layout, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
+        /* optional Photo author_photo = 14; */
+        if (message.authorPhoto)
+            Photo.internalBinaryWrite(message.authorPhoto, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

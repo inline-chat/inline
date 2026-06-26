@@ -76,6 +76,7 @@ const cloneUrlPreviewById = async (previewId: bigint): Promise<number | null> =>
       authorTag: existing.authorTag,
       mediaKind: existing.mediaKind,
       photoId: existing.photoId,
+      authorPhotoId: existing.authorPhotoId,
       videoId: existing.videoId,
       documentId: existing.documentId,
       externalUrl: existing.externalUrl,

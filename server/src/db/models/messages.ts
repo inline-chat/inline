@@ -65,6 +65,7 @@ export type DbInputFullAttachment = DbMessageAttachment & {
   externalTask?: DbExternalTask | null
   linkEmbed?: (DbLinkEmbed & {
     photo?: InputDbFullPhoto | null
+    authorPhoto?: InputDbFullPhoto | null
     video?: InputDbFullVideo | null
     document?: InputDbFullDocument | null
   }) | null
@@ -168,6 +169,7 @@ export type ProcessedLinkEmbed = Omit<
   externalUrl: string | null
   embedUrl: string | null
   photo?: DbFullPhoto | null
+  authorPhoto?: DbFullPhoto | null
   video?: DbFullVideo | null
   document?: DbFullDocument | null
 }
@@ -236,6 +238,7 @@ const messageAttachmentRelations = {
   linkEmbed: {
     with: {
       photo: fullPhotoRelations,
+      authorPhoto: fullPhotoRelations,
       video: fullVideoRelations,
       document: fullDocumentRelations,
     },
@@ -851,6 +854,7 @@ export function processAttachments(
     externalTask?: DbExternalTask | null
     linkEmbed?: (DbLinkEmbed & {
       photo?: InputDbFullPhoto | null
+      authorPhoto?: InputDbFullPhoto | null
       video?: InputDbFullVideo | null
       document?: InputDbFullDocument | null
     }) | null
@@ -899,6 +903,7 @@ export function processAttachments(
         embedUrlIv,
         embedUrlTag,
         photo,
+        authorPhoto,
         video,
         document,
         ...rest
@@ -964,6 +969,7 @@ export function processAttachments(
               })
             : null,
         photo: photo ? FileModel.processFullPhoto(photo) : null,
+        authorPhoto: authorPhoto ? FileModel.processFullPhoto(authorPhoto) : null,
         video: video ? FileModel.processFullVideo(video) : null,
         document: document ? FileModel.processFullDocument(document) : null,
       }

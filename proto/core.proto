@@ -587,6 +587,9 @@ message UrlPreview {
 
   // Server-provided layout hints that clients can adapt to available space.
   optional UrlPreviewLayout layout = 13;
+
+  // Author, channel, account, or publisher avatar, separate from primary media.
+  optional Photo author_photo = 14;
 }
 
 // Typed media attached to a URL preview.

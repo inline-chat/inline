@@ -6,11 +6,12 @@ import { MessageModel } from "@in/server/db/models/messages"
 import { addSpaceUrlPreviewExclusion } from "@in/server/functions/space.urlPreviewExclusions"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { isSpaceUrlPreviewExcluded } from "@in/server/modules/urlPreview/exclusions"
-import { getPreviewRoutesFromMessage, processUrlPreview } from "@in/server/modules/urlPreview/processUrlPreview"
 import {
-  getFreshPreviewCache,
-  upsertPreviewCache,
-} from "@in/server/modules/urlPreview/cache"
+  getPreviewRoutesFromMessage,
+  processUrlPreview,
+  processUrlPreviews,
+} from "@in/server/modules/urlPreview/processUrlPreview"
+import { getCachedPreviewPhotoId, getFreshPreviewCache, upsertPreviewCache } from "@in/server/modules/urlPreview/cache"
 import { setupTestLifecycle, testUtils } from "../setup"
 
 const originalFetch = globalThis.fetch
@@ -24,9 +25,16 @@ describe("URL preview cache", () => {
 
   it("stores fresh metadata by normalized url and ignores expired rows", async () => {
     const now = new Date("2026-05-31T10:00:00Z")
+    const authorPhotoUrl = "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg"
+    const [authorPhoto] = await db.insert(schema.photos).values({ format: "jpeg" }).returning()
+    if (!authorPhoto) {
+      throw new Error("Failed to create author photo fixture")
+    }
+
     const cache = await upsertPreviewCache({
       now,
       photoId: null,
+      authorPhotoId: authorPhoto.id,
       metadata: {
         url: "https://example.com/article?utm_source=share&id=1",
         finalUrl: "https://example.com/article?id=1",
@@ -36,6 +44,7 @@ describe("URL preview cache", () => {
         mediaType: "video",
         provider: "generic",
         author: "Inline",
+        authorPhotoUrl,
         media: {
           kind: "embed",
           url: "https://example.com/embed/article",
@@ -61,6 +70,9 @@ describe("URL preview cache", () => {
     expect(fresh?.embedDuration).toBe(42)
     expect(fresh?.hasLargeMedia).toBe(true)
     expect(fresh?.showLargeMedia).toBe(true)
+    expect(fresh?.authorPhotoId).toBe(authorPhoto.id)
+    expect(fresh?.authorImageUrlHash).toBeInstanceOf(Buffer)
+    expect(await getCachedPreviewPhotoId(authorPhotoUrl)).toBe(authorPhoto.id)
 
     await db
       .update(schema.urlPreviewCache)
@@ -172,6 +184,284 @@ describe("URL preview cache", () => {
     expect(attachment?.linkEmbed?.siteName).toBe("Facebook & Video")
     expect(attachment?.linkEmbed?.title).toBe("\u{1f534} \u6b63\u5728\u76f4\u64ad\uff01Amy \u5e36\u4f60")
     expect(attachment?.linkEmbed?.description).toBe('Fish & chips "safe" \u00a9')
+  })
+
+  it("recalculates cached large preview display per message URL count", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "URL Preview Layout",
+      ["preview-layout@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create layout test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create layout test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://www.youtube.com/watch?v=abcDEF12345 https://example.com/also",
+    })
+
+    const youtubeCache = await upsertPreviewCache({
+      photoId: null,
+      metadata: {
+        url: "https://www.youtube.com/watch?v=abcDEF12345",
+        finalUrl: "https://www.youtube.com/watch?v=abcDEF12345",
+        siteName: "YouTube",
+        title: "Demo video",
+        mediaType: "video",
+        provider: "youtube",
+        media: {
+          kind: "embed",
+          url: "https://www.youtube.com/embed/abcDEF12345",
+          embedType: "iframe",
+        },
+        layout: {
+          hasLargeMedia: true,
+          showLargeMedia: true,
+        },
+      },
+    })
+    const otherCache = await upsertPreviewCache({
+      photoId: null,
+      metadata: {
+        url: "https://example.com/also",
+        finalUrl: "https://example.com/also",
+        siteName: "Example",
+        title: "Other link",
+        provider: "generic",
+      },
+    })
+
+    let fetchCalls = 0
+    globalThis.fetch = (async () => {
+      fetchCalls += 1
+      throw new Error("network fetch should not run for cache hits")
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreviews({
+        message,
+        previewUrls: ["https://www.youtube.com/watch?v=abcDEF12345", "https://example.com/also"],
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const [youtubePreview] = await db
+      .select()
+      .from(schema.urlPreview)
+      .where(eq(schema.urlPreview.cacheId, youtubeCache.id))
+      .limit(1)
+    const [otherPreview] = await db
+      .select()
+      .from(schema.urlPreview)
+      .where(eq(schema.urlPreview.cacheId, otherCache.id))
+      .limit(1)
+
+    expect(fetchCalls).toBe(0)
+    expect(youtubePreview?.hasLargeMedia).toBe(true)
+    expect(youtubePreview?.showLargeMedia).toBe(false)
+    expect(otherPreview?.showLargeMedia).toBeNull()
+  })
+
+  it("uses the single-link X/Twitter large preview policy for cached rows", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "X Preview Layout",
+      ["x-preview-layout@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create X layout test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create X layout test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://x.com/inline/status/123",
+    })
+
+    const cache = await upsertPreviewCache({
+      photoId: null,
+      metadata: {
+        url: "https://x.com/inline/status/123",
+        finalUrl: "https://x.com/inline/status/123",
+        siteName: "X",
+        title: "Inline on X",
+        provider: "generic",
+        layout: {
+          hasLargeMedia: true,
+          showLargeMedia: false,
+        },
+      },
+    })
+
+    await processUrlPreview({
+      message,
+      previewUrl: "https://x.com/inline/status/123",
+      chatId: chat.id,
+      currentUserId: user.id,
+      inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+    })
+
+    const [preview] = await db.select().from(schema.urlPreview).where(eq(schema.urlPreview.cacheId, cache.id)).limit(1)
+    expect(preview?.hasLargeMedia).toBe(true)
+    expect(preview?.showLargeMedia).toBe(true)
+  })
+
+  it("moves stale cached X profile images out of primary preview media", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "X Stale Author Image Cache",
+      ["x-stale-author-image@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create stale X cache test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create stale X cache test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://x.com/inline/status/456",
+    })
+
+    const [avatar] = await db.insert(schema.photos).values({ format: "jpeg" }).returning()
+    if (!avatar) {
+      throw new Error("Failed to create avatar photo fixture")
+    }
+
+    const cache = await upsertPreviewCache({
+      photoId: avatar.id,
+      metadata: {
+        url: "https://x.com/inline/status/456",
+        finalUrl: "https://x.com/inline/status/456",
+        siteName: "X",
+        title: "Inline (@inline) on X",
+        provider: "generic",
+        author: "Inline",
+        imageUrl: "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg",
+        layout: {
+          hasLargeMedia: true,
+          showLargeMedia: true,
+        },
+      },
+    })
+
+    globalThis.fetch = (async () => {
+      throw new Error("refresh should fall back to stale cache")
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewUrl: "https://x.com/inline/status/456",
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const [preview] = await db.select().from(schema.urlPreview).where(eq(schema.urlPreview.cacheId, cache.id)).limit(1)
+    expect(preview?.photoId).toBeNull()
+    expect(preview?.authorPhotoId).toBe(avatar.id)
+    expect(preview?.hasLargeMedia).toBe(false)
+    expect(preview?.showLargeMedia).toBe(false)
+  })
+
+  it("moves stale cached YouTube channel avatars out of primary preview media", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "YouTube Stale Author Image Cache",
+      ["youtube-stale-author-image@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create stale YouTube cache test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create stale YouTube cache test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://www.youtube.com/watch?v=abcDEF12345",
+    })
+
+    const [avatar] = await db.insert(schema.photos).values({ format: "jpeg" }).returning()
+    if (!avatar) {
+      throw new Error("Failed to create avatar photo fixture")
+    }
+
+    const cache = await upsertPreviewCache({
+      photoId: avatar.id,
+      metadata: {
+        url: "https://www.youtube.com/watch?v=abcDEF12345",
+        finalUrl: "https://www.youtube.com/watch?v=abcDEF12345",
+        siteName: "YouTube",
+        title: "Demo video",
+        provider: "youtube",
+        imageUrl: "https://yt3.ggpht.com/channel-avatar=s88-c-k-c0x00ffffff-no-rj",
+        mediaType: "video",
+        media: {
+          kind: "embed",
+          url: "https://www.youtube.com/embed/abcDEF12345",
+          embedType: "iframe",
+        },
+        layout: {
+          hasLargeMedia: true,
+          showLargeMedia: true,
+        },
+      },
+    })
+
+    globalThis.fetch = (async () => {
+      throw new Error("refresh should fall back to stale cache")
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewUrl: "https://www.youtube.com/watch?v=abcDEF12345",
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const [preview] = await db.select().from(schema.urlPreview).where(eq(schema.urlPreview.cacheId, cache.id)).limit(1)
+    expect(preview?.photoId).toBeNull()
+    expect(preview?.authorPhotoId).toBe(avatar.id)
+    expect(preview?.mediaKind).toBe("embed")
+    expect(preview?.hasLargeMedia).toBe(true)
+    expect(preview?.showLargeMedia).toBe(true)
   })
 
   it("skips excluded space URL previews before fetch or cache work", async () => {

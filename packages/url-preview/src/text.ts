@@ -11,6 +11,23 @@ export function cleanField(value: string | undefined | null, maxLength: number):
   return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
 }
 
+export function cleanMultilineField(value: string | undefined | null, maxLength: number): string | null {
+  const cleaned = stripUnsafeControls(decodeEntities(value ?? ""))
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+  if (!cleaned) {
+    return null
+  }
+  if (cleaned.length <= maxLength) {
+    return cleaned
+  }
+  return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+}
+
 export function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined
 }

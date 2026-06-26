@@ -8,11 +8,17 @@ import {
   DEFAULT_USER_AGENT,
 } from "../constants.js"
 import { firstMeta, parseHtml, type ParsedHtml } from "../html.js"
+import {
+  metadataImageUrls,
+  previewProviderFromImageRules,
+  selectPreviewImage,
+} from "../imageRoles.js"
 import { defaultLookup, fetchWithRedirects, readResponseTextPrefix } from "../network.js"
 import { normalizeMetadataUrl } from "../normalize.js"
 import { cleanField, hostLabel } from "../text.js"
 import type { FetchUrlPreviewOptions, PreviewMedia, UrlPreviewResult } from "../types.js"
 import { fetchVideoMetadata, type VideoMetadata } from "../videoMetadata.js"
+import { previewLayout } from "../layout.js"
 
 export async function fetchGenericPreview(
   originalUrl: string,
@@ -56,19 +62,18 @@ function buildGenericPreview(
     firstMeta(meta, ["og:description", "twitter:description", "description"]),
     options.maxDescriptionLength ?? DEFAULT_DESCRIPTION_LENGTH,
   )
-  const imageUrl = normalizeMetadataUrl(
-    firstMeta(meta, ["og:image:secure_url", "og:image:url", "og:image", "twitter:image", "twitter:image:src"]),
-    finalUrl,
-  )
+  const image = selectPreviewImage(originalUrl, finalUrl, metadataImageUrls(meta, finalUrl))
   const siteName = cleanField(
     firstMeta(meta, ["og:site_name", "application-name"]) ?? hostLabel(finalUrl),
     options.maxSiteNameLength ?? DEFAULT_SITE_NAME_LENGTH,
   )
-  const media = detectMedia(meta, finalUrl, imageUrl ?? undefined)
+  const media = detectMedia(meta, finalUrl, image.primaryUrl)
   const mediaType = detectMediaType(meta, media)
   const duration = mediaDuration(media)
+  const provider = previewProvider(originalUrl, finalUrl)
+  const author = provider === "x" ? xAuthorFromTitle(title) : undefined
 
-  if (!title && !description && !imageUrl) {
+  if (!title && !description && !image.primaryUrl && !image.authorPhotoUrl) {
     return null
   }
 
@@ -78,13 +83,24 @@ function buildGenericPreview(
     siteName: siteName ?? undefined,
     title: title ?? undefined,
     description: description ?? undefined,
-    imageUrl: imageUrl ?? undefined,
+    imageUrl: image.primaryUrl,
     duration,
     mediaType,
+    author,
+    authorPhotoUrl: image.authorPhotoUrl,
     media,
     layout: media ? previewLayout(media) : undefined,
-    provider: "generic",
+    provider,
   }
+}
+
+function previewProvider(originalUrl: string, finalUrl: string): UrlPreviewResult["provider"] {
+  return previewProviderFromImageRules(originalUrl, finalUrl) ?? "generic"
+}
+
+function xAuthorFromTitle(title: string | null): string | undefined {
+  const author = title?.match(/^(.+?)\s+\(@[^)]+\)\s+on\s+X$/i)?.[1]?.trim()
+  return author || undefined
 }
 
 async function buildContentTypePreview(
@@ -250,14 +266,6 @@ function mediaFromContentType(
   }
 
   return undefined
-}
-
-function previewLayout(media: PreviewMedia) {
-  const hasLargeMedia = media.kind === "external_video" || media.kind === "embed" || media.kind === "photo"
-  return {
-    hasLargeMedia,
-    showLargeMedia: media.kind === "external_video" || media.kind === "embed",
-  }
 }
 
 function mediaDuration(media: PreviewMedia | undefined): number | undefined {

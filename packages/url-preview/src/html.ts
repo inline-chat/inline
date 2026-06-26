@@ -16,6 +16,7 @@ type HTMLRewriterConstructor = new () => HTMLRewriterInstance
 export type ParsedHtml = {
   title?: string
   meta: Map<string, string>
+  metaValues: Map<string, string[]>
 }
 
 export async function parseHtml(html: string): Promise<ParsedHtml> {
@@ -24,7 +25,7 @@ export async function parseHtml(html: string): Promise<ParsedHtml> {
     return parseHtmlFallback(html)
   }
 
-  const parsed: ParsedHtml = { meta: new Map() }
+  const parsed = emptyParsedHtml()
   let title = ""
 
   const response = new rewriter()
@@ -37,7 +38,7 @@ export async function parseHtml(html: string): Promise<ParsedHtml> {
       element(element) {
         const key = element.getAttribute("property") ?? element.getAttribute("name")
         const content = element.getAttribute("content")
-        addMeta(parsed.meta, key, content)
+        addMeta(parsed, key, content)
       },
     })
     .transform(new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } }))
@@ -57,17 +58,29 @@ export function firstMeta(parsed: ParsedHtml, keys: readonly string[]): string |
   return undefined
 }
 
+export function allMeta(parsed: ParsedHtml, keys: readonly string[]): string[] {
+  const values: string[] = []
+  for (const key of keys) {
+    values.push(...(parsed.metaValues.get(key) ?? []))
+  }
+  return values
+}
+
 function parseHtmlFallback(html: string): ParsedHtml {
-  const parsed: ParsedHtml = { meta: new Map() }
+  const parsed = emptyParsedHtml()
   const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
   parsed.title = cleanField(stripTags(title), DEFAULT_TITLE_LENGTH) ?? undefined
 
   for (const match of html.matchAll(/<meta\s+([^>]+)>/gi)) {
     const attrs = parseAttributes(match[1] ?? "")
-    addMeta(parsed.meta, attrs.get("property") ?? attrs.get("name"), attrs.get("content"))
+    addMeta(parsed, attrs.get("property") ?? attrs.get("name"), attrs.get("content"))
   }
 
   return parsed
+}
+
+function emptyParsedHtml(): ParsedHtml {
+  return { meta: new Map(), metaValues: new Map() }
 }
 
 function parseAttributes(input: string): Map<string, string> {
@@ -82,11 +95,18 @@ function parseAttributes(input: string): Map<string, string> {
   return attrs
 }
 
-function addMeta(meta: Map<string, string>, key: string | null | undefined, value: string | null | undefined) {
+function addMeta(parsed: ParsedHtml, key: string | null | undefined, value: string | null | undefined) {
   const normalizedKey = key?.trim().toLowerCase()
   const normalizedValue = cleanField(value, 1_000)
-  if (!normalizedKey || !normalizedValue || meta.has(normalizedKey)) {
+  if (!normalizedKey || !normalizedValue) {
     return
   }
-  meta.set(normalizedKey, normalizedValue)
+
+  if (!parsed.meta.has(normalizedKey)) {
+    parsed.meta.set(normalizedKey, normalizedValue)
+  }
+
+  const values = parsed.metaValues.get(normalizedKey) ?? []
+  values.push(normalizedValue)
+  parsed.metaValues.set(normalizedKey, values)
 }

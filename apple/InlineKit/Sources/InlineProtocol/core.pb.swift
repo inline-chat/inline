@@ -2745,6 +2745,16 @@ public struct UrlPreview: @unchecked Sendable {
   /// Clears the value of `layout`. Subsequent reads from it will return its default value.
   public mutating func clearLayout() {_uniqueStorage()._layout = nil}
 
+  /// Author, channel, account, or publisher avatar, separate from primary media.
+  public var authorPhoto: Photo {
+    get {return _storage._authorPhoto ?? Photo()}
+    set {_uniqueStorage()._authorPhoto = newValue}
+  }
+  /// Returns true if `authorPhoto` has been explicitly set.
+  public var hasAuthorPhoto: Bool {return _storage._authorPhoto != nil}
+  /// Clears the value of `authorPhoto`. Subsequent reads from it will return its default value.
+  public mutating func clearAuthorPhoto() {_uniqueStorage()._authorPhoto = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Compatibility summary of the preview media.
@@ -13626,6 +13636,7 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     11: .same(proto: "author"),
     12: .same(proto: "media"),
     13: .same(proto: "layout"),
+    14: .standard(proto: "author_photo"),
   ]
 
   fileprivate class _StorageClass {
@@ -13642,6 +13653,7 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     var _author: String? = nil
     var _media: UrlPreviewMedia? = nil
     var _layout: UrlPreviewLayout? = nil
+    var _authorPhoto: Photo? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -13669,6 +13681,7 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
       _author = source._author
       _media = source._media
       _layout = source._layout
+      _authorPhoto = source._authorPhoto
     }
   }
 
@@ -13700,6 +13713,7 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
         case 11: try { try decoder.decodeSingularStringField(value: &_storage._author) }()
         case 12: try { try decoder.decodeSingularMessageField(value: &_storage._media) }()
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._layout) }()
+        case 14: try { try decoder.decodeSingularMessageField(value: &_storage._authorPhoto) }()
         default: break
         }
       }
@@ -13751,6 +13765,9 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
       try { if let v = _storage._layout {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
       } }()
+      try { if let v = _storage._authorPhoto {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -13773,6 +13790,7 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
         if _storage._author != rhs_storage._author {return false}
         if _storage._media != rhs_storage._media {return false}
         if _storage._layout != rhs_storage._layout {return false}
+        if _storage._authorPhoto != rhs_storage._authorPhoto {return false}
         return true
       }
       if !storagesAreEqual {return false}

@@ -4,7 +4,11 @@ import {
   fetchAuthenticatedUrlPreview,
   fetchBinary,
   fetchUrlPreview,
+  isPreviewAuthorImageUrl,
+  isXStatusUrl,
+  isYouTubeUrl,
   normalizePreviewUrl,
+  resolvePreviewLayout,
   type PreviewRoute,
   type UrlPreviewResult,
 } from "@inline-chat/url-preview"
@@ -28,7 +32,7 @@ import {
   type DbUrlPreviewCache,
 } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import {
@@ -65,6 +69,7 @@ type ProcessUrlPreviewInput = {
   spaceId?: number | null
   currentUserId: number
   inputPeer: InputPeer
+  previewUrlCount?: number
   messageText?: string
   messageEntities?: MessageEntities
   titleAttachments?: ThreadTitleAttachmentContext[]
@@ -95,6 +100,7 @@ type PreviewAttachmentSource = {
   authorTag: Buffer | null
   mediaKind: PreviewMediaKind | null
   photoId: number | null
+  authorPhotoId: number | null
   videoId: number | null
   documentId: number | null
   externalUrl: Buffer | null
@@ -159,8 +165,9 @@ export async function processUrlPreviews(
   },
 ): Promise<void> {
   const routes = input.previewRoutes ?? input.previewUrls?.map(generalPreviewRoute) ?? []
+  const previewUrlCount = routes.length
   for (const previewRoute of routes.slice(0, maxPreviewUrls)) {
-    await processUrlPreview({ ...input, previewRoute })
+    await processUrlPreview({ ...input, previewRoute, previewUrlCount })
   }
 
   await maybeScheduleTitleGenerationAfterPreviews(input)
@@ -196,17 +203,8 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
       })
       return null
     })
-    if (cached) {
-      const inserted = await insertPreviewAttachment(input.message, input.chatId, previewSourceFromCache(cached))
-      await touchPreviewCache(cached.id).catch((error) => {
-        log.warn("Failed to touch URL preview cache", {
-          error,
-          cacheId: cached.id,
-          messageId: input.message.messageId,
-          chatId: input.chatId,
-        })
-      })
-      await pushInsertedPreviewAttachment(input, inserted)
+    if (cached && !shouldRefetchCachedPreview(cached, previewRoute.url)) {
+      await insertCachedPreviewAttachment(input, previewRoute, cached)
       return
     }
 
@@ -214,14 +212,33 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
       maxDescriptionLength,
       maxTitleLength,
       maxSiteNameLength,
+    }).catch((error) => {
+      log.warn("Failed to fetch URL preview metadata", {
+        error,
+        url: previewRoute.url,
+        messageId: input.message.messageId,
+        chatId: input.chatId,
+      })
+      return null
     })
     if (!metadata) {
+      if (cached) {
+        await insertCachedPreviewAttachment(input, previewRoute, cached)
+      }
       return
     }
 
     // TODO: Generate and cache poster thumbnails for direct video previews once capture can be safely bounded.
     const photoId = metadata.imageUrl ? await getOrSavePreviewImage(metadata.imageUrl, input.currentUserId) : null
-    const cache = await upsertPreviewCache({ metadata, photoId }).catch((error) => {
+    const authorPhotoId = metadata.authorPhotoUrl
+      ? await getOrSavePreviewImage(metadata.authorPhotoUrl, input.currentUserId)
+      : null
+    if (cached && shouldKeepCachedAuthorImageFallback(cached, photoId, authorPhotoId)) {
+      await insertCachedPreviewAttachment(input, previewRoute, cached)
+      return
+    }
+
+    const cache = await upsertPreviewCache({ metadata, photoId, authorPhotoId }).catch((error) => {
       log.warn("Failed to write URL preview cache", {
         error,
         url: metadata.url,
@@ -233,7 +250,11 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
     const inserted = await insertPreviewAttachment(
       input.message,
       input.chatId,
-      previewSourceFromMetadata(metadata, photoId, cache?.id ?? null),
+      previewSourceForMessage(
+        previewSourceFromMetadata(metadata, photoId, authorPhotoId, cache?.id ?? null),
+        previewRouteUrl(previewRoute),
+        input.previewUrlCount,
+      ),
     )
     await pushInsertedPreviewAttachment(input, inserted)
   } catch (error) {
@@ -246,6 +267,94 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
   } finally {
     releaseSlot()
   }
+}
+
+async function insertCachedPreviewAttachment(
+  input: ProcessUrlPreviewInput,
+  previewRoute: PreviewRoute & { kind: "general" },
+  cached: DbUrlPreviewCache,
+): Promise<void> {
+  const inserted = await insertPreviewAttachment(
+    input.message,
+    input.chatId,
+    previewSourceForMessage(previewSourceFromCache(cached), previewRouteUrl(previewRoute), input.previewUrlCount),
+  )
+  await touchPreviewCache(cached.id).catch((error) => {
+    log.warn("Failed to touch URL preview cache", {
+      error,
+      cacheId: cached.id,
+      messageId: input.message.messageId,
+      chatId: input.chatId,
+    })
+  })
+  await pushInsertedPreviewAttachment(input, inserted)
+}
+
+function shouldRefetchCachedPreview(cache: DbUrlPreviewCache, url: string): boolean {
+  const normalized = normalizePreviewUrl(url)
+  if (!normalized) {
+    return false
+  }
+
+  if (isXStatusUrl(normalized)) {
+    return isStaleXPreviewCache(cache) || cachedPrimaryImageIsAuthorImage(cache)
+  }
+
+  if (isYouTubeUrl(normalized)) {
+    return cachedImageUrlNeedsYouTubeRefresh(cache) || cachedPrimaryImageIsAuthorImage(cache)
+  }
+
+  return false
+}
+
+function cachedImageUrlNeedsYouTubeRefresh(cache: DbUrlPreviewCache): boolean {
+  const imageUrl = decryptCacheValue(cache.imageUrl, cache.imageUrlIv, cache.imageUrlTag)
+  if (!imageUrl) {
+    return false
+  }
+
+  return isLetterboxedYouTubeThumbnailUrl(imageUrl)
+}
+
+function isLetterboxedYouTubeThumbnailUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "")
+    if (host !== "i.ytimg.com" && host !== "img.youtube.com") {
+      return false
+    }
+
+    const parts = parsed.pathname.split("/").filter(Boolean)
+    const fileName = parts[parts.length - 1]?.toLowerCase()
+    return fileName === "default.jpg" || fileName === "hqdefault.jpg" || fileName === "sddefault.jpg"
+  } catch {
+    return false
+  }
+}
+
+function isStaleXPreviewCache(cache: DbUrlPreviewCache): boolean {
+  return (
+    cache.author == null &&
+    cache.mediaKind == null &&
+    cache.externalUrl == null &&
+    cache.embedUrl == null &&
+    cache.videoId == null &&
+    cache.documentId == null
+  )
+}
+
+function cachedPrimaryImageIsAuthorImage(cache: DbUrlPreviewCache): boolean {
+  const url = decryptCacheValue(cache.url, cache.urlIv, cache.urlTag)
+  const imageUrl = decryptCacheValue(cache.imageUrl, cache.imageUrlIv, cache.imageUrlTag)
+  return !!url && !!imageUrl && isPreviewAuthorImageUrl(url, imageUrl)
+}
+
+function shouldKeepCachedAuthorImageFallback(
+  cache: DbUrlPreviewCache,
+  photoId: number | null,
+  authorPhotoId: number | null,
+): boolean {
+  return photoId == null && authorPhotoId == null && cachedPrimaryImageIsAuthorImage(cache)
 }
 
 function generalPreviewRoute(url: string): PreviewRoute {
@@ -275,10 +384,17 @@ async function processAuthenticatedUrlPreview(
   }
 
   const photoId = metadata.imageUrl ? await getOrSavePreviewImage(metadata.imageUrl, input.currentUserId) : null
+  const authorPhotoId = metadata.authorPhotoUrl
+    ? await getOrSavePreviewImage(metadata.authorPhotoUrl, input.currentUserId)
+    : null
   const inserted = await insertPreviewAttachment(
     input.message,
     input.chatId,
-    previewSourceFromMetadata(metadata, photoId, null),
+    previewSourceForMessage(
+      previewSourceFromMetadata(metadata, photoId, authorPhotoId, null),
+      previewRouteUrl(previewRoute),
+      input.previewUrlCount,
+    ),
   )
   await pushInsertedPreviewAttachment(input, inserted)
 }
@@ -371,6 +487,7 @@ async function insertPreviewAttachment(
         authorTag: source.authorTag,
         mediaKind: source.mediaKind,
         photoId: source.photoId,
+        authorPhotoId: source.authorPhotoId,
         videoId: source.videoId,
         documentId: source.documentId,
         externalUrl: source.externalUrl,
@@ -444,7 +561,7 @@ async function insertPreviewAttachment(
 }
 
 function previewSourceFromCache(cache: DbUrlPreviewCache): PreviewAttachmentSource {
-  return {
+  const source: PreviewAttachmentSource = {
     url: cache.url,
     urlIv: cache.urlIv,
     urlTag: cache.urlTag,
@@ -462,6 +579,7 @@ function previewSourceFromCache(cache: DbUrlPreviewCache): PreviewAttachmentSour
     authorTag: cache.authorTag,
     mediaKind: cache.mediaKind,
     photoId: cache.photoId,
+    authorPhotoId: cache.authorPhotoId,
     videoId: cache.videoId,
     documentId: cache.documentId,
     externalUrl: cache.externalUrl,
@@ -483,11 +601,70 @@ function previewSourceFromCache(cache: DbUrlPreviewCache): PreviewAttachmentSour
     cacheId: cache.id,
     duration: cache.duration,
   }
+
+  return sourceWithSeparatedCachedAuthorPhoto(source, cache)
+}
+
+function sourceWithSeparatedCachedAuthorPhoto(
+  source: PreviewAttachmentSource,
+  cache: DbUrlPreviewCache,
+): PreviewAttachmentSource {
+  if (source.photoId == null || source.authorPhotoId != null) {
+    return source
+  }
+
+  const url = decryptCacheValue(cache.url, cache.urlIv, cache.urlTag)
+  const imageUrl = decryptCacheValue(cache.imageUrl, cache.imageUrlIv, cache.imageUrlTag)
+  if (!url || !imageUrl || !isPreviewAuthorImageUrl(url, imageUrl)) {
+    return source
+  }
+
+  const keepLargeMedia = source.mediaKind != null && source.mediaKind !== "photo"
+  return {
+    ...source,
+    photoId: null,
+    authorPhotoId: source.photoId,
+    mediaKind: source.mediaKind === "photo" ? null : source.mediaKind,
+    hasLargeMedia: keepLargeMedia ? source.hasLargeMedia : null,
+    showLargeMedia: keepLargeMedia ? source.showLargeMedia : null,
+  }
+}
+
+function decryptCacheValue(value: Buffer | null, iv: Buffer | null, authTag: Buffer | null): string | null {
+  if (!value || !iv || !authTag) {
+    return null
+  }
+
+  return decryptMessage({ encrypted: value, iv, authTag })
+}
+
+function previewSourceForMessage(
+  source: PreviewAttachmentSource,
+  url: string,
+  previewUrlCount: number | undefined,
+): PreviewAttachmentSource {
+  const layout = resolvePreviewLayout({
+    url,
+    provider: source.provider,
+    mediaType: source.mediaType,
+    mediaKind: source.mediaKind,
+    hasPhoto: source.photoId != null,
+    hasLargeMedia: source.hasLargeMedia,
+    showLargeMedia: source.showLargeMedia,
+    urlCount: previewUrlCount ?? 1,
+  })
+
+  return {
+    ...source,
+    hasLargeMedia: layout.hasLargeMedia,
+    showLargeMedia: layout.showLargeMedia,
+  }
 }
 
 function previewSourceFromMetadata(
   metadata: UrlPreviewResult,
   photoId: number | null,
+  authorPhotoId: number | null,
   cacheId: number | null,
 ): PreviewAttachmentSource {
   const urlEncrypted = encryptMessage(metadata.url)
@@ -518,6 +695,7 @@ function previewSourceFromMetadata(
     authorTag: authorEncrypted?.authTag ?? null,
     mediaKind,
     photoId,
+    authorPhotoId,
     videoId: null,
     documentId: null,
     externalUrl: externalUrlEncrypted?.encrypted ?? null,
@@ -567,6 +745,15 @@ async function loadProcessedAttachment(attachmentId: number): Promise<ProcessedM
       linkEmbed: {
         with: {
           photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+          authorPhoto: {
             with: {
               photoSizes: {
                 with: {

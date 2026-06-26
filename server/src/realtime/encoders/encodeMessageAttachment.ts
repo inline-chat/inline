@@ -100,6 +100,9 @@ export const encodeMessageAttachment = (attachment: ProcessedMessageAttachment):
           author: attachment.linkEmbed.author ?? undefined,
           media: encodeUrlPreviewMedia(attachment.linkEmbed),
           layout: encodeUrlPreviewLayout(attachment.linkEmbed),
+          authorPhoto: attachment.linkEmbed.authorPhoto
+            ? encodePhoto({ photo: attachment.linkEmbed.authorPhoto })
+            : undefined,
         },
       },
     }

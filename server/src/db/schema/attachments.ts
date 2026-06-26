@@ -40,8 +40,14 @@ export const urlPreviewCache = pgTable(
     imageUrlIv: bytea("image_url_iv"),
     imageUrlTag: bytea("image_url_tag"),
 
+    authorImageUrlHash: bytea("author_image_url_hash"),
+    authorImageUrl: bytea("author_image_url"),
+    authorImageUrlIv: bytea("author_image_url_iv"),
+    authorImageUrlTag: bytea("author_image_url_tag"),
+
     mediaKind: text("media_kind", { enum: ["photo", "video", "document", "external_video", "embed"] }),
     photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
+    authorPhotoId: bigint("author_photo_id", { mode: "number" }).references(() => photos.id),
     videoId: bigint("video_id", { mode: "number" }).references(() => videos.id),
     documentId: bigint("document_id", { mode: "number" }).references(() => documents.id),
 
@@ -74,6 +80,7 @@ export const urlPreviewCache = pgTable(
   (table) => ({
     urlHashUnique: uniqueIndex("url_preview_cache_url_hash_unique").on(table.urlHash),
     imageUrlHashIndex: index("url_preview_cache_image_url_hash_idx").on(table.imageUrlHash),
+    authorImageUrlHashIndex: index("url_preview_cache_author_image_url_hash_idx").on(table.authorImageUrlHash),
     expiresAtIndex: index("url_preview_cache_expires_at_idx").on(table.expiresAt),
     lastUsedAtIndex: index("url_preview_cache_last_used_at_idx").on(table.lastUsedAt),
   }),
@@ -104,6 +111,7 @@ export const urlPreview = pgTable("url_preview", {
 
   mediaKind: text("media_kind", { enum: ["photo", "video", "document", "external_video", "embed"] }),
   photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
+  authorPhotoId: bigint("author_photo_id", { mode: "number" }).references(() => photos.id),
   videoId: bigint("video_id", { mode: "number" }).references(() => videos.id),
   documentId: bigint("document_id", { mode: "number" }).references(() => documents.id),
   cacheId: bigint("cache_id", { mode: "number" }).references(() => urlPreviewCache.id),
@@ -186,6 +194,11 @@ export const urlPreviewRelations = relations(urlPreview, ({ one }) => ({
     references: [photos.id],
   }),
 
+  authorPhoto: one(photos, {
+    fields: [urlPreview.authorPhotoId],
+    references: [photos.id],
+  }),
+
   video: one(videos, {
     fields: [urlPreview.videoId],
     references: [videos.id],
@@ -205,6 +218,11 @@ export const urlPreviewRelations = relations(urlPreview, ({ one }) => ({
 export const urlPreviewCacheRelations = relations(urlPreviewCache, ({ one }) => ({
   photo: one(photos, {
     fields: [urlPreviewCache.photoId],
+    references: [photos.id],
+  }),
+
+  authorPhoto: one(photos, {
+    fields: [urlPreviewCache.authorPhotoId],
     references: [photos.id],
   }),
 
