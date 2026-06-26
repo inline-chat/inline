@@ -143,15 +143,13 @@ public class ChatContainerView: UIView {
     }
 
     scrollButton.isHidden = true
-    composeContainerViewBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    composeContainerViewBottomConstraint = composeContainerView.bottomAnchor
+      .constraint(equalTo: safeAreaLayoutGuide.bottomAnchor)
 
     // initialize mention completion height constraint
     mentionCompletionHeightConstraint = mentionCompletionViewWrapper.heightAnchor
       .constraint(equalToConstant: 0)
     pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: 0)
-    let composeBottomAnchor = usesIOS27KeyboardWorkaround
-      ? composeContainerView.bottomAnchor
-      : keyboardLayoutGuide.topAnchor
 
     NSLayoutConstraint.activate(
       [
@@ -187,7 +185,7 @@ public class ChatContainerView: UIView {
         composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
         composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
         composeView.bottomAnchor.constraint(
-          equalTo: composeBottomAnchor,
+          equalTo: composeContainerView.bottomAnchor,
           constant: -ComposeView.textViewVerticalMargin
         ),
         borderView.leadingAnchor.constraint(equalTo: composeContainerView.leadingAnchor),
@@ -304,7 +302,7 @@ public class ChatContainerView: UIView {
       delay: 0,
       options: .curveEaseIn
     ) {
-      self.setComposeContainerBottom(to: self.bottomAnchor)
+      self.setComposeContainerBottom(to: self.safeAreaLayoutGuide.bottomAnchor)
       self.layoutIfNeeded()
     }
   }
@@ -378,7 +376,8 @@ public class ChatContainerView: UIView {
 
   @discardableResult
   private func setComposeKeyboardInset(_ inset: CGFloat) -> Bool {
-    let constant = -inset
+    let insetFromSafeArea = max(0, inset - safeAreaInsets.bottom)
+    let constant = -insetFromSafeArea
     guard abs((composeContainerViewBottomConstraint?.constant ?? 0) - constant) > 0.5 else { return false }
     composeContainerViewBottomConstraint?.constant = constant
     return true
