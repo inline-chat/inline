@@ -23,6 +23,7 @@ import {
   messageAttachments,
   messages,
   urlPreview,
+  type DbChat,
   type DbMessage,
   type DbUrlPreviewCache,
 } from "@in/server/db/schema"
@@ -45,6 +46,11 @@ import {
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { connectionManager } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
+import {
+  getMessageAttachmentTitleContext,
+  maybeScheduleThreadTitleGeneration,
+  type ThreadTitleAttachmentContext,
+} from "@in/server/modules/threadTitles"
 import { and, eq } from "drizzle-orm"
 import sharp from "sharp"
 
@@ -54,10 +60,14 @@ type ProcessUrlPreviewInput = {
   message: DbMessage
   previewUrl?: string
   previewRoute?: PreviewRoute
+  chat?: DbChat
   chatId: number
   spaceId?: number | null
   currentUserId: number
   inputPeer: InputPeer
+  messageText?: string
+  messageEntities?: MessageEntities
+  titleAttachments?: ThreadTitleAttachmentContext[]
 }
 
 type InsertPreviewOutput = {
@@ -152,6 +162,8 @@ export async function processUrlPreviews(
   for (const previewRoute of routes.slice(0, maxPreviewUrls)) {
     await processUrlPreview({ ...input, previewRoute })
   }
+
+  await maybeScheduleTitleGenerationAfterPreviews(input)
 }
 
 export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<void> {
@@ -297,6 +309,35 @@ function collectEntityUrls(text: string, entities?: MessageEntities | null): str
   }
 
   return urls
+}
+
+async function maybeScheduleTitleGenerationAfterPreviews(
+  input: Omit<ProcessUrlPreviewInput, "previewUrl" | "previewRoute">,
+): Promise<void> {
+  if (!input.chat) {
+    return
+  }
+
+  let attachments: ThreadTitleAttachmentContext[] = input.titleAttachments ?? []
+  try {
+    const previewAttachments = await getMessageAttachmentTitleContext(input.message.globalId)
+    attachments = [...attachments, ...previewAttachments]
+  } catch (error) {
+    log.warn("Failed to load URL preview context for thread title generation", {
+      error,
+      chatId: input.chatId,
+      messageId: input.message.messageId,
+    })
+  }
+
+  maybeScheduleThreadTitleGeneration({
+    chat: input.chat,
+    message: input.message,
+    text: input.messageText,
+    entities: input.messageEntities,
+    attachments,
+    currentUserId: input.currentUserId,
+  })
 }
 
 async function insertPreviewAttachment(

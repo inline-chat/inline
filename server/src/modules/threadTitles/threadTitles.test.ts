@@ -17,12 +17,12 @@ mock.module("@in/server/libs/openAI", () => ({
   },
 }))
 
-const completion = (title: string) => ({
+const completion = (title: string, emoji?: string | null) => ({
   choices: [
     {
       finish_reason: "stop",
       message: {
-        parsed: { title },
+        parsed: { title, emoji },
       },
     },
   ],
@@ -119,10 +119,86 @@ describe("thread title generation", () => {
         currentUserId: 1,
       }),
     ).toBeUndefined()
+
+    expect(
+      getThreadTitleSourceText({
+        chat: emptyThread,
+        message: textMessage,
+        text: "https://www.youtube.com/watch?v=abc123",
+        entities: undefined,
+        attachments: [
+          {
+            kind: "urlPreview",
+            title: "Roadmap review walkthrough",
+            description: "Customer onboarding and launch notes",
+            author: "Inline",
+            siteName: "YouTube",
+          },
+        ],
+        currentUserId: 1,
+      }),
+    ).toBe(
+      [
+        "URL preview title: Roadmap review walkthrough",
+        "URL preview description: Customer onboarding and launch notes",
+        "URL preview author: Inline",
+        "URL preview site: YouTube",
+      ].join("\n"),
+    )
+  })
+
+  test("uses URL preview attachment text when the message body is only a link", async () => {
+    parseCompletion.mockResolvedValue(completion("Roadmap Review"))
+
+    const user = await testUtils.createUser("thread-title-preview-user@example.com")
+    const [chat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: null,
+        publicThread: false,
+        createdBy: user.id,
+      })
+      .returning()
+
+    if (!chat) {
+      throw new Error("Chat not created")
+    }
+
+    await testUtils.addParticipant(chat.id, user.id)
+
+    const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
+    maybeScheduleThreadTitleGeneration({
+      chat,
+      message: textMessage,
+      text: "https://www.youtube.com/watch?v=abc123",
+      entities: undefined,
+      attachments: [
+        {
+          kind: "urlPreview",
+          title: "Roadmap review walkthrough",
+          description: "Customer onboarding and launch notes",
+          author: "Inline",
+          siteName: "YouTube",
+        },
+      ],
+      currentUserId: user.id,
+    })
+
+    await waitForChatTitle(chat.id, "Roadmap Review")
+
+    const request = parseCompletion.mock.calls[0]?.[0] as
+      | { messages?: { role?: string; content?: string }[] }
+      | undefined
+    const userMessage = request?.messages?.find((message) => message.role === "user")?.content
+
+    expect(userMessage).toContain("URL preview title: Roadmap review walkthrough")
+    expect(userMessage).toContain("URL preview description: Customer onboarding and launch notes")
+    expect(userMessage).not.toContain("https://www.youtube.com/watch")
   })
 
   test("sets a generated title only while the thread is untitled", async () => {
-    parseCompletion.mockResolvedValue(completion("Launch Checklist 🚀"))
+    parseCompletion.mockResolvedValue(completion("Launch Checklist 🚀", "🚀"))
 
     const user = await testUtils.createUser("thread-title-user@example.com")
     const [chat] = await db
@@ -152,13 +228,60 @@ describe("thread title generation", () => {
     expect(result.didUpdate).toBe(true)
 
     const updated = await db
-      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
+      .select({ title: schema.chats.title, emoji: schema.chats.emoji, isUntitled: schema.chats.isUntitled })
       .from(schema.chats)
       .where(eq(schema.chats.id, chat.id))
       .then((rows) => rows[0])
 
     expect(updated?.title).toBe("Launch Checklist")
+    expect(updated?.emoji).toBe("🚀")
     expect(updated?.isUntitled).toBe(true)
+
+    const request = parseCompletion.mock.calls[0]?.[0] as
+      | { messages?: { role?: string; content?: string }[] }
+      | undefined
+    const systemMessage = request?.messages?.find((message) => message.role === "system")?.content
+    expect(systemMessage).toContain("roughly half of the time")
+  })
+
+  test("ignores invalid generated emoji values", async () => {
+    parseCompletion.mockResolvedValue(completion("Launch Checklist", "launch"))
+
+    const user = await testUtils.createUser("invalid-thread-emoji-user@example.com")
+    const [chat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: null,
+        publicThread: false,
+        createdBy: user.id,
+      })
+      .returning()
+
+    if (!chat) {
+      throw new Error("Chat not created")
+    }
+
+    await testUtils.addParticipant(chat.id, user.id)
+
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    const result = await generateAndApplyThreadTitle({
+      chatId: chat.id,
+      messageId: 1,
+      text: "Can you write the launch checklist for tomorrow morning before we send the build?",
+      currentUserId: user.id,
+    })
+
+    expect(result.didUpdate).toBe(true)
+
+    const updated = await db
+      .select({ title: schema.chats.title, emoji: schema.chats.emoji })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, chat.id))
+      .then((rows) => rows[0])
+
+    expect(updated?.title).toBe("Launch Checklist")
+    expect(updated?.emoji).toBeNull()
   })
 
   test("does not overwrite a manually titled thread", async () => {

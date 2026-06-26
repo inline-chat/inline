@@ -57,7 +57,12 @@ import {
   showAndOpenLinkedSubthreadDialogs,
 } from "@in/server/modules/subthreads"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
-import { maybeScheduleThreadTitleGeneration } from "@in/server/modules/threadTitles"
+import {
+  documentTitleContext,
+  getMessageAttachmentTitleContext,
+  maybeScheduleThreadTitleGeneration,
+  type ThreadTitleAttachmentContext,
+} from "@in/server/modules/threadTitles"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { VoiceTranscriptionModule } from "@in/server/modules/voiceTranscription"
 import {
@@ -257,6 +262,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
   }
 
+  const titleAttachments = documentTitleContext(dbFullDocument)
+
   const recordDesktopChatActivityPromise = desktopPushSuppressionTracker.recordChatActivity({
     userId: currentUserId,
     sessionId: context.currentSessionId,
@@ -353,6 +360,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       spaceId: chat.spaceId,
       currentUserId,
       inputPeer,
+      chat,
+      messageText: text,
+      messageEntities: entities,
+      titleAttachments,
     })
   }
 
@@ -384,13 +395,27 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     })
   })
 
-  maybeScheduleThreadTitleGeneration({
-    chat,
-    message: newMessage,
-    text,
-    entities,
-    currentUserId,
-  })
+  if (previewRoutes.length === 0) {
+    if (input.messageAttachments && input.messageAttachments.length > 0) {
+      void scheduleThreadTitleGenerationWithMessageAttachments({
+        chat,
+        message: newMessage,
+        text,
+        entities,
+        attachments: titleAttachments,
+        currentUserId,
+      })
+    } else {
+      maybeScheduleThreadTitleGeneration({
+        chat,
+        message: newMessage,
+        text,
+        entities,
+        attachments: titleAttachments,
+        currentUserId,
+      })
+    }
+  }
 
   if (input.messageAttachments && input.messageAttachments.length > 0) {
     try {
@@ -445,6 +470,35 @@ async function ensurePrivatePeerCanReceiveMessages(chat: DbChat, currentUserId: 
   if (!peerUser || UsersModel.isDeleted(peerUser)) {
     throw RealtimeRpcError.PeerIdInvalid()
   }
+}
+
+async function scheduleThreadTitleGenerationWithMessageAttachments(input: {
+  chat: DbChat
+  message: DbMessage
+  text: string | undefined
+  entities: MessageEntities | undefined
+  attachments: ThreadTitleAttachmentContext[]
+  currentUserId: number
+}): Promise<void> {
+  let attachments = input.attachments
+  try {
+    attachments = [...attachments, ...(await getMessageAttachmentTitleContext(input.message.globalId))]
+  } catch (error) {
+    log.warn("Failed to load message attachment context for thread title generation", {
+      error,
+      chatId: input.chat.id,
+      messageId: input.message.messageId,
+    })
+  }
+
+  maybeScheduleThreadTitleGeneration({
+    chat: input.chat,
+    message: input.message,
+    text: input.text,
+    entities: input.entities,
+    attachments,
+    currentUserId: input.currentUserId,
+  })
 }
 
 const getMentionedUserIds = (entities: MessageEntities | undefined): number[] => {
