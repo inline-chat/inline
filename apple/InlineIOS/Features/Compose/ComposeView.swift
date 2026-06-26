@@ -959,7 +959,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       )
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
-      clearComposeTextAfterSend()
+      resetComposeState()
       reconcileVoiceControls(animated: true)
     } catch {
       log.error("Failed to send voice recording", error: error)

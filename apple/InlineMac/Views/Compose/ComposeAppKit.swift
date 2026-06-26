@@ -764,9 +764,7 @@ class ComposeAppKit: NSView {
         )
       )
 
-      state.clearReplyingToMsgId()
-      clearDraft(flush: true)
-      updateSendButtonIfNeeded()
+      clear()
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
         self.state.scrollToBottom()
