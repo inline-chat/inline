@@ -6,6 +6,11 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { editMessage } from "@in/server/functions/messages.editMessage"
 import { Log } from "@in/server/utils/log"
 import { transcribeVoiceWithOpenAI, type VoiceTranscriber } from "./openAITranscriber"
+import {
+  baseVoiceTranscriptionPrompt,
+  buildVoiceTranscriptionPrompt,
+  type VoiceTranscriptionPrompt,
+} from "./prompt"
 
 const log = new Log("modules/voiceTranscription")
 
@@ -19,16 +24,17 @@ export type VoiceMessageTranscriptionInput = {
 export type VoiceMessageTranscriptionDeps = {
   transcribeVoice: VoiceTranscriber
   editText: typeof editMessage
+  buildPrompt?: typeof buildVoiceTranscriptionPrompt
 }
 
 export const VoiceTranscriptionModule = {
   schedule(input: VoiceMessageTranscriptionInput) {
     void transcribeAndEditVoiceMessage(input).catch((error) => {
-      log.error("Voice transcription failed", {
-        error,
+      log.error("Voice transcription failed", error, {
         chatId: input.message.chatId,
         messageId: input.message.messageId,
         voiceId: input.voice.id,
+        fileId: input.voice.fileId,
       })
     })
   },
@@ -52,8 +58,28 @@ export async function transcribeAndEditVoiceMessage(
     return { didEdit: false }
   }
 
-  const text = await deps.transcribeVoice(input.voice)
+  const prompt = await safeBuildPrompt(input, deps.buildPrompt)
+  log.info("Starting voice transcription", {
+    chatId: input.message.chatId,
+    messageId: input.message.messageId,
+    voiceId: input.voice.id,
+    fileId: input.voice.fileId,
+    chatType: prompt.chatType,
+    promptLength: prompt.prompt.length,
+    participantCount: prompt.participantCount,
+    includedParticipantCount: prompt.includedParticipantCount,
+    hasChatTitle: prompt.hasChatTitle,
+    hasSpaceName: prompt.hasSpaceName,
+  })
+
+  const text = await deps.transcribeVoice(input.voice, { prompt: prompt.prompt })
   if (!text) {
+    log.warn("Voice transcription produced no text", {
+      chatId: input.message.chatId,
+      messageId: input.message.messageId,
+      voiceId: input.voice.id,
+      fileId: input.voice.fileId,
+    })
     return { didEdit: false }
   }
 
@@ -63,6 +89,7 @@ export async function transcribeAndEditVoiceMessage(
       chatId: input.message.chatId,
       messageId: input.message.messageId,
       voiceId: input.voice.id,
+      fileId: input.voice.fileId,
     })
     return { didEdit: false, text }
   }
@@ -77,7 +104,33 @@ export async function transcribeAndEditVoiceMessage(
     input.context,
   )
 
+  log.info("Applied voice transcription edit", {
+    chatId: input.message.chatId,
+    messageId: input.message.messageId,
+    voiceId: input.voice.id,
+    fileId: input.voice.fileId,
+    transcriptLength: text.length,
+  })
+
   return { didEdit: true, text }
+}
+
+async function safeBuildPrompt(
+  input: VoiceMessageTranscriptionInput,
+  buildPrompt: typeof buildVoiceTranscriptionPrompt = buildVoiceTranscriptionPrompt,
+): Promise<VoiceTranscriptionPrompt> {
+  try {
+    return await buildPrompt(input)
+  } catch (error) {
+    log.warn("Failed to build voice transcription prompt context", {
+      error,
+      chatId: input.message.chatId,
+      messageId: input.message.messageId,
+      voiceId: input.voice.id,
+      fileId: input.voice.fileId,
+    })
+    return baseVoiceTranscriptionPrompt()
+  }
 }
 
 function shouldStartTranscription(message: DbMessage, voice: DbFullVoice): boolean {

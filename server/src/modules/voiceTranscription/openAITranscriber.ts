@@ -9,11 +9,18 @@ const log = new Log("modules/voiceTranscription/openAI")
 const model = "gpt-4o-mini-transcribe"
 const fetchTimeoutMs = 30_000
 
-export type VoiceTranscriber = (voice: DbFullVoice) => Promise<string | undefined>
+export type VoiceTranscriptionOptions = {
+  prompt?: string
+}
 
-export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice) => {
+export type VoiceTranscriber = (voice: DbFullVoice, options?: VoiceTranscriptionOptions) => Promise<string | undefined>
+
+export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options) => {
   if (!openaiClient) {
-    log.warn("Skipping voice transcription: OpenAI client is not configured")
+    log.warn("Skipping voice transcription: OpenAI client is not configured", {
+      voiceId: voice.id,
+      fileId: voice.fileId,
+    })
     return undefined
   }
 
@@ -22,14 +29,46 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice) => {
     return undefined
   }
 
+  const startMs = Date.now()
+  const prompt = options?.prompt?.trim()
+  log.info("Sending voice transcription request to OpenAI", {
+    voiceId: voice.id,
+    fileId: voice.fileId,
+    model,
+    fileSize: voice.file.fileSize ?? null,
+    duration: voice.duration ?? null,
+    hasPrompt: Boolean(prompt),
+    promptLength: prompt?.length ?? 0,
+  })
+
   const response = await openaiClient.audio.transcriptions.create({
     file,
     model,
+    ...(prompt ? { prompt } : {}),
     response_format: "json",
     temperature: 0,
   })
 
-  return cleanTranscript(response.text)
+  const text = cleanTranscript(response.text)
+  if (!text) {
+    log.warn("OpenAI voice transcription returned empty text", {
+      voiceId: voice.id,
+      fileId: voice.fileId,
+      model,
+      durationMs: Date.now() - startMs,
+    })
+    return undefined
+  }
+
+  log.info("OpenAI voice transcription completed", {
+    voiceId: voice.id,
+    fileId: voice.fileId,
+    model,
+    durationMs: Date.now() - startMs,
+    transcriptLength: text.length,
+  })
+
+  return text
 }
 
 async function fetchVoiceFile(voice: DbFullVoice): Promise<File | undefined> {
