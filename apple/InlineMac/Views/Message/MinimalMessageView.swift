@@ -95,7 +95,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private var usesAvatarOverlay: Bool {
-    props.renderStyle == .minimal && AppConfig.macMessageAvatarOverlayEnabled
+    props.usesAvatarOverlay && props.renderStyle == .minimal && AppConfig.macMessageAvatarOverlayEnabled
   }
 
   private var avatarUserInfo: UserInfo {

@@ -248,6 +248,14 @@ class MessageListAppKit: NSViewController {
     chatRows.messageStableId(forRow: row)
   }
 
+  private func usesAvatarOverlay(forRow row: Int) -> Bool {
+    guard usesAvatarOverlay else { return false }
+    if case .parentMessage? = rowItem(at: row) {
+      return false
+    }
+    return true
+  }
+
   private var selectableMessageStableIds: [Int64] {
     messages.map(\.id)
   }
@@ -737,6 +745,13 @@ class MessageListAppKit: NSViewController {
     avatarOverlaySyncInProgress = false
   }
 
+  private func syncAvatarOverlayAfterTableLayout(force: Bool = true, animate: Bool = false) {
+    guard usesAvatarOverlay, isViewLoaded, !isDisposed else { return }
+
+    tableView.layoutSubtreeIfNeeded()
+    scheduleAvatarOverlaySync(force: force, animate: animate)
+  }
+
   private func installAvatarOverlayIfNeeded(raise: Bool = false) {
     guard usesAvatarOverlay else { return }
 
@@ -861,6 +876,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func avatarOverlayGroup(forVisibleRow row: Int) -> (messageIndex: Int, range: ClosedRange<Int>)? {
+    guard usesAvatarOverlay(forRow: row) else { return nil }
     guard let stableId = messageStableId(forRow: row) else { return nil }
     guard let messageIndex = chatRows.messageIndex(forStableMessageId: stableId) else { return nil }
     guard messages.indices.contains(messageIndex) else { return nil }
@@ -1675,7 +1691,7 @@ class MessageListAppKit: NSViewController {
 
     NSAnimationContext.endGrouping()
     CATransaction.commit()
-    scheduleAvatarOverlaySync()
+    syncAvatarOverlayAfterTableLayout()
   }
 
   private var wasLastResizeAboveLimit = false
@@ -1859,7 +1875,7 @@ class MessageListAppKit: NSViewController {
             tableView.beginUpdates()
             tableView.insertRows(at: inserted, withAnimation: .none)
             tableView.endUpdates()
-            scheduleAvatarOverlaySync()
+            syncAvatarOverlayAfterTableLayout()
             didInsertRows = true
             return true
 
@@ -1869,13 +1885,13 @@ class MessageListAppKit: NSViewController {
 
           case .reloadAll:
             tableView.reloadData()
-            scheduleAvatarOverlaySync()
+            syncAvatarOverlayAfterTableLayout()
             didInsertRows = true
             return true
 
           case .remove(_), .reloadRows(_), .insert(_):
             tableView.reloadData()
-            scheduleAvatarOverlaySync()
+            syncAvatarOverlayAfterTableLayout()
             didInsertRows = true
             return true
         }
@@ -1920,7 +1936,7 @@ class MessageListAppKit: NSViewController {
     rebuildRowItems()
     tableView.reloadData()
     pruneMessageSelection()
-    scheduleAvatarOverlaySync()
+    syncAvatarOverlayAfterTableLayout()
   }
 
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
@@ -1933,8 +1949,11 @@ class MessageListAppKit: NSViewController {
       category: .messages,
       "type=\(updateLabel) rows=\(beforeRows) messages=\(beforeMessages)"
     )
+    var didSyncAvatarOverlayForUpdate = false
     defer {
-      scheduleAvatarOverlaySync()
+      if !didSyncAvatarOverlayForUpdate {
+        scheduleAvatarOverlaySync()
+      }
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
       span.end(
         "type=\(updateLabel) rows_before=\(beforeRows) rows_after=\(tableView.numberOfRows) messages_before=\(beforeMessages) messages_after=\(messages.count) duration_ms=\(durationMs)"
@@ -1964,19 +1983,25 @@ class MessageListAppKit: NSViewController {
     let rowUpdate = chatRows.apply(update)
     pruneMessageSelection()
 
+    func syncUpdateAvatarOverlayAfterTableLayout(on controller: MessageListAppKit, animate: Bool = false) {
+      didSyncAvatarOverlayForUpdate = true
+      controller.syncAvatarOverlayAfterTableLayout(animate: animate)
+    }
+
     func reloadAll(animated: Bool) {
       if animated {
         NSAnimationContext.runAnimationGroup { [weak self] context in
           guard let self else { return }
           context.duration = animationDuration
           tableView.reloadData()
-          scheduleAvatarOverlaySync(animate: true)
+          syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
           if shouldScroll { scrollToBottom(animated: true) }
         } completionHandler: { [weak self] in
           self?.isPerformingUpdate = false
         }
       } else {
         tableView.reloadData()
+        syncUpdateAvatarOverlayAfterTableLayout(on: self)
         if shouldScroll { scrollToBottom(animated: false) }
         isPerformingUpdate = false
       }
@@ -1991,7 +2016,7 @@ class MessageListAppKit: NSViewController {
           context.duration = animationDuration
           tableView.insertRows(at: inserted, withAnimation: .effectFade)
           reloadGroupBoundaryRows(boundaryRows)
-          scheduleAvatarOverlaySync(animate: true)
+          syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
           if shouldScroll { scrollToBottom(animated: true) }
         } completionHandler: { [weak self] in
           self?.isPerformingUpdate = false
@@ -2001,6 +2026,7 @@ class MessageListAppKit: NSViewController {
         tableView.insertRows(at: inserted, withAnimation: .none)
         tableView.endUpdates()
         reloadGroupBoundaryRows(boundaryRows)
+        syncUpdateAvatarOverlayAfterTableLayout(on: self)
         if shouldScroll { scrollToBottom(animated: false) }
         isPerformingUpdate = false
       }
@@ -2012,7 +2038,7 @@ class MessageListAppKit: NSViewController {
           guard let self else { return }
           context.duration = animationDuration
           tableView.removeRows(at: removed, withAnimation: .effectFade)
-          scheduleAvatarOverlaySync(animate: true)
+          syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
           if shouldScroll { scrollToBottom(animated: true) }
         } completionHandler: { [weak self] in
           self?.isPerformingUpdate = false
@@ -2021,6 +2047,7 @@ class MessageListAppKit: NSViewController {
         tableView.beginUpdates()
         tableView.removeRows(at: removed, withAnimation: .none)
         tableView.endUpdates()
+        syncUpdateAvatarOverlayAfterTableLayout(on: self)
         if shouldScroll { scrollToBottom(animated: false) }
         isPerformingUpdate = false
       }
@@ -2069,7 +2096,7 @@ class MessageListAppKit: NSViewController {
                 context.duration = animationDuration
                 tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
                 tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
-                scheduleAvatarOverlaySync(animate: true)
+                syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
                 if shouldScroll { scrollToBottom(animated: true) }
               } completionHandler: { [weak self] in
                 self?.isPerformingUpdate = false
@@ -2077,6 +2104,7 @@ class MessageListAppKit: NSViewController {
             } else {
               tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
               tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+              syncUpdateAvatarOverlayAfterTableLayout(on: self)
               if shouldScroll { scrollToBottom(animated: true) }
               isPerformingUpdate = false
             }
@@ -2093,6 +2121,7 @@ class MessageListAppKit: NSViewController {
         switch rowUpdate {
           case .none:
             tableView.reloadData()
+            syncUpdateAvatarOverlayAfterTableLayout(on: self)
             if shouldScroll { scrollToBottom(animated: false) }
             isPerformingUpdate = false
           case .reloadAll, .insert(_), .remove(_), .reloadRows(_):
@@ -2283,7 +2312,7 @@ class MessageListAppKit: NSViewController {
     apply?()
     NSAnimationContext.endGrouping()
     CATransaction.commit()
-    scheduleAvatarOverlaySync()
+    syncAvatarOverlayAfterTableLayout()
   }
 
   private func updateHeightsForRows(at indexSet: IndexSet, width: CGFloat? = nil) {
@@ -2306,12 +2335,13 @@ class MessageListAppKit: NSViewController {
             isLastMessage: inputProps.isLastMessage,
             isFirstMessage: inputProps.isFirstMessage,
             isRtl: inputProps.isRtl,
-            isDM: chat?.type == .privateChat,
+            isDM: inputProps.isDM,
             renderStyle: inputProps.renderStyle,
             index: chatRows.messageIndex(forStableMessageId: message.id),
             translated: inputProps.translated,
             interactionMode: interactionMode(for: row),
             replyThreadTitle: inputProps.replyThreadTitle,
+            usesAvatarOverlay: usesAvatarOverlay(forRow: row),
             layout: plan,
           )
 
@@ -2834,12 +2864,13 @@ extension MessageListAppKit: NSTableViewDelegate {
       isLastMessage: inputProps.isLastMessage,
       isFirstMessage: inputProps.isFirstMessage,
       isRtl: inputProps.isRtl,
-      isDM: chat?.type == .privateChat,
+      isDM: inputProps.isDM,
       renderStyle: inputProps.renderStyle,
       index: messageAndIndex.index,
       translated: inputProps.translated,
       interactionMode: interactionMode(for: row),
       replyThreadTitle: inputProps.replyThreadTitle,
+      usesAvatarOverlay: usesAvatarOverlay(forRow: row),
       layout: layoutPlan
     )
 

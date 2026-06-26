@@ -96,7 +96,7 @@ class MessageViewAppKit: NSView {
   }
 
   private var usesAvatarOverlay: Bool {
-    props.renderStyle == .bubble && AppConfig.macMessageAvatarOverlayEnabled
+    props.usesAvatarOverlay && props.renderStyle == .bubble && AppConfig.macMessageAvatarOverlayEnabled
   }
 
   private var showsName: Bool {
