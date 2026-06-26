@@ -1,0 +1,4 @@
+interface:
+  display_name: "Finalize Work"
+  short_description: "Tighten changes before commit"
+  default_prompt: "Use $finalize-work to review, simplify, and finish the current change before commit."
