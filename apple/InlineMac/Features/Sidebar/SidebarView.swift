@@ -711,6 +711,8 @@ struct SidebarView: View {
 
     guard let dependencies else { return }
 
+    closeActiveRouteIfNeeded(peer: item.peerId, dependencies: dependencies)
+
     Task(priority: .userInitiated) {
       do {
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: item.peerId, open: false))
@@ -718,6 +720,27 @@ struct SidebarView: View {
         Log.shared.error("Failed to close chat in sidebar", error: error)
       }
     }
+  }
+
+  private func closeActiveRouteIfNeeded(peer: Peer, dependencies: AppDependencies) {
+    guard isActiveRoute(peer, dependencies: dependencies) else { return }
+    _ = dependencies.removeChatFromNavigation(peer: peer)
+  }
+
+  private func isActiveRoute(_ peer: Peer, dependencies: AppDependencies) -> Bool {
+    if nav.currentRoute.selectedPeer == peer {
+      return true
+    }
+
+    if dependencies.nav3?.currentRoute.selectedPeer == peer {
+      return true
+    }
+
+    if dependencies.nav2?.currentRoute.selectedPeer == peer {
+      return true
+    }
+
+    return false
   }
 
   private func syncEphemeralChat(_ peer: Peer?) {

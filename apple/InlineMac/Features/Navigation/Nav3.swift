@@ -173,22 +173,34 @@ class Nav3 {
 
   @discardableResult
   func removeChat(peer: Peer) -> Bool {
+    if currentRoute.selectedPeer == peer {
+      let spaceId = selectedSpaceId
+
+      if history.indices.contains(historyIndex), historyIndex < history.count - 1 {
+        history.removeSubrange((historyIndex + 1)...)
+      }
+
+      let oldCount = history.count
+      history.removeAll { $0.route.selectedPeer == peer }
+      guard history.count != oldCount else { return false }
+
+      let emptyState = Nav3RouteState(route: .empty, selectedSpaceId: spaceId)
+      if history.last != emptyState {
+        history.append(emptyState)
+      }
+      historyIndex = history.count - 1
+      notifyRouteChange()
+      return true
+    }
+
     let indexedRoutes = history.enumerated().filter { _, state in
       state.route.selectedPeer != peer
     }
     guard indexedRoutes.count != history.count else { return false }
 
     let oldIndex = historyIndex
-    let wasCurrent = currentRoute.selectedPeer == peer
-    let nextIndex: Int?
-
-    if wasCurrent {
-      nextIndex = indexedRoutes.lastIndex { oldIndex > $0.offset }
-        ?? indexedRoutes.firstIndex { $0.offset > oldIndex }
-    } else {
-      nextIndex = indexedRoutes.firstIndex { $0.offset == oldIndex }
-        ?? indexedRoutes.lastIndex { oldIndex > $0.offset }
-    }
+    let nextIndex = indexedRoutes.firstIndex { $0.offset == oldIndex }
+      ?? indexedRoutes.lastIndex { oldIndex > $0.offset }
 
     history = indexedRoutes.map(\.element)
     historyIndex = nextIndex ?? -1
