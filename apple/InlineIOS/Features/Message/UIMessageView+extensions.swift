@@ -340,6 +340,7 @@ extension UIMessageView {
     let controller = UIHostingController(
       rootView: VoiceMessageBubble(message: fullMessage.message, outgoing: outgoing)
     )
+    controller.safeAreaRegions = []
     controller.view.translatesAutoresizingMaskIntoConstraints = false
     controller.view.backgroundColor = .clear
     NSLayoutConstraint.activate([
