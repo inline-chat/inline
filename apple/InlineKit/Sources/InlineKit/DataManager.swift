@@ -60,7 +60,7 @@ public class DataManager: ObservableObject {
         }
         do {
           try result.chats.forEach { chat in
-            try Chat(from: chat).save(db)
+            _ = try Chat(from: chat).saveFull(db)
           }
         } catch {
           log.error("Failed to save chat", error: error)
@@ -80,7 +80,7 @@ public class DataManager: ObservableObject {
       // Create the chat
       let chat = Chat(from: result.chat)
       try await database.dbWriter.write { db in
-        try chat.save(db)
+        _ = try chat.saveFull(db)
       }
       return chat.id
 

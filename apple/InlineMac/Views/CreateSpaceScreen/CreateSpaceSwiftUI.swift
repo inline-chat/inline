@@ -80,7 +80,7 @@ struct CreateSpaceSwiftUI: View {
           try Space(from: result.space).save(db)
           try Member(from: result.member).save(db)
           try result.chats.forEach { chat in
-            try Chat(from: chat).save(db)
+            _ = try Chat(from: chat).saveFull(db)
           }
           // ... save more stuff
         }

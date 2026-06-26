@@ -71,7 +71,7 @@ public struct MoveThreadTransaction: Transaction2 {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         let chat = Chat(from: protoChat)
-        try chat.save(db)
+        _ = try chat.saveFull(db)
 
         let peer: Peer = .thread(id: chat.id)
         if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer)) {

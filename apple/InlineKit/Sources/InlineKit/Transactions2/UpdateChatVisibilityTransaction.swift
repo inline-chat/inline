@@ -65,7 +65,7 @@ public struct UpdateChatVisibilityTransaction: Transaction2 {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         let chat = Chat(from: response.chat)
-        try chat.save(db)
+        _ = try chat.saveFull(db)
       }
     } catch {
       log.error("Failed to save updated chat visibility", error: error)

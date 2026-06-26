@@ -66,7 +66,7 @@ public struct GetChatsTransaction: Transaction2 {
             var chatModel = Chat(from: chat)
             let lastMsgId = chatModel.lastMsgId
             chatModel.lastMsgId = nil // Temporarily remove lastMsgId
-            try chatModel.save(db)
+            _ = try chatModel.saveFull(db)
             chatsToUpdate.append((chatModel, lastMsgId))
           } catch {
             Log.shared.error("Failed to save chat", error: error)
@@ -87,7 +87,7 @@ public struct GetChatsTransaction: Transaction2 {
           do {
             var updatedChat = chat
             updatedChat.lastMsgId = lastMsgId
-            try updatedChat.save(db)
+            _ = try updatedChat.saveFull(db)
           } catch {
             Log.shared.error("Failed to update chat with lastMsgId", error: error)
           }

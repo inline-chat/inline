@@ -147,6 +147,73 @@ struct ChatLastMessagePersistenceTests {
     }
   }
 
+  @Test("full save preserves existing title when incoming chat omits it")
+  func fullSavePreservesExistingTitle() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedChat(db, title: "Renamed Thread")
+
+      let incoming = Chat(
+        id: chatId,
+        date: Date(timeIntervalSince1970: 2),
+        type: .thread,
+        title: nil,
+        spaceId: nil,
+        isUntitled: true
+      )
+      _ = try incoming.saveFull(db)
+
+      let saved = try #require(try Chat.fetchOne(db, id: chatId))
+      #expect(saved.title == "Renamed Thread")
+      #expect(saved.isUntitled == nil)
+    }
+  }
+
+  @Test("full save applies incoming title when provided")
+  func fullSaveAppliesIncomingTitle() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedChat(db, title: "Old Thread")
+
+      let incoming = Chat(
+        id: chatId,
+        date: Date(timeIntervalSince1970: 2),
+        type: .thread,
+        title: "Server Thread",
+        spaceId: nil,
+        isUntitled: nil
+      )
+      _ = try incoming.saveFull(db)
+
+      let saved = try #require(try Chat.fetchOne(db, id: chatId))
+      #expect(saved.title == "Server Thread")
+      #expect(saved.isUntitled == nil)
+    }
+  }
+
+  @Test("full save keeps missing title when no stored title exists")
+  func fullSaveKeepsMissingTitleWithoutStoredTitle() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      let incoming = Chat(
+        id: chatId,
+        date: Date(timeIntervalSince1970: 2),
+        type: .thread,
+        title: nil,
+        spaceId: nil,
+        isUntitled: true
+      )
+      _ = try incoming.saveFull(db)
+
+      let saved = try #require(try Chat.fetchOne(db, id: chatId))
+      #expect(saved.title == nil)
+      #expect(saved.isUntitled == true)
+    }
+  }
+
   @Test("chatOpen update does not persist a missing last message reference")
   func chatOpenUpdateIgnoresMissingLastMessage() throws {
     let dbQueue = try makeInMemoryDB()

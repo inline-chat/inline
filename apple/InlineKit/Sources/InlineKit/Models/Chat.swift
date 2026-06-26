@@ -267,8 +267,32 @@ public extension Chat {
     try User(id: peerUserId, email: nil, firstName: nil).save(db)
   }
 
+  private mutating func mergeLocalFieldsForFullSave(_ db: Database) throws {
+    if let title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+      return
+    }
+    guard let existing = try Chat.fetchOne(db, key: id) else { return }
+    guard let existingTitle = existing.title,
+          existingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    else {
+      return
+    }
+
+    title = existingTitle
+    isUntitled = existing.isUntitled
+  }
+
+  @discardableResult
+  func saveFull(_ db: Database) throws -> Chat {
+    var chat = self
+    try chat.mergeLocalFieldsForFullSave(db)
+    try chat.save(db)
+    return chat
+  }
+
   mutating func saveWithValidLastMsg(_ db: Database) throws {
     try ensurePeerUserExists(db)
+    try mergeLocalFieldsForFullSave(db)
 
     if let existing = try Chat.fetchOne(db, key: id), lastMsgId == nil {
       lastMsgId = existing.lastMsgId

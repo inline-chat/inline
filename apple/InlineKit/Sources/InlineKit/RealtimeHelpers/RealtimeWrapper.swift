@@ -282,7 +282,7 @@ public extension Realtime {
       try AppDatabase.shared.dbWriter.write { db in
         do {
           let chat = Chat(from: result.chat)
-          try chat.save(db)
+          _ = try chat.saveFull(db)
         } catch {
           Log.shared.error("Failed to save chat", error: error)
         }
@@ -344,7 +344,7 @@ public extension Realtime {
       do {
         let chat = Chat(from: result.chat)
         // print("chat: \(chat)")
-        try chat.save(db)
+        _ = try chat.saveFull(db)
       } catch {
         Log.shared.error("Failed to save chat", error: error)
       }
@@ -495,7 +495,7 @@ public extension Realtime {
           var chatModel = Chat(from: chat)
           let lastMsgId = chatModel.lastMsgId
           chatModel.lastMsgId = nil // Temporarily remove lastMsgId
-          try chatModel.save(db)
+          _ = try chatModel.saveFull(db)
           chatsToUpdate.append((chatModel, lastMsgId))
         } catch {
           Log.shared.error("Failed to save chat", error: error)
@@ -516,7 +516,7 @@ public extension Realtime {
         do {
           var updatedChat = chat
           updatedChat.lastMsgId = lastMsgId
-          try updatedChat.save(db)
+          _ = try updatedChat.saveFull(db)
         } catch {
           Log.shared.error("Failed to update chat with lastMsgId", error: error)
         }

@@ -77,7 +77,7 @@ public struct TransactionCreateChat: Transaction {
       try await AppDatabase.shared.dbWriter.write { db in
         do {
           let chat = Chat(from: result.chat)
-          try chat.save(db)
+          _ = try chat.saveFull(db)
         } catch {
           Log.shared.error("Failed to save chat", error: error)
         }

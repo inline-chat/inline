@@ -108,7 +108,7 @@ public struct CreateChatTransaction: Transaction2 {
           if let existingChat = try Chat.fetchOne(db, key: chat.id), chat.lastMsgId == nil {
             chat.lastMsgId = existingChat.lastMsgId
           }
-          try chat.save(db)
+          _ = try chat.saveFull(db)
         } catch {
           log.error("Failed to save chat", error: error)
         }
