@@ -1219,7 +1219,7 @@ private extension MessagesCollectionView {
             "animated": animatingDifferences,
           ]
         )
-        self.syncAvatarOverlay(animate: false)
+        self.syncAvatarOverlayAfterLayout(animate: false)
         completion?()
       }
 
@@ -1357,6 +1357,11 @@ private extension MessagesCollectionView {
       }
 
       avatarOverlayController.sync(items: items, animate: animate)
+    }
+
+    private func syncAvatarOverlayAfterLayout(animate: Bool) {
+      currentCollectionView?.layoutIfNeeded()
+      syncAvatarOverlay(animate: animate)
     }
 
     private func avatarOverlayViewport(

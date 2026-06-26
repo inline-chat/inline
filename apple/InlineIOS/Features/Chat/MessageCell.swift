@@ -38,8 +38,12 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     isThread || displayMode == .threadAnchor
   }
 
+  private var usesAvatarOverlay: Bool {
+    MessageAvatarOverlayConfig.enabled && usesThreadLayout && displayMode != .threadAnchor
+  }
+
   var canShowAvatarOverlay: Bool {
-    MessageAvatarOverlayConfig.enabled && usesThreadLayout && !outgoing && message.senderInfo != nil
+    usesAvatarOverlay && !outgoing && message.senderInfo != nil
   }
 
   var avatarOverlayUserInfo: UserInfo? {
@@ -449,7 +453,7 @@ extension MessageCollectionViewCell {
   }
 
   private var showsCellAvatar: Bool {
-    usesThreadLayout && !outgoing && lastInGroup && message.senderInfo != nil && !MessageAvatarOverlayConfig.enabled
+    usesThreadLayout && !outgoing && lastInGroup && message.senderInfo != nil && !usesAvatarOverlay
   }
 
   func avatarOverlayFrame(in view: UIView) -> CGRect? {
