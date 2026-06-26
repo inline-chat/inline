@@ -20,8 +20,6 @@ struct SidebarChatIcon: View, Equatable {
         )
       case let .user(userInfo):
         UserAvatar(userInfo: userInfo, size: size)
-      case let .savedMessage(user):
-        InitialsCircle(name: user.firstName ?? user.username ?? "", size: size, symbol: "bookmark.fill")
     }
   }
 

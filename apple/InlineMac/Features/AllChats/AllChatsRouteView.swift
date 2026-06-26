@@ -462,7 +462,7 @@ struct AllChatsItem: Identifiable, Equatable {
     spaceName = chat.space?.displayName
 
     if let user = chat.user {
-      peer = user.user.isCurrentUser() ? .savedMessage(user.user) : .user(user)
+      peer = .user(user)
     } else if let chat = chat.chat {
       peer = .chat(chat)
     } else {
@@ -472,7 +472,7 @@ struct AllChatsItem: Identifiable, Equatable {
 
   private static func title(for item: HomeChatItem) -> String {
     if let user = item.user?.user {
-      return user.isCurrentUser() ? "Saved Messages" : user.displayName
+      return user.displayName
     }
 
     return item.chat?.humanReadableTitle ?? "Chat"

@@ -50,7 +50,6 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
         date: new Date(),
         minUserId: currentUserId,
         maxUserId: currentUserId,
-        title: "Saved Messages",
       })
       .returning()
     selfChat = newSelfChat

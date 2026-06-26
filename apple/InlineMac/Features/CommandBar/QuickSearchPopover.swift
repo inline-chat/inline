@@ -34,19 +34,6 @@ private enum QuickSearchLayout {
   static let itemTextSpacing: CGFloat = 6
 }
 
-private enum QuickSearchSavedMessages {
-  static let title = "Saved Messages"
-
-  static func matches(query: String) -> Bool {
-    let title = Self.title.lowercased()
-    let tokens = query
-      .lowercased()
-      .split(whereSeparator: { $0.isWhitespace })
-    guard !tokens.isEmpty else { return false }
-    return tokens.allSatisfy { title.contains(String($0)) }
-  }
-}
-
 fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   case thread(ThreadInfo)
   case user(User)
@@ -318,13 +305,10 @@ final class QuickSearchViewModel: ObservableObject {
   @Published private var spaceResults: [Space] = []
   @Published private var isSpaceSearching: Bool = false
   @Published private var commandContext = QuickSearchCommandContext()
-  @Published private var savedMessagesUser: User?
-  @Published private var isSavedMessagesSearching = false
   @Published private var userActivity: [Int64: QuickSearchUserActivity] = [:]
   @Published private var activeSearchQuery = ""
   @Published private var isLocalSearchPending = false
   private var spaceSearchToken = UUID()
-  private var savedMessagesSearchToken = UUID()
   private var userActivityToken = UUID()
   private var localSearchTask: Task<Void, Never>?
   private var didLoadUserActivity = false
@@ -353,17 +337,13 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   fileprivate var localResults: [QuickSearchLocalItem] {
-    var locals = localSearch.results.map { result in
+    let locals = localSearch.results.map { result in
       switch result {
         case let .thread(threadInfo):
           return QuickSearchLocalItem.thread(threadInfo)
         case let .user(user):
           return QuickSearchLocalItem.user(user)
       }
-    }
-
-    if let savedMessagesUser, !locals.containsUser(id: savedMessagesUser.id) {
-      locals.insert(.user(savedMessagesUser), at: 0)
     }
 
     let spaces = supportsSpaceSelection ? spaceResults.map { QuickSearchLocalItem.space($0) } : []
@@ -410,16 +390,12 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   var renderedGlobalResults: [GlobalSearchResult] {
-    var localUserIds = Set(localSearch.results.compactMap { result in
+    let localUserIds = Set(localSearch.results.compactMap { result in
       if case let .user(user) = result {
         return user.id
       }
       return nil
     })
-    if let savedMessagesUser {
-      localUserIds.insert(savedMessagesUser.id)
-    }
-
     let filtered = globalResults.filter { result in
       switch result {
         case let .users(user):
@@ -460,7 +436,6 @@ final class QuickSearchViewModel: ObservableObject {
   var isLoading: Bool {
     isLocalSearchPending ||
       localSearch.isSearching ||
-      isSavedMessagesSearching ||
       isSpaceSearching ||
       messageSearch.isSearching ||
       globalSearch.isLoading
@@ -485,8 +460,6 @@ final class QuickSearchViewModel: ObservableObject {
       updateActiveSearchQuery("")
       localSearch.search(query: "")
       messageSearch.clear()
-      savedMessagesUser = nil
-      isSavedMessagesSearching = false
       spaceResults = []
       isSpaceSearching = false
       return
@@ -513,13 +486,10 @@ final class QuickSearchViewModel: ObservableObject {
     query = ""
     updateActiveSearchQuery("")
     setLocalSearchPending(false)
-    savedMessagesSearchToken = UUID()
     spaceSearchToken = UUID()
     userActivityToken = UUID()
     localSearch.search(query: "")
     messageSearch.clear()
-    savedMessagesUser = nil
-    isSavedMessagesSearching = false
     didLoadUserActivity = false
     userActivity = [:]
     spaceResults = []
@@ -705,7 +675,6 @@ final class QuickSearchViewModel: ObservableObject {
   private var hasAnySearchResults: Bool {
     if localSearch.results.isEmpty == false { return true }
     if messageSearch.results.isEmpty == false { return true }
-    if savedMessagesUser != nil { return true }
     if spaceResults.isEmpty == false { return true }
     if renderedGlobalResults.isEmpty == false { return true }
     if commandResults.isEmpty == false { return true }
@@ -715,7 +684,6 @@ final class QuickSearchViewModel: ObservableObject {
   private var isSearchComplete: Bool {
     isLocalSearchPending == false &&
       localSearch.isSearching == false &&
-      isSavedMessagesSearching == false &&
       isSpaceSearching == false &&
       messageSearch.isSearching == false &&
       globalSearch.isLoading == false &&
@@ -761,41 +729,6 @@ final class QuickSearchViewModel: ObservableObject {
         dependencies.requestOpenChat(peer: peer, targetMessageId: messageId)
       }
       openInSidebar(peer: peer)
-    }
-  }
-
-  private func searchSavedMessages(query: String) {
-    savedMessagesSearchToken = UUID()
-    let token = savedMessagesSearchToken
-    savedMessagesUser = nil
-
-    guard QuickSearchSavedMessages.matches(query: query) else {
-      isSavedMessagesSearching = false
-      return
-    }
-
-    if let currentUser = dependencies.rootData?.currentUser {
-      savedMessagesUser = currentUser
-      isSavedMessagesSearching = false
-      return
-    }
-
-    isSavedMessagesSearching = true
-
-    Task { @MainActor in
-      do {
-        let user = try await dependencies.database.reader.read { db in
-          try CurrentUser().fetch(db)?.user
-        }
-        guard savedMessagesSearchToken == token else { return }
-        savedMessagesUser = user
-        isSavedMessagesSearching = false
-      } catch {
-        Log.shared.error("Failed to search saved messages", error: error)
-        guard savedMessagesSearchToken == token else { return }
-        savedMessagesUser = nil
-        isSavedMessagesSearching = false
-      }
     }
   }
 
@@ -983,7 +916,6 @@ final class QuickSearchViewModel: ObservableObject {
     updateActiveSearchQuery(query)
     localSearch.search(query: query)
     messageSearch.search(query: query, options: messageSearchOptions)
-    searchSavedMessages(query: query)
     searchSpaces(query: query)
   }
 
@@ -1073,9 +1005,6 @@ final class QuickSearchViewModel: ObservableObject {
           fields.insert(QuickSearchSearchField(value: "@\(username)", boost: 900), at: 0)
           fields.insert(QuickSearchSearchField(value: username, boost: 840), at: 1)
         }
-        if user.isCurrentUser() {
-          fields.insert(QuickSearchSearchField(value: QuickSearchSavedMessages.title, boost: 760), at: 0)
-        }
         return fields
       case let .space(space):
         return [
@@ -1134,7 +1063,7 @@ final class QuickSearchViewModel: ObservableObject {
       case let .thread(threadInfo):
         threadInfo.chat.humanReadableTitle ?? ""
       case let .user(user):
-        user.isCurrentUser() ? QuickSearchSavedMessages.title : user.displayName
+        user.displayName
       case let .space(space):
         space.displayName
       case let .command(command):
@@ -1725,9 +1654,8 @@ private struct QuickSearchRow: View {
               }
 
             case let .user(user):
-              let isSavedMessages = user.isCurrentUser()
               SidebarChatIcon(
-                peer: isSavedMessages ? .savedMessage(user) : .user(UserInfo(user: user)),
+                peer: .user(UserInfo(user: user)),
                 size: QuickSearchLayout.iconSize
               )
                 .frame(
@@ -1736,15 +1664,15 @@ private struct QuickSearchRow: View {
                   alignment: .center
                 )
               HStack(spacing: QuickSearchLayout.itemTextSpacing) {
-                Text(isSavedMessages ? QuickSearchSavedMessages.title : user.displayName)
+                Text(user.displayName)
                   .lineLimit(1)
-                if !isSavedMessages, let username = user.username {
+                if let username = user.username {
                   Text("@\(username)")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Text(isSavedMessages ? "Chat" : "User")
+                Text("User")
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }
@@ -1882,7 +1810,7 @@ private struct QuickSearchRow: View {
       case .user:
         if let user = result.peerUser {
           SidebarChatIcon(
-            peer: user.isCurrentUser() ? .savedMessage(user) : .user(UserInfo(user: user)),
+            peer: .user(UserInfo(user: user)),
             size: QuickSearchLayout.iconSize
           )
         } else {

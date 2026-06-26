@@ -36,8 +36,7 @@ final class SidebarViewModel {
       self.peerId = peerId
       chatId = listItem.chat?.id ?? 0
       spaceId = listItem.spaceId
-      let isCurrentUser = listItem.user?.user.isCurrentUser() == true
-      title = isCurrentUser ? "Saved Messages" : listItem.displayTitle
+      title = listItem.displayTitle
       parentTitle = listItem.parentTitle
       preview = listItem.sidebarBasePreviewText
       unread = listItem.hasUnread
@@ -48,7 +47,7 @@ final class SidebarViewModel {
       pinnedOrder = listItem.dialog?.pinnedOrder
 
       if let user = listItem.user {
-        peer = isCurrentUser ? .savedMessage(user.user) : .user(user)
+        peer = .user(user)
       } else if let chat = listItem.chat {
         peer = .chat(chat)
       } else {

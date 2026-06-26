@@ -1,4 +1,3 @@
-import Auth
 import InlineKit
 import InlineUI
 import SwiftUI
@@ -101,17 +100,7 @@ struct DirectChatItem: View {
   @ViewBuilder
   var userProfile: some View {
     if let userInfo {
-      Group {
-        if userInfo.user.id == Auth.shared.getCurrentUserId() {
-          InitialsCircle(
-            name: UserAvatar.getNameForInitials(user: userInfo.user),
-            size: 60,
-            symbol: "bookmark.fill"
-          )
-        } else {
-          UserAvatar(userInfo: userInfo, size: 60)
-        }
-      }
+      UserAvatar(userInfo: userInfo, size: 60)
       .overlay(alignment: .bottomTrailing) {
         if isPinned {
           if #available(iOS 26.0, *) {
@@ -166,10 +155,6 @@ struct DirectChatItem: View {
   }
 
   private func displayName(for userInfo: UserInfo) -> String {
-    if userInfo.user.id == Auth.shared.getCurrentUserId() {
-      return "Saved Message"
-    }
-
     return userInfo.user.needsDisplayNameFetch ? "Loading..." : userInfo.user.displayName
   }
 

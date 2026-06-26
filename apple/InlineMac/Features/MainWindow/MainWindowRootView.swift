@@ -229,13 +229,8 @@ private final class NativeWindowTabModel {
         return
       }
 
-      if userInfo.user.isCurrentUser() {
-        title = "Saved Messages"
-        iconPeer = .savedMessage(userInfo.user)
-      } else {
-        title = userInfo.user.displayName
-        iconPeer = .user(userInfo)
-      }
+      title = userInfo.user.displayName
+      iconPeer = .user(userInfo)
 
     case let .thread(id):
       guard let chat = ObjectCache.shared.getChat(id: id) else {

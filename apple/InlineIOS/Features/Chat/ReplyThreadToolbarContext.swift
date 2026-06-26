@@ -140,7 +140,7 @@ enum ReplyThreadToolbarContextLoader {
   private static func parentTitle(for chat: Chat, userInfo: UserInfo?, db: Database) throws -> String {
     if chat.type == .privateChat {
       if let userInfo {
-        return userInfo.user.isCurrentUser() ? "Saved Messages" : userInfo.user.displayName
+        return userInfo.user.displayName
       }
       return "Direct Message"
     }

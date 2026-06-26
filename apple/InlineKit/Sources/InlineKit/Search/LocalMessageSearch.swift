@@ -59,7 +59,7 @@ public struct LocalMessageSearchResult: Sendable, Hashable, Identifiable {
 
   public var title: String {
     if let peerUser {
-      return peerUser.isCurrentUser() ? "Saved Messages" : peerUser.displayName
+      return peerUser.displayName
     }
     return chat?.humanReadableTitle ?? "Chat"
   }

@@ -76,9 +76,6 @@ public struct HomeChatListItemSnapshot: Hashable, Identifiable, Sendable {
 
   private static func title(for item: HomeChatItem, titleOverride: String?) -> String {
     if let userInfo = item.displayUserInfo {
-      if userInfo.user.isCurrentUser() {
-        return "Saved Messages"
-      }
       return userInfo.user.needsDisplayNameFetch ? "Loading..." : userInfo.user.displayName
     }
 

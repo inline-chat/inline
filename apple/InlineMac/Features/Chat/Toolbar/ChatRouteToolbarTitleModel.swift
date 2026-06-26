@@ -268,7 +268,7 @@ final class ChatRouteToolbarTitleModel {
 
   private func resolvedTitle() -> String {
     if let user = resolvedUserInfo()?.user {
-      return user.isCurrentUser() ? "Saved Messages" : user.displayName
+      return user.displayName
     }
 
     if let chat = resolvedChat() {
@@ -290,7 +290,7 @@ final class ChatRouteToolbarTitleModel {
 
   private func resolvedIconPeer() -> ChatIcon.PeerType? {
     if let user = resolvedUserInfo() {
-      return user.user.isCurrentUser() ? .savedMessage(user.user) : .user(user)
+      return .user(user)
     }
 
     if let chat = resolvedChat() {
@@ -389,7 +389,7 @@ final class ChatRouteToolbarTitleModel {
   private func parentTitle(for chat: Chat) -> String {
     if chat.type == .privateChat {
       if let userInfo = parentUserInfo(for: chat) {
-        return userInfo.user.isCurrentUser() ? "Saved Messages" : userInfo.user.displayName
+        return userInfo.user.displayName
       }
       return "Direct Message"
     }

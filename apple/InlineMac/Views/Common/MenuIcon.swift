@@ -148,13 +148,6 @@ enum MenuIcon {
     case let .user(userInfo):
       userFallbackIcon(userInfo: userInfo, size: size)
 
-    case let .savedMessage(user):
-      InitialsCircle(
-        name: user.firstName ?? user.username ?? "",
-        size: size,
-        symbol: "bookmark.fill"
-      )
-
     case .chat:
       SidebarChatIcon(peer: peer, size: size)
     }
@@ -189,7 +182,6 @@ enum MenuIcon {
     enum Kind: Hashable {
       case chat
       case user
-      case savedMessage
     }
   }
 
@@ -225,17 +217,6 @@ enum MenuIcon {
         colorScheme: colorScheme
       )
 
-    case let .savedMessage(user):
-      return Key(
-        id: user.id,
-        kind: .savedMessage,
-        size: size,
-        signature: [
-          user.firstName ?? "",
-          user.username ?? "",
-        ].joined(separator: "|"),
-        colorScheme: colorScheme
-      )
     }
   }
 

@@ -1,4 +1,3 @@
-import Auth
 import InlineKit
 import InlineUI
 import RealtimeV2
@@ -37,13 +36,9 @@ struct ChatToolbarLeadingView: View {
     }
   }
 
-  private var isCurrentUser: Bool {
-    peerId.asUserId() == Auth.shared.getCurrentUserId()
-  }
-
   private var title: String {
     if case .user = peerId {
-      return isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser.map {
+      return fullChatViewModel.peerUser.map {
         $0.needsDisplayNameFetch ? "Loading..." : $0.displayName
       } ?? "Loading..."
     } else if let chat = fullChatViewModel.chat {

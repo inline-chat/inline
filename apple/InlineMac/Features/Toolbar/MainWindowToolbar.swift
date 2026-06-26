@@ -228,11 +228,8 @@ private enum NavHistoryMenuLabel {
     case let .chatInfo(_, query):
       return chatInfoSystemImage(query)
 
-    case let .profile(userId):
-      guard let userInfo = ObjectCache.shared.getCachedUser(id: userId) else {
-        return "person.crop.circle"
-      }
-      return userInfo.user.isCurrentUser() ? "bookmark.fill" : "person.crop.circle"
+    case .profile:
+      return "person.crop.circle"
 
     case .createSpace:
       return "plus.square.on.square"
@@ -260,7 +257,7 @@ private enum NavHistoryMenuLabel {
       guard let userInfo = ObjectCache.shared.getCachedUser(id: id) else {
         return "Direct Message"
       }
-      return userInfo.user.isCurrentUser() ? "Saved Messages" : userInfo.user.displayName
+      return userInfo.user.displayName
 
     case let .thread(id):
       guard let chat = ObjectCache.shared.getCachedChat(id: id) else {
@@ -282,11 +279,8 @@ private enum NavHistoryMenuLabel {
 
   private static func peerSystemImage(_ peer: Peer) -> String {
     switch peer {
-    case let .user(id):
-      guard let userInfo = ObjectCache.shared.getCachedUser(id: id) else {
-        return "person.crop.circle"
-      }
-      return userInfo.user.isCurrentUser() ? "bookmark.fill" : "person.crop.circle"
+    case .user:
+      return "person.crop.circle"
 
     case let .thread(id):
       guard let chat = ObjectCache.shared.getCachedChat(id: id) else {
@@ -360,7 +354,7 @@ private enum NavHistoryMenuLabel {
       guard let userInfo = ObjectCache.shared.getCachedUser(id: id) else {
         return nil
       }
-      return userInfo.user.isCurrentUser() ? .savedMessage(userInfo.user) : .user(userInfo)
+      return .user(userInfo)
 
     case let .thread(id):
       guard let chat = ObjectCache.shared.getCachedChat(id: id) else {

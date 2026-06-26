@@ -12,7 +12,6 @@ struct ChatIcon: View {
   enum PeerType: Equatable {
     case chat(Chat)
     case user(UserInfo)
-    case savedMessage(User)
 
     static func == (lhs: PeerType, rhs: PeerType) -> Bool {
       switch (lhs, rhs) {
@@ -26,9 +25,6 @@ struct ChatIcon: View {
         case let (.user(lhsUserInfo), .user(rhsUserInfo)):
           return userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
             && profilePhotoId(lhsUserInfo) == profilePhotoId(rhsUserInfo)
-
-        case let (.savedMessage(lhsUser), .savedMessage(rhsUser)):
-          return userNameSignature(lhsUser) == userNameSignature(rhsUser)
 
         default:
           return false
@@ -87,14 +83,6 @@ struct ChatIcon: View {
 
       case let .user(userInfo):
         UserAvatar(userInfo: userInfo, size: size, backgroundOpacity: backgroundOpacity)
-
-      case let .savedMessage(user):
-        InitialsCircle(
-          name: user.firstName ?? user.username ?? "",
-          size: size,
-          symbol: "bookmark.fill",
-          backgroundOpacity: backgroundOpacity
-        )
     }
   }
 }
@@ -140,12 +128,6 @@ struct ChatIcon: View {
       // User avatar
       ChatIcon(
         peer: .user(UserInfo.preview),
-        size: size
-      )
-
-      // Saved messages
-      ChatIcon(
-        peer: .savedMessage(User.preview),
         size: size
       )
 
