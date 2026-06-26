@@ -48,14 +48,6 @@ function Download() {
             <a href="https://x.com/inline_chat" target="_blank" rel="noopener noreferrer" {...stylex.props(styles.navLink)}>
               X
             </a>
-            <a
-              href="https://github.com/inline-chat/inline/blob/main/SUPPORT.md"
-              target="_blank"
-              rel="noopener noreferrer"
-              {...stylex.props(styles.navLink)}
-            >
-              Sponsor
-            </a>
           </nav>
 
           <a href="/download" {...stylex.props(styles.navEnd)} aria-current="page">

@@ -72,7 +72,6 @@ const COPY = {
     links: {
       twitter: "X",
       github: "GitHub",
-      sponsor: "Sponsor",
       status: "Status",
       download: "Downloads",
       docs: "Docs",
@@ -505,16 +504,6 @@ export function Landing() {
               {...stylex.props(styles.footerLink)}
             >
               {COPY.footer.links.github}
-            </a>
-          </div>
-          <div>
-            <a
-              href="https://github.com/inline-chat/inline/blob/main/SUPPORT.md"
-              target="_blank"
-              rel="noopener noreferrer"
-              {...stylex.props(styles.footerLink)}
-            >
-              {COPY.footer.links.sponsor}
             </a>
           </div>
           <div>
