@@ -93,6 +93,8 @@ class MessageListAppKit: NSViewController {
   private var lastAvatarOverlayVisibleRange: NSRange?
   private var lastAvatarOverlayVisibleRect: CGRect?
   private var isDisposed = false
+  private weak var observedToolbar: NSToolbar?
+  private var toolbarDisplayModeObservation: NSKeyValueObservation?
 
   // Translation system
   private let translationViewModel: TranslationViewModel
@@ -206,7 +208,7 @@ class MessageListAppKit: NSViewController {
     AppSettings.shared.$toolbarStyle
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
-        self?.updateToolbarBackgroundForStyleChange()
+        self?.scheduleToolbarBackgroundUpdate()
       }
       .store(in: &cancellables)
   }
@@ -525,21 +527,33 @@ class MessageListAppKit: NSViewController {
   private var toolbarHeight: CGFloat = Theme.toolbarHeight
   private var toolbarBgHeightConstraint: NSLayoutConstraint?
 
-  private func toolbarBackgroundHeight(chromeHeight: CGFloat) -> CGFloat {
-    guard AppSettings.shared.toolbarStyle == .unifiedCompact else { return chromeHeight }
-    return min(chromeHeight, Theme.toolbarHeight)
+  private func observeToolbarDisplayModeIfNeeded() {
+    guard let toolbar = view.window?.toolbar else { return }
+    guard observedToolbar !== toolbar else { return }
+
+    toolbarDisplayModeObservation?.invalidate()
+    observedToolbar = toolbar
+    toolbarDisplayModeObservation = toolbar.observe(\.displayMode, options: [.initial, .new]) { [weak self] _, _ in
+      self?.scheduleToolbarBackgroundUpdate()
+    }
+  }
+
+  private func scheduleToolbarBackgroundUpdate() {
+    updateToolbarBackgroundForStyleChange()
+
+    DispatchQueue.main.async { [weak self] in
+      self?.updateToolbarBackgroundForStyleChange()
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in
+      self?.updateToolbarBackgroundForStyleChange()
+    }
   }
 
   private func updateToolbarBackgroundForStyleChange() {
     guard isViewLoaded else { return }
     updateScrollViewInsets()
     view.needsLayout = true
-
-    DispatchQueue.main.async { [weak self] in
-      guard let self, isViewLoaded else { return }
-      updateScrollViewInsets()
-      view.needsLayout = true
-    }
   }
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did
@@ -551,7 +565,7 @@ class MessageListAppKit: NSViewController {
     let windowFrame = window.frame
     let contentFrame = window.contentLayoutRect
     let chromeHeight = windowFrame.height - contentFrame.height
-    let toolbarHeight = toolbarBackgroundHeight(chromeHeight: chromeHeight)
+    let toolbarHeight = chromeHeight
     self.toolbarHeight = toolbarHeight
     toolbarBgHeightConstraint?.constant = toolbarHeight
     let topInset = toolbarHeight + pinnedHeaderHeight
@@ -1586,6 +1600,7 @@ class MessageListAppKit: NSViewController {
       scheduleAvatarOverlaySync()
     }
 
+    observeToolbarDisplayModeIfNeeded()
 
     updateToolbar()
 
@@ -1645,6 +1660,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidAppear() {
     super.viewDidAppear()
     log.trace("viewDidAppear() called")
+    observeToolbarDisplayModeIfNeeded()
     updateScrollViewInsets()
     updateToolbar()
     scheduleAvatarOverlaySync()
@@ -3286,6 +3302,9 @@ extension MessageListAppKit {
     readAllTask = nil
     deferredTranslationTask?.cancel()
     deferredTranslationTask = nil
+    toolbarDisplayModeObservation?.invalidate()
+    toolbarDisplayModeObservation = nil
+    observedToolbar = nil
     avatarOverlaySyncInProgress = false
     avatarOverlaySyncPending = false
     if usesAvatarOverlay {
