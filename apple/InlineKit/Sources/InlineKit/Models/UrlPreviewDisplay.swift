@@ -6,6 +6,20 @@ public struct UrlPreviewDisplayContent: Equatable, Sendable {
   public let subtitle: String?
 }
 
+public struct UrlPreviewLargeDisplayContent: Equatable, Sendable {
+  public let style: UrlPreviewLargeStyle
+  public let title: String?
+  public let body: String?
+  public let subtitle: String?
+  public let authorName: String?
+  public let authorSubtitle: String?
+}
+
+public enum UrlPreviewLargeStyle: Codable, Equatable, Hashable, Sendable {
+  case standard
+  case x
+}
+
 public extension UrlPreview {
   var openURL: URL? {
     Self.openURL(for: url)
@@ -35,6 +49,67 @@ public extension UrlPreview {
 
   var isNotionPreview: Bool {
     displaySource == KnownURLPreviewProvider.notion.displayName
+  }
+
+  var largePreviewAuthorName: String? {
+    author?.nilIfEmpty
+  }
+
+  var largePreviewStyle: UrlPreviewLargeStyle {
+    largePreviewProvider == .x ? .x : .standard
+  }
+
+  func largeDisplayContent(maxDescriptionLength: Int) -> UrlPreviewLargeDisplayContent {
+    switch largePreviewStyle {
+    case .standard:
+      let source = displaySource
+      let title = title?.nilIfEmpty ?? source ?? url
+      let authorName = isLargePreviewAuthorProvider ? largePreviewAuthorName : nil
+      let description = description?.limitedDisplayText(maxLength: maxDescriptionLength)
+      let subtitleSource = authorName == nil && !title.isSameDisplayText(as: source) ? source : nil
+      let subtitle = [subtitleSource, displayDurationText, description]
+        .compactMap(\.self)
+        .joined(separator: " • ")
+        .nilIfEmpty
+
+      return UrlPreviewLargeDisplayContent(
+        style: .standard,
+        title: title,
+        body: nil,
+        subtitle: subtitle,
+        authorName: authorName,
+        authorSubtitle: authorName == nil ? nil : source
+      )
+
+    case .x:
+      let authorName = largePreviewAuthorName
+      return UrlPreviewLargeDisplayContent(
+        style: .x,
+        title: nil,
+        body: description?.limitedDisplayText(maxLength: maxDescriptionLength),
+        subtitle: nil,
+        authorName: authorName,
+        authorSubtitle: authorName == nil ? nil : displaySource
+      )
+    }
+  }
+
+  func shouldShowLargePreviewAuthor(hasAuthorPhoto: Bool) -> Bool {
+    guard isLargePreviewAuthorProvider else { return false }
+    return hasAuthorPhoto || largePreviewAuthorName != nil
+  }
+
+  private var isLargePreviewAuthorProvider: Bool {
+    guard let provider = largePreviewProvider else {
+      return false
+    }
+
+    return provider == .youtube || provider == .x
+  }
+
+  private var largePreviewProvider: KnownURLPreviewProvider? {
+    let host = displayUrl.flatMap(Self.normalizedHost(for:)) ?? Self.normalizedHost(for: url)
+    return knownProvider(provider: provider, siteName: siteName, host: host)
   }
 
   private var displayDurationText: String? {
@@ -109,13 +184,17 @@ public extension UrlPreview {
   }
 
   private func knownProviderName(provider: String?, siteName: String?, host: String?) -> String? {
+    knownProvider(provider: provider, siteName: siteName, host: host)?.displayName
+  }
+
+  private func knownProvider(provider: String?, siteName: String?, host: String?) -> KnownURLPreviewProvider? {
     for knownProvider in KnownURLPreviewProvider.allCases {
       if let host, knownProvider.matches(host: host) {
-        return knownProvider.displayName
+        return knownProvider
       }
 
       if knownProvider.matches(label: provider) || knownProvider.matches(label: siteName) {
-        return knownProvider.displayName
+        return knownProvider
       }
     }
 

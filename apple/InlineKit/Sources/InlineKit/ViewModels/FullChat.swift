@@ -18,6 +18,7 @@ public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, 
   public var externalTask: ExternalTask?
   public var urlPreview: UrlPreview?
   public var photoInfo: PhotoInfo?
+  public var authorPhotoInfo: PhotoInfo?
   public var userInfo: UserInfo?
 
   enum CodingKeys: String, CodingKey {
@@ -26,6 +27,7 @@ public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, 
     case urlPreview
     case userInfo
     case photoInfo
+    case authorPhotoInfo
   }
 
   public init(
@@ -33,12 +35,14 @@ public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, 
     externalTask: ExternalTask? = nil,
     urlPreview: UrlPreview? = nil,
     photoInfo: PhotoInfo? = nil,
+    authorPhotoInfo: PhotoInfo? = nil,
     userInfo: UserInfo? = nil
   ) {
     self.attachment = attachment
     self.externalTask = externalTask
     self.urlPreview = urlPreview
     self.photoInfo = photoInfo
+    self.authorPhotoInfo = authorPhotoInfo
     self.userInfo = userInfo
   }
 }
@@ -277,6 +281,10 @@ public extension FullMessage {
             optional: Attachment.urlPreview
               .including(
                 optional: UrlPreview.photo.forKey(FullAttachment.CodingKeys.photoInfo)
+                  .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+              )
+              .including(
+                optional: UrlPreview.authorPhoto.forKey(FullAttachment.CodingKeys.authorPhotoInfo)
                   .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
               )
           )

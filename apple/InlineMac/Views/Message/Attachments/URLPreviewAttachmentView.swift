@@ -12,13 +12,16 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   private var message: Message
   private let usesOutgoingBubbleStyle: Bool
   private let mode: Mode
+  private let largeStyle: UrlPreviewLargeStyle
 
   var attachment: Attachment {
     fullAttachment.attachment
   }
 
   func canUpdate(with fullAttachment: FullAttachment) -> Bool {
-    fullAttachment.urlPreview != nil && Self.mode(for: fullAttachment) == mode
+    fullAttachment.urlPreview != nil &&
+      Self.mode(for: fullAttachment) == mode &&
+      Self.largeStyle(for: fullAttachment) == largeStyle
   }
 
   func update(fullAttachment next: FullAttachment, message: Message) {
@@ -52,7 +55,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
-    view.layer?.cornerRadius = Layout.cornerRadius
+    view.layer?.cornerRadius = mode == .large ? Layout.largeCornerRadius : Layout.cornerRadius
     view.layer?.masksToBounds = true
     return view
   }()
@@ -61,7 +64,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     let stack = NSStackView()
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = mode == .large ? .vertical : .horizontal
-    stack.spacing = mode == .large ? Layout.largeSpacing : Layout.spacing
+    stack.spacing = mode == .large ? 0 : Layout.spacing
     stack.alignment = mode == .large ? .leading : .centerY
     stack.detachesHiddenViews = true
     return stack
@@ -71,7 +74,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     let view = PreviewImageContainerView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
-    view.layer?.cornerRadius = 6
+    view.layer?.cornerRadius = mode == .large ? 0 : Layout.imageCornerRadius
     view.layer?.masksToBounds = true
     view.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
     view.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -84,9 +87,78 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     view.photoContentMode = .aspectFill
     view.showsTinyThumbnailBackground = true
     view.showsLoadingPlaceholder = true
-    view.layer?.cornerRadius = 6
+    view.layer?.cornerRadius = mode == .large ? 0 : Layout.imageCornerRadius
     view.layer?.masksToBounds = true
     return view
+  }()
+
+  private lazy var largeContentStack: NSStackView = {
+    let stack = NSStackView()
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.orientation = .vertical
+    stack.spacing = Layout.largeSpacing
+    stack.alignment = .leading
+    stack.detachesHiddenViews = true
+    stack.edgeInsets = NSEdgeInsets(
+      top: Layout.largeVerticalPadding,
+      left: Layout.largeHorizontalPadding,
+      bottom: Layout.largeVerticalPadding,
+      right: Layout.largeHorizontalPadding
+    )
+    return stack
+  }()
+
+  private lazy var authorStack: NSStackView = {
+    let stack = NSStackView()
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.orientation = .horizontal
+    stack.spacing = Layout.authorSpacing
+    stack.alignment = .centerY
+    stack.detachesHiddenViews = true
+    stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return stack
+  }()
+
+  private lazy var authorAvatarView: PlatformPhotoView = {
+    let view = PlatformPhotoView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.photoContentMode = .aspectFill
+    view.showsTinyThumbnailBackground = true
+    view.showsLoadingPlaceholder = true
+    view.layer?.cornerRadius = Layout.authorAvatarSize / 2
+    view.layer?.masksToBounds = true
+    return view
+  }()
+
+  private lazy var authorLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.font = Layout.authorFont
+    label.lineBreakMode = .byTruncatingTail
+    label.maximumNumberOfLines = 1
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return label
+  }()
+
+  private lazy var authorSubtitleLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.font = Layout.authorSubtitleFont
+    label.lineBreakMode = .byTruncatingTail
+    label.maximumNumberOfLines = 1
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return label
+  }()
+
+  private lazy var authorTextStack: NSStackView = {
+    let stack = NSStackView()
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.orientation = .vertical
+    stack.spacing = Layout.authorTextSpacing
+    stack.alignment = .leading
+    stack.detachesHiddenViews = true
+    stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return stack
   }()
 
   private lazy var playIconView: NSImageView = {
@@ -95,6 +167,17 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     view.symbolConfiguration = .init(pointSize: Layout.playIconSize, weight: .medium)
     view.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Play")
     view.imageScaling = .scaleProportionallyUpOrDown
+    return view
+  }()
+
+  private lazy var playOverlayView: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.46).cgColor
+    view.layer?.cornerRadius = Layout.playOverlaySize / 2
+    view.layer?.masksToBounds = true
+    view.isHidden = true
     return view
   }()
 
@@ -143,6 +226,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     self.message = message
     self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
     self.mode = Self.mode(for: fullAttachment)
+    self.largeStyle = Self.largeStyle(for: fullAttachment)
     super.init(frame: .zero)
 
     guard fullAttachment.urlPreview != nil else { return }
@@ -160,15 +244,21 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     Layout.mode(for: fullAttachment)
   }
 
+  private static func largeStyle(for fullAttachment: FullAttachment) -> UrlPreviewLargeStyle {
+    fullAttachment.urlPreview?.largePreviewStyle ?? .standard
+  }
+
   private func setup() {
     wantsLayer = true
-    layer?.cornerRadius = Layout.cornerRadius
+    layer?.cornerRadius = mode == .large ? Layout.largeCornerRadius : Layout.cornerRadius
     layer?.masksToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
     PressScaleAnimator.prepare(self)
-    let verticalPadding = mode == .large ? Layout.largePadding : Layout.compactVerticalPadding
-    let leadingPadding = mode == .large ? Layout.largePadding : Layout.compactLeadingPadding
-    let trailingPadding = mode == .large ? Layout.largePadding : Layout.compactTrailingPadding
+    let verticalPadding = mode == .large ? 0 : Layout.compactVerticalPadding
+    let leadingPadding = mode == .large ? 0 : Layout.compactLeadingPadding
+    let trailingPadding = mode == .large ? 0 : Layout.compactTrailingPadding
+    let accentWidth = mode == .large ? 0 : Layout.accentWidth
+    accentView.isHidden = mode == .large
 
     addSubview(backgroundView)
     addSubview(accentView)
@@ -183,7 +273,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       accentView.leadingAnchor.constraint(equalTo: leadingAnchor),
       accentView.topAnchor.constraint(equalTo: topAnchor),
       accentView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      accentView.widthAnchor.constraint(equalToConstant: Layout.accentWidth),
+      accentView.widthAnchor.constraint(equalToConstant: accentWidth),
 
       contentStack.leadingAnchor.constraint(equalTo: accentView.trailingAnchor, constant: leadingPadding),
       contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingPadding),
@@ -192,7 +282,13 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     ])
 
     contentStack.addArrangedSubview(imageContainer)
-    contentStack.addArrangedSubview(textStack)
+    if mode == .large {
+      largeContentStack.addArrangedSubview(textStack)
+      largeContentStack.addArrangedSubview(authorStack)
+      contentStack.addArrangedSubview(largeContentStack)
+    } else {
+      contentStack.addArrangedSubview(textStack)
+    }
 
     switch mode {
       case .compact:
@@ -207,13 +303,14 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
         NSLayoutConstraint.activate([
           imageContainer.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
           largeMediaHeightConstraint!,
-          textStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+          largeContentStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
         ])
     }
 
     imageContainer.addSubview(photoView)
     imageContainer.addSubview(providerPlaceholderView)
-    imageContainer.addSubview(playIconView)
+    imageContainer.addSubview(playOverlayView)
+    playOverlayView.addSubview(playIconView)
     imageContainer.contextMenuProvider = { [weak self] in
       self?.makeContextMenu()
     }
@@ -229,8 +326,13 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       providerPlaceholderView.widthAnchor.constraint(equalToConstant: Layout.providerPlaceholderSize),
       providerPlaceholderView.heightAnchor.constraint(equalToConstant: Layout.providerPlaceholderSize),
 
-      playIconView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
-      playIconView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
+      playOverlayView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
+      playOverlayView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
+      playOverlayView.widthAnchor.constraint(equalToConstant: Layout.playOverlaySize),
+      playOverlayView.heightAnchor.constraint(equalToConstant: Layout.playOverlaySize),
+
+      playIconView.centerXAnchor.constraint(equalTo: playOverlayView.centerXAnchor),
+      playIconView.centerYAnchor.constraint(equalTo: playOverlayView.centerYAnchor),
       playIconView.widthAnchor.constraint(equalToConstant: Layout.playIconSize),
       playIconView.heightAnchor.constraint(equalToConstant: Layout.playIconSize),
     ])
@@ -238,8 +340,27 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     textStack.addArrangedSubview(titleLabel)
     textStack.addArrangedSubview(descriptionLabel)
 
+    if mode == .large {
+      authorStack.addArrangedSubview(authorAvatarView)
+      authorTextStack.addArrangedSubview(authorLabel)
+      authorTextStack.addArrangedSubview(authorSubtitleLabel)
+      authorStack.addArrangedSubview(authorTextStack)
+
+      NSLayoutConstraint.activate([
+        authorStack.widthAnchor.constraint(lessThanOrEqualTo: largeContentStack.widthAnchor),
+        authorAvatarView.widthAnchor.constraint(equalToConstant: Layout.authorAvatarSize),
+        authorAvatarView.heightAnchor.constraint(equalToConstant: Layout.authorAvatarSize),
+        authorTextStack.widthAnchor.constraint(lessThanOrEqualTo: authorStack.widthAnchor),
+        authorLabel.widthAnchor.constraint(lessThanOrEqualTo: authorTextStack.widthAnchor),
+        authorSubtitleLabel.widthAnchor.constraint(lessThanOrEqualTo: authorTextStack.widthAnchor),
+      ])
+    }
+
     NSLayoutConstraint.activate([
-      titleLabel.widthAnchor.constraint(lessThanOrEqualTo: textStack.widthAnchor),
+      titleLabel.widthAnchor.constraint(
+        lessThanOrEqualTo: textStack.widthAnchor,
+        constant: mode == .large ? -Layout.largeTitleTrailingPadding : 0
+      ),
       descriptionLabel.widthAnchor.constraint(lessThanOrEqualTo: textStack.widthAnchor),
     ])
   }
@@ -249,18 +370,40 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
 
     let isVideo = preview.isVideoPreview
     let display = Layout.displayContent(for: preview, mode: mode)
+    let largeDisplay = mode == .large ? preview.largeDisplayContent(maxDescriptionLength: Layout.largeDescriptionMaxLength) : nil
+    let titleText: String? = if let largeDisplay {
+      largeDisplay.title
+    } else {
+      display.title
+    }
+    let descriptionText: String? = if let largeDisplay {
+      largeDisplay.style == .x ? largeDisplay.body : largeDisplay.subtitle
+    } else {
+      display.subtitle
+    }
     previewURL = preview.openURL
     toolTip = preview.title ?? preview.url
 
-    titleLabel.stringValue = display.title
+    let usesMultilineTitle = mode == .large && largeStyle != .x
+    titleLabel.stringValue = titleText ?? ""
+    titleLabel.lineBreakMode = usesMultilineTitle ? .byWordWrapping : .byTruncatingTail
+    titleLabel.maximumNumberOfLines = usesMultilineTitle ? Layout.largeTitleMaxLines : 1
+    titleLabel.isHidden = titleLabel.stringValue.isEmpty
     descriptionLabel.lineBreakMode = mode == .large ? .byWordWrapping : .byTruncatingTail
     descriptionLabel.maximumNumberOfLines = mode == .large ? 0 : 1
-    descriptionLabel.stringValue = display.subtitle ?? ""
+    descriptionLabel.stringValue = descriptionText ?? ""
     descriptionLabel.isHidden = descriptionLabel.stringValue.isEmpty
+    configureAuthorRow(preview: preview, display: largeDisplay)
+    textStack.isHidden = titleLabel.isHidden && descriptionLabel.isHidden
 
-    setAccessibilityLabel([display.title, display.subtitle].compactMap(\.self).joined(separator: ": "))
+    setAccessibilityLabel(
+      [descriptionText, largeDisplay?.authorName ?? preview.largePreviewAuthorName, largeDisplay?.authorSubtitle, titleText]
+        .compactMap(\.self)
+        .joined(separator: ": ")
+    )
     setAccessibilityRole(.group)
 
+    playOverlayView.isHidden = !isVideo
     playIconView.isHidden = !isVideo
     let hasPhoto = fullAttachment.photoInfo != nil
     let showsProviderPlaceholder = !isVideo && fullAttachment.photoInfo == nil && preview.isNotionPreview
@@ -270,6 +413,31 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       opensLinkOnImage: isVideo,
       providerPlaceholderImage: showsProviderPlaceholder ? NSImage(named: "notion-logo") : nil
     )
+  }
+
+  private func configureAuthorRow(preview: UrlPreview, display: UrlPreviewLargeDisplayContent?) {
+    guard mode == .large else { return }
+
+    guard preview.shouldShowLargePreviewAuthor(hasAuthorPhoto: fullAttachment.authorPhotoInfo != nil) else {
+      authorStack.isHidden = true
+      authorAvatarView.setPhoto(nil)
+      return
+    }
+
+    authorStack.isHidden = false
+    if let authorPhotoInfo = fullAttachment.authorPhotoInfo {
+      authorAvatarView.isHidden = false
+      authorAvatarView.setPhoto(authorPhotoInfo, reloadMessageOnFinish: message)
+    } else {
+      authorAvatarView.isHidden = true
+      authorAvatarView.setPhoto(nil)
+    }
+
+    authorLabel.stringValue = display?.authorName ?? ""
+    authorLabel.isHidden = authorLabel.stringValue.isEmpty
+    authorSubtitleLabel.stringValue = display?.authorSubtitle ?? ""
+    authorSubtitleLabel.isHidden = authorSubtitleLabel.stringValue.isEmpty
+    authorTextStack.isHidden = authorLabel.isHidden && authorSubtitleLabel.isHidden
   }
 
   func apply(layout: URLPreviewAttachmentLayout.Plan) {
@@ -298,11 +466,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       photoView.isHidden = providerPlaceholderImage != nil || showIconPlaceholder
       photoView.showsLoadingPlaceholder = showLoadingPlaceholder && providerPlaceholderImage == nil
       photoView.setPhoto(nil)
-      if !imageContainer.isHidden, opensLinkOnImage {
-        imageContainer.onTap = { [weak self] in
-          self?.openPreviewURL()
-        }
-      }
       return
     }
 
@@ -313,11 +476,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     photoView.showsLoadingPlaceholder = true
     photoView.setPhoto(photoInfo, reloadMessageOnFinish: message)
 
-    if opensLinkOnImage {
-      imageContainer.onTap = { [weak self] in
-        self?.openPreviewURL()
-      }
-    } else {
+    if !opensLinkOnImage {
       imageContainer.onTap = { [weak self] in
         self?.openPhotoPreview(for: photoInfo)
       }
@@ -436,13 +595,22 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.72) : .secondaryLabelColor
   }
 
+  private var tertiaryTextColor: NSColor {
+    usesOutgoingBubbleStyle ? .white.withAlphaComponent(0.55) : .tertiaryLabelColor
+  }
+
   private func updateColors() {
     layer?.backgroundColor = backgroundColor.cgColor
     backgroundView.layer?.backgroundColor = backgroundColor.cgColor
     accentView.layer?.backgroundColor = accentColor.cgColor
     titleLabel.textColor = primaryTextColor
-    descriptionLabel.textColor = secondaryTextColor
-    playIconView.contentTintColor = secondaryTextColor
+    descriptionLabel.textColor = mode == .large && largeStyle == .x ? primaryTextColor : secondaryTextColor
+    if mode == .large {
+      authorLabel.textColor = primaryTextColor
+      authorSubtitleLabel.textColor = tertiaryTextColor
+    }
+    playOverlayView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.46).cgColor
+    playIconView.contentTintColor = .white
   }
 
   private func localPhotoURL(for photoInfo: PhotoInfo) -> URL? {
@@ -837,12 +1005,18 @@ private final class PreviewImageContainerView: NSView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    guard onTap != nil, bounds.contains(point), !isHidden else {
-      let hit = super.hitTest(point)
+    guard bounds.contains(point), !isHidden else {
       MessageGestureTrace.trace(
-        "URLPreviewImageContainer.hitTest point=\(MessageGestureTrace.point(point)) result=\(String(describing: hit.map { type(of: $0) })) hasTap=\(onTap != nil) hidden=\(isHidden)"
+        "URLPreviewImageContainer.hitTest point=\(MessageGestureTrace.point(point)) result=nil hasTap=\(onTap != nil) hidden=\(isHidden)"
       )
-      return hit
+      return nil
+    }
+
+    guard onTap != nil else {
+      MessageGestureTrace.trace(
+        "URLPreviewImageContainer.hitTest point=\(MessageGestureTrace.point(point)) result=nil hasTap=false"
+      )
+      return nil
     }
 
     MessageGestureTrace.trace("URLPreviewImageContainer.hitTest point=\(MessageGestureTrace.point(point)) result=self")

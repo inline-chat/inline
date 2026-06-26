@@ -853,6 +853,12 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("url preview author photo") { db in
+      try db.alter(table: "urlPreview") { t in
+        t.add(column: "authorPhotoId", .integer)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

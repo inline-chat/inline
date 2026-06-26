@@ -569,6 +569,7 @@ class UIMessageView: UIView {
     previewView.configure(
       with: attachment.urlPreview!,
       photoInfo: attachment.photoInfo,
+      authorPhotoInfo: attachment.authorPhotoInfo,
       parentViewController: findViewController(),
       outgoing: outgoing,
       mode: URLPreviewView.preferredMode(for: attachment.urlPreview!, photoInfo: attachment.photoInfo),

@@ -69,6 +69,54 @@ struct UrlPreviewDisplayTests {
     #expect(!other.isNotionPreview)
   }
 
+  @Test("shows large preview authors only for X and YouTube")
+  func showsLargePreviewAuthorsOnlyForXAndYouTube() {
+    let youtube = makePreview(url: "https://youtube.com/watch?v=abc", author: "Inline")
+    let x = makePreview(url: "https://example.com/status/1", provider: "twitter")
+    let other = makePreview(url: "https://example.com/post", author: "Inline")
+
+    #expect(youtube.largePreviewAuthorName == "Inline")
+    #expect(youtube.shouldShowLargePreviewAuthor(hasAuthorPhoto: false))
+    #expect(x.shouldShowLargePreviewAuthor(hasAuthorPhoto: true))
+    #expect(!other.shouldShowLargePreviewAuthor(hasAuthorPhoto: true))
+  }
+
+  @Test("uses custom X large preview display")
+  func usesCustomXLargePreviewDisplay() {
+    let preview = makePreview(
+      url: "https://x.com/morajabi/status/2070457314524459100",
+      title: "Mo Rajabi (@morajabi) on X",
+      description: "Maybe you weren't meant to have a boss.",
+      provider: "x",
+      author: "David Lieb (@dflieb)"
+    )
+    let display = preview.largeDisplayContent(maxDescriptionLength: 110)
+
+    #expect(display.style == .x)
+    #expect(display.title == nil)
+    #expect(display.body == "Maybe you weren't meant to have a boss.")
+    #expect(display.subtitle == nil)
+    #expect(display.authorName == "David Lieb (@dflieb)")
+    #expect(display.authorSubtitle == "X")
+  }
+
+  @Test("moves large standard source into author block")
+  func movesLargeStandardSourceIntoAuthorBlock() {
+    let preview = makePreview(
+      url: "https://youtube.com/watch?v=abc",
+      title: "Launch products people love",
+      provider: "youtube",
+      author: "Y Combinator"
+    )
+    let display = preview.largeDisplayContent(maxDescriptionLength: 110)
+
+    #expect(display.style == .standard)
+    #expect(display.title == "Launch products people love")
+    #expect(display.subtitle == nil)
+    #expect(display.authorName == "Y Combinator")
+    #expect(display.authorSubtitle == "YouTube")
+  }
+
   @Test("joins source and truncated description")
   func joinsSourceAndTruncatedDescription() {
     let preview = makePreview(
@@ -196,6 +244,24 @@ struct UrlPreviewDisplayTests {
     #expect(!embedUrl.isVideoPreview)
   }
 
+  @Test("prefers large media previews from layout hints with legacy video fallback")
+  func prefersLargeMediaPreviewsFromLayoutHintsWithLegacyVideoFallback() {
+    let x = makePreview(url: "https://x.com/inline/status/123", hasLargeMedia: true, showLargeMedia: true)
+    let multiLinkYouTube = makePreview(
+      url: "https://youtube.com/watch?v=abc",
+      mediaKind: "embed",
+      hasLargeMedia: true,
+      showLargeMedia: false
+    )
+    let legacyVideo = makePreview(url: "https://youtube.com/watch?v=abc", mediaKind: "embed")
+
+    #expect(x.prefersLargeMediaPreview(hasPhoto: true))
+    #expect(x.prefersLargeMediaPreview(hasPhoto: false))
+    #expect(!multiLinkYouTube.prefersLargeMediaPreview(hasPhoto: true))
+    #expect(legacyVideo.prefersLargeMediaPreview(hasPhoto: true))
+    #expect(!legacyVideo.prefersLargeMediaPreview(hasPhoto: false))
+  }
+
   private func makePreview(
     url: String,
     siteName: String? = nil,
@@ -203,6 +269,7 @@ struct UrlPreviewDisplayTests {
     description: String? = nil,
     displayUrl: String? = nil,
     provider: String? = nil,
+    author: String? = nil,
     duration: Int64? = nil,
     mediaType: String? = nil,
     mediaKind: String? = nil,
@@ -211,7 +278,9 @@ struct UrlPreviewDisplayTests {
     externalDuration: Int? = nil,
     embedUrl: String? = nil,
     embedType: String? = nil,
-    embedDuration: Int? = nil
+    embedDuration: Int? = nil,
+    hasLargeMedia: Bool? = nil,
+    showLargeMedia: Bool? = nil
   ) -> UrlPreview {
     UrlPreview(
       id: 1,
@@ -224,13 +293,16 @@ struct UrlPreviewDisplayTests {
       mediaType: mediaType,
       displayUrl: displayUrl,
       provider: provider,
+      author: author,
       mediaKind: mediaKind,
       externalUrl: externalUrl,
       externalMimeType: externalMimeType,
       externalDuration: externalDuration,
       embedUrl: embedUrl,
       embedType: embedType,
-      embedDuration: embedDuration
+      embedDuration: embedDuration,
+      hasLargeMedia: hasLargeMedia,
+      showLargeMedia: showLargeMedia
     )
   }
 }

@@ -15,7 +15,14 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
   private enum Metrics {
     static let compactImageSize = CGSize(width: 32, height: 32)
-    static let largeImageWidth: CGFloat = 240
+    static let authorAvatarSize: CGFloat = 26
+    static let largeCornerRadius: CGFloat = 14
+    static let largeContentPadding: CGFloat = 12
+    static let largeContentVerticalPadding: CGFloat = 10
+    static let largeSectionSpacing: CGFloat = 7
+    static let largeTitleTrailingPadding: CGFloat = 14
+    static let imageCornerRadius: CGFloat = 6
+    static let playOverlaySize: CGFloat = 34
     static let playIconSize: CGFloat = 14
     static let providerPlaceholderSize: CGFloat = 24
     static let pressedScale: CGFloat = 0.97
@@ -30,10 +37,12 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
   private let titleLabel = UILabel()
   private let descriptionLabel = UILabel()
+  private let authorLabel = UILabel()
+  private let authorSubtitleLabel = UILabel()
   private let imageContainer: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.layer.cornerRadius = 6
+    view.layer.cornerRadius = Metrics.imageCornerRadius
     view.layer.masksToBounds = true
     view.isHidden = true
     view.isUserInteractionEnabled = false
@@ -46,6 +55,29 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     view.photoContentMode = .aspectFill
     view.showsTinyThumbnailBackground = true
     view.showsLoadingPlaceholder = true
+    view.isUserInteractionEnabled = false
+    return view
+  }()
+
+  private let authorAvatarView: PlatformPhotoView = {
+    let view = PlatformPhotoView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.photoContentMode = .aspectFill
+    view.showsTinyThumbnailBackground = true
+    view.showsLoadingPlaceholder = true
+    view.layer.cornerRadius = Metrics.authorAvatarSize / 2
+    view.layer.masksToBounds = true
+    view.isUserInteractionEnabled = false
+    return view
+  }()
+
+  private let playOverlayView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = UIColor.black.withAlphaComponent(0.46)
+    view.layer.cornerRadius = Metrics.playOverlaySize / 2
+    view.layer.masksToBounds = true
+    view.isHidden = true
     view.isUserInteractionEnabled = false
     return view
   }()
@@ -94,7 +126,8 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
   private func setupImageContainer() {
     imageContainer.addSubview(imageView)
     imageContainer.addSubview(providerPlaceholderView)
-    imageContainer.addSubview(playIconView)
+    imageContainer.addSubview(playOverlayView)
+    playOverlayView.addSubview(playIconView)
 
     NSLayoutConstraint.activate([
       imageView.leadingAnchor.constraint(equalTo: imageContainer.leadingAnchor),
@@ -107,8 +140,13 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
       providerPlaceholderView.widthAnchor.constraint(equalToConstant: Metrics.providerPlaceholderSize),
       providerPlaceholderView.heightAnchor.constraint(equalToConstant: Metrics.providerPlaceholderSize),
 
-      playIconView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
-      playIconView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
+      playOverlayView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
+      playOverlayView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
+      playOverlayView.widthAnchor.constraint(equalToConstant: Metrics.playOverlaySize),
+      playOverlayView.heightAnchor.constraint(equalToConstant: Metrics.playOverlaySize),
+
+      playIconView.centerXAnchor.constraint(equalTo: playOverlayView.centerXAnchor),
+      playIconView.centerYAnchor.constraint(equalTo: playOverlayView.centerYAnchor),
       playIconView.widthAnchor.constraint(equalToConstant: Metrics.playIconSize),
       playIconView.heightAnchor.constraint(equalToConstant: Metrics.playIconSize),
     ])
@@ -139,6 +177,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
   func configure(
     with preview: UrlPreview,
     photoInfo: PhotoInfo?,
+    authorPhotoInfo: PhotoInfo? = nil,
     parentViewController: UIViewController?,
     outgoing: Bool,
     mode: Mode = .compact,
@@ -156,10 +195,10 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     resetLayout()
 
     let trailingPadding: CGFloat = 8
-    let verticalPadding: CGFloat = mode == .large ? 7 : 6
+    let verticalPadding: CGFloat = 6
     let rectangleWidth: CGFloat = 4
-    let contentSpacing: CGFloat = mode == .large ? 8 : 12
-    let cornerRadius: CGFloat = 8
+    let contentSpacing: CGFloat = 12
+    let cornerRadius: CGFloat = mode == .large ? Metrics.largeCornerRadius : 8
 
     let theme = ThemeManager.shared.selected
     let bgColor = outgoing ? .white.withAlphaComponent(0.1) : theme.secondaryTextColor?
@@ -167,32 +206,67 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     let primaryTextColor = outgoing ? UIColor.white : (theme.primaryTextColor ?? .label)
     let secondaryTextColor = outgoing ? UIColor.white
       .withAlphaComponent(0.7) : (theme.primaryTextColor?.withAlphaComponent(0.7) ?? .secondaryLabel)
-    let rectangleColor = outgoing ? UIColor.white : theme.accent
+    let tertiaryTextColor = outgoing ? UIColor.white
+      .withAlphaComponent(0.55) : (theme.primaryTextColor?.withAlphaComponent(0.55) ?? .tertiaryLabel)
 
     let isVideo = preview.isVideoPreview
     let display = preview.displayContent(maxDescriptionLength: mode == .large ? 420 : 110)
-    playIconView.tintColor = photoInfo == nil ? secondaryTextColor : .white
+    let largeDisplay = mode == .large ? preview.largeDisplayContent(maxDescriptionLength: 420) : nil
+    let titleText: String? = if let largeDisplay {
+      largeDisplay.title
+    } else {
+      display.title
+    }
+    let descriptionText: String? = if let largeDisplay {
+      largeDisplay.style == .x ? largeDisplay.body : largeDisplay.subtitle
+    } else {
+      display.subtitle
+    }
+    let authorName = largeDisplay?.authorName ?? preview.largePreviewAuthorName
+    let authorSubtitle = largeDisplay?.authorSubtitle
+    let isXStyle = largeDisplay?.style == .x
+    let usesMultilineTitle = mode == .large && !isXStyle
+    playIconView.tintColor = .white
 
-    titleLabel.text = display.title
+    titleLabel.text = titleText
     titleLabel.font = UIFont.systemFont(ofSize: mode == .large ? 15 : 13, weight: .medium)
     titleLabel.textColor = primaryTextColor
-    titleLabel.numberOfLines = 1
-    titleLabel.lineBreakMode = .byTruncatingTail
-    titleLabel.isHidden = display.title.isEmpty
+    titleLabel.numberOfLines = usesMultilineTitle ? 2 : 1
+    titleLabel.lineBreakMode = usesMultilineTitle ? .byWordWrapping : .byTruncatingTail
+    titleLabel.isHidden = titleText?.isEmpty != false
     titleLabel.translatesAutoresizingMaskIntoConstraints = false
     titleLabel.isUserInteractionEnabled = false
     titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
-    let shouldShowDescription = display.subtitle != nil
-    descriptionLabel.text = display.subtitle
-    descriptionLabel.font = UIFont.systemFont(ofSize: 12)
-    descriptionLabel.textColor = secondaryTextColor
-    descriptionLabel.numberOfLines = 1
-    descriptionLabel.lineBreakMode = .byTruncatingTail
+    let shouldShowDescription = descriptionText != nil
+    descriptionLabel.text = descriptionText
+    descriptionLabel.font = UIFont.systemFont(ofSize: isXStyle ? 14 : 12)
+    descriptionLabel.textColor = isXStyle ? primaryTextColor : secondaryTextColor
+    descriptionLabel.numberOfLines = isXStyle ? 0 : 1
+    descriptionLabel.lineBreakMode = isXStyle ? .byWordWrapping : .byTruncatingTail
     descriptionLabel.isHidden = !shouldShowDescription
     descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
     descriptionLabel.isUserInteractionEnabled = false
     descriptionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    authorLabel.text = authorName
+    authorLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+    authorLabel.textColor = primaryTextColor
+    authorLabel.numberOfLines = 1
+    authorLabel.lineBreakMode = .byTruncatingTail
+    authorLabel.translatesAutoresizingMaskIntoConstraints = false
+    authorLabel.isUserInteractionEnabled = false
+    authorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    authorSubtitleLabel.text = authorSubtitle
+    authorSubtitleLabel.font = UIFont.systemFont(ofSize: 11)
+    authorSubtitleLabel.textColor = tertiaryTextColor
+    authorSubtitleLabel.numberOfLines = 1
+    authorSubtitleLabel.lineBreakMode = .byTruncatingTail
+    authorSubtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+    authorSubtitleLabel.isUserInteractionEnabled = false
+    authorSubtitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     configureImage(
       photoInfo: photoInfo,
@@ -201,31 +275,45 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
       backgroundColor: bgColor,
       reloadMessage: message
     )
-
-    rectangleView.backgroundColor = rectangleColor
-    addSubview(rectangleView)
+    imageContainer.layer.cornerRadius = mode == .large ? 0 : Metrics.imageCornerRadius
 
     let bodyStack = UIStackView()
     bodyStack.axis = .vertical
-    bodyStack.spacing = 4
-    bodyStack.alignment = mode == .large ? .leading : .fill
+    bodyStack.spacing = mode == .large ? 0 : 4
+    bodyStack.alignment = .fill
     bodyStack.translatesAutoresizingMaskIntoConstraints = false
     bodyStack.isUserInteractionEnabled = false
 
     let textStack = UIStackView()
     textStack.axis = .vertical
     textStack.spacing = 3
-    textStack.alignment = .fill
+    textStack.alignment = mode == .large ? .leading : .fill
     textStack.translatesAutoresizingMaskIntoConstraints = false
     textStack.isUserInteractionEnabled = false
     textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-    textStack.addArrangedSubview(titleLabel)
+    if !titleLabel.isHidden {
+      textStack.addArrangedSubview(titleLabel)
+      if mode == .large {
+        activeConstraints.append(
+          titleLabel.widthAnchor.constraint(
+            lessThanOrEqualTo: textStack.widthAnchor,
+            constant: -Metrics.largeTitleTrailingPadding
+          )
+        )
+      }
+    }
     if shouldShowDescription {
       textStack.addArrangedSubview(descriptionLabel)
+      if mode == .large {
+        activeConstraints.append(descriptionLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor))
+      }
     }
 
     if mode == .compact {
+      rectangleView.backgroundColor = outgoing ? UIColor.white : theme.accent
+      addSubview(rectangleView)
+
       let rowStack = UIStackView()
       rowStack.axis = .horizontal
       rowStack.spacing = 8
@@ -246,31 +334,66 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     } else {
       if !imageContainer.isHidden {
         bodyStack.addArrangedSubview(imageContainer)
-        let imageWidth = imageContainer.widthAnchor.constraint(equalToConstant: Metrics.largeImageWidth)
-        imageWidth.priority = .defaultHigh
         activeConstraints.append(contentsOf: [
-          imageWidth,
-          imageContainer.widthAnchor.constraint(lessThanOrEqualTo: bodyStack.widthAnchor),
+          imageContainer.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
           imageContainer.heightAnchor.constraint(equalTo: imageContainer.widthAnchor, multiplier: 9.0 / 16.0),
         ])
       }
-      bodyStack.addArrangedSubview(textStack)
-      activeConstraints.append(textStack.widthAnchor.constraint(equalTo: bodyStack.widthAnchor))
+
+      let largeContentStack = UIStackView()
+      largeContentStack.axis = .vertical
+      largeContentStack.spacing = Metrics.largeSectionSpacing
+      largeContentStack.alignment = .fill
+      largeContentStack.translatesAutoresizingMaskIntoConstraints = false
+      largeContentStack.isUserInteractionEnabled = false
+      largeContentStack.isLayoutMarginsRelativeArrangement = true
+      largeContentStack.layoutMargins = UIEdgeInsets(
+        top: Metrics.largeContentVerticalPadding,
+        left: Metrics.largeContentPadding,
+        bottom: Metrics.largeContentPadding,
+        right: Metrics.largeContentPadding
+      )
+
+      if let authorRow = makeAuthorRow(
+        preview: preview,
+        authorName: authorName,
+        authorSubtitle: authorSubtitle,
+        authorPhotoInfo: authorPhotoInfo,
+        reloadMessage: message
+      ) {
+        if !textStack.arrangedSubviews.isEmpty {
+          largeContentStack.addArrangedSubview(textStack)
+        }
+        largeContentStack.addArrangedSubview(authorRow)
+      } else if !textStack.arrangedSubviews.isEmpty {
+        largeContentStack.addArrangedSubview(textStack)
+      }
+      bodyStack.addArrangedSubview(largeContentStack)
+      activeConstraints.append(largeContentStack.widthAnchor.constraint(equalTo: bodyStack.widthAnchor))
     }
 
     addSubview(bodyStack)
 
-    activeConstraints.append(contentsOf: [
-      rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      rectangleView.widthAnchor.constraint(equalToConstant: rectangleWidth),
-      rectangleView.topAnchor.constraint(equalTo: topAnchor),
-      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    if mode == .compact {
+      activeConstraints.append(contentsOf: [
+        rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
+        rectangleView.widthAnchor.constraint(equalToConstant: rectangleWidth),
+        rectangleView.topAnchor.constraint(equalTo: topAnchor),
+        rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      bodyStack.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingPadding),
-      bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
-      bodyStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
-    ])
+        bodyStack.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
+        bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingPadding),
+        bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
+        bodyStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
+      ])
+    } else {
+      activeConstraints.append(contentsOf: [
+        bodyStack.leadingAnchor.constraint(equalTo: leadingAnchor),
+        bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor),
+        bodyStack.topAnchor.constraint(equalTo: topAnchor),
+        bodyStack.bottomAnchor.constraint(equalTo: bottomAnchor),
+      ])
+    }
 
     NSLayoutConstraint.activate(activeConstraints)
 
@@ -302,7 +425,71 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
   }
 
   static func preferredMode(for preview: UrlPreview, photoInfo: PhotoInfo?) -> Mode {
-    preview.isVideoPreview && photoInfo != nil ? .large : .compact
+    preview.prefersLargeMediaPreview(hasPhoto: photoInfo != nil) ? .large : .compact
+  }
+
+  private func makeAuthorRow(
+    preview: UrlPreview,
+    authorName: String?,
+    authorSubtitle: String?,
+    authorPhotoInfo: PhotoInfo?,
+    reloadMessage: Message?
+  ) -> UIStackView? {
+    guard preview.shouldShowLargePreviewAuthor(hasAuthorPhoto: authorPhotoInfo != nil) else {
+      authorAvatarView.setPhoto(nil)
+      return nil
+    }
+
+    let row = UIStackView()
+    row.axis = .horizontal
+    row.spacing = 6
+    row.alignment = .center
+    row.translatesAutoresizingMaskIntoConstraints = false
+    row.isUserInteractionEnabled = false
+    row.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    if let authorPhotoInfo {
+      authorAvatarView.isHidden = false
+      authorAvatarView.setPhoto(authorPhotoInfo, reloadMessageOnFinish: reloadMessage)
+      row.addArrangedSubview(authorAvatarView)
+      activeConstraints.append(contentsOf: [
+        authorAvatarView.widthAnchor.constraint(equalToConstant: Metrics.authorAvatarSize),
+        authorAvatarView.heightAnchor.constraint(equalToConstant: Metrics.authorAvatarSize),
+      ])
+    } else {
+      authorAvatarView.isHidden = true
+      authorAvatarView.setPhoto(nil)
+    }
+
+    if let authorName {
+      authorLabel.text = authorName
+      authorLabel.isHidden = false
+    } else {
+      authorLabel.isHidden = true
+    }
+
+    if let authorSubtitle {
+      authorSubtitleLabel.text = authorSubtitle
+      authorSubtitleLabel.isHidden = false
+    } else {
+      authorSubtitleLabel.isHidden = true
+    }
+
+    if !authorLabel.isHidden || !authorSubtitleLabel.isHidden {
+      let textStack = UIStackView()
+      textStack.axis = .vertical
+      textStack.spacing = 0
+      textStack.alignment = .fill
+      textStack.translatesAutoresizingMaskIntoConstraints = false
+      textStack.isUserInteractionEnabled = false
+      textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+      textStack.addArrangedSubview(authorLabel)
+      textStack.addArrangedSubview(authorSubtitleLabel)
+      row.addArrangedSubview(textStack)
+      activeConstraints.append(textStack.widthAnchor.constraint(lessThanOrEqualTo: row.widthAnchor))
+    }
+
+    return row
   }
 
   private func configureImage(
@@ -315,6 +502,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     let showsProviderPlaceholder = providerPlaceholderImage != nil
     imageContainer.backgroundColor = showsProviderPlaceholder ? .clear : backgroundColor.withAlphaComponent(0.2)
     imageContainer.isHidden = !isVideo && photoInfo == nil && !showsProviderPlaceholder
+    playOverlayView.isHidden = !isVideo
     playIconView.isHidden = !isVideo
     providerPlaceholderView.image = providerPlaceholderImage
     providerPlaceholderView.isHidden = !showsProviderPlaceholder

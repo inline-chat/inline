@@ -10,6 +10,7 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
   public var title: String?
   public var description: String?
   public var photoId: Int64?
+  public var authorPhotoId: Int64?
   public var duration: Int64?
   public var mediaType: String?
   public var displayUrl: String?
@@ -38,6 +39,7 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
     static let title = Column(CodingKeys.title)
     static let description = Column(CodingKeys.description)
     static let photoId = Column(CodingKeys.photoId)
+    static let authorPhotoId = Column(CodingKeys.authorPhotoId)
     static let duration = Column(CodingKeys.duration)
     static let mediaType = Column(CodingKeys.mediaType)
     static let displayUrl = Column(CodingKeys.displayUrl)
@@ -62,11 +64,16 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
 
   // Relationship to photo using photoId (server ID)
   static let photo = belongsTo(Photo.self, using: ForeignKey(["photoId"], to: ["photoId"]))
+  static let authorPhoto = belongsTo(Photo.self, using: ForeignKey(["authorPhotoId"], to: ["photoId"]))
   static let video = belongsTo(Video.self, using: ForeignKey(["videoId"], to: ["videoId"]))
   static let document = belongsTo(Document.self, using: ForeignKey(["documentId"], to: ["documentId"]))
 
   var photo: QueryInterfaceRequest<Photo> {
     request(for: UrlPreview.photo)
+  }
+
+  var authorPhoto: QueryInterfaceRequest<Photo> {
+    request(for: UrlPreview.authorPhoto)
   }
 
   var video: QueryInterfaceRequest<Video> {
@@ -84,6 +91,7 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
     title: String?,
     description: String?,
     photoId: Int64?,
+    authorPhotoId: Int64? = nil,
     duration: Int64?,
     mediaType: String? = nil,
     displayUrl: String? = nil,
@@ -111,6 +119,7 @@ public struct UrlPreview: FetchableRecord, Identifiable, Codable, Hashable, Pers
     self.title = title
     self.description = description
     self.photoId = photoId
+    self.authorPhotoId = authorPhotoId
     self.duration = duration
     self.mediaType = mediaType
     self.displayUrl = displayUrl
@@ -157,8 +166,20 @@ public extension UrlPreview {
     return false
   }
 
+  func prefersLargeMediaPreview(hasPhoto: Bool) -> Bool {
+    if let showLargeMedia {
+      return showLargeMedia && (hasLargeMedia ?? true)
+    }
+
+    if hasLargeMedia == false {
+      return false
+    }
+
+    return hasPhoto && isVideoPreview
+  }
+
   enum CodingKeys: String, CodingKey {
-    case id, url, siteName, title, description, photoId, duration, mediaType
+    case id, url, siteName, title, description, photoId, authorPhotoId, duration, mediaType
     case displayUrl, provider, author, mediaKind, videoId, documentId
     case externalUrl, externalMimeType, externalWidth, externalHeight, externalDuration
     case embedUrl, embedType, embedWidth, embedHeight, embedDuration
@@ -173,6 +194,7 @@ public extension UrlPreview {
     title = try container.decodeIfPresent(String.self, forKey: .title)
     description = try container.decodeIfPresent(String.self, forKey: .description)
     photoId = try container.decodeIfPresent(Int64.self, forKey: .photoId)
+    authorPhotoId = try container.decodeIfPresent(Int64.self, forKey: .authorPhotoId)
     duration = try container.decodeIfPresent(Int64.self, forKey: .duration)
     mediaType = try container.decodeIfPresent(String.self, forKey: .mediaType)
     displayUrl = try container.decodeIfPresent(String.self, forKey: .displayUrl)
@@ -206,6 +228,12 @@ public extension UrlPreview {
     if linkEmbed.hasPhoto {
       let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.photo)
       photoId = savedPhoto.photoId
+    }
+
+    var authorPhotoId: Int64?
+    if linkEmbed.hasAuthorPhoto {
+      let savedPhoto = try Photo.savePhotoFromProtocol(db, photo: linkEmbed.authorPhoto)
+      authorPhotoId = savedPhoto.photoId
     }
 
     var mediaKind: String?
@@ -286,6 +314,7 @@ public extension UrlPreview {
       title: linkEmbed.hasTitle ? linkEmbed.title : nil,
       description: linkEmbed.hasDescription_p ? linkEmbed.description_p : nil,
       photoId: photoId,
+      authorPhotoId: authorPhotoId,
       duration: linkEmbed.hasDuration ? linkEmbed.duration : nil,
       mediaType: linkEmbed.hasMediaType ? Self.mediaTypeValue(from: linkEmbed.mediaType) : nil,
       displayUrl: linkEmbed.hasDisplayURL ? linkEmbed.displayURL : nil,
