@@ -139,7 +139,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         payload.clearActions()
       }
 
-      if payload.hasVoice || payload.hasActions || payload.hasReplies {
+      if Self.hasContentPayload(payload) {
         contentPayload = payload
       } else {
         contentPayload = nil
@@ -578,6 +578,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     return baseId > 0 ? -baseId : baseId
   }
 
+  private static func hasContentPayload(_ payload: Client_MessageContentPayload) -> Bool {
+    payload.hasVoice || payload.hasActions || payload.hasReplies || payload.hasServiceMessage
+  }
+
   private static func contentPayload(from voice: InlineProtocol.Voice) -> Client_MessageContentPayload {
     Client_MessageContentPayload.with {
       $0.voice = Client_MessageVoiceContent.with {
@@ -600,8 +604,11 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     if message.hasReplies {
       payload.replies = message.replies
     }
+    if message.hasServiceMessage {
+      payload.serviceMessage = message.serviceMessage
+    }
 
-    return (payload.hasVoice || payload.hasActions || payload.hasReplies) ? payload : nil
+    return hasContentPayload(payload) ? payload : nil
   }
 
   private static func mergedContentPayload(
@@ -638,13 +645,21 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         }
       }
 
-      return (merged.hasVoice || merged.hasActions || merged.hasReplies) ? merged : nil
+      if incoming.hasServiceMessage || existing.hasServiceMessage {
+        if incoming.hasServiceMessage {
+          merged.serviceMessage = incoming.serviceMessage
+        } else if existing.hasServiceMessage {
+          merged.serviceMessage = existing.serviceMessage
+        }
+      }
+
+      return hasContentPayload(merged) ? merged : nil
 
     case let (incoming?, nil):
-      return (incoming.hasVoice || incoming.hasActions || incoming.hasReplies) ? incoming : nil
+      return hasContentPayload(incoming) ? incoming : nil
 
     case let (nil, existing?):
-      return (existing.hasVoice || existing.hasActions || existing.hasReplies) ? existing : nil
+      return hasContentPayload(existing) ? existing : nil
 
     case (nil, nil):
       return nil
@@ -688,10 +703,95 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
 // MARK: - UI helpers
 
+public struct MessageServiceDisplaySegment: Equatable, Sendable {
+  public enum Link: Equatable, Sendable {
+    case user(Int64)
+    case thread(Int64)
+  }
+
+  public enum Tone: Equatable, Sendable {
+    case secondary
+    case tertiary
+  }
+
+  public var text: String
+  public var link: Link?
+  public var tone: Tone
+
+  public init(text: String, link: Link? = nil, tone: Tone = .secondary) {
+    self.text = text
+    self.link = link
+    self.tone = tone
+  }
+}
+
 public extension Message {
+  var serviceMessage: MessageService? {
+    guard let contentPayload, contentPayload.hasServiceMessage else { return nil }
+    return contentPayload.serviceMessage
+  }
+
+  var isServiceMessage: Bool {
+    serviceMessage?.event != nil
+  }
+
+  var serviceFallbackText: String? {
+    guard let serviceMessage else { return nil }
+    return serviceMessage.fallbackText
+  }
+
+  var servicePinnedMessageId: Int64? {
+    guard let serviceMessage else { return nil }
+    guard case let .pinnedMessage(pinnedMessage) = serviceMessage.event else { return nil }
+    guard pinnedMessage.hasMessageID, pinnedMessage.messageID > 0 else { return nil }
+    return pinnedMessage.messageID
+  }
+
+  func serviceDisplayText(actorName: String?) -> String? {
+    serviceDisplaySegments(actorName: actorName)?.map(\.text).joined()
+  }
+
+  func serviceDisplaySegments(actorName: String?) -> [MessageServiceDisplaySegment]? {
+    guard let serviceMessage else { return nil }
+
+    let actor = serviceActorName(actorName)
+    let actorLink: MessageServiceDisplaySegment.Link? = fromId > 0 ? .user(fromId) : nil
+    let actorSegment = MessageServiceDisplaySegment(text: actor, link: actorLink)
+
+    switch serviceMessage.event {
+      case let .threadBacklink(backlink):
+        if let sourceTitle = backlink.sourceDisplayTitle {
+          let sourceLink = backlink.sourceChatLink
+          return [
+            actorSegment,
+            MessageServiceDisplaySegment(text: " linked from "),
+            MessageServiceDisplaySegment(text: "[[", link: sourceLink, tone: .tertiary),
+            MessageServiceDisplaySegment(
+              text: sourceTitle,
+              link: sourceLink
+            ),
+            MessageServiceDisplaySegment(text: "]]", link: sourceLink, tone: .tertiary),
+          ]
+        }
+        return [
+          actorSegment,
+          MessageServiceDisplaySegment(text: " linked to this thread"),
+        ]
+      case .pinnedMessage:
+        return [
+          actorSegment,
+          MessageServiceDisplaySegment(text: " pinned a message"),
+        ]
+      case nil:
+        return nil
+    }
+  }
+
   /// Returns a string representation of the message, including emojis for different media types.
   var stringRepresentationWithEmoji: String {
-    if let text, !text.isEmpty {
+    if let serviceFallbackText {
+      serviceFallbackText
+    } else if let text, !text.isEmpty {
       text
     } else if isSticker == true {
       "🖼️ Sticker"
@@ -712,7 +812,9 @@ public extension Message {
 
   /// Returns a string representation of the message without emoji prefixes.
   var stringRepresentationPlain: String {
-    if let text, !text.isEmpty {
+    if let serviceFallbackText {
+      serviceFallbackText
+    } else if let text, !text.isEmpty {
       text
     } else if isSticker == true {
       "Sticker"
@@ -738,7 +840,9 @@ public extension Message {
 
 public extension InlineProtocol.Message {
   var stringRepresentationWithEmoji: String {
-    if hasMessage {
+    if hasServiceMessage, let serviceFallbackText = serviceMessage.fallbackText {
+      serviceFallbackText
+    } else if hasMessage {
       message
     } else if isSticker == true {
       "🖼️ Sticker"
@@ -758,7 +862,9 @@ public extension InlineProtocol.Message {
   }
 
   var stringRepresentationPlain: String {
-    if hasMessage {
+    if hasServiceMessage, let serviceFallbackText = serviceMessage.fallbackText {
+      serviceFallbackText
+    } else if hasMessage {
       message
     } else if isSticker == true {
       "Sticker"
@@ -775,6 +881,49 @@ public extension InlineProtocol.Message {
     } else {
       "Message"
     }
+  }
+}
+
+public extension MessageService {
+  var fallbackText: String? {
+    switch event {
+      case let .threadBacklink(backlink):
+        if let sourceTitle = backlink.sourceDisplayTitle {
+          return "Linked from \(sourceTitle)"
+        }
+        return "Linked from another thread"
+      case .pinnedMessage:
+        return "Pinned a message"
+      case nil:
+        return nil
+    }
+  }
+}
+
+public extension MessageServiceThreadBacklink {
+  var sourceDisplayTitle: String? {
+    guard hasSourceTitle else { return nil }
+    let trimmed = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  var sourceChatLink: MessageServiceDisplaySegment.Link? {
+    guard hasSourceChatID, sourceChatID > 0 else { return nil }
+    return .thread(sourceChatID)
+  }
+}
+
+private extension Message {
+  func serviceActorName(_ actorName: String?) -> String {
+    if outgoing {
+      return "You"
+    }
+
+    if let actorName = actorName?.trimmingCharacters(in: .whitespacesAndNewlines), !actorName.isEmpty {
+      return actorName
+    }
+
+    return "Someone"
   }
 }
 
@@ -1228,7 +1377,7 @@ public extension Message {
     } else {
       payload.clearVoice()
     }
-    contentPayload = (payload.hasVoice || payload.hasActions || payload.hasReplies) ? payload : nil
+    contentPayload = Self.hasContentPayload(payload) ? payload : nil
   }
 
   mutating func setVoiceLocalRelativePath(_ localRelativePath: String?) {

@@ -393,6 +393,27 @@ extension UIMessageView {
     return view
   }
 
+  func createServiceContainerView() -> UIView {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = .tertiarySystemFill
+    view.layer.cornerRadius = 11
+    view.layer.masksToBounds = true
+    return view
+  }
+
+  func createServiceLabel() -> UILabel {
+    let label = UILabel()
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .preferredFont(forTextStyle: .caption1)
+    label.textColor = .secondaryLabel
+    label.textAlignment = .center
+    label.numberOfLines = 0
+    label.lineBreakMode = .byWordWrapping
+    label.adjustsFontForContentSizeCategory = true
+    return label
+  }
+
   func createMessageActionRowStack() -> UIStackView {
     let stack = UIStackView()
     stack.axis = .horizontal

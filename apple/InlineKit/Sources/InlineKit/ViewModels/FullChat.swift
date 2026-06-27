@@ -160,6 +160,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 
 public extension FullMessage {
   var canReply: Bool {
+    guard !message.isServiceMessage else { return false }
     guard let status = message.status else { return true }
     switch status {
       case .sent:
@@ -167,6 +168,24 @@ public extension FullMessage {
       case .sending, .failed:
         return false
     }
+  }
+
+  var serviceDisplayText: String? {
+    message.serviceDisplayText(actorName: senderInfo?.user.shortDisplayName)
+  }
+
+  var serviceDisplaySegments: [MessageServiceDisplaySegment]? {
+    message.serviceDisplaySegments(actorName: senderInfo?.user.shortDisplayName)
+  }
+}
+
+public extension EmbeddedMessage {
+  var serviceDisplayText: String? {
+    message.serviceDisplayText(actorName: senderInfo?.user.shortDisplayName)
+  }
+
+  var serviceDisplaySegments: [MessageServiceDisplaySegment]? {
+    message.serviceDisplaySegments(actorName: senderInfo?.user.shortDisplayName)
   }
 }
 

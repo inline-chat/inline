@@ -339,6 +339,8 @@ class UIMessageView: UIView {
   lazy var metadataView = createMessageTimeAndStatus()
   lazy var messageActionsContainer = createMessageActionsContainer()
   lazy var replyThreadSummaryView = createReplyThreadSummaryView()
+  lazy var serviceContainerView = createServiceContainerView()
+  lazy var serviceLabel = createServiceLabel()
   private weak var metadataContainerView: UIStackView?
 
   lazy var reactionsFlowView: ReactionsFlowView = {
@@ -456,6 +458,11 @@ class UIMessageView: UIView {
   }
 
   func setupViews() {
+    if message.isServiceMessage {
+      setupServiceMessage()
+      return
+    }
+
     bubbleView.isUserInteractionEnabled = true
     messageLabel.isUserInteractionEnabled = true
     containerStack.isUserInteractionEnabled = true
@@ -482,6 +489,76 @@ class UIMessageView: UIView {
     setupAppearance()
     setupConstraints()
     setupTranslationObserver()
+  }
+
+  private func setupServiceMessage() {
+    serviceLabel.attributedText = serviceAttributedText()
+    serviceLabel.isUserInteractionEnabled = true
+    serviceLabel.addGestureRecognizer(UITapGestureRecognizer(
+      target: self,
+      action: #selector(handleServiceMessageTap)
+    ))
+    addSubview(serviceContainerView)
+    serviceContainerView.addSubview(serviceLabel)
+
+    NSLayoutConstraint.activate([
+      serviceContainerView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      serviceContainerView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+      serviceContainerView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+      serviceContainerView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
+
+      serviceLabel.topAnchor.constraint(equalTo: serviceContainerView.topAnchor, constant: 6),
+      serviceLabel.leadingAnchor.constraint(equalTo: serviceContainerView.leadingAnchor, constant: 10),
+      serviceLabel.trailingAnchor.constraint(equalTo: serviceContainerView.trailingAnchor, constant: -10),
+      serviceLabel.bottomAnchor.constraint(equalTo: serviceContainerView.bottomAnchor, constant: -6),
+    ])
+  }
+
+  private func serviceAttributedText() -> NSAttributedString {
+    let segments = fullMessage.serviceDisplaySegments ?? [
+      MessageServiceDisplaySegment(text: message.serviceFallbackText
+        ?? message.text
+        ?? message.stringRepresentationPlain),
+    ]
+    let text = NSMutableAttributedString()
+
+    for segment in segments {
+      text.append(serviceAttributedText(for: segment))
+    }
+
+    return text
+  }
+
+  private func serviceAttributedText(for segment: MessageServiceDisplaySegment) -> NSAttributedString {
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.alignment = .center
+    paragraphStyle.lineBreakMode = .byWordWrapping
+
+    var attributes: [NSAttributedString.Key: Any] = [
+      .font: serviceLabel.font ?? UIFont.preferredFont(forTextStyle: .caption1),
+      .foregroundColor: serviceTextColor(for: segment.tone),
+      .paragraphStyle: paragraphStyle,
+    ]
+
+    switch segment.link {
+      case let .user(userId):
+        attributes[.mentionUserId] = userId
+      case let .thread(chatId):
+        attributes[.threadLink] = ThreadLinkTarget.chatId(chatId)
+      case nil:
+        break
+    }
+
+    return NSAttributedString(string: segment.text, attributes: attributes)
+  }
+
+  private func serviceTextColor(for tone: MessageServiceDisplaySegment.Tone) -> UIColor {
+    switch tone {
+      case .secondary:
+        return ThemeManager.shared.selected.secondaryTextColor ?? .secondaryLabel
+      case .tertiary:
+        return .tertiaryLabel
+    }
   }
 
   private func setupTranslationObserver() {
@@ -1336,6 +1413,67 @@ class UIMessageView: UIView {
     }
 
     addGestureRecognizer(backgroundDoubleTapGesture)
+  }
+
+  @objc private func handleServiceMessageTap(_ gesture: UITapGestureRecognizer) {
+    guard let attributedText = serviceLabel.attributedText else { return }
+    guard let characterIndex = serviceCharacterIndex(at: gesture.location(in: serviceLabel)) else { return }
+
+    if let userId = attributedText.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) as? Int64 {
+      NotificationCenter.default.post(
+        name: Notification.Name("NavigateToUser"),
+        object: nil,
+        userInfo: ["userId": userId]
+      )
+      return
+    }
+
+    if let threadTarget = attributedText
+      .attribute(.threadLink, at: characterIndex, effectiveRange: nil) as? ThreadLinkTarget
+    {
+      ThreadLinkNavigator.open(target: threadTarget)
+    }
+  }
+
+  private func serviceCharacterIndex(at point: CGPoint) -> Int? {
+    guard let attributedText = serviceLabel.attributedText, attributedText.length > 0 else {
+      return nil
+    }
+
+    let textStorage = NSTextStorage(attributedString: attributedText)
+    let layoutManager = NSLayoutManager()
+    let textContainer = NSTextContainer(size: serviceLabel.bounds.size)
+    textContainer.lineFragmentPadding = 0
+    textContainer.maximumNumberOfLines = serviceLabel.numberOfLines
+    textContainer.lineBreakMode = serviceLabel.lineBreakMode
+
+    layoutManager.addTextContainer(textContainer)
+    textStorage.addLayoutManager(layoutManager)
+    layoutManager.ensureLayout(for: textContainer)
+
+    let glyphRange = layoutManager.glyphRange(for: textContainer)
+    guard glyphRange.length > 0 else { return nil }
+
+    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+    let offset = CGPoint(
+      x: (serviceLabel.bounds.width - textRect.width) * 0.5 - textRect.origin.x,
+      y: (serviceLabel.bounds.height - textRect.height) * 0.5 - textRect.origin.y
+    )
+    let location = CGPoint(x: point.x - offset.x, y: point.y - offset.y)
+    guard textRect.insetBy(dx: -6, dy: -6).contains(location) else { return nil }
+
+    let glyphIndex = layoutManager.glyphIndex(for: location, in: textContainer)
+    guard glyphIndex < layoutManager.numberOfGlyphs else { return nil }
+
+    let glyphRect = layoutManager.boundingRect(
+      forGlyphRange: NSRange(location: glyphIndex, length: 1),
+      in: textContainer
+    )
+    guard glyphRect.insetBy(dx: -8, dy: -8).contains(location) else { return nil }
+
+    let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+    guard characterIndex >= 0, characterIndex < attributedText.length else { return nil }
+    return characterIndex
   }
 
   @objc func handleTextViewTap(_ gesture: UITapGestureRecognizer) {
