@@ -2,6 +2,7 @@
 .agent-docs
 .action
 .codex
+.tmp
 .vscode
 apple
 build

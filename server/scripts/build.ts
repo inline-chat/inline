@@ -1,22 +1,10 @@
-import { build, $ } from "bun"
+import { $ } from "bun"
 import { resolve } from "path"
 import { version } from "../package.json"
 
 // https://coolify.io/docs/knowledge-base/environment-variables/
 const sourceCommit = process.env["SOURCE_COMMIT"] || (await $`git rev-parse HEAD`.quiet()).text().trim() || "N/A"
 const commitHash = sourceCommit === "N/A" ? "N/A" : sourceCommit.slice(0, 7)
-
-// Migrate if run in production
-if (process.env.NODE_ENV === "production") {
-  console.info(`🚧 Migrating...`)
-
-  try {
-    await $`bun scripts/migrate.ts`.quiet()
-  } catch (error) {
-    console.error("🚨 Error migrating:", error)
-    process.exit(1)
-  }
-}
 
 console.info(`🚧 Building...`)
 

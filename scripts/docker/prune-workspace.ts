@@ -1,5 +1,5 @@
-import { copyFile, cp, mkdir, readFile, rm, writeFile } from "fs/promises"
-import { dirname, relative, resolve } from "path"
+import { copyFile, cp, mkdir, readFile, rm, stat, writeFile } from "fs/promises"
+import { basename, dirname, relative, resolve } from "path"
 import { fileURLToPath } from "url"
 
 type WorkspacesField = string[] | { packages?: string[] }
@@ -52,7 +52,11 @@ for (const workspacePath of selectedWorkspacePaths) {
   const jsonPackagePath = resolve(jsonDir, workspacePath, "package.json")
   await mkdir(dirname(jsonPackagePath), { recursive: true })
   await copyFile(resolve(repoRoot, workspacePath, "package.json"), jsonPackagePath)
-  await cp(resolve(repoRoot, workspacePath), resolve(fullDir, workspacePath), { recursive: true })
+  await cp(resolve(repoRoot, workspacePath), resolve(fullDir, workspacePath), {
+    recursive: true,
+    dereference: true,
+    filter: shouldCopyWorkspaceEntry,
+  })
 }
 
 await regenerateLockfile(jsonDir, resolve(outputDir, "bun.lock"))
@@ -87,26 +91,58 @@ async function loadWorkspacePackages(workspacesField: WorkspacesField | undefine
 
   for (const pattern of patterns) {
     const normalized = pattern.replace(/\/$/, "")
+    const packageJsonPath = `${normalized}/package.json`
+
+    if (!hasGlob(normalized) && (await exists(resolve(repoRoot, packageJsonPath)))) {
+      await addWorkspacePackage(byName, packageJsonPath)
+      continue
+    }
+
     const glob = new Bun.Glob(`${normalized}/package.json`)
 
     for await (const match of glob.scan({ cwd: repoRoot, onlyFiles: true })) {
-      const relPath = relative(repoRoot, resolve(repoRoot, match))
-      const workspacePath = dirname(relPath)
-      const packageJson = JSON.parse(await readFile(resolve(repoRoot, relPath), "utf8")) as PackageJson
-
-      if (!packageJson.name) {
-        continue
-      }
-
-      byName.set(packageJson.name, {
-        name: packageJson.name,
-        relPath: workspacePath,
-        packageJson,
-      })
+      await addWorkspacePackage(byName, match)
     }
   }
 
   return { byName }
+}
+
+async function addWorkspacePackage(
+  byName: Map<string, { name: string; relPath: string; packageJson: PackageJson }>,
+  packageJsonRelPath: string,
+) {
+  const relPath = relative(repoRoot, resolve(repoRoot, packageJsonRelPath))
+  const workspacePath = dirname(relPath)
+  const packageJson = JSON.parse(await readFile(resolve(repoRoot, relPath), "utf8")) as PackageJson
+
+  if (!packageJson.name) {
+    return
+  }
+
+  byName.set(packageJson.name, {
+    name: packageJson.name,
+    relPath: workspacePath,
+    packageJson,
+  })
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function hasGlob(pattern: string): boolean {
+  return /[*?[\]{}]/.test(pattern)
+}
+
+function shouldCopyWorkspaceEntry(path: string): boolean {
+  const name = basename(path)
+  return name !== "node_modules" && name !== "dist" && name !== ".turbo" && name !== ".DS_Store" && !name.endsWith(".tsbuildinfo")
 }
 
 function collectWorkspaceClosure(
