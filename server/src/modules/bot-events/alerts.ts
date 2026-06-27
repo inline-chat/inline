@@ -150,6 +150,19 @@ export const BotAlerts = {
     })()
   },
 
+  inviteCodeTaken(props: {
+    source?: string
+    ip?: string
+  }) {
+    const lines = [
+      "Taken invite code attempt",
+      `source: ${props.source ? compact(props.source) : "unknown"}`,
+      `ip: ${props.ip ? compact(props.ip) : "unknown"}`,
+    ]
+
+    sendInlineOnlyBotEvent(lines.join("\n"))
+  },
+
   spaceInvite(props: { inviterUserId: number; invitedUserId: number; spaceId: number; spaceName: string | null }) {
     void (async () => {
       const [inviter, invited] = await Promise.all([getAlertUser(props.inviterUserId), getAlertUser(props.invitedUserId)])

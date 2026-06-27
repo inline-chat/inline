@@ -4,6 +4,7 @@ import { InlineError } from "@in/server/types/errors"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { InviteCodesModel, isDevInviteCode, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
   inviteCode: Type.String({ maxLength: 64 }),
@@ -42,6 +43,10 @@ export const handler = async (
   }
 
   if (row.redeemedAt) {
+    BotAlerts.inviteCodeTaken({
+      source: context.source,
+      ip: context.ip,
+    })
     throw new InlineError(InlineError.ApiError.INVITE_CODE_TAKEN)
   }
 

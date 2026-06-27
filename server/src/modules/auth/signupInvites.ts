@@ -4,6 +4,7 @@ import { members, users, type DbUser } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { InviteCodesModel, isDevInviteCode, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
 import { isInviteCodesRequired as isInviteCodesRequiredConfig } from "@in/server/env"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 type Database = any
 
@@ -171,6 +172,11 @@ const redeemInviteCode = async (database: Database, inviteCode: string, userId: 
 
   if (!redeemed) {
     const existing = await InviteCodesModel.getByCode({ code: inviteCode, tx: database })
+    if (existing?.redeemedAt) {
+      BotAlerts.inviteCodeTaken({
+        source: "signup-redeem",
+      })
+    }
     throw new InlineError(
       existing?.redeemedAt ? InlineError.ApiError.INVITE_CODE_TAKEN : InlineError.ApiError.INVITE_CODE_NOT_FOUND,
     )
