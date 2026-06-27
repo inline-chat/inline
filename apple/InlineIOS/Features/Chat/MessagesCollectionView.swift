@@ -1088,6 +1088,7 @@ private extension MessagesCollectionView {
     }
 
     private func canGroup(_ earlier: FullMessage, _ later: FullMessage) -> Bool {
+      guard !earlier.message.isServiceMessage, !later.message.isServiceMessage else { return false }
       guard earlier.message.fromId == later.message.fromId else { return false }
       guard groupCalendar.isDate(earlier.message.date, inSameDayAs: later.message.date) else { return false }
 
@@ -1822,6 +1823,26 @@ private extension MessagesCollectionView {
       let availableWidth = collectionView.bounds.width - 16
       let textWidth = availableWidth - 32
 
+      if message.message.isServiceMessage {
+        let font = UIFont.preferredFont(forTextStyle: .caption1)
+        let text = message.serviceDisplayText ?? message.message.serviceFallbackText ?? message.message.text ?? ""
+        let textHeight = (text as NSString).boundingRect(
+          with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+          options: [.usesLineFragmentOrigin, .usesFontLeading],
+          attributes: [.font: font],
+          context: nil
+        ).height
+        let size = CGSize(width: availableWidth, height: max(34, ceil(textHeight) + 18))
+        if sizeCache.count >= maxCacheSize {
+          let keysToRemove = Array(sizeCache.keys.prefix(sizeCache.count / 2))
+          for key in keysToRemove {
+            sizeCache.removeValue(forKey: key)
+          }
+        }
+        sizeCache[item] = size
+        return size
+      }
+
       let font = UIFont.preferredFont(forTextStyle: .body)
       let text = message.message.text ?? ""
 
@@ -1882,7 +1903,8 @@ private extension MessagesCollectionView {
       guard let indexPath = indexPaths.first,
             let item = item(at: indexPath),
             !item.isThreadAnchor,
-            let fullMessage = message(for: item) else { return nil }
+            let fullMessage = message(for: item),
+            !fullMessage.message.isServiceMessage else { return nil }
       let message = fullMessage.message
       let cell = currentCollectionView?.cellForItem(at: indexPath) as! MessageCollectionViewCell
 
@@ -2933,11 +2955,12 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
     switch update {
       case .reload:
         // For reload, trigger translation on all current messages
-        translationViewModel.messagesDisplayed(messages: viewModel.messages)
+        let messages = viewModel.messages.filter { !$0.message.isServiceMessage }
+        translationViewModel.messagesDisplayed(messages: messages)
 
         // Also analyze for translation detection on initial load
-        if !hasAnalyzedInitialMessages, !viewModel.messages.isEmpty {
-          await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: viewModel.messages)
+        if !hasAnalyzedInitialMessages, !messages.isEmpty {
+          await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: messages)
           hasAnalyzedInitialMessages = true
         }
 
@@ -2945,7 +2968,7 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
         // For added messages, get them from the viewModel and trigger translation
         let addedMessages = messageIds.compactMap { messageId in
           viewModel.messagesByID[messageId]
-        }
+        }.filter { !$0.message.isServiceMessage }
         if !addedMessages.isEmpty {
           translationViewModel.messagesDisplayed(messages: addedMessages)
 
@@ -2960,19 +2983,19 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
         // For updated messages, get them from the viewModel and trigger translation
         let updatedMessages = messageIds.compactMap { messageId in
           viewModel.messagesByID[messageId]
-        }
+        }.filter { !$0.message.isServiceMessage }
         if !updatedMessages.isEmpty {
           translationViewModel.messagesDisplayed(messages: updatedMessages)
         }
 
       case let .sectionsChanged(sections):
-        let changedMessages = sections.flatMap(\.messages)
+        let changedMessages = sections.flatMap(\.messages).filter { !$0.message.isServiceMessage }
         if !changedMessages.isEmpty {
           translationViewModel.messagesDisplayed(messages: changedMessages)
         }
 
       case let .multiSectionUpdate(sections):
-        let changedMessages = sections.flatMap(\.messages)
+        let changedMessages = sections.flatMap(\.messages).filter { !$0.message.isServiceMessage }
         if !changedMessages.isEmpty {
           translationViewModel.messagesDisplayed(messages: changedMessages)
         }

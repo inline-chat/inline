@@ -42,12 +42,17 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     MessageAvatarOverlayConfig.enabled && usesThreadLayout && displayMode != .threadAnchor
   }
 
+  private var isServiceMessage: Bool {
+    message?.message.isServiceMessage == true
+  }
+
   var canShowAvatarOverlay: Bool {
-    usesAvatarOverlay && !outgoing && message.senderInfo != nil
+    guard let message else { return false }
+    return usesAvatarOverlay && !isServiceMessage && !outgoing && message.senderInfo != nil
   }
 
   var avatarOverlayUserInfo: UserInfo? {
-    guard canShowAvatarOverlay else { return nil }
+    guard canShowAvatarOverlay, let message else { return nil }
     return message.senderInfo
   }
 
@@ -182,12 +187,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   @objc func handleAvatarTap() {
-    guard let from = message.from else { return }
+    guard let from = message?.from else { return }
     onUserTap?(from.id)
   }
 
   func highlightBubble() {
     guard let messageView else { return }
+    guard !isServiceMessage else { return }
     let bubble = messageView.bubbleView
     let originalColor = bubble.backgroundColor ?? .systemGray6
     let isEmojiOrSticker = messageView.isEmojiOnlyMessage || messageView.isSticker
@@ -208,6 +214,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   func clearHighlight() {
     guard let messageView else { return }
+    guard !isServiceMessage else { return }
     let bubble = messageView.bubbleView
     bubble.layer.removeAllAnimations()
     bubble.backgroundColor = messageView.bubbleColor
@@ -390,6 +397,7 @@ extension MessageCollectionViewCell {
   }
 
   func setupThreadHeaderViewsIfNeeded() {
+    guard let message, !isServiceMessage else { return }
     guard usesThreadLayout, !outgoing else { return }
 
     let avatarOrSpacer: UIView
@@ -440,20 +448,26 @@ extension MessageCollectionViewCell {
 
   /// Space between bubble's top to contentView's top (includes name height)
   private var topBubblePadding: CGFloat {
+    if isServiceMessage {
+      return 0
+    }
+
     if usesThreadLayout, firstInGroup, !outgoing {
-      nameLabelHeight + nameLabelTop
+      return nameLabelHeight + nameLabelTop
     } else {
-      firstInGroup ? 6 : 1
+      return firstInGroup ? 6 : 1
     }
   }
 
   private var bubbleTailSide: MessageBubbleTailSide {
+    guard message != nil, !isServiceMessage else { return .none }
     guard lastInGroup else { return .none }
     return outgoing ? .trailing : .leading
   }
 
   private var showsCellAvatar: Bool {
-    usesThreadLayout && !outgoing && lastInGroup && message.senderInfo != nil && !usesAvatarOverlay
+    guard let message else { return false }
+    return usesThreadLayout && !isServiceMessage && !outgoing && lastInGroup && message.senderInfo != nil && !usesAvatarOverlay
   }
 
   func avatarOverlayFrame(in view: UIView) -> CGRect? {

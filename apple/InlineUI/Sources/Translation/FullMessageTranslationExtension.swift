@@ -32,7 +32,9 @@ public extension FullMessage {
   /// If translation is enabled, use the current translation
   /// Otherwise, use the message text
   var displayText: String? {
-    if let translationText {
+    if let serviceDisplayText {
+      serviceDisplayText
+    } else if let translationText {
       translationText
     } else if let text = message.text {
       text
@@ -70,7 +72,9 @@ public extension EmbeddedMessage {
   /// If translation is enabled, use the current translation
   /// Otherwise, use the message text
   var displayText: String? {
-    if let translationText {
+    if let serviceDisplayText {
+      serviceDisplayText
+    } else if let translationText {
       translationText
     } else if let text = message.text {
       text
