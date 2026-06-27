@@ -701,6 +701,19 @@ class MessageSizeCalculator {
     }
   }
 
+  func calculateServiceSize(
+    for message: FullMessage,
+    with _: MessageViewInputProps,
+    tableWidth width: CGFloat
+  ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
+    let (size, textSize, plan) = ServiceMessageRowLayout.calculateSize(
+      for: message,
+      tableWidth: width
+    )
+    lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
+    return (size, textSize, nil, plan)
+  }
+
   private func calculateBubbleSizeInternal(
     for message: FullMessage,
     with props: MessageViewInputProps,

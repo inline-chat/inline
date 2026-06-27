@@ -255,6 +255,9 @@ class MessageListAppKit: NSViewController {
     if case .parentMessage? = rowItem(at: row) {
       return false
     }
+    if message(forRow: row)?.message.isServiceMessage == true {
+      return false
+    }
     return true
   }
 
@@ -987,6 +990,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func canGroup(_ earlier: FullMessage, _ later: FullMessage) -> Bool {
+    guard !earlier.message.isServiceMessage, !later.message.isServiceMessage else { return false }
     guard earlier.message.fromId == later.message.fromId else { return false }
 
     let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
@@ -2526,11 +2530,15 @@ class MessageListAppKit: NSViewController {
     with props: MessageViewInputProps,
     tableWidth: CGFloat
   ) -> (NSSize, NSSize, NSSize?, MessageSizeCalculator.LayoutPlans) {
+    if message.message.isServiceMessage {
+      return sizeCalculator.calculateServiceSize(for: message, with: props, tableWidth: tableWidth)
+    }
+
     switch props.renderStyle {
     case .bubble:
-      sizeCalculator.calculateBubbleSize(for: message, with: props, tableWidth: tableWidth)
+      return sizeCalculator.calculateBubbleSize(for: message, with: props, tableWidth: tableWidth)
     case .minimal:
-      sizeCalculator.calculateMinimalSize(for: message, with: props, tableWidth: tableWidth)
+      return sizeCalculator.calculateMinimalSize(for: message, with: props, tableWidth: tableWidth)
     }
   }
 
@@ -2583,6 +2591,7 @@ class MessageListAppKit: NSViewController {
 
   private func scheduleTranslationWork(messages: [FullMessage], analyzeForDetection: Bool) {
     guard AppSettings.shared.translationUIEnabled else { return }
+    let messages = messages.filter { !$0.message.isServiceMessage }
     guard !messages.isEmpty else { return }
 
     deferredTranslationTask?.cancel()

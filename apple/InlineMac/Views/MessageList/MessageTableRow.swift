@@ -1,11 +1,8 @@
 import AppKit
 import InlineKit
-import InlineUI
 import Logger
-import SwiftUI
-import Translation
 
-private protocol MessageTableRenderableView: AnyObject {
+protocol MessageTableRenderableView: AnyObject {
   func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps, animate: Bool)
   func updateSize(props: MessageViewProps)
   func reflectBoundsChange(fraction: CGFloat)
@@ -14,7 +11,7 @@ private protocol MessageTableRenderableView: AnyObject {
   func reset()
 }
 
-private extension MessageTableRenderableView where Self: NSView {
+extension MessageTableRenderableView where Self: NSView {
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
     nil
   }
@@ -22,197 +19,6 @@ private extension MessageTableRenderableView where Self: NSView {
 
 extension MessageViewAppKit: MessageTableRenderableView {}
 extension MinimalMessageViewAppKit: MessageTableRenderableView {}
-
-private final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
-  private let containerView = NSView()
-  private let stackView = NSStackView()
-  private var fullMessage: FullMessage
-  private var dependencies: AppDependencies?
-
-  init(fullMessage: FullMessage, dependencies: AppDependencies?) {
-    self.fullMessage = fullMessage
-    self.dependencies = dependencies
-    super.init(frame: .zero)
-    setupView()
-    updateText()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  override func viewDidChangeEffectiveAppearance() {
-    super.viewDidChangeEffectiveAppearance()
-    updateAppearance()
-  }
-
-  func setDependencies(_ dependencies: AppDependencies) {
-    self.dependencies = dependencies
-  }
-
-  func updateTextAndSize(fullMessage: FullMessage, props _: MessageViewProps, animate _: Bool) {
-    self.fullMessage = fullMessage
-    updateText()
-  }
-
-  func updateSize(props _: MessageViewProps) {}
-
-  func reflectBoundsChange(fraction _: CGFloat) {}
-
-  func setScrollState(_: MessageListScrollState) {}
-
-  func reset() {}
-
-  private func setupView() {
-    translatesAutoresizingMaskIntoConstraints = false
-    wantsLayer = true
-    layer?.backgroundColor = .clear
-
-    containerView.translatesAutoresizingMaskIntoConstraints = false
-    containerView.wantsLayer = true
-    containerView.layer?.cornerRadius = 11
-    containerView.layer?.masksToBounds = true
-    addSubview(containerView)
-
-    stackView.translatesAutoresizingMaskIntoConstraints = false
-    stackView.orientation = .horizontal
-    stackView.alignment = .firstBaseline
-    stackView.spacing = 0
-    stackView.distribution = .fill
-    containerView.addSubview(stackView)
-
-    NSLayoutConstraint.activate([
-      containerView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      containerView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      containerView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
-
-      stackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 5),
-      stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 10),
-      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -10),
-      stackView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -5),
-    ])
-
-    updateAppearance()
-  }
-
-  private func updateText() {
-    stackView.arrangedSubviews.forEach { view in
-      stackView.removeArrangedSubview(view)
-      view.removeFromSuperview()
-    }
-
-    for segment in serviceSegments() {
-      stackView.addArrangedSubview(view(for: segment))
-    }
-  }
-
-  private func updateAppearance() {
-    containerView.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.75).cgColor
-  }
-
-  private func serviceSegments() -> [MessageServiceDisplaySegment] {
-    fullMessage.serviceDisplaySegments ?? [
-      MessageServiceDisplaySegment(text: fullMessage.message.serviceFallbackText
-        ?? fullMessage.message.text
-        ?? fullMessage.message.stringRepresentationPlain),
-    ]
-  }
-
-  private func view(for segment: MessageServiceDisplaySegment) -> NSView {
-    guard let link = segment.link else {
-      return plainLabel(segment.text, tone: segment.tone)
-    }
-
-    return ServiceMessageLinkLabel(
-      text: segment.text,
-      link: link,
-      tone: segment.tone,
-      onOpen: { [weak self] link in
-        self?.open(link)
-      }
-    )
-  }
-
-  private func plainLabel(_ text: String, tone: MessageServiceDisplaySegment.Tone) -> NSTextField {
-    let label = NSTextField(labelWithString: text)
-    label.font = Self.font
-    label.textColor = Self.textColor(for: tone)
-    label.lineBreakMode = .byTruncatingTail
-    label.maximumNumberOfLines = 1
-    label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-    label.setContentCompressionResistancePriority(.required, for: .vertical)
-    return label
-  }
-
-  private func open(_ link: MessageServiceDisplaySegment.Link) {
-    switch link {
-      case let .user(userId):
-        dependencies?.requestOpenChat(peer: .user(id: userId))
-      case let .thread(chatId):
-        dependencies?.requestOpenChat(peer: .thread(id: chatId))
-    }
-  }
-
-  fileprivate static func textColor(for tone: MessageServiceDisplaySegment.Tone) -> NSColor {
-    switch tone {
-      case .secondary:
-        return .secondaryLabelColor
-      case .tertiary:
-        return .tertiaryLabelColor
-    }
-  }
-
-  fileprivate static let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-}
-
-private final class ServiceMessageLinkLabel: NSTextField {
-  private let link: MessageServiceDisplaySegment.Link
-  private let onOpen: (MessageServiceDisplaySegment.Link) -> Void
-
-  init(
-    text: String,
-    link: MessageServiceDisplaySegment.Link,
-    tone: MessageServiceDisplaySegment.Tone,
-    onOpen: @escaping (MessageServiceDisplaySegment.Link) -> Void
-  ) {
-    self.link = link
-    self.onOpen = onOpen
-    super.init(frame: .zero)
-
-    isBezeled = false
-    isBordered = false
-    isEditable = false
-    isSelectable = false
-    drawsBackground = false
-    font = ServiceMessageViewAppKit.font
-    lineBreakMode = .byTruncatingTail
-    maximumNumberOfLines = 1
-    attributedStringValue = NSAttributedString(
-      string: text,
-      attributes: [
-        .font: ServiceMessageViewAppKit.font,
-        .foregroundColor: ServiceMessageViewAppKit.textColor(for: tone),
-      ]
-    )
-    setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    setContentCompressionResistancePriority(.required, for: .vertical)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  override func mouseDown(with event: NSEvent) {
-    onOpen(link)
-  }
-
-  override func resetCursorRects() {
-    super.resetCursorRects()
-    addCursorRect(bounds, cursor: .pointingHand)
-  }
-}
 
 class MessageTableCell: NSView {
   private var messageView: (NSView & MessageTableRenderableView)?
