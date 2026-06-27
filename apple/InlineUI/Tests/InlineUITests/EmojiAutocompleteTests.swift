@@ -33,6 +33,14 @@ struct EmojiAutocompleteTests {
     #expect(emojis.contains("👎"))
   }
 
+  @Test("prioritizes trademark alias over flag keyword")
+  func prioritizesTrademarkAliasOverFlagKeyword() {
+    let suggestions = EmojiAutocomplete.suggestions(matching: "tm", limit: 5)
+
+    #expect(suggestions.first?.emoji == "™️")
+    #expect(suggestions.first?.shortcode == "trade_mark")
+  }
+
   @Test("allows exact x shortcode")
   func allowsExactXShortcode() {
     let suggestions = EmojiAutocomplete.suggestions(matching: "x", limit: 5)

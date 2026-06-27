@@ -174,6 +174,7 @@ enum EmojiAutocompleteAliases {
     "woman_gesturing_no": ["no"],
     "person_facepalming": ["facepalm"],
     "person_shrugging": ["shrug", "idk"],
+    "trade_mark": ["tm"],
     "flag_united_kingdom": ["uk", "flag_uk"],
     "flag_norway": ["no"],
   ]
