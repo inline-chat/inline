@@ -58,6 +58,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
+          APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+          APPLE_NOTARIZATION_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
           PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
           PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
@@ -93,6 +96,7 @@ jobs:
           if [[ "${missing}" -ne 0 ]]; then
             exit 1
           fi
+          bash scripts/macos/check-notary-credentials.sh --no-env-file
           sw_vers
           echo "Available Xcodes:"
           ls -d /Applications/Xcode*.app 2>/dev/null || true

@@ -927,6 +927,15 @@ async function main() {
       }
       throw new Error(`Missing required command(s): ${missing.join(", ")}`);
     }
+    if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "build")) {
+      if (ctx.dryRun) {
+        ui.info("Would validate notarization credentials with xcrun notarytool history.");
+      } else {
+        await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/check-notary-credentials.sh")], {
+          cwd: ctx.rootDir,
+        });
+      }
+    }
   };
 
   tasks.push({
