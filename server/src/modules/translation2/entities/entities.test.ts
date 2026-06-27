@@ -186,6 +186,23 @@ describe("translation2 entity toMd/fromMd", () => {
     ])
   })
 
+  test("round-trips home thread title links without space id", () => {
+    const text = "Open [[Personal]] now"
+    const entities = pack([
+      {
+        ...base(MessageEntity_Type.THREAD_TITLE, 5, 12),
+        entity: { oneofKind: "threadTitle", threadTitle: { spaceId: 0n, title: "Personal" } },
+      },
+    ])
+
+    const markdown = toMd(text, entities)
+    expect(markdown).toBe("Open [\\[\\[Personal\\]\\]](inline://thread?title=Personal) now")
+
+    const parsed = fromMd(markdown)
+    expect(parsed.text).toBe(text)
+    expect(parsed.entities.entities).toEqual(entities.entities)
+  })
+
   test("parses hashtag-looking labels inside thread links", () => {
     const parsed = fromMd("Open [#thread](inline://thread?space_id=7&title=%23thread) now")
 

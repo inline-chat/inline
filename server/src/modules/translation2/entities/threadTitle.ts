@@ -1,8 +1,10 @@
 export const threadTitleMdUrl = (input: { spaceId: bigint; title: string }): string => {
-  const params = new URLSearchParams({
-    space_id: input.spaceId.toString(),
-    title: input.title,
-  })
+  const params = new URLSearchParams()
+  if (input.spaceId > 0n) {
+    params.set("space_id", input.spaceId.toString())
+  }
+  params.set("title", input.title)
+
   return `inline://thread?${params.toString()}`
 }
 
@@ -24,10 +26,18 @@ export const parseThreadTitleMdUrl = (rawUrl: string): { spaceId: bigint; title:
 
   const rawSpaceId = url.searchParams.get("space_id")
   const title = url.searchParams.get("title")?.trim()
-  if (!rawSpaceId || !/^\d+$/.test(rawSpaceId) || !title) {
+  if (!title) {
+    return null
+  }
+
+  if (!rawSpaceId) {
+    return { spaceId: 0n, title }
+  }
+
+  if (!/^\d+$/.test(rawSpaceId)) {
     return null
   }
 
   const spaceId = BigInt(rawSpaceId)
-  return spaceId > 0n ? { spaceId, title } : null
+  return { spaceId, title }
 }

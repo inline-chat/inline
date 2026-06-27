@@ -144,9 +144,29 @@ describe("processOutgoingText", () => {
     expect(thread.entity.threadTitle.title).toBe("Planning")
   })
 
+  test("converts markdown home thread title links to thread title entities", async () => {
+    const result = await processOutgoingText({
+      text: "cc [Personal Plan](inline://thread) please",
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("cc Personal Plan please")
+    expect(result.entities?.entities).toHaveLength(1)
+
+    const thread = result.entities!.entities[0]!
+    expect(thread.type).toBe(MessageEntity_Type.THREAD_TITLE)
+    expect(thread.entity.oneofKind).toBe("threadTitle")
+    if (thread.entity.oneofKind !== "threadTitle") {
+      throw new Error("Expected thread title entity")
+    }
+    expect(thread.entity.threadTitle.spaceId).toBe(0n)
+    expect(thread.entity.threadTitle.title).toBe("Personal Plan")
+  })
+
   test("keeps invalid inline thread links as text urls", async () => {
     const result = await processOutgoingText({
-      text: "cc [Planning](inline://thread) please",
+      text: "cc [Planning](inline://thread?space_id=nope) please",
       entities: undefined,
       parseMarkdown: true,
     })
@@ -158,7 +178,7 @@ describe("processOutgoingText", () => {
     expect(link.type).toBe(MessageEntity_Type.TEXT_URL)
     expect(link.entity).toEqual({
       oneofKind: "textUrl",
-      textUrl: { url: "inline://thread" },
+      textUrl: { url: "inline://thread?space_id=nope" },
     })
   })
 
