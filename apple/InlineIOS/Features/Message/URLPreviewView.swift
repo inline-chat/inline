@@ -19,8 +19,8 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     static let largeCornerRadius: CGFloat = 14
     static let largeContentPadding: CGFloat = 12
     static let largeContentVerticalPadding: CGFloat = 10
-    static let largeSectionSpacing: CGFloat = 7
-    static let largeTitleTrailingPadding: CGFloat = 14
+    static let largeSectionSpacing: CGFloat = 6
+    static let largeTextTrailingPadding: CGFloat = 14
     static let imageCornerRadius: CGFloat = 6
     static let playOverlaySize: CGFloat = 34
     static let playIconSize: CGFloat = 14
@@ -298,7 +298,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
         activeConstraints.append(
           titleLabel.widthAnchor.constraint(
             lessThanOrEqualTo: textStack.widthAnchor,
-            constant: -Metrics.largeTitleTrailingPadding
+            constant: -Metrics.largeTextTrailingPadding
           )
         )
       }
@@ -306,7 +306,12 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     if shouldShowDescription {
       textStack.addArrangedSubview(descriptionLabel)
       if mode == .large {
-        activeConstraints.append(descriptionLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor))
+        activeConstraints.append(
+          descriptionLabel.widthAnchor.constraint(
+            lessThanOrEqualTo: textStack.widthAnchor,
+            constant: -Metrics.largeTextTrailingPadding
+          )
+        )
       }
     }
 
@@ -350,7 +355,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
       largeContentStack.layoutMargins = UIEdgeInsets(
         top: Metrics.largeContentVerticalPadding,
         left: Metrics.largeContentPadding,
-        bottom: Metrics.largeContentPadding,
+        bottom: Metrics.largeContentVerticalPadding,
         right: Metrics.largeContentPadding
       )
 

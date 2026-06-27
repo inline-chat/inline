@@ -8,6 +8,31 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   private typealias Layout = URLPreviewAttachmentLayout
   private typealias Mode = URLPreviewAttachmentLayout.Mode
 
+  private struct PhotoRefreshKey: Equatable {
+    var photo: PhotoInfo
+    var width: Int
+    var height: Int
+  }
+
+  private struct ViewFrameConstraints {
+    let x: NSLayoutConstraint
+    let y: NSLayoutConstraint
+    let width: NSLayoutConstraint
+    let height: NSLayoutConstraint
+
+    func update(to rect: NSRect) {
+      update(x, rect.origin.x)
+      update(y, rect.origin.y)
+      update(width, rect.width)
+      update(height, rect.height)
+    }
+
+    private func update(_ constraint: NSLayoutConstraint, _ value: CGFloat) {
+      guard constraint.constant != value else { return }
+      constraint.constant = value
+    }
+  }
+
   private(set) var fullAttachment: FullAttachment
   private var message: Message
   private let usesOutgoingBubbleStyle: Bool
@@ -28,21 +53,35 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     guard canUpdate(with: next) else { return }
 
     let previousPhotoId = fullAttachment.photoInfo?.id
+    let previousAuthorPhotoId = fullAttachment.authorPhotoInfo?.id
     fullAttachment = next
     self.message = message
+    layoutPlan = nil
     if previousPhotoId != next.photoInfo?.id {
       clearPreviewImageURL()
+      previewPhotoRefreshKey = nil
+    }
+    if previousAuthorPhotoId != next.authorPhotoInfo?.id {
+      authorPhotoRefreshKey = nil
     }
 
     configure()
     updateColors()
+    needsLayout = true
   }
 
   private var previewURL: URL?
   private var previewImageURL: URL?
   private var tempPreviewImageURL: URL?
   private var pressed = false
-  private var largeMediaHeightConstraint: NSLayoutConstraint?
+  private var layoutPlan: Layout.Plan?
+  private var viewFrameConstraints: [ObjectIdentifier: ViewFrameConstraints] = [:]
+  private var previewPhotoRefreshKey: PhotoRefreshKey?
+  private var authorPhotoRefreshKey: PhotoRefreshKey?
+
+  override var isFlipped: Bool {
+    true
+  }
 
   private lazy var accentView: NSView = {
     let view = NSView()
@@ -58,16 +97,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     view.layer?.cornerRadius = mode == .large ? Layout.largeCornerRadius : Layout.cornerRadius
     view.layer?.masksToBounds = true
     return view
-  }()
-
-  private lazy var contentStack: NSStackView = {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = mode == .large ? .vertical : .horizontal
-    stack.spacing = mode == .large ? 0 : Layout.spacing
-    stack.alignment = mode == .large ? .leading : .centerY
-    stack.detachesHiddenViews = true
-    return stack
   }()
 
   private lazy var imageContainer: PreviewImageContainerView = {
@@ -90,33 +119,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     view.layer?.cornerRadius = mode == .large ? 0 : Layout.imageCornerRadius
     view.layer?.masksToBounds = true
     return view
-  }()
-
-  private lazy var largeContentStack: NSStackView = {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .vertical
-    stack.spacing = Layout.largeSpacing
-    stack.alignment = .leading
-    stack.detachesHiddenViews = true
-    stack.edgeInsets = NSEdgeInsets(
-      top: Layout.largeVerticalPadding,
-      left: Layout.largeHorizontalPadding,
-      bottom: Layout.largeVerticalPadding,
-      right: Layout.largeHorizontalPadding
-    )
-    return stack
-  }()
-
-  private lazy var authorStack: NSStackView = {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .horizontal
-    stack.spacing = Layout.authorSpacing
-    stack.alignment = .centerY
-    stack.detachesHiddenViews = true
-    stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    return stack
   }()
 
   private lazy var authorAvatarView: PlatformPhotoView = {
@@ -150,17 +152,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     return label
   }()
 
-  private lazy var authorTextStack: NSStackView = {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .vertical
-    stack.spacing = Layout.authorTextSpacing
-    stack.alignment = .leading
-    stack.detachesHiddenViews = true
-    stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    return stack
-  }()
-
   private lazy var playIconView: NSImageView = {
     let view = NSImageView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -187,18 +178,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     view.imageScaling = .scaleProportionallyUpOrDown
     view.isHidden = true
     return view
-  }()
-
-  private lazy var textStack: NSStackView = {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .vertical
-    stack.spacing = Layout.textSpacing
-    stack.alignment = .leading
-    stack.detachesHiddenViews = true
-    stack.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    return stack
   }()
 
   private lazy var titleLabel: NSTextField = {
@@ -254,58 +233,16 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     layer?.masksToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
     PressScaleAnimator.prepare(self)
-    let verticalPadding = mode == .large ? 0 : Layout.compactVerticalPadding
-    let leadingPadding = mode == .large ? 0 : Layout.compactLeadingPadding
-    let trailingPadding = mode == .large ? 0 : Layout.compactTrailingPadding
-    let accentWidth = mode == .large ? 0 : Layout.accentWidth
     accentView.isHidden = mode == .large
 
     addSubview(backgroundView)
     addSubview(accentView)
-    addSubview(contentStack)
-
-    NSLayoutConstraint.activate([
-      backgroundView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-      accentView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      accentView.topAnchor.constraint(equalTo: topAnchor),
-      accentView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      accentView.widthAnchor.constraint(equalToConstant: accentWidth),
-
-      contentStack.leadingAnchor.constraint(equalTo: accentView.trailingAnchor, constant: leadingPadding),
-      contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingPadding),
-      contentStack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
-      contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
-    ])
-
-    contentStack.addArrangedSubview(imageContainer)
-    if mode == .large {
-      largeContentStack.addArrangedSubview(textStack)
-      largeContentStack.addArrangedSubview(authorStack)
-      contentStack.addArrangedSubview(largeContentStack)
-    } else {
-      contentStack.addArrangedSubview(textStack)
-    }
-
-    switch mode {
-      case .compact:
-        NSLayoutConstraint.activate([
-          imageContainer.heightAnchor.constraint(equalTo: textStack.heightAnchor),
-          imageContainer.widthAnchor.constraint(equalTo: imageContainer.heightAnchor),
-        ])
-      case .large:
-        largeMediaHeightConstraint = imageContainer.heightAnchor.constraint(
-          equalToConstant: 0
-        )
-        NSLayoutConstraint.activate([
-          imageContainer.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
-          largeMediaHeightConstraint!,
-          largeContentStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
-        ])
-    }
+    addSubview(imageContainer)
+    addSubview(titleLabel)
+    addSubview(descriptionLabel)
+    addSubview(authorAvatarView)
+    addSubview(authorLabel)
+    addSubview(authorSubtitleLabel)
 
     imageContainer.addSubview(photoView)
     imageContainer.addSubview(providerPlaceholderView)
@@ -314,55 +251,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     imageContainer.contextMenuProvider = { [weak self] in
       self?.makeContextMenu()
     }
-
-    NSLayoutConstraint.activate([
-      photoView.leadingAnchor.constraint(equalTo: imageContainer.leadingAnchor),
-      photoView.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
-      photoView.topAnchor.constraint(equalTo: imageContainer.topAnchor),
-      photoView.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor),
-
-      providerPlaceholderView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
-      providerPlaceholderView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
-      providerPlaceholderView.widthAnchor.constraint(equalToConstant: Layout.providerPlaceholderSize),
-      providerPlaceholderView.heightAnchor.constraint(equalToConstant: Layout.providerPlaceholderSize),
-
-      playOverlayView.centerXAnchor.constraint(equalTo: imageContainer.centerXAnchor),
-      playOverlayView.centerYAnchor.constraint(equalTo: imageContainer.centerYAnchor),
-      playOverlayView.widthAnchor.constraint(equalToConstant: Layout.playOverlaySize),
-      playOverlayView.heightAnchor.constraint(equalToConstant: Layout.playOverlaySize),
-
-      playIconView.centerXAnchor.constraint(equalTo: playOverlayView.centerXAnchor),
-      playIconView.centerYAnchor.constraint(equalTo: playOverlayView.centerYAnchor),
-      playIconView.widthAnchor.constraint(equalToConstant: Layout.playIconSize),
-      playIconView.heightAnchor.constraint(equalToConstant: Layout.playIconSize),
-    ])
-
-    textStack.addArrangedSubview(titleLabel)
-    textStack.addArrangedSubview(descriptionLabel)
-
-    if mode == .large {
-      authorStack.addArrangedSubview(authorAvatarView)
-      authorTextStack.addArrangedSubview(authorLabel)
-      authorTextStack.addArrangedSubview(authorSubtitleLabel)
-      authorStack.addArrangedSubview(authorTextStack)
-
-      NSLayoutConstraint.activate([
-        authorStack.widthAnchor.constraint(lessThanOrEqualTo: largeContentStack.widthAnchor),
-        authorAvatarView.widthAnchor.constraint(equalToConstant: Layout.authorAvatarSize),
-        authorAvatarView.heightAnchor.constraint(equalToConstant: Layout.authorAvatarSize),
-        authorTextStack.widthAnchor.constraint(lessThanOrEqualTo: authorStack.widthAnchor),
-        authorLabel.widthAnchor.constraint(lessThanOrEqualTo: authorTextStack.widthAnchor),
-        authorSubtitleLabel.widthAnchor.constraint(lessThanOrEqualTo: authorTextStack.widthAnchor),
-      ])
-    }
-
-    NSLayoutConstraint.activate([
-      titleLabel.widthAnchor.constraint(
-        lessThanOrEqualTo: textStack.widthAnchor,
-        constant: mode == .large ? -Layout.largeTitleTrailingPadding : 0
-      ),
-      descriptionLabel.widthAnchor.constraint(lessThanOrEqualTo: textStack.widthAnchor),
-    ])
   }
 
   private func configure() {
@@ -394,7 +282,6 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
     descriptionLabel.stringValue = descriptionText ?? ""
     descriptionLabel.isHidden = descriptionLabel.stringValue.isEmpty
     configureAuthorRow(preview: preview, display: largeDisplay)
-    textStack.isHidden = titleLabel.isHidden && descriptionLabel.isHidden
 
     setAccessibilityLabel(
       [descriptionText, largeDisplay?.authorName ?? preview.largePreviewAuthorName, largeDisplay?.authorSubtitle, titleText]
@@ -416,35 +303,241 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
   }
 
   private func configureAuthorRow(preview: UrlPreview, display: UrlPreviewLargeDisplayContent?) {
-    guard mode == .large else { return }
-
-    guard preview.shouldShowLargePreviewAuthor(hasAuthorPhoto: fullAttachment.authorPhotoInfo != nil) else {
-      authorStack.isHidden = true
+    guard mode == .large else {
+      authorAvatarView.isHidden = true
+      authorLabel.isHidden = true
+      authorSubtitleLabel.isHidden = true
       authorAvatarView.setPhoto(nil)
+      authorPhotoRefreshKey = nil
       return
     }
 
-    authorStack.isHidden = false
+    guard preview.shouldShowLargePreviewAuthor(hasAuthorPhoto: fullAttachment.authorPhotoInfo != nil) else {
+      authorAvatarView.isHidden = true
+      authorLabel.isHidden = true
+      authorSubtitleLabel.isHidden = true
+      authorAvatarView.setPhoto(nil)
+      authorPhotoRefreshKey = nil
+      return
+    }
+
     if let authorPhotoInfo = fullAttachment.authorPhotoInfo {
       authorAvatarView.isHidden = false
       authorAvatarView.setPhoto(authorPhotoInfo, reloadMessageOnFinish: message)
     } else {
       authorAvatarView.isHidden = true
       authorAvatarView.setPhoto(nil)
+      authorPhotoRefreshKey = nil
     }
 
     authorLabel.stringValue = display?.authorName ?? ""
     authorLabel.isHidden = authorLabel.stringValue.isEmpty
     authorSubtitleLabel.stringValue = display?.authorSubtitle ?? ""
     authorSubtitleLabel.isHidden = authorSubtitleLabel.stringValue.isEmpty
-    authorTextStack.isHidden = authorLabel.isHidden && authorSubtitleLabel.isHidden
   }
 
   func apply(layout: URLPreviewAttachmentLayout.Plan) {
-    guard let mediaSize = layout.mediaSize else { return }
-    if largeMediaHeightConstraint?.constant != mediaSize.height {
-      largeMediaHeightConstraint?.constant = mediaSize.height
+    apply(plan: layout)
+    needsLayout = true
+  }
+
+  override func layout() {
+    let width = bounds.width > 0 ? bounds.width : (layoutPlan?.size.width ?? 0)
+    guard width > 0 else {
+      clearLayoutConstraints()
+      super.layout()
+      return
     }
+
+    let plan: Layout.Plan
+    if let layoutPlan, layoutPlan.mode == mode, abs(layoutPlan.size.width - width) < 0.5 {
+      plan = layoutPlan
+    } else {
+      plan = Layout.plan(for: fullAttachment, width: width)
+    }
+
+    apply(plan: plan)
+    super.layout()
+    imageContainer.layoutSubtreeIfNeeded()
+    photoView.layoutSubtreeIfNeeded()
+    authorAvatarView.layoutSubtreeIfNeeded()
+
+    refreshPreviewPhotoIfNeeded()
+    refreshAuthorPhotoIfNeeded()
+  }
+
+  private func apply(plan: Layout.Plan) {
+    layoutPlan = plan
+    switch mode {
+    case .compact:
+      guard let compact = plan.compact else { return }
+      apply(compact: compact)
+    case .large:
+      guard let large = plan.large else { return }
+      apply(large: large)
+    }
+  }
+
+  private func apply(compact plan: Layout.CompactPlan) {
+    setConstrainedFrame(plan.backgroundFrame, for: backgroundView)
+    setConstrainedFrame(plan.accentFrame, for: accentView)
+    accentView.isHidden = false
+    setConstrainedFrame(plan.titleFrame, for: titleLabel)
+    setConstrainedFrame(plan.descriptionFrame, for: descriptionLabel)
+    setConstrainedFrame(nil, for: authorAvatarView)
+    setConstrainedFrame(nil, for: authorLabel)
+    setConstrainedFrame(nil, for: authorSubtitleLabel)
+    applyImageLayout(
+      containerFrame: plan.imageFrame,
+      providerPlaceholderFrame: plan.providerPlaceholderFrame,
+      playOverlayFrame: plan.playOverlayFrame,
+      playIconFrame: plan.playIconFrame
+    )
+  }
+
+  private func apply(large plan: Layout.LargePlan) {
+    setConstrainedFrame(plan.backgroundFrame, for: backgroundView)
+    setConstrainedFrame(nil, for: accentView)
+    accentView.isHidden = true
+    setConstrainedFrame(plan.titleFrame, for: titleLabel)
+    setConstrainedFrame(plan.descriptionFrame, for: descriptionLabel)
+    setConstrainedFrame(plan.authorAvatarFrame, for: authorAvatarView)
+    setConstrainedFrame(plan.authorNameFrame, for: authorLabel)
+    setConstrainedFrame(plan.authorSubtitleFrame, for: authorSubtitleLabel)
+    applyImageLayout(
+      containerFrame: plan.mediaFrame,
+      providerPlaceholderFrame: plan.providerPlaceholderFrame,
+      playOverlayFrame: plan.playOverlayFrame,
+      playIconFrame: plan.playIconFrame
+    )
+  }
+
+  private func applyImageLayout(
+    containerFrame: Layout.Frame?,
+    providerPlaceholderFrame: Layout.Frame?,
+    playOverlayFrame: Layout.Frame?,
+    playIconFrame: Layout.Frame?
+  ) {
+    setConstrainedFrame(containerFrame, for: imageContainer)
+    let photoFrame = containerFrame.map {
+      NSRect(x: 0, y: 0, width: $0.width, height: $0.height)
+    } ?? .zero
+    setConstrainedFrame(photoFrame, for: photoView)
+    setConstrainedFrame(localRect(providerPlaceholderFrame, in: containerFrame), for: providerPlaceholderView)
+    setConstrainedFrame(localRect(playOverlayFrame, in: containerFrame), for: playOverlayView)
+    setConstrainedFrame(localRect(playIconFrame, in: playOverlayFrame), for: playIconView)
+  }
+
+  private func clearLayoutConstraints() {
+    let views: [NSView] = [
+      backgroundView,
+      accentView,
+      imageContainer,
+      titleLabel,
+      descriptionLabel,
+      authorAvatarView,
+      authorLabel,
+      authorSubtitleLabel,
+      photoView,
+      providerPlaceholderView,
+      playOverlayView,
+      playIconView,
+    ]
+    views.forEach { setConstrainedFrame(nil, for: $0) }
+  }
+
+  private func setConstrainedFrame(_ frame: Layout.Frame?, for view: NSView) {
+    setConstrainedFrame(frame?.rect ?? .zero, for: view)
+  }
+
+  private func setConstrainedFrame(_ frame: NSRect, for view: NSView) {
+    frameConstraints(for: view).update(to: frame)
+  }
+
+  private func frameConstraints(for view: NSView) -> ViewFrameConstraints {
+    let id = ObjectIdentifier(view)
+    if let constraints = viewFrameConstraints[id] {
+      return constraints
+    }
+
+    guard let superview = view.superview else {
+      preconditionFailure("Expected \(type(of: view)) to have a superview before applying URL preview layout")
+    }
+
+    let constraints = ViewFrameConstraints(
+      x: view.leadingAnchor.constraint(equalTo: superview.leadingAnchor),
+      y: view.topAnchor.constraint(equalTo: superview.topAnchor),
+      width: view.widthAnchor.constraint(equalToConstant: 0),
+      height: view.heightAnchor.constraint(equalToConstant: 0)
+    )
+    NSLayoutConstraint.activate([
+      constraints.x,
+      constraints.y,
+      constraints.width,
+      constraints.height,
+    ])
+    viewFrameConstraints[id] = constraints
+    return constraints
+  }
+
+  private func refreshPreviewPhotoIfNeeded() {
+    guard let photoInfo = fullAttachment.photoInfo else {
+      return
+    }
+
+    guard !imageContainer.isHidden, !photoView.isHidden else {
+      return
+    }
+
+    guard photoView.bounds.width > 0, photoView.bounds.height > 0 else {
+      return
+    }
+
+    let key = PhotoRefreshKey(
+      photo: photoInfo,
+      width: Int(photoView.bounds.width),
+      height: Int(photoView.bounds.height)
+    )
+    guard previewPhotoRefreshKey != key else {
+      return
+    }
+    previewPhotoRefreshKey = key
+    photoView.setPhoto(photoInfo, reloadMessageOnFinish: message)
+  }
+
+  private func refreshAuthorPhotoIfNeeded() {
+    guard let photoInfo = fullAttachment.authorPhotoInfo else {
+      return
+    }
+
+    guard !authorAvatarView.isHidden else {
+      return
+    }
+
+    guard authorAvatarView.bounds.width > 0, authorAvatarView.bounds.height > 0 else {
+      return
+    }
+
+    let key = PhotoRefreshKey(
+      photo: photoInfo,
+      width: Int(authorAvatarView.bounds.width),
+      height: Int(authorAvatarView.bounds.height)
+    )
+    guard authorPhotoRefreshKey != key else {
+      return
+    }
+    authorPhotoRefreshKey = key
+    authorAvatarView.setPhoto(photoInfo, reloadMessageOnFinish: message)
+  }
+
+  private func localRect(_ frame: Layout.Frame?, in parent: Layout.Frame?) -> NSRect {
+    guard let frame, let parent else { return .zero }
+    return NSRect(
+      x: frame.x - parent.x,
+      y: frame.y - parent.y,
+      width: frame.width,
+      height: frame.height
+    )
   }
 
   private func configureImage(
@@ -466,6 +559,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       photoView.isHidden = providerPlaceholderImage != nil || showIconPlaceholder
       photoView.showsLoadingPlaceholder = showLoadingPlaceholder && providerPlaceholderImage == nil
       photoView.setPhoto(nil)
+      previewPhotoRefreshKey = nil
       return
     }
 
@@ -977,6 +1071,10 @@ extension URLPreviewAttachmentView: QLPreviewItem {
 private final class PreviewImageContainerView: NSView {
   var onTap: (() -> Void)?
   var contextMenuProvider: (() -> NSMenu?)?
+
+  override var isFlipped: Bool {
+    true
+  }
 
   var hasTapAction: Bool {
     onTap != nil
