@@ -816,6 +816,7 @@ class GlassComposeAppKit: NSView {
     let draftVoiceAttachmentId = voiceViewModel.draftVoiceAttachmentId
     voiceViewModel.cancel()
     if let draftVoiceAttachmentId {
+      attachmentItems.removeValue(forKey: draftVoiceAttachmentId)
       drafts2.removeAttachment(peer: peerId, id: draftVoiceAttachmentId)
       drafts2.flushBlocking()
     }

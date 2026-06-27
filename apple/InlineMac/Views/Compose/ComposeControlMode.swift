@@ -80,6 +80,83 @@ enum ComposeControlMode {
     }
   }
 
+  var voiceInputButtonVisualSize: CGFloat {
+    switch self {
+      case .legacy:
+        voiceInputButtonSize
+      case .glass:
+        // Glass divergence: active voice controls sit inside the compact 34pt
+        // compose pill, so the visible circles are smaller than their hit area.
+        24
+    }
+  }
+
+  var voiceInputRowSpacing: CGFloat {
+    switch self {
+      case .legacy:
+        10
+      case .glass:
+        8
+    }
+  }
+
+  var voiceInputHorizontalPadding: CGFloat {
+    switch self {
+      case .legacy:
+        4
+      case .glass:
+        8
+    }
+  }
+
+  var voiceInputWaveformHeight: CGFloat {
+    switch self {
+      case .legacy:
+        20
+      case .glass:
+        18
+    }
+  }
+
+  var voiceInputTargetBarCount: Int {
+    switch self {
+      case .legacy:
+        160
+      case .glass:
+        // Glass divergence: use a high cap so AudioWaveformView's geometry
+        // chooses the count from available width instead of leaving empty row
+        // space on wide compose pills.
+        1_000
+    }
+  }
+
+  var voiceInputBarWidth: CGFloat {
+    switch self {
+      case .legacy:
+        1.5
+      case .glass:
+        1.2
+    }
+  }
+
+  var voiceInputBarSpacing: CGFloat {
+    switch self {
+      case .legacy:
+        2
+      case .glass:
+        1.8
+    }
+  }
+
+  var voiceInputRecordingDotSize: CGFloat {
+    switch self {
+      case .legacy:
+        8
+      case .glass:
+        6
+    }
+  }
+
   var emojiButtonSize: CGFloat {
     switch self {
       case .legacy:
@@ -207,7 +284,7 @@ enum ComposeControlMode {
       case .legacy:
         13
       case .glass:
-        14
+        12.5
     }
   }
 }

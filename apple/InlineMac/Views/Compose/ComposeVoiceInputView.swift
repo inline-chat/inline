@@ -36,20 +36,20 @@ struct ComposeVoiceInputView: View {
           recordingIndicator
           waveform(progress: 1)
           durationLabel
-          iconButton("pause.fill", title: "Pause recording", action: onPause)
+          iconButton("stop.fill", title: "Stop recording", action: onPause)
 
         case .review:
+          iconButton("xmark", title: "Cancel", action: onCancel)
+          waveform(progress: viewModel.playbackProgress) { progress in
+            viewModel.seekPlayback(to: progress)
+          }
+          durationLabel
           iconButton(
             viewModel.isPlaying ? "pause.fill" : "play.fill",
             title: viewModel.isPlaying ? "Pause" : "Play",
             action: onPlay
           )
-          waveform(progress: viewModel.playbackProgress) { progress in
-            viewModel.seekPlayback(to: progress)
-          }
-          durationLabel
-          iconButton("xmark", title: "Cancel", action: onCancel)
-          iconButton("arrow.up", title: "Send", isPrimary: true, action: onSend)
+          iconButton("arrow.up", title: "Send voice message", isPrimary: true, action: onSend)
 
         case .idle:
           EmptyView()
@@ -62,6 +62,8 @@ struct ComposeVoiceInputView: View {
         maxHeight: mode.textMinHeight,
         alignment: rowFrameAlignment
       )
+      .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
+      .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
     }
   }
 
@@ -78,17 +80,18 @@ struct ComposeVoiceInputView: View {
   }
 
   private var rowSpacing: CGFloat {
-    isGlass ? 6 : 10
+    mode.voiceInputRowSpacing
   }
 
   private var horizontalPadding: CGFloat {
-    isGlass ? 2 : 4
+    mode.voiceInputHorizontalPadding
   }
 
   private var recordingIndicator: some View {
     Circle()
       .fill(Color.red)
-      .frame(width: isGlass ? 6 : 8, height: isGlass ? 6 : 8)
+      .frame(width: mode.voiceInputRecordingDotSize, height: mode.voiceInputRecordingDotSize)
+      .frame(width: mode.voiceInputButtonSize, height: mode.voiceInputButtonSize)
       .accessibilityLabel("Recording")
   }
 
@@ -96,7 +99,8 @@ struct ComposeVoiceInputView: View {
     Text(Self.format(duration: viewModel.duration))
       .font((isGlass ? Font.caption2 : Font.caption).monospacedDigit())
       .foregroundStyle(.secondary)
-      .frame(minWidth: isGlass ? 30 : 38, alignment: .trailing)
+      .frame(minWidth: isGlass ? 34 : 38, alignment: .trailing)
+      .lineLimit(1)
   }
 
   private func waveform(progress: Double, onSeek: (@MainActor @Sendable (Double) -> Void)? = nil) -> some View {
@@ -105,17 +109,19 @@ struct ComposeVoiceInputView: View {
       progress: progress,
       foreground: Color(nsColor: .secondaryLabelColor),
       background: Color(nsColor: .tertiaryLabelColor).opacity(0.45),
-      targetBarCount: isGlass ? 96 : 160,
-      barWidth: isGlass ? 1 : 1.5,
-      barSpacing: isGlass ? 1.5 : 2,
+      targetBarCount: mode.voiceInputTargetBarCount,
+      barWidth: mode.voiceInputBarWidth,
+      barSpacing: mode.voiceInputBarSpacing,
       minBarHeight: 2,
+      horizontalAlignment: isGlass ? .center : .leading,
       verticalAlignment: isGlass ? .center : .bottom,
       shortSamplesMode: viewModel.phase == .recording ? .padLeadingQuiet : .stretch,
       motion: viewModel.phase == .recording ? .recordingReel : .fixed,
       onSeek: onSeek
     )
-    .frame(height: isGlass ? 14 : 20)
+    .frame(height: mode.voiceInputWaveformHeight)
     .frame(maxWidth: .infinity)
+    .layoutPriority(1)
   }
 
   private func iconButton(
@@ -152,23 +158,47 @@ private struct VoiceIconControl: View {
   @State private var isHovering = false
 
   var body: some View {
-    Image(systemName: systemName)
-      .font(.system(size: mode.voiceInputIconPointSize, weight: .medium))
-      .foregroundStyle(isPrimary ? Color.white : Color.primary)
-      .frame(width: mode.voiceInputButtonSize, height: mode.voiceInputButtonSize)
-      .background(
+    Button(action: action) {
+      Image(systemName: systemName)
+    }
+    .buttonStyle(
+      VoiceIconButtonStyle(
+        isPrimary: isPrimary,
+        mode: mode,
+        isHovering: isHovering
+      )
+    )
+    .frame(width: mode.voiceInputButtonSize, height: mode.voiceInputButtonSize)
+    .contentShape(Circle())
+    .onHover { hovering in
+      isHovering = hovering
+    }
+    .help(title)
+    .accessibilityLabel(title)
+  }
+}
+
+private struct VoiceIconButtonStyle: ButtonStyle {
+  let isPrimary: Bool
+  let mode: ComposeControlMode
+  let isHovering: Bool
+
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.system(size: mode.voiceInputIconPointSize, weight: .semibold))
+      .foregroundStyle(isPrimary ? Color.white : Color(nsColor: .secondaryLabelColor))
+      .frame(width: mode.voiceInputButtonVisualSize, height: mode.voiceInputButtonVisualSize)
+      .contentShape(Circle())
+      .background {
         Circle()
           .fill(backgroundColor)
-      )
-      .contentShape(Circle())
-      .scaleEffect(isHovering ? 0.96 : 1)
-      .onTapGesture(perform: action)
-      .onHover { hovering in
-        isHovering = hovering
       }
-      .help(title)
-      .accessibilityLabel(title)
-      .accessibilityAddTraits(.isButton)
+      .opacity(opacity(isPressed: configuration.isPressed))
+      .scaleEffect(configuration.isPressed ? 0.96 : 1)
+      .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+      .animation(.easeInOut(duration: 0.12), value: isHovering)
   }
 
   private var backgroundColor: Color {
@@ -176,7 +206,15 @@ private struct VoiceIconControl: View {
       return .accentColor
     }
 
-    let opacity = isHovering ? 0.82 : 1
-    return Color(nsColor: .quinaryLabel).opacity(opacity)
+    if mode == .glass {
+      return Color(nsColor: .separatorColor).opacity(isHovering ? 0.5 : 0.32)
+    }
+
+    return Color(nsColor: .quinaryLabel).opacity(isHovering ? 0.82 : 1)
+  }
+
+  private func opacity(isPressed: Bool) -> Double {
+    guard isEnabled else { return 0.48 }
+    return isPressed ? 0.62 : 1
   }
 }
