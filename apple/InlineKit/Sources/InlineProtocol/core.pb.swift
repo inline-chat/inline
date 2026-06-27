@@ -1880,6 +1880,93 @@ public struct MessageActionToast: Sendable {
   public init() {}
 }
 
+public struct MessageService: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var event: MessageService.OneOf_Event? = nil
+
+  public var threadBacklink: MessageServiceThreadBacklink {
+    get {
+      if case .threadBacklink(let v)? = event {return v}
+      return MessageServiceThreadBacklink()
+    }
+    set {event = .threadBacklink(newValue)}
+  }
+
+  public var pinnedMessage: MessageServicePinnedMessage {
+    get {
+      if case .pinnedMessage(let v)? = event {return v}
+      return MessageServicePinnedMessage()
+    }
+    set {event = .pinnedMessage(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum OneOf_Event: Equatable, Sendable {
+    case threadBacklink(MessageServiceThreadBacklink)
+    case pinnedMessage(MessageServicePinnedMessage)
+
+  }
+
+  public init() {}
+}
+
+public struct MessageServiceThreadBacklink: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var sourceChatID: Int64 {
+    get {return _sourceChatID ?? 0}
+    set {_sourceChatID = newValue}
+  }
+  /// Returns true if `sourceChatID` has been explicitly set.
+  public var hasSourceChatID: Bool {return self._sourceChatID != nil}
+  /// Clears the value of `sourceChatID`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceChatID() {self._sourceChatID = nil}
+
+  public var sourceTitle: String {
+    get {return _sourceTitle ?? String()}
+    set {_sourceTitle = newValue}
+  }
+  /// Returns true if `sourceTitle` has been explicitly set.
+  public var hasSourceTitle: Bool {return self._sourceTitle != nil}
+  /// Clears the value of `sourceTitle`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceTitle() {self._sourceTitle = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _sourceChatID: Int64? = nil
+  fileprivate var _sourceTitle: String? = nil
+}
+
+public struct MessageServicePinnedMessage: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Per-chat message id of the pinned message, when known.
+  public var messageID: Int64 {
+    get {return _messageID ?? 0}
+    set {_messageID = newValue}
+  }
+  /// Returns true if `messageID` has been explicitly set.
+  public var hasMessageID: Bool {return self._messageID != nil}
+  /// Clears the value of `messageID`. Subsequent reads from it will return its default value.
+  public mutating func clearMessageID() {self._messageID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _messageID: Int64? = nil
+}
+
 public struct Message: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -2083,6 +2170,17 @@ public struct Message: @unchecked Sendable {
   public var hasRev: Bool {return _storage._rev != nil}
   /// Clears the value of `rev`. Subsequent reads from it will return its default value.
   public mutating func clearRev() {_uniqueStorage()._rev = nil}
+
+  /// Typed service/system message metadata. Older clients ignore this and use
+  /// `message` as fallback text.
+  public var serviceMessage: MessageService {
+    get {return _storage._serviceMessage ?? MessageService()}
+    set {_uniqueStorage()._serviceMessage = newValue}
+  }
+  /// Returns true if `serviceMessage` has been explicitly set.
+  public var hasServiceMessage: Bool {return _storage._serviceMessage != nil}
+  /// Clears the value of `serviceMessage`. Subsequent reads from it will return its default value.
+  public mutating func clearServiceMessage() {_uniqueStorage()._serviceMessage = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -12479,6 +12577,154 @@ extension MessageActionToast: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
+extension MessageService: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageService"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "thread_backlink"),
+    2: .standard(proto: "pinned_message"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: MessageServiceThreadBacklink?
+        var hadOneofValue = false
+        if let current = self.event {
+          hadOneofValue = true
+          if case .threadBacklink(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.event = .threadBacklink(v)
+        }
+      }()
+      case 2: try {
+        var v: MessageServicePinnedMessage?
+        var hadOneofValue = false
+        if let current = self.event {
+          hadOneofValue = true
+          if case .pinnedMessage(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.event = .pinnedMessage(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.event {
+    case .threadBacklink?: try {
+      guard case .threadBacklink(let v)? = self.event else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .pinnedMessage?: try {
+      guard case .pinnedMessage(let v)? = self.event else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageService, rhs: MessageService) -> Bool {
+    if lhs.event != rhs.event {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageServiceThreadBacklink: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageServiceThreadBacklink"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "source_chat_id"),
+    2: .standard(proto: "source_title"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self._sourceChatID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._sourceTitle) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._sourceChatID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._sourceTitle {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageServiceThreadBacklink, rhs: MessageServiceThreadBacklink) -> Bool {
+    if lhs._sourceChatID != rhs._sourceChatID {return false}
+    if lhs._sourceTitle != rhs._sourceTitle {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageServicePinnedMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageServicePinnedMessage"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "message_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self._messageID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._messageID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageServicePinnedMessage, rhs: MessageServicePinnedMessage) -> Bool {
+    if lhs._messageID != rhs._messageID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
@@ -12504,6 +12750,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     19: .same(proto: "replies"),
     20: .same(proto: "actions"),
     21: .same(proto: "rev"),
+    22: .standard(proto: "service_message"),
   ]
 
   fileprivate class _StorageClass {
@@ -12529,6 +12776,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _replies: MessageReplies? = nil
     var _actions: MessageActions? = nil
     var _rev: Int64? = nil
+    var _serviceMessage: MessageService? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -12565,6 +12813,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _replies = source._replies
       _actions = source._actions
       _rev = source._rev
+      _serviceMessage = source._serviceMessage
     }
   }
 
@@ -12604,6 +12853,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 19: try { try decoder.decodeSingularMessageField(value: &_storage._replies) }()
         case 20: try { try decoder.decodeSingularMessageField(value: &_storage._actions) }()
         case 21: try { try decoder.decodeSingularInt64Field(value: &_storage._rev) }()
+        case 22: try { try decoder.decodeSingularMessageField(value: &_storage._serviceMessage) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -12680,6 +12930,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._rev {
         try visitor.visitSingularInt64Field(value: v, fieldNumber: 21)
       } }()
+      try { if let v = _storage._serviceMessage {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -12714,6 +12967,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._replies != rhs_storage._replies {return false}
         if _storage._actions != rhs_storage._actions {return false}
         if _storage._rev != rhs_storage._rev {return false}
+        if _storage._serviceMessage != rhs_storage._serviceMessage {return false}
         return true
       }
       if !storagesAreEqual {return false}

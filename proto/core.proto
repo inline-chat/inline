@@ -306,6 +306,23 @@ message MessageActionResponseUi {
 
 message MessageActionToast { string text = 1; }
 
+message MessageService {
+  oneof event {
+    MessageServiceThreadBacklink thread_backlink = 1;
+    MessageServicePinnedMessage pinned_message = 2;
+  }
+}
+
+message MessageServiceThreadBacklink {
+  optional int64 source_chat_id = 1;
+  optional string source_title = 2;
+}
+
+message MessageServicePinnedMessage {
+  // Per-chat message id of the pinned message, when known.
+  optional int64 message_id = 1;
+}
+
 message Message {
   int64 id = 1;
 
@@ -370,6 +387,10 @@ message Message {
 
   // Monotonic edit revision for the message. Increments on every edit.
   optional int64 rev = 21;
+
+  // Typed service/system message metadata. Older clients ignore this and use
+  // `message` as fallback text.
+  optional MessageService service_message = 22;
 }
 
 enum MessageSendMode {

@@ -827,6 +827,53 @@ export interface MessageActionToast {
     text: string;
 }
 /**
+ * @generated from protobuf message MessageService
+ */
+export interface MessageService {
+    /**
+     * @generated from protobuf oneof: event
+     */
+    event: {
+        oneofKind: "threadBacklink";
+        /**
+         * @generated from protobuf field: MessageServiceThreadBacklink thread_backlink = 1;
+         */
+        threadBacklink: MessageServiceThreadBacklink;
+    } | {
+        oneofKind: "pinnedMessage";
+        /**
+         * @generated from protobuf field: MessageServicePinnedMessage pinned_message = 2;
+         */
+        pinnedMessage: MessageServicePinnedMessage;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message MessageServiceThreadBacklink
+ */
+export interface MessageServiceThreadBacklink {
+    /**
+     * @generated from protobuf field: optional int64 source_chat_id = 1;
+     */
+    sourceChatId?: bigint;
+    /**
+     * @generated from protobuf field: optional string source_title = 2;
+     */
+    sourceTitle?: string;
+}
+/**
+ * @generated from protobuf message MessageServicePinnedMessage
+ */
+export interface MessageServicePinnedMessage {
+    /**
+     * Per-chat message id of the pinned message, when known.
+     *
+     * @generated from protobuf field: optional int64 message_id = 1;
+     */
+    messageId?: bigint;
+}
+/**
  * @generated from protobuf message Message
  */
 export interface Message {
@@ -959,6 +1006,13 @@ export interface Message {
      * @generated from protobuf field: optional int64 rev = 21;
      */
     rev?: bigint;
+    /**
+     * Typed service/system message metadata. Older clients ignore this and use
+     * `message` as fallback text.
+     *
+     * @generated from protobuf field: optional MessageService service_message = 22;
+     */
+    serviceMessage?: MessageService;
 }
 /**
  * @generated from protobuf message MessageFwdHeader
@@ -9035,6 +9089,165 @@ class MessageActionToast$Type extends MessageType<MessageActionToast> {
  */
 export const MessageActionToast = new MessageActionToast$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class MessageService$Type extends MessageType<MessageService> {
+    constructor() {
+        super("MessageService", [
+            { no: 1, name: "thread_backlink", kind: "message", oneof: "event", T: () => MessageServiceThreadBacklink },
+            { no: 2, name: "pinned_message", kind: "message", oneof: "event", T: () => MessageServicePinnedMessage }
+        ]);
+    }
+    create(value?: PartialMessage<MessageService>): MessageService {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.event = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<MessageService>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageService): MessageService {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* MessageServiceThreadBacklink thread_backlink */ 1:
+                    message.event = {
+                        oneofKind: "threadBacklink",
+                        threadBacklink: MessageServiceThreadBacklink.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).threadBacklink)
+                    };
+                    break;
+                case /* MessageServicePinnedMessage pinned_message */ 2:
+                    message.event = {
+                        oneofKind: "pinnedMessage",
+                        pinnedMessage: MessageServicePinnedMessage.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).pinnedMessage)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageService, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* MessageServiceThreadBacklink thread_backlink = 1; */
+        if (message.event.oneofKind === "threadBacklink")
+            MessageServiceThreadBacklink.internalBinaryWrite(message.event.threadBacklink, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* MessageServicePinnedMessage pinned_message = 2; */
+        if (message.event.oneofKind === "pinnedMessage")
+            MessageServicePinnedMessage.internalBinaryWrite(message.event.pinnedMessage, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageService
+ */
+export const MessageService = new MessageService$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageServiceThreadBacklink$Type extends MessageType<MessageServiceThreadBacklink> {
+    constructor() {
+        super("MessageServiceThreadBacklink", [
+            { no: 1, name: "source_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "source_title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageServiceThreadBacklink>): MessageServiceThreadBacklink {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageServiceThreadBacklink>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageServiceThreadBacklink): MessageServiceThreadBacklink {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional int64 source_chat_id */ 1:
+                    message.sourceChatId = reader.int64().toBigInt();
+                    break;
+                case /* optional string source_title */ 2:
+                    message.sourceTitle = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageServiceThreadBacklink, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int64 source_chat_id = 1; */
+        if (message.sourceChatId !== undefined)
+            writer.tag(1, WireType.Varint).int64(message.sourceChatId);
+        /* optional string source_title = 2; */
+        if (message.sourceTitle !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.sourceTitle);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageServiceThreadBacklink
+ */
+export const MessageServiceThreadBacklink = new MessageServiceThreadBacklink$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageServicePinnedMessage$Type extends MessageType<MessageServicePinnedMessage> {
+    constructor() {
+        super("MessageServicePinnedMessage", [
+            { no: 1, name: "message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageServicePinnedMessage>): MessageServicePinnedMessage {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageServicePinnedMessage>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageServicePinnedMessage): MessageServicePinnedMessage {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional int64 message_id */ 1:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageServicePinnedMessage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int64 message_id = 1; */
+        if (message.messageId !== undefined)
+            writer.tag(1, WireType.Varint).int64(message.messageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageServicePinnedMessage
+ */
+export const MessageServicePinnedMessage = new MessageServicePinnedMessage$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class Message$Type extends MessageType<Message> {
     constructor() {
         super("Message", [
@@ -9059,7 +9272,8 @@ class Message$Type extends MessageType<Message> {
             { no: 18, name: "fwd_from", kind: "message", T: () => MessageFwdHeader },
             { no: 19, name: "replies", kind: "message", T: () => MessageReplies },
             { no: 20, name: "actions", kind: "message", T: () => MessageActions },
-            { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 22, name: "service_message", kind: "message", T: () => MessageService }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -9144,6 +9358,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional int64 rev */ 21:
                     message.rev = reader.int64().toBigInt();
                     break;
+                case /* optional MessageService service_message */ 22:
+                    message.serviceMessage = MessageService.internalBinaryRead(reader, reader.uint32(), options, message.serviceMessage);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9222,6 +9439,9 @@ class Message$Type extends MessageType<Message> {
         /* optional int64 rev = 21; */
         if (message.rev !== undefined)
             writer.tag(21, WireType.Varint).int64(message.rev);
+        /* optional MessageService service_message = 22; */
+        if (message.serviceMessage)
+            MessageService.internalBinaryWrite(message.serviceMessage, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

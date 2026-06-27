@@ -11,6 +11,7 @@ import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { RpcCall } from "./core.js";
+import { MessageService } from "./core.js";
 import { MessageReplies } from "./core.js";
 import { MessageActions } from "./core.js";
 /**
@@ -29,6 +30,10 @@ export interface MessageContentPayload {
      * @generated from protobuf field: MessageReplies replies = 3;
      */
     replies?: MessageReplies;
+    /**
+     * @generated from protobuf field: MessageService service_message = 4;
+     */
+    serviceMessage?: MessageService;
 }
 /**
  * @generated from protobuf message client.MessageVoiceContent
@@ -90,7 +95,8 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
         super("client.MessageContentPayload", [
             { no: 1, name: "voice", kind: "message", T: () => MessageVoiceContent },
             { no: 2, name: "actions", kind: "message", T: () => MessageActions },
-            { no: 3, name: "replies", kind: "message", T: () => MessageReplies }
+            { no: 3, name: "replies", kind: "message", T: () => MessageReplies },
+            { no: 4, name: "service_message", kind: "message", T: () => MessageService }
         ]);
     }
     create(value?: PartialMessage<MessageContentPayload>): MessageContentPayload {
@@ -113,6 +119,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
                 case /* MessageReplies replies */ 3:
                     message.replies = MessageReplies.internalBinaryRead(reader, reader.uint32(), options, message.replies);
                     break;
+                case /* MessageService service_message */ 4:
+                    message.serviceMessage = MessageService.internalBinaryRead(reader, reader.uint32(), options, message.serviceMessage);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -134,6 +143,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
         /* MessageReplies replies = 3; */
         if (message.replies)
             MessageReplies.internalBinaryWrite(message.replies, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* MessageService service_message = 4; */
+        if (message.serviceMessage)
+            MessageService.internalBinaryWrite(message.serviceMessage, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

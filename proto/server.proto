@@ -240,6 +240,28 @@ message ServerUserUpdateDialogFollowMode {
 // Update for a user when their profile/account fields change.
 message ServerUserUpdateUser { User user = 1; }
 
+// ------------------------------------------------------------
+// Server-only stored payloads
+// ------------------------------------------------------------
+
+message SystemMessage {
+  oneof event {
+    ThreadBacklinkSystemMessage thread_backlink = 1;
+    PinnedMessageSystemMessage pinned_message = 2;
+  }
+}
+
+message ThreadBacklinkSystemMessage {
+  int64 graph_link_id = 1;
+  optional int64 source_chat_id = 2;
+  optional string source_title = 3;
+}
+
+message PinnedMessageSystemMessage {
+  int64 pinned_message_global_id = 1;
+  optional int64 pinned_message_id = 2;
+}
+
 // Update for a user when a chat becomes chat-list-visible for them.
 message ServerUserUpdateChatOpen {
   Chat chat = 1;

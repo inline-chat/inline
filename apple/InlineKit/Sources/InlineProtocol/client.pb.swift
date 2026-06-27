@@ -53,6 +53,15 @@ public struct Client_MessageContentPayload: Sendable {
   /// Clears the value of `replies`. Subsequent reads from it will return its default value.
   public mutating func clearReplies() {self._replies = nil}
 
+  public var serviceMessage: MessageService {
+    get {return _serviceMessage ?? MessageService()}
+    set {_serviceMessage = newValue}
+  }
+  /// Returns true if `serviceMessage` has been explicitly set.
+  public var hasServiceMessage: Bool {return self._serviceMessage != nil}
+  /// Clears the value of `serviceMessage`. Subsequent reads from it will return its default value.
+  public mutating func clearServiceMessage() {self._serviceMessage = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -60,6 +69,7 @@ public struct Client_MessageContentPayload: Sendable {
   fileprivate var _voice: Client_MessageVoiceContent? = nil
   fileprivate var _actions: MessageActions? = nil
   fileprivate var _replies: MessageReplies? = nil
+  fileprivate var _serviceMessage: MessageService? = nil
 }
 
 public struct Client_MessageVoiceContent: @unchecked Sendable {
@@ -123,6 +133,7 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
     1: .same(proto: "voice"),
     2: .same(proto: "actions"),
     3: .same(proto: "replies"),
+    4: .standard(proto: "service_message"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -134,6 +145,7 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
       case 1: try { try decoder.decodeSingularMessageField(value: &self._voice) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._actions) }()
       case 3: try { try decoder.decodeSingularMessageField(value: &self._replies) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._serviceMessage) }()
       default: break
       }
     }
@@ -153,6 +165,9 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
     try { if let v = self._replies {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._serviceMessage {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -160,6 +175,7 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
     if lhs._voice != rhs._voice {return false}
     if lhs._actions != rhs._actions {return false}
     if lhs._replies != rhs._replies {return false}
+    if lhs._serviceMessage != rhs._serviceMessage {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
