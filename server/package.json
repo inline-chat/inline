@@ -69,6 +69,7 @@
   "devDependencies": {
     "@types/bun": "^1.1.16",
     "@types/nanoid-dictionary": "^4.2.3",
+    "@types/node": "20.17.19",
     "@types/react": "^19.2.9",
     "@types/react-dom": "^19.2.3",
     "oxlint": "^1.39.0",
