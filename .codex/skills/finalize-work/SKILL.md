@@ -29,7 +29,7 @@ This skill is not mainly about running every automated check. It is about tighte
    - Tests and typing: are there focused regression tests or a clear reason none are needed? Are types precise enough to prevent misuse? Avoid unsafe casts, force unwraps, `Any`/`any`, and untyped data shapes where better options exist.
    - Simplicity: is the change over-engineered, too broad, or split into unnecessary concepts? Can logic be shorter, clearer, or more local without losing safety?
    - Architecture: does the solution follow the codebase's established patterns and platform idioms? Is it a durable design rather than a short-term workaround?
-   - Duplication: does duplicated logic create a consistency risk? Extract shared behavior only when the abstraction removes real maintenance cost.
+   - Duplication: does duplicated logic create a consistency risk? Extract shared behavior only when the abstraction removes real maintenance cost. If duplication is truly necessary, add a comment explaining why it must stay duplicated and name the source it mirrors.
    - Performance: check scroll/fps responsiveness, synchronous work on UI hot paths, DB or network calls during rendering/menu presentation, repeated layout work, unbounded memory growth, and avoidable main-thread work.
    - Error handling and observability: ensure failures have appropriate handling, user fallback, logging, or capture. Remove temporary debug logs/traces unless they are intentional diagnostics.
    - Compatibility and rendering: check OS availability gates, existing behavior on supported platforms, light/dark theming, layout stability, accessibility basics, and visual regressions.

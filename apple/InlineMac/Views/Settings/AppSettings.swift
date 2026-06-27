@@ -123,7 +123,7 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   var detailText: String {
     switch self {
     case .twelveHours:
-      return "close chats i haven't opened in 12 hrs."
+      return "Close chats i haven't opened in 12 hrs."
     case .never:
       return "Don't close chats automatically."
     }
