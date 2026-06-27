@@ -36,6 +36,24 @@ describe("bot entities", () => {
     expect(title.entity.threadTitle.title).toBe("Planning")
   })
 
+  test("parses home thread title entities without a space id", () => {
+    const entities = parseBotEntities([
+      {
+        type: "thread_title",
+        offset: 0,
+        length: 12,
+        title: "Personal",
+      },
+    ])
+
+    const title = entities?.entities[0]
+    expect(title?.type).toBe(MessageEntity_Type.THREAD_TITLE)
+    expect(title?.entity.oneofKind).toBe("threadTitle")
+    if (title?.entity.oneofKind !== "threadTitle") throw new Error("Expected thread title entity")
+    expect(title.entity.threadTitle.spaceId).toBe(0n)
+    expect(title.entity.threadTitle.title).toBe("Personal")
+  })
+
   test("rejects non-canonical thread entity names and fields", () => {
     expect(() => parseBotEntities([
       { type: "threadlink", offset: 0, length: 7, chat_id: "42" },
@@ -116,6 +134,31 @@ describe("bot entities", () => {
         length: 12,
         space_id: 7,
         title: "Planning",
+      },
+    ])
+  })
+
+  test("omits space id when encoding home thread title entities", () => {
+    const encoded = encodeBotEntities({
+      entities: [
+        {
+          type: MessageEntity_Type.THREAD_TITLE,
+          offset: 0n,
+          length: 8n,
+          entity: {
+            oneofKind: "threadTitle",
+            threadTitle: { spaceId: 0n, title: "Personal" },
+          },
+        },
+      ],
+    })
+
+    expect(encoded).toEqual([
+      {
+        type: "thread_title",
+        offset: 0,
+        length: 8,
+        title: "Personal",
       },
     ])
   })

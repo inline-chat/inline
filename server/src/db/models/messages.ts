@@ -35,6 +35,7 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { persistChatMetadataUpdates, type ChatMetadataUpdate } from "@in/server/modules/chatMetadataUpdates"
+import { decryptSystemMessagePayload, type SystemMessage } from "@in/server/modules/systemMessages/payload"
 
 const log = new Log("MessageModel", LogLevel.INFO)
 
@@ -94,10 +95,14 @@ export type ProcessedMessage = Omit<
   | "actionsEncrypted"
   | "actionsIv"
   | "actionsTag"
+  | "systemMessageEncrypted"
+  | "systemMessageIv"
+  | "systemMessageTag"
 > & {
   text: string | null
   entities: MessageEntities | null
   actions?: MessageActions | null
+  systemMessage: SystemMessage | null
 }
 
 export type ProcessedMessageTranslation = Omit<
@@ -125,9 +130,13 @@ export type DbFullMessage = Omit<
   | "actionsEncrypted"
   | "actionsIv"
   | "actionsTag"
+  | "systemMessageEncrypted"
+  | "systemMessageIv"
+  | "systemMessageTag"
 > & {
   entities: MessageEntities | null
   actions?: MessageActions | null
+  systemMessage: SystemMessage | null
   from: DbUser
   reactions: DbReaction[]
   photo: DbFullPhoto | null
@@ -493,6 +502,14 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
               authTag: message.actionsTag,
             }),
           )
+        : null,
+    systemMessage:
+      message.systemMessageEncrypted && message.systemMessageIv && message.systemMessageTag
+        ? decryptSystemMessagePayload({
+            encrypted: message.systemMessageEncrypted,
+            iv: message.systemMessageIv,
+            authTag: message.systemMessageTag,
+          })
         : null,
     photo: message.photo ? FileModel.processFullPhoto(message.photo) : null,
     video: message.video ? FileModel.processFullVideo(message.video) : null,
@@ -1009,6 +1026,14 @@ async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: 
             decryptBinary({ encrypted: msg.actionsEncrypted, iv: msg.actionsIv, authTag: msg.actionsTag }),
           )
         : null,
+    systemMessage:
+      msg.systemMessageEncrypted && msg.systemMessageIv && msg.systemMessageTag
+        ? decryptSystemMessagePayload({
+            encrypted: msg.systemMessageEncrypted,
+            iv: msg.systemMessageIv,
+            authTag: msg.systemMessageTag,
+          })
+        : null,
   }))
 }
 
@@ -1047,6 +1072,14 @@ async function getNonFullMessagesFromNewToOld(input: {
         ? MessageActions.fromBinary(
             decryptBinary({ encrypted: msg.actionsEncrypted, iv: msg.actionsIv, authTag: msg.actionsTag }),
           )
+        : null,
+    systemMessage:
+      msg.systemMessageEncrypted && msg.systemMessageIv && msg.systemMessageTag
+        ? decryptSystemMessagePayload({
+            encrypted: msg.systemMessageEncrypted,
+            iv: msg.systemMessageIv,
+            authTag: msg.systemMessageTag,
+          })
         : null,
   }))
 }
@@ -1100,6 +1133,14 @@ async function getMessagesAroundTarget(
         ? MessageActions.fromBinary(
             decryptBinary({ encrypted: msg.actionsEncrypted, iv: msg.actionsIv, authTag: msg.actionsTag }),
           )
+        : null,
+    systemMessage:
+      msg.systemMessageEncrypted && msg.systemMessageIv && msg.systemMessageTag
+        ? decryptSystemMessagePayload({
+            encrypted: msg.systemMessageEncrypted,
+            iv: msg.systemMessageIv,
+            authTag: msg.systemMessageTag,
+          })
         : null,
   }))
 }

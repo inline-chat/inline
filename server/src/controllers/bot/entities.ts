@@ -274,9 +274,12 @@ export const parseBotEntities = (raw: unknown): MessageEntities | undefined => {
     }
 
     if (type === MessageEntity_Type.THREAD_TITLE) {
-      const spaceId = toBigInt(item["space_id"], new InlineError(InlineError.ApiError.BAD_REQUEST))
+      const spaceId =
+        item["space_id"] === undefined
+          ? 0n
+          : toBigInt(item["space_id"], new InlineError(InlineError.ApiError.BAD_REQUEST))
       const title = item["title"]
-      if (spaceId <= 0n || typeof title !== "string" || !title.trim()) {
+      if (spaceId < 0n || typeof title !== "string" || !title.trim()) {
         throw new InlineError(InlineError.ApiError.BAD_REQUEST)
       }
       return {
@@ -315,7 +318,9 @@ export const encodeBotEntities = (
     } else if (e.entity.oneofKind === "thread") {
       out.chat_id = Number(e.entity.thread.chatId)
     } else if (e.entity.oneofKind === "threadTitle") {
-      out.space_id = Number(e.entity.threadTitle.spaceId)
+      if (e.entity.threadTitle.spaceId > 0n) {
+        out.space_id = Number(e.entity.threadTitle.spaceId)
+      }
       out.title = e.entity.threadTitle.title
     }
 

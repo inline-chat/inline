@@ -1,4 +1,4 @@
-import { eq, sql, and, gt, ne, inArray, desc } from "drizzle-orm"
+import { eq, sql, and, gt, ne, inArray, isNull } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { dialogs, messages } from "@in/server/db/schema"
 
@@ -22,6 +22,7 @@ export class DialogsModel {
           inArray(messages.chatId, chatIds),
           gt(messages.messageId, sql`COALESCE(${dialogs.readInboxMaxId}, 0)`),
           ne(messages.fromId, userId),
+          isNull(messages.systemMessageEncrypted),
         ),
       )
       .groupBy(messages.chatId)
@@ -49,6 +50,7 @@ export class DialogsModel {
           eq(messages.chatId, chatId),
           gt(messages.messageId, sql`COALESCE(${dialogs.readInboxMaxId}, 0)`),
           ne(messages.fromId, userId),
+          isNull(messages.systemMessageEncrypted),
         ),
       )
     return result?.count ?? 0
