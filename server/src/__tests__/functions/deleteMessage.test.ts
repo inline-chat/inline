@@ -7,9 +7,249 @@ import { UpdatesModel } from "@in/server/db/models/updates"
 import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
 import { getMessages } from "@in/server/functions/messages.getMessages"
 import { setupTestLifecycle, testUtils } from "../setup"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 describe("messages.deleteMessage", () => {
   setupTestLifecycle()
+
+  test("allows message authors to delete their own messages in space threads", async () => {
+    const author = await testUtils.createUser("space-delete-own-author@example.com")
+    const space = await testUtils.createSpace("Space Delete Own")
+    if (!space) {
+      throw new Error("Space not created")
+    }
+
+    await db.insert(schema.members).values({ spaceId: space.id, userId: author.id, role: "member" })
+
+    const chat = await testUtils.createChat(space.id, "Author Space Thread", "thread", true, author.id)
+    if (!chat) {
+      throw new Error("Author space thread not created")
+    }
+
+    await db.insert(schema.messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: author.id,
+      text: "author message",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, chat.id))
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(chat.id) },
+          },
+        },
+        messageIds: [1n],
+      },
+      testUtils.functionContext({ userId: author.id }),
+    )
+
+    const deleted = await db
+      .select({ messageId: schema.messages.messageId })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, chat.id), eq(schema.messages.messageId, 1)))
+
+    expect(deleted).toHaveLength(0)
+  })
+
+  test("rejects deleting another user's message in a private space thread for non-admin members", async () => {
+    const author = await testUtils.createUser("space-delete-author@example.com")
+    const member = await testUtils.createUser("space-delete-member@example.com")
+    const space = await testUtils.createSpace("Space Delete Member")
+    if (!space) {
+      throw new Error("Space not created")
+    }
+
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: author.id, role: "member" },
+      { spaceId: space.id, userId: member.id, role: "member" },
+    ])
+
+    const chat = await testUtils.createChat(space.id, "Private Space Thread", "thread", false, author.id)
+    if (!chat) {
+      throw new Error("Private space thread not created")
+    }
+    await testUtils.addParticipant(chat.id, author.id)
+    await testUtils.addParticipant(chat.id, member.id)
+
+    await db.insert(schema.messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: author.id,
+      text: "author message",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, chat.id))
+
+    await expect(
+      deleteMessage(
+        {
+          peer: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: BigInt(chat.id) },
+            },
+          },
+          messageIds: [1n],
+        },
+        testUtils.functionContext({ userId: member.id }),
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.SPACE_ADMIN_REQUIRED })
+
+    const retained = await db
+      .select({ messageId: schema.messages.messageId })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, chat.id), eq(schema.messages.messageId, 1)))
+
+    expect(retained).toHaveLength(1)
+  })
+
+  test("rejects deleting another user's message in a public space thread for non-admin members", async () => {
+    const author = await testUtils.createUser("space-delete-public-author@example.com")
+    const member = await testUtils.createUser("space-delete-public-member@example.com")
+    const space = await testUtils.createSpace("Public Space Delete Member")
+    if (!space) {
+      throw new Error("Space not created")
+    }
+
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: author.id, role: "member" },
+      { spaceId: space.id, userId: member.id, role: "member" },
+    ])
+
+    const chat = await testUtils.createChat(space.id, "Public Space Thread", "thread", true, author.id)
+    if (!chat) {
+      throw new Error("Public space thread not created")
+    }
+
+    await db.insert(schema.messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: author.id,
+      text: "author message",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, chat.id))
+
+    await expect(
+      deleteMessage(
+        {
+          peer: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: BigInt(chat.id) },
+            },
+          },
+          messageIds: [1n],
+        },
+        testUtils.functionContext({ userId: member.id }),
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.SPACE_ADMIN_REQUIRED })
+
+    const retained = await db
+      .select({ messageId: schema.messages.messageId })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, chat.id), eq(schema.messages.messageId, 1)))
+
+    expect(retained).toHaveLength(1)
+  })
+
+  test("allows space admins to delete another user's message in a space thread", async () => {
+    const author = await testUtils.createUser("space-delete-admin-author@example.com")
+    const admin = await testUtils.createUser("space-delete-admin@example.com")
+    const space = await testUtils.createSpace("Space Delete Admin")
+    if (!space) {
+      throw new Error("Space not created")
+    }
+
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: author.id, role: "member" },
+      { spaceId: space.id, userId: admin.id, role: "admin" },
+    ])
+
+    const chat = await testUtils.createChat(space.id, "Public Space Thread", "thread", true, author.id)
+    if (!chat) {
+      throw new Error("Public space thread not created")
+    }
+
+    await db.insert(schema.messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: author.id,
+      text: "author message",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, chat.id))
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(chat.id) },
+          },
+        },
+        messageIds: [1n],
+      },
+      testUtils.functionContext({ userId: admin.id }),
+    )
+
+    const deleted = await db
+      .select({ messageId: schema.messages.messageId })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, chat.id), eq(schema.messages.messageId, 1)))
+
+    expect(deleted).toHaveLength(0)
+  })
+
+  test("allows space admins to delete another user's message in a private space thread they can access", async () => {
+    const author = await testUtils.createUser("space-delete-private-admin-author@example.com")
+    const admin = await testUtils.createUser("space-delete-private-admin@example.com")
+    const space = await testUtils.createSpace("Private Space Delete Admin")
+    if (!space) {
+      throw new Error("Space not created")
+    }
+
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: author.id, role: "member" },
+      { spaceId: space.id, userId: admin.id, role: "admin" },
+    ])
+
+    const chat = await testUtils.createChat(space.id, "Private Admin Space Thread", "thread", false, author.id)
+    if (!chat) {
+      throw new Error("Private admin space thread not created")
+    }
+    await testUtils.addParticipant(chat.id, author.id)
+    await testUtils.addParticipant(chat.id, admin.id)
+
+    await db.insert(schema.messages).values({
+      chatId: chat.id,
+      messageId: 1,
+      fromId: author.id,
+      text: "author message",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, chat.id))
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(chat.id) },
+          },
+        },
+        messageIds: [1n],
+      },
+      testUtils.functionContext({ userId: admin.id }),
+    )
+
+    const deleted = await db
+      .select({ messageId: schema.messages.messageId })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, chat.id), eq(schema.messages.messageId, 1)))
+
+    expect(deleted).toHaveLength(0)
+  })
 
   test("orphaning reply threads when deleting their anchor message", async () => {
     const currentUser = await testUtils.createUser("reply-anchor-delete-owner@example.com")

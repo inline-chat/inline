@@ -13,6 +13,10 @@ import { Log } from "@in/server/utils/log"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
 import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePush"
+import { db } from "@in/server/db"
+import { members, messages, type DbChat } from "@in/server/db/schema"
+import { and, eq, inArray } from "drizzle-orm"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 type Input = {
   messageIds: bigint[]
@@ -38,6 +42,12 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     })
     throw error
   }
+
+  await ensureDeleteAllowed({
+    chat,
+    messageIds: input.messageIds,
+    currentUserId: context.currentUserId,
+  })
 
   let { update, metadataChatUpdates } = await MessageModel.deleteMessages(input.messageIds, chat.id)
 
@@ -72,6 +82,54 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
   )
 
   return { updates: [...selfUpdates, ...metadataSelfUpdates] }
+}
+
+async function ensureDeleteAllowed(input: {
+  chat: DbChat
+  messageIds: bigint[]
+  currentUserId: number
+}): Promise<void> {
+  if (input.chat.spaceId === null) {
+    return
+  }
+
+  const messageIds = input.messageIds
+    .map((id) => Number(id))
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
+
+  if (messageIds.length === 0) {
+    return
+  }
+
+  const rows = await db
+    .select({
+      messageId: messages.messageId,
+      fromId: messages.fromId,
+    })
+    .from(messages)
+    .where(and(eq(messages.chatId, input.chat.id), inArray(messages.messageId, messageIds)))
+
+  if (rows.length === 0 || rows.every((message) => message.fromId === input.currentUserId)) {
+    return
+  }
+
+  const [member] = await db
+    .select({ role: members.role })
+    .from(members)
+    .where(and(eq(members.spaceId, input.chat.spaceId), eq(members.userId, input.currentUserId)))
+    .limit(1)
+
+  if (member?.role === "admin" || member?.role === "owner") {
+    return
+  }
+
+  log.warn("deleteMessage blocked: space thread requires author or admin", {
+    chatId: input.chat.id,
+    spaceId: input.chat.spaceId,
+    currentUserId: input.currentUserId,
+    messageIds,
+  })
+  throw RealtimeRpcError.SpaceAdminRequired()
 }
 
 // ------------------------------------------------------------
