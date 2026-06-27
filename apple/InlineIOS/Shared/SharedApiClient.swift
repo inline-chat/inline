@@ -16,6 +16,15 @@ public enum APIError: Error {
   case error(error: String, errorCode: Int?, description: String?)
 }
 
+public extension APIError {
+  var isInviteCodeTaken: Bool {
+    if case let .error(error, _, _) = self {
+      return error == "INVITE_CODE_TAKEN"
+    }
+    return false
+  }
+}
+
 public enum Path: String {
   case sendMessage20250509
 }
