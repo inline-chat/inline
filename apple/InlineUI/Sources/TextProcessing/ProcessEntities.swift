@@ -413,7 +413,7 @@ public class ProcessEntities {
 
         case .threadTitle:
           guard case let .threadTitle(threadTitle) = entity.entity,
-                threadTitle.spaceID > 0,
+                threadTitle.spaceID >= 0,
                 threadTitle.title.isEmpty == false
           else {
             break
@@ -607,7 +607,7 @@ public class ProcessEntities {
             $0.chatID = chatId
           }
         case let .title(spaceId, title):
-          guard spaceId > 0, title.isEmpty == false else { return }
+          guard spaceId >= 0, title.isEmpty == false else { return }
           entity.type = .threadTitle
           entity.threadTitle = MessageEntity.MessageEntityThreadTitle.with {
             $0.spaceID = spaceId
@@ -885,7 +885,7 @@ public class ProcessEntities {
       // NOTE: Only extract if not within code blocks
       entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
 
-      if let threadLinkSpaceId, threadLinkSpaceId > 0 {
+      if let threadLinkSpaceId, threadLinkSpaceId >= 0 {
         entities = extractThreadTitleLinks(text: &text, spaceId: threadLinkSpaceId, existingEntities: entities)
       }
     }
@@ -968,7 +968,7 @@ public class ProcessEntities {
     }
 
     guard host == "thread" else { return nil }
-    guard let spaceId = positiveInt64(queryValue(in: components, names: ["space_id"])) else {
+    guard let spaceId = nonNegativeInt64(queryValue(in: components, names: ["space_id"])) else {
       return nil
     }
 
@@ -1015,6 +1015,13 @@ public class ProcessEntities {
     return id
   }
 
+  private static func nonNegativeInt64(_ value: String?) -> Int64? {
+    guard let value, !value.isEmpty, value.allSatisfy(\.isNumber), let id = Int64(value), id >= 0 else {
+      return nil
+    }
+    return id
+  }
+
   private static func threadEntity(target: ThreadLinkTarget, offset: Int64, length: Int64) -> MessageEntity? {
     var entity = MessageEntity()
     entity.offset = offset
@@ -1028,7 +1035,7 @@ public class ProcessEntities {
           $0.chatID = chatId
         }
       case let .title(spaceId, title):
-        guard spaceId > 0, !title.isEmpty else { return nil }
+        guard spaceId >= 0, !title.isEmpty else { return nil }
         entity.type = .threadTitle
         entity.threadTitle = MessageEntity.MessageEntityThreadTitle.with {
           $0.spaceID = spaceId

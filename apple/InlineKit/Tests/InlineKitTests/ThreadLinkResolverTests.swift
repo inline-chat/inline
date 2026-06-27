@@ -20,6 +20,19 @@ struct ThreadLinkResolverTests {
     }
   }
 
+  @Test("resolves title in home when space id is zero")
+  func resolvesTitleInHomeWhenSpaceIdIsZero() throws {
+    let queue = try makeInMemoryDB()
+
+    try queue.write { db in
+      try seedThread(db, id: 1, spaceId: nil, title: "Personal", date: 1)
+
+      let peer = try ThreadLinkResolver.resolve(.title(spaceId: 0, title: "personal"), db: db)
+
+      #expect(peer == .thread(id: 1))
+    }
+  }
+
   @Test("resolves newest duplicate title in space")
   func resolvesNewestDuplicateTitleInSpace() throws {
     let queue = try makeInMemoryDB()
@@ -48,7 +61,7 @@ struct ThreadLinkResolverTests {
   private func seedThread(
     _ db: Database,
     id: Int64,
-    spaceId: Int64,
+    spaceId: Int64?,
     title: String,
     date: TimeInterval
   ) throws {

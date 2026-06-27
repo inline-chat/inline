@@ -257,6 +257,30 @@ struct ProcessEntitiesTests {
     #expect(titleAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
   }
 
+  @Test("Home thread title entity")
+  func testHomeThreadTitleEntity() {
+    let text = "Open [[Personal]]"
+    let threadRange = rangeOfSubstring("[[Personal]]", in: text)
+    let entities = createMessageEntities([
+      createThreadTitleEntity(
+        offset: Int64(threadRange.location),
+        length: Int64(threadRange.length),
+        spaceId: 0,
+        title: "Personal"
+      ),
+    ])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let titleAttributes = result.attributes(at: threadRange.location + 2, effectiveRange: nil)
+    #expect(titleAttributes[.threadLink] as? ThreadLinkTarget == .title(spaceId: 0, title: "Personal"))
+    #expect(titleAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+  }
+
   @Test("Bot command entity")
   func testBotCommandEntity() {
     let text = "Run /start"
@@ -1314,6 +1338,34 @@ struct ProcessEntitiesTests {
     #expect(threadTitleEntity?.threadTitle.title == "Planning")
   }
 
+  @Test("Extract home thread title link from attributed string")
+  func testExtractHomeThreadTitleLinkFromAttributedString() {
+    let text = "Open [[Personal]]"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
+    )
+
+    let personalRange = rangeOfSubstring("[[Personal]]", in: text)
+    attributedString.addAttribute(
+      .threadLink,
+      value: ThreadLinkTarget.title(spaceId: 0, title: "Personal"),
+      range: personalRange
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .threadTitle)
+    #expect(entity.offset == Int64(personalRange.location))
+    #expect(entity.length == Int64(personalRange.length))
+    #expect(entity.threadTitle.spaceID == 0)
+    #expect(entity.threadTitle.title == "Personal")
+  }
+
   @Test("Extract markdown chat link syntax as thread entity")
   func testExtractMarkdownChatLinkSyntaxAsThreadEntity() {
     let text = "Open [Planning](inline://chat?id=42) now"
@@ -1375,6 +1427,27 @@ struct ProcessEntitiesTests {
     #expect(entity.threadTitle.title == "Planning")
   }
 
+  @Test("Extract markdown home thread title link syntax")
+  func testExtractMarkdownHomeThreadTitleLinkSyntax() {
+    let text = "Open [Personal](inline://thread?space_id=0) now"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "Open Personal now")
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .threadTitle)
+    #expect(entity.offset == 5)
+    #expect(entity.length == 8)
+    #expect(entity.threadTitle.spaceID == 0)
+    #expect(entity.threadTitle.title == "Personal")
+  }
+
   @Test("Extract markdown thread title link syntax with title override")
   func testExtractMarkdownThreadTitleLinkSyntaxWithTitleOverride() {
     let text = "Open [the thread](inline://thread?space_id=7&title=Planning) now"
@@ -1415,6 +1488,27 @@ struct ProcessEntitiesTests {
     #expect(entity.length == 12)
     #expect(entity.threadTitle.spaceID == 7)
     #expect(entity.threadTitle.title == "Planning")
+  }
+
+  @Test("Extract home thread title link syntax")
+  func testExtractHomeThreadTitleLinkSyntax() {
+    let text = "Open [[Personal]] now"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString, threadLinkSpaceId: 0)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .threadTitle)
+    #expect(entity.offset == 5)
+    #expect(entity.length == 12)
+    #expect(entity.threadTitle.spaceID == 0)
+    #expect(entity.threadTitle.title == "Personal")
   }
 
   @Test("Extract thread title link syntax after inline markdown")

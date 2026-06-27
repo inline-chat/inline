@@ -40,17 +40,24 @@ public enum ThreadLinkResolver {
     }
 
     let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedTitle.isEmpty else {
+    guard spaceId >= 0, !trimmedTitle.isEmpty else {
       return nil
     }
 
-    let chats = try Chat
+    var request = Chat
       .filter(Chat.Columns.type == ChatType.thread.rawValue)
-      .filter(Chat.Columns.spaceId == spaceId)
       .filter(Chat.Columns.parentMessageId == nil)
       .filter(sql: "title = ? COLLATE NOCASE", arguments: StatementArguments([trimmedTitle]))
       .order(Chat.Columns.date.desc)
       .limit(1)
+
+    if spaceId == 0 {
+      request = request.filter(sql: #""spaceId" IS NULL"#)
+    } else {
+      request = request.filter(Chat.Columns.spaceId == spaceId)
+    }
+
+    let chats = try request
       .fetchAll(db)
 
     guard let chat = chats.first else { return nil }
@@ -73,7 +80,7 @@ public enum ThreadLinkResolver {
     }
 
     let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard spaceId > 0, !trimmedTitle.isEmpty else {
+    guard spaceId >= 0, !trimmedTitle.isEmpty else {
       return nil
     }
 
@@ -86,7 +93,7 @@ public enum ThreadLinkResolver {
       title: trimmedTitle,
       emoji: nil,
       isPublic: true,
-      spaceId: spaceId,
+      spaceId: spaceId == 0 ? nil : spaceId,
       participants: []
     )
     let peer: Peer = .thread(id: chatId)
