@@ -734,7 +734,7 @@ class MessageListAppKit: NSViewController {
     NSLayoutConstraint.activate([
       scrollToBottomButton.trailingAnchor.constraint(
         equalTo: view.trailingAnchor,
-        constant: -12
+        constant: -14
       ),
       scrollToBottomBottomConstraint,
       scrollToBottomButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),

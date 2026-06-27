@@ -175,7 +175,7 @@ public enum Theme {
   public static let urlPreviewGroupSpacing: CGFloat = 5.0
   public static let urlPreviewGroupBottomSpacing: CGFloat = 2.0
   public static let messageAttachmentsSpacing: CGFloat = 4.0
-  public static let scrollButtonSize: CGFloat = 32.0
+  public static let scrollButtonSize: CGFloat = 34.0
 
   public static let composeMinHeight: CGFloat = 44
   public static let composeAttachmentsVPadding: CGFloat = 6
