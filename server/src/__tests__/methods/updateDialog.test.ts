@@ -6,7 +6,7 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type DecryptedUpdate } from "@in/server/db/models/updates"
 import { db } from "../../db"
 import { chats, dialogs as dialogsTable, messages } from "../../db/schema"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { and, eq } from "drizzle-orm"
 
 describe("updateDialog", () => {

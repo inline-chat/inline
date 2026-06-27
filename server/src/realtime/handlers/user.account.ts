@@ -9,7 +9,7 @@ import {
   type UpdateProfileInput,
   type UpdateProfileResult,
 } from "@inline-chat/protocol/core"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
 import { lower, users, type DbNewUser, type DbUser } from "@in/server/db/schema"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"

@@ -3,7 +3,7 @@ import type { Transaction } from "@in/server/db/types"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { updates, UpdateBucket, users } from "@in/server/db/schema"
 import { eq, sql } from "drizzle-orm"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 

@@ -12,7 +12,7 @@ import { getUpdateGroup } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
 import { UpdateBucket } from "@in/server/db/schema"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import {

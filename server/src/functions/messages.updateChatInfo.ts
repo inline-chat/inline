@@ -10,7 +10,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
 import type { Update } from "@inline-chat/protocol/core"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
 
 const log = new Log("functions.updateChatInfo")

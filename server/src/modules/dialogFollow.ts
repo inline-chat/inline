@@ -1,5 +1,5 @@
 import { DialogFollowMode, type Update } from "@inline-chat/protocol/core"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import { dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"

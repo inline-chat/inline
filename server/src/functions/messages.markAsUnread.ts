@@ -8,7 +8,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
 
 type Input = {

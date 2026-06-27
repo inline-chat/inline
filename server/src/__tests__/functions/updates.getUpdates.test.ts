@@ -9,7 +9,7 @@ import {
   InputPeer,
   Member_Role,
 } from "@inline-chat/protocol/core"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { chats, dialogs, members, messages, spaces } from "@in/server/db/schema"

@@ -1,5 +1,4 @@
 import type { Update } from "@inline-chat/protocol/core"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { db } from "@in/server/db"
 import { dialogs } from "@in/server/db/schema"
 import type { DbChat } from "@in/server/db/schema"

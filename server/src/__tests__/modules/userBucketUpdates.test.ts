@@ -5,7 +5,7 @@ import { db } from "@in/server/db"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket, updates, users } from "@in/server/db/schema"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 describe("UserBucketUpdates", () => {

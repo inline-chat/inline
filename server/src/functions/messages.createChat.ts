@@ -18,7 +18,7 @@ import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuards
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UsersModel } from "@in/server/db/models/users"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"

@@ -9,7 +9,7 @@ import type { Update } from "@inline-chat/protocol/core"
 import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
 
