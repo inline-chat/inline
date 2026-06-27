@@ -13,19 +13,9 @@ enum MacToolbarVisibilityPriority {
       return .low
     }
   }
-
-  @available(macOS 27.0, *)
-  var swiftUI: ToolbarItemVisibilityPriority {
-    switch self {
-    case .high:
-      return .high
-    case .low:
-      return .low
-    }
-  }
 }
 
-/// Wraps toolbar items so macOS 27 can use SwiftUI priority while older macOS keeps the AppKit fallback.
+/// Wraps toolbar items so visibility priority is applied through our AppKit fallback.
 @MainActor
 struct MacToolbarItem<Content: View>: ToolbarContent {
   private let placement: ToolbarItemPlacement
@@ -49,24 +39,13 @@ struct MacToolbarItem<Content: View>: ToolbarContent {
   }
 
   var body: some ToolbarContent {
-    if #available(macOS 27.0, *) {
-      ToolbarItem(placement: placement) {
-        content()
-          .toolbarItemAppKitConfiguration(
-            label: label,
-            isNavigational: isNavigational
-          )
-      }
-      .visibilityPriority(priority.swiftUI)
-    } else {
-      ToolbarItem(placement: placement) {
-        content()
-          .toolbarItemAppKitConfiguration(
-            priority: priority.appKit,
-            label: label,
-            isNavigational: isNavigational
-          )
-      }
+    ToolbarItem(placement: placement) {
+      content()
+        .toolbarItemAppKitConfiguration(
+          priority: priority.appKit,
+          label: label,
+          isNavigational: isNavigational
+        )
     }
   }
 }

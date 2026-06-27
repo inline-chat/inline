@@ -31,7 +31,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   static let textViewVerticalPadding: CGFloat = 0.0
   static let textViewHorizantalPadding: CGFloat = 12.0
   static let textViewHorizantalMargin: CGFloat = 7.0
-  static let textViewVerticalMargin: CGFloat = 4.0
+  static let textViewVerticalMargin: CGFloat = 5.6
 
   // MARK: - Properties
 

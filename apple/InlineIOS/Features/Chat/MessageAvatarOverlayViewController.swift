@@ -4,7 +4,7 @@ import UIKit
 enum MessageAvatarOverlayConfig {
   static let enabled = true
   static let avatarSize: CGFloat = 28
-  static let viewportEdgeInset: CGFloat = 8
+  static let viewportEdgeInset: CGFloat = 0
   static let maxPooledViews = 32
   static let maxPooledViewsPerKey = 3
 }
