@@ -185,6 +185,7 @@ class GlassComposeAppKit: NSView {
   // ---
   private var textViewContentHeight: CGFloat = 0.0
   private var textViewHeight: CGFloat = 0.0
+  private var lastMeasuredTextLayoutWidth: CGFloat = 0.0
 
   // Features
   private var feature_animateHeightChanges = false // for now until fixing how to update list view smoothly
@@ -498,15 +499,18 @@ class GlassComposeAppKit: NSView {
   /// This method is called from ChatViewAppKit's viewDidLayout
   /// Load draft, set initial height, etc here.
   func didLayout() {
-    guard !initializedDraft else { return }
-    let loaded = loadDraft()
-    if !loaded {
-      updateHeight(animate: false)
+    if !initializedDraft {
+      let loaded = loadDraft()
+      if !loaded {
+        updateHeight(animate: false)
 
-      // If no draft is loaded, show placeholder
-      textEditor.showPlaceholder(true)
+        // If no draft is loaded, show placeholder
+        textEditor.showPlaceholder(true)
+      }
+      initializedDraft = true
     }
-    initializedDraft = true
+
+    updateHeightForTextLayoutWidthChange()
   }
 
   private func setUpConstraints() {
@@ -1334,26 +1338,39 @@ class GlassComposeAppKit: NSView {
       return textViewHeight
     }
 
-    textViewHeight = glassTextViewHeight(for: textEditor.string)
+    textViewHeight = glassTextViewHeight(for: textEditor.textView)
 
     return textViewHeight
   }
 
-  private func glassTextViewHeight(for text: String) -> CGFloat {
-    // Glass divergence: do not derive visible height from TextKit content
-    // bounds. Glass compose behaves like a compact input: one-row height by
-    // default, then one line-height per explicit newline.
-    let lineHeight = max(textEditor.getTypingLineHeight(), 1)
-    let rowCount = glassInputLineCount(for: text)
-    let rowHeight = textEditor.minHeight + max(0, rowCount - 1) * lineHeight
-    return min(300.0, max(textEditor.minHeight, ceil(rowHeight)))
+  private func glassTextViewHeight(for textView: NSTextView) -> CGFloat {
+    // Glass divergence: keep the compact input-style vertical insets, but
+    // measure actual layout height so soft wraps grow like explicit newlines.
+    let contentHeight = contentHeight(for: textView)
+    let insetHeight = textView.textContainerInset.height * 2
+    let measuredHeight = ceil(contentHeight + insetHeight)
+    return min(300.0, max(textEditor.minHeight, measuredHeight))
   }
 
-  private func glassInputLineCount(for text: String) -> CGFloat {
-    let newlineCount = text.unicodeScalars.reduce(0) { count, scalar in
-      CharacterSet.newlines.contains(scalar) ? count + 1 : count
+  private func updateHeightForTextLayoutWidthChange() {
+    guard !currentVoiceActive else { return }
+
+    var textLayoutWidth = textEditor.textView.bounds.width
+    if textLayoutWidth <= 1 {
+      textEditor.layoutSubtreeIfNeeded()
+      textLayoutWidth = textEditor.textView.bounds.width
     }
-    return CGFloat(max(1, newlineCount + 1))
+    guard textLayoutWidth > 1 else { return }
+    guard abs(lastMeasuredTextLayoutWidth - textLayoutWidth) >= 0.5 else { return }
+
+    lastMeasuredTextLayoutWidth = textLayoutWidth
+    if textEditor.isAttributedTextEmpty {
+      return
+    }
+
+    // Glass divergence: soft-wrap height depends on the resolved text width,
+    // so window resizing must remeasure even when the text itself did not edit.
+    updateHeightIfNeeded(for: textEditor.textView, animate: false)
   }
 
   private func getChromeHeight(textEditorHeight: CGFloat) -> CGFloat {
@@ -2302,10 +2319,10 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func updateHeightIfNeeded(for textView: NSTextView, animate: Bool = false) {
     let currentTextHeight = max(textEditor.minHeight, textViewHeight)
-    let nextTextHeight = glassTextViewHeight(for: textView.string)
+    let nextTextHeight = glassTextViewHeight(for: textView)
     if abs(currentTextHeight - nextTextHeight) < 0.5 {
-      // Glass divergence: normal typing within the same explicit line count
-      // does not change compose height.
+      // Glass divergence: normal typing within the same measured visual row
+      // count does not change compose height.
       return
     }
 
@@ -2323,8 +2340,30 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     guard let textLayoutManager = textView.textLayoutManager else { return 0 }
-    textLayoutManager.textViewportLayoutController.layoutViewport()
-    return textLayoutManager.usageBoundsForTextContainer.height
+
+    let documentEnd = textLayoutManager.documentRange.endLocation
+    var fragmentMaxY: CGFloat = 0
+    textLayoutManager.enumerateTextLayoutFragments(
+      from: documentEnd,
+      options: [.reverse, .ensuresLayout, .ensuresExtraLineFragment]
+    ) { fragment in
+      fragmentMaxY = max(fragmentMaxY, fragment.layoutFragmentFrame.maxY)
+      return false
+    }
+
+    let segmentRange = NSTextRange(location: documentEnd)
+    textLayoutManager.ensureLayout(for: segmentRange)
+    var segmentMaxY: CGFloat = 0
+    textLayoutManager.enumerateTextSegments(
+      in: segmentRange,
+      type: .standard,
+      options: .middleFragmentsExcluded
+    ) { _, rect, _, _ in
+      segmentMaxY = max(segmentMaxY, rect.maxY)
+      return true
+    }
+
+    return max(segmentMaxY, fragmentMaxY)
   }
 
   func textViewDidChangeSelection(_ notification: Notification) {
