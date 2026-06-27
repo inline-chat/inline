@@ -35,30 +35,37 @@ describe("voice transcription", () => {
   })
 
   test("passes work chat context prompt to the transcriber", async () => {
-    const scenario = await createVoiceMessage("voice-transcribe-context", {
-      userProfile: {
-        firstName: "Mo",
-        lastName: "Inline",
-        username: "mo",
-      },
+    const scenario = await createVoiceMessage("voice-transcribe-context")
+    const prompt = [
+      "You are transcribing a voice message in Inline, a work chat app for teammates.",
+      "Context:",
+      "- Message kind: voice message",
+      "- Chat type: direct message",
+      "- Voice sender: Mo Inline (@mo)",
+      "- Participant/name hints: Mo Inline (@mo)",
+    ].join("\n")
+    const buildPrompt = mock().mockResolvedValue({
+      prompt,
+      chatType: "private",
+      participantCount: 1,
+      includedParticipantCount: 1,
+      hasChatTitle: false,
+      hasSpaceName: false,
     })
-
     const transcribeVoice = mock().mockResolvedValue("ship the branch")
 
     const result = await transcribeAndEditVoiceMessage(scenario, {
       transcribeVoice,
       editText: editMessage,
+      buildPrompt,
     })
 
     expect(result.didEdit).toBe(true)
+    expect(buildPrompt).toHaveBeenCalledTimes(1)
     expect(transcribeVoice).toHaveBeenCalledTimes(1)
 
     const options = transcribeVoice.mock.calls[0]?.[1]
-    expect(options?.prompt).toContain("Inline, a work chat app")
-    expect(options?.prompt).toContain("Message kind: voice message")
-    expect(options?.prompt).toContain("Chat type: direct message")
-    expect(options?.prompt).toContain("Voice sender: Mo Inline (@mo)")
-    expect(options?.prompt).toContain("Participant/name hints: Mo Inline (@mo)")
+    expect(options?.prompt).toBe(prompt)
   })
 
   test("uses the base prompt when prompt context fails", async () => {
