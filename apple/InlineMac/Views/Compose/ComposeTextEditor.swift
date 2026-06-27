@@ -9,6 +9,7 @@ class ComposeTextEditor: NSView {
   public let scrollView: ComposeScrollView
   public let textView: ComposeNSTextView
   private let log = Log.scoped("ComposeTextEditor")
+  private let mode: ComposeControlMode
 
   // MARK: - Theme
 
@@ -21,10 +22,13 @@ class ComposeTextEditor: NSView {
   static let linkColor: NSColor = .linkColor
   private var linkColor: NSColor { Self.linkColor }
 
-  let minHeight: CGFloat = Theme.composeMinHeight
-  let minTextHeight: CGFloat = Theme.composeMinHeight - 2 * Theme.composeVerticalPadding
+  var minHeight: CGFloat { mode.textMinHeight }
+  var minTextHeight: CGFloat { mode.textMinHeight - 2 * Theme.composeVerticalPadding }
   let verticalPadding: CGFloat = Theme.composeVerticalPadding
   let horizontalPadding: CGFloat = Theme.composeTextViewHorizontalPadding
+  private var usesInputStyleTextInsets: Bool {
+    initiallySingleLine || mode.usesInputStyleTextInsets
+  }
 
   // MARK: - Computed
 
@@ -107,10 +111,11 @@ class ComposeTextEditor: NSView {
 
   var initiallySingleLine: Bool
 
-  init(initiallySingleLine: Bool = false) {
+  init(initiallySingleLine: Bool = false, mode: ComposeControlMode = .legacy) {
     scrollView = ComposeScrollView()
     textView = Self.makeTextView()
 
+    self.mode = mode
     self.initiallySingleLine = initiallySingleLine
 
     super.init(frame: .zero)
@@ -127,12 +132,16 @@ class ComposeTextEditor: NSView {
   private func setupViews() {
     // Scroll view
     scrollView.drawsBackground = false
-    scrollView.hasVerticalScroller = true
+    // Glass divergence: the glass compose is a compact input-style field, so
+    // do not show a persistent editor scroller for the normal one-line state.
+    scrollView.hasVerticalScroller = !mode.usesInputStyleTextInsets
     scrollView.hasHorizontalRuler = false
     scrollView.scrollerStyle = .overlay
     scrollView.autoresizingMask = [.width]
     scrollView.translatesAutoresizingMaskIntoConstraints = false
-    scrollView.contentInsets = NSEdgeInsets(top: verticalPadding, left: 8, bottom: verticalPadding, right: 8)
+    scrollView.contentInsets = mode.usesInputStyleTextInsets
+      ? NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+      : NSEdgeInsets(top: verticalPadding, left: 8, bottom: verticalPadding, right: 8)
     scrollView.verticalScrollElasticity = .none
     addSubview(scrollView)
 
@@ -178,16 +187,16 @@ class ComposeTextEditor: NSView {
       .foregroundColor: NSColor.labelColor,
     ]
 
-    if !initiallySingleLine {
+    if usesInputStyleTextInsets {
+      textView.textContainerInset = NSSize(
+        width: 0,
+        height: inputStyleTextInsetHeight()
+      )
+    } else {
       let lineHeight = calculateLineHeight()
       textView.textContainerInset = NSSize(
         width: 0,
         height: (minHeight - lineHeight) / 2
-      )
-    } else {
-      textView.textContainerInset = NSSize(
-        width: 0,
-        height: verticalPadding
       )
     }
 
@@ -357,10 +366,10 @@ class ComposeTextEditor: NSView {
   }
 
   func resetTextViewInsets() {
-    if initiallySingleLine {
+    if usesInputStyleTextInsets {
       textView.textContainerInset = NSSize(
         width: 0,
-        height: verticalPadding
+        height: inputStyleTextInsetHeight()
       )
     } else {
       let lineHeight = getTypingLineHeight()
@@ -372,10 +381,10 @@ class ComposeTextEditor: NSView {
   }
 
   func updateTextViewInsets(contentHeight: CGFloat) {
-    if initiallySingleLine {
+    if usesInputStyleTextInsets {
       textView.textContainerInset = NSSize(
         width: 0,
-        height: verticalPadding
+        height: inputStyleTextInsetHeight()
       )
       return
     }
@@ -398,6 +407,12 @@ class ComposeTextEditor: NSView {
       textView.selectedRange = NSMakeRange(currentRange.location, 0)
       textView.setNeedsDisplay(textView.bounds)
     }
+  }
+
+  private func inputStyleTextInsetHeight() -> CGFloat {
+    // Glass divergence: fixed input-style inset keeps the first line centered
+    // in the 34pt row without using legacy dynamic recentering on height changes.
+    max(0, (minHeight - getTypingLineHeight()) / 2)
   }
 
   private func resetFormattingState() {

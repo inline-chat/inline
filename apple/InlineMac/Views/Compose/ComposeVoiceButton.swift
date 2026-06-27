@@ -2,7 +2,8 @@ import AppKit
 import InlineKit
 
 final class ComposeVoiceButton: NSView {
-  private let size: CGFloat = Theme.composeButtonSize
+  private let mode: ComposeControlMode
+  private var size: CGFloat { mode.voiceButtonSize }
   private let iconView: NSImageView
   private var trackingArea: NSTrackingArea?
   private var isHovering = false
@@ -10,8 +11,9 @@ final class ComposeVoiceButton: NSView {
   var onClick: (() -> Void)?
 
   override init(frame frameRect: NSRect) {
+    mode = .legacy
     let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Record voice message")?
-      .withSymbolConfiguration(.init(pointSize: size * 0.56, weight: .semibold))
+      .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
     iconView = NSImageView(image: image ?? NSImage())
     iconView.translatesAutoresizingMaskIntoConstraints = false
     iconView.contentTintColor = .tertiaryLabelColor
@@ -20,8 +22,20 @@ final class ComposeVoiceButton: NSView {
     setupView()
   }
 
+  init(mode: ComposeControlMode) {
+    self.mode = mode
+    let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Record voice message")?
+      .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
+    iconView = NSImageView(image: image ?? NSImage())
+    iconView.translatesAutoresizingMaskIntoConstraints = false
+    iconView.contentTintColor = .tertiaryLabelColor
+
+    super.init(frame: .zero)
+    setupView()
+  }
+
   convenience init() {
-    self.init(frame: .zero)
+    self.init(mode: .legacy)
   }
 
   @available(*, unavailable)
@@ -84,6 +98,11 @@ final class ComposeVoiceButton: NSView {
   }
 
   private func updateBackgroundColor() {
+    guard mode.usesCustomHoverFill else {
+      layer?.backgroundColor = NSColor.clear.cgColor
+      return
+    }
+
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.12
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)

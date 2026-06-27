@@ -2,12 +2,13 @@ import SwiftUI
 
 struct ComposeSendButtonSwiftUI: View {
   @ObservedObject var state: ComposeSendButtonState
+  let mode: ComposeControlMode
   var action: () -> Void
   var toggleSendSilently: () -> Void
   @State private var isHovering = false
   @Environment(\.colorScheme) private var colorScheme
 
-  private let size: CGFloat = Theme.composeButtonSize
+  private var size: CGFloat { mode.sendButtonSize }
   private let disabledBackgroundColor: Color = Color(nsColor: .quinaryLabel)
 
   private var enabledBackgroundColor: Color {
@@ -32,14 +33,14 @@ struct ComposeSendButtonSwiftUI: View {
   var body: some View {
     let isEnabled = state.canSend
     let targetSize = isEnabled ? size : size * 0.9
-    let iconSize = isEnabled ? 16.0 : 14.0
+    let iconSize = isEnabled ? mode.sendIconPointSize : mode.sendIconPointSize - 2
     let padding = isEnabled ? 5.0 : 4.0
     Button(action: {
       guard isEnabled else { return }
       action()
     }) {
       Image(systemName: "arrow.up")
-        .font(.system(size: iconSize, weight: .semibold))
+        .font(.system(size: iconSize, weight: .medium))
         .foregroundStyle(iconForegroundColor)
         .padding(padding)
         .frame(width: targetSize, height: targetSize)

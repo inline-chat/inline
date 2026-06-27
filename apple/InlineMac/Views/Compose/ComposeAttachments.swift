@@ -2,7 +2,7 @@ import AppKit
 import InlineKit
 
 final class ComposeAttachments: NSView {
-  private weak var compose: ComposeAppKit?
+  private weak var compose: (any ComposeAttachmentOwner)?
 
   private var attachments: [String: ImageAttachmentView] = [:]
   private var videoAttachments: [String: VideoAttachmentView] = [:]
@@ -44,7 +44,7 @@ final class ComposeAttachments: NSView {
   private var filesLeadingConstraint: NSLayoutConstraint!
   private var verticalPadding: CGFloat = Theme.composeAttachmentsVPadding
 
-  init(frame: NSRect, compose: ComposeAppKit) {
+  init(frame: NSRect, compose: any ComposeAttachmentOwner) {
     self.compose = compose
 
     mediaLayout = NSCollectionViewFlowLayout()

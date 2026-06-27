@@ -6,9 +6,10 @@ protocol ComposeEmojiButtonDelegate: AnyObject {
 }
 
 final class ComposeEmojiButton: NSView {
-  private let size: CGFloat = Theme.composeButtonSize
-  private let iconView: NSImageView
-  private let textView: EmojiReceiverTextView
+  private let mode: ComposeControlMode
+  private var size: CGFloat { mode.emojiButtonSize }
+  private let button: NSButton
+  private let textView: NSTextView
   private let scrollView: NSScrollView
   private var isHandlingChange = false
   private let stickerDetector = ComposeStickerDetector()
@@ -21,20 +22,27 @@ final class ComposeEmojiButton: NSView {
   }
 
   override init(frame frameRect: NSRect) {
-    let image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: nil)?
-      .withSymbolConfiguration(.init(pointSize: size * 0.6, weight: .semibold))
-    iconView = NSImageView(image: image ?? NSImage())
-    iconView.translatesAutoresizingMaskIntoConstraints = false
-    iconView.contentTintColor = .tertiaryLabelColor
+    mode = .legacy
+    button = Self.makeButton(mode: mode)
 
-    textView = EmojiReceiverTextView(frame: .zero)
+    textView = NSTextView(frame: .zero)
     scrollView = NSScrollView(frame: .zero)
     super.init(frame: frameRect)
     setupView()
   }
 
+  init(mode: ComposeControlMode) {
+    self.mode = mode
+    button = Self.makeButton(mode: mode)
+
+    textView = NSTextView(frame: .zero)
+    scrollView = NSScrollView(frame: .zero)
+    super.init(frame: .zero)
+    setupView()
+  }
+
   convenience init() {
-    self.init(frame: .zero)
+    self.init(mode: .legacy)
   }
 
   @available(*, unavailable)
@@ -43,9 +51,14 @@ final class ComposeEmojiButton: NSView {
   }
 
   private func setupView() {
+    translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
     layer?.cornerRadius = size / 2
     layer?.backgroundColor = NSColor.clear.cgColor
+
+    button.target = self
+    button.action = #selector(handleClick)
+    button.toolTip = "Emoji"
 
     textView.isEditable = true
     textView.isSelectable = true
@@ -58,56 +71,56 @@ final class ComposeEmojiButton: NSView {
     textView.isVerticallyResizable = false
     textView.isHorizontallyResizable = false
     textView.delegate = self
-    textView.onFocus = { [weak self] in
-      self?.focusWindowIfNeeded()
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-        guard self?.canShowEmojiPanel == true else { return }
-        self?.showEmojiPanel()
-      }
-    }
 
     scrollView.drawsBackground = false
+    scrollView.borderType = .noBorder
     scrollView.hasVerticalScroller = false
     scrollView.hasHorizontalScroller = false
     scrollView.autohidesScrollers = true
+    // AppKit's emoji panel inserts into the first responder text view. Keep a
+    // tiny receiver around for insertion, but make the visible affordance a
+    // real button.
+    scrollView.alphaValue = 0
     scrollView.documentView = textView
     scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-    addSubview(iconView)
     addSubview(scrollView)
+    addSubview(button)
 
     NSLayoutConstraint.activate([
       widthAnchor.constraint(equalToConstant: size),
       heightAnchor.constraint(equalToConstant: size),
 
-      iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      button.leadingAnchor.constraint(equalTo: leadingAnchor),
+      button.trailingAnchor.constraint(equalTo: trailingAnchor),
+      button.topAnchor.constraint(equalTo: topAnchor),
+      button.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       scrollView.topAnchor.constraint(equalTo: topAnchor),
-      scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      scrollView.widthAnchor.constraint(equalToConstant: 1),
+      scrollView.heightAnchor.constraint(equalToConstant: 1),
     ])
   }
 
-  override func mouseDown(with event: NSEvent) {
-    if let window {
-      if !NSApplication.shared.isActive {
-        NSApplication.shared.activate(ignoringOtherApps: true)
-      }
-      if !window.isKeyWindow {
-        window.makeKeyAndOrderFront(nil)
-      }
-    }
-    super.mouseDown(with: event)
+  private static func makeButton(mode: ComposeControlMode) -> NSButton {
+    let button = NSButton(frame: .zero)
+    button.bezelStyle = .regularSquare
+    button.isBordered = false
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.imageScaling = .scaleNone
+    button.image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: "Emoji")?
+      .withSymbolConfiguration(.init(pointSize: mode.emojiIconPointSize, weight: .medium))
+    button.contentTintColor = .tertiaryLabelColor
+    return button
+  }
+
+  @objc private func handleClick() {
+    focusWindowIfNeeded()
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
       guard self.canShowEmojiPanel else { return }
-      if self.textView.window?.firstResponder === self.textView {
-        self.showEmojiPanel()
-      } else {
-        _ = self.window?.makeFirstResponder(self.textView)
-      }
+      self.showEmojiPanel()
     }
   }
 
@@ -146,6 +159,11 @@ final class ComposeEmojiButton: NSView {
   }
 
   private func updateBackgroundColor() {
+    guard mode.usesCustomHoverFill else {
+      layer?.backgroundColor = NSColor.clear.cgColor
+      return
+    }
+
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.2
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -182,21 +200,6 @@ final class ComposeEmojiButton: NSView {
     window?.makeFirstResponder(nil)
   }
 }
-
-private final class EmojiReceiverTextView: NSTextView {
-  var onFocus: (() -> Void)?
-
-  @discardableResult
-  override func becomeFirstResponder() -> Bool {
-    let result = super.becomeFirstResponder()
-    if result {
-      onFocus?()
-    }
-    return result
-  }
-
-}
-
 
 extension ComposeEmojiButton: NSTextViewDelegate {
   func textDidChange(_ notification: Notification) {

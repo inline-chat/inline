@@ -3,7 +3,8 @@ import AppKit
 final class ComposeSilentModeButton: NSView {
   static let controlSize: CGFloat = Theme.composeButtonSize * 0.94
 
-  private let size: CGFloat = ComposeSilentModeButton.controlSize
+  private let mode: ComposeControlMode
+  private var size: CGFloat { mode.silentButtonSize }
   private let iconView: NSImageView
   private var trackingArea: NSTrackingArea?
   private var isHovering = false
@@ -11,7 +12,8 @@ final class ComposeSilentModeButton: NSView {
   var onClick: (() -> Void)?
 
   override init(frame frameRect: NSRect) {
-    let configuration = NSImage.SymbolConfiguration(pointSize: ComposeSilentModeButton.controlSize * 0.58, weight: .semibold)
+    mode = .legacy
+    let configuration = NSImage.SymbolConfiguration(pointSize: mode.silentIconPointSize, weight: .medium)
     let image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: "Disable send silently")?
       .withSymbolConfiguration(configuration)
     iconView = NSImageView(image: image ?? NSImage())
@@ -22,8 +24,21 @@ final class ComposeSilentModeButton: NSView {
     setupView()
   }
 
+  init(mode: ComposeControlMode) {
+    self.mode = mode
+    let configuration = NSImage.SymbolConfiguration(pointSize: mode.silentIconPointSize, weight: .medium)
+    let image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: "Disable send silently")?
+      .withSymbolConfiguration(configuration)
+    iconView = NSImageView(image: image ?? NSImage())
+    iconView.translatesAutoresizingMaskIntoConstraints = false
+    iconView.contentTintColor = .tertiaryLabelColor
+
+    super.init(frame: .zero)
+    setupView()
+  }
+
   convenience init() {
-    self.init(frame: .zero)
+    self.init(mode: .legacy)
   }
 
   @available(*, unavailable)
@@ -83,6 +98,11 @@ final class ComposeSilentModeButton: NSView {
   }
 
   private func updateBackgroundColor() {
+    guard mode.usesCustomHoverFill else {
+      layer?.backgroundColor = NSColor.clear.cgColor
+      return
+    }
+
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.12
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)

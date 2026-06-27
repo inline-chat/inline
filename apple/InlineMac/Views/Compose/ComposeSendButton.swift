@@ -4,6 +4,7 @@ import SwiftUI
 
 class ComposeSendButton: NSView {
   var state = ComposeSendButtonState()
+  private let mode: ComposeControlMode
 
   var onSend: (() -> Void)?
   var onToggleSendSilently: (() -> Void)?
@@ -13,6 +14,7 @@ class ComposeSendButton: NSView {
   private lazy var view: NSHostingView<ComposeSendButtonSwiftUI> = {
     let sendButton = ComposeSendButtonSwiftUI(
       state: state,
+      mode: mode,
       action: { [weak self] in
         self?.onSend?()
       },
@@ -29,7 +31,13 @@ class ComposeSendButton: NSView {
 
   // MARK: - Initialization
 
-  init(frame: NSRect = .zero, onSend: (() -> Void)? = nil, onToggleSendSilently: (() -> Void)? = nil) {
+  init(
+    frame: NSRect = .zero,
+    mode: ComposeControlMode = .legacy,
+    onSend: (() -> Void)? = nil,
+    onToggleSendSilently: (() -> Void)? = nil
+  ) {
+    self.mode = mode
     self.onSend = onSend
     self.onToggleSendSilently = onToggleSendSilently
     super.init(frame: frame)
@@ -59,8 +67,8 @@ class ComposeSendButton: NSView {
       view.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       // Set fixed size for the button container
-      widthAnchor.constraint(equalToConstant: Theme.composeButtonSize),
-      heightAnchor.constraint(equalToConstant: Theme.composeButtonSize),
+      widthAnchor.constraint(equalToConstant: mode.sendButtonSize),
+      heightAnchor.constraint(equalToConstant: mode.sendButtonSize),
     ])
   }
 

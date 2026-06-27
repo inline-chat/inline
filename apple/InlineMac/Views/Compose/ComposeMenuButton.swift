@@ -4,7 +4,8 @@ import InlineKit
 import UniformTypeIdentifiers
 
 class ComposeMenuButton: NSView {
-  private let size: CGFloat = Theme.composeButtonSize
+  private let mode: ComposeControlMode
+  private var size: CGFloat { mode.sideButtonSize }
   private let button: NSButton
   private var trackingArea: NSTrackingArea?
   private var isHovering = false
@@ -17,14 +18,15 @@ class ComposeMenuButton: NSView {
 
   // MARK: - Initialization
 
-  init() {
+  init(mode: ComposeControlMode = .legacy) {
+    self.mode = mode
     button = NSButton(frame: .zero)
     button.bezelStyle = .regularSquare
     button.isBordered = false
     button.translatesAutoresizingMaskIntoConstraints = false
 
     let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
-      .withSymbolConfiguration(.init(pointSize: size * 0.6, weight: .semibold))
+      .withSymbolConfiguration(.init(pointSize: mode.sideIconPointSize, weight: .medium))
     button.image = image
     button.contentTintColor = .tertiaryLabelColor
 
@@ -212,6 +214,11 @@ class ComposeMenuButton: NSView {
   }
 
   private func updateBackgroundColor() {
+    guard mode.usesCustomHoverFill else {
+      layer?.backgroundColor = NSColor.clear.cgColor
+      return
+    }
+
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.2
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -219,7 +226,7 @@ class ComposeMenuButton: NSView {
       if isHovering {
         layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.1).cgColor
       } else {
-        layer?.backgroundColor = .clear
+        layer?.backgroundColor = NSColor.clear.cgColor
       }
     }
   }

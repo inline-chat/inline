@@ -6,14 +6,31 @@ import SwiftUI
 struct ComposeVoiceInputView: View {
   @ObservedObject var viewModel: ComposeVoiceRecordingViewModel
 
+  let mode: ComposeControlMode
   let onPause: @MainActor () -> Void
   let onPlay: @MainActor () -> Void
   let onCancel: @MainActor () -> Void
   let onSend: @MainActor () -> Void
 
+  init(
+    viewModel: ComposeVoiceRecordingViewModel,
+    mode: ComposeControlMode = .legacy,
+    onPause: @escaping @MainActor () -> Void,
+    onPlay: @escaping @MainActor () -> Void,
+    onCancel: @escaping @MainActor () -> Void,
+    onSend: @escaping @MainActor () -> Void
+  ) {
+    self.viewModel = viewModel
+    self.mode = mode
+    self.onPause = onPause
+    self.onPlay = onPlay
+    self.onCancel = onCancel
+    self.onSend = onSend
+  }
+
   var body: some View {
     if ExperimentalFeatureFlags.voiceMessagesEnabled {
-      HStack(spacing: 10) {
+      HStack(alignment: rowAlignment, spacing: rowSpacing) {
         switch viewModel.phase {
         case .recording:
           recordingIndicator
@@ -38,23 +55,48 @@ struct ComposeVoiceInputView: View {
           EmptyView()
         }
       }
-      .padding(.horizontal, 4)
-      .frame(maxWidth: .infinity, minHeight: Theme.composeMinHeight, maxHeight: Theme.composeMinHeight)
+      .padding(.horizontal, horizontalPadding)
+      .frame(
+        maxWidth: .infinity,
+        minHeight: mode.textMinHeight,
+        maxHeight: mode.textMinHeight,
+        alignment: rowFrameAlignment
+      )
     }
+  }
+
+  private var isGlass: Bool {
+    mode == .glass
+  }
+
+  private var rowAlignment: VerticalAlignment {
+    isGlass ? .center : .bottom
+  }
+
+  private var rowFrameAlignment: Alignment {
+    isGlass ? .center : .bottom
+  }
+
+  private var rowSpacing: CGFloat {
+    isGlass ? 6 : 10
+  }
+
+  private var horizontalPadding: CGFloat {
+    isGlass ? 2 : 4
   }
 
   private var recordingIndicator: some View {
     Circle()
       .fill(Color.red)
-      .frame(width: 8, height: 8)
+      .frame(width: isGlass ? 6 : 8, height: isGlass ? 6 : 8)
       .accessibilityLabel("Recording")
   }
 
   private var durationLabel: some View {
     Text(Self.format(duration: viewModel.duration))
-      .font(.caption.monospacedDigit())
+      .font((isGlass ? Font.caption2 : Font.caption).monospacedDigit())
       .foregroundStyle(.secondary)
-      .frame(minWidth: 38, alignment: .trailing)
+      .frame(minWidth: isGlass ? 30 : 38, alignment: .trailing)
   }
 
   private func waveform(progress: Double, onSeek: (@MainActor @Sendable (Double) -> Void)? = nil) -> some View {
@@ -63,16 +105,16 @@ struct ComposeVoiceInputView: View {
       progress: progress,
       foreground: Color(nsColor: .secondaryLabelColor),
       background: Color(nsColor: .tertiaryLabelColor).opacity(0.45),
-      targetBarCount: 160,
-      barWidth: 1.5,
-      barSpacing: 2,
+      targetBarCount: isGlass ? 96 : 160,
+      barWidth: isGlass ? 1 : 1.5,
+      barSpacing: isGlass ? 1.5 : 2,
       minBarHeight: 2,
-      verticalAlignment: .bottom,
+      verticalAlignment: isGlass ? .center : .bottom,
       shortSamplesMode: viewModel.phase == .recording ? .padLeadingQuiet : .stretch,
       motion: viewModel.phase == .recording ? .recordingReel : .fixed,
       onSeek: onSeek
     )
-    .frame(height: 20)
+    .frame(height: isGlass ? 14 : 20)
     .frame(maxWidth: .infinity)
   }
 
@@ -86,6 +128,7 @@ struct ComposeVoiceInputView: View {
       systemName: systemName,
       title: title,
       isPrimary: isPrimary,
+      mode: mode,
       action: action
     )
   }
@@ -103,15 +146,16 @@ private struct VoiceIconControl: View {
   let systemName: String
   let title: String
   let isPrimary: Bool
+  let mode: ComposeControlMode
   let action: @MainActor () -> Void
 
   @State private var isHovering = false
 
   var body: some View {
     Image(systemName: systemName)
-      .font(.system(size: 13, weight: .semibold))
+      .font(.system(size: mode.voiceInputIconPointSize, weight: .medium))
       .foregroundStyle(isPrimary ? Color.white : Color.primary)
-      .frame(width: Theme.composeButtonSize, height: Theme.composeButtonSize)
+      .frame(width: mode.voiceInputButtonSize, height: mode.voiceInputButtonSize)
       .background(
         Circle()
           .fill(backgroundColor)
