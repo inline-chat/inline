@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 
 const parseCompletion = mock()
-const getCachedUserName = mock()
+const getCachedUserName = mock(getUserNameFromDb)
 
 mock.module("@in/server/libs/openAI", () => ({
   openaiClient: {
@@ -15,25 +15,34 @@ mock.module("@in/server/libs/openAI", () => ({
 
 mock.module("@in/server/modules/cache/userNames", () => ({
   getCachedUserName,
+  UserNamesCache: {
+    getCachedUserName,
+    getDisplayName,
+  },
 }))
 
 mock.module("@in/server/modules/notifications/eval", () => ({
   relativeTimeFromNow: () => "just now",
 }))
 
-mock.module("@in/server/env", () => ({
-  HARDCODED_TRANSLATION_CONTEXT: "Shared work chat context",
-  isProd: false,
-}))
-
 describe("translateTexts", () => {
   afterEach(() => {
     parseCompletion.mockReset()
     getCachedUserName.mockReset()
+    getCachedUserName.mockImplementation(getUserNameFromDb)
   })
 
   test("places context messages inside an explicit non-translatable boundary block", async () => {
-    getCachedUserName.mockResolvedValue({ firstName: "Alice" })
+    getCachedUserName.mockResolvedValue({
+      id: 7,
+      firstName: "Alice",
+      lastName: null,
+      username: null,
+      email: null,
+      phone: null,
+      timeZone: null,
+      cacheDate: Date.now(),
+    })
     parseCompletion.mockResolvedValue({
       choices: [
         {
@@ -129,3 +138,35 @@ describe("translateTexts", () => {
     ).rejects.toThrow("Invalid translation output")
   })
 })
+
+async function getUserNameFromDb(userId: number) {
+  const [{ db }, { users }, { eq }] = await Promise.all([
+    import("@in/server/db"),
+    import("@in/server/db/schema"),
+    import("drizzle-orm"),
+  ])
+
+  const user = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .then(([user]) => user)
+
+  if (!user) return undefined
+
+  return {
+    id: userId,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    username: user.username,
+    email: user.emailVerified ? user.email : null,
+    phone: user.phoneVerified ? user.phoneNumber : null,
+    timeZone: user.timeZone,
+    cacheDate: Date.now(),
+  }
+}
+
+function getDisplayName(userName: Awaited<ReturnType<typeof getUserNameFromDb>>): string | null {
+  if (!userName) return null
+  return userName.firstName ?? userName.lastName ?? userName.username ?? userName.email ?? userName.phone ?? null
+}

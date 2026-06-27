@@ -193,6 +193,9 @@
     "Are you sure you want to remove %@ from the chat?" : {
 
     },
+    "Auto" : {
+
+    },
     "Auto-Download" : {
 
     },
@@ -487,6 +490,9 @@
       }
     },
     "Creating..." : {
+
+    },
+    "Current: %@" : {
 
     },
     "Debug" : {
@@ -796,6 +802,9 @@
     "Message" : {
 
     },
+    "Microphone" : {
+
+    },
     "More" : {
 
     },
@@ -925,6 +934,9 @@
         }
       }
     },
+    "Pick a preferred device" : {
+
+    },
     "Pin" : {
 
     },
@@ -985,9 +997,6 @@
 
     },
     "Saving..." : {
-
-    },
-    "Scenarios" : {
 
     },
     "Search countries..." : {
@@ -1122,6 +1131,9 @@
 
     },
     "Sync Engine" : {
+
+    },
+    "System default" : {
 
     },
     "The document is not available for preview. Please try downloading it again." : {
