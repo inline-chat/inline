@@ -32,6 +32,9 @@ const baseMessage: DbMessage = {
   actionsEncrypted: null,
   actionsIv: null,
   actionsTag: null,
+  systemMessageEncrypted: null,
+  systemMessageIv: null,
+  systemMessageTag: null,
   chatId: 10,
   fromId: 100,
   editDate: null,
@@ -109,6 +112,7 @@ const baseFullMessage: DbFullMessage = {
   hasLink: null,
   entities: null,
   actions: null,
+  systemMessage: null,
   from: baseUser,
   reactions: [],
   photo: null,
@@ -350,5 +354,82 @@ describe("mentioned", () => {
     })
 
     expect(result.mentioned).toBe(false)
+  })
+})
+
+describe("service messages", () => {
+  it("encodes thread backlink service metadata on full messages", () => {
+    const result = encodeFullMessage({
+      message: buildFullMessage({
+        text: "Linked from Source",
+        systemMessage: {
+          event: {
+            oneofKind: "threadBacklink",
+            threadBacklink: { graphLinkId: 42n, sourceChatId: 10n, sourceTitle: "Source" },
+          },
+        },
+      }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.message).toBe("Linked from Source")
+    expect(result.serviceMessage?.event.oneofKind).toBe("threadBacklink")
+    if (result.serviceMessage?.event.oneofKind !== "threadBacklink") {
+      throw new Error("expected thread backlink service message")
+    }
+    expect(result.serviceMessage.event.threadBacklink.sourceChatId).toBe(10n)
+    expect(result.serviceMessage.event.threadBacklink.sourceTitle).toBe("Source")
+  })
+
+  it("encodes pinned message service metadata with target message id", () => {
+    const result = encodeFullMessage({
+      message: buildFullMessage({
+        text: "Pinned a message",
+        systemMessage: {
+          event: {
+            oneofKind: "pinnedMessage",
+            pinnedMessage: {
+              pinnedMessageGlobalId: 900n,
+              pinnedMessageId: 12n,
+            },
+          },
+        },
+      }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.message).toBe("Pinned a message")
+    expect(result.serviceMessage?.event.oneofKind).toBe("pinnedMessage")
+    if (result.serviceMessage?.event.oneofKind !== "pinnedMessage") {
+      throw new Error("Expected pinned message service metadata")
+    }
+    expect(result.serviceMessage.event.pinnedMessage.messageId).toBe(12n)
+  })
+
+  it("encodes service metadata on non-full processed messages when present", () => {
+    const result = encodeMessage({
+      message: {
+        ...buildMessage({ text: "Pinned a message" }),
+        systemMessage: {
+          event: {
+            oneofKind: "pinnedMessage",
+            pinnedMessage: {
+              pinnedMessageGlobalId: 901n,
+              pinnedMessageId: 13n,
+            },
+          },
+        },
+      },
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.serviceMessage?.event.oneofKind).toBe("pinnedMessage")
+    if (result.serviceMessage?.event.oneofKind !== "pinnedMessage") {
+      throw new Error("Expected pinned message service metadata")
+    }
+    expect(result.serviceMessage.event.pinnedMessage.messageId).toBe(13n)
   })
 })

@@ -19,12 +19,13 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import type { Chat, ChatParticipant, Dialog, Message } from "@inline-chat/protocol/core"
 import type { Transaction } from "@in/server/db/types"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
 import { and, eq, inArray } from "drizzle-orm"
+import { queueReplyThreadGraphMaterialization } from "@in/server/modules/threadGraph"
 
 type Input = {
   parentChatId: bigint
@@ -96,6 +97,11 @@ export async function createSubthread(input: Input, context: FunctionContext): P
         currentUserId: context.currentUserId,
         anchorMessage,
       })
+      queueReplyThreadGraphMaterialization({
+        replyThread: existingReplyThread,
+        parentChat,
+        parentMessageGlobalId: anchorMessage?.globalId ?? null,
+      })
 
       return encodeSubthreadResult({
         chat: existingReplyThread,
@@ -152,6 +158,11 @@ export async function createSubthread(input: Input, context: FunctionContext): P
       parentMessageId,
       currentUserId: context.currentUserId,
       update: parentSummaryUpdate,
+    })
+    queueReplyThreadGraphMaterialization({
+      replyThread: chat,
+      parentChat,
+      parentMessageGlobalId: anchorMessage?.globalId ?? null,
     })
   }
 

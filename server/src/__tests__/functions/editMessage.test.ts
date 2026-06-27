@@ -11,8 +11,8 @@ import { editMessage } from "@in/server/functions/messages.editMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { files, users, voices } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
+import { files, messages, threadGraphLinks, users, voices } from "@in/server/db/schema"
+import { and, eq, isNull } from "drizzle-orm"
 
 let currentUser: DbUser
 let privateChat: DbChat
@@ -29,6 +29,12 @@ function extractEditedMessage(result: EditMessageResult): Message | null {
     return null
   }
   return update.update.editMessage?.message ?? null
+}
+
+function extractSentMessageId(result: Awaited<ReturnType<typeof sendMessage>>): bigint | undefined {
+  return result.updates[0]?.update.oneofKind === "updateMessageId"
+    ? result.updates[0].update.updateMessageId?.messageId
+    : undefined
 }
 
 async function createVoiceForUser(userId: number) {
@@ -235,4 +241,138 @@ describe("editMessage function", () => {
     expect(editedMessage?.message).toBe("voice transcript")
     expect(editedMessage?.media?.media.oneofKind).toBe("voice")
   })
+
+  test("replaces explicit thread graph links when editing message entities", async () => {
+    const source = await testUtils.createChat(null, "Graph source", "thread", false, currentUser.id)
+    const target = await testUtils.createChat(null, "Graph target", "thread", false, currentUser.id)
+    if (!source || !target) {
+      throw new Error("Failed to create graph test chats")
+    }
+
+    await testUtils.addParticipant(source.id, currentUser.id)
+    await testUtils.addParticipant(target.id, currentUser.id)
+
+    const sent = await sendMessage(
+      {
+        peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(source.id) } } },
+        message: "see target",
+        entities: {
+          entities: [
+            {
+              type: MessageEntity_Type.THREAD,
+              offset: 4n,
+              length: 6n,
+              entity: {
+                oneofKind: "thread",
+                thread: { chatId: BigInt(target.id) },
+              },
+            },
+          ],
+        },
+      },
+      context,
+    )
+
+    const sentMessageId = extractSentMessageId(sent)
+    expect(sentMessageId).toBeTruthy()
+
+    const link = await waitForThreadGraphLinks({
+      fromChatId: source.id,
+      fromMessageId: Number(sentMessageId),
+      count: 1,
+      withBacklink: true,
+    }).then((links) => links[0])
+
+    const backlinkMessageGlobalId = link?.backlinkMessageGlobalId
+    expect(backlinkMessageGlobalId).toBeTruthy()
+
+    expect(link).toMatchObject({
+      kind: "thread_link",
+      scopeType: "user",
+      scopeId: currentUser.id,
+      fromChatId: source.id,
+      fromMessageId: Number(sentMessageId),
+      fromMessageRevision: 0,
+      entityIndex: 0,
+      toChatId: target.id,
+      deletedAt: null,
+    })
+
+    const [backlinkMessage] = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.globalId, backlinkMessageGlobalId!))
+      .limit(1)
+    expect(backlinkMessage).toBeTruthy()
+    expect(backlinkMessage?.chatId).toBe(target.id)
+    expect(backlinkMessage?.systemMessageEncrypted).toBeTruthy()
+
+    await editMessage(
+      {
+        messageId: sentMessageId!,
+        peer: { type: { oneofKind: "chat", chat: { chatId: BigInt(source.id) } } },
+        text: "no link",
+      },
+      context,
+    )
+
+    await waitForThreadGraphLinks({
+      fromChatId: source.id,
+      fromMessageId: Number(sentMessageId),
+      count: 0,
+    })
+
+    const inactiveLinks = await db
+      .select()
+      .from(threadGraphLinks)
+      .where(
+        and(
+          eq(threadGraphLinks.kind, "thread_link"),
+          eq(threadGraphLinks.fromChatId, source.id),
+          eq(threadGraphLinks.fromMessageId, Number(sentMessageId)),
+        ),
+      )
+    expect(inactiveLinks).toHaveLength(1)
+    expect(inactiveLinks[0]?.deletedAt).toBeTruthy()
+    expect(inactiveLinks[0]?.backlinkMessageGlobalId).toBeNull()
+
+    const deletedBacklinkMessages = await db
+      .select({ globalId: messages.globalId })
+      .from(messages)
+      .where(eq(messages.globalId, backlinkMessageGlobalId!))
+    expect(deletedBacklinkMessages).toHaveLength(0)
+  })
 })
+
+async function waitForThreadGraphLinks(input: {
+  fromChatId: number
+  fromMessageId: number
+  count: number
+  withBacklink?: boolean
+}) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const links = await db
+      .select()
+      .from(threadGraphLinks)
+      .where(
+        and(
+          eq(threadGraphLinks.kind, "thread_link"),
+          eq(threadGraphLinks.fromChatId, input.fromChatId),
+          eq(threadGraphLinks.fromMessageId, input.fromMessageId),
+          isNull(threadGraphLinks.deletedAt),
+        ),
+      )
+
+    if (links.length === input.count && (!input.withBacklink || links.every((link) => link.backlinkMessageGlobalId))) {
+      return links
+    }
+
+    await sleep(10)
+  }
+
+  throw new Error(`Expected ${input.count} graph links for message ${input.fromChatId}:${input.fromMessageId}`)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}

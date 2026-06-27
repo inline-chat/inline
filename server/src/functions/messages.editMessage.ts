@@ -15,6 +15,8 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
+import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 
 type Input = {
   messageId: bigint
@@ -45,12 +47,16 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     entities: input.entities,
     parseMarkdown: input.parseMarkdown,
   })
+  const entities = await resolveThreadTitleLinks({
+    entities: outgoingText.entities,
+    context,
+  })
 
   const { message, update } = await MessageModel.editMessage({
     messageId: Number(input.messageId),
     chatId,
     text: outgoingText.text,
-    entities: outgoingText.entities,
+    entities,
     actions: normalizedActions,
   })
 
@@ -58,6 +64,15 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     Log.shared.error("Message not found")
     throw new Error("Message not found")
   }
+
+  queueMessageThreadLinkMaterialization({
+    sourceChatId: chatId,
+    sourceMessageGlobalId: message.globalId,
+    sourceMessageId: message.messageId,
+    sourceMessageFromId: message.fromId,
+    sourceMessageRevision: message.rev,
+    entities,
+  })
 
   const messageInfo: MessageInfo = {
     message: message,

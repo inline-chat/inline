@@ -1,11 +1,12 @@
 import type { InputPeer, Update } from "@inline-chat/protocol/core"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { chats, messages } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { insertPinnedMessageSystemMessage } from "@in/server/modules/systemMessages"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -49,14 +50,18 @@ export const pinMessage = async (input: Input, context: FunctionContext): Promis
 
   const unpin = Boolean(input.unpin)
 
-  const { update, pinnedMessageIds } = await db.transaction(async (tx) => {
+  const { update, pinnedMessageIds, pinnedMessageGlobalId, pinnedMessageId } = await db.transaction(async (tx) => {
     const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
     if (!lockedChat) {
       throw RealtimeRpcError.ChatIdInvalid()
     }
 
     const [existingMessage] = await tx
-      .select({ messageId: messages.messageId })
+      .select({
+        globalId: messages.globalId,
+        messageId: messages.messageId,
+        pinnedAt: messages.pinnedAt,
+      })
       .from(messages)
       .where(and(eq(messages.chatId, chat.id), eq(messages.messageId, messageId)))
       .limit(1)
@@ -105,8 +110,31 @@ export const pinMessage = async (input: Input, context: FunctionContext): Promis
       throw RealtimeRpcError.InternalError()
     }
 
-    return { update, pinnedMessageIds }
+    return {
+      update,
+      pinnedMessageIds,
+      pinnedMessageGlobalId: !unpin && existingMessage.pinnedAt === null ? existingMessage.globalId : null,
+      pinnedMessageId: !unpin && existingMessage.pinnedAt === null ? BigInt(messageId) : null,
+    }
   })
+
+  if (pinnedMessageGlobalId !== null && pinnedMessageId !== null) {
+    try {
+      await insertPinnedMessageSystemMessage({
+        chatId: chat.id,
+        actorUserId: context.currentUserId,
+        pinnedMessageGlobalId,
+        pinnedMessageId,
+      })
+    } catch (error) {
+      log.error("Failed to insert pinned message service message", {
+        chatId: chat.id,
+        currentUserId: context.currentUserId,
+        pinnedMessageId,
+        error,
+      })
+    }
+  }
 
   const { selfUpdates } = await pushUpdates({
     inputPeer: input.peer,

@@ -39,7 +39,7 @@ type InlineThreadLinkTarget =
     }
   | {
       kind: "title"
-      spaceId: number
+      spaceId: number | null
       title: string
     }
 
@@ -189,6 +189,19 @@ const parsePositiveSafeInt = (value: string | null): number | null => {
   return id
 }
 
+const parseNonNegativeSafeInt = (value: string | null): number | null => {
+  if (!value || !/^\d+$/.test(value)) {
+    return null
+  }
+
+  const id = Number(value)
+  if (!Number.isSafeInteger(id) || id < 0) {
+    return null
+  }
+
+  return id
+}
+
 const normalizeUsername = (value: string | null): string | null => {
   const username = value?.trim().replace(/^@/, "").toLowerCase()
   if (!username || username.length < 2 || !/^[a-z0-9_]+$/.test(username)) {
@@ -260,13 +273,17 @@ const parseInlineThreadLink = (rawUrl: string, visibleText: string): InlineThrea
     return null
   }
 
-  const spaceId = parsePositiveSafeInt(url.searchParams.get("space_id"))
+  const spaceId = parseNonNegativeSafeInt(url.searchParams.get("space_id"))
   const title = trimTitle(url.searchParams.get("title")) ?? trimTitle(visibleText)
-  if (!spaceId || !title) {
+  if (spaceId === null && url.searchParams.has("space_id")) {
     return null
   }
 
-  return { kind: "title", spaceId, title }
+  if (!title) {
+    return null
+  }
+
+  return { kind: "title", spaceId: spaceId && spaceId > 0 ? spaceId : null, title }
 }
 
 const entityText = (text: string, entity: MessageEntity): string => {
@@ -519,7 +536,7 @@ const resolveInlineThreadLinks = (
       entity: {
         oneofKind: "threadTitle" as const,
         threadTitle: {
-          spaceId: BigInt(target.spaceId),
+          spaceId: BigInt(target.spaceId ?? 0),
           title: target.title,
         },
       },

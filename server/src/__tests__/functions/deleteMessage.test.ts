@@ -1,16 +1,63 @@
 import { describe, expect, test } from "bun:test"
-import { and, desc, eq } from "drizzle-orm"
+import { MessageEntity_Type } from "@inline-chat/protocol/core"
+import { and, desc, eq, isNull } from "drizzle-orm"
 import { db } from "@in/server/db"
 import * as schema from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
+import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { getMessages } from "@in/server/functions/messages.getMessages"
 import { setupTestLifecycle, testUtils } from "../setup"
+import { insertThreadBacklinkSystemMessage } from "@in/server/modules/systemMessages"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 describe("messages.deleteMessage", () => {
   setupTestLifecycle()
+
+  test("allows service message authors to delete their own service messages in space threads", async () => {
+    const author = await testUtils.createUser("space-service-delete-author@example.com")
+    const space = await testUtils.createSpace("Space Service Delete")
+    if (!space) {
+      throw new Error("Space not created")
+    }
+
+    await db.insert(schema.members).values({ spaceId: space.id, userId: author.id, role: "member" })
+
+    const source = await testUtils.createChat(space.id, "Source Thread", "thread", true, author.id)
+    const target = await testUtils.createChat(space.id, "Target Thread", "thread", true, author.id)
+    if (!source || !target) {
+      throw new Error("Space service delete chats not created")
+    }
+
+    const systemMessage = await insertThreadBacklinkSystemMessage({
+      chatId: target.id,
+      actorUserId: author.id,
+      graphLinkId: 1n,
+      sourceChatId: source.id,
+      sourceTitle: source.title,
+    })
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(target.id) },
+          },
+        },
+        messageIds: [BigInt(systemMessage.messageId)],
+      },
+      testUtils.functionContext({ userId: author.id }),
+    )
+
+    const deleted = await db
+      .select({ messageId: schema.messages.messageId })
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, target.id), eq(schema.messages.messageId, systemMessage.messageId)))
+
+    expect(deleted).toHaveLength(0)
+  })
 
   test("allows message authors to delete their own messages in space threads", async () => {
     const author = await testUtils.createUser("space-delete-own-author@example.com")
@@ -610,4 +657,142 @@ describe("messages.deleteMessage", () => {
       expect(Number(decrypted.payload.update.editMessage.msgId)).toBe(1)
     }
   })
+
+  test("deleting a linked source message deletes its backlink system message", async () => {
+    const currentUser = await testUtils.createUser("thread-link-delete-owner@example.com")
+    const source = await testUtils.createChat(null, "Delete Link Source", "thread", false, currentUser.id)
+    const target = await testUtils.createChat(null, "Delete Link Target", "thread", false, currentUser.id)
+    if (!source || !target) {
+      throw new Error("Graph delete test chats not created")
+    }
+
+    await testUtils.addParticipant(source.id, currentUser.id)
+    await testUtils.addParticipant(target.id, currentUser.id)
+
+    const sent = await sendMessage(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(source.id) },
+          },
+        },
+        message: "see target",
+        entities: {
+          entities: [
+            {
+              type: MessageEntity_Type.THREAD,
+              offset: 4n,
+              length: 6n,
+              entity: {
+                oneofKind: "thread",
+                thread: { chatId: BigInt(target.id) },
+              },
+            },
+          ],
+        },
+      },
+      testUtils.functionContext({ userId: currentUser.id }),
+    )
+
+    const sentMessageId =
+      sent.updates[0]?.update.oneofKind === "updateMessageId"
+        ? sent.updates[0].update.updateMessageId?.messageId
+        : undefined
+    expect(sentMessageId).toBeTruthy()
+
+    const link = await waitForThreadGraphLink({
+      fromChatId: source.id,
+      fromMessageId: Number(sentMessageId),
+      toChatId: target.id,
+    })
+    const backlinkMessageGlobalId = link.backlinkMessageGlobalId
+    expect(backlinkMessageGlobalId).toBeTruthy()
+
+    const [backlinkMessageBeforeDelete] = await db
+      .select({
+        chatId: schema.messages.chatId,
+        messageId: schema.messages.messageId,
+      })
+      .from(schema.messages)
+      .where(eq(schema.messages.globalId, backlinkMessageGlobalId!))
+      .limit(1)
+    expect(backlinkMessageBeforeDelete).toBeTruthy()
+
+    const result = await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(source.id) },
+          },
+        },
+        messageIds: [sentMessageId!],
+      },
+      testUtils.functionContext({ userId: currentUser.id }),
+    )
+
+    const backlinkDeleteUpdate = result.updates.find((update) => {
+      if (update.update.oneofKind !== "deleteMessages") {
+        return false
+      }
+
+      const deleteMessages = update.update.deleteMessages
+      return (
+        deleteMessages.peerId?.type.oneofKind === "chat" &&
+        deleteMessages.peerId.type.chat.chatId === BigInt(target.id) &&
+        deleteMessages.messageIds.includes(BigInt(backlinkMessageBeforeDelete!.messageId))
+      )
+    })
+    expect(backlinkDeleteUpdate).toBeTruthy()
+
+    const activeLinks = await db
+      .select()
+      .from(schema.threadGraphLinks)
+      .where(
+        and(
+          eq(schema.threadGraphLinks.kind, "thread_link"),
+          eq(schema.threadGraphLinks.fromChatId, source.id),
+          eq(schema.threadGraphLinks.fromMessageId, Number(sentMessageId)),
+          isNull(schema.threadGraphLinks.deletedAt),
+        ),
+      )
+    expect(activeLinks).toHaveLength(0)
+
+    const backlinkMessages = await db
+      .select({ globalId: schema.messages.globalId })
+      .from(schema.messages)
+      .where(eq(schema.messages.globalId, backlinkMessageGlobalId!))
+    expect(backlinkMessages).toHaveLength(0)
+  })
 })
+
+async function waitForThreadGraphLink(input: { fromChatId: number; fromMessageId: number; toChatId: number }) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const [link] = await db
+      .select()
+      .from(schema.threadGraphLinks)
+      .where(
+        and(
+          eq(schema.threadGraphLinks.kind, "thread_link"),
+          eq(schema.threadGraphLinks.fromChatId, input.fromChatId),
+          eq(schema.threadGraphLinks.fromMessageId, input.fromMessageId),
+          eq(schema.threadGraphLinks.toChatId, input.toChatId),
+          isNull(schema.threadGraphLinks.deletedAt),
+        ),
+      )
+      .limit(1)
+
+    if (link?.backlinkMessageGlobalId) {
+      return link
+    }
+
+    await sleep(10)
+  }
+
+  throw new Error(`Expected graph backlink for message ${input.fromChatId}:${input.fromMessageId}`)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}

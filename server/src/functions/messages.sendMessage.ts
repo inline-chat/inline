@@ -70,6 +70,8 @@ import {
   getFollowingDialogUserIds,
   setDialogFollowModeForUsers,
 } from "@in/server/modules/dialogFollow"
+import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
+import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 
 type Input = {
   peerId: InputPeer
@@ -133,7 +135,19 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       })
     : undefined
   let text = outgoingText?.text
-  let entities = outgoingText?.entities
+  let entities: MessageEntities | undefined
+  try {
+    entities = await resolveThreadTitleLinks({
+      entities: outgoingText?.entities,
+      context,
+    })
+  } catch (error) {
+    log.error("sendMessage failed to resolve thread title links", { chatId, currentUserId, error })
+    if (RealtimeRpcError.is(error)) {
+      throw error
+    }
+    throw RealtimeRpcError.InternalError()
+  }
 
   const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
   const previewRoutes = text && !input.skipLinkProcessing && !hasInputUrlPreview
@@ -247,6 +261,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       throw RealtimeRpcError.InternalError()
     }
   }
+
+  queueMessageThreadLinkMaterialization({
+    sourceChat: chat,
+    sourceChatId: chat.id,
+    sourceMessageGlobalId: newMessage.globalId,
+    sourceMessageId: newMessage.messageId,
+    sourceMessageFromId: newMessage.fromId,
+    sourceMessageRevision: newMessage.rev,
+    entities,
+  })
 
   if (input.messageAttachments && input.messageAttachments.length > 0) {
     const attachmentRows = input.messageAttachments

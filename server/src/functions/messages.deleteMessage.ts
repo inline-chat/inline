@@ -13,6 +13,7 @@ import { Log } from "@in/server/utils/log"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
 import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePush"
+import { deleteBacklinkMessages, getBacklinkMessagesForSourceMessages } from "@in/server/modules/threadGraph"
 import { db } from "@in/server/db"
 import { members, messages, type DbChat } from "@in/server/db/schema"
 import { and, eq, inArray } from "drizzle-orm"
@@ -49,7 +50,15 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     currentUserId: context.currentUserId,
   })
 
+  const backlinkMessages = await getBacklinkMessagesForSourceMessages({
+    chatId: chat.id,
+    messageIds: input.messageIds,
+  })
+
   let { update, metadataChatUpdates } = await MessageModel.deleteMessages(input.messageIds, chat.id)
+  const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
+    currentUserId: context.currentUserId,
+  })
 
   const { selfUpdates, updateGroup } = await pushUpdates({
     inputPeer: input.peer,
@@ -81,7 +90,7 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     }),
   )
 
-  return { updates: [...selfUpdates, ...metadataSelfUpdates] }
+  return { updates: [...selfUpdates, ...metadataSelfUpdates, ...backlinkSelfUpdates] }
 }
 
 async function ensureDeleteAllowed(input: {

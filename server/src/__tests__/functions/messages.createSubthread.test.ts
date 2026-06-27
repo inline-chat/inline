@@ -62,6 +62,18 @@ describe("messages.createSubthread", () => {
     expect(childChat?.isUntitled).toBe(true)
     expect(childChat?.threadNumber).toBeNull()
 
+    const graphLink = await waitForReplyThreadGraphLink(childChatId)
+    expect(graphLink).toMatchObject({
+      kind: "reply_thread",
+      scopeType: "user",
+      scopeId: creator.id,
+      fromChatId: parentChat.id,
+      fromMessageId: 1,
+      toChatId: childChatId,
+      backlinkMessageGlobalId: null,
+      deletedAt: null,
+    })
+
     const childDialogs = await db
       .select({
         userId: schema.dialogs.userId,
@@ -358,3 +370,25 @@ describe("messages.createSubthread", () => {
     expect(existingDialog?.chatListHidden).toBe(true)
   })
 })
+
+async function waitForReplyThreadGraphLink(toChatId: number) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const [link] = await db
+      .select()
+      .from(schema.threadGraphLinks)
+      .where(and(eq(schema.threadGraphLinks.kind, "reply_thread"), eq(schema.threadGraphLinks.toChatId, toChatId)))
+      .limit(1)
+
+    if (link) {
+      return link
+    }
+
+    await sleep(10)
+  }
+
+  throw new Error(`Reply-thread graph link not materialized for chat ${toChatId}`)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}

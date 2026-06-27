@@ -1,5 +1,5 @@
 import type { InputPeer, Update } from "@inline-chat/protocol/core"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
@@ -12,6 +12,11 @@ import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePu
 import { getUpdateGroupForSpace, getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import {
+  deleteBacklinkMessages,
+  getBacklinkMessagesForClearedChatMessages,
+  getBacklinkMessagesForClearedSpaceMessages,
+} from "@in/server/modules/threadGraph"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -112,6 +117,10 @@ async function clearPeerHistory(input: {
   const chat = await ChatModel.getChatFromInputPeer(input.peer, input.context)
 
   await ensureCanClearHistory(chat, input.context.currentUserId)
+  const backlinkMessages = await getBacklinkMessagesForClearedChatMessages({
+    chatId: chat.id,
+    beforeDate: input.cutoff?.date,
+  })
 
   const { clearUpdate, sideEffects, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } =
     await db.transaction(async (tx) => {
@@ -161,8 +170,25 @@ async function clearPeerHistory(input: {
     currentUserId: input.context.currentUserId,
   })
 
+  const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
+    currentUserId: input.context.currentUserId,
+  }).catch((error) => {
+    log.error("Failed to delete backlink messages for cleared chat history", {
+      chatId: chat.id,
+      currentUserId: input.context.currentUserId,
+      error,
+    })
+    return []
+  })
+
   return {
-    updates: [...selfUpdates, ...metadataSelfUpdates, ...deletedSelfUpdates, ...removedAccessSelfUpdates],
+    updates: [
+      ...selfUpdates,
+      ...metadataSelfUpdates,
+      ...deletedSelfUpdates,
+      ...removedAccessSelfUpdates,
+      ...backlinkSelfUpdates,
+    ],
   }
 }
 
@@ -174,6 +200,10 @@ async function clearSpaceHistory(input: {
 }): Promise<ClearHistoryOutput> {
   const spaceId = normalizeSpaceId(input.spaceId)
   await ensureCanClearSpaceHistory(spaceId, input.context.currentUserId)
+  const backlinkMessages = await getBacklinkMessagesForClearedSpaceMessages({
+    spaceId,
+    beforeDate: input.cutoff?.date,
+  })
 
   const { clearUpdate, sideEffects, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } = await db.transaction(
     async (tx) => {
@@ -247,8 +277,25 @@ async function clearSpaceHistory(input: {
     chatUpdates: removedAccessUpdates,
   })
 
+  const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
+    currentUserId: input.context.currentUserId,
+  }).catch((error) => {
+    log.error("Failed to delete backlink messages for cleared space history", {
+      spaceId,
+      currentUserId: input.context.currentUserId,
+      error,
+    })
+    return []
+  })
+
   return {
-    updates: [...selfUpdates, ...metadataSelfUpdates, ...deletedSelfUpdates, ...removedAccessSelfUpdates],
+    updates: [
+      ...selfUpdates,
+      ...metadataSelfUpdates,
+      ...deletedSelfUpdates,
+      ...removedAccessSelfUpdates,
+      ...backlinkSelfUpdates,
+    ],
   }
 }
 

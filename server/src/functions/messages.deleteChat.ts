@@ -3,7 +3,7 @@ import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
 import { members } from "@in/server/db/schema/members"
-import { Log, LogLevel } from "@in/server/utils/log"
+import { Log } from "@in/server/utils/log"
 import { ChatModel } from "@in/server/db/models/chats"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -11,11 +11,12 @@ import { and, eq } from "drizzle-orm"
 import { ModelError } from "@in/server/db/models/_errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import type { ServerUpdate } from "@inline-chat/protocol/server"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { deleteBacklinkMessages, getBacklinkMessagesForSourceChat } from "@in/server/modules/threadGraph"
 
 const log = new Log("functions.deleteChat")
 /**
@@ -116,6 +117,7 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
     let persistedUpdate: UpdateSeqAndDate | undefined
     let recipientIds: number[] = []
     let peerId: Peer | undefined
+    const backlinkMessages = await getBacklinkMessagesForSourceChat({ chatId: chat.id })
 
     // Delete chat, participants, dialogs in a transaction
     try {
@@ -190,6 +192,14 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
           RealtimeUpdates.pushToUser(userId, [update])
         })
       }
+
+      await deleteBacklinkMessages(backlinkMessages, { currentUserId }).catch((error) => {
+        log.error("Failed to delete backlink messages for deleted chat", {
+          chatId: chat.id,
+          currentUserId,
+          error,
+        })
+      })
 
       log.info("Deleted chat and related data", { chatId: chat.id })
       return {}

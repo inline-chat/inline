@@ -41,6 +41,11 @@ export const messages = pgTable(
     actionsIv: bytea("actions_iv"),
     actionsTag: bytea("actions_tag"),
 
+    /** server-only typed system message payload */
+    systemMessageEncrypted: bytea("system_message_encrypted"),
+    systemMessageIv: bytea("system_message_iv"),
+    systemMessageTag: bytea("system_message_tag"),
+
     /** required, chat it belongs to */
     chatId: integer("chat_id")
       .notNull()

@@ -2,17 +2,18 @@ import type { TPeerInfo } from "@in/server/api-types"
 import type { DbFile, DbMessage } from "@in/server/db/schema"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import {
+  MessageActions,
+  MessageEntities,
+  MessageSendMode,
   type InputPeer,
   type Message,
-  type MessageFwdHeader,
-  type MessageMedia,
   type MessageAttachment,
   type MessageAttachments,
+  type MessageFwdHeader,
+  type MessageMedia,
+  type MessageReplies,
+  type MessageService,
   type Peer,
-    type MessageReplies,
-    MessageActions,
-    MessageEntities,
-  MessageSendMode,
 } from "@inline-chat/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
@@ -27,6 +28,41 @@ import { decryptBinary } from "@in/server/modules/encryption/encryption"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
+import type { SystemMessage } from "@in/server/modules/systemMessages"
+
+type EncodableMessage = DbMessage & {
+  systemMessage?: SystemMessage | null
+}
+
+function encodeServiceMessage(systemMessage: SystemMessage | null | undefined): MessageService | undefined {
+  const event = systemMessage?.event
+
+  switch (event?.oneofKind) {
+    case "threadBacklink":
+      return {
+        event: {
+          oneofKind: "threadBacklink",
+          threadBacklink: {
+            sourceChatId: event.threadBacklink.sourceChatId,
+            sourceTitle: event.threadBacklink.sourceTitle,
+          },
+        },
+      }
+
+    case "pinnedMessage":
+      return {
+        event: {
+          oneofKind: "pinnedMessage",
+          pinnedMessage: {
+            messageId: event.pinnedMessage.pinnedMessageId,
+          },
+        },
+      }
+
+    case undefined:
+      return undefined
+  }
+}
 
 export const encodeMessage = ({
   message,
@@ -40,7 +76,7 @@ export const encodeMessage = ({
   sendMode,
   replies,
 }: {
-  message: DbMessage
+  message: EncodableMessage
   encodingForUserId: number
   encodingForPeer: { legacyPeer: TPeerInfo } | { peer: Peer } | { inputPeer: InputPeer }
   file?: DbFile | undefined
@@ -189,6 +225,7 @@ export const encodeMessage = ({
     fwdFrom: fwdFrom,
     replies,
     actions,
+    serviceMessage: encodeServiceMessage(message.systemMessage),
   }
 
   return messageProto
@@ -324,6 +361,7 @@ export const encodeFullMessage = ({
     fwdFrom: fwdFrom,
     replies,
     actions: message.actions ?? undefined,
+    serviceMessage: encodeServiceMessage(message.systemMessage),
   }
 
   return messageProto
