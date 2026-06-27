@@ -170,6 +170,10 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
 
+      - name: Ensure public workspaces
+        if: steps.target.outputs.selected == 'true'
+        run: bash scripts/ci/ensure-public-workspaces.sh
+
       - name: Setup Bun
         if: steps.target.outputs.selected == 'true'
         uses: oven-sh/setup-bun@v2
@@ -272,6 +276,10 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
 
+      - name: Ensure public workspaces
+        if: steps.target.outputs.selected == 'true'
+        run: bash scripts/ci/ensure-public-workspaces.sh
+
       - name: Setup Bun
         if: steps.target.outputs.selected == 'true'
         uses: oven-sh/setup-bun@v2
@@ -363,6 +371,9 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
+
+      - name: Ensure public workspaces
+        run: bash scripts/ci/ensure-public-workspaces.sh
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

@@ -32,6 +32,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Ensure public workspaces
+        run: bash scripts/ci/ensure-public-workspaces.sh
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

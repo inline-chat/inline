@@ -49,6 +49,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Ensure public workspaces
+        run: bash scripts/ci/ensure-public-workspaces.sh
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
