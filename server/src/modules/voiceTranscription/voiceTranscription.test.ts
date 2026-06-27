@@ -126,13 +126,10 @@ describe("voice transcription", () => {
 async function createVoiceMessage(
   label: string,
   options: {
-    userProfile?: Partial<typeof users.$inferInsert>
+    userProfile?: Omit<Partial<typeof users.$inferInsert>, "email">
   } = {},
 ) {
-  const user = await testUtils.createUser(nextEmail(label))
-  if (options.userProfile) {
-    await db.update(users).set(options.userProfile).where(eq(users.id, user.id))
-  }
+  const user = await createVoiceTestUser(label, options.userProfile)
   const chat = await testUtils.createPrivateChat(user, user)
   if (!chat) {
     throw new Error("Failed to create private chat")
@@ -177,6 +174,22 @@ async function createVoiceMessage(
     inputPeer,
     context,
   }
+}
+
+async function createVoiceTestUser(label: string, userProfile: Omit<Partial<typeof users.$inferInsert>, "email"> = {}) {
+  const [user] = await db
+    .insert(users)
+    .values({
+      ...userProfile,
+      email: nextEmail(label),
+    })
+    .returning()
+
+  if (!user) {
+    throw new Error("Failed to create test user")
+  }
+
+  return user
 }
 
 async function createVoiceForUser(userId: number) {
