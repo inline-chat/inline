@@ -134,8 +134,12 @@ public enum Theme {
 
   public static let messageBubbleSecondaryBgColor: NSColor =
     .init(name: "messageBubbleSecondaryBgColor") { appearance in
-      appearance.name == .darkAqua ? NSColor.white
-        .withAlphaComponent(0.1) : .init(
+      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? solidBubbleColor(
+        background: windowContentBackgroundColor,
+        overlay: .white,
+        alpha: 0.1,
+        appearance: appearance
+      ) : .init(
           calibratedRed: 236 / 255,
           green: 236 / 255,
           blue: 236 / 255,
@@ -190,6 +194,17 @@ public enum Theme {
       .withAlphaComponent(0.09)
   }
 
+  private static func solidBubbleColor(
+    background: NSColor,
+    overlay: NSColor,
+    alpha: CGFloat,
+    appearance: NSAppearance
+  ) -> NSColor {
+    let bg = background.resolvedColor(with: appearance).withAlphaComponent(1)
+    let fg = overlay.resolvedColor(with: appearance).withAlphaComponent(1)
+    return bg.blended(withFraction: alpha, of: fg)?.withAlphaComponent(1) ?? bg
+  }
+
   // MARK: - Devtools
 
   public static let devtoolsHeight: CGFloat = 30
@@ -200,5 +215,13 @@ extension NSColor {
     self.init(name: name) { appearance in
       appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
     }
+  }
+
+  fileprivate func resolvedColor(with appearance: NSAppearance) -> NSColor {
+    var resolved: NSColor = self
+    appearance.performAsCurrentDrawingAppearance {
+      resolved = self.usingType(.componentBased) ?? self.usingColorSpace(.deviceRGB) ?? self
+    }
+    return resolved
   }
 }

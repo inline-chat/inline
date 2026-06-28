@@ -42,6 +42,12 @@ class BasicView: NSView {
     configureCornerRadius()
   }
 
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    configureBackground()
+    configureBorder()
+  }
+
   private func configureView() {
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -49,12 +55,12 @@ class BasicView: NSView {
 
   private func configureBackground() {
     guard let layer else { return }
-    layer.backgroundColor = backgroundColor?.cgColor
+    layer.backgroundColor = backgroundColor?.resolvedColor(with: effectiveAppearance).cgColor
   }
 
   private func configureBorder() {
     guard let layer else { return }
-    layer.borderColor = borderColor?.cgColor
+    layer.borderColor = borderColor?.resolvedColor(with: effectiveAppearance).cgColor
     layer.borderWidth = borderWidth
   }
 

@@ -261,8 +261,12 @@ final class MessageActionButtonView: NSView {
       backgroundColor = .white.withAlphaComponent(isDark ? 0.18 : 0.14)
     } else {
       let incomingBase = Theme.messageBubbleSecondaryBgColor.resolvedColor(with: appearance)
-      let incomingAlpha = min(1, max(0.08, incomingBase.alphaComponent * (isDark ? 1.6 : 0.9)))
-      backgroundColor = incomingBase.withAlphaComponent(incomingAlpha)
+      if isDark {
+        backgroundColor = incomingBase.blended(withFraction: 0.16, of: .white) ?? incomingBase
+      } else {
+        let incomingAlpha = min(1, max(0.08, incomingBase.alphaComponent * 0.9))
+        backgroundColor = incomingBase.withAlphaComponent(incomingAlpha)
+      }
     }
 
     let hoverOverlay = isHovered ? (isDark ? 0.035 : 0.025) : 0

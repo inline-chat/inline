@@ -448,7 +448,17 @@ class MessageListAppKit: NSViewController {
   }()
 
   private lazy var avatarOverlayView = MessageAvatarOverlayView()
-  private let avatarOverlayStickyViewportInset: CGFloat = 8
+  private var avatarOverlayStickyViewportInset: CGFloat {
+    switch avatarOverlayStickyMode {
+    case .bottom:
+      if #available(macOS 26.0, *) {
+        return 0
+      }
+      return 8
+    case .top:
+      return 8
+    }
+  }
   private var avatarOverlayStickyMode: MessageAvatarStickyMode {
     switch messageRenderStyle {
     case .bubble:
