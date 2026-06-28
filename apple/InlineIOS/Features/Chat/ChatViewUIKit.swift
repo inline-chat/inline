@@ -8,6 +8,11 @@ public class ChatContainerView: UIView {
   let spaceId: Int64?
   private var peerUser: User?
 
+  private enum ComposeBottomMode {
+    case safeArea
+    case keyboard
+  }
+
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
 
   private lazy var keyboardDismissTapGestureRecognizer: UITapGestureRecognizer = {
@@ -87,6 +92,8 @@ public class ChatContainerView: UIView {
   }()
 
   private var composeContainerViewBottomConstraint: NSLayoutConstraint?
+  private var composeBottomMode: ComposeBottomMode = .safeArea
+  private var isComposeKeyboardVisible = false
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
 
   deinit {
@@ -114,6 +121,7 @@ public class ChatContainerView: UIView {
   override public func didMoveToWindow() {
     super.didMoveToWindow()
     attachEdgePanHandlerIfNeeded()
+    resetComposeToSafeAreaIfKeyboardClosed()
   }
 
   func setPeerUser(_ user: User?) {
@@ -240,6 +248,12 @@ public class ChatContainerView: UIView {
       name: .scrollToBottomUnreadChanged,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(applicationDidBecomeActive),
+      name: UIApplication.didBecomeActiveNotification,
+      object: nil
+    )
   }
 
   @objc private func handleScrollToBottomChanged(_ notification: Notification) {
@@ -274,9 +288,14 @@ public class ChatContainerView: UIView {
   }
 
   @objc private func keyboardWillShow(_ notification: Notification) {
-    guard !usesIOS27KeyboardWorkaround,
-          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
-    else {
+    guard !usesIOS27KeyboardWorkaround else {
+      return
+    }
+
+    let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+
+    guard composeView.textView.isFirstResponder else {
+      animateComposeSafeAreaReset(duration: duration, options: .curveEaseIn)
       return
     }
 
@@ -285,25 +304,24 @@ public class ChatContainerView: UIView {
       delay: 0,
       options: .curveEaseOut
     ) {
-      self.setComposeContainerBottom(to: self.keyboardLayoutGuide.topAnchor)
+      self.isComposeKeyboardVisible = true
+      self.setComposeContainerBottom(to: self.keyboardLayoutGuide.topAnchor, mode: .keyboard)
       self.layoutIfNeeded()
     }
   }
 
   @objc private func keyboardWillHide(_ notification: Notification) {
-    guard !usesIOS27KeyboardWorkaround,
-          let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
-    else {
+    guard !usesIOS27KeyboardWorkaround else {
       return
     }
 
-    UIView.animate(
-      withDuration: duration,
-      delay: 0,
-      options: .curveEaseIn
-    ) {
-      self.setComposeContainerBottom(to: self.safeAreaLayoutGuide.bottomAnchor)
-      self.layoutIfNeeded()
+    let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+    animateComposeSafeAreaReset(duration: duration, options: .curveEaseIn)
+  }
+
+  @objc private func applicationDidBecomeActive() {
+    DispatchQueue.main.async { [weak self] in
+      self?.resetComposeToSafeAreaIfKeyboardClosed()
     }
   }
 
@@ -323,13 +341,22 @@ public class ChatContainerView: UIView {
       return
     }
 
-    if composeView.textView.isFirstResponder {
+    let isComposeFocused = composeView.textView.isFirstResponder
+
+    if isComposeFocused {
       keyboardTrackingAccessoryView.resumeTracking()
     }
 
-    let inset = keyboardOverlap(with: keyboardFrame)
+    guard let inset = keyboardOverlap(with: keyboardFrame) else {
+      if !isComposeFocused {
+        animateComposeSafeAreaReset(animated: animated, notification: notification)
+      }
+      return
+    }
+
+    let targetInset = isComposeFocused ? inset : 0
     let update = {
-      guard self.setComposeKeyboardInset(inset) else { return }
+      guard self.setComposeKeyboardInset(targetInset) else { return }
       self.layoutIfNeeded()
     }
 
@@ -358,35 +385,123 @@ public class ChatContainerView: UIView {
       return
     }
 
-    let inset = normalizedKeyboardInset(fromKeyboardTop: keyboardTop)
+    guard let inset = normalizedKeyboardInset(fromKeyboardTop: keyboardTop) else { return }
     UIView.performWithoutAnimation {
       guard self.setComposeKeyboardInset(inset) else { return }
       self.layoutIfNeeded()
     }
   }
 
-  private func keyboardOverlap(with keyboardFrame: CGRect) -> CGFloat {
+  private func keyboardOverlap(with keyboardFrame: CGRect) -> CGFloat? {
+    guard isFinite(keyboardFrame) else { return nil }
     let keyboardFrameInView = convert(keyboardFrame, from: nil)
     return normalizedKeyboardInset(fromKeyboardTop: keyboardFrameInView.minY)
   }
 
-  private func normalizedKeyboardInset(fromKeyboardTop keyboardTop: CGFloat) -> CGFloat {
-    min(bounds.height, max(0, bounds.maxY - keyboardTop))
+  private func normalizedKeyboardInset(fromKeyboardTop keyboardTop: CGFloat) -> CGFloat? {
+    guard bounds.height > 0,
+          bounds.maxY.isFinite,
+          keyboardTop.isFinite
+    else {
+      return nil
+    }
+
+    let inset = bounds.maxY - keyboardTop
+    if inset <= 0.5 {
+      return 0
+    }
+
+    let maxInset = max(0, bounds.height - ComposeView.minHeight - (ComposeView.textViewVerticalMargin * 2))
+    // Foreground transitions can briefly report a keyboard top at the screen edge while the keyboard is closed.
+    guard inset <= maxInset else {
+      return nil
+    }
+
+    return min(bounds.height, inset)
+  }
+
+  private func isFinite(_ rect: CGRect) -> Bool {
+    rect.origin.x.isFinite
+      && rect.origin.y.isFinite
+      && rect.size.width.isFinite
+      && rect.size.height.isFinite
   }
 
   @discardableResult
   private func setComposeKeyboardInset(_ inset: CGFloat) -> Bool {
+    let didResetMode = setComposeContainerBottom(to: safeAreaLayoutGuide.bottomAnchor, mode: .safeArea)
     let insetFromSafeArea = max(0, inset - safeAreaInsets.bottom)
     let constant = -insetFromSafeArea
-    guard abs((composeContainerViewBottomConstraint?.constant ?? 0) - constant) > 0.5 else { return false }
+    let wasKeyboardVisible = isComposeKeyboardVisible
+    isComposeKeyboardVisible = inset > 0.5
+    guard didResetMode || abs((composeContainerViewBottomConstraint?.constant ?? 0) - constant) > 0.5 else {
+      return wasKeyboardVisible != isComposeKeyboardVisible
+    }
     composeContainerViewBottomConstraint?.constant = constant
     return true
   }
 
-  private func setComposeContainerBottom(to anchor: NSLayoutYAxisAnchor) {
+  @discardableResult
+  private func setComposeSafeAreaBottom() -> Bool {
+    let didResetMode = setComposeContainerBottom(to: safeAreaLayoutGuide.bottomAnchor, mode: .safeArea)
+    let wasKeyboardVisible = isComposeKeyboardVisible
+    isComposeKeyboardVisible = false
+    guard abs(composeContainerViewBottomConstraint?.constant ?? 0) > 0.5 else {
+      return didResetMode || wasKeyboardVisible
+    }
+    composeContainerViewBottomConstraint?.constant = 0
+    return true
+  }
+
+  private func resetComposeToSafeAreaIfKeyboardClosed() {
+    guard window != nil else { return }
+    guard !composeView.textView.isFirstResponder || !isComposeKeyboardVisible else { return }
+    UIView.performWithoutAnimation {
+      guard self.setComposeSafeAreaBottom() else { return }
+      self.layoutIfNeeded()
+    }
+  }
+
+  private func animateComposeSafeAreaReset(
+    animated: Bool = true,
+    duration: Double,
+    options: UIView.AnimationOptions
+  ) {
+    let update = {
+      guard self.setComposeSafeAreaBottom() else { return }
+      self.layoutIfNeeded()
+    }
+
+    guard animated, duration > 0 else {
+      UIView.performWithoutAnimation(update)
+      return
+    }
+
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: options,
+      animations: update
+    )
+  }
+
+  private func animateComposeSafeAreaReset(animated: Bool, notification: Notification) {
+    let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+    animateComposeSafeAreaReset(
+      animated: animated,
+      duration: duration,
+      options: keyboardAnimationOptions(from: notification)
+    )
+  }
+
+  @discardableResult
+  private func setComposeContainerBottom(to anchor: NSLayoutYAxisAnchor, mode: ComposeBottomMode) -> Bool {
+    guard composeBottomMode != mode else { return false }
     composeContainerViewBottomConstraint?.isActive = false
     composeContainerViewBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: anchor)
     composeContainerViewBottomConstraint?.isActive = true
+    composeBottomMode = mode
+    return true
   }
 
   private func keyboardAnimationOptions(from notification: Notification) -> UIView.AnimationOptions {
