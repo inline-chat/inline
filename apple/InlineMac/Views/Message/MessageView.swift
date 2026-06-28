@@ -289,11 +289,12 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  private func syncBubbleTail() {
+  private func syncBubbleTail(animated: Bool = false) {
     let side = bubbleTailSide
     bubbleTailView.configure(
       side: side,
-      color: bubbleBackgroundColor
+      color: bubbleBackgroundColor,
+      animated: animated
     )
     syncBubbleTailSideConstraint(side)
   }
@@ -3620,7 +3621,7 @@ class MessageViewAppKit: NSView {
   ) {
     // update internal props (must update so contentView is recalced)
     self.props = props
-    syncBubbleTail()
+    syncBubbleTail(animated: animate)
 
     if textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
@@ -3716,7 +3717,7 @@ class MessageViewAppKit: NSView {
 
     // Update bubble background
     bubbleView.backgroundColor = bubbleBackgroundColor
-    syncBubbleTail()
+    syncBubbleTail(animated: animate)
 
     syncForwardHeaderView(for: props)
 

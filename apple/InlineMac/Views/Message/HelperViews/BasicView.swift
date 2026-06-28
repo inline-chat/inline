@@ -128,7 +128,7 @@ final class MessageBubbleTailView: NSView {
     guard side != .none else { return }
 
     resolvedFillColor.setFill()
-    path(in: bounds).fill()
+    Self.path(for: side, in: bounds).fill()
   }
 
   override func viewDidChangeEffectiveAppearance() {
@@ -136,8 +136,14 @@ final class MessageBubbleTailView: NSView {
     updateVisibility()
   }
 
-  func configure(side: Side, color: NSColor) {
+  func configure(side: Side, color: NSColor, animated: Bool = false) {
     guard self.side != side || !fillColor.isEqual(color) else { return }
+    let oldSide = self.side
+    let oldColor = fillColor
+    if animated, oldSide != side {
+      animateRemovedTail(side: oldSide, color: oldColor)
+    }
+
     self.side = side
     fillColor = color
     updateVisibility()
@@ -152,7 +158,28 @@ final class MessageBubbleTailView: NSView {
     fillColor.resolvedColor(with: effectiveAppearance)
   }
 
-  private func path(in rect: CGRect) -> NSBezierPath {
+  private func animateRemovedTail(side: Side, color: NSColor) {
+    guard side != .none, !bounds.isEmpty, color.resolvedColor(with: effectiveAppearance).alphaComponent > 0.01,
+          let superview
+    else {
+      return
+    }
+
+    let fadeView = MessageBubbleTailFadeView(side: side, color: color)
+    fadeView.frame = frame
+    fadeView.alphaValue = 1
+    superview.addSubview(fadeView, positioned: .above, relativeTo: self)
+
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.16
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      fadeView.animator().alphaValue = 0
+    } completionHandler: {
+      fadeView.removeFromSuperview()
+    }
+  }
+
+  fileprivate static func path(for side: Side, in rect: CGRect) -> NSBezierPath {
     let scaleX = rect.width / Self.sourceSize.width
     let scaleY = rect.height / Self.sourceSize.height
 
@@ -203,5 +230,34 @@ final class MessageBubbleTailView: NSView {
     )
     path.close()
     return path
+  }
+}
+
+private final class MessageBubbleTailFadeView: NSView {
+  private let side: MessageBubbleTailView.Side
+  private let fillColor: NSColor
+
+  override var isFlipped: Bool { true }
+
+  init(side: MessageBubbleTailView.Side, color: NSColor) {
+    self.side = side
+    fillColor = color
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    nil
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    fillColor.resolvedColor(with: effectiveAppearance).setFill()
+    MessageBubbleTailView.path(for: side, in: bounds).fill()
   }
 }
