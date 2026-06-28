@@ -1959,10 +1959,11 @@ private extension MessagesCollectionView {
       guard let indexPath = indexPaths.first,
             let item = item(at: indexPath),
             !item.isThreadAnchor,
-            let fullMessage = message(for: item),
-            !fullMessage.message.isServiceMessage else { return nil }
+            let fullMessage = message(for: item) else { return nil }
       let message = fullMessage.message
-      let cell = currentCollectionView?.cellForItem(at: indexPath) as! MessageCollectionViewCell
+      guard let cell = currentCollectionView?.cellForItem(at: indexPath) as? MessageCollectionViewCell else {
+        return nil
+      }
 
       // Check if the touch point is within a view that has its own context menu interaction
       if let messageView = cell.messageView {
@@ -1984,6 +1985,24 @@ private extension MessagesCollectionView {
             }
             currentView = view.superview
           }
+        }
+      }
+
+      if message.isServiceMessage {
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+          guard let self else { return UIMenu(children: []) }
+          let deleteAction = UIAction(
+            title: "Delete",
+            image: UIImage(systemName: "trash"),
+            attributes: .destructive
+          ) { _ in
+            self.showDeleteConfirmation(
+              messageId: message.messageId,
+              peerId: message.peerId,
+              chatId: message.chatId
+            )
+          }
+          return UIMenu(children: [deleteAction])
         }
       }
 
@@ -2472,13 +2491,24 @@ private extension MessagesCollectionView {
     private func targetedPreview(for indexPath: IndexPath) -> UITargetedPreview? {
       guard let collectionView = currentCollectionView,
             let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
-            let messageView = cell.messageView?.bubbleView else { return nil }
+            let messageView = cell.messageView else { return nil }
 
       let parameters = UIPreviewParameters()
       parameters.backgroundColor = .clear
-      parameters.visiblePath = messageView.visiblePath()
 
-      let targetedPreview = UITargetedPreview(view: messageView, parameters: parameters)
+      if messageView.fullMessage.message.isServiceMessage {
+        let serviceView = messageView.serviceContainerView
+        parameters.visiblePath = UIBezierPath(
+          roundedRect: serviceView.bounds,
+          cornerRadius: serviceView.layer.cornerRadius
+        )
+        return UITargetedPreview(view: serviceView, parameters: parameters)
+      }
+
+      let bubbleView = messageView.bubbleView
+      parameters.visiblePath = bubbleView.visiblePath()
+
+      let targetedPreview = UITargetedPreview(view: bubbleView, parameters: parameters)
       return targetedPreview
     }
 

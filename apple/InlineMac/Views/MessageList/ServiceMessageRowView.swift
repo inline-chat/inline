@@ -168,6 +168,9 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
     if let hit = textView.hitTest(textPoint) {
       return hit
     }
+    if containerView.frame.contains(point) {
+      return self
+    }
     return nil
   }
 
@@ -201,6 +204,9 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
     addSubview(containerView)
 
     containerView.addSubview(textView)
+    let menu = makeContextMenu()
+    self.menu = menu
+    textView.menu = menu
 
     updateAppearance()
   }
@@ -229,6 +235,26 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView {
       dependencies?.requestOpenChat(peer: .user(id: userId))
     case let .thread(chatId):
       dependencies?.requestOpenChat(peer: .thread(id: chatId))
+    }
+  }
+
+  private func makeContextMenu() -> NSMenu {
+    let menu = NSMenu()
+    let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "delete")
+    deleteItem.target = self
+    deleteItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete")
+    menu.addItem(deleteItem)
+    return menu
+  }
+
+  @objc private func deleteMessage() {
+    let message = fullMessage.message
+    Task(priority: .userInitiated) { @MainActor in
+      try await Api.realtime.send(.deleteMessages(
+        messageIds: [message.messageId],
+        peerId: message.peerId,
+        chatId: message.chatId
+      ))
     }
   }
 
