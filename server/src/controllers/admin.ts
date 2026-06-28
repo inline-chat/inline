@@ -2002,12 +2002,14 @@ const getWeeklyActivity = async (baseUserWhere: ReturnType<typeof and>) => {
 
   const messageWeek = sql<string>`to_char(date_trunc('week', timezone('utc', ${messages.date})), 'YYYY-MM-DD')`
   const threadWeek = sql<string>`to_char(date_trunc('week', timezone('utc', ${chats.date})), 'YYYY-MM-DD')`
+  const userWeek = sql<string>`to_char(date_trunc('week', timezone('utc', ${users.date})), 'YYYY-MM-DD')`
 
-  const [messageRows, threadRows] = await Promise.all([
+  const [messageRows, threadRows, newUserRows] = await Promise.all([
     db
       .select({
         week: messageWeek,
-        count: sql<number>`count(*)::int`,
+        messages: sql<number>`count(*)::int`,
+        activeUsers: sql<number>`count(distinct ${messages.fromId})::int`,
       })
       .from(messages)
       .innerJoin(users, eq(messages.fromId, users.id))
@@ -2021,10 +2023,20 @@ const getWeeklyActivity = async (baseUserWhere: ReturnType<typeof and>) => {
       .from(chats)
       .where(and(eq(chats.type, "thread"), gte(chats.date, firstWeekStart), lt(chats.date, nextWeekStart)))
       .groupBy(sql`date_trunc('week', timezone('utc', ${chats.date}))`),
+    db
+      .select({
+        week: userWeek,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(users)
+      .where(and(gte(users.date, firstWeekStart), lt(users.date, nextWeekStart), baseUserWhere))
+      .groupBy(sql`date_trunc('week', timezone('utc', ${users.date}))`),
   ])
 
-  const messagesByWeek = new Map(messageRows.map((row) => [row.week, row.count]))
+  const messagesByWeek = new Map(messageRows.map((row) => [row.week, row.messages]))
+  const activeUsersByWeek = new Map(messageRows.map((row) => [row.week, row.activeUsers]))
   const threadsByWeek = new Map(threadRows.map((row) => [row.week, row.count]))
+  const newUsersByWeek = new Map(newUserRows.map((row) => [row.week, row.count]))
 
   return Array.from({ length: 8 }, (_, index) => {
     const start = new Date(firstWeekStart)
@@ -2036,6 +2048,8 @@ const getWeeklyActivity = async (baseUserWhere: ReturnType<typeof and>) => {
     return {
       weekStart: start.toISOString(),
       weekEnd: end.toISOString(),
+      activeUsers: activeUsersByWeek.get(key) ?? 0,
+      newUsers: newUsersByWeek.get(key) ?? 0,
       messages: messagesByWeek.get(key) ?? 0,
       threads: threadsByWeek.get(key) ?? 0,
     }
