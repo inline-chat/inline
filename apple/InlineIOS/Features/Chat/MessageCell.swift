@@ -10,6 +10,8 @@ protocol MessageCellDelegate: AnyObject {
 
 class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelegate {
   static let reuseIdentifier = "MessageCell"
+  private static let contentTransform = CGAffineTransform(scaleX: 1, y: -1)
+  private static let insertionContentTransform = contentTransform.scaledBy(x: 0.985, y: 0.985)
 
   var messageView: UIMessageView?
   var avatarView: UserAvatarView?
@@ -112,6 +114,21 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
         // skip only if everything is exact match including outgoing state
         return
       }
+
+      if canUpdateBubbleTailOnly(
+        with: message,
+        firstInGroup: firstInGroup,
+        lastInGroup: lastInGroup,
+        spaceId: spaceId,
+        displayMode: displayMode,
+        outgoing: newOutgoing
+      ) {
+        self.lastInGroup = lastInGroup
+        canReply = message.canReply && displayMode != .threadAnchor
+        messageView?.updateBubbleTail(side: bubbleTailSide, animated: true)
+        updateSwipeAvailability()
+        return
+      }
     }
 
     // update it first
@@ -132,14 +149,35 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     setupThreadHeaderViewsIfNeeded()
     setupBaseMessageConstraints()
 
-    contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+    contentView.transform = Self.contentTransform
 
     // Enable/disable swipe based on message state
     updateSwipeAvailability()
   }
 
+  func prepareInsertionAnimation() {
+    alpha = 0
+    contentView.transform = Self.insertionContentTransform
+  }
+
+  func animateInsertion() {
+    UIView.animate(
+      withDuration: 0.2,
+      delay: 0,
+      usingSpringWithDamping: 0.94,
+      initialSpringVelocity: 0.7,
+      options: [.allowUserInteraction, .beginFromCurrentState]
+    ) {
+      self.alpha = 1
+      self.contentView.transform = Self.contentTransform
+    }
+  }
+
   override func prepareForReuse() {
     super.prepareForReuse()
+
+    alpha = 1
+    contentView.transform = Self.contentTransform
 
     // Reset swipe state
     resetSwipeState()
@@ -467,7 +505,69 @@ extension MessageCollectionViewCell {
 
   private var showsCellAvatar: Bool {
     guard let message else { return false }
-    return usesThreadLayout && !isServiceMessage && !outgoing && lastInGroup && message.senderInfo != nil && !usesAvatarOverlay
+    return showsInlineAvatar(
+      for: message,
+      outgoing: outgoing,
+      lastInGroup: lastInGroup,
+      displayMode: displayMode
+    )
+  }
+
+  private func usesThreadLayout(for message: FullMessage, displayMode: MessageDisplayMode) -> Bool {
+    message.peerId.isThread || displayMode == .threadAnchor
+  }
+
+  private func usesAvatarOverlay(for message: FullMessage, displayMode: MessageDisplayMode) -> Bool {
+    MessageAvatarOverlayConfig.enabled &&
+      usesThreadLayout(for: message, displayMode: displayMode) &&
+      displayMode != .threadAnchor
+  }
+
+  private func showsInlineAvatar(
+    for message: FullMessage,
+    outgoing: Bool,
+    lastInGroup: Bool,
+    displayMode: MessageDisplayMode
+  ) -> Bool {
+    usesThreadLayout(for: message, displayMode: displayMode) &&
+      !message.message.isServiceMessage &&
+      !outgoing &&
+      lastInGroup &&
+      message.senderInfo != nil &&
+      !usesAvatarOverlay(for: message, displayMode: displayMode)
+  }
+
+  private func canUpdateBubbleTailOnly(
+    with newMessage: FullMessage,
+    firstInGroup newFirstInGroup: Bool,
+    lastInGroup newLastInGroup: Bool,
+    spaceId newSpaceId: Int64?,
+    displayMode newDisplayMode: MessageDisplayMode,
+    outgoing newOutgoing: Bool
+  ) -> Bool {
+    guard let currentMessage = message, messageView != nil else { return false }
+    guard !currentMessage.message.isServiceMessage, !newMessage.message.isServiceMessage else {
+      return false
+    }
+    guard prevText == newMessage.displayText, currentMessage == newMessage else { return false }
+    guard firstInGroup == newFirstInGroup, lastInGroup != newLastInGroup else { return false }
+    guard spaceId == newSpaceId, outgoing == newOutgoing, displayMode == newDisplayMode else {
+      return false
+    }
+
+    let oldShowsAvatar = showsInlineAvatar(
+      for: currentMessage,
+      outgoing: outgoing,
+      lastInGroup: lastInGroup,
+      displayMode: displayMode
+    )
+    let newShowsAvatar = showsInlineAvatar(
+      for: newMessage,
+      outgoing: newOutgoing,
+      lastInGroup: newLastInGroup,
+      displayMode: newDisplayMode
+    )
+    return oldShowsAvatar == newShowsAvatar
   }
 
   func avatarOverlayFrame(in view: UIView) -> CGRect? {

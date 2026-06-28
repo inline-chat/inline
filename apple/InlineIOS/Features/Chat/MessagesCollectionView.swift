@@ -581,6 +581,7 @@ private extension MessagesCollectionView {
     private let groupCalendar = Calendar.current
     private let avatarOverlayController = MessageAvatarOverlayViewController()
     private var groupInfoByItem: [MessageListItem: MessageGroupInfo] = [:]
+    private var pendingAppearingItems: Set<MessageListItem> = []
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
@@ -605,6 +606,30 @@ private extension MessagesCollectionView {
     /// Delay before the pinned date badge is hidden after scrolling stops.
     /// Adjust this value to tweak the UX (similar to WhatsApp/Telegram/Signal).
     fileprivate let dateSeparatorHideDelay: TimeInterval = 0.5
+
+    func collectionView(
+      _ collectionView: UICollectionView,
+      willDisplay cell: UICollectionViewCell,
+      forItemAt indexPath: IndexPath
+    ) {
+      guard let item = item(at: indexPath), pendingAppearingItems.remove(item) != nil else {
+        cell.alpha = 1
+        return
+      }
+
+      if let cell = cell as? MessageCollectionViewCell {
+        cell.animateInsertion()
+      } else {
+        cell.alpha = 0
+        UIView.animate(
+          withDuration: 0.16,
+          delay: 0,
+          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]
+        ) {
+          cell.alpha = 1
+        }
+      }
+    }
 
     func collectionView(
       _ collectionView: UICollectionView,
@@ -994,6 +1019,12 @@ private extension MessagesCollectionView {
           displayMode: displayMode
         )
 
+        if pendingAppearingItems.contains(item) {
+          cell.prepareInsertionAnimation()
+        } else {
+          cell.alpha = 1
+        }
+
         cell.onUserTap = { userId in
           // Navigate to user chat using notification center to bridge back to SwiftUI
           NotificationCenter.default.post(
@@ -1200,8 +1231,8 @@ private extension MessagesCollectionView {
 
       if withCustomTiming, animatingDifferences {
         CATransaction.begin()
-        CATransaction.setAnimationDuration(0.33)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1.0))
+        CATransaction.setAnimationDuration(0.22)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.16, 0.9, 0.24, 1.0))
       }
 
       dataSource.apply(snapshot, animatingDifferences: animatingDifferences) {
@@ -1220,7 +1251,7 @@ private extension MessagesCollectionView {
             "animated": animatingDifferences,
           ]
         )
-        self.syncAvatarOverlayAfterLayout(animate: false)
+        self.syncAvatarOverlay(animate: false)
         completion?()
       }
 
@@ -1257,15 +1288,41 @@ private extension MessagesCollectionView {
       return boundary.filter { $0.messageStableId != nil }
     }
 
+    @discardableResult
     private func reconfigureGroupBoundaryItems(
       around changedItems: [MessageListItem],
       in snapshot: inout NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>
-    ) {
+    ) -> [MessageListItem] {
       let items = groupBoundaryItems(around: changedItems, in: snapshot)
         .filter { snapshot.itemIdentifiers.contains($0) }
 
-      guard !items.isEmpty else { return }
+      guard !items.isEmpty else { return [] }
       snapshot.reconfigureItems(items)
+      return items
+    }
+
+    private func reconfigureVisibleItems(_ items: [MessageListItem]) {
+      guard let collectionView = currentCollectionView else { return }
+
+      for item in Set(items) {
+        guard let indexPath = dataSource.indexPath(for: item),
+              let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
+              let model = model(for: item),
+              case let .message(message, displayMode) = model.content
+        else {
+          continue
+        }
+
+        let firstInGroup = item.isThreadAnchor ? true : groupInfoByItem[item]?.isFirst ?? true
+        let lastInGroup = item.isThreadAnchor ? true : groupInfoByItem[item]?.isLast ?? true
+        cell.configure(
+          with: message,
+          firstInGroup: firstInGroup,
+          lastInGroup: lastInGroup,
+          spaceId: spaceId,
+          displayMode: displayMode
+        )
+      }
     }
 
     func attachAvatarOverlay(over collectionView: UICollectionView, parent: UIViewController?) {
@@ -1360,11 +1417,6 @@ private extension MessagesCollectionView {
       avatarOverlayController.sync(items: items, animate: animate)
     }
 
-    private func syncAvatarOverlayAfterLayout(animate: Bool) {
-      currentCollectionView?.layoutIfNeeded()
-      syncAvatarOverlay(animate: animate)
-    }
-
     private func avatarOverlayViewport(
       collectionView: UICollectionView,
       overlayView: UIView
@@ -1430,7 +1482,9 @@ private extension MessagesCollectionView {
           } else {
             snapshot.appendItems(items, toSection: sectionId)
           }
-          reconfigureGroupBoundaryItems(around: items, in: &snapshot)
+          let boundaryItems = reconfigureGroupBoundaryItems(around: items, in: &snapshot)
+          reconfigureVisibleItems(boundaryItems)
+          pendingAppearingItems.formUnion(items)
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return }
@@ -1458,6 +1512,7 @@ private extension MessagesCollectionView {
           let existingBoundaryItems = boundaryItems.filter { snapshot.itemIdentifiers.contains($0) }
           if !existingBoundaryItems.isEmpty {
             snapshot.reconfigureItems(existingBoundaryItems)
+            reconfigureVisibleItems(existingBoundaryItems)
           }
           safeApplySnapshot(snapshot, animatingDifferences: true)
 
@@ -1474,6 +1529,7 @@ private extension MessagesCollectionView {
             let boundaryItems = groupBoundaryItems(around: existingItems, in: snapshot)
               .filter { snapshot.itemIdentifiers.contains($0) }
             snapshot.reconfigureItems(existingItems + boundaryItems)
+            reconfigureVisibleItems(boundaryItems)
             safeApplySnapshot(snapshot, animatingDifferences: animated ?? false)
           }
 

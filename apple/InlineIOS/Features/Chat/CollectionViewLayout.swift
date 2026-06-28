@@ -11,9 +11,8 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
 
     let modifiedAttributes = attributes.copy() as! UICollectionViewLayoutAttributes
 
-    // For new items appearing, start them from below and transparent
-    // Since collection view is inverted, negative Y makes items slide up from bottom (proper chat behavior)
-    modifiedAttributes.transform = CGAffineTransform(translationX: 0, y: -50)
+    // Since the collection view is inverted, negative Y gives new messages a subtle upward settle.
+    modifiedAttributes.transform = CGAffineTransform(translationX: 0, y: -18)
     modifiedAttributes.alpha = 0.0
 
     return modifiedAttributes
@@ -29,7 +28,7 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
       return nil
     }
 
-    attributes.transform = CGAffineTransform(translationX: 0, y: -26)
+    attributes.transform = CGAffineTransform(translationX: 0, y: -18)
     attributes.alpha = 0.0
     return attributes
   }

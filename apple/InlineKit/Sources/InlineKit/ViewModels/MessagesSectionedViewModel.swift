@@ -53,8 +53,16 @@ public class MessagesSectionedViewModel {
 
   // MARK: - Init
 
-  public init(peer: Peer, reversed: Bool = false) {
-    progressiveViewModel = MessagesProgressiveViewModel(peer: peer, reversed: reversed)
+  public init(
+    peer: Peer,
+    reversed: Bool = false,
+    initialState: MessagesProgressiveViewModel.InitialState? = nil
+  ) {
+    progressiveViewModel = MessagesProgressiveViewModel(
+      peer: peer,
+      reversed: reversed,
+      initialState: initialState
+    )
 
     // Setup observer for progressive view model changes
     progressiveViewModel.observe { [weak self] update in
@@ -161,6 +169,24 @@ public class MessagesSectionedViewModel {
     return lhsKey.messageId > rhsKey.messageId
   }
 
+  private static func orderedNewMessages(
+    from newMessages: [FullMessage],
+    in dayMessages: [FullMessage]
+  ) -> [FullMessage] {
+    let newIds = Set(newMessages.map(\.id))
+    return dayMessages.filter { newIds.contains($0.id) }
+  }
+
+  private static func areMessagesAtSectionHead(
+    _ newMessages: [FullMessage],
+    in dayMessages: [FullMessage]
+  ) -> Bool {
+    guard !newMessages.isEmpty, dayMessages.count >= newMessages.count else { return false }
+
+    let newIds = Set(newMessages.map(\.id))
+    return dayMessages.prefix(newMessages.count).allSatisfy { newIds.contains($0.id) }
+  }
+
   private func groupMessagesByDay(_ messages: [FullMessage]) -> [MessageSection] {
     let grouped = Dictionary(grouping: messages) { message in
       Self.calendar.startOfDay(for: message.message.date)
@@ -253,19 +279,32 @@ public class MessagesSectionedViewModel {
             {
               // Add messages to existing section with bounds checking
               let sortedMessages = Self.sortMessagesForSection(dayMessages)
+              let orderedDayMessages = progressiveViewModel.messages.filter {
+                Self.calendar.isDate($0.message.date, inSameDayAs: dayStart)
+              }
+              let orderedNewMessages = Self.orderedNewMessages(
+                from: dayMessages,
+                in: orderedDayMessages
+              )
+              let messagesToPrepend = orderedNewMessages.isEmpty ? sortedMessages : orderedNewMessages
 
               // Determine insertion point based on message dates
               // For reversed collection view: newest messages go at index 0
               let existingMessages = sections[sectionIndex].messages
               if existingMessages.isEmpty {
                 // Empty section, just add all messages
-                sections[sectionIndex].messages = sortedMessages
+                sections[sectionIndex].messages = messagesToPrepend
               } else {
                 // Check if new messages are newer or older than existing ones
                 let newestNewMessage = sortedMessages.first
                 let newestExistingMessage = existingMessages.first
 
-                if let newestNewMessage, let newestExistingMessage,
+                if Self.areMessagesAtSectionHead(dayMessages, in: orderedDayMessages) {
+                  // Progressive updates already inserted these messages at the section head.
+                  // Keep that ordering so optimistic sends don't fall back to a full reload when
+                  // their temporary ids/global ids sort behind same-second messages.
+                  sections[sectionIndex].messages.insert(contentsOf: messagesToPrepend, at: 0)
+                } else if let newestNewMessage, let newestExistingMessage,
                    Self.isNewerMessage(newestNewMessage, than: newestExistingMessage)
                 {
                   // New messages are newer, insert at beginning

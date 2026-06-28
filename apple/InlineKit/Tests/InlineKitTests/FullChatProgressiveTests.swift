@@ -138,16 +138,55 @@ struct MessagesProgressiveViewModelOrderingTests {
     #expect(merged[1].startMessageId == 40)
     #expect(merged[1].endMessageId == 60)
   }
+
+  @Test("reversed add reports inserted head index")
+  @MainActor
+  func testReversedAddReportsHeadIndex() {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let peer = Peer.user(id: 9_002)
+    let existing = makeFullMessage(messageId: 20, globalId: 200, date: date, peerUserId: peer.id)
+    let added = makeFullMessage(messageId: -1_234, globalId: nil, date: date, peerUserId: peer.id)
+    let initialState = MessagesProgressiveViewModel.InitialState(
+      messages: [existing],
+      oldestLoadedMessageId: existing.message.messageId,
+      newestLoadedMessageId: existing.message.messageId,
+      canLoadOlderFromLocal: false,
+      canLoadNewerFromLocal: false
+    )
+    let viewModel = MessagesProgressiveViewModel(
+      peer: peer,
+      reversed: true,
+      initialState: initialState
+    )
+
+    var update: MessagesProgressiveViewModel.MessagesChangeSet?
+    viewModel.observe { update = $0 }
+    MessagesPublisher.shared.publisher.send(.add(.init(messages: [added], peer: peer)))
+
+    guard case let .added(messages, indexSet)? = update else {
+      Issue.record("Expected added change set")
+      return
+    }
+
+    #expect(messages.map(\.id) == [added.id])
+    #expect(indexSet == [0])
+    #expect(viewModel.messages.map(\.id) == [added.id, existing.id])
+  }
 }
 
-private func makeFullMessage(messageId: Int64, globalId: Int64?, date: Date) -> FullMessage {
+private func makeFullMessage(
+  messageId: Int64,
+  globalId: Int64?,
+  date: Date,
+  peerUserId: Int64? = nil
+) -> FullMessage {
   var message = Message(
     messageId: messageId,
     fromId: 1,
     date: date,
     text: "hi",
-    peerUserId: nil,
-    peerThreadId: 1,
+    peerUserId: peerUserId,
+    peerThreadId: peerUserId == nil ? 1 : nil,
     chatId: 1
   )
   message.globalId = globalId

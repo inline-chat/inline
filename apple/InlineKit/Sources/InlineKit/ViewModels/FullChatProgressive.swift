@@ -270,8 +270,10 @@ public class MessagesProgressiveViewModel {
           // Check if we have it to not add it again
           let existingIds = Set(messages.map(\.id))
           let newMessages = messageAdd.messages.filter { !existingIds.contains($0.id) }
+          guard !newMessages.isEmpty else { return nil }
 
           // TODO: detect if we should add to the bottom or top
+          let insertIndex = reversed ? 0 : messages.count
           if reversed {
             messages.insert(contentsOf: newMessages, at: 0)
           } else {
@@ -286,7 +288,10 @@ public class MessagesProgressiveViewModel {
           updateLoadedWindowMetadata()
 
           // Return changeset
-          return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
+          return MessagesChangeSet.added(
+            newMessages,
+            indexSet: Array(insertIndex ..< insertIndex + newMessages.count)
+          )
         }
 
       // .messageId, then globalID out for lists

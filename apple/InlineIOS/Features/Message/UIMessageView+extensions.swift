@@ -90,11 +90,16 @@ final class MessageBubbleView: UIView {
     updateShape()
   }
 
-  func configure(side: MessageBubbleTailSide) {
+  func configure(side: MessageBubbleTailSide, animated: Bool = false) {
     guard self.side != side else { return }
+    let removedShapePath = animated ? removedShapePath(from: self.side, to: side, in: bounds) : nil
     self.side = side
     updateContentInsets()
     updateShape()
+
+    if let removedShapePath {
+      animateRemovedShape(path: removedShapePath)
+    }
   }
 
   @available(*, unavailable)
@@ -115,7 +120,12 @@ final class MessageBubbleView: UIView {
   }
 
   private var contentRect: CGRect {
-    bounds.inset(by: UIEdgeInsets(
+    contentRect(for: side, in: bounds)
+  }
+
+  private func contentRect(for side: MessageBubbleTailSide, in rect: CGRect) -> CGRect {
+    let tailWidth = Self.tailWidth(for: side)
+    return rect.inset(by: UIEdgeInsets(
       top: 0,
       left: side == .leading ? tailWidth : 0,
       bottom: 0,
@@ -139,14 +149,92 @@ final class MessageBubbleView: UIView {
     CATransaction.commit()
   }
 
+  private func animateRemovedShape(path: UIBezierPath) {
+    let color = resolvedFillColor
+    guard color.cgColor.alpha > 0.01 else { return }
+
+    let fadeLayer = CAShapeLayer()
+    fadeLayer.contentsScale = UIScreen.main.scale
+    fadeLayer.fillRule = path.usesEvenOddFillRule ? .evenOdd : .nonZero
+    fadeLayer.fillColor = color.cgColor
+    fadeLayer.opacity = 1
+
+    if let superview {
+      let origin = convert(bounds.origin, to: superview)
+      let translatedPath = UIBezierPath(cgPath: path.cgPath)
+      translatedPath.apply(CGAffineTransform(translationX: origin.x, y: origin.y))
+      fadeLayer.frame = superview.layer.bounds
+      fadeLayer.path = translatedPath.cgPath
+      superview.layer.insertSublayer(fadeLayer, above: layer)
+    } else {
+      fadeLayer.frame = bounds
+      fadeLayer.path = path.cgPath
+      layer.insertSublayer(fadeLayer, above: fillLayer)
+    }
+
+    let animation = CABasicAnimation(keyPath: "opacity")
+    animation.fromValue = 1
+    animation.toValue = 0
+    animation.duration = 0.16
+    animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    fadeLayer.add(animation, forKey: "bubbleShapeRemoval")
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    fadeLayer.opacity = 0
+    CATransaction.commit()
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak fadeLayer] in
+      fadeLayer?.removeFromSuperlayer()
+    }
+  }
+
   private func bubblePath(in rect: CGRect) -> UIBezierPath {
-    let contentRect = contentRect.intersection(rect)
+    bubblePath(for: side, in: rect)
+  }
+
+  private func bubblePath(for side: MessageBubbleTailSide, in rect: CGRect) -> UIBezierPath {
+    let contentRect = contentRect(for: side, in: bounds).intersection(rect)
     guard !contentRect.isNull, contentRect.width > 0, contentRect.height > 0 else {
       return UIBezierPath()
     }
 
     let path = UIBezierPath(roundedRect: contentRect, cornerRadius: Self.cornerRadius)
-    guard side != .none else { return path }
+    if let tailPath = tailOnlyPath(for: side, contentRect: contentRect) {
+      path.append(tailPath)
+    }
+
+    return path
+  }
+
+  private func removedShapePath(
+    from oldSide: MessageBubbleTailSide,
+    to newSide: MessageBubbleTailSide,
+    in rect: CGRect
+  ) -> UIBezierPath? {
+    guard oldSide != .none, !rect.isEmpty else { return nil }
+
+    if newSide == .none {
+      let path = UIBezierPath()
+      path.append(bubblePath(for: oldSide, in: rect))
+      path.append(bubblePath(for: newSide, in: rect))
+      path.usesEvenOddFillRule = true
+      return path
+    }
+
+    return tailOnlyPath(for: oldSide, in: rect)
+  }
+
+  private func tailOnlyPath(for side: MessageBubbleTailSide, in rect: CGRect) -> UIBezierPath? {
+    let contentRect = contentRect(for: side, in: rect)
+    guard !contentRect.isNull, contentRect.width > 0, contentRect.height > 0 else {
+      return nil
+    }
+    return tailOnlyPath(for: side, contentRect: contentRect)
+  }
+
+  private func tailOnlyPath(for side: MessageBubbleTailSide, contentRect: CGRect) -> UIBezierPath? {
+    guard side != .none else { return nil }
 
     let drawSize = CGSize(
       width: Self.sourceSize.width * Self.tailDrawScale,
@@ -157,7 +245,7 @@ final class MessageBubbleView: UIView {
     let tailRect: CGRect
     switch side {
     case .none:
-      return path
+      return nil
     case .leading:
       tailRect = CGRect(
         x: contentRect.minX - Self.exposedTailWidth,
@@ -174,11 +262,10 @@ final class MessageBubbleView: UIView {
       )
     }
 
-    path.append(tailPath(in: tailRect))
-    return path
+    return tailPath(for: side, in: tailRect)
   }
 
-  private func tailPath(in rect: CGRect) -> UIBezierPath {
+  private func tailPath(for side: MessageBubbleTailSide, in rect: CGRect) -> UIBezierPath {
     let scaleX = rect.width / Self.sourceSize.width
     let scaleY = rect.height / Self.sourceSize.height
 

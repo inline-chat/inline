@@ -32,19 +32,71 @@ struct MessagesSectionedViewModelOrderingTests {
 
     #expect(sorted.map { $0.message.messageId } == [3, 2, 1])
   }
+
+  @Test("head adds use messagesAdded even when sort key is older")
+  @MainActor
+  func testHeadAddUsesIncrementalChangeSet() {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let peer = Peer.user(id: 9_001)
+    let existing = makeSectionTestFullMessage(
+      messageId: 20,
+      globalId: 200,
+      date: date,
+      peerUserId: peer.id
+    )
+    let optimistic = makeSectionTestFullMessage(
+      messageId: -1_234,
+      globalId: nil,
+      date: date,
+      peerUserId: peer.id,
+      status: .sending
+    )
+    let initialState = MessagesProgressiveViewModel.InitialState(
+      messages: [existing],
+      oldestLoadedMessageId: existing.message.messageId,
+      newestLoadedMessageId: existing.message.messageId,
+      canLoadOlderFromLocal: false,
+      canLoadNewerFromLocal: false
+    )
+    let viewModel = MessagesSectionedViewModel(
+      peer: peer,
+      reversed: true,
+      initialState: initialState
+    )
+
+    var update: MessagesSectionedViewModel.SectionedMessagesChangeSet?
+    viewModel.observe { update = $0 }
+    MessagesPublisher.shared.publisher.send(.add(.init(messages: [optimistic], peer: peer)))
+
+    guard case let .messagesAdded(sectionIndex, messageIds)? = update else {
+      Issue.record("Expected messagesAdded for optimistic head insert")
+      return
+    }
+
+    #expect(sectionIndex == 0)
+    #expect(messageIds == [optimistic.id])
+    #expect(viewModel.sections.first?.messages.map(\.id) == [optimistic.id, existing.id])
+  }
 }
 
-private func makeSectionTestFullMessage(messageId: Int64, globalId: Int64?, date: Date) -> FullMessage {
+private func makeSectionTestFullMessage(
+  messageId: Int64,
+  globalId: Int64?,
+  date: Date,
+  peerUserId: Int64? = nil,
+  status: MessageSendingStatus? = nil
+) -> FullMessage {
   var message = Message(
     messageId: messageId,
     fromId: 1,
     date: date,
     text: "hi",
-    peerUserId: nil,
-    peerThreadId: 1,
+    peerUserId: peerUserId,
+    peerThreadId: peerUserId == nil ? 1 : nil,
     chatId: 1
   )
   message.globalId = globalId
+  message.status = status
 
   return FullMessage(
     senderInfo: nil,

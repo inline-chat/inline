@@ -29,11 +29,12 @@ class UIMessageView: UIView {
   let fullMessage: FullMessage
   let spaceId: Int64?
   let displayMode: MessageDisplayMode
-  private let bubbleTailSide: MessageBubbleTailSide
+  private var bubbleTailSide: MessageBubbleTailSide
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
   private var messageActionButtonsById: [String: MessageActionButton] = [:]
+  private var bubbleHorizontalConstraint: NSLayoutConstraint?
   private var isTranslating = false {
     didSet {
       if isTranslating {
@@ -1913,15 +1914,8 @@ class UIMessageView: UIView {
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     }
 
-    let tailWidth = MessageBubbleView.tailWidth(for: bubbleTailSide)
-
-    switch resolvedBubbleTailSide {
-    case .none, .trailing:
-      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2 + tailWidth).isActive = true
-
-    case .leading:
-      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2 - tailWidth).isActive = true
-    }
+    updateBubbleHorizontalConstraint(for: bubbleTailSide)
+    bubbleHorizontalConstraint?.isActive = true
   }
 
   func setupAppearance() {
@@ -1971,6 +1965,47 @@ class UIMessageView: UIView {
 
   private func updateBubbleShape() {
     bubbleView.configure(side: bubbleTailSide)
+  }
+
+  func updateBubbleTail(side: MessageBubbleTailSide, animated: Bool) {
+    guard bubbleTailSide != side else { return }
+    bubbleTailSide = side
+    updateBubbleHorizontalConstraint(for: side)
+    bubbleHorizontalConstraint?.isActive = true
+    bubbleView.configure(side: side, animated: animated)
+
+    guard animated else {
+      layoutIfNeeded()
+      return
+    }
+
+    UIView.animate(
+      withDuration: 0.16,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]
+    ) {
+      self.layoutIfNeeded()
+    }
+  }
+
+  private func updateBubbleHorizontalConstraint(for side: MessageBubbleTailSide) {
+    bubbleHorizontalConstraint?.isActive = false
+
+    let tailWidth = MessageBubbleView.tailWidth(for: side)
+    let resolvedSide: MessageBubbleTailSide = if side != .none {
+      side
+    } else {
+      outgoing ? .trailing : .leading
+    }
+
+    let constraint: NSLayoutConstraint = switch resolvedSide {
+    case .none, .trailing:
+      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2 + tailWidth)
+    case .leading:
+      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2 - tailWidth)
+    }
+
+    bubbleHorizontalConstraint = constraint
   }
 
   private var resolvedBubbleTailSide: MessageBubbleTailSide {
