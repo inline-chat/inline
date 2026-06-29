@@ -589,9 +589,6 @@
     "Enable experimental view" : {
 
     },
-    "Enable voice messages" : {
-
-    },
     "Enter invite code" : {
       "comment" : "Invite code input title"
     },
@@ -679,7 +676,7 @@
     "Experimental" : {
 
     },
-    "Experimental voice features and UI changes may require an app restart." : {
+    "Experimental toggles will appear here." : {
 
     },
     "Failed to load chat" : {
