@@ -1,16 +1,17 @@
 import SwiftUI
 
 struct ExperimentalSettingsDetailView: View {
-  @StateObject private var appSettings = AppSettings.shared
+  // Example future toggle:
+  // @AppStorage("experimental.exampleFeature") private var enableExampleFeature = false
 
   var body: some View {
     Form {
       Section("Experimental") {
-        Toggle("Enable voice messages", isOn: $appSettings.enableVoiceMessages)
-
-        Text("Voice features may require an app restart.")
-          .font(.caption)
+        Text("Experimental toggles will appear here.")
           .foregroundStyle(.secondary)
+
+        // Example future toggle:
+        // Toggle("Enable example feature", isOn: $enableExampleFeature)
       }
     }
     .formStyle(.grouped)

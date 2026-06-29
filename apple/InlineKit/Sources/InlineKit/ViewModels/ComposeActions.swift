@@ -40,11 +40,6 @@ public class ComposeActions: ObservableObject {
 
   /// Add compose action for a specific user in a peer
   public func addComposeAction(for peer: Peer, action: ApiComposeAction, userId: Int64) {
-    guard action != .recordingVoice || ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      removeComposeAction(for: peer, userId: userId)
-      return
-    }
-
     log.trace("action \(action) added for user \(userId) in \(peer)")
 
     // Cancel existing task for this user in this peer
@@ -106,9 +101,7 @@ public class ComposeActions: ObservableObject {
 
   /// Get the first compose action for a peer (backwards compatibility)
   public func getComposeAction(for peer: Peer) -> ComposeActionInfo? {
-    actions[peer]?.values.first { action in
-      action.action != .recordingVoice || ExperimentalFeatureFlags.voiceMessagesEnabled
-    }
+    actions[peer]?.values.first
   }
 
   /// Remove compose action for peer (backwards compatibility - removes all)
@@ -339,10 +332,6 @@ public extension ComposeActions {
 
   /// Keeps a voice-recording compose action alive until recording stops.
   func startVoiceRecording(for peerId: Peer) -> @Sendable () -> Void {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      return {}
-    }
-
     lastTypingSent[peerId] = Date()
 
     Task.detached(priority: .userInitiated) {

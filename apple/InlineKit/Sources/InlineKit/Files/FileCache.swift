@@ -433,10 +433,6 @@ public actor FileCache: Sendable {
     mimeType: String,
     fileExtension: String
   ) throws -> Client_MessageVoiceContent {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      throw FileCacheError.failedToSave
-    }
-
     let normalizedExtension = fileExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     let finalExtension = normalizedExtension.hasPrefix(".") ? normalizedExtension : ".\(normalizedExtension)"
     let localPath = "\(UUID().uuidString)\(finalExtension)"

@@ -256,7 +256,6 @@ struct ComposeInteractionStateTests {
   @Test("voice recording can start only from an idle empty composer")
   func voiceRecordingCanStartFromIdleEmptyComposer() async throws {
     let canStart = ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: false,
       hasAttachments: false,
       hasPendingVideos: false,
@@ -273,7 +272,6 @@ struct ComposeInteractionStateTests {
   @Test("voice recording is hidden when regular compose content exists")
   func voiceRecordingCannotStartWithRegularComposeContent() async throws {
     #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: true,
       hasAttachments: false,
       hasPendingVideos: false,
@@ -285,7 +283,6 @@ struct ComposeInteractionStateTests {
     ) == false)
 
     #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: false,
       hasAttachments: true,
       hasPendingVideos: false,
@@ -297,7 +294,6 @@ struct ComposeInteractionStateTests {
     ) == false)
 
     #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: false,
       hasAttachments: false,
       hasPendingVideos: true,
@@ -309,22 +305,9 @@ struct ComposeInteractionStateTests {
     ) == false)
   }
 
-  @Test("voice recording is blocked by feature and mode state")
-  func voiceRecordingCannotStartWhenFeatureOrModeDisallowsIt() async throws {
+  @Test("voice recording is blocked by mode state")
+  func voiceRecordingCannotStartWhenModeDisallowsIt() async throws {
     #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: false,
-      hasText: false,
-      hasAttachments: false,
-      hasPendingVideos: false,
-      isEditing: false,
-      isForwarding: false,
-      hasPeer: true,
-      hasChat: true,
-      isVoiceActive: false
-    ) == false)
-
-    #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: false,
       hasAttachments: false,
       hasPendingVideos: false,
@@ -336,7 +319,6 @@ struct ComposeInteractionStateTests {
     ) == false)
 
     #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: false,
       hasAttachments: false,
       hasPendingVideos: false,
@@ -348,7 +330,6 @@ struct ComposeInteractionStateTests {
     ) == false)
 
     #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: false,
       hasAttachments: false,
       hasPendingVideos: false,
@@ -360,7 +341,6 @@ struct ComposeInteractionStateTests {
     ) == false)
 
     #expect(ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: true,
       hasText: false,
       hasAttachments: false,
       hasPendingVideos: false,

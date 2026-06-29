@@ -13,7 +13,6 @@ class LegacyComposeAppKit: NSView {
   // MARK: - Internals
 
   private var log = Log.scoped("Compose", enableTracing: false)
-  private let voiceControlsInstalled = ExperimentalFeatureFlags.voiceMessagesEnabled
 
   // MARK: - Props
 
@@ -49,16 +48,11 @@ class LegacyComposeAppKit: NSView {
   }
 
   private var canStartVoiceRecording: Bool {
-    guard voiceControlsAvailable else { return false }
-    return isVoiceRecordingAvailable(isVoiceActive: voiceViewModel.isActive)
+    isVoiceRecordingAvailable(isVoiceActive: voiceViewModel.isActive)
   }
 
   private var currentVoiceActive: Bool {
-    voiceControlsAvailable && voiceViewModel.isActive
-  }
-
-  private var voiceControlsAvailable: Bool {
-    voiceControlsInstalled && ExperimentalFeatureFlags.voiceMessagesEnabled
+    voiceViewModel.isActive
   }
 
   private var placeholderText: String {
@@ -75,8 +69,7 @@ class LegacyComposeAppKit: NSView {
   }
 
   private func isVoiceRecordingAvailable(isVoiceActive: Bool) -> Bool {
-    voiceControlsAvailable &&
-      !isVoiceActive &&
+    !isVoiceActive &&
       isEmptyTrimmed &&
       attachmentItems.isEmpty &&
       state.editingMsgId == nil &&
@@ -415,10 +408,8 @@ class LegacyComposeAppKit: NSView {
     // to bottom
     addSubview(sendButton)
     addSubview(silentModeButton)
-    if voiceControlsInstalled {
-      addSubview(voiceButton)
-      addSubview(voiceInputView)
-    }
+    addSubview(voiceButton)
+    addSubview(voiceInputView)
     addSubview(emojiButton)
     addSubview(menuButton)
     addSubview(textEditor)
@@ -513,16 +504,14 @@ class LegacyComposeAppKit: NSView {
       border.heightAnchor.constraint(equalToConstant: 1),
     ]
 
-    if voiceControlsInstalled {
-      constraints.append(contentsOf: [
-        voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
-        voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
-        voiceInputView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
-        voiceInputView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
-        voiceInputView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        voiceInputView.heightAnchor.constraint(equalToConstant: Theme.composeMinHeight),
-      ])
-    }
+    constraints.append(contentsOf: [
+      voiceButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      voiceButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
+      voiceInputView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
+      voiceInputView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
+      voiceInputView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      voiceInputView.heightAnchor.constraint(equalToConstant: Theme.composeMinHeight),
+    ])
 
     NSLayoutConstraint.activate(constraints)
 
@@ -578,16 +567,14 @@ class LegacyComposeAppKit: NSView {
         )
       }.store(in: &cancellables)
 
-    if voiceControlsInstalled {
-      voiceViewModel.$phase
-        .sink { [weak self] phase in
-          guard let self else { return }
-          updateVoiceAvailability(phase: phase)
-          updateVoiceKeyHandlers(phase: phase)
-          updateHeight(animate: true, voicePhase: phase)
-        }
-        .store(in: &cancellables)
-    }
+    voiceViewModel.$phase
+      .sink { [weak self] phase in
+        guard let self else { return }
+        updateVoiceAvailability(phase: phase)
+        updateVoiceKeyHandlers(phase: phase)
+        updateHeight(animate: true, voicePhase: phase)
+      }
+      .store(in: &cancellables)
 
     Publishers.CombineLatest3(
       autocompleteViewModel.$items,
@@ -628,20 +615,6 @@ class LegacyComposeAppKit: NSView {
   }
 
   private func updateVoiceAvailability(phase: ComposeVoiceRecordingPhase? = nil) {
-    guard voiceControlsAvailable else {
-      if voiceControlsInstalled {
-        voiceInputView.isHidden = true
-        voiceButton.isHidden = true
-      }
-      textEditor.isHidden = false
-      menuButton.isHidden = false
-      emojiButton.isHidden = false
-      attachments.isHidden = false
-      sendButton.isHidden = false
-      updateSilentModeUI(animated: false, forceLayout: false, isVoiceActive: false)
-      return
-    }
-
     let isVoiceActive = phase.map { $0 != .idle } ?? voiceViewModel.isActive
     let shouldShowVoiceButton = isVoiceRecordingAvailable(isVoiceActive: isVoiceActive)
 
@@ -690,7 +663,7 @@ class LegacyComposeAppKit: NSView {
   }
 
   private func updateVoiceKeyHandlers(phase: ComposeVoiceRecordingPhase) {
-    guard voiceControlsAvailable, phase != .idle else {
+    guard phase != .idle else {
       removeVoiceKeyHandlers()
       return
     }
@@ -726,8 +699,6 @@ class LegacyComposeAppKit: NSView {
   }
 
   private func handleVoiceSpaceKey() {
-    guard voiceControlsAvailable else { return }
-
     switch voiceViewModel.phase {
       case .recording:
         pauseVoiceRecording()
@@ -739,13 +710,6 @@ class LegacyComposeAppKit: NSView {
   }
 
   private func sendVoiceRecording() {
-    guard voiceControlsAvailable else {
-      if voiceControlsInstalled {
-        voiceViewModel.cancel()
-      }
-      return
-    }
-
     do {
       guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }
 
@@ -1491,9 +1455,7 @@ class LegacyComposeAppKit: NSView {
 
   // Clear, reset height
   func clear() {
-    if voiceControlsInstalled {
-      voiceViewModel.cancel()
-    }
+    voiceViewModel.cancel()
 
     // State
     attachmentItems.removeAll()
@@ -2734,7 +2696,7 @@ extension LegacyComposeAppKit {
         attachmentItems[attachment.id] = attachment.media
         attachments.addDocumentView(documentInfo, id: attachment.id)
       case let .voice(voice):
-        guard voiceControlsAvailable, voiceViewModel.loadDraftVoice(voice) else {
+        guard voiceViewModel.loadDraftVoice(voice) else {
           log.warning("Unable to restore draft voice attachment")
           return
         }

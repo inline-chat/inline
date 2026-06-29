@@ -169,7 +169,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       AppSettings.sidebarCleanupIntervalKey: SidebarCleanupInterval.defaultValue.rawValue,
       AppSettings.messageDoubleClickActionKey: MessageGestureAction.defaultDoubleClick.rawValue,
       AppSettings.messageHoldActionKey: MessageGestureAction.defaultHold.rawValue,
-      ExperimentalFeatureFlags.voiceMessagesKey: false,
       ExperimentalFeatureFlags.sidebarAsInboxKey: true,
     ])
   }

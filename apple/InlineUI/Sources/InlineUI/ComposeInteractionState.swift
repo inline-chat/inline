@@ -100,7 +100,6 @@ public enum ComposeSendEligibility {
 
 public enum ComposeVoiceRecordingEligibility {
   public static func canStart(
-    isFeatureEnabled: Bool,
     hasText: Bool,
     hasAttachments: Bool,
     hasPendingVideos: Bool,
@@ -110,7 +109,6 @@ public enum ComposeVoiceRecordingEligibility {
     hasChat: Bool,
     isVoiceActive: Bool
   ) -> Bool {
-    guard isFeatureEnabled else { return false }
     guard hasPeer, hasChat else { return false }
     guard !isVoiceActive else { return false }
     guard !hasText else { return false }

@@ -29,42 +29,40 @@ struct ComposeVoiceInputView: View {
   }
 
   var body: some View {
-    if ExperimentalFeatureFlags.voiceMessagesEnabled {
-      HStack(alignment: rowAlignment, spacing: rowSpacing) {
-        switch viewModel.phase {
-        case .recording:
-          recordingIndicator
-          waveform(progress: 1)
-          durationLabel
-          iconButton("stop.fill", title: "Stop recording", action: onPause)
+    HStack(alignment: rowAlignment, spacing: rowSpacing) {
+      switch viewModel.phase {
+      case .recording:
+        recordingIndicator
+        waveform(progress: 1)
+        durationLabel
+        iconButton("stop.fill", title: "Stop recording", action: onPause)
 
-        case .review:
-          iconButton("xmark", title: "Cancel", action: onCancel)
-          waveform(progress: viewModel.playbackProgress) { progress in
-            viewModel.seekPlayback(to: progress)
-          }
-          durationLabel
-          iconButton(
-            viewModel.isPlaying ? "pause.fill" : "play.fill",
-            title: viewModel.isPlaying ? "Pause" : "Play",
-            action: onPlay
-          )
-          iconButton("arrow.up", title: "Send voice message", isPrimary: true, action: onSend)
-
-        case .idle:
-          EmptyView()
+      case .review:
+        iconButton("xmark", title: "Cancel", action: onCancel)
+        waveform(progress: viewModel.playbackProgress) { progress in
+          viewModel.seekPlayback(to: progress)
         }
+        durationLabel
+        iconButton(
+          viewModel.isPlaying ? "pause.fill" : "play.fill",
+          title: viewModel.isPlaying ? "Pause" : "Play",
+          action: onPlay
+        )
+        iconButton("arrow.up", title: "Send voice message", isPrimary: true, action: onSend)
+
+      case .idle:
+        EmptyView()
       }
-      .padding(.horizontal, horizontalPadding)
-      .frame(
-        maxWidth: .infinity,
-        minHeight: mode.textMinHeight,
-        maxHeight: mode.textMinHeight,
-        alignment: rowFrameAlignment
-      )
-      .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
-      .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
     }
+    .padding(.horizontal, horizontalPadding)
+    .frame(
+      maxWidth: .infinity,
+      minHeight: mode.textMinHeight,
+      maxHeight: mode.textMinHeight,
+      alignment: rowFrameAlignment
+    )
+    .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
+    .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
   }
 
   private var isGlass: Bool {

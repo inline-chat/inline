@@ -295,12 +295,6 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var enableVoiceMessages: Bool {
-    didSet {
-      UserDefaults.standard.set(enableVoiceMessages, forKey: ExperimentalFeatureFlags.voiceMessagesKey)
-    }
-  }
-
   @Published var sidebarAsInbox: Bool {
     didSet {
       UserDefaults.standard.set(sidebarAsInbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
@@ -381,7 +375,6 @@ final class AppSettings: ObservableObject {
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
-    enableVoiceMessages = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.voiceMessagesKey)
     sidebarAsInbox = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
     if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
        !storedChannel.isEmpty,

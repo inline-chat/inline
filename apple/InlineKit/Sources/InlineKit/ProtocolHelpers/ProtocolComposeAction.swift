@@ -14,7 +14,7 @@ public extension InlineProtocol.UpdateComposeAction.ComposeAction {
       case .uploadingVideo:
         .uploadingVideo
       case .recordingVoice:
-        ExperimentalFeatureFlags.voiceMessagesEnabled ? .recordingVoice : .typing
+        .recordingVoice
       default:
         .typing
     }
@@ -33,7 +33,7 @@ public extension ApiComposeAction {
       case .uploadingVideo:
         .uploadingVideo
       case .recordingVoice:
-        ExperimentalFeatureFlags.voiceMessagesEnabled ? .recordingVoice : .none
+        .recordingVoice
     }
   }
 }

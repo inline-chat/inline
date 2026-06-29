@@ -1,5 +1,4 @@
 import AppKit
-import InlineKit
 
 final class ComposeVoiceButton: NSView {
   private let mode: ComposeControlMode
@@ -46,7 +45,6 @@ final class ComposeVoiceButton: NSView {
   private func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
-    isHidden = !ExperimentalFeatureFlags.voiceMessagesEnabled
     layer?.cornerRadius = size / 2
     layer?.masksToBounds = true
     toolTip = "Record voice message"
@@ -67,7 +65,6 @@ final class ComposeVoiceButton: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
     super.mouseDown(with: event)
     onClick?()
   }

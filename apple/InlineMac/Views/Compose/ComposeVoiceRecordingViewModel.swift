@@ -60,7 +60,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func start() async {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
     guard phase == .idle, !isStarting else { return }
     isStarting = true
     defer {
@@ -93,11 +92,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func pauseRecording() {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      cancel()
-      return
-    }
-
     guard phase == .recording, let recorder else { return }
 
     do {
@@ -137,11 +131,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func togglePlayback() {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      stopPlayback(resetProgress: true)
-      return
-    }
-
     guard phase == .review, let recording else { return }
 
     if player?.isPlaying == true {
@@ -169,7 +158,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func seekPlayback(to progress: Double) {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
     guard phase == .review, let recording else { return }
 
     do {
@@ -194,11 +182,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func takeVoiceMediaItem() throws -> FileMediaItem? {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      cancel()
-      return nil
-    }
-
     guard let recording else { return nil }
     stopPlayback(resetProgress: true)
 
@@ -228,7 +211,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func draftVoiceMediaItem() throws -> FileMediaItem? {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return nil }
     guard phase == .review, let recording else { return nil }
 
     if let draftVoice {
@@ -247,7 +229,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func loadDraftVoice(_ voice: Client_MessageVoiceContent) -> Bool {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return false }
     guard let url = FileMediaItem.voice(voice).localFileURL(),
           let data = try? Data(contentsOf: url),
           !data.isEmpty

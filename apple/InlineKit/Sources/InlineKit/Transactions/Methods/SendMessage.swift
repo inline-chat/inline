@@ -160,7 +160,7 @@ public struct TransactionSendMessage: Transaction {
   // Methods
   public func optimistic() {
     let media = attachments.first?.media
-    let voiceContent = ExperimentalFeatureFlags.voiceMessagesEnabled ? media?.asVoiceContent() : nil
+    let voiceContent = media?.asVoiceContent()
     Log.shared.debug("Optimistic send message \(media.debugDescription)")
     guard let currentUserId = Auth.getCurrentUserId() else {
       Log.shared.error("Skipping optimistic send message because current user id is missing")
@@ -336,10 +336,6 @@ public struct TransactionSendMessage: Transaction {
           }
 
         case let .voice(voiceContent):
-          guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-            throw FileUploadError.invalidVoice
-          }
-
           let localVoiceId = voiceContent.voiceID
           guard localVoiceId != 0 else {
             throw FileUploadError.invalidVoiceId

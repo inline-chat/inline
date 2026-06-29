@@ -77,7 +77,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
   @discardableResult
   func prepareToStart() -> Bool {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return false }
     guard phase == .idle else { return false }
 
     let operationId = UUID()
@@ -86,8 +85,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func start(peerId: InlineKit.Peer) async {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
-
     let operationId: UUID
     switch phase {
     case .idle:
@@ -199,11 +196,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func togglePlayback() {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      stopPlayback(resetProgress: true)
-      return
-    }
-
     guard phase == .review, let recording else { return }
 
     if player?.isPlaying == true {
@@ -232,7 +224,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func seekPlayback(to progress: Double) {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else { return }
     guard phase == .review, let recording else { return }
 
     do {
@@ -256,11 +247,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func takeVoiceMediaItem() throws -> FileMediaItem? {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      cancel()
-      return nil
-    }
-
     guard canSend, let recording else { return nil }
     isSending = true
     defer {
@@ -286,11 +272,6 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func finishRecording(showTooShortToast: Bool) async {
-    guard ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      cancel()
-      return
-    }
-
     guard phase == .recording, let recorder else { return }
 
     let operationId = self.operationId

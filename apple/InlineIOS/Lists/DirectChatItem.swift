@@ -72,11 +72,7 @@ struct DirectChatItem: View {
   @Environment(\.colorScheme) private var colorScheme
 
   private func currentComposeAction() -> ApiComposeAction? {
-    let action = composeActions.getComposeAction(for: Peer(userId: userInfo?.user.id ?? 0))?.action
-    guard action != .recordingVoice || ExperimentalFeatureFlags.voiceMessagesEnabled else {
-      return nil
-    }
-    return action
+    composeActions.getComposeAction(for: Peer(userId: userInfo?.user.id ?? 0))?.action
   }
 
   private var showTypingIndicator: Bool {

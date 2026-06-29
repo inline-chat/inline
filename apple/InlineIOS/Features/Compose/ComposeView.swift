@@ -51,7 +51,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private let composePlusSpacing: CGFloat = 9.5
   private let composeHorizontalInset: CGFloat = 10.0
   private let composeControlTrailingInset: CGFloat = 6.0
-  private let voiceControlsInstalled = ExperimentalFeatureFlags.voiceMessagesEnabled
 
   // MARK: - State Management
 
@@ -260,9 +259,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   override func removeFromSuperview() {
-    if voiceControlsInstalled {
-      voiceViewModel.cancel()
-    }
+    voiceViewModel.cancel()
     saveDraft()
     stopDraftSaveTimer()
     resetMentionManager()
@@ -392,10 +389,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     attachmentScrollView.addSubview(attachmentStackView)
     composeContent.addSubview(textView)
     composeContent.addSubview(sendButton)
-    if voiceControlsInstalled {
-      composeContent.addSubview(voiceButton)
-      composeContent.addSubview(voiceInputView)
-    }
+    composeContent.addSubview(voiceButton)
+    composeContent.addSubview(voiceInputView)
 
     setupInitialHeight()
     setupConstraints()
@@ -495,19 +490,17 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
     ])
 
-    if voiceControlsInstalled {
-      NSLayoutConstraint.activate([
-        voiceButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
-        voiceButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
-        voiceButton.widthAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
-        voiceButton.heightAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
+    NSLayoutConstraint.activate([
+      voiceButton.centerXAnchor.constraint(equalTo: sendButton.centerXAnchor),
+      voiceButton.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
+      voiceButton.widthAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
+      voiceButton.heightAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
 
-        voiceInputView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
-        voiceInputView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
-        voiceInputView.topAnchor.constraint(equalTo: composeContent.topAnchor),
-        voiceInputView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor),
-      ])
-    }
+      voiceInputView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
+      voiceInputView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
+      voiceInputView.topAnchor.constraint(equalTo: composeContent.topAnchor),
+      voiceInputView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor),
+    ])
   }
 
   func buttonDisappear(animated: Bool = true) {
@@ -693,7 +686,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private var isVoiceActive: Bool {
-    voiceControlsInstalled && voiceViewModel.isActive
+    voiceViewModel.isActive
   }
 
   private var canStartVoiceRecording: Bool {
@@ -702,7 +695,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let state = peerId.map { ChatState.shared.getState(peer: $0) }
 
     return ComposeVoiceRecordingEligibility.canStart(
-      isFeatureEnabled: voiceControlsInstalled,
       hasText: hasText,
       hasAttachments: !attachmentItems.isEmpty,
       hasPendingVideos: !pendingVideoAttachments.isEmpty,
@@ -715,8 +707,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func setupVoicePhaseObserver() {
-    guard voiceControlsInstalled else { return }
-
     voicePhaseObserver = Publishers.CombineLatest(
       voiceViewModel.$phase.removeDuplicates(),
       voiceViewModel.$isSending.removeDuplicates()
@@ -727,15 +717,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func reconcileVoiceControls(animated: Bool) {
-    guard voiceControlsInstalled else { return }
-
     updateVoiceAvailability(animated: animated)
     updateSendButtonVisibility(syncVoiceAvailability: false)
   }
 
   func updateVoiceAvailability(animated: Bool = false) {
-    guard voiceControlsInstalled else { return }
-
     let voiceActive = voiceViewModel.isActive
     let shouldShowVoiceButton = canStartVoiceRecording
 
@@ -873,7 +859,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func discardVoiceRecordingTapped() {
-    guard voiceControlsInstalled, voiceViewModel.phase == .review else { return }
+    guard voiceViewModel.phase == .review else { return }
 
     if voiceViewModel.shouldConfirmCancel {
       presentVoiceDiscardConfirmation()
@@ -920,7 +906,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func handleVoiceSendTapped(sendMode: MessageSendMode?) -> Bool {
-    guard voiceControlsInstalled, voiceViewModel.isActive else { return false }
+    guard voiceViewModel.isActive else { return false }
     guard voiceViewModel.canSend else { return true }
 
     sendVoiceRecording(sendMode: sendMode)
@@ -928,7 +914,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func sendVoiceRecording(sendMode: MessageSendMode?) {
-    guard voiceControlsInstalled else { return }
     guard let peerId, let chatId else {
       voiceViewModel.cancel()
       reconcileVoiceControls(animated: true)
@@ -1907,14 +1892,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func updateSendButtonVisibility(syncVoiceAvailability: Bool = true) {
-    if voiceControlsInstalled {
-      if syncVoiceAvailability {
-        updateVoiceAvailability(animated: false)
-      }
-      if voiceViewModel.isActive || canStartVoiceRecording {
-        buttonDisappear(animated: false)
-        return
-      }
+    if syncVoiceAvailability {
+      updateVoiceAvailability(animated: false)
+    }
+    if voiceViewModel.isActive || canStartVoiceRecording {
+      buttonDisappear(animated: false)
+      return
     }
 
     if isAwaitingPendingVideoSend {
