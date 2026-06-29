@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RouteWindowAppearance {
@@ -65,15 +66,36 @@ private struct TranslucentPageWindowBackground: ViewModifier {
   func body(content: Content) -> some View {
     content
       .background {
-        ZStack {
-          VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-
-          windowOverlayColor
-            .opacity(appearsActive ? 0.7 : 0)
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
+        background
       }
+  }
+
+  @ViewBuilder
+  private var background: some View {
+    if #available(macOS 27.0, *) {
+      windowBackground
+    } else if #available(macOS 26.0, *) {
+      hudBackground
+    } else {
+      windowBackground
+    }
+  }
+
+  private var hudBackground: some View {
+    ZStack {
+      VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+
+      windowOverlayColor
+        .opacity(appearsActive ? 0.7 : 0)
+    }
+    .ignoresSafeArea()
+    .allowsHitTesting(false)
+  }
+
+  private var windowBackground: some View {
+    Color(nsColor: .windowBackgroundColor)
+      .ignoresSafeArea()
+      .allowsHitTesting(false)
   }
 
   private var windowOverlayColor: Color {
