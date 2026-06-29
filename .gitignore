@@ -116,6 +116,15 @@ dist/
 # WEb
 .output
 
+# Expo mobile
+mobile/.expo/
+mobile/android/
+mobile/ios/
+mobile/dist/
+mobile/*.apk
+mobile/*.aab
+mobile/.eas/build/
+
 
 # Swift
 .swift-module-cache

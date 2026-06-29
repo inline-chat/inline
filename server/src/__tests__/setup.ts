@@ -261,7 +261,7 @@ export const testUtils = {
   async createSessionForUser(
     userId: number,
     options?: {
-      clientType?: "ios" | "macos" | "web" | "api" | "cli"
+      clientType?: "ios" | "macos" | "web" | "api" | "android" | "cli"
       deviceId?: string
       deviceName?: string
       osVersion?: string

@@ -7,6 +7,7 @@ import {
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { updatePushNotificationDetails as updatePushNotificationDetailsFunction } from "@in/server/functions/user.updatePushNotificationDetails"
+import type { SessionPushNotificationProvider } from "@in/server/db/models/sessions"
 
 export const updatePushNotificationDetailsHandler = async (
   input: UpdatePushNotificationDetailsInput,
@@ -14,6 +15,7 @@ export const updatePushNotificationDetailsHandler = async (
 ): Promise<UpdatePushNotificationDetailsResult> => {
   const legacyToken = input.applePushToken?.trim()
   let pushToken = legacyToken
+  let pushNotificationProvider: SessionPushNotificationProvider | undefined
 
   if (input.notificationMethod) {
     const provider = input.notificationMethod.provider
@@ -21,14 +23,20 @@ export const updatePushNotificationDetailsHandler = async (
 
     if (provider === PushNotificationProvider.APNS && method.oneofKind === "apns") {
       pushToken = method.apns.deviceToken.trim()
+      pushNotificationProvider = "apns"
     } else if (provider === PushNotificationProvider.EXPO_ANDROID && method.oneofKind === "expoAndroid") {
       pushToken = method.expoAndroid.expoPushToken.trim()
+      pushNotificationProvider = "expo_android"
     } else {
       throw RealtimeRpcError.BadRequest()
     }
   }
 
   if (!pushToken) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  if (pushNotificationProvider === "expo_android" && input.pushContentEncryptionKey) {
     throw RealtimeRpcError.BadRequest()
   }
 
@@ -45,6 +53,7 @@ export const updatePushNotificationDetailsHandler = async (
   await updatePushNotificationDetailsFunction(
     {
       applePushToken: pushToken,
+      pushNotificationProvider,
       pushContentEncryptionKey: input.pushContentEncryptionKey
         ? {
             publicKey: input.pushContentEncryptionKey.publicKey,

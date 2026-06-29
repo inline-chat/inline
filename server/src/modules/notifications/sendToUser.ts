@@ -1,6 +1,12 @@
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { getApnProvider } from "@in/server/libs/apn"
 import { isSuppressedApnFailure, summarizeApnFailure } from "@in/server/libs/apnFailures"
+import {
+  getExpoPushClient,
+  isExpoPushToken,
+  type ExpoPushMessage,
+  type ExpoPushTicket,
+} from "@in/server/libs/expoPush"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
@@ -137,7 +143,7 @@ const configurePlaintextSendMessageNotification = ({
 const genericEncryptedAlertTitle = "New message"
 const genericEncryptedAlertBody = "Open Inline to read it."
 
-type UserSession = Awaited<ReturnType<typeof SessionsModel.getValidIOSPushSessionsByUserId>>[number]
+type UserSession = Awaited<ReturnType<typeof SessionsModel.getValidPushSessionsByUserId>>[number]
 
 const sessionSupportsEncryptedPushContent = (
   session: UserSession,
@@ -154,15 +160,9 @@ const sessionSupportsEncryptedPushContent = (
 export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
   try {
     // Get all sessions for the user
-    const userSessions = await SessionsModel.getValidIOSPushSessionsByUserId(userId)
+    const userSessions = await SessionsModel.getValidPushSessionsByUserId(userId)
 
     if (!userSessions.length) {
-      return
-    }
-
-    const apnProvider = getApnProvider()
-    if (!apnProvider) {
-      Log.shared.error("APN provider not found", { userId })
       return
     }
 
@@ -179,6 +179,17 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
     }
 
     for (const session of userSessions) {
+      if (session.pushNotificationProvider === "expo_android") {
+        await sendExpoPush({ session, payload, silent, userId })
+        continue
+      }
+
+      const apnProvider = getApnProvider()
+      if (!apnProvider) {
+        Log.shared.error("APN provider not found", { userId, sessionId: session.id })
+        continue
+      }
+
       const topic = iOSTopic
       if (!topic) continue
 
@@ -340,5 +351,183 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
       userId,
       threadId: payload.threadId,
     })
+  }
+}
+
+async function sendExpoPush({
+  session,
+  payload,
+  silent,
+  userId,
+}: {
+  session: UserSession
+  payload: PushToUserPayload
+  silent: boolean
+  userId: number
+}) {
+  if (!session.applePushToken || !isExpoPushToken(session.applePushToken)) {
+    log.warn("Invalid Expo push token", {
+      userId,
+      sessionId: session.id,
+      threadId: payload.threadId,
+    })
+    return
+  }
+
+  const message = buildExpoPushMessage({
+    to: session.applePushToken,
+    payload,
+    silent,
+  })
+  if (!message) return
+
+  const expo = getExpoPushClient()
+  const chunks = expo.chunkPushNotifications([message])
+
+  for (const chunk of chunks) {
+    try {
+      const tickets = await expo.sendPushNotificationsAsync(chunk)
+      await handleExpoTickets({ tickets, session, payload, userId })
+    } catch (error) {
+      log.error("Error sending Expo push notification", {
+        error,
+        userId,
+        sessionId: session.id,
+        threadId: payload.threadId,
+      })
+    }
+  }
+}
+
+export function buildExpoPushMessage({
+  to,
+  payload,
+  silent,
+}: {
+  to: string
+  payload: PushToUserPayload
+  silent: boolean
+}): ExpoPushMessage | undefined {
+  const baseData = expoDataForPayload(payload)
+  const shouldSound =
+    payload.kind === "send_message"
+      ? shouldPlayNotificationSound({ silent, isUrgentNudge: payload.isUrgentNudge })
+      : payload.kind === "alert"
+        ? shouldPlayNotificationSound({ silent })
+        : false
+
+  if (payload.kind === "send_message") {
+    const message: ExpoPushMessage = {
+      to,
+      title: payload.title,
+      body: payload.body,
+      subtitle: payload.subtitle,
+      data: baseData,
+      sound: shouldSound ? "default" : undefined,
+      priority: payload.isUrgentNudge ? "high" : "default",
+      channelId: payload.isUrgentNudge ? "urgent" : silent ? "messages_silent" : "messages",
+      richContent: payload.senderProfilePhotoUrl ? { image: payload.senderProfilePhotoUrl } : undefined,
+    }
+    return message
+  }
+
+  if (payload.kind === "alert") {
+    return {
+      to,
+      title: payload.title,
+      body: payload.body,
+      subtitle: payload.subtitle,
+      data: baseData,
+      sound: shouldSound ? "default" : undefined,
+      priority: "default",
+      channelId: silent ? "messages_silent" : "messages",
+    }
+  }
+
+  if (payload.kind === "message_deleted" || payload.kind === "messages_read") {
+    return {
+      to,
+      data: baseData,
+      priority: "normal",
+    }
+  }
+
+  return undefined
+}
+
+function expoDataForPayload(payload: PushToUserPayload): Record<string, unknown> {
+  if (payload.kind === "send_message") {
+    return {
+      kind: "send_message",
+      userId: payload.senderUserId,
+      senderUserId: payload.senderUserId,
+      senderDisplayName: payload.senderDisplayName,
+      senderProfilePhotoUrl: payload.senderProfilePhotoUrl,
+      threadId: payload.threadId,
+      isThread: payload.isThread ?? false,
+      messageId: payload.messageId,
+      isUrgentNudge: payload.isUrgentNudge ?? false,
+      threadEmoji: payload.threadEmoji,
+    }
+  }
+
+  if (payload.kind === "alert") {
+    return {
+      kind: "alert",
+      userId: payload.senderUserId,
+      threadId: payload.threadId,
+      isThread: payload.isThread ?? false,
+      threadEmoji: payload.threadEmoji,
+    }
+  }
+
+  if (payload.kind === "message_deleted") {
+    return {
+      kind: "message_deleted",
+      threadId: payload.threadId,
+      messageIds: payload.messageIds,
+    }
+  }
+
+  return {
+    kind: "messages_read",
+    threadId: payload.threadId,
+    readUpToMessageId: payload.readUpToMessageId,
+  }
+}
+
+async function handleExpoTickets({
+  tickets,
+  session,
+  payload,
+  userId,
+}: {
+  tickets: ExpoPushTicket[]
+  session: UserSession
+  payload: PushToUserPayload
+  userId: number
+}) {
+  for (const ticket of tickets) {
+    if (ticket.status === "ok") {
+      log.debug("Expo push notification queued", {
+        userId,
+        sessionId: session.id,
+        threadId: payload.threadId,
+        ticketId: ticket.id,
+      })
+      continue
+    }
+
+    log.warn("Expo push notification failed", {
+      userId,
+      sessionId: session.id,
+      threadId: payload.threadId,
+      message: ticket.message,
+      details: ticket.details,
+    })
+
+    if (ticket.details?.error === "DeviceNotRegistered") {
+      await SessionsModel.clearApplePushToken(session.id)
+    }
   }
 }

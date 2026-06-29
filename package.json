@@ -7,6 +7,7 @@
     "cli",
     "web",
     "landing",
+    "mobile",
     "packages/bot-api",
     "packages/bot-api-types",
     "packages/mcp",

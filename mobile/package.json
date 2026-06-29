@@ -1,0 +1,49 @@
+{
+  "name": "@inline-chat/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start --android",
+    "start": "expo start",
+    "eas": "eas",
+    "android": "expo run:android",
+    "prebuild": "expo prebuild --platform android",
+    "build:apk": "eas build --platform android --profile preview-apk",
+    "build:production": "eas build --platform android --profile production",
+    "update:preview": "eas update --channel preview --platform android",
+    "update:production": "eas update --channel production --platform android",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "expo lint"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "15.1.1",
+    "@inline-chat/protocol": "workspace:*",
+    "@protobuf-ts/runtime": "2.11.1",
+    "@sentry/react-native": "7.11.0",
+    "expo": "56.0.12",
+    "expo-application": "56.0.3",
+    "expo-constants": "56.0.18",
+    "expo-crypto": "56.0.4",
+    "expo-device": "56.0.4",
+    "expo-linking": "56.0.14",
+    "expo-notifications": "56.0.18",
+    "expo-router": "56.2.11",
+    "expo-secure-store": "56.0.4",
+    "expo-status-bar": "56.0.4",
+    "expo-updates": "56.0.19",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-safe-area-context": "5.7.0",
+    "react-native-screens": "4.25.2",
+    "react-native-web": "0.21.2"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "eas-cli": "20.4.0",
+    "eslint": "9.39.4",
+    "eslint-config-expo": "56.0.4",
+    "typescript": "6.0.3"
+  }
+}

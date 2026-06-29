@@ -7,6 +7,9 @@ import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encrypt
 import { db } from "@in/server/db"
 import { Log } from "@in/server/utils/log"
 
+type SessionClientType = NonNullable<DbNewSession["clientType"]>
+export type SessionPushNotificationProvider = "apns" | "expo_android"
+
 // Define interfaces for the personal data structure
 export interface SessionPersonalData {
   country?: string | undefined
@@ -23,7 +26,8 @@ export interface CreateSessionData {
   tokenHash: string
   personalData: SessionPersonalData
   applePushToken?: string
-  clientType: "ios" | "macos" | "web" | "api" | "cli"
+  pushNotificationProvider?: SessionPushNotificationProvider
+  clientType: SessionClientType
   clientVersion?: string | undefined
   osVersion?: string | undefined
   deviceId?: string | undefined
@@ -37,6 +41,7 @@ export interface PushContentEncryptionKeyDetails {
 
 export interface UpdatePushNotificationDetailsData {
   applePushToken: string
+  pushNotificationProvider?: SessionPushNotificationProvider | undefined
   deviceId?: string | undefined
   pushContentEncryptionKey?: PushContentEncryptionKeyDetails | undefined
   pushContentVersion?: number | undefined
@@ -60,6 +65,12 @@ export interface SessionWithDecryptedData
 export interface IOSPushSession extends SessionWithDecryptedData {
   clientType: "ios"
   applePushToken: string
+  pushNotificationProvider: "apns"
+}
+
+export interface PushSession extends SessionWithDecryptedData {
+  applePushToken: string
+  pushNotificationProvider: SessionPushNotificationProvider
 }
 
 const log = new Log("SessionsModel")
@@ -101,6 +112,8 @@ export class SessionsModel {
           applePushTokenEncrypted: applePushTokenData.encrypted,
           applePushTokenIv: applePushTokenData.iv,
           applePushTokenTag: applePushTokenData.authTag,
+          pushNotificationProvider:
+            data.pushNotificationProvider ?? this.defaultPushProviderForClientType(data.clientType),
         }),
 
         // Client info
@@ -199,15 +212,17 @@ export class SessionsModel {
       throw new Error("Invalid session ID")
     }
     if (!data.applePushToken || data.applePushToken.trim().length === 0) {
-      throw new Error("Invalid apple push token")
+      throw new Error("Invalid push token")
     }
 
+    const pushNotificationProvider = data.pushNotificationProvider ?? (await this.defaultPushProviderForSession(id))
     const encryptedApplePushToken = encrypt(data.applePushToken)
     const updateData: Partial<DbNewSession> = {
       applePushToken: null,
       applePushTokenEncrypted: encryptedApplePushToken.encrypted,
       applePushTokenIv: encryptedApplePushToken.iv,
       applePushTokenTag: encryptedApplePushToken.authTag,
+      pushNotificationProvider,
       // Token-only updates must clear stale encrypted-push capability.
       pushContentKeyPublic: null,
       pushContentKeyId: null,
@@ -244,6 +259,7 @@ export class SessionsModel {
         applePushTokenEncrypted: null,
         applePushTokenIv: null,
         applePushTokenTag: null,
+        pushNotificationProvider: null,
         pushContentKeyPublic: null,
         pushContentKeyId: null,
         pushContentKeyAlgorithm: null,
@@ -268,6 +284,7 @@ export class SessionsModel {
           applePushTokenEncrypted: null,
           applePushTokenIv: null,
           applePushTokenTag: null,
+          pushNotificationProvider: null,
           pushContentKeyPublic: null,
           pushContentKeyId: null,
           pushContentKeyAlgorithm: null,
@@ -362,7 +379,7 @@ export class SessionsModel {
     }
   }
 
-  static async getValidIOSPushSessionsByUserId(userId: number): Promise<IOSPushSession[]> {
+  static async getValidPushSessionsByUserId(userId: number): Promise<PushSession[]> {
     if (!userId || userId <= 0) {
       throw new Error("Invalid user ID")
     }
@@ -372,14 +389,20 @@ export class SessionsModel {
         .select({ session: sessions })
         .from(sessions)
         .innerJoin(users, eq(sessions.userId, users.id))
-        .where(and(eq(sessions.userId, userId), isNull(sessions.revoked), eq(sessions.clientType, "ios"), userNotDeleted()))
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revoked), userNotDeleted()))
 
-      return rows.map((row) => this.decryptSessionData(row.session)).filter(this.isIOSPushSession)
+      return rows
+        .map((row) => this.decryptSessionData(row.session))
+        .map((session) => this.toPushSession(session))
+        .filter((session): session is PushSession => session !== undefined)
     } catch (error) {
-      throw new Error(
-        `Failed to get active iOS push sessions: ${error instanceof Error ? error.message : "Unknown error"}`,
-      )
+      throw new Error(`Failed to get active push sessions: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
+  }
+
+  static async getValidIOSPushSessionsByUserId(userId: number): Promise<IOSPushSession[]> {
+    const pushSessions = await this.getValidPushSessionsByUserId(userId)
+    return pushSessions.filter(this.isIOSPushSession)
   }
 
   // Get all currently active sessions for a user
@@ -403,7 +426,43 @@ export class SessionsModel {
     }
   }
 
-  private static isIOSPushSession(session: SessionWithDecryptedData): session is IOSPushSession {
-    return session.revoked === null && session.clientType === "ios" && !!session.applePushToken
+  private static defaultPushProviderForClientType(clientType: SessionClientType): SessionPushNotificationProvider | null {
+    if (clientType === "ios") return "apns"
+    if (clientType === "android") return "expo_android"
+    return null
+  }
+
+  private static async defaultPushProviderForSession(id: number): Promise<SessionPushNotificationProvider | null> {
+    const [session] = await db
+      .select({ clientType: sessions.clientType })
+      .from(sessions)
+      .where(and(eq(sessions.id, id), isNull(sessions.revoked)))
+      .limit(1)
+
+    return session?.clientType ? this.defaultPushProviderForClientType(session.clientType) : null
+  }
+
+  private static normalizedPushProvider(session: SessionWithDecryptedData): SessionPushNotificationProvider | null {
+    if (session.pushNotificationProvider === "apns" || session.pushNotificationProvider === "expo_android") {
+      return session.pushNotificationProvider
+    }
+    return session.clientType ? this.defaultPushProviderForClientType(session.clientType) : null
+  }
+
+  private static toPushSession(session: SessionWithDecryptedData): PushSession | undefined {
+    if (session.revoked !== null || !session.applePushToken) return undefined
+
+    const pushNotificationProvider = this.normalizedPushProvider(session)
+    if (!pushNotificationProvider) return undefined
+
+    return {
+      ...session,
+      applePushToken: session.applePushToken,
+      pushNotificationProvider,
+    }
+  }
+
+  private static isIOSPushSession(session: PushSession): session is IOSPushSession {
+    return session.clientType === "ios" && session.pushNotificationProvider === "apns"
   }
 }

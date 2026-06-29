@@ -24,7 +24,7 @@ export const Input = Type.Object({
 
   // optional
   clientType: Type.Optional(
-    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("cli")]),
+    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("android"), Type.Literal("cli")]),
   ),
   clientVersion: Type.Optional(Type.String()),
   osVersion: Type.Optional(Type.String()),

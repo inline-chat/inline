@@ -35,6 +35,7 @@ export const sessions = pgTable(
     applePushTokenEncrypted: bytea("apple_push_token_encrypted"),
     applePushTokenIv: bytea("apple_push_token_iv"),
     applePushTokenTag: bytea("apple_push_token_tag"),
+    pushNotificationProvider: text("push_notification_provider"),
     pushContentKeyPublic: bytea("push_content_key_public"),
     pushContentKeyId: text("push_content_key_id"),
     pushContentKeyAlgorithm: text("push_content_key_algorithm"),

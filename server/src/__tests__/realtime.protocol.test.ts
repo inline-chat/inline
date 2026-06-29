@@ -77,7 +77,7 @@ describe("realtime protocol safety", () => {
 
   const authenticateExistingUserSocket = async (
     userId: number,
-    clientType: "ios" | "macos" | "web" | "api" | "cli" = "macos",
+    clientType: "ios" | "macos" | "web" | "api" | "android" | "cli" = "macos",
   ) => {
     const ws = await openRealtimeSocket()
     const { token, session } = await testUtils.createSessionForUser(userId, { clientType })
@@ -306,6 +306,7 @@ describe("realtime protocol safety", () => {
     const session = await db
       .select({
         applePushTokenEncrypted: sessions.applePushTokenEncrypted,
+        pushNotificationProvider: sessions.pushNotificationProvider,
         pushContentKeyPublic: sessions.pushContentKeyPublic,
         pushContentKeyId: sessions.pushContentKeyId,
         pushContentKeyAlgorithm: sessions.pushContentKeyAlgorithm,
@@ -318,11 +319,114 @@ describe("realtime protocol safety", () => {
 
     expect(session).toBeDefined()
     expect(session?.applePushTokenEncrypted).toBeTruthy()
+    expect(session?.pushNotificationProvider).toBe("apns")
     expect(session?.pushContentKeyPublic).toBeTruthy()
     expect(Buffer.from(session?.pushContentKeyPublic ?? []).equals(Buffer.from(publicKey))).toBe(true)
     expect(session?.pushContentKeyId).toBe("key-v1")
     expect(session?.pushContentKeyAlgorithm).toBe("X25519_HKDF_SHA256_AES256_GCM")
     expect(session?.pushContentVersion).toBe(1)
+
+    await wsClosed(ws)
+  })
+
+  it("updates Expo Android push notification details via RPC", async () => {
+    const { ws, sessionId } = await authenticateSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 504n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          input: {
+            oneofKind: "updatePushNotificationDetails",
+            updatePushNotificationDetails: {
+              applePushToken: "",
+              notificationMethod: {
+                provider: PushNotificationProvider.EXPO_ANDROID,
+                method: {
+                  oneofKind: "expoAndroid",
+                  expoAndroid: {
+                    expoPushToken: "ExponentPushToken[rpc-android-token]",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind === "rpcResult") {
+      expect(response.body.rpcResult.reqMsgId).toBe(504n)
+      expect(response.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+    }
+
+    const session = await db
+      .select({
+        applePushTokenEncrypted: sessions.applePushTokenEncrypted,
+        pushNotificationProvider: sessions.pushNotificationProvider,
+        pushContentKeyPublic: sessions.pushContentKeyPublic,
+        pushContentVersion: sessions.pushContentVersion,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .then((rows) => rows[0])
+
+    expect(session).toBeDefined()
+    expect(session?.applePushTokenEncrypted).toBeTruthy()
+    expect(session?.pushNotificationProvider).toBe("expo_android")
+    expect(session?.pushContentKeyPublic).toBeNull()
+    expect(session?.pushContentVersion).toBeNull()
+
+    await wsClosed(ws)
+  })
+
+  it("infers Expo Android push provider for legacy Android push-token RPC", async () => {
+    const user = await testUtils.createUser("realtime-android-legacy-push@test.com")
+    const { ws, sessionId } = await authenticateExistingUserSocket(user.id, "android")
+
+    wsSendClientProtocolMessage(ws, {
+      id: 506n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          input: {
+            oneofKind: "updatePushNotificationDetails",
+            updatePushNotificationDetails: {
+              applePushToken: "ExponentPushToken[legacy-rpc-android-token]",
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind === "rpcResult") {
+      expect(response.body.rpcResult.reqMsgId).toBe(506n)
+      expect(response.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+    }
+
+    const session = await db
+      .select({
+        applePushTokenEncrypted: sessions.applePushTokenEncrypted,
+        pushNotificationProvider: sessions.pushNotificationProvider,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .then((rows) => rows[0])
+
+    expect(session).toBeDefined()
+    expect(session?.applePushTokenEncrypted).toBeTruthy()
+    expect(session?.pushNotificationProvider).toBe("expo_android")
 
     await wsClosed(ws)
   })
@@ -669,6 +773,50 @@ describe("realtime protocol safety", () => {
     expect(response.body.oneofKind).toBe("rpcError")
     if (response.body.oneofKind === "rpcError") {
       expect(response.body.rpcError.reqMsgId).toBe(501n)
+    }
+
+    await wsClosed(ws)
+  })
+
+  it("rejects push-content key metadata for Expo Android push registration", async () => {
+    const { ws } = await authenticateSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 505n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          input: {
+            oneofKind: "updatePushNotificationDetails",
+            updatePushNotificationDetails: {
+              applePushToken: "",
+              notificationMethod: {
+                provider: PushNotificationProvider.EXPO_ANDROID,
+                method: {
+                  oneofKind: "expoAndroid",
+                  expoAndroid: {
+                    expoPushToken: "ExponentPushToken[rpc-android-token]",
+                  },
+                },
+              },
+              pushContentEncryptionKey: {
+                publicKey: new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1)),
+                keyId: "key-v1",
+                algorithm: 1,
+              },
+              pushContentVersion: 1,
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcError")
+    if (response.body.oneofKind === "rpcError") {
+      expect(response.body.rpcError.reqMsgId).toBe(505n)
     }
 
     await wsClosed(ws)

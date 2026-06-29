@@ -1,0 +1,28 @@
+{
+  "cli": {
+    "version": ">= 20.4.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview-apk": {
+      "distribution": "internal",
+      "channel": "preview",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {}
+    }
+  }
+}
