@@ -18,7 +18,7 @@ import { normalizeMetadataUrl } from "../normalize.js"
 import { cleanField, hostLabel } from "../text.js"
 import type { FetchUrlPreviewOptions, PreviewMedia, UrlPreviewResult } from "../types.js"
 import { fetchVideoMetadata, type VideoMetadata } from "../videoMetadata.js"
-import { previewLayout } from "../layout.js"
+import { previewLayout, textCardLayout } from "../layout.js"
 
 export async function fetchGenericPreview(
   originalUrl: string,
@@ -72,6 +72,7 @@ function buildGenericPreview(
   const duration = mediaDuration(media)
   const provider = previewProvider(originalUrl, finalUrl)
   const author = provider === "x" ? xAuthorFromTitle(title) : undefined
+  const layout = media ? previewLayout(media) : textCardLayout(provider, Boolean(description))
 
   if (!title && !description && !image.primaryUrl && !image.authorPhotoUrl) {
     return null
@@ -89,7 +90,7 @@ function buildGenericPreview(
     author,
     authorPhotoUrl: image.authorPhotoUrl,
     media,
-    layout: media ? previewLayout(media) : undefined,
+    layout,
     provider,
   }
 }

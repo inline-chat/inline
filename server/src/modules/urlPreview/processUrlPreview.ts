@@ -648,6 +648,7 @@ function previewSourceForMessage(
     provider: source.provider,
     mediaType: source.mediaType,
     mediaKind: source.mediaKind,
+    hasCardContent: source.description != null,
     hasPhoto: source.photoId != null,
     hasLargeMedia: source.hasLargeMedia,
     showLargeMedia: source.showLargeMedia,

@@ -6,6 +6,7 @@ export type PreviewLayoutPolicyInput = {
   provider?: PreviewProvider | null
   mediaType?: PreviewMediaType | null
   mediaKind?: string | null
+  hasCardContent?: boolean | null
   hasPhoto?: boolean | null
   hasLargeMedia?: boolean | null
   showLargeMedia?: boolean | null
@@ -24,6 +25,7 @@ type PreviewLayoutRule = {
   mediaTypes?: readonly PreviewMediaType[]
   mediaKinds?: readonly string[]
   requireSingleUrl?: boolean
+  allowTextCard?: boolean
   showLargeMedia: boolean
 }
 
@@ -40,6 +42,7 @@ const largePreviewLayoutRules: readonly PreviewLayoutRule[] = [
     hosts: ["x.com", "twitter.com"],
     providers: ["x"],
     requireSingleUrl: true,
+    allowTextCard: true,
     showLargeMedia: true,
   },
 ]
@@ -52,6 +55,17 @@ export function previewLayout(media: { kind: string }): PreviewLayout {
   }
 }
 
+export function textCardLayout(provider: PreviewProvider, hasCardContent: boolean): PreviewLayout | undefined {
+  if (provider !== "x" || !hasCardContent) {
+    return undefined
+  }
+
+  return {
+    hasLargeMedia: true,
+    showLargeMedia: true,
+  }
+}
+
 export function resolvePreviewLayout(input: PreviewLayoutPolicyInput): ResolvedPreviewLayout {
   const rule = largePreviewLayoutRules.find((item) => matchesRule(item, input))
   if (!rule) {
@@ -61,7 +75,7 @@ export function resolvePreviewLayout(input: PreviewLayoutPolicyInput): ResolvedP
     }
   }
 
-  const hasLargeMedia = inferHasLargeMedia(input) ?? false
+  const hasLargeMedia = inferHasLargeMedia(input, rule) ?? false
   const canShowLarge = hasLargeMedia && (!rule.requireSingleUrl || input.urlCount == null || input.urlCount === 1)
 
   return {
@@ -80,7 +94,7 @@ function matchesRule(rule: PreviewLayoutRule, input: PreviewLayoutPolicyInput): 
   )
 }
 
-function inferHasLargeMedia(input: PreviewLayoutPolicyInput): boolean | null {
+function inferHasLargeMedia(input: PreviewLayoutPolicyInput, rule: PreviewLayoutRule): boolean | null {
   if (input.hasLargeMedia != null) {
     return input.hasLargeMedia
   }
@@ -96,8 +110,14 @@ function inferHasLargeMedia(input: PreviewLayoutPolicyInput): boolean | null {
     case "embed":
       return true
     default:
-      return null
+      break
   }
+
+  if (rule.allowTextCard && input.hasCardContent === true) {
+    return true
+  }
+
+  return null
 }
 
 function matchesHosts(hosts: readonly string[] | undefined, url: string | undefined): boolean {

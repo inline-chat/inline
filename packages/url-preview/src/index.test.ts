@@ -77,6 +77,35 @@ describe("url-preview", () => {
     expect(
       resolvePreviewLayout({
         url: "https://x.com/inline/status/123",
+        hasCardContent: true,
+        urlCount: 1,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: true,
+    })
+    expect(
+      resolvePreviewLayout({
+        url: "https://x.com/inline/status/123",
+        hasCardContent: true,
+        urlCount: 2,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: false,
+    })
+    expect(
+      resolvePreviewLayout({
+        url: "https://x.com/inline/status/123",
+        urlCount: 1,
+      }),
+    ).toEqual({
+      hasLargeMedia: false,
+      showLargeMedia: false,
+    })
+    expect(
+      resolvePreviewLayout({
+        url: "https://x.com/inline/status/123",
         hasPhoto: true,
         urlCount: 1,
       }),
@@ -177,7 +206,10 @@ describe("url-preview", () => {
     expect(preview?.imageUrl).toBeUndefined()
     expect(preview?.authorPhotoUrl).toBe("https://pbs.twimg.com/profile_images/123/avatar_normal.jpg")
     expect(preview?.media).toBeUndefined()
-    expect(preview?.layout).toBeUndefined()
+    expect(preview?.layout).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: true,
+    })
   })
 
   it("prefers X tweet media over the author profile image", async () => {
@@ -290,6 +322,48 @@ describe("url-preview", () => {
         showLargeMedia: true,
       },
     })
+  })
+
+  it("extracts text-only X tweet cards and preserves newlines", async () => {
+    let fetchedUrl = ""
+    const payload = {
+      __typename: "Tweet",
+      text: "stream starts soon\nnew video after\n\nsee you there",
+      user: {
+        name: "Ludwig",
+        screen_name: "ludwig",
+        profile_image_url_https: "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg",
+      },
+      entities: {},
+      mediaDetails: [],
+    }
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      fetchedUrl = String(url)
+      return new Response(JSON.stringify(payload), {
+        headers: { "content-type": "application/json" },
+      })
+    }
+
+    const preview = await fetchUrlPreview("https://x.com/ludwig/status/2072005832716292415?s=20", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(fetchedUrl).toContain("id=2072005832716292415")
+    expect(preview).toMatchObject({
+      provider: "x",
+      siteName: "X",
+      title: "Ludwig (@ludwig) on X",
+      author: "Ludwig",
+      description: "stream starts soon\nnew video after\n\nsee you there",
+      authorPhotoUrl: "https://pbs.twimg.com/profile_images/123/avatar_200x200.jpg",
+      layout: {
+        hasLargeMedia: true,
+        showLargeMedia: true,
+      },
+    })
+    expect(preview?.imageUrl).toBeUndefined()
+    expect(preview?.media).toBeUndefined()
   })
 
   it("decodes html entities in generic metadata", async () => {

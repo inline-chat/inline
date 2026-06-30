@@ -324,6 +324,65 @@ describe("URL preview cache", () => {
     expect(preview?.showLargeMedia).toBe(true)
   })
 
+  it("uses the X/Twitter card policy for cached text-only rows", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "X Text Preview Layout",
+      ["x-text-preview-layout@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create X text layout test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create X text layout test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://x.com/ludwig/status/2072005832716292415?s=20",
+    })
+
+    const cache = await upsertPreviewCache({
+      photoId: null,
+      metadata: {
+        url: "https://x.com/ludwig/status/2072005832716292415?s=20",
+        finalUrl: "https://x.com/ludwig/status/2072005832716292415?s=20",
+        siteName: "X",
+        title: "Ludwig (@ludwig) on X",
+        description: "stream starts soon\nnew video after\n\nsee you there",
+        provider: "x",
+        author: "Ludwig",
+      },
+    })
+
+    let fetchCalls = 0
+    globalThis.fetch = (async () => {
+      fetchCalls += 1
+      throw new Error("network fetch should not run for cache hits")
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewUrl: "https://x.com/ludwig/status/2072005832716292415?s=20",
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    const [preview] = await db.select().from(schema.urlPreview).where(eq(schema.urlPreview.cacheId, cache.id)).limit(1)
+    expect(fetchCalls).toBe(0)
+    expect(preview?.hasLargeMedia).toBe(true)
+    expect(preview?.showLargeMedia).toBe(true)
+  })
+
   it("moves stale cached X profile images out of primary preview media", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers(
       "X Stale Author Image Cache",

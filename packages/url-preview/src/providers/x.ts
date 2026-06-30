@@ -11,7 +11,7 @@ import { defaultLookup, readResponseText } from "../network.js"
 import { normalizeMetadataUrl } from "../normalize.js"
 import { asFiniteNumber, asString, cleanField, cleanMultilineField } from "../text.js"
 import type { FetchUrlPreviewOptions, PreviewMedia, PreviewMediaType, UrlPreviewResult } from "../types.js"
-import { previewLayout } from "../layout.js"
+import { previewLayout, textCardLayout } from "../layout.js"
 import type { UrlPreviewProvider } from "./types.js"
 
 const X_SYNDICATION_URL = "https://cdn.syndication.twimg.com/tweet-result"
@@ -69,6 +69,7 @@ async function fetchXPreview(
   const authorPhotoUrl = normalizeXProfileImageUrl(asString(user?.["profile_image_url_https"]))
   const media = tweetMedia(data)
   const title = cleanField(tweetTitle(author, screenName), options.maxTitleLength ?? DEFAULT_TITLE_LENGTH)
+  const layout = media.media ? previewLayout(media.media) : textCardLayout("x", Boolean(tweetText))
 
   if (!title && !tweetText && !authorPhotoUrl && !media.imageUrl) {
     return null
@@ -87,7 +88,7 @@ async function fetchXPreview(
     author: author ?? undefined,
     authorPhotoUrl,
     media: media.media,
-    layout: media.media ? previewLayout(media.media) : undefined,
+    layout,
   }
 }
 
