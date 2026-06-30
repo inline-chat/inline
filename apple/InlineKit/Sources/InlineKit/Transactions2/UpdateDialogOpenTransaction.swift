@@ -154,6 +154,7 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
         dialog.order = order ?? dialog.order
       }
       dialog.open = true
+      dialog.openedDate = Date()
       dialog.archived = false
     } else {
       dialog.open = false

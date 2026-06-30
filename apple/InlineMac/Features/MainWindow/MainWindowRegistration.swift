@@ -1,4 +1,5 @@
 import AppKit
+import InlineKit
 import SwiftUI
 
 extension View {
@@ -13,7 +14,8 @@ extension View {
     goBack: @escaping @MainActor () -> Void,
     goForward: @escaping @MainActor () -> Void,
     canGoBack: @escaping @MainActor () -> Bool,
-    canGoForward: @escaping @MainActor () -> Bool
+    canGoForward: @escaping @MainActor () -> Bool,
+    selectedPeer: @escaping @MainActor () -> Peer?
   ) -> some View {
     modifier(MainWindowRegistrationModifier(
       id: id,
@@ -26,7 +28,8 @@ extension View {
       goBack: goBack,
       goForward: goForward,
       canGoBack: canGoBack,
-      canGoForward: canGoForward
+      canGoForward: canGoForward,
+      selectedPeer: selectedPeer
     ))
   }
 }
@@ -43,6 +46,7 @@ private struct MainWindowRegistrationModifier: ViewModifier {
   let goForward: @MainActor () -> Void
   let canGoBack: @MainActor () -> Bool
   let canGoForward: @MainActor () -> Bool
+  let selectedPeer: @MainActor () -> Peer?
 
   @Environment(\.appBridge) private var appBridge
 
@@ -66,6 +70,7 @@ private struct MainWindowRegistrationModifier: ViewModifier {
       id: id,
       window: appBridge?.currentWindow(),
       toastPresenter: toastPresenter,
+      selectedPeer: selectedPeer(),
       route: route,
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,

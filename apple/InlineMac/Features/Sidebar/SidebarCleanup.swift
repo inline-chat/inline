@@ -124,7 +124,9 @@ final class SidebarCleanup {
       log.info("Closing \(peers.count) stale sidebar chats")
       for peer in peers {
         try Task.checkCancellation()
+        guard MainWindowOpenCoordinator.shared.hasActivePeer(peer) == false else { continue }
         guard try await Self.isStillStale(peer: peer, cutoff: cutoff) else { continue }
+        guard MainWindowOpenCoordinator.shared.hasActivePeer(peer) == false else { continue }
 
         do {
           _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: false))

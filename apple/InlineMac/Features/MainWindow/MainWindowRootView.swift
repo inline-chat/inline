@@ -78,25 +78,28 @@ struct MainWindowRootView: View {
       nav3.canGoBack
     } canGoForward: {
       nav3.canGoForward
+    } selectedPeer: {
+      activeSelectedPeer
     }
     .nativeWindowTab(title: nativeTab.title, icon: nativeTab.iconPeer)
     .onAppear {
-      nativeTab.update(peer: nav3.currentRoute.selectedPeer)
-      markCurrentChatOpened()
-      installNativeTabShortcuts()
       syncTopLevelRoute(viewModel.topLevelRoute)
+      nativeTab.update(peer: currentSelectedPeer)
+      syncCurrentPeer()
+      installNativeTabShortcuts()
     }
     .onReceive(viewModel.$topLevelRoute) { route in
       syncTopLevelRoute(route)
+      syncCurrentPeer()
     }
     .onChange(of: nav3.currentRoute) { _, _ in
-      guard showsMain else { return }
-      nativeTab.update(peer: nav3.currentRoute.selectedPeer)
-      markCurrentChatOpened()
+      nativeTab.update(peer: currentSelectedPeer)
+      syncCurrentPeer()
     }
     .onDisappear {
       chatOpenPreloader.cancelPendingOpen()
       nativeTab.update(peer: nil)
+      MainWindowOpenCoordinator.shared.updateSelectedPeer(id: windowID, peer: nil)
       removeNativeTabShortcuts()
       MainWindowOpenCoordinator.shared.unregisterWindow(id: windowID)
     }
@@ -172,9 +175,19 @@ struct MainWindowRootView: View {
     }
   }
 
-  private func markCurrentChatOpened() {
-    guard case let .chat(peer) = nav3.currentRoute else { return }
+  private func syncCurrentPeer() {
+    let peer = activeSelectedPeer
+    MainWindowOpenCoordinator.shared.updateSelectedPeer(id: windowID, peer: peer)
+    guard let peer else { return }
     SidebarCleanup.shared.markOpened(peer)
+  }
+
+  private var activeSelectedPeer: Peer? {
+    showsMain ? currentSelectedPeer : nil
+  }
+
+  private var currentSelectedPeer: Peer? {
+    nav3.currentRoute.selectedPeer
   }
 
   private var sidebarMode: SidebarViewModel.ContentMode {

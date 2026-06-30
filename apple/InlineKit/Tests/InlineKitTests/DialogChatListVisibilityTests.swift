@@ -102,6 +102,33 @@ struct DialogChatListVisibilityTests {
     }
   }
 
+  @Test("dialog open transaction refreshes opened date")
+  func updateDialogOpenRefreshesOpenedDate() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      let oldDate = Date(timeIntervalSince1970: 1)
+      try seedDialog(db, chatId: 19, chatListHidden: nil, open: true)
+      try Dialog
+        .filter(id: Dialog.getDialogId(peerId: .thread(id: 19)))
+        .updateAll(db, [Dialog.Columns.openedDate.set(to: oldDate)])
+
+      let before = Date()
+      try UpdateDialogOpenTransaction.applyLocalOpenState(
+        peerId: .thread(id: 19),
+        open: true,
+        order: "m",
+        db: db
+      )
+      let after = Date()
+
+      let saved = try #require(try Dialog.get(peerId: .thread(id: 19)).fetchOne(db))
+      let openedDate = try #require(saved.openedDate)
+      #expect(openedDate >= before)
+      #expect(openedDate <= after)
+    }
+  }
+
   @Test("new thread open can wait for local chat creation")
   func updateDialogOpenCanWaitForLocalChatCreation() {
     let transaction = UpdateDialogOpenTransaction(

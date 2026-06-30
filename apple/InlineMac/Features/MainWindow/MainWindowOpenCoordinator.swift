@@ -19,6 +19,7 @@ final class MainWindowOpenCoordinator {
   private struct WindowEntry {
     weak var window: NSWindow?
     weak var toastPresenter: (any ToastPresenting)?
+    var selectedPeer: Peer?
     let route: @MainActor (MainWindowDestination) -> Void
     let openCommandBar: @MainActor () -> Void
     let toggleCommandBar: @MainActor () -> Void
@@ -51,6 +52,7 @@ final class MainWindowOpenCoordinator {
     id: UUID,
     window: NSWindow?,
     toastPresenter: (any ToastPresenting)?,
+    selectedPeer: Peer?,
     route: @escaping @MainActor (MainWindowDestination) -> Void,
     openCommandBar: @escaping @MainActor () -> Void,
     toggleCommandBar: @escaping @MainActor () -> Void,
@@ -69,6 +71,7 @@ final class MainWindowOpenCoordinator {
     windows[id] = WindowEntry(
       window: window,
       toastPresenter: toastPresenter,
+      selectedPeer: selectedPeer,
       route: route,
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,
@@ -87,6 +90,19 @@ final class MainWindowOpenCoordinator {
     windows.removeValue(forKey: id)
     sidebarNavigation.removeValue(forKey: id)
     threadRenaming.removeValue(forKey: id)
+  }
+
+  func updateSelectedPeer(id: UUID, peer: Peer?) {
+    guard var entry = windows[id] else { return }
+    entry.selectedPeer = peer
+    windows[id] = entry
+  }
+
+  func hasActivePeer(_ peer: Peer) -> Bool {
+    removeClosedWindows()
+    return windows.values.contains { entry in
+      entry.window != nil && entry.selectedPeer == peer
+    }
   }
 
   func registerSidebarNavigation(
