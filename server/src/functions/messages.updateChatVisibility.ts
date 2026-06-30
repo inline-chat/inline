@@ -1,10 +1,22 @@
 import { db } from "@in/server/db"
-import { chats, chatParticipants, dialogs, members, type DbChat } from "@in/server/db/schema"
+import {
+  chatParticipantGroups,
+  chats,
+  chatParticipants,
+  dialogs,
+  members,
+  userGroupMembers,
+  userGroups,
+  userNotDeleted,
+  users,
+  type DbChat,
+  type DbChatParticipantGroup,
+} from "@in/server/db/schema"
 import { Log } from "@in/server/utils/log"
 import { and, eq, inArray, isNull, notInArray, or } from "drizzle-orm"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { UpdatesModel } from "@in/server/db/models/updates"
+import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
@@ -14,6 +26,7 @@ import type { Update } from "@inline-chat/protocol/core"
 import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import type { Transaction } from "@in/server/db/types"
 
 const log = new Log("functions.updateChatVisibility")
 
@@ -26,7 +39,26 @@ type UpdateChatVisibilityInput = {
 type UpdateChatVisibilityOutput = {
   chat: DbChat
   removedUserIds: number[]
-  update: { seq: number; date: Date }
+  groupRevocations: GroupGrantRevocation[]
+  update: UpdateSeqAndDate
+}
+
+type GroupGrantRevocation = {
+  chatId: number
+  groupId: number
+  memberIds: number[]
+  update: UpdateSeqAndDate
+}
+
+type GroupMemberAccess = {
+  groupId: number
+  userId: number
+  canAccessPublicChats: boolean | null
+}
+
+type ChatUpdateCursor = {
+  id: number
+  updateSeq: number | null | undefined
 }
 
 export async function updateChatVisibility(
@@ -41,8 +73,9 @@ export async function updateChatVisibility(
   const isPublic = Boolean(input.isPublic)
 
   let removedUserIds: number[] = []
+  let groupRevocations: GroupGrantRevocation[] = []
   let updatedChat: DbChat | undefined
-  let persistedUpdate: { seq: number; date: Date } | undefined
+  let persistedUpdate: UpdateSeqAndDate | undefined
 
   try {
     const result = await db.transaction(async (tx): Promise<UpdateChatVisibilityOutput> => {
@@ -66,6 +99,15 @@ export async function updateChatVisibility(
       if (!member || (!isCreator && member.role !== "admin" && member.role !== "owner")) {
         throw RealtimeRpcError.SpaceAdminRequired()
       }
+
+      const existingGroupGrants = await tx
+        .select()
+        .from(chatParticipantGroups)
+        .where(eq(chatParticipantGroups.chatId, chatId))
+      const groupMemberRows = await loadActiveGroupMembers(
+        tx,
+        existingGroupGrants.map((grant) => grant.groupId),
+      )
 
       if (isPublic) {
         if (input.participants && input.participants.length > 0) {
@@ -91,6 +133,10 @@ export async function updateChatVisibility(
           )
 
         removedUserIds = removedRows.map((row) => row.userId)
+        const blockedGroupMemberIds = groupMemberRows
+          .filter((row) => !row.canAccessPublicChats)
+          .map((row) => row.userId)
+        removedUserIds = uniqueIds([...removedUserIds, ...blockedGroupMemberIds])
 
         if (removedUserIds.length > 0) {
           await tx
@@ -99,6 +145,7 @@ export async function updateChatVisibility(
         }
 
         await tx.delete(chatParticipants).where(eq(chatParticipants.chatId, chatId))
+        await tx.delete(chatParticipantGroups).where(eq(chatParticipantGroups.chatId, chatId))
       } else {
         const inputParticipantIds = input.participants ?? []
         if (inputParticipantIds.length === 0) {
@@ -144,6 +191,7 @@ export async function updateChatVisibility(
         }
 
         await tx.delete(chatParticipants).where(eq(chatParticipants.chatId, chatId))
+        await tx.delete(chatParticipantGroups).where(eq(chatParticipantGroups.chatId, chatId))
 
         await tx.insert(chatParticipants).values(
           uniqueParticipantIds.map((userId) => ({
@@ -153,6 +201,9 @@ export async function updateChatVisibility(
           })),
         )
       }
+
+      const chatUpdateCursor: ChatUpdateCursor = { id: chat.id, updateSeq: chat.updateSeq }
+      groupRevocations = await insertGroupRevocationUpdates(tx, chatUpdateCursor, existingGroupGrants, groupMemberRows)
 
       const chatUpdatePayload: ServerUpdate["update"] = {
         oneofKind: "chatVisibility",
@@ -165,8 +216,9 @@ export async function updateChatVisibility(
       const update = await UpdatesModel.insertUpdate(tx, {
         update: chatUpdatePayload,
         bucket: UpdateBucket.Chat,
-        entity: chat,
+        entity: chatUpdateCursor,
       })
+      chatUpdateCursor.updateSeq = update.seq
 
       const [chatRecord] = await tx
         .update(chats)
@@ -185,23 +237,38 @@ export async function updateChatVisibility(
       // NOTE: We only enqueue user-bucket updates for removals. Newly added participants
       // (or newly eligible public members) discover chats via getChats.
       await UserBucketUpdates.enqueueMany(
-        removedUserIds.map((userId) => ({
-          userId,
-          update: {
-            oneofKind: "userChatParticipantDelete",
-            userChatParticipantDelete: {
-              chatId: BigInt(chat.id),
+        [
+          ...groupRevocations.flatMap((revocation) =>
+            revocation.memberIds.map((userId) => ({
+              userId,
+              update: {
+                oneofKind: "userChatParticipantGroupDelete" as const,
+                userChatParticipantGroupDelete: {
+                  chatId: BigInt(chat.id),
+                  groupId: BigInt(revocation.groupId),
+                },
+              },
+            })),
+          ),
+          ...removedUserIds.map((userId) => ({
+            userId,
+            update: {
+              oneofKind: "userChatParticipantDelete" as const,
+              userChatParticipantDelete: {
+                chatId: BigInt(chat.id),
+              },
             },
-          },
-        })),
+          })),
+        ],
         { tx },
       )
 
-      return { chat: chatRecord, removedUserIds, update }
+      return { chat: chatRecord, removedUserIds, groupRevocations, update }
     })
 
     updatedChat = result.chat
     removedUserIds = result.removedUserIds
+    groupRevocations = result.groupRevocations
     persistedUpdate = result.update
   } catch (error) {
     log.error("Failed to update chat visibility", { chatId, error })
@@ -217,11 +284,15 @@ export async function updateChatVisibility(
 
   AccessGuardsCache.resetChatParticipant(updatedChat.id)
   removedUserIds.forEach((userId) => AccessGuardsCache.resetChatParticipant(updatedChat!.id, userId))
+  groupRevocations.forEach((revocation) => {
+    revocation.memberIds.forEach((userId) => AccessGuardsCache.resetChatParticipant(updatedChat!.id, userId))
+  })
 
   await pushUpdates({
     chat: updatedChat,
     isPublic,
     removedUserIds,
+    groupRevocations,
     currentUserId: context.currentUserId,
     update: persistedUpdate,
   })
@@ -233,23 +304,93 @@ export async function updateChatVisibility(
 // Updates
 // ------------------------------------------------------------
 
+async function loadActiveGroupMembers(tx: Transaction, groupIds: number[]): Promise<GroupMemberAccess[]> {
+  const ids = uniqueIds(groupIds)
+  if (ids.length === 0) {
+    return []
+  }
+
+  return tx
+    .select({
+      groupId: userGroupMembers.groupId,
+      userId: userGroupMembers.userId,
+      canAccessPublicChats: members.canAccessPublicChats,
+    })
+    .from(userGroupMembers)
+    .innerJoin(userGroups, eq(userGroups.id, userGroupMembers.groupId))
+    .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
+    .innerJoin(users, eq(users.id, userGroupMembers.userId))
+    .where(and(inArray(userGroupMembers.groupId, ids), userNotDeleted()))
+}
+
+async function insertGroupRevocationUpdates(
+  tx: Transaction,
+  chat: ChatUpdateCursor,
+  grants: DbChatParticipantGroup[],
+  memberRows: GroupMemberAccess[],
+): Promise<GroupGrantRevocation[]> {
+  const memberIdsByGroupId = new Map<number, number[]>()
+  for (const row of memberRows) {
+    const memberIds = memberIdsByGroupId.get(row.groupId)
+    if (memberIds) {
+      memberIds.push(row.userId)
+    } else {
+      memberIdsByGroupId.set(row.groupId, [row.userId])
+    }
+  }
+
+  const revocations: GroupGrantRevocation[] = []
+  for (const grant of grants) {
+    const update = await UpdatesModel.insertUpdate(tx, {
+      update: {
+        oneofKind: "participantGroupDelete",
+        participantGroupDelete: {
+          chatId: BigInt(grant.chatId),
+          groupId: BigInt(grant.groupId),
+        },
+      },
+      bucket: UpdateBucket.Chat,
+      entity: chat,
+    })
+    chat.updateSeq = update.seq
+
+    revocations.push({
+      chatId: grant.chatId,
+      groupId: grant.groupId,
+      memberIds: memberIdsByGroupId.get(grant.groupId) ?? [],
+      update,
+    })
+  }
+
+  return revocations
+}
+
+function uniqueIds(ids: number[]): number[] {
+  return Array.from(new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0)))
+}
+
 const pushUpdates = async ({
   chat,
   isPublic,
   removedUserIds,
+  groupRevocations,
   currentUserId,
   update,
 }: {
   chat: DbChat
   isPublic: boolean
   removedUserIds: number[]
+  groupRevocations: GroupGrantRevocation[]
   currentUserId: number
-  update: { seq: number; date: Date }
+  update: UpdateSeqAndDate
 }): Promise<{ updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroup({ threadId: chat.id }, { currentUserId })
+  const updateGroupUserIds = new Set(updateGroup.userIds)
+  const groupDeleteUpdates = groupRevocations.map(groupRevocationUpdate)
 
   updateGroup.userIds.forEach((userId) => {
     const updates: Update[] = [
+      ...groupDeleteUpdates,
       {
         update: {
           oneofKind: "newChat",
@@ -274,6 +415,15 @@ const pushUpdates = async ({
     RealtimeUpdates.pushToUser(userId, updates)
   })
 
+  for (const revocation of groupRevocations) {
+    const groupDeleteUpdate = groupRevocationUpdate(revocation)
+    revocation.memberIds.forEach((userId) => {
+      if (!updateGroupUserIds.has(userId)) {
+        RealtimeUpdates.pushToUser(userId, [groupDeleteUpdate])
+      }
+    })
+  }
+
   removedUserIds.forEach((userId) => {
     const participantDelete: Update = {
       update: {
@@ -295,4 +445,18 @@ const pushUpdates = async ({
   })
 
   return { updateGroup }
+}
+
+function groupRevocationUpdate(revocation: GroupGrantRevocation): Update {
+  return {
+    seq: revocation.update.seq,
+    date: encodeDateStrict(revocation.update.date),
+    update: {
+      oneofKind: "participantGroupDelete",
+      participantGroupDelete: {
+        chatId: BigInt(revocation.chatId),
+        groupId: BigInt(revocation.groupId),
+      },
+    },
+  }
 }

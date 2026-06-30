@@ -1,6 +1,7 @@
 import { spaces } from "@in/server/db/schema"
 import { chatParticipants, chats } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
+import { userGroupMembers, userGroups } from "@in/server/db/schema/userGroups"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
 
@@ -75,6 +76,10 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
           userId,
         }),
       catch: (error) => (error instanceof Error ? error : new Error("removeUserFromPrivateThreads failed")),
+    })
+    yield* Effect.tryPromise({
+      try: () => removeUserFromSpaceGroups({ spaceId, userId }),
+      catch: (error) => (error instanceof Error ? error : new Error("removeUserFromSpaceGroups failed")),
     })
     privateThreadIds.forEach((chatId) => AccessGuardsCache.resetChatParticipant(chatId, userId))
     AccessGuardsCache.resetForUser(userId)
@@ -234,6 +239,20 @@ const removeUserFromPrivateThreads = async ({ chatIds, userId }: { chatIds: numb
   await db
     .delete(chatParticipants)
     .where(and(eq(chatParticipants.userId, userId), inArray(chatParticipants.chatId, chatIds)))
+}
+
+const removeUserFromSpaceGroups = async ({ spaceId, userId }: { spaceId: number; userId: number }) => {
+  const rows = await db
+    .select({ groupId: userGroups.id })
+    .from(userGroups)
+    .where(eq(userGroups.spaceId, spaceId))
+
+  const groupIds = rows.map((row) => row.groupId)
+  if (groupIds.length === 0) return
+
+  await db
+    .delete(userGroupMembers)
+    .where(and(eq(userGroupMembers.userId, userId), inArray(userGroupMembers.groupId, groupIds)))
 }
 
 const deleteDialogsForSpace = async ({ spaceId, userId }: { spaceId: number; userId: number }) => {

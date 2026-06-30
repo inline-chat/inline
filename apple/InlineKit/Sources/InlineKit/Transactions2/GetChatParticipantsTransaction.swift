@@ -42,6 +42,7 @@ public struct GetChatParticipantsTransaction: Transaction2 {
       try await AppDatabase.shared.dbWriter.write { db in
         do {
           try ChatParticipant.filter(Column("chatId") == context.chatID).deleteAll(db)
+          try ChatParticipantGroup.filter(ChatParticipantGroup.Columns.chatId == context.chatID).deleteAll(db)
         } catch {
           log.error("Failed to clear chat participants before refresh", error: error)
         }
@@ -58,6 +59,22 @@ public struct GetChatParticipantsTransaction: Transaction2 {
         // Save participants
         for participant in response.participants {
           ChatParticipant.save(db, from: participant, chatId: context.chatID)
+        }
+
+        for group in response.groups {
+          do {
+            try UserGroup.save(db, from: group)
+          } catch {
+            log.error("Failed to save user group for chat participants", error: error)
+          }
+        }
+
+        for participant in response.groupParticipants {
+          do {
+            try ChatParticipantGroup.save(db, from: participant, chatId: context.chatID)
+          } catch {
+            log.error("Failed to save group participant", error: error)
+          }
         }
       }
       log.trace("getChatParticipants saved")

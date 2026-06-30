@@ -15,6 +15,7 @@ struct ChatInfoView: View {
   @EnvironmentStateObject var mediaViewModel: ChatMediaViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @StateObject var spaceFullMembersViewModel: SpaceFullMembersViewModel
+  @StateObject var userGroupsViewModel: UserGroupsViewModel
   @State  var space: Space?
   @State var isSearching = false
   @State var searchText = ""
@@ -188,6 +189,10 @@ struct ChatInfoView: View {
       db: AppDatabase.shared,
       spaceId: chatItem.chat?.spaceId ?? 0
     ))
+    _userGroupsViewModel = StateObject(wrappedValue: UserGroupsViewModel(
+      db: AppDatabase.shared,
+      spaceId: chatItem.chat?.spaceId ?? 0
+    ))
     _notificationSelection = State(initialValue: chatItem.dialog.notificationSelection)
 
     // Default tab based on chat type
@@ -251,6 +256,7 @@ struct ChatInfoView: View {
                     isDM: isDM,
                     isOwnerOrAdmin: isOwnerOrAdmin,
                     participants: participantsWithMembersViewModel.participants,
+                    groupParticipants: participantsWithMembersViewModel.groupParticipants,
                     chatId: currentChatId,
                     chatItem: chatItem,
                     notificationSelection: notificationSelection,
@@ -271,6 +277,9 @@ struct ChatInfoView: View {
                           Log.shared.error("Failed to remove participant", error: error)
                         }
                       }
+                    },
+                    removeGroupParticipant: { group in
+                      removeGroupParticipant(group)
                     },
                     openParticipantChat: { userInfo in
                       UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -320,6 +329,7 @@ struct ChatInfoView: View {
       Task {
         if let spaceId = chatItem.chat?.spaceId {
           await spaceMembersViewModel.refetchMembers()
+          await userGroupsViewModel.loadIfNeeded()
           // Fetch space information
           do {
             space = try await database.reader.read { db in
@@ -701,6 +711,8 @@ struct InfoTabView: View {
   @EnvironmentObject  var chatInfoView: ChatInfoViewEnvironment
   @State  var participantToRemove: UserInfo?
   @State  var showRemoveAlert = false
+  @State  var groupToRemove: UserGroup?
+  @State  var showRemoveGroupAlert = false
 
   private var cardBackgroundColor: Color {
     Color(uiColor: .secondarySystemGroupedBackground)
@@ -727,6 +739,18 @@ struct InfoTabView: View {
     } message: {
       if let participant = participantToRemove {
         Text("Are you sure you want to remove \(participant.user.firstName ?? "this user") from the chat?")
+      }
+    }
+    .alert("Remove Group Access", isPresented: $showRemoveGroupAlert) {
+      Button("Cancel", role: .cancel) {}
+      Button("Remove", role: .destructive) {
+        if let group = groupToRemove {
+          chatInfoView.removeGroupParticipant(group)
+        }
+      }
+    } message: {
+      if let group = groupToRemove {
+        Text("Remove \(group.name) from this thread? Members may still have access through direct participants, parent access, or another group.")
       }
     }
   }
@@ -819,22 +843,52 @@ struct InfoTabView: View {
   private var participantsCard: some View {
     VStack(spacing: 0) {
       LabeledContent {
-        Text("\(chatInfoView.participants.count)")
+        Text(accessSummary)
           .foregroundStyle(.secondary)
       } label: {
-        Text("Participants")
+        Text("Access")
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 12)
 
       rowDivider
 
+      Text("Direct Participants")
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+
       participantsGrid
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+
+      if !chatInfoView.groupParticipants.isEmpty {
+        rowDivider
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text("Group Access")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+          ForEach(chatInfoView.groupParticipants) { group in
+            groupAccessRow(group)
+          }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+      }
     }
     .background(cardBackgroundColor)
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  private var accessSummary: String {
+    let direct = "\(chatInfoView.participants.count) direct"
+    let groupCount = chatInfoView.groupParticipants.count
+    guard groupCount > 0 else { return direct }
+    return "\(direct), \(groupCount) \(groupCount == 1 ? "group" : "groups")"
   }
 
   private var participantsSummaryCard: some View {
@@ -925,6 +979,50 @@ struct InfoTabView: View {
       }
     }
     .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
+  }
+
+  private func groupAccessRow(_ group: UserGroup) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: "person.3.fill")
+        .font(.callout.weight(.semibold))
+        .foregroundStyle(.white)
+        .frame(width: 36, height: 36)
+        .background(Color.accentColor)
+        .clipShape(Circle())
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(group.name)
+          .font(.callout)
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+        Text(groupSubtitle(group))
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+
+      Spacer()
+    }
+    .contextMenu {
+      if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
+        Button(role: .destructive, action: {
+          let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+          impactFeedback.impactOccurred()
+          groupToRemove = group
+          showRemoveGroupAlert = true
+        }) {
+          Label("Remove Group Access", systemImage: "minus.circle")
+        }
+      }
+    }
+  }
+
+  private func groupSubtitle(_ group: UserGroup) -> String {
+    let count = group.memberCount == 1 ? "1 person" : "\(group.memberCount) people"
+    guard let description = group.description, !description.isEmpty else {
+      return count
+    }
+    return "\(description) - \(count)"
   }
 
   private var notificationSelectionBinding: Binding<DialogNotificationSettingSelection> {

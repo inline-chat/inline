@@ -136,6 +136,32 @@ public class MentionDetector {
     return (mutable.copy() as! NSAttributedString, newCursorPosition)
   }
 
+  /// Replace a mention range with the selected group mention text and group ID.
+  public func replaceGroupMention(
+    in attributedText: NSAttributedString,
+    range: NSRange,
+    with mentionText: String,
+    groupId: Int64,
+    trailingText: String = " ",
+    mentionAttributes: [NSAttributedString.Key: Any]? = nil,
+    trailingAttributes: [NSAttributedString.Key: Any]? = nil
+  ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
+    let replacement = NSMutableAttributedString()
+    replacement.append(groupMentionString(mentionText, groupId: groupId, attributes: mentionAttributes))
+    if !trailingText.isEmpty {
+      replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
+    }
+
+    let mutable = attributedText.mutableCopy() as! NSMutableAttributedString
+    mutable.replaceCharacters(in: range, with: replacement)
+
+    let newCursorPosition = range.location + mentionText.utf16.count + trailingText.utf16.count
+
+    log.trace("Replaced mention at \(range) with '\(mentionText)' for group \(groupId), new cursor: \(newCursorPosition)")
+
+    return (mutable.copy() as! NSAttributedString, newCursorPosition)
+  }
+
   private func mentionString(
     _ text: String,
     userId: Int64,
@@ -146,6 +172,19 @@ public class MentionDetector {
     }
 
     attributes[.mentionUserId] = userId
+    return NSAttributedString(string: text, attributes: attributes)
+  }
+
+  private func groupMentionString(
+    _ text: String,
+    groupId: Int64,
+    attributes: [NSAttributedString.Key: Any]?
+  ) -> NSAttributedString {
+    guard var attributes else {
+      return AttributedStringHelpers.createGroupMentionAttributedString(text, groupId: groupId)
+    }
+
+    attributes[.mentionGroupId] = groupId
     return NSAttributedString(string: text, attributes: attributes)
   }
 

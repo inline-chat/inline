@@ -6,7 +6,7 @@ import Logger
 import SwiftUI
 
 protocol MentionCompletionMenuDelegate: AnyObject {
-  func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String, userId: Int64)
+  func mentionMenu(_ menu: MentionCompletionMenu, didSelectItem item: MentionCompletionItem, withText text: String)
   func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu)
 }
 
@@ -22,7 +22,7 @@ class MentionCompletionMenu: NSView {
   private(set) var isVisible: Bool = false
 
   private var heightConstraint: NSLayoutConstraint!
-  private var filteredParticipants: [UserInfo] {
+  private var filteredItems: [MentionCompletionItem] {
     model.items
   }
 
@@ -148,15 +148,21 @@ class MentionCompletionMenu: NSView {
     updateTableViewAndHeight()
   }
 
+  func updateCandidates(_ candidates: MentionCompletionCandidates) {
+    log.trace("MentionMenu updateCandidates: received \(candidates.users.count + candidates.groups.count) candidates")
+    model.updateCandidates(candidates)
+    updateTableViewAndHeight()
+  }
+
   func filterParticipants(with query: String) {
-    log.trace("MentionMenu filterParticipants: query='\(query)', total participants=\(filteredParticipants.count)")
+    log.trace("MentionMenu filterParticipants: query='\(query)', total participants=\(filteredItems.count)")
     model.filter(with: query)
-    log.trace("MentionMenu filterParticipants: filtered to \(filteredParticipants.count) participants")
+    log.trace("MentionMenu filterParticipants: filtered to \(filteredItems.count) participants")
     updateTableViewAndHeight()
   }
 
   private func updateTableViewAndHeight() {
-    let itemCount = filteredParticipants.count
+    let itemCount = filteredItems.count
 
     tableView.reloadData()
 
@@ -203,7 +209,7 @@ class MentionCompletionMenu: NSView {
       return
     }
 
-    log.trace("MentionMenu show: showing menu with \(filteredParticipants.count) participants")
+    log.trace("MentionMenu show: showing menu with \(filteredItems.count) participants")
     isVisible = true
     isHidden = false
 
@@ -239,13 +245,13 @@ class MentionCompletionMenu: NSView {
   }
 
   func selectNext() {
-    guard !filteredParticipants.isEmpty else { return }
+    guard !filteredItems.isEmpty else { return }
     model.selectNext()
     updateSelection()
   }
 
   func selectPrevious() {
-    guard !filteredParticipants.isEmpty else { return }
+    guard !filteredItems.isEmpty else { return }
     model.selectPrevious()
     updateSelection()
   }
@@ -261,7 +267,7 @@ class MentionCompletionMenu: NSView {
 
   private func updateCellSelectionStates() {
     // Update selection state for all visible rows
-    for row in 0 ..< filteredParticipants.count {
+    for row in 0 ..< filteredItems.count {
       if let cellView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MentionTableCellView {
         cellView.isSelected = (row == selectedIndex)
       }
@@ -271,16 +277,16 @@ class MentionCompletionMenu: NSView {
   /// Selects the current item and returns true if successful, false otherwise
   @discardableResult
   func selectCurrentItem() -> Bool {
-    guard let participant = model.selectedItem else { return false }
-    let mentionText = model.mentionText(for: participant)
-    delegate?.mentionMenu(self, didSelectUser: participant, withText: mentionText, userId: participant.user.id)
+    guard let item = model.selectedItem else { return false }
+    let mentionText = model.mentionText(for: item)
+    delegate?.mentionMenu(self, didSelectItem: item, withText: mentionText)
     return true
   }
 
   @objc private func tableViewClicked() {
     // Get the clicked row
     let clickedRow = tableView.clickedRow
-    if clickedRow >= 0, clickedRow < filteredParticipants.count {
+    if clickedRow >= 0, clickedRow < filteredItems.count {
       model.select(index: clickedRow)
 
       // Don't let the table view steal focus - we want compose to keep focus
@@ -301,7 +307,7 @@ class MentionCompletionMenu: NSView {
 
 extension MentionCompletionMenu: NSTableViewDataSource {
   func numberOfRows(in tableView: NSTableView) -> Int {
-    filteredParticipants.count
+    filteredItems.count
   }
 }
 
@@ -317,9 +323,9 @@ extension MentionCompletionMenu: NSTableViewDelegate {
       cellView?.identifier = identifier
     }
 
-    if row < filteredParticipants.count {
-      let participant = filteredParticipants[row]
-      cellView?.configure(with: participant)
+    if row < filteredItems.count {
+      let item = filteredItems[row]
+      cellView?.configure(with: item)
       // Set selection state
       cellView?.isSelected = (row == selectedIndex)
     }

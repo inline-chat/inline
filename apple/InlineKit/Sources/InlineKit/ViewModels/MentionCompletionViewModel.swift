@@ -20,11 +20,80 @@ public struct MentionCompletionUser: Hashable, Sendable {
   }
 }
 
+public struct MentionCompletionCandidates: Equatable, Sendable {
+  public var users: [MentionCompletionUser]
+  public var groups: [UserGroup]
+
+  public static let empty = MentionCompletionCandidates(users: [], groups: [])
+
+  public init(users: [MentionCompletionUser], groups: [UserGroup]) {
+    self.users = users
+    self.groups = groups
+  }
+}
+
+public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
+  case user(MentionCompletionUser)
+  case group(UserGroup)
+
+  public var id: String {
+    switch self {
+      case let .user(user):
+        "user:\(user.userInfo.user.id)"
+      case let .group(group):
+        "group:\(group.id)"
+    }
+  }
+
+  public var userInfo: UserInfo? {
+    switch self {
+      case let .user(user):
+        user.userInfo
+      case .group:
+        nil
+    }
+  }
+
+  public var group: UserGroup? {
+    switch self {
+      case .user:
+        nil
+      case let .group(group):
+        group
+    }
+  }
+
+  public var title: String {
+    switch self {
+      case let .user(user):
+        user.userInfo.user.displayName
+      case let .group(group):
+        group.name
+    }
+  }
+
+  public var subtitle: String? {
+    switch self {
+      case let .user(user):
+        if let username = user.userInfo.user.username, !username.isEmpty {
+          return "@\(username)"
+        }
+        return nil
+      case let .group(group):
+        let count = "\(group.memberCount) \(group.memberCount == 1 ? "person" : "people")"
+        guard let description = group.description, !description.isEmpty else {
+          return count
+        }
+        return "\(description) - \(count)"
+    }
+  }
+}
+
 @MainActor
 @Observable
 public final class MentionCompletionViewModel {
   public private(set) var query = ""
-  public private(set) var items: [UserInfo] = []
+  public private(set) var items: [MentionCompletionItem] = []
   public private(set) var selectedIndex = 0
 
   @ObservationIgnored private var candidates: [MentionCompletionCandidate] = []
@@ -43,25 +112,34 @@ public final class MentionCompletionViewModel {
     !items.isEmpty
   }
 
-  public var selectedItem: UserInfo? {
+  public var selectedItem: MentionCompletionItem? {
     item(at: selectedIndex)
   }
 
-  public var singleItem: UserInfo? {
+  public var selectedUser: UserInfo? {
+    selectedItem?.userInfo
+  }
+
+  public var singleItem: MentionCompletionItem? {
     items.count == 1 ? items.first : nil
   }
 
   public func updateParticipants(_ participants: [UserInfo]) {
-    updateCandidates(participants.map {
+    updateCandidates(MentionCompletionCandidates(users: participants.map {
       MentionCompletionUser(userInfo: $0, source: .participant)
-    })
+    }, groups: []))
   }
 
   public func updateCandidates(_ users: [MentionCompletionUser]) {
+    updateCandidates(MentionCompletionCandidates(users: users, groups: []))
+  }
+
+  public func updateCandidates(_ input: MentionCompletionCandidates) {
     let currentUserId = currentUserId()
     var candidatesByUserId: [Int64: MentionCompletionCandidate] = [:]
+    var groupCandidatesById: [Int64: MentionCompletionCandidate] = [:]
 
-    for user in users {
+    for user in input.users {
       guard user.userInfo.user.pendingSetup != true else { continue }
       guard user.source != .directChat || (user.lastMsgId ?? 0) > 0 else { continue }
       if let currentUserId, user.userInfo.user.id == currentUserId {
@@ -78,16 +156,20 @@ public final class MentionCompletionViewModel {
       candidatesByUserId[user.userInfo.id] = candidate
     }
 
-    candidates = candidatesByUserId.values.sorted {
-      if $0.source != $1.source {
-        return $0.source.rawValue < $1.source.rawValue
+    for group in input.groups where group.id > 0 {
+      groupCandidatesById[group.id] = MentionCompletionCandidate(group: group, locale: locale)
+    }
+
+    candidates = (Array(groupCandidatesById.values) + Array(candidatesByUserId.values)).sorted {
+      if $0.sortRank != $1.sortRank {
+        return $0.sortRank < $1.sortRank
       }
 
       if $0.sortText != $1.sortText {
         return $0.sortText < $1.sortText
       }
 
-      return $0.userInfo.id < $1.userInfo.id
+      return $0.id < $1.id
     }
 
     let selectedId = selectedItem?.id
@@ -121,19 +203,28 @@ public final class MentionCompletionViewModel {
     selectedIndex = index
   }
 
-  public func item(at index: Int) -> UserInfo? {
+  public func item(at index: Int) -> MentionCompletionItem? {
     guard items.indices.contains(index) else { return nil }
     return items[index]
   }
 
-  public func mentionText(for user: UserInfo) -> String {
-    Self.mentionText(for: user)
+  public func mentionText(for item: MentionCompletionItem) -> String {
+    switch item {
+      case let .user(user):
+        Self.mentionText(for: user.userInfo)
+      case let .group(group):
+        Self.mentionText(for: group)
+    }
   }
 
   public nonisolated static func mentionText(for user: UserInfo) -> String {
     let displayName = user.user.displayName
     let firstName = displayName.split(separator: " ").first.map(String.init) ?? displayName
     return "@\(firstName)"
+  }
+
+  public nonisolated static func mentionText(for group: UserGroup) -> String {
+    "@\(group.name)"
   }
 
   public nonisolated static func query(
@@ -148,19 +239,34 @@ public final class MentionCompletionViewModel {
       .contains(normalizedQuery)
   }
 
-  private func applyFilter(resetSelection: Bool, selectedId: Int64? = nil) {
+  public nonisolated static func query(
+    _ query: String,
+    exactlyMatches item: MentionCompletionItem,
+    locale: Locale = .current
+  ) -> Bool {
+    switch item {
+      case let .user(user):
+        return Self.query(query, exactlyMatches: user.userInfo, locale: locale)
+      case let .group(group):
+        let normalizedQuery = normalized(query, locale: locale)
+        guard !normalizedQuery.isEmpty else { return false }
+        return normalized(group.name, locale: locale) == normalizedQuery
+    }
+  }
+
+  private func applyFilter(resetSelection: Bool, selectedId: String? = nil) {
     let normalizedQuery = Self.normalized(query, locale: locale)
     let compactQuery = Self.compact(normalizedQuery)
 
-    let nextItems: [UserInfo]
+    let nextItems: [MentionCompletionItem]
     if normalizedQuery.isEmpty {
       nextItems = candidates.compactMap { candidate in
-        candidate.source == .directChat ? nil : candidate.userInfo
+        candidate.isDirectChat ? nil : candidate.item
       }
     } else {
       nextItems = candidates.compactMap { candidate in
         guard candidate.matches(normalizedQuery, compactQuery: compactQuery) else { return nil }
-        return candidate.userInfo
+        return candidate.item
       }
     }
 
@@ -192,15 +298,35 @@ public final class MentionCompletionViewModel {
 }
 
 private struct MentionCompletionCandidate: Equatable {
-  let userInfo: UserInfo
-  let source: MentionCompletionSource
+  let item: MentionCompletionItem
+  let sortRank: Int
   let matchText: String
   let compactMatchText: String
   let sortText: String
 
+  var id: String {
+    item.id
+  }
+
+  var source: MentionCompletionSource {
+    switch item {
+      case let .user(user):
+        user.source
+      case .group:
+        .participant
+    }
+  }
+
+  var isDirectChat: Bool {
+    if case let .user(user) = item {
+      return user.source == .directChat
+    }
+    return false
+  }
+
   init(user: MentionCompletionUser, locale: Locale) {
-    userInfo = user.userInfo
-    source = user.source
+    item = .user(user)
+    sortRank = user.source.rawValue + 1
 
     let values = Self.matchValues(for: user.userInfo)
       .map { MentionCompletionViewModel.normalized($0, locale: locale) }
@@ -209,6 +335,24 @@ private struct MentionCompletionCandidate: Equatable {
     matchText = values.joined(separator: "\n")
     compactMatchText = MentionCompletionViewModel.compact(matchText)
     sortText = MentionCompletionViewModel.normalized(user.userInfo.user.displayName, locale: locale)
+  }
+
+  init(group: UserGroup, locale: Locale) {
+    item = .group(group)
+    sortRank = 0
+
+    var values = [group.name]
+    if let description = group.description {
+      values.append(description)
+    }
+
+    let normalizedValues = values
+      .map { MentionCompletionViewModel.normalized($0, locale: locale) }
+      .filter { !$0.isEmpty }
+
+    matchText = normalizedValues.joined(separator: "\n")
+    compactMatchText = MentionCompletionViewModel.compact(matchText)
+    sortText = MentionCompletionViewModel.normalized(group.name, locale: locale)
   }
 
   func matches(_ query: String, compactQuery: String) -> Bool {

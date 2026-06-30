@@ -1,8 +1,9 @@
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
+import { chatParticipantGroups } from "@in/server/db/schema/userGroups"
 import { Log } from "@in/server/utils/log"
 import { and, eq } from "drizzle-orm"
-import { ChatParticipant, Update } from "@inline-chat/protocol/core"
+import { ChatParticipant, ChatParticipantGroup, Update, UserGroup } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -19,15 +20,41 @@ import {
   ensureCanManageChatParticipants,
   ensureUserCanParticipateInChat,
 } from "@in/server/modules/authorization/spaceThreadGuards"
+import {
+  encodeChatParticipantGroup,
+  ensureGroupCanParticipateInChat,
+  loadActiveGroupMemberIds,
+  loadGroupsByIds,
+} from "@in/server/modules/userGroups"
+
+type AddChatParticipantOutput = {
+  participant?: ChatParticipant
+  groupParticipant?: ChatParticipantGroup
+  group?: UserGroup
+}
 
 export async function addChatParticipant(
   input: {
     chatId: number
-    userId: number
+    userId?: number
+    groupId?: number
   },
   context: FunctionContext,
-): Promise<ChatParticipant> {
+): Promise<AddChatParticipantOutput> {
   try {
+    const userId = input.userId
+    const groupId = input.groupId
+    if ((userId == null && groupId == null) || (userId != null && groupId != null)) {
+      throw RealtimeRpcError.BadRequest()
+    }
+
+    if (groupId != null) {
+      return addChatParticipantGroup({ chatId: input.chatId, groupId }, context)
+    }
+    if (userId == null) {
+      throw RealtimeRpcError.BadRequest()
+    }
+
     const result = await db.transaction(async (tx): Promise<{ participant: ChatParticipant; update: UpdateSeqAndDate | null }> => {
       // Check if chat exists
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
@@ -41,23 +68,23 @@ export async function addChatParticipant(
       }
 
       await ensureCanManageChatParticipants(chat, context.currentUserId)
-      await ensureUserCanParticipateInChat(chat, input.userId)
+      await ensureUserCanParticipateInChat(chat, userId)
 
       // Check if user exists
       const user = await tx
         .select()
         .from(users)
-        .where(and(eq(users.id, input.userId), userNotDeleted()))
+        .where(and(eq(users.id, userId), userNotDeleted()))
         .limit(1)
       if (!user || user.length === 0) {
-        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${input.userId} not found`, 404)
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${userId} not found`, 404)
       }
 
       // check if user is already a participant return the participant
       const [participant] = await tx
         .select()
         .from(chatParticipants)
-        .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
+        .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, userId)))
 
       if (participant != null) {
         return {
@@ -73,7 +100,7 @@ export async function addChatParticipant(
         .insert(chatParticipants)
         .values({
           chatId: input.chatId,
-          userId: input.userId,
+          userId,
           date: new Date(),
         })
         .returning()
@@ -110,7 +137,7 @@ export async function addChatParticipant(
 
       await UserBucketUpdates.enqueue(
         {
-          userId: input.userId,
+          userId,
           update: {
             oneofKind: "userChatParticipantAdd",
             userChatParticipantAdd: {
@@ -128,7 +155,7 @@ export async function addChatParticipant(
       }
     })
 
-    AccessGuardsCache.setChatParticipant(input.chatId, input.userId)
+    AccessGuardsCache.setChatParticipant(input.chatId, userId)
 
     if (result.update) {
       await pushUpdates({
@@ -139,13 +166,120 @@ export async function addChatParticipant(
       })
     }
 
-    return result.participant
+    return { participant: result.participant }
   } catch (error) {
     Log.shared.error(`Failed to add participant to chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {
       throw error
     }
     throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to add chat participant", 500)
+  }
+}
+
+async function addChatParticipantGroup(
+  input: { chatId: number; groupId: number },
+  context: FunctionContext,
+): Promise<AddChatParticipantOutput> {
+  const result = await db.transaction(
+    async (tx): Promise<{ groupParticipant: ChatParticipantGroup; update: UpdateSeqAndDate | null }> => {
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
+
+      if (!chat) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
+      }
+
+      if (chat.type !== "thread") {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
+      }
+
+      await ensureCanManageChatParticipants(chat, context.currentUserId)
+      await ensureGroupCanParticipateInChat(chat, input.groupId)
+
+      const [existing] = await tx
+        .select()
+        .from(chatParticipantGroups)
+        .where(and(eq(chatParticipantGroups.chatId, input.chatId), eq(chatParticipantGroups.groupId, input.groupId)))
+
+      if (existing != null) {
+        return {
+          groupParticipant: encodeChatParticipantGroup(existing),
+          update: null,
+        }
+      }
+
+      const [newGroupParticipant] = await tx
+        .insert(chatParticipantGroups)
+        .values({
+          chatId: input.chatId,
+          groupId: input.groupId,
+          date: new Date(),
+        })
+        .returning()
+
+      if (!newGroupParticipant) {
+        throw RealtimeRpcError.InternalError()
+      }
+
+      const groupParticipant = encodeChatParticipantGroup(newGroupParticipant)
+      const chatServerUpdatePayload: ServerUpdate["update"] = {
+        oneofKind: "participantGroupAdd",
+        participantGroupAdd: {
+          chatId: BigInt(input.chatId),
+          groupParticipant,
+        },
+      }
+
+      const update = await UpdatesModel.insertUpdate(tx, {
+        update: chatServerUpdatePayload,
+        bucket: UpdateBucket.Chat,
+        entity: chat,
+      })
+
+      await tx
+        .update(chats)
+        .set({
+          updateSeq: update.seq,
+          lastUpdateDate: update.date,
+        })
+        .where(eq(chats.id, chat.id))
+
+      const groupMemberIds = await loadActiveGroupMemberIds(input.groupId)
+      await Promise.all(
+        groupMemberIds.map((memberId) =>
+          UserBucketUpdates.enqueue(
+            {
+              userId: memberId,
+              update: {
+                oneofKind: "userChatParticipantGroupAdd",
+                userChatParticipantGroupAdd: {
+                  chatId: BigInt(input.chatId),
+                  groupParticipant,
+                },
+              },
+            },
+            { tx },
+          ),
+        ),
+      )
+
+      return { groupParticipant, update }
+    },
+  )
+
+  const [group] = await loadGroupsByIds([input.groupId], context.currentUserId)
+
+  if (result.update) {
+    await pushGroupUpdates({
+      chatId: input.chatId,
+      currentUserId: context.currentUserId,
+      groupParticipant: result.groupParticipant,
+      update: result.update,
+    })
+  }
+
+  return {
+    groupParticipant: result.groupParticipant,
+    group,
   }
 }
 
@@ -182,6 +316,45 @@ const pushUpdates = async ({
 
     if (userId === currentUserId) {
       selfUpdates = [chatParticipantAdd]
+    }
+  })
+
+  return { selfUpdates, updateGroup }
+}
+
+/** Push group participant-add updates to currently connected clients. */
+const pushGroupUpdates = async ({
+  chatId,
+  currentUserId,
+  groupParticipant,
+  update,
+}: {
+  chatId: number
+  currentUserId: number
+  groupParticipant: ChatParticipantGroup
+  update: UpdateSeqAndDate
+}): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
+  const updateGroup = await getUpdateGroup({ threadId: chatId }, { currentUserId })
+
+  let selfUpdates: Update[] = []
+
+  updateGroup.userIds.forEach((userId) => {
+    const chatParticipantGroupAdd: Update = {
+      seq: update.seq,
+      date: encodeDateStrict(update.date),
+      update: {
+        oneofKind: "participantGroupAdd",
+        participantGroupAdd: {
+          chatId: BigInt(chatId),
+          groupParticipant,
+        },
+      },
+    }
+
+    RealtimeUpdates.pushToUser(userId, [chatParticipantGroupAdd])
+
+    if (userId === currentUserId) {
+      selfUpdates = [chatParticipantGroupAdd]
     }
   })
 

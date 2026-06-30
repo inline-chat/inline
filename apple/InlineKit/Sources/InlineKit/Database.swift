@@ -859,6 +859,57 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("user groups") { db in
+      try db.create(table: "userGroup") { t in
+        t.primaryKey("id", .integer).notNull().unique()
+        t.column("spaceId", .integer)
+          .notNull()
+          .references("space", column: "id", onDelete: .cascade)
+        t.column("name", .text).notNull()
+        t.column("description", .text)
+        t.column("memberCount", .integer).notNull().defaults(to: 0)
+        t.column("currentUserIsMember", .boolean).notNull().defaults(to: false)
+        t.column("date", .datetime).notNull()
+      }
+
+      try db.create(index: "userGroup_spaceId_idx", on: "userGroup", columns: ["spaceId"])
+
+      try db.create(table: "userGroupMember") { t in
+        t.column("groupId", .integer)
+          .notNull()
+          .references("userGroup", column: "id", onDelete: .cascade)
+        t.column("userId", .integer)
+          .notNull()
+          .references("user", column: "id", onDelete: .cascade)
+        t.primaryKey(["groupId", "userId"])
+      }
+
+      try db.create(index: "userGroupMember_userId_idx", on: "userGroupMember", columns: ["userId"])
+
+      try db.create(table: "chatParticipantGroup") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("chatId", .integer)
+          .notNull()
+          .references("chat", column: "id", onDelete: .cascade)
+        t.column("groupId", .integer)
+          .notNull()
+          .references("userGroup", column: "id", onDelete: .cascade)
+        t.column("date", .datetime).notNull()
+        t.uniqueKey(["chatId", "groupId"], onConflict: .replace)
+      }
+
+      try db.create(
+        index: "chatParticipantGroup_chatId_idx",
+        on: "chatParticipantGroup",
+        columns: ["chatId"]
+      )
+      try db.create(
+        index: "chatParticipantGroup_groupId_idx",
+        on: "chatParticipantGroup",
+        columns: ["groupId"]
+      )
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

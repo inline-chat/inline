@@ -70,6 +70,57 @@ extension ChatInfoView {
     }
   }
 
+  func addGroupParticipant(_ group: UserGroup) {
+    guard currentChatId != 0 else {
+      Log.shared.error("No chat ID found when trying to add group participant")
+      return
+    }
+
+    Task {
+      do {
+        try await Api.realtime.send(.addChatParticipant(
+          chatID: currentChatId,
+          groupID: group.id
+        ))
+        isSearching = false
+        searchText = ""
+      } catch {
+        Log.shared.error("Failed to add group participant", error: error)
+      }
+    }
+  }
+
+  func removeGroupParticipant(_ group: UserGroup) {
+    guard currentChatId != 0 else {
+      Log.shared.error("No chat ID found when trying to remove group participant")
+      return
+    }
+
+    Task {
+      do {
+        try await Api.realtime.send(.removeChatParticipant(
+          chatID: currentChatId,
+          groupID: group.id
+        ))
+      } catch {
+        Log.shared.error("Failed to remove group participant", error: error)
+      }
+    }
+  }
+
+  var groupSearchResults: [UserGroup] {
+    let existingGroupIds = Set(participantsWithMembersViewModel.groupParticipants.map(\.id))
+    let groups = userGroupsViewModel.groups.filter { !existingGroupIds.contains($0.id) }
+    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard !query.isEmpty else { return groups }
+
+    return groups.filter { group in
+      group.name.localizedCaseInsensitiveContains(query) ||
+        (group.description?.localizedCaseInsensitiveContains(query) == true)
+    }
+  }
+
   func showMessageInChat(_ message: Message) {
     router.selectedTab = .chats
     router.pop(for: .chats)
@@ -349,6 +400,32 @@ extension ChatInfoView {
             }
           }
       }
+
+      ForEach(participantsWithMembersViewModel.groupParticipants) { group in
+        HStack(spacing: 10) {
+          Image(systemName: "person.3.fill")
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(Color.accentColor)
+            .clipShape(Circle())
+
+          VStack(alignment: .leading, spacing: 2) {
+            Text(group.name)
+            Text(group.memberCount == 1 ? "1 person" : "\(group.memberCount) people")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .swipeActions {
+          if isOwnerOrAdmin, isPrivate {
+            Button(role: .destructive, action: {
+              removeGroupParticipant(group)
+            }) {
+              Text("Remove")
+            }
+          }
+        }
+      }
     }
   }
 
@@ -388,6 +465,7 @@ extension ChatInfoView {
     SearchParticipantsView(
       searchText: $searchText,
       searchResults: searchResults,
+      groupResults: groupSearchResults,
       isSearching: isSearchingState,
       onSearchTextChanged: { text in
         searchDebouncer.input = text
@@ -397,6 +475,7 @@ extension ChatInfoView {
         searchUsers(query: value)
       },
       onAddParticipant: addParticipant,
+      onAddGroup: addGroupParticipant,
       onCancel: {
         isSearching = false
         searchText = ""

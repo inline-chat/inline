@@ -94,6 +94,7 @@ public enum ComposeThreadLinkEditing {
     var attributes = typingAttributes
     attributes.removeValue(forKey: .threadLink)
     attributes.removeValue(forKey: .mentionUserId)
+    attributes.removeValue(forKey: .mentionGroupId)
     attributes.removeValue(forKey: .link)
     attributes.removeValue(forKey: .emailAddress)
     attributes.removeValue(forKey: .phoneNumber)

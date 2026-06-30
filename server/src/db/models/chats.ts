@@ -1,6 +1,19 @@
 import { db } from "@in/server/db"
-import { eq, and, desc } from "drizzle-orm"
-import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { eq, and, desc, gte, isNull } from "drizzle-orm"
+import {
+  chatParticipantGroups,
+  chats,
+  dialogs,
+  members,
+  messages,
+  spaces,
+  userGroupMembers,
+  userGroups,
+  userNotDeleted,
+  users,
+  type DbChat,
+  type DbDialog,
+} from "@in/server/db/schema"
 import { UsersModel } from "@in/server/db/models/users"
 import { InlineError } from "@in/server/types/errors"
 import { TPeerInfo } from "@in/server/api-types"
@@ -304,7 +317,7 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
   let { userId, where } = input
 
   // Fetch a list of public threads the user is a part of and don't have a dialog
-  const chats = await db.query.chats.findMany({
+  const baseChats = await db.query.chats.findMany({
     where: {
       ...(where && "lastUpdateAtGreaterThanEqual" in where
         ? {
@@ -383,5 +396,37 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
     },
   })
 
-  return { chats }
+  const groupRows = await db
+    .select({ chat: chats })
+    .from(chats)
+    .innerJoin(chatParticipantGroups, eq(chatParticipantGroups.chatId, chats.id))
+    .innerJoin(userGroups, eq(userGroups.id, chatParticipantGroups.groupId))
+    .innerJoin(userGroupMembers, eq(userGroupMembers.groupId, userGroups.id))
+    .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
+    .innerJoin(users, eq(users.id, userGroupMembers.userId))
+    .innerJoin(spaces, eq(spaces.id, userGroups.spaceId))
+    .where(
+      and(
+        eq(chats.type, "thread"),
+        isNull(chats.parentChatId),
+        eq(chats.publicThread, false),
+        eq(chats.spaceId, userGroups.spaceId),
+        eq(userGroupMembers.userId, userId),
+        isNull(spaces.deleted),
+        userNotDeleted(),
+        where && "lastUpdateAtGreaterThanEqual" in where
+          ? gte(chats.lastUpdateDate, where.lastUpdateAtGreaterThanEqual)
+          : undefined,
+      ),
+    )
+
+  const chatsById = new Map<number, DbChat>()
+  for (const chat of baseChats) {
+    chatsById.set(chat.id, chat)
+  }
+  for (const row of groupRows) {
+    chatsById.set(row.chat.id, row.chat)
+  }
+
+  return { chats: Array.from(chatsById.values()) }
 }

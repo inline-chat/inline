@@ -396,6 +396,14 @@ public class ProcessEntities {
             }
           }
 
+        case .groupMention:
+          if case let .groupMention(groupMention) = entity.entity {
+            attributedString.addAttributes([
+              .mentionGroupId: groupMention.groupID,
+              .foregroundColor: configuration.linkColor,
+            ], range: range)
+          }
+
         case .thread:
           guard case let .thread(thread) = entity.entity, thread.chatID > 0 else {
             break
@@ -587,6 +595,24 @@ public class ProcessEntities {
     }
 
     attributedString.enumerateAttribute(
+      .mentionGroupId,
+      in: fullRange,
+      options: []
+    ) { value, range, _ in
+      if let groupId = value as? Int64 {
+        guard let range = trimmedEntityRange(in: nsText, range: range) else { return }
+        var entity = MessageEntity()
+        entity.type = .groupMention
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entity.groupMention = MessageEntity.MessageEntityGroupMention.with {
+          $0.groupID = groupId
+        }
+        entities.append(entity)
+      }
+    }
+
+    attributedString.enumerateAttribute(
       .threadLink,
       in: fullRange,
       options: []
@@ -680,6 +706,10 @@ public class ProcessEntities {
       // Skip if this range is a mention; mention extraction is authoritative.
       let attributesAtLocation = attributedString.attributes(at: range.location, effectiveRange: nil)
       if attributesAtLocation[.mentionUserId] != nil {
+        return
+      }
+
+      if attributesAtLocation[.mentionGroupId] != nil {
         return
       }
 

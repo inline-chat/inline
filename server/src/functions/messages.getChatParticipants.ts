@@ -1,12 +1,14 @@
 import { db } from "@in/server/db"
 import { chats } from "@in/server/db/schema/chats"
+import { chatParticipantGroups } from "@in/server/db/schema/userGroups"
 import { Log } from "@in/server/utils/log"
 import { eq } from "drizzle-orm"
-import { ChatParticipant, User } from "@inline-chat/protocol/core"
+import { ChatParticipant, ChatParticipantGroup, User, UserGroup } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Encoders } from "../realtime/encoders/encoders"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { encodeChatParticipantGroup, encodeUserGroup, loadChatParticipantGroups } from "@in/server/modules/userGroups"
 
 export async function getChatParticipants(
   input: {
@@ -15,7 +17,9 @@ export async function getChatParticipants(
   context: FunctionContext,
 ): Promise<{
   participants: ChatParticipant[]
+  groupParticipants: ChatParticipantGroup[]
   users: User[]
+  groups: UserGroup[]
 }> {
   try {
     const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
@@ -39,15 +43,25 @@ export async function getChatParticipants(
       },
     })
 
-    if (!participants || participants.length === 0) {
+    const participantGroups = await db
+      .select()
+      .from(chatParticipantGroups)
+      .where(eq(chatParticipantGroups.chatId, input.chatId))
+
+    const groups = await loadChatParticipantGroups(input.chatId)
+
+    if ((!participants || participants.length === 0) && participantGroups.length === 0) {
       return {
         participants: [],
+        groupParticipants: [],
         users: [],
+        groups: [],
       }
     }
 
     return {
       participants: participants.map((participant) => Encoders.chatParticipant(participant)),
+      groupParticipants: participantGroups.map((group) => encodeChatParticipantGroup(group)),
       users: participants
         .map((participant) => {
           if (!participant.user) return null
@@ -59,6 +73,7 @@ export async function getChatParticipants(
           })
         })
         .filter((user) => user !== null),
+      groups: groups.map((group) => encodeUserGroup(group, context.currentUserId)),
     }
   } catch (error) {
     Log.shared.error(`Failed to get participants for chat ${input.chatId}: ${error}`)

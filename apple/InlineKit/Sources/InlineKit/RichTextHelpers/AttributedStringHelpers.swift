@@ -22,6 +22,17 @@ public class AttributedStringHelpers {
     ]
   }
 
+  public static func groupMentionAttributes(
+    groupId: Int64,
+    font: NSFont = .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+  ) -> [NSAttributedString.Key: Any] {
+    [
+      .mentionGroupId: groupId,
+      .foregroundColor: NSColor.systemBlue,
+      .font: font,
+    ]
+  }
+
   public static func threadLinkAttributes(
     target: ThreadLinkTarget,
     font: NSFont = .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -45,6 +56,17 @@ public class AttributedStringHelpers {
     ]
   }
 
+  public static func groupMentionAttributes(
+    groupId: Int64,
+    font: UIFont = UIFont.systemFont(ofSize: 17, weight: .regular)
+  ) -> [NSAttributedString.Key: Any] {
+    [
+      .mentionGroupId: groupId,
+      .foregroundColor: UIColor.systemBlue,
+      .font: font,
+    ]
+  }
+
   public static func threadLinkAttributes(
     target: ThreadLinkTarget,
     font: UIFont = UIFont.systemFont(ofSize: 17, weight: .regular)
@@ -61,6 +83,10 @@ public class AttributedStringHelpers {
 
   public static func createMentionAttributedString(_ text: String, userId: Int64) -> NSAttributedString {
     NSAttributedString(string: text, attributes: mentionAttributes(userId: userId))
+  }
+
+  public static func createGroupMentionAttributedString(_ text: String, groupId: Int64) -> NSAttributedString {
+    NSAttributedString(string: text, attributes: groupMentionAttributes(groupId: groupId))
   }
 
   public static func createThreadLinkAttributedString(_ text: String, target: ThreadLinkTarget) -> NSAttributedString {
@@ -145,6 +171,18 @@ public class AttributedStringHelpers {
     return mutableAttributedString.copy() as! NSAttributedString
   }
 
+  public static func replaceGroupMentionInAttributedString(
+    _ attributedString: NSAttributedString,
+    range: NSRange,
+    with mentionText: String,
+    groupId: Int64
+  ) -> NSAttributedString {
+    let mutableAttributedString = attributedString.mutableCopy() as! NSMutableAttributedString
+    let mentionAttributedString = createGroupMentionAttributedString(mentionText, groupId: groupId)
+    mutableAttributedString.replaceCharacters(in: range, with: mentionAttributedString)
+    return mutableAttributedString.copy() as! NSAttributedString
+  }
+
   public static func replaceThreadLinkInAttributedString(
     _ attributedString: NSAttributedString,
     range: NSRange,
@@ -173,6 +211,24 @@ public class AttributedStringHelpers {
         entity.length = Int64(range.length)
         entity.mention = MessageEntity.MessageEntityMention.with {
           $0.userID = userId
+        }
+        entities.append(entity)
+      }
+    }
+
+    attributedString.enumerateAttribute(
+      .mentionGroupId,
+      in: NSRange(location: 0, length: attributedString.length),
+      options: []
+    ) { value, range, _ in
+      if let groupId = value as? Int64 {
+        guard let range = trimmedEntityRange(in: text, range: range) else { return }
+        var entity = MessageEntity()
+        entity.type = .groupMention
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entity.groupMention = MessageEntity.MessageEntityGroupMention.with {
+          $0.groupID = groupId
         }
         entities.append(entity)
       }
@@ -235,6 +291,7 @@ public class AttributedStringHelpers {
 
 public extension NSAttributedString.Key {
   static let mentionUserId = NSAttributedString.Key("mentionUserId")
+  static let mentionGroupId = NSAttributedString.Key("mentionGroupId")
   static let threadLink = NSAttributedString.Key("threadLink")
   static let botCommand = NSAttributedString.Key("botCommand")
   static let emailAddress = NSAttributedString.Key("emailAddress")

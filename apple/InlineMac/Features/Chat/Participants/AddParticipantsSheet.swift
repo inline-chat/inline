@@ -10,6 +10,7 @@ struct AddParticipantsSheet: View {
     chatId: Int64,
     spaceId: Int64,
     currentParticipants: [UserInfo],
+    currentGroupParticipants: [UserGroup],
     db: AppDatabase,
     isPresented: Binding<Bool>
   ) {
@@ -18,6 +19,7 @@ struct AddParticipantsSheet: View {
         chatId: chatId,
         spaceId: spaceId,
         currentParticipants: currentParticipants,
+        currentGroupParticipants: currentGroupParticipants,
         db: db
       )
     )
@@ -38,10 +40,10 @@ struct AddParticipantsSheet: View {
         loadingView
       } else if let error = viewModel.errorMessage {
         errorView(error)
-      } else if viewModel.filteredMembers.isEmpty {
+      } else if viewModel.filteredMembers.isEmpty && viewModel.filteredGroups.isEmpty {
         emptyView
       } else {
-        membersList
+        accessList
       }
 
       Divider()
@@ -88,9 +90,37 @@ struct AddParticipantsSheet: View {
     .cornerRadius(6)
   }
 
-  private var membersList: some View {
+  private var accessList: some View {
     ScrollView {
-      LazyVStack(spacing: 0) {
+      LazyVStack(alignment: .leading, spacing: 0) {
+        if !viewModel.filteredGroups.isEmpty {
+          Text("Groups")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+
+          ForEach(viewModel.filteredGroups) { group in
+            GroupRow(
+              group: group,
+              isSelected: viewModel.selectedGroupIds.contains(group.id),
+              onTap: {
+                viewModel.toggleGroupSelection(groupId: group.id)
+              }
+            )
+          }
+          .padding(.horizontal, 16)
+        }
+
+        if !viewModel.filteredMembers.isEmpty {
+          Text("People")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.top, viewModel.filteredGroups.isEmpty ? 6 : 14)
+            .padding(.bottom, 4)
+
         ForEach(viewModel.filteredMembers, id: \.userInfo.user.id) { member in
           MemberRow(
             member: member,
@@ -100,8 +130,9 @@ struct AddParticipantsSheet: View {
             }
           )
         }
+        .padding(.horizontal, 16)
+        }
       }
-      .padding(.horizontal, 16)
     }
   }
 
@@ -150,8 +181,8 @@ struct AddParticipantsSheet: View {
 
   private var footer: some View {
     HStack {
-      if !viewModel.selectedUserIds.isEmpty {
-        Text("\(viewModel.selectedUserIds.count) selected")
+      if selectedCount > 0 {
+        Text("\(selectedCount) selected")
           .font(.system(size: 12))
           .foregroundColor(.secondary)
       }
@@ -177,6 +208,60 @@ struct AddParticipantsSheet: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 12)
+  }
+
+  private var selectedCount: Int {
+    viewModel.selectedUserIds.count + viewModel.selectedGroupIds.count
+  }
+}
+
+private struct GroupRow: View {
+  let group: UserGroup
+  let isSelected: Bool
+  let onTap: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "person.3.fill")
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(width: 32, height: 32)
+        .background(Color.accentColor)
+        .clipShape(Circle())
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(group.name)
+          .font(.system(size: 13, weight: .medium))
+
+        Text(subtitle)
+          .font(.system(size: 11))
+          .foregroundColor(.secondary)
+          .lineLimit(1)
+      }
+
+      Spacer()
+
+      if isSelected {
+        Image(systemName: "checkmark.circle.fill")
+          .font(.system(size: 18))
+          .foregroundColor(.blue)
+      } else {
+        Image(systemName: "circle")
+          .font(.system(size: 18))
+          .foregroundColor(.secondary.opacity(0.3))
+      }
+    }
+    .padding(.vertical, 8)
+    .contentShape(Rectangle())
+    .onTapGesture(perform: onTap)
+  }
+
+  private var subtitle: String {
+    let count = group.memberCount == 1 ? "1 person" : "\(group.memberCount) people"
+    guard let description = group.description, !description.isEmpty else {
+      return count
+    }
+    return "\(description) - \(count)"
   }
 }
 

@@ -10,6 +10,7 @@ struct SpaceSettingsView: View {
   @EnvironmentObject private var data: DataManager
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
   @StateObject private var urlPreviewExclusions: SpaceUrlPreviewExclusionsViewModel
+  @StateObject private var userGroups: UserGroupsViewModel
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
@@ -17,6 +18,7 @@ struct SpaceSettingsView: View {
       FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
     }
     _urlPreviewExclusions = StateObject(wrappedValue: SpaceUrlPreviewExclusionsViewModel(spaceId: spaceId))
+    _userGroups = StateObject(wrappedValue: UserGroupsViewModel(db: AppDatabase.shared, spaceId: spaceId))
   }
 
   private var currentUserMember: FullMemberItem? {
@@ -77,6 +79,11 @@ struct SpaceSettingsView: View {
       }
 
       if isAdminOrOwner {
+        UserGroupsSettingsSection(
+          viewModel: userGroups,
+          canManage: true
+        )
+
         Section("URL Previews") {
           SpaceUrlPreviewExclusionsSettingsView(viewModel: urlPreviewExclusions)
         }
@@ -102,6 +109,7 @@ struct SpaceSettingsView: View {
     .hideTabBarIfNeeded()
     .task {
       if isAdminOrOwner {
+        await userGroups.loadIfNeeded()
         await urlPreviewExclusions.loadIfNeeded()
       }
     }

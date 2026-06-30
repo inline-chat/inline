@@ -6,9 +6,8 @@ import UIKit
 protocol MentionCompletionDelegate: AnyObject {
   func mentionCompletion(
     _ view: MentionCompletionView,
-    didSelectUser user: UserInfo,
-    withText text: String,
-    userId: Int64
+    didSelectItem item: MentionCompletionItem,
+    withText text: String
   )
   func mentionCompletionDidRequestClose(_ view: MentionCompletionView)
 }
@@ -143,15 +142,25 @@ public class MentionCompletionView: UIView {
     updateHeight()
   }
 
+  func updateCandidates(_ candidates: MentionCompletionCandidates) {
+    model.updateCandidates(candidates)
+    updateRows()
+    updateHeight()
+  }
+
   func filterParticipants(with query: String) {
     model.filter(with: query)
     updateRows()
     updateHeight()
   }
 
-  /// Returns the only filtered participant when exactly one remains, otherwise nil.
-  func singleFilteredParticipant() -> UserInfo? {
+  /// Returns the only filtered item when exactly one remains, otherwise nil.
+  func singleFilteredItem() -> MentionCompletionItem? {
     model.singleItem
+  }
+
+  func mentionText(for item: MentionCompletionItem) -> String {
+    model.mentionText(for: item)
   }
 
   func show() {
@@ -188,14 +197,14 @@ public class MentionCompletionView: UIView {
   }
 
   func selectCurrentItem() -> Bool {
-    guard let user = model.selectedItem else { return false }
-    selectUser(user)
+    guard let item = model.selectedItem else { return false }
+    selectItem(item)
     return true
   }
 
-  private func selectUser(_ user: UserInfo) {
-    let mentionText = model.mentionText(for: user)
-    delegate?.mentionCompletion(self, didSelectUser: user, withText: mentionText, userId: user.user.id)
+  private func selectItem(_ item: MentionCompletionItem) {
+    let mentionText = model.mentionText(for: item)
+    delegate?.mentionCompletion(self, didSelectItem: item, withText: mentionText)
   }
 
   private func updateRows() {
@@ -203,48 +212,63 @@ public class MentionCompletionView: UIView {
     stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
     // Add new rows
-    for (index, user) in model.items.enumerated() {
-      let row = createUserRow(user: user, index: index)
+    for (index, item) in model.items.enumerated() {
+      let row = createItemRow(item: item, index: index)
       stackView.addArrangedSubview(row)
     }
   }
 
-  private func createUserRow(user: UserInfo, index: Int) -> UIView {
+  private func createItemRow(item: MentionCompletionItem, index: Int) -> UIView {
     let containerView = UIView()
     containerView.translatesAutoresizingMaskIntoConstraints = false
     containerView.tag = index
 
-    let avatarView = UserAvatarView()
-    avatarView.configure(with: user, size: 36)
-    avatarView.translatesAutoresizingMaskIntoConstraints = false
+    let iconView: UIView
+    switch item {
+      case let .user(user):
+        let avatarView = UserAvatarView()
+        avatarView.configure(with: user.userInfo, size: 36)
+        avatarView.translatesAutoresizingMaskIntoConstraints = false
+        iconView = avatarView
+
+      case .group:
+        let imageView = UIImageView(image: UIImage(systemName: "person.2.fill"))
+        imageView.tintColor = .secondaryLabel
+        imageView.contentMode = .center
+        imageView.backgroundColor = UIColor.secondarySystemFill
+        imageView.layer.cornerRadius = 18
+        imageView.clipsToBounds = true
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        iconView = imageView
+    }
 
     let nameLabel = UILabel()
     nameLabel.font = .systemFont(ofSize: 17, weight: .medium)
     nameLabel.textColor = .label
     nameLabel.numberOfLines = 1
-    nameLabel.text = user.user.fullName.isEmpty ? (user.user.username ?? "Unknown") : user.user.fullName
+    nameLabel.text = item.title
     nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
-    let usernameLabel = UILabel()
-    usernameLabel.font = .systemFont(ofSize: 15, weight: .regular)
-    usernameLabel.textColor = .secondaryLabel
-    usernameLabel.numberOfLines = 1
-    usernameLabel.translatesAutoresizingMaskIntoConstraints = false
+    let subtitleLabel = UILabel()
+    subtitleLabel.font = .systemFont(ofSize: 15, weight: .regular)
+    subtitleLabel.textColor = .secondaryLabel
+    subtitleLabel.numberOfLines = 1
+    subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-    if let username = user.user.username, !username.isEmpty, !user.user.fullName.isEmpty {
-      usernameLabel.text = "@\(username)"
-      usernameLabel.isHidden = false
+    if let subtitle = item.subtitle {
+      subtitleLabel.text = subtitle
+      subtitleLabel.isHidden = false
     } else {
-      usernameLabel.isHidden = true
+      subtitleLabel.isHidden = true
     }
 
-    let labelsStackView = UIStackView(arrangedSubviews: [nameLabel, usernameLabel])
+    let labelsStackView = UIStackView(arrangedSubviews: [nameLabel, subtitleLabel])
     labelsStackView.axis = .vertical
     labelsStackView.spacing = 4
     labelsStackView.alignment = .leading
     labelsStackView.translatesAutoresizingMaskIntoConstraints = false
 
-    let containerStackView = UIStackView(arrangedSubviews: [avatarView, labelsStackView])
+    let containerStackView = UIStackView(arrangedSubviews: [iconView, labelsStackView])
     containerStackView.axis = .horizontal
     containerStackView.spacing = 6
     containerStackView.alignment = .center
@@ -253,8 +277,8 @@ public class MentionCompletionView: UIView {
     containerView.addSubview(containerStackView)
 
     NSLayoutConstraint.activate([
-      avatarView.widthAnchor.constraint(equalToConstant: 36),
-      avatarView.heightAnchor.constraint(equalToConstant: 36),
+      iconView.widthAnchor.constraint(equalToConstant: 36),
+      iconView.heightAnchor.constraint(equalToConstant: 36),
 
       containerStackView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
       containerStackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
@@ -273,11 +297,11 @@ public class MentionCompletionView: UIView {
 
   @objc private func rowTapped(_ gesture: UITapGestureRecognizer) {
     guard let view = gesture.view,
-          let user = model.item(at: view.tag)
+          let item = model.item(at: view.tag)
     else { return }
 
     model.select(index: view.tag)
-    selectUser(user)
+    selectItem(item)
   }
 
   private func updateSelection() {

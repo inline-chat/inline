@@ -9,21 +9,15 @@ export const addChatParticipant = async (
   input: AddChatParticipantInput,
   handlerContext: HandlerContext,
 ): Promise<AddChatParticipantResult> => {
-  await Functions.messages.addChatParticipant(
+  return Functions.messages.addChatParticipant(
     {
       chatId: Number(input.chatId),
-      userId: Number(input.userId),
+      userId: input.userId != null ? Number(input.userId) : undefined,
+      groupId: input.groupId != null ? Number(input.groupId) : undefined,
     },
     {
       currentUserId: handlerContext.userId,
       currentSessionId: handlerContext.sessionId,
     },
   )
-
-  return {
-    participant: {
-      userId: BigInt(input.userId),
-      date: BigInt(Date.now()),
-    },
-  }
 }

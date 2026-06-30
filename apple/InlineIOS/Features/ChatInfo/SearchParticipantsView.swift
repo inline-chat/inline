@@ -5,18 +5,46 @@ import SwiftUI
 struct SearchParticipantsView: View {
   @Binding var searchText: String
   let searchResults: [UserInfo]
+  let groupResults: [UserGroup]
   let isSearching: Bool
   let onSearchTextChanged: (String) -> Void
   let onDebouncedInput: (String?) -> Void
   let onAddParticipant: (UserInfo) -> Void
+  let onAddGroup: (UserGroup) -> Void
   let onCancel: () -> Void
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
 
   var body: some View {
     NavigationView {
       VStack {
-        if !searchResults.isEmpty {
+        if !searchResults.isEmpty || !groupResults.isEmpty {
           List {
+            if !groupResults.isEmpty {
+              Section("Groups") {
+                ForEach(groupResults) { group in
+                  Button(action: { onAddGroup(group) }) {
+                    HStack(spacing: 9) {
+                      Image(systemName: "person.3.fill")
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Color.accentColor)
+                        .clipShape(Circle())
+
+                      VStack(alignment: .leading, spacing: 2) {
+                        Text(group.name)
+                          .fontWeight(.medium)
+                          .foregroundColor(.primary)
+                        Text(groupSubtitle(group))
+                          .font(.footnote)
+                          .foregroundStyle(.secondary)
+                          .lineLimit(1)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
             ForEach(searchResults, id: \.user.id) { userInfo in
               Button(action: { onAddParticipant(userInfo) }) {
                 HStack(spacing: 9) {
@@ -40,10 +68,10 @@ struct SearchParticipantsView: View {
                 .font(.largeTitle)
                 .foregroundColor(.primary)
                 .padding(.bottom, 14)
-              Text("Search for people")
+              Text("Search for people or groups")
                 .font(.headline)
                 .foregroundColor(.primary)
-              Text("Type a username to find someone to add. eg. dena, mo")
+              Text("Type a username or group name to find access to add.")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             }
@@ -69,5 +97,13 @@ struct SearchParticipantsView: View {
         }
       }
     }
+  }
+
+  private func groupSubtitle(_ group: UserGroup) -> String {
+    let count = group.memberCount == 1 ? "1 person" : "\(group.memberCount) people"
+    guard let description = group.description, !description.isEmpty else {
+      return count
+    }
+    return "\(description) - \(count)"
   }
 }

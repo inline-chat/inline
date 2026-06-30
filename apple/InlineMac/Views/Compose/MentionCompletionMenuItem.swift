@@ -7,12 +7,13 @@ import SwiftUI
 
 class MentionTableCellView: NSTableCellView {
   private var avatarView: ChatIconSwiftUIBridge?
+  private var groupIconView: NSImageView?
   private let nameLabel = NSTextField()
   private let usernameLabel = NSTextField()
   private let containerView = NSView()
 
   // state
-  private var currentParticipant: UserInfo?
+  private var currentItem: MentionCompletionItem?
   private var _isSelected: Bool = false
 
   // Custom selection state property
@@ -70,32 +71,52 @@ class MentionTableCellView: NSTableCellView {
     ])
   }
 
-  func configure(with participant: UserInfo) {
-    // only if different from currently rendered participant
-    guard participant != currentParticipant else { return }
-    currentParticipant = participant
+  func configure(with item: MentionCompletionItem) {
+    guard item != currentItem else { return }
+    currentItem = item
 
-    nameLabel.stringValue = participant.user.displayName
-    usernameLabel.stringValue = "@\(participant.user.username ?? participant.user.displayName)"
+    nameLabel.stringValue = item.title
+    usernameLabel.stringValue = item.subtitle ?? ""
+    usernameLabel.isHidden = item.subtitle == nil
 
     // Remove existing avatar if any
     avatarView?.removeFromSuperview()
+    avatarView = nil
+    groupIconView?.removeFromSuperview()
+    groupIconView = nil
 
-    // Create new avatar using ChatIconSwiftUIBridge
-    let newAvatarView = ChatIconSwiftUIBridge(.user(participant), size: MentionCompletionMenu.Layout.avatarSize)
-    newAvatarView.translatesAutoresizingMaskIntoConstraints = false
-    containerView.addSubview(newAvatarView)
-    avatarView = newAvatarView
+    let iconView: NSView
+    switch item {
+      case let .user(user):
+        let newAvatarView = ChatIconSwiftUIBridge(.user(user.userInfo), size: MentionCompletionMenu.Layout.avatarSize)
+        newAvatarView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(newAvatarView)
+        avatarView = newAvatarView
+        iconView = newAvatarView
+
+      case .group:
+        let imageView = NSImageView()
+        imageView.image = NSImage(systemSymbolName: "person.2.fill", accessibilityDescription: nil)
+        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        imageView.contentTintColor = .secondaryLabelColor
+        imageView.wantsLayer = true
+        imageView.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.2).cgColor
+        imageView.layer?.cornerRadius = MentionCompletionMenu.Layout.avatarSize / 2
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(imageView)
+        groupIconView = imageView
+        iconView = imageView
+    }
 
     // Vertical layout - name and username stacked vertically
     NSLayoutConstraint.activate([
-      newAvatarView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
-      newAvatarView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
-      newAvatarView.widthAnchor.constraint(equalToConstant: MentionCompletionMenu.Layout.avatarSize),
-      newAvatarView.heightAnchor.constraint(equalToConstant: MentionCompletionMenu.Layout.avatarSize),
+      iconView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 8),
+      iconView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+      iconView.widthAnchor.constraint(equalToConstant: MentionCompletionMenu.Layout.avatarSize),
+      iconView.heightAnchor.constraint(equalToConstant: MentionCompletionMenu.Layout.avatarSize),
 
       nameLabel.leadingAnchor.constraint(
-        equalTo: newAvatarView.trailingAnchor,
+        equalTo: iconView.trailingAnchor,
         constant: MentionCompletionMenu.Layout.avatarNameSpacing
       ),
       nameLabel.topAnchor.constraint(
@@ -108,7 +129,7 @@ class MentionTableCellView: NSTableCellView {
       ),
 
       usernameLabel.leadingAnchor.constraint(
-        equalTo: newAvatarView.trailingAnchor,
+        equalTo: iconView.trailingAnchor,
         constant: MentionCompletionMenu.Layout.avatarNameSpacing
       ),
       usernameLabel.topAnchor.constraint(

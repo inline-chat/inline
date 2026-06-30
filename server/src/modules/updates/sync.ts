@@ -407,6 +407,34 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         })
         break
 
+      case "participantGroupDelete":
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "participantGroupDelete",
+            participantGroupDelete: {
+              chatId: serverUpdate.update.participantGroupDelete.chatId,
+              groupId: serverUpdate.update.participantGroupDelete.groupId,
+            },
+          },
+        })
+        break
+
+      case "participantGroupAdd":
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "participantGroupAdd",
+            participantGroupAdd: {
+              chatId: serverUpdate.update.participantGroupAdd.chatId,
+              groupParticipant: serverUpdate.update.participantGroupAdd.groupParticipant,
+            },
+          },
+        })
+        break
+
       case "chatVisibility":
         inflatedUpdates.push({
           seq: update.seq,
@@ -933,6 +961,32 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           participantAdd: {
             chatId: payload.userChatParticipantAdd.chatId,
             participant: payload.userChatParticipantAdd.participant,
+          },
+        },
+      }
+
+    case "userChatParticipantGroupDelete":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "participantGroupDelete",
+          participantGroupDelete: {
+            chatId: payload.userChatParticipantGroupDelete.chatId,
+            groupId: payload.userChatParticipantGroupDelete.groupId,
+          },
+        },
+      }
+
+    case "userChatParticipantGroupAdd":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "participantGroupAdd",
+          participantGroupAdd: {
+            chatId: payload.userChatParticipantGroupAdd.chatId,
+            groupParticipant: payload.userChatParticipantGroupAdd.groupParticipant,
           },
         },
       }

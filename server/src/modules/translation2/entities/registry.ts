@@ -16,6 +16,7 @@ export const entityPolicies: PolicyRegistry = {
   [MessageEntity_Type.THREAD]: "markdown",
   [MessageEntity_Type.THREAD_TITLE]: "markdown",
   [MessageEntity_Type.BOT_COMMAND]: "literalDetected",
+  [MessageEntity_Type.GROUP_MENTION]: "markdown",
 }
 
 export const policyFor = (type: MessageEntity_Type): EntityPolicy => {

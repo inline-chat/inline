@@ -111,6 +111,12 @@ public actor UpdatesEngine: Sendable {
         case let .participantDelete(participantDelete):
           try participantDelete.apply(db)
 
+        case let .participantGroupAdd(participantGroupAdd):
+          try participantGroupAdd.apply(db)
+
+        case let .participantGroupDelete(participantGroupDelete):
+          try participantGroupDelete.apply(db)
+
         case let .chatVisibility(chatVisibility):
           try chatVisibility.apply(db)
 
@@ -1173,6 +1179,26 @@ extension InlineProtocol.UpdateChatParticipantDelete {
         )
       }
     }
+  }
+}
+
+extension InlineProtocol.UpdateChatParticipantGroupAdd {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update chat participant group add \(chatID) \(groupParticipant.groupID)")
+
+    guard hasGroupParticipant else { return }
+    try ChatParticipantGroup.save(db, from: groupParticipant, chatId: chatID)
+  }
+}
+
+extension InlineProtocol.UpdateChatParticipantGroupDelete {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update chat participant group delete \(chatID) \(groupID)")
+
+    try ChatParticipantGroup
+      .filter(ChatParticipantGroup.Columns.chatId == chatID)
+      .filter(ChatParticipantGroup.Columns.groupId == groupID)
+      .deleteAll(db)
   }
 }
 

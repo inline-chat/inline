@@ -19,6 +19,7 @@ import {
   getSpaceUrlPreviewExclusions,
   removeSpaceUrlPreviewExclusion,
 } from "./space.urlPreviewExclusions"
+import { createUserGroup, deleteUserGroup, getUserGroups, updateUserGroup } from "@in/server/modules/userGroups"
 import { getChatParticipants } from "./messages.getChatParticipants"
 import { removeChatParticipant } from "./messages.removeChatParticipant"
 import { addChatParticipant } from "./messages.addChatParticipant"
@@ -98,6 +99,10 @@ export const Functions = {
     getUrlPreviewExclusions: getSpaceUrlPreviewExclusions,
     addUrlPreviewExclusion: addSpaceUrlPreviewExclusion,
     removeUrlPreviewExclusion: removeSpaceUrlPreviewExclusion,
+    getUserGroups: getUserGroups,
+    createUserGroup: createUserGroup,
+    updateUserGroup: updateUserGroup,
+    deleteUserGroup: deleteUserGroup,
   },
   user: {
     getUserSettings: getUserSettings,

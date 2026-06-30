@@ -4,6 +4,7 @@ import {
   DialogNotificationSettings_Mode,
   InputPeer,
   Message,
+  MessageEntities,
   MessageEntity_Type,
   SendMessageResult,
 } from "@inline-chat/protocol/core"
@@ -12,7 +13,7 @@ import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { chats, dialogs, files, messages, users, voices } from "@in/server/db/schema"
+import { chats, dialogs, files, members, messages, users, voices } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -20,6 +21,8 @@ import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/
 import { getMessages } from "@in/server/functions/messages.getMessages"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { getReplyThreadAnchorSenderId } from "@in/server/modules/subthreads"
+import { createUserGroup } from "@in/server/modules/userGroups"
+import { addChatParticipant } from "@in/server/functions/messages.addChatParticipant"
 
 // Test state
 let currentUser: DbUser
@@ -582,6 +585,89 @@ describe("sendMessage", () => {
       .some((update) => update.payload.update.oneofKind === "userChatOpen")
 
     expect(hasChatOpenUpdate).toBe(true)
+  })
+
+  test("opens group-mentioned users' dialogs and keeps the group mention entity", async () => {
+    const owner = await testUtils.createUser(nextEmail("group-mention-owner"))
+    const groupMember = await testUtils.createUser(nextEmail("group-mention-member"))
+    const bystander = await testUtils.createUser(nextEmail("group-mention-bystander"))
+    const space = await testUtils.createSpace("Group Mention Space")
+    if (!space) throw new Error("Space not created")
+
+    await db.insert(members).values([
+      { spaceId: space.id, userId: owner.id, role: "owner" },
+      { spaceId: space.id, userId: groupMember.id, role: "member" },
+      { spaceId: space.id, userId: bystander.id, role: "member" },
+    ])
+
+    const { group } = await createUserGroup(
+      {
+        spaceId: space.id,
+        name: "Eng",
+        userIds: [groupMember.id],
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+    const groupId = Number(group.id)
+
+    const chat = await testUtils.createChat(space.id, "Group Mention Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, owner.id)
+    await addChatParticipant(
+      { chatId: chat.id, groupId },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const result = await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        message: "@eng hello",
+        entities: MessageEntities.create({
+          entities: [
+            {
+              type: MessageEntity_Type.GROUP_MENTION,
+              offset: 0n,
+              length: 4n,
+              entity: {
+                oneofKind: "groupMention",
+                groupMention: {
+                  groupId: BigInt(groupId),
+                },
+              },
+            },
+          ],
+        }),
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const sentMessage = extractMessage(result)
+    expect(sentMessage?.mentioned).toBe(false)
+    const entity = sentMessage?.entities?.entities[0]
+    expect(entity?.entity.oneofKind).toBe("groupMention")
+    if (entity?.entity.oneofKind !== "groupMention") {
+      throw new Error("Expected group mention entity")
+    }
+    expect(entity.entity.groupMention.groupId).toBe(BigInt(groupId))
+
+    const [memberDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, groupMember.id)))
+      .limit(1)
+
+    expect(memberDialog?.open).toBe(true)
+    expect(memberDialog?.order).toBeTruthy()
+
+    const [bystanderDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, bystander.id)))
+      .limit(1)
+
+    expect(bystanderDialog).toBeUndefined()
   })
 
   test("does not open explicit all-notification dialogs for plain thread messages", async () => {

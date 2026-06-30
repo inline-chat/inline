@@ -104,6 +104,7 @@ struct ChatToolbarParticipantsTitlePresentations: ViewModifier {
           AddParticipantsContent(
             chat: chat,
             participants: participantsViewModel.participants,
+            groupParticipants: participantsViewModel.groupParticipants,
             dependencies: dependencies,
             isPresented: Binding(
               get: { toolbarState.presentation == .addParticipants(.title) },
@@ -229,6 +230,7 @@ private struct ChatToolbarParticipantsPresentations: ViewModifier {
           AddParticipantsContent(
             chat: chat,
             participants: participantsViewModel.participants,
+            groupParticipants: participantsViewModel.groupParticipants,
             dependencies: dependencies,
             isPresented: Binding(
               get: { toolbarState.presentation == .addParticipants(anchor) },
@@ -294,18 +296,18 @@ private struct ChatToolbarMentionParticipantPromptPresentation: ViewModifier {
   func body(content: Content) -> some View {
     content
       .popover(isPresented: Binding(
-        get: { toolbarState.mentionParticipantPromptUsers(for: anchor) != nil },
+        get: { toolbarState.mentionParticipantPromptItems(for: anchor) != nil },
         set: { isPresented in
-          guard !isPresented, toolbarState.mentionParticipantPromptUsers(for: anchor) != nil else { return }
+          guard !isPresented, toolbarState.mentionParticipantPromptItems(for: anchor) != nil else { return }
           toolbarState.dismissPresentation()
         }
       ), arrowEdge: .bottom) {
-        if let users = toolbarState.mentionParticipantPromptUsers(for: anchor) {
+        if let items = toolbarState.mentionParticipantPromptItems(for: anchor) {
           MentionedParticipantsPromptView(
-            users: users,
+            items: items,
             isAdding: isAdding,
             onAdd: {
-              add(users)
+              add(items)
             }
           )
         }
@@ -313,7 +315,7 @@ private struct ChatToolbarMentionParticipantPromptPresentation: ViewModifier {
   }
 
   @MainActor
-  private func add(_ users: [UserInfo]) {
+  private func add(_ items: [MentionCompletionItem]) {
     guard case let .thread(chatId) = peer else { return }
     guard !isAdding else { return }
 
@@ -324,21 +326,29 @@ private struct ChatToolbarMentionParticipantPromptPresentation: ViewModifier {
         isAdding = false
       }
 
-      var addedUsers: [UserInfo] = []
+      var addedCount = 0
 
-      for user in users {
+      for item in items {
         do {
-          try await Api.realtime.send(.addChatParticipant(
-            chatID: chatId,
-            userID: user.user.id
-          ))
-          addedUsers.append(user)
+          switch item {
+            case let .user(user):
+              try await Api.realtime.send(.addChatParticipant(
+                chatID: chatId,
+                userID: user.userInfo.user.id
+              ))
+            case let .group(group):
+              try await Api.realtime.send(.addChatParticipant(
+                chatID: chatId,
+                groupID: group.id
+              ))
+          }
+          addedCount += 1
         } catch {
           Log.shared.error("Failed to add mentioned participant from prompt", error: error)
         }
       }
 
-      guard !addedUsers.isEmpty else {
+      guard addedCount > 0 else {
         ToastCenter.shared.showError("Failed to add participants")
         return
       }
@@ -358,6 +368,7 @@ private struct ParticipantsToolbarPopoverContent: View {
   var body: some View {
     ParticipantsPopoverView(
       participants: participantsViewModel.participants,
+      groupParticipants: participantsViewModel.groupParticipants,
       currentUserId: dependencies.auth.currentUserId,
       peer: peer,
       dependencies: dependencies,
@@ -371,6 +382,7 @@ private struct ParticipantsToolbarPopoverContent: View {
 private struct AddParticipantsContent: View {
   let chat: Chat
   let participants: [UserInfo]
+  let groupParticipants: [UserGroup]
   let dependencies: AppDependencies
   let isPresented: Binding<Bool>
 
@@ -380,6 +392,7 @@ private struct AddParticipantsContent: View {
         chatId: chat.id,
         spaceId: spaceId,
         currentParticipants: participants,
+        currentGroupParticipants: groupParticipants,
         db: dependencies.database,
         isPresented: isPresented
       )

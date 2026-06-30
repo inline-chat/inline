@@ -7,6 +7,7 @@ import SwiftUI
 
 public struct ParticipantsPopoverView: View {
   let participants: [UserInfo]
+  let groupParticipants: [UserGroup]
   let currentUserId: Int64?
   let peer: Peer
   let dependencies: AppDependencies
@@ -18,12 +19,15 @@ public struct ParticipantsPopoverView: View {
   @State private var isCreator = false
   @State private var showRemoveConfirmation = false
   @State private var participantPendingRemoval: UserInfo?
+  @State private var showRemoveGroupConfirmation = false
+  @State private var groupPendingRemoval: UserGroup?
   @State private var showVisibilityPicker = false
   @State private var selectedParticipantIds: Set<Int64> = []
   @State private var chatSubscription: AnyCancellable?
 
   public init(
     participants: [UserInfo],
+    groupParticipants: [UserGroup] = [],
     currentUserId: Int64?,
     peer: Peer,
     dependencies: AppDependencies,
@@ -31,6 +35,7 @@ public struct ParticipantsPopoverView: View {
     onAddParticipants: (() -> Void)? = nil
   ) {
     self.participants = participants
+    self.groupParticipants = groupParticipants
     self.currentUserId = currentUserId
     self.peer = peer
     self.dependencies = dependencies
@@ -54,8 +59,19 @@ public struct ParticipantsPopoverView: View {
     }
   }
 
+  private var filteredGroups: [UserGroup] {
+    if searchText.isEmpty {
+      return groupParticipants
+    }
+
+    return groupParticipants.filter { group in
+      group.name.localizedCaseInsensitiveContains(searchText) ||
+        (group.description?.localizedCaseInsensitiveContains(searchText) == true)
+    }
+  }
+
   private var shouldShowSearch: Bool {
-    participants.count >= 5
+    participants.count + groupParticipants.count >= 5
   }
 
   private var isShowingInheritedParticipants: Bool {
@@ -98,7 +114,7 @@ public struct ParticipantsPopoverView: View {
     VStack(alignment: .leading, spacing: 4) {
       VStack(alignment: .leading, spacing: 2) {
         HStack {
-          Text("Participants (\(participants.count))")
+          Text("Access (\(participants.count + groupParticipants.count))")
             .font(.system(size: 13, weight: .semibold))
 
           Spacer()
@@ -155,17 +171,37 @@ public struct ParticipantsPopoverView: View {
       // Participant List
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 0) {
-          ForEach(filteredParticipants, id: \.id) { participant in
-            ParticipantRow(
-              participant: participant,
-              isCurrentUser: participant.id == currentUserId,
-              canManageParticipants: canManageParticipants,
-              onRequestRemove: {
-                participantPendingRemoval = participant
-                showRemoveConfirmation = true
-              }
-            )
-            .padding(.horizontal, 10)
+          if !filteredGroups.isEmpty {
+            SectionHeader("Groups")
+
+            ForEach(filteredGroups) { group in
+              GroupAccessRow(
+                group: group,
+                canManageParticipants: canManageParticipants,
+                onRequestRemove: {
+                  groupPendingRemoval = group
+                  showRemoveGroupConfirmation = true
+                }
+              )
+              .padding(.horizontal, 10)
+            }
+          }
+
+          if !filteredParticipants.isEmpty {
+            SectionHeader("People")
+
+            ForEach(filteredParticipants, id: \.id) { participant in
+              ParticipantRow(
+                participant: participant,
+                isCurrentUser: participant.id == currentUserId,
+                canManageParticipants: canManageParticipants,
+                onRequestRemove: {
+                  participantPendingRemoval = participant
+                  showRemoveConfirmation = true
+                }
+              )
+              .padding(.horizontal, 10)
+            }
           }
         }
         .padding(.vertical, 2)
@@ -189,6 +225,20 @@ public struct ParticipantsPopoverView: View {
       },
       message: { participant in
         Text("Remove \(participant.user.shortDisplayName) from this chat?")
+      }
+    )
+    .confirmationDialog(
+      "Remove group access?",
+      isPresented: $showRemoveGroupConfirmation,
+      presenting: groupPendingRemoval,
+      actions: { group in
+        Button("Cancel", role: .cancel) {}
+        Button("Remove", role: .destructive) {
+          removeGroupParticipant(groupId: group.id)
+        }
+      },
+      message: { group in
+        Text("Remove \(group.name) from this chat? Members may still have access through direct participants, parent access, or another group.")
       }
     )
     .sheet(isPresented: $showVisibilityPicker) {
@@ -289,6 +339,94 @@ public struct ParticipantsPopoverView: View {
         }
       } catch {
         Log.shared.error("Failed to remove participant", error: error)
+      }
+    }
+  }
+
+  private func removeGroupParticipant(groupId: Int64) {
+    guard case let .thread(chatId) = peer else { return }
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.removeChatParticipant(chatID: chatId, groupID: groupId))
+        do {
+          try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        } catch {
+          Log.shared.error("Failed to refetch chat participants after group removal", error: error)
+        }
+      } catch {
+        Log.shared.error("Failed to remove group participant", error: error)
+      }
+    }
+  }
+}
+
+private struct SectionHeader: View {
+  let title: String
+
+  init(_ title: String) {
+    self.title = title
+  }
+
+  var body: some View {
+    Text(title)
+      .font(.system(size: 10, weight: .semibold))
+      .foregroundStyle(.secondary)
+      .padding(.horizontal, 10)
+      .padding(.top, 6)
+      .padding(.bottom, 2)
+  }
+}
+
+private struct GroupAccessRow: View {
+  let group: UserGroup
+  let canManageParticipants: Bool
+  let onRequestRemove: () -> Void
+  @State private var isHovered = false
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "person.3.fill")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.white)
+        .frame(width: 24, height: 24)
+        .background(Color.accentColor)
+        .clipShape(Circle())
+
+      VStack(alignment: .leading, spacing: 0) {
+        Text(group.name)
+          .font(.system(size: 12, weight: .medium))
+          .lineLimit(1)
+        Text(group.memberCount == 1 ? "1 person" : "\(group.memberCount) people")
+          .font(.system(size: 10))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+
+      Spacer()
+
+      if canManageParticipants {
+        Button(action: onRequestRemove) {
+          Image(systemName: "minus.circle.fill")
+            .font(.system(size: 14))
+            .foregroundColor(.red)
+            .opacity(isHovered ? 0.9 : 0.0)
+        }
+        .buttonStyle(.plain)
+        .allowsHitTesting(isHovered)
+        .accessibilityLabel("Remove group access")
+      }
+    }
+    .padding(.vertical, 3)
+    .contentShape(Rectangle())
+    .onHover { hovering in
+      isHovered = hovering
+    }
+    .contextMenu {
+      if canManageParticipants {
+        Button(role: .destructive, action: onRequestRemove) {
+          Label("Remove Group Access", systemImage: "minus.circle")
+        }
       }
     }
   }

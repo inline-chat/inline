@@ -15,21 +15,27 @@ public struct RemoveChatParticipantTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     let chatID: Int64
-    let userID: Int64
+    let userID: Int64?
+    let groupID: Int64?
   }
 
-  public init(chatID: Int64, userID: Int64) {
+  public init(chatID: Int64, userID: Int64? = nil, groupID: Int64? = nil) {
     if chatID == 0 {
       log.error("chat ID is zero")
     }
 
-    context = Context(chatID: chatID, userID: userID)
+    context = Context(chatID: chatID, userID: userID, groupID: groupID)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .removeChatParticipant(.with {
       $0.chatID = context.chatID
-      $0.userID = context.userID
+      if let userID = context.userID {
+        $0.userID = userID
+      }
+      if let groupID = context.groupID {
+        $0.groupID = groupID
+      }
     })
   }
 
@@ -45,10 +51,19 @@ public struct RemoveChatParticipantTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        _ = try ChatParticipant
-          .filter(Column("chatId") == String(context.chatID))
-          .filter(Column("userId") == String(context.userID))
-          .deleteAll(db)
+        if let userID = context.userID {
+          _ = try ChatParticipant
+            .filter(ChatParticipant.Columns.chatId == context.chatID)
+            .filter(ChatParticipant.Columns.userId == userID)
+            .deleteAll(db)
+        }
+
+        if let groupID = context.groupID {
+          _ = try ChatParticipantGroup
+            .filter(ChatParticipantGroup.Columns.chatId == context.chatID)
+            .filter(ChatParticipantGroup.Columns.groupId == groupID)
+            .deleteAll(db)
+        }
       }
     } catch {
       log.error("Failed to optimistically remove chat participant", error: error)
@@ -80,5 +95,9 @@ public struct RemoveChatParticipantTransaction: Transaction2 {
 public extension Transaction2 where Self == RemoveChatParticipantTransaction {
   static func removeChatParticipant(chatID: Int64, userID: Int64) -> RemoveChatParticipantTransaction {
     RemoveChatParticipantTransaction(chatID: chatID, userID: userID)
+  }
+
+  static func removeChatParticipant(chatID: Int64, groupID: Int64) -> RemoveChatParticipantTransaction {
+    RemoveChatParticipantTransaction(chatID: chatID, groupID: groupID)
   }
 }

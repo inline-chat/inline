@@ -1,11 +1,9 @@
 import type { DbChat } from "@in/server/db/schema"
 import { MembersModel } from "@in/server/db/models/members"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { db } from "@in/server/db"
-import { chatParticipants } from "@in/server/db/schema/chats"
-import { and, eq } from "drizzle-orm"
-import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { getChatById } from "@in/server/modules/subthreads"
+import { hasThreadAccessGrant } from "@in/server/modules/authorization/threadAccess"
+import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 export const AccessGuards = {
   ensureChatAccess,
@@ -22,7 +20,7 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
     return
   }
 
-  if (await hasDirectChatParticipant(chat.id, userId)) {
+  if (await hasThreadAccessGrant(chat.id, userId)) {
     return
   }
 
@@ -62,7 +60,7 @@ async function ensureTopLevelChatAccess(chat: DbChat, userId: number) {
   }
 
   if (!chat.spaceId) {
-    await ensureChatParticipant(chat.id, userId)
+    await ensureThreadAccessGrant(chat.id, userId)
     return
   }
 
@@ -76,7 +74,7 @@ async function ensureTopLevelChatAccess(chat: DbChat, userId: number) {
     return
   }
 
-  await ensureChatParticipant(chat.id, userId)
+  await ensureThreadAccessGrant(chat.id, userId)
 }
 
 async function ensureSpaceMember(spaceId: number, userId: number) {
@@ -98,29 +96,9 @@ async function ensureSpaceMember(spaceId: number, userId: number) {
   }
 }
 
-async function ensureChatParticipant(chatId: number, userId: number) {
-  const exists = await hasDirectChatParticipant(chatId, userId)
+async function ensureThreadAccessGrant(chatId: number, userId: number) {
+  const exists = await hasThreadAccessGrant(chatId, userId)
   if (!exists) {
     throw RealtimeRpcError.PeerIdInvalid()
   }
-}
-
-async function hasDirectChatParticipant(chatId: number, userId: number): Promise<boolean> {
-  const cachedParticipant = AccessGuardsCache.getChatParticipant(chatId, userId)
-  if (cachedParticipant !== undefined) {
-    return cachedParticipant
-  }
-
-  const participant = await db
-    .select({ id: chatParticipants.id })
-    .from(chatParticipants)
-    .where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, userId)))
-    .limit(1)
-
-  const exists = participant.length > 0
-  if (exists) {
-    AccessGuardsCache.setChatParticipant(chatId, userId)
-  }
-
-  return exists
 }

@@ -57,6 +57,8 @@ struct ChatInfo: View {
   @State private var isTranslationEnabled: Bool
   @State private var selectedParticipantIds: Set<Int64> = []
   @State private var participantPendingRemoval: UserInfo?
+  @State private var groupPendingRemoval: UserGroup?
+  @State private var showRemoveGroupConfirmation = false
 
   private var chatTitle: String {
     if let userInfo = fullChat.chatItem?.userInfo {
@@ -381,6 +383,7 @@ struct ChatInfo: View {
             chatId: chat.id,
             spaceId: spaceId,
             currentParticipants: participantsState.participantsViewModel?.participants ?? [],
+            currentGroupParticipants: participantsState.participantsViewModel?.groupParticipants ?? [],
             db: dependencies.database,
             isPresented: $showAddParticipants
           )
@@ -407,6 +410,20 @@ struct ChatInfo: View {
       },
       message: { participant in
         Text("Remove \(participant.user.shortDisplayName) from this chat?")
+      }
+    )
+    .confirmationDialog(
+      "Remove group access?",
+      isPresented: $showRemoveGroupConfirmation,
+      presenting: groupPendingRemoval,
+      actions: { group in
+        Button("Cancel", role: .cancel) {}
+        Button("Remove", role: .destructive) {
+          removeGroupParticipant(groupId: group.id)
+        }
+      },
+      message: { group in
+        Text("Remove \(group.name) from this chat? Members may still have access through direct participants, parent access, or another group.")
       }
     )
   }
@@ -532,6 +549,10 @@ struct ChatInfo: View {
         onRequestRemove: { userInfo in
           participantPendingRemoval = userInfo
           showRemoveParticipantConfirmation = true
+        },
+        onRequestRemoveGroup: { group in
+          groupPendingRemoval = group
+          showRemoveGroupConfirmation = true
         }
       )
     } else {
@@ -729,6 +750,23 @@ struct ChatInfo: View {
         }
       } catch {
         Log.shared.error("Failed to remove participant", error: error)
+      }
+    }
+  }
+
+  private func removeGroupParticipant(groupId: Int64) {
+    guard case let .thread(chatId) = peerId else { return }
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.removeChatParticipant(chatID: chatId, groupID: groupId))
+        do {
+          try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        } catch {
+          Log.shared.error("Failed to refetch chat participants after group removal", error: error)
+        }
+      } catch {
+        Log.shared.error("Failed to remove group participant", error: error)
       }
     }
   }
@@ -1221,6 +1259,7 @@ private struct ChatInfoParticipantsList: View {
   let onAddParticipants: () -> Void
   let onOpenChatInfo: (UserInfo) -> Void
   let onRequestRemove: (UserInfo) -> Void
+  let onRequestRemoveGroup: (UserGroup) -> Void
 
   private var sortedParticipants: [UserInfo] {
     participantsViewModel.participants.sorted { lhs, rhs in
@@ -1233,17 +1272,27 @@ private struct ChatInfoParticipantsList: View {
     }
   }
 
+  private var sortedGroups: [UserGroup] {
+    participantsViewModel.groupParticipants.sorted { lhs, rhs in
+      let comparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+      if comparison == .orderedSame {
+        return lhs.id < rhs.id
+      }
+      return comparison == .orderedAscending
+    }
+  }
+
   var body: some View {
     Group {
-      if sortedParticipants.isEmpty {
-        Text("No participants found in this chat.")
+      if sortedParticipants.isEmpty, sortedGroups.isEmpty {
+        Text("No access grants found in this chat.")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, alignment: .center)
           .padding(.vertical, 32)
       } else {
         VStack(alignment: .leading, spacing: 0) {
           HStack {
-            Text("\(sortedParticipants.count) participant\(sortedParticipants.count == 1 ? "" : "s")")
+            Text(accessSummary)
               .font(.subheadline.weight(.semibold))
               .foregroundStyle(.secondary)
 
@@ -1263,22 +1312,45 @@ private struct ChatInfoParticipantsList: View {
           .padding(.bottom, 8)
 
           VStack(alignment: .leading, spacing: 0) {
-            ForEach(sortedParticipants, id: \.id) { participant in
-              ChatInfoParticipantRow(
-                participant: participant,
-                isCurrentUser: participant.user.id == currentUserId,
-                canRemove: canManageParticipants && participant.user.id != currentUserId,
-                onOpenChatInfo: {
-                  onOpenChatInfo(participant)
-                },
-                onRequestRemove: {
-                  onRequestRemove(participant)
-                }
-              )
+            if !sortedGroups.isEmpty {
+              ChatInfoAccessSectionHeader(title: "Groups")
 
-              if participant.id != sortedParticipants.last?.id {
-                Divider()
-                  .padding(.leading, 54)
+              ForEach(sortedGroups) { group in
+                ChatInfoGroupAccessRow(
+                  group: group,
+                  canRemove: canManageParticipants,
+                  onRequestRemove: {
+                    onRequestRemoveGroup(group)
+                  }
+                )
+
+                if group.id != sortedGroups.last?.id || !sortedParticipants.isEmpty {
+                  Divider()
+                    .padding(.leading, 54)
+                }
+              }
+            }
+
+            if !sortedParticipants.isEmpty {
+              ChatInfoAccessSectionHeader(title: "Direct Participants")
+
+              ForEach(sortedParticipants, id: \.id) { participant in
+                ChatInfoParticipantRow(
+                  participant: participant,
+                  isCurrentUser: participant.user.id == currentUserId,
+                  canRemove: canManageParticipants && participant.user.id != currentUserId,
+                  onOpenChatInfo: {
+                    onOpenChatInfo(participant)
+                  },
+                  onRequestRemove: {
+                    onRequestRemove(participant)
+                  }
+                )
+
+                if participant.id != sortedParticipants.last?.id {
+                  Divider()
+                    .padding(.leading, 54)
+                }
               }
             }
           }
@@ -1295,6 +1367,86 @@ private struct ChatInfoParticipantsList: View {
     .task {
       await participantsViewModel.refetchParticipants()
     }
+  }
+
+  private var accessSummary: String {
+    let direct = "\(sortedParticipants.count) direct"
+    guard !sortedGroups.isEmpty else { return direct }
+    return "\(direct), \(sortedGroups.count) \(sortedGroups.count == 1 ? "group" : "groups")"
+  }
+}
+
+private struct ChatInfoAccessSectionHeader: View {
+  let title: String
+
+  var body: some View {
+    Text(title)
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(.secondary)
+      .padding(.horizontal, 10)
+      .padding(.top, 8)
+      .padding(.bottom, 2)
+  }
+}
+
+private struct ChatInfoGroupAccessRow: View {
+  let group: UserGroup
+  let canRemove: Bool
+  let onRequestRemove: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      HStack(spacing: 10) {
+        Image(systemName: "person.3.fill")
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(.white)
+          .frame(width: 28, height: 28)
+          .background(Color.accentColor)
+          .clipShape(Circle())
+
+        VStack(alignment: .leading, spacing: 1) {
+          Text(group.name)
+            .font(.body)
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+
+        Spacer(minLength: 8)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if canRemove {
+        Button(role: .destructive, action: onRequestRemove) {
+          Image(systemName: "minus.circle")
+            .font(.system(size: 14, weight: .medium))
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Remove group access")
+      }
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 7)
+    .contentShape(Rectangle())
+    .contextMenu {
+      if canRemove {
+        Button(role: .destructive, action: onRequestRemove) {
+          Label("Remove Group Access", systemImage: "minus.circle")
+        }
+      }
+    }
+  }
+
+  private var subtitle: String {
+    let count = group.memberCount == 1 ? "1 person" : "\(group.memberCount) people"
+    guard let description = group.description, !description.isEmpty else {
+      return count
+    }
+    return "\(description) - \(count)"
   }
 }
 

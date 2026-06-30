@@ -72,6 +72,12 @@ import {
   getSpaceUrlPreviewExclusionsHandler,
   removeSpaceUrlPreviewExclusionHandler,
 } from "@in/server/realtime/handlers/space.urlPreviewExclusions"
+import {
+  createUserGroupHandler,
+  deleteUserGroupHandler,
+  getUserGroupsHandler,
+  updateUserGroupHandler,
+} from "@in/server/realtime/handlers/space.userGroups"
 
 const log = new Log("rpc")
 
@@ -252,6 +258,38 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
         currentSessionId: handlerContext.sessionId,
       })
       return { oneofKind: "inviteToSpace", inviteToSpace: result }
+    }
+
+    case Method.GET_USER_GROUPS: {
+      if (call.input.oneofKind !== "getUserGroups") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getUserGroupsHandler(call.input.getUserGroups, handlerContext)
+      return { oneofKind: "getUserGroups", getUserGroups: result }
+    }
+
+    case Method.CREATE_USER_GROUP: {
+      if (call.input.oneofKind !== "createUserGroup") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await createUserGroupHandler(call.input.createUserGroup, handlerContext)
+      return { oneofKind: "createUserGroup", createUserGroup: result }
+    }
+
+    case Method.UPDATE_USER_GROUP: {
+      if (call.input.oneofKind !== "updateUserGroup") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await updateUserGroupHandler(call.input.updateUserGroup, handlerContext)
+      return { oneofKind: "updateUserGroup", updateUserGroup: result }
+    }
+
+    case Method.DELETE_USER_GROUP: {
+      if (call.input.oneofKind !== "deleteUserGroup") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await deleteUserGroupHandler(call.input.deleteUserGroup, handlerContext)
+      return { oneofKind: "deleteUserGroup", deleteUserGroup: result }
     }
 
     case Method.GET_CHAT_PARTICIPANTS: {

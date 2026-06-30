@@ -20,11 +20,15 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
   private struct ParticipantsSnapshot {
     var participants: [UserInfo]
-    var mentionCandidates: [MentionCompletionUser]
+    var groupParticipants: [UserGroup]
+    var effectiveUserIds: Set<Int64>
+    var mentionCandidates: MentionCompletionCandidates
   }
 
   @Published public private(set) var participants: [UserInfo] = []
-  @Published public private(set) var mentionCandidates: [MentionCompletionUser] = []
+  @Published public private(set) var groupParticipants: [UserGroup] = []
+  @Published public private(set) var effectiveUserIds: Set<Int64> = []
+  @Published public private(set) var mentionCandidates: MentionCompletionCandidates = .empty
 
   private var participantsCancellable: AnyCancellable?
   private var spaceMembersCancellable: AnyCancellable?
@@ -95,6 +99,36 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
       .map(\.userInfo)
   }
 
+  private static func fetchUserGroups(_ db: Database, spaceId: Int64) throws -> [UserGroup] {
+    try UserGroup
+      .filter(UserGroup.Columns.spaceId == spaceId)
+      .order(UserGroup.Columns.name)
+      .fetchAll(db)
+  }
+
+  private static func fetchChatParticipantGroups(_ db: Database, chatId: Int64) throws -> [UserGroup] {
+    let groupIds = try ChatParticipantGroup
+      .filter(ChatParticipantGroup.Columns.chatId == chatId)
+      .fetchAll(db)
+      .map(\.groupId)
+
+    guard !groupIds.isEmpty else { return [] }
+
+    return try UserGroup
+      .filter(groupIds.contains(UserGroup.Columns.id))
+      .order(UserGroup.Columns.name)
+      .fetchAll(db)
+  }
+
+  private static func fetchGroupMemberIds(_ db: Database, groupIds: [Int64]) throws -> Set<Int64> {
+    guard !groupIds.isEmpty else { return [] }
+
+    return Set(try UserGroupMember
+      .filter(groupIds.contains(UserGroupMember.Columns.groupId))
+      .fetchAll(db)
+      .map(\.userId))
+  }
+
   private static func fetchDirectChatCandidates(_ db: Database) throws -> [MentionCompletionUser] {
     let chats = try Chat
       .filter(Chat.Columns.type == ChatType.privateChat.rawValue)
@@ -160,18 +194,20 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         func snapshot(
           participants: [UserInfo],
           spaceMembers: [UserInfo] = [],
+          groups: [UserGroup] = [],
+          groupParticipants: [UserGroup] = [],
           directChats: [MentionCompletionUser]
         ) -> ParticipantsSnapshot {
           let mentionParticipants = Self.filterMentionCandidates(participants)
           let mentionSpaceMembers = Self.filterMentionCandidates(spaceMembers)
 
-          var mentionCandidates = mentionParticipants.map {
+          var mentionUsers = mentionParticipants.map {
             MentionCompletionUser(userInfo: $0, source: .participant)
           }
-          mentionCandidates.append(contentsOf: mentionSpaceMembers.map {
+          mentionUsers.append(contentsOf: mentionSpaceMembers.map {
             MentionCompletionUser(userInfo: $0, source: .spaceMember)
           })
-          mentionCandidates.append(contentsOf: directChats)
+          mentionUsers.append(contentsOf: directChats)
 
           let users: [UserInfo]
           if purpose == .mentionCandidates {
@@ -180,7 +216,15 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             users = participants
           }
 
-          return ParticipantsSnapshot(participants: users, mentionCandidates: mentionCandidates)
+          let groupMemberIds = (try? Self.fetchGroupMemberIds(db, groupIds: groupParticipants.map(\.id))) ?? []
+          let effectiveUserIds = Set(users.map(\.id)).union(groupMemberIds)
+
+          return ParticipantsSnapshot(
+            participants: users,
+            groupParticipants: groupParticipants,
+            effectiveUserIds: effectiveUserIds,
+            mentionCandidates: MentionCompletionCandidates(users: mentionUsers, groups: groups)
+          )
         }
 
         // DMs: mention candidates should only include the peer (not chat_participants).
@@ -207,8 +251,16 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
               log.trace("Space thread, fetching chat participants and space members for mention candidates")
               let participants = try Self.fetchChatParticipants(db, chatId: sourceChatId)
               let spaceMembers = try Self.fetchSpaceMembers(db, spaceId: spaceId)
+              let groups = try Self.fetchUserGroups(db, spaceId: spaceId)
+              let groupParticipants = try Self.fetchChatParticipantGroups(db, chatId: sourceChatId)
 
-              return snapshot(participants: participants, spaceMembers: spaceMembers, directChats: directChats)
+              return snapshot(
+                participants: participants,
+                spaceMembers: spaceMembers,
+                groups: groups,
+                groupParticipants: groupParticipants,
+                directChats: directChats
+              )
 
             case .participantsList:
               if chat.isPublic == true {
@@ -218,7 +270,9 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
               }
 
               log.trace("Private space thread, fetching chat participants")
-              return snapshot(participants: try Self.fetchChatParticipants(db, chatId: sourceChatId), directChats: [])
+              let participants = try Self.fetchChatParticipants(db, chatId: sourceChatId)
+              let groupParticipants = try Self.fetchChatParticipantGroups(db, chatId: sourceChatId)
+              return snapshot(participants: participants, groupParticipants: groupParticipants, directChats: [])
             }
           }
 
@@ -249,6 +303,8 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         receiveValue: { [weak self] snapshot in
           self?.log.trace("Updated participants: \(snapshot.participants.count) users")
           self?.participants = snapshot.participants
+          self?.groupParticipants = snapshot.groupParticipants
+          self?.effectiveUserIds = snapshot.effectiveUserIds
           self?.mentionCandidates = snapshot.mentionCandidates
         }
       )
@@ -307,6 +363,11 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         if purpose == .mentionCandidates || source.isPublic == true {
           log.trace("Also fetching space members for space thread, spaceId: \(spaceId)")
           try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
+        }
+
+        if purpose == .mentionCandidates {
+          log.trace("Also fetching user groups for mention candidates, spaceId: \(spaceId)")
+          try await Api.realtime.send(.getUserGroups(spaceId: spaceId))
         }
       }
 

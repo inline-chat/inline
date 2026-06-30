@@ -141,6 +141,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
   var mentionManager: MentionManager?
+  private lazy var mentionedParticipantsAccess = MentionedParticipantsAccessManager(composeView: self)
   var slashCommandManager: SlashCommandManager?
   var autocompleteManager: ComposeAutocompleteManager?
   let draftManager = DraftManager(debounceDelay: 2.0)
@@ -1065,6 +1066,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     if isEditing {
+      mentionedParticipantsAccess.handle(entities: entities, peer: peerId, chatId: chatId)
       Task(priority: .userInitiated) { @MainActor in
         try await Api.realtime.send(.editMessage(
           messageId: state.editingMessageId ?? 0,
@@ -1103,6 +1105,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       ChatState.shared.clearForwarding(peer: peerId)
     } else {
       let replyToMessageId = state.replyingMessageId
+      mentionedParticipantsAccess.handle(entities: entities, peer: peerId, chatId: chatId)
       Task(priority: .userInitiated) { @MainActor in
         await sendTextAndAttachments(replyToMessageId: replyToMessageId, queueOnly: false)
       }

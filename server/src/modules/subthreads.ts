@@ -3,7 +3,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
-import { chatParticipants, chats, dialogs, members, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
@@ -16,6 +16,12 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import type { MessageReplies, Update } from "@inline-chat/protocol/core"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { dialogOpenDefaultsForChat, setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
+import {
+  getDirectParticipantUserIds as resolveDirectParticipantUserIds,
+  getEffectiveAccessUserIds as resolveEffectiveAccessUserIds,
+  getInheritedAccessUserIds as resolveInheritedAccessUserIds,
+  getTopLevelAccessUserIds as resolveTopLevelAccessUserIds,
+} from "@in/server/modules/authorization/threadAccess"
 
 export const isLinkedSubthread = (chat: Pick<DbChat, "parentChatId">): boolean => chat.parentChatId != null
 
@@ -314,63 +320,19 @@ export async function getMessageRepliesMap(input: {
 }
 
 export async function getDirectParticipantUserIds(chatId: number): Promise<number[]> {
-  const participants = await db
-    .select({ userId: chatParticipants.userId })
-    .from(chatParticipants)
-    .where(eq(chatParticipants.chatId, chatId))
-
-  return UsersModel.getActiveUserIds(participants.map((participant) => participant.userId))
+  return resolveDirectParticipantUserIds(chatId)
 }
 
 export async function getTopLevelAccessUserIds(chat: DbChat): Promise<number[]> {
-  if (chat.type === "private") {
-    if (chat.minUserId == null || chat.maxUserId == null) {
-      return []
-    }
-
-    if (chat.minUserId === chat.maxUserId) {
-      return UsersModel.getActiveUserIds([chat.minUserId])
-    }
-
-    return UsersModel.getActiveUserIds([chat.minUserId, chat.maxUserId])
-  }
-
-  if (chat.spaceId == null) {
-    return getDirectParticipantUserIds(chat.id)
-  }
-
-  if (chat.publicThread) {
-    const publicMembers = await db
-      .select({ userId: members.userId })
-      .from(members)
-      .where(and(eq(members.spaceId, chat.spaceId), eq(members.canAccessPublicChats, true)))
-
-    return UsersModel.getActiveUserIds(publicMembers.map((member) => member.userId))
-  }
-
-  return getDirectParticipantUserIds(chat.id)
+  return resolveTopLevelAccessUserIds(chat)
 }
 
 export async function getInheritedAccessUserIds(chat: DbChat): Promise<number[]> {
-  if (chat.parentChatId == null) {
-    return getTopLevelAccessUserIds(chat)
-  }
-
-  const parentChat = await getChatById(chat.parentChatId)
-  if (!parentChat) {
-    return []
-  }
-
-  return getInheritedAccessUserIds(parentChat)
+  return resolveInheritedAccessUserIds(chat)
 }
 
 export async function getEffectiveAccessUserIds(chat: DbChat): Promise<number[]> {
-  const [directUserIds, inheritedUserIds] = await Promise.all([
-    getDirectParticipantUserIds(chat.id),
-    getInheritedAccessUserIds(chat),
-  ])
-
-  return Array.from(new Set([...directUserIds, ...inheritedUserIds]))
+  return resolveEffectiveAccessUserIds(chat)
 }
 
 export async function persistMessageRepliesUpdate(input: {

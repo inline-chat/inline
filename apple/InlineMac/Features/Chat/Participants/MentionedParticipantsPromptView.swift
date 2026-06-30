@@ -3,23 +3,23 @@ import InlineUI
 import SwiftUI
 
 struct MentionedParticipantsPromptView: View {
-  let users: [UserInfo]
+  let items: [MentionCompletionItem]
   let isAdding: Bool
   let onAdd: () -> Void
 
   private var title: String {
-    if users.count == 1, let user = users.first {
-      return "Add \(user.user.displayName)?"
+    if items.count == 1, let item = items.first {
+      return "Add \(item.title)?"
     }
 
-    return "Add \(users.count) people?"
+    return "Add \(items.count) mentions?"
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: users.count == 1 ? 0 : 10) {
+    VStack(alignment: .leading, spacing: items.count == 1 ? 0 : 10) {
       HStack(spacing: 10) {
-        if users.count == 1, let firstUser = users.first {
-          UserAvatar(user: firstUser.user, size: 30)
+        if items.count == 1, let item = items.first {
+          MentionedParticipantPromptIcon(item: item, size: 30)
         }
 
         Text(title)
@@ -35,11 +35,11 @@ struct MentionedParticipantsPromptView: View {
           .disabled(isAdding)
       }
 
-      if users.count > 1 {
+      if items.count > 1 {
         ScrollView {
           VStack(alignment: .leading, spacing: 6) {
-            ForEach(users) { user in
-              MentionedParticipantPromptRow(user: user)
+            ForEach(items) { item in
+              MentionedParticipantPromptRow(item: item)
             }
           }
         }
@@ -47,23 +47,43 @@ struct MentionedParticipantsPromptView: View {
       }
     }
     .padding(12)
-    .frame(width: users.count == 1 ? 260 : 280)
+    .frame(width: items.count == 1 ? 260 : 280)
   }
 }
 
 private struct MentionedParticipantPromptRow: View {
-  let user: UserInfo
+  let item: MentionCompletionItem
 
   var body: some View {
     HStack(spacing: 8) {
-      UserAvatar(user: user.user, size: 28)
+      MentionedParticipantPromptIcon(item: item, size: 28)
 
-      Text(user.user.displayName)
+      Text(item.title)
         .font(.system(size: 12))
         .lineLimit(1)
         .truncationMode(.tail)
 
       Spacer(minLength: 0)
+    }
+  }
+}
+
+private struct MentionedParticipantPromptIcon: View {
+  let item: MentionCompletionItem
+  let size: CGFloat
+
+  var body: some View {
+    switch item {
+      case let .user(user):
+        UserAvatar(user: user.userInfo.user, size: size)
+
+      case .group:
+        Image(systemName: "person.2.fill")
+          .font(.system(size: max(12, size * 0.42), weight: .medium))
+          .foregroundStyle(.secondary)
+          .frame(width: size, height: size)
+          .background(.quaternary)
+          .clipShape(Circle())
     }
   }
 }

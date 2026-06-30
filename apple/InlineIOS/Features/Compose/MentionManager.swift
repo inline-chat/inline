@@ -6,7 +6,7 @@ import SwiftUI
 import UIKit
 
 protocol MentionManagerDelegate: AnyObject {
-  func mentionManager(_ manager: MentionManager, didSelectMention text: String, userId: Int64, for range: NSRange)
+  func mentionManager(_ manager: MentionManager, didSelectMention text: String, item: MentionCompletionItem, for range: NSRange)
   func mentionManagerDidDismiss(_ manager: MentionManager)
 }
 
@@ -69,7 +69,7 @@ class MentionManager: NSObject {
     // Subscribe to mention candidate updates
     chatParticipantsViewModel?.$mentionCandidates
       .sink { [weak self] candidates in
-        Log.shared.trace("🔍 Mention candidates updated: \(candidates.count) candidates")
+        Log.shared.trace("🔍 Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
         guard let self else { return }
         mentionCompletionView?.updateCandidates(candidates)
 
@@ -170,19 +170,18 @@ class MentionManager: NSObject {
 
     let insertionPoint = changeRange.location
     guard insertionPoint == mentionRange.range.location + mentionRange.range.length else { return false }
-    guard let user = mentionCompletionView.singleFilteredParticipant() else { return false }
-    guard MentionCompletionViewModel.query(mentionRange.query, exactlyMatches: user) else { return false }
+    guard let item = mentionCompletionView.singleFilteredItem() else { return false }
+    guard MentionCompletionViewModel.query(mentionRange.query, exactlyMatches: item) else { return false }
 
-    // Build the mention text (uses first name like existing selection path)
-    let mentionText = MentionCompletionViewModel.mentionText(for: user)
+    let mentionText = mentionCompletionView.mentionText(for: item)
 
     // Replace mention and append the typed character as trailing text.
     let currentAttributedText = textView.attributedText ?? NSAttributedString()
-    let result = mentionDetector.replaceMention(
+    let result = replaceMentionResult(
+      item: item,
       in: currentAttributedText,
       range: mentionRange.range,
       with: mentionText,
-      userId: user.user.id,
       trailingText: String(text),
       mentionAttributes: mentionAttributes(for: textView),
       trailingAttributes: baseTextAttributes(for: textView)
@@ -192,7 +191,7 @@ class MentionManager: NSObject {
     textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
     (textView as? ComposeTextView)?.resetTypingAttributesToDefault()
     hideMentionCompletion()
-    delegate?.mentionManager(self, didSelectMention: mentionText, userId: user.user.id, for: mentionRange.range)
+    delegate?.mentionManager(self, didSelectMention: mentionText, item: item, for: mentionRange.range)
     return true
   }
 
@@ -212,7 +211,7 @@ class MentionManager: NSObject {
     var effectiveRange = NSRange(location: 0, length: 0)
     let attributes = attributed.attributes(at: changeRange.location, effectiveRange: &effectiveRange)
 
-    guard attributes[.mentionUserId] != nil else { return false }
+    guard attributes[.mentionUserId] != nil || attributes[.mentionGroupId] != nil else { return false }
 
     let mutable = attributed.mutableCopy() as! NSMutableAttributedString
     let mentionString = mutable.attributedSubstring(from: effectiveRange).string
@@ -337,15 +336,15 @@ class MentionManager: NSObject {
 
   // MARK: - Mention Replacement
 
-  func replaceMention(in textView: UITextView, with mentionText: String, userId: Int64) {
+  func replaceMention(in textView: UITextView, with item: MentionCompletionItem, mentionText: String) {
     guard let mentionRange = currentMentionRange else { return }
 
     let currentAttributedText = textView.attributedText ?? NSAttributedString()
-    let result = mentionDetector.replaceMention(
+    let result = replaceMentionResult(
+      item: item,
       in: currentAttributedText,
       range: mentionRange.range,
       with: mentionText,
-      userId: userId,
       mentionAttributes: mentionAttributes(for: textView),
       trailingAttributes: baseTextAttributes(for: textView)
     )
@@ -359,7 +358,7 @@ class MentionManager: NSObject {
     hideMentionCompletion()
 
     // Notify delegate
-    delegate?.mentionManager(self, didSelectMention: mentionText, userId: userId, for: mentionRange.range)
+    delegate?.mentionManager(self, didSelectMention: mentionText, item: item, for: mentionRange.range)
   }
 
   // MARK: - Utility
@@ -386,6 +385,39 @@ class MentionManager: NSObject {
       ?? textView.tintColor
       ?? UIColor.systemBlue
   }
+
+  private func replaceMentionResult(
+    item: MentionCompletionItem,
+    in attributedText: NSAttributedString,
+    range: NSRange,
+    with mentionText: String,
+    trailingText: String = " ",
+    mentionAttributes: [NSAttributedString.Key: Any],
+    trailingAttributes: [NSAttributedString.Key: Any]
+  ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
+    switch item {
+      case let .user(user):
+        mentionDetector.replaceMention(
+          in: attributedText,
+          range: range,
+          with: mentionText,
+          userId: user.userInfo.user.id,
+          trailingText: trailingText,
+          mentionAttributes: mentionAttributes,
+          trailingAttributes: trailingAttributes
+        )
+      case let .group(group):
+        mentionDetector.replaceGroupMention(
+          in: attributedText,
+          range: range,
+          with: mentionText,
+          groupId: group.id,
+          trailingText: trailingText,
+          mentionAttributes: mentionAttributes,
+          trailingAttributes: trailingAttributes
+        )
+    }
+  }
 }
 
 // MARK: - MentionCompletionDelegate
@@ -393,12 +425,11 @@ class MentionManager: NSObject {
 extension MentionManager: MentionCompletionDelegate {
   func mentionCompletion(
     _ view: MentionCompletionView,
-    didSelectUser user: UserInfo,
-    withText text: String,
-    userId: Int64
+    didSelectItem item: MentionCompletionItem,
+    withText text: String
   ) {
     guard let textView else { return }
-    replaceMention(in: textView, with: text, userId: userId)
+    replaceMention(in: textView, with: item, mentionText: text)
   }
 
   func mentionCompletionDidRequestClose(_ view: MentionCompletionView) {

@@ -20,6 +20,10 @@ public enum TransactionTypeRegistry {
       case is GetChatTransaction: "get_chat"
       case is GetMeTransaction: "get_me"
       case is GetSpaceMembersTransaction: "get_space_members"
+      case is GetUserGroupsTransaction: "get_user_groups"
+      case is CreateUserGroupTransaction: "create_user_group"
+      case is UpdateUserGroupTransaction: "update_user_group"
+      case is DeleteUserGroupTransaction: "delete_user_group"
       case is GetSpaceUrlPreviewExclusionsTransaction: "get_space_url_preview_exclusions"
       case is AddSpaceUrlPreviewExclusionTransaction: "add_space_url_preview_exclusion"
       case is RemoveSpaceUrlPreviewExclusionTransaction: "remove_space_url_preview_exclusion"
@@ -77,6 +81,10 @@ public enum TransactionTypeRegistry {
       case "get_chat": return try decoder.decode(GetChatTransaction.self, from: data)
       case "get_me": return try decoder.decode(GetMeTransaction.self, from: data)
       case "get_space_members": return try decoder.decode(GetSpaceMembersTransaction.self, from: data)
+      case "get_user_groups": return try decoder.decode(GetUserGroupsTransaction.self, from: data)
+      case "create_user_group": return try decoder.decode(CreateUserGroupTransaction.self, from: data)
+      case "update_user_group": return try decoder.decode(UpdateUserGroupTransaction.self, from: data)
+      case "delete_user_group": return try decoder.decode(DeleteUserGroupTransaction.self, from: data)
       case "get_space_url_preview_exclusions":
         return try decoder.decode(GetSpaceUrlPreviewExclusionsTransaction.self, from: data)
       case "add_space_url_preview_exclusion":

@@ -31,7 +31,7 @@ final class ChatToolbarState {
     case translationOptions(Anchor)
     case participantsPopover(Anchor)
     case addParticipants(Anchor)
-    case mentionParticipantPrompt(Anchor, [UserInfo])
+    case mentionParticipantPrompt(Anchor, [MentionCompletionItem])
 
     var anchor: Anchor {
       switch self {
@@ -106,17 +106,23 @@ final class ChatToolbarState {
 
   func presentMentionParticipantPrompt(users: [UserInfo], from anchor: Anchor? = nil) {
     guard !users.isEmpty else { return }
-    presentation = .mentionParticipantPrompt(anchor ?? self.anchor(for: .participants), users)
+    let items = users.map { MentionCompletionItem.user(MentionCompletionUser(userInfo: $0, source: .participant)) }
+    presentMentionParticipantPrompt(items: items, from: anchor)
   }
 
-  func mentionParticipantPromptUsers(for anchor: Anchor) -> [UserInfo]? {
-    guard case let .mentionParticipantPrompt(promptAnchor, users) = presentation,
+  func presentMentionParticipantPrompt(items: [MentionCompletionItem], from anchor: Anchor? = nil) {
+    guard !items.isEmpty else { return }
+    presentation = .mentionParticipantPrompt(anchor ?? self.anchor(for: .participants), items)
+  }
+
+  func mentionParticipantPromptItems(for anchor: Anchor) -> [MentionCompletionItem]? {
+    guard case let .mentionParticipantPrompt(promptAnchor, items) = presentation,
           promptAnchor == anchor
     else {
       return nil
     }
 
-    return users
+    return items
   }
 
   func dismissPresentation() {

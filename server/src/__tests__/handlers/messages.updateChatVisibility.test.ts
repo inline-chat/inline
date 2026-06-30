@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { and, eq } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import type { Peer } from "@inline-chat/protocol/core"
 import { UpdateBucket, updates } from "@in/server/db/schema/updates"
-import { chats, chatParticipants, dialogs, members } from "@in/server/db/schema"
+import { chatParticipantGroups, chats, chatParticipants, dialogs, members, userGroupMembers, userGroups } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { updateChatVisibility } from "@in/server/functions/messages.updateChatVisibility"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -217,6 +217,135 @@ describe("messages.updateChatVisibility", () => {
       throw new Error("Expected chatVisibility update")
     }
     expect(inflatedUpdate.chatVisibility.isPublic).toBe(true)
+  })
+
+  test("revokes group participants when private thread becomes public", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Visibility Group Public", [
+      "owner-group-public@inline.test",
+      "member-group-public@inline.test",
+      "blocked-group-public@inline.test",
+    ])
+    const [owner, publicMember, blockedMember] = users
+    if (!space || !owner || !publicMember || !blockedMember) {
+      throw new Error("Failed to create fixtures")
+    }
+
+    await db
+      .update(members)
+      .set({ role: "owner", canAccessPublicChats: true })
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, owner.id)))
+      .execute()
+
+    await db
+      .update(members)
+      .set({ canAccessPublicChats: true })
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, publicMember.id)))
+      .execute()
+
+    await db
+      .update(members)
+      .set({ canAccessPublicChats: false })
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, blockedMember.id)))
+      .execute()
+
+    const chat = await testUtils.createChat(space.id, "Private Group Thread", "thread", false)
+    if (!chat) throw new Error("Failed to create chat")
+
+    const [group] = await db
+      .insert(userGroups)
+      .values({
+        spaceId: space.id,
+        name: "Reviewers",
+        createdBy: owner.id,
+      })
+      .returning()
+    if (!group) throw new Error("Failed to create group")
+
+    await db
+      .insert(userGroupMembers)
+      .values([
+        { groupId: group.id, userId: publicMember.id },
+        { groupId: group.id, userId: blockedMember.id },
+      ])
+      .execute()
+
+    await db.insert(chatParticipantGroups).values({ chatId: chat.id, groupId: group.id }).execute()
+
+    await db
+      .insert(dialogs)
+      .values([
+        { userId: owner.id, chatId: chat.id, spaceId: space.id },
+        { userId: publicMember.id, chatId: chat.id, spaceId: space.id },
+        { userId: blockedMember.id, chatId: chat.id, spaceId: space.id },
+      ])
+      .execute()
+
+    await updateChatVisibility(
+      {
+        chatId: chat.id,
+        isPublic: true,
+        participants: [],
+      },
+      {
+        currentUserId: owner.id,
+        currentSessionId: 1,
+      },
+    )
+
+    const groupGrants = await db
+      .select()
+      .from(chatParticipantGroups)
+      .where(eq(chatParticipantGroups.chatId, chat.id))
+    expect(groupGrants).toHaveLength(0)
+
+    const dialogUsers = await db
+      .select({ userId: dialogs.userId })
+      .from(dialogs)
+      .where(eq(dialogs.chatId, chat.id))
+    expect(dialogUsers.map((row) => row.userId).sort()).toEqual([owner.id, publicMember.id].sort())
+
+    const chatUpdates = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, chat.id)))
+      .orderBy(asc(updates.seq))
+    expect(chatUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind)).toEqual([
+      "participantGroupDelete",
+      "chatVisibility",
+    ])
+
+    const publicMemberUpdates = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, publicMember.id)))
+      .orderBy(asc(updates.seq))
+    expect(publicMemberUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind)).toEqual([
+      "userChatParticipantGroupDelete",
+    ])
+
+    const blockedMemberUpdates = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, blockedMember.id)))
+      .orderBy(asc(updates.seq))
+    expect(blockedMemberUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind)).toEqual([
+      "userChatParticipantGroupDelete",
+      "userChatParticipantDelete",
+    ])
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.Chat, chatId: chat.id },
+      seqStart: 0,
+      limit: 10,
+    })
+    const { updates: inflated } = await Sync.processChatUpdates({
+      chatId: chat.id,
+      peerId: makePeer(chat.id),
+      updates: dbUpdates,
+      userId: owner.id,
+    })
+
+    expect(inflated.map((update) => update.update.oneofKind)).toEqual(["participantGroupDelete", "chatVisibility"])
   })
 
   test("allows thread creator (non-admin) to make thread public", async () => {

@@ -5,7 +5,7 @@ import UIKit
 // MARK: - MentionManagerDelegate
 
 extension ComposeView: MentionManagerDelegate {
-  func mentionManager(_ manager: MentionManager, didSelectMention text: String, userId: Int64, for range: NSRange) {
+  func mentionManager(_ manager: MentionManager, didSelectMention text: String, item: MentionCompletionItem, for range: NSRange) {
     // Update height if needed after mention replacement
     updateHeight()
 

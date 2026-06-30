@@ -46,6 +46,10 @@ message ServerUpdate {
     ServerChatUpdateMessageAttachment message_attachment = 29;
     ServerUserUpdateDialogFollowMode user_dialog_follow_mode = 32;
     ServerUserUpdateUser updated_user = 33;
+    ServerChatUpdateParticipantGroupAdd participant_group_add = 34;
+    ServerChatUpdateParticipantGroupDelete participant_group_delete = 35;
+    ServerUserUpdateChatParticipantGroupAdd user_chat_participant_group_add = 36;
+    ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete = 37;
   }
 }
 
@@ -106,6 +110,18 @@ message ServerChatUpdateParticipantDelete {
 message ServerChatUpdateParticipantAdd {
   int64 chat_id = 1;
   ChatParticipant participant = 2;
+}
+
+// Update for a chat when a user group participant grant is added
+message ServerChatUpdateParticipantGroupAdd {
+  int64 chat_id = 1;
+  ChatParticipantGroup group_participant = 2;
+}
+
+// Update for a chat when a user group participant grant is removed
+message ServerChatUpdateParticipantGroupDelete {
+  int64 chat_id = 1;
+  int64 group_id = 2;
 }
 
 // Update for a chat when visibility changes
@@ -196,6 +212,18 @@ message ServerUserUpdateChatParticipantDelete { int64 chat_id = 1; }
 message ServerUserUpdateChatParticipantAdd {
   int64 chat_id = 1;
   ChatParticipant participant = 2;
+}
+
+// Update for a user when a group granted them chat access
+message ServerUserUpdateChatParticipantGroupAdd {
+  int64 chat_id = 1;
+  ChatParticipantGroup group_participant = 2;
+}
+
+// Update for a user when a group chat access grant was removed
+message ServerUserUpdateChatParticipantGroupDelete {
+  int64 chat_id = 1;
+  int64 group_id = 2;
 }
 
 // Update for a user when a dialog is archived or unarchived

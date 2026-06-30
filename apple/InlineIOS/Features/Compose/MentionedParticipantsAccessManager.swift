@@ -1,17 +1,19 @@
+import Auth
 import GRDB
 import InlineKit
 import InlineProtocol
 import Logger
+import UIKit
 
-private enum MentionedParticipantsAutoAddError: Error {
+private enum MentionedParticipantsAccessError: Error {
   case chatNotFound
 }
 
 @MainActor
-final class MentionedParticipantsAutoAddManager {
+final class MentionedParticipantsAccessManager {
   private struct Request: Sendable {
     let peer: InlineKit.Peer
-    let chat: InlineKit.Chat?
+    let chatId: Int64?
     let currentUserId: Int64?
     let pendingUserIds: Set<Int64>
     let reservedUserIds: Set<Int64>
@@ -28,19 +30,22 @@ final class MentionedParticipantsAutoAddManager {
     let groups: [InlineKit.UserGroup]
   }
 
-  private let dependencies: AppDependencies
-  private weak var toolbarState: ChatToolbarState?
-  private let log = Log.scoped("MentionedParticipantsAutoAdd", enableTracing: false)
+  private enum GroupAction {
+    case none
+    case autoAdd([MentionCompletionItem])
+    case prompt([MentionCompletionItem])
+  }
 
+  private weak var composeView: ComposeView?
+  private let log = Log.scoped("MentionedParticipantsAccess", enableTracing: false)
   private var pendingUserIds: Set<Int64> = []
   private var pendingGroupIds: Set<Int64> = []
 
-  init(dependencies: AppDependencies, toolbarState: ChatToolbarState?) {
-    self.dependencies = dependencies
-    self.toolbarState = toolbarState
+  init(composeView: ComposeView) {
+    self.composeView = composeView
   }
 
-  func handle(entities: MessageEntities?, peer: InlineKit.Peer, chat: InlineKit.Chat?) {
+  func handle(entities: MessageEntities?, peer: InlineKit.Peer, chatId: Int64?) {
     let mentionedUserIds = Self.mentionedUserIds(from: entities)
     let mentionedGroupIds = Self.mentionedGroupIds(from: entities)
     let previousPendingUserIds = pendingUserIds
@@ -54,21 +59,21 @@ final class MentionedParticipantsAutoAddManager {
 
     let request = Request(
       peer: peer,
-      chat: chat,
-      currentUserId: dependencies.auth.currentUserId,
+      chatId: chatId,
+      currentUserId: Auth.shared.getCurrentUserId(),
       pendingUserIds: previousPendingUserIds,
       reservedUserIds: reservedUserIds,
       pendingGroupIds: previousPendingGroupIds,
       reservedGroupIds: reservedGroupIds
     )
-    let database = dependencies.database
+    let database = AppDatabase.shared
 
     Task.detached(priority: .userInitiated) { [weak self] in
       do {
         let snapshot = try await Self.snapshot(
           database: database,
           peer: request.peer,
-          chat: request.chat,
+          chatId: request.chatId,
           userIds: request.reservedUserIds,
           groupIds: request.reservedGroupIds
         )
@@ -83,73 +88,106 @@ final class MentionedParticipantsAutoAddManager {
           pendingUserIds: request.pendingUserIds
         )
 
-        let action = MentionedParticipantAddPolicy.action(
+        let userAction = MentionedParticipantAddPolicy.action(
           for: request.reservedUserIds,
           context: context
         )
         let groupItems = Self.groupItems(
-          for: request.reservedGroupIds.subtracting(snapshot.groupParticipantIds),
+          for: request.reservedGroupIds
+            .subtracting(request.pendingGroupIds)
+            .subtracting(snapshot.groupParticipantIds),
           from: snapshot.groups
         )
         let groupAction = Self.groupAction(for: groupItems, context: context)
 
-        var releasedUserIds = request.reservedUserIds
-        var releasedGroupIds = request.reservedGroupIds
-        switch action {
-          case .none:
-            break
-
-          case let .autoAdd(userIds):
-            let users = Self.userInfos(for: userIds, from: snapshot.users)
-            await self?.autoAdd(Self.userItems(for: users), chatId: snapshot.chat.id)
-            releasedUserIds.subtract(userIds)
-
-          case let .prompt(userIds):
-            let users = Self.userInfos(for: userIds, from: snapshot.users)
-            await self?.prompt(Self.userItems(for: users))
-            releasedUserIds.subtract(userIds)
-        }
-
-        switch groupAction {
-          case .none:
-            break
-          case let .autoAdd(items):
-            await self?.autoAdd(items, chatId: snapshot.chat.id)
-            releasedGroupIds.subtract(items.compactMap(\.group?.id))
-          case let .prompt(items):
-            await self?.prompt(items)
-            releasedGroupIds.subtract(items.compactMap(\.group?.id))
-        }
-
-        await self?.release(userIds: releasedUserIds, groupIds: releasedGroupIds)
+        await self?.apply(
+          userAction: userAction,
+          groupAction: groupAction,
+          snapshot: snapshot,
+          reservedUserIds: request.reservedUserIds,
+          reservedGroupIds: request.reservedGroupIds
+        )
       } catch {
-        await self?.fail(userIds: request.reservedUserIds, groupIds: request.reservedGroupIds, error: error)
+        await self?.fail(
+          userIds: request.reservedUserIds,
+          groupIds: request.reservedGroupIds,
+          error: error
+        )
       }
     }
   }
 
-  @MainActor
-  private func release(userIds: Set<Int64> = [], groupIds: Set<Int64> = []) {
-    pendingUserIds.subtract(userIds)
-    pendingGroupIds.subtract(groupIds)
-  }
-
-  @MainActor
-  private func prompt(_ items: [MentionCompletionItem]) {
-    toolbarState?.presentMentionParticipantPrompt(items: items)
-  }
-
-  @MainActor
-  private func fail(userIds: Set<Int64>, groupIds: Set<Int64>, error: Error) {
-    release(userIds: userIds, groupIds: groupIds)
-    log.error("Failed to handle mentioned participants", error: error)
-  }
-
-  @MainActor
-  private func autoAdd(
-    _ items: [MentionCompletionItem],
-    chatId: Int64
+  private func apply(
+    userAction: MentionedParticipantAddAction,
+    groupAction: GroupAction,
+    snapshot: Snapshot,
+    reservedUserIds: Set<Int64>,
+    reservedGroupIds: Set<Int64>
   ) async {
+    var handledUserIds: Set<Int64> = []
+    var handledGroupIds: Set<Int64> = []
+
+    switch userAction {
+      case .none:
+        break
+      case let .autoAdd(userIds):
+        let items = Self.userItems(for: Self.userInfos(for: userIds, from: snapshot.users))
+        await autoAdd(items, chatId: snapshot.chat.id)
+        handledUserIds.formUnion(userIds)
+      case let .prompt(userIds):
+        let items = Self.userItems(for: Self.userInfos(for: userIds, from: snapshot.users))
+        prompt(items, chatId: snapshot.chat.id)
+        handledUserIds.formUnion(userIds)
+    }
+
+    switch groupAction {
+      case .none:
+        break
+      case let .autoAdd(items):
+        await autoAdd(items, chatId: snapshot.chat.id)
+        handledGroupIds.formUnion(items.compactMap(\.group?.id))
+      case let .prompt(items):
+        prompt(items, chatId: snapshot.chat.id)
+        handledGroupIds.formUnion(items.compactMap(\.group?.id))
+    }
+
+    release(
+      userIds: reservedUserIds.subtracting(handledUserIds),
+      groupIds: reservedGroupIds.subtracting(handledGroupIds)
+    )
+  }
+
+  private func prompt(_ items: [MentionCompletionItem], chatId: Int64) {
+    guard !items.isEmpty else { return }
+    guard let composeView, let presenter = composeView.attachmentFlowPresenter() else {
+      release(items: items)
+      return
+    }
+
+    let alert = UIAlertController(
+      title: Self.promptTitle(for: items),
+      message: Self.promptMessage(for: items),
+      preferredStyle: .actionSheet
+    )
+    alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        await self?.autoAdd(items, chatId: chatId)
+        self?.release(items: items)
+      }
+    })
+    alert.addAction(UIAlertAction(title: "Not Now", style: .cancel) { [weak self] _ in
+      self?.release(items: items)
+    })
+
+    if let popover = alert.popoverPresentationController {
+      popover.sourceView = composeView.sendButton
+      popover.sourceRect = composeView.sendButton.bounds
+    }
+
+    presenter.present(alert, animated: true)
+  }
+
+  private func autoAdd(_ items: [MentionCompletionItem], chatId: Int64) async {
     var addedItems: [MentionCompletionItem] = []
 
     for item in items {
@@ -157,17 +195,11 @@ final class MentionedParticipantsAutoAddManager {
         switch item {
           case let .user(user):
             try await Api.realtime.send(
-              .addChatParticipant(
-                chatID: chatId,
-                userID: user.userInfo.user.id
-              )
+              .addChatParticipant(chatID: chatId, userID: user.userInfo.user.id)
             )
           case let .group(group):
             try await Api.realtime.send(
-              .addChatParticipant(
-                chatID: chatId,
-                groupID: group.id
-              )
+              .addChatParticipant(chatID: chatId, groupID: group.id)
             )
         }
         addedItems.append(item)
@@ -178,61 +210,78 @@ final class MentionedParticipantsAutoAddManager {
 
     guard !addedItems.isEmpty else { return }
 
-    ToastCenter.shared.showSuccess(
+    ToastManager.shared.showToast(
       Self.addedToastMessage(for: addedItems),
+      type: .success,
+      systemImage: "person.badge.plus",
+      action: { [weak self] in
+        self?.remove(addedItems, chatId: chatId)
+      },
       actionTitle: "Undo"
-    ) { [weak self] in
-      self?.remove(addedItems, chatId: chatId)
-    }
+    )
   }
 
-  @MainActor
   private func remove(_ items: [MentionCompletionItem], chatId: Int64) {
-    Task {
+    Task { @MainActor in
       for item in items {
         do {
           switch item {
             case let .user(user):
               try await Api.realtime.send(
-                .removeChatParticipant(
-                  chatID: chatId,
-                  userID: user.userInfo.user.id
-                )
+                .removeChatParticipant(chatID: chatId, userID: user.userInfo.user.id)
               )
             case let .group(group):
               try await Api.realtime.send(
-                .removeChatParticipant(
-                  chatID: chatId,
-                  groupID: group.id
-                )
+                .removeChatParticipant(chatID: chatId, groupID: group.id)
               )
           }
         } catch {
           log.error("Failed to undo mentioned participant add", error: error)
-          ToastCenter.shared.showError("Failed to undo participant add")
+          ToastManager.shared.showToast(
+            "Failed to undo participant add",
+            type: .error,
+            systemImage: "exclamationmark.triangle.fill"
+          )
           return
         }
       }
     }
   }
 
+  private func release(userIds: Set<Int64> = [], groupIds: Set<Int64> = []) {
+    pendingUserIds.subtract(userIds)
+    pendingGroupIds.subtract(groupIds)
+  }
+
+  private func release(items: [MentionCompletionItem]) {
+    release(
+      userIds: Set(items.compactMap(\.userInfo?.user.id)),
+      groupIds: Set(items.compactMap(\.group?.id))
+    )
+  }
+
+  private func fail(userIds: Set<Int64>, groupIds: Set<Int64>, error: Error) {
+    release(userIds: userIds, groupIds: groupIds)
+    log.error("Failed to handle mentioned participants", error: error)
+  }
+
   nonisolated private static func snapshot(
     database: AppDatabase,
     peer: InlineKit.Peer,
-    chat: InlineKit.Chat?,
+    chatId: Int64?,
     userIds: Set<Int64>,
     groupIds: Set<Int64>
   ) async throws -> Snapshot {
     try await database.reader.read { db in
       let resolvedChat: InlineKit.Chat?
-      if let chat {
-        resolvedChat = chat
+      if let chatId {
+        resolvedChat = try Chat.fetchOne(db, id: chatId)
       } else {
         resolvedChat = try Chat.getByPeerId(db: db, peerId: peer)
       }
 
       guard let chat = resolvedChat else {
-        throw MentionedParticipantsAutoAddError.chatNotFound
+        throw MentionedParticipantsAccessError.chatNotFound
       }
 
       let messageCount = try Message
@@ -277,7 +326,7 @@ final class MentionedParticipantsAutoAddManager {
         guard entity.type == .mention else { return nil }
         return entity.mention.userID
       }
-    ).filter { $0 != 0 }
+    ).filter { $0 > 0 }
   }
 
   nonisolated private static func mentionedGroupIds(from entities: MessageEntities?) -> Set<Int64> {
@@ -287,29 +336,7 @@ final class MentionedParticipantsAutoAddManager {
         guard entity.type == .groupMention else { return nil }
         return entity.groupMention.groupID
       }
-    ).filter { $0 != 0 }
-  }
-
-  nonisolated private static func userItems(for users: [UserInfo]) -> [MentionCompletionItem] {
-    users.map {
-      .user(MentionCompletionUser(userInfo: $0, source: .participant))
-    }
-  }
-
-  nonisolated private static func groupItems(
-    for groupIds: Set<Int64>,
-    from groups: [InlineKit.UserGroup]
-  ) -> [MentionCompletionItem] {
-    let groupsById = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0) })
-    return groupIds.sorted().compactMap { groupId in
-      groupsById[groupId].map(MentionCompletionItem.group)
-    }
-  }
-
-  private enum GroupAction {
-    case none
-    case autoAdd([MentionCompletionItem])
-    case prompt([MentionCompletionItem])
+    ).filter { $0 > 0 }
   }
 
   nonisolated private static func groupAction(
@@ -329,6 +356,22 @@ final class MentionedParticipantsAutoAddManager {
     return .prompt(items)
   }
 
+  nonisolated private static func userItems(for users: [UserInfo]) -> [MentionCompletionItem] {
+    users.map {
+      .user(MentionCompletionUser(userInfo: $0, source: .participant))
+    }
+  }
+
+  nonisolated private static func groupItems(
+    for groupIds: Set<Int64>,
+    from groups: [InlineKit.UserGroup]
+  ) -> [MentionCompletionItem] {
+    let groupsById = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0) })
+    return groupIds.sorted().compactMap { groupId in
+      groupsById[groupId].map(MentionCompletionItem.group)
+    }
+  }
+
   nonisolated private static func userInfos(for userIds: [Int64], from users: [UserInfo]) -> [UserInfo] {
     let usersById = Dictionary(uniqueKeysWithValues: users.map { ($0.user.id, $0) })
     return userIds.map { userId in
@@ -338,6 +381,27 @@ final class MentionedParticipantsAutoAddManager {
 
       return UserInfo(user: User(id: userId, email: nil, firstName: nil))
     }
+  }
+
+  nonisolated private static func promptTitle(for items: [MentionCompletionItem]) -> String {
+    if items.count == 1 {
+      return "Add \(items[0].title) to this thread?"
+    }
+
+    return "Add mentioned access?"
+  }
+
+  nonisolated private static func promptMessage(for items: [MentionCompletionItem]) -> String {
+    if items.count == 1 {
+      return "They will be able to access this private thread."
+    }
+
+    let names = items.prefix(3).map(\.title).joined(separator: ", ")
+    if items.count <= 3 {
+      return "\(names) will be able to access this private thread."
+    }
+
+    return "\(names), and \(items.count - 3) others will be able to access this private thread."
   }
 
   nonisolated private static func addedToastMessage(for items: [MentionCompletionItem]) -> String {

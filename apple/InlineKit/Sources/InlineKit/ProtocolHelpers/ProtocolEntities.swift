@@ -76,6 +76,7 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
     case pre
     case thread
     case threadTitle
+    case groupMention
   }
 
   public init(from decoder: Decoder) throws {
@@ -91,6 +92,8 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
       self = .thread(thread)
     } else if let threadTitle = try container.decodeIfPresent(MessageEntity.MessageEntityThreadTitle.self, forKey: .threadTitle) {
       self = .threadTitle(threadTitle)
+    } else if let groupMention = try container.decodeIfPresent(MessageEntity.MessageEntityGroupMention.self, forKey: .groupMention) {
+      self = .groupMention(groupMention)
     } else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
@@ -115,7 +118,28 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
         try container.encode(thread, forKey: .thread)
       case let .threadTitle(threadTitle):
         try container.encode(threadTitle, forKey: .threadTitle)
+      case let .groupMention(groupMention):
+        try container.encode(groupMention, forKey: .groupMention)
     }
+  }
+}
+
+extension InlineProtocol.MessageEntity.MessageEntityGroupMention: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case groupID
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let groupID = try container.decode(Int64.self, forKey: .groupID)
+
+    self.init()
+    self.groupID = groupID
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(groupID, forKey: .groupID)
   }
 }
 

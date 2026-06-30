@@ -427,6 +427,7 @@ message MessageEntity {
     TYPE_THREAD = 11;
     TYPE_THREAD_TITLE = 12;
     TYPE_BOT_COMMAND = 13;
+    TYPE_GROUP_MENTION = 14;
   }
 
   Type type = 1;
@@ -434,6 +435,7 @@ message MessageEntity {
   int64 length = 3;
 
   message MessageEntityMention { int64 user_id = 1; }
+  message MessageEntityGroupMention { int64 group_id = 1; }
   message MessageEntityTextUrl { string url = 1; }
   message MessageEntityPre { string language = 1; }
   message MessageEntityThread { int64 chat_id = 1; }
@@ -448,6 +450,7 @@ message MessageEntity {
     MessageEntityPre pre = 6;
     MessageEntityThread thread = 7;
     MessageEntityThreadTitle thread_title = 8;
+    MessageEntityGroupMention group_mention = 9;
   }
 }
 
@@ -507,6 +510,17 @@ message Space {
 
   // Whether this is a public community space with stricter member privacy.
   optional bool is_public = 5;
+}
+
+message UserGroup {
+  int64 id = 1;
+  int64 space_id = 2;
+  string name = 3;
+  optional string description = 4;
+  int32 member_count = 5;
+  repeated int64 user_ids = 6;
+  bool current_user_is_member = 7;
+  int64 date = 8;
 }
 
 // Add reaction input
@@ -963,6 +977,10 @@ enum Method {
   GET_SPACE_URL_PREVIEW_EXCLUSIONS = 65;
   ADD_SPACE_URL_PREVIEW_EXCLUSION = 66;
   REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
+  GET_USER_GROUPS = 68;
+  CREATE_USER_GROUP = 69;
+  UPDATE_USER_GROUP = 70;
+  DELETE_USER_GROUP = 71;
 }
 
 message RpcCall {
@@ -1035,6 +1053,10 @@ message RpcCall {
     GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions = 66;
     AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion = 67;
     RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68;
+    GetUserGroupsInput getUserGroups = 69;
+    CreateUserGroupInput createUserGroup = 70;
+    UpdateUserGroupInput updateUserGroup = 71;
+    DeleteUserGroupInput deleteUserGroup = 72;
   }
 }
 
@@ -1109,6 +1131,10 @@ message RpcResult {
     GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions = 66;
     AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion = 67;
     RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
+    GetUserGroupsResult getUserGroups = 69;
+    CreateUserGroupResult createUserGroup = 70;
+    UpdateUserGroupResult updateUserGroup = 71;
+    DeleteUserGroupResult deleteUserGroup = 72;
   }
 }
 
@@ -1955,7 +1981,10 @@ message SearchMessagesInput {
 
 message SearchMessagesResult { repeated Message messages = 1; }
 
-message InputChatParticipant { int64 user_id = 1; }
+message InputChatParticipant {
+  optional int64 user_id = 1;
+  optional int64 group_id = 2;
+}
 
 message ReserveChatIdsInput { int32 count = 1; }
 
@@ -2027,6 +2056,35 @@ message GetSpaceMembersResult {
   repeated User users = 2;
 }
 
+message GetUserGroupsInput { int64 space_id = 1; }
+
+message GetUserGroupsResult {
+  repeated UserGroup groups = 1;
+  repeated User users = 2;
+}
+
+message CreateUserGroupInput {
+  int64 space_id = 1;
+  string name = 2;
+  optional string description = 3;
+  repeated int64 user_ids = 4;
+}
+
+message CreateUserGroupResult { UserGroup group = 1; }
+
+message UpdateUserGroupInput {
+  int64 group_id = 1;
+  string name = 2;
+  optional string description = 3;
+  repeated int64 user_ids = 4;
+}
+
+message UpdateUserGroupResult { UserGroup group = 1; }
+
+message DeleteUserGroupInput { int64 group_id = 1; }
+
+message DeleteUserGroupResult {}
+
 /// ------------------------------
 // Updates Subsystem
 message Update {
@@ -2073,6 +2131,8 @@ message Update {
     UpdateBotPresence bot_presence = 38;
     UpdateDialogFollowMode dialog_follow_mode = 39;
     UpdateUpdatedUser updated_user = 40;
+    UpdateChatParticipantGroupAdd participant_group_add = 41;
+    UpdateChatParticipantGroupDelete participant_group_delete = 42;
   }
 }
 
@@ -2371,6 +2431,11 @@ message ChatParticipant {
   int64 date = 2;
 }
 
+message ChatParticipantGroup {
+  int64 group_id = 1;
+  int64 date = 2;
+}
+
 message UpdateChatParticipantAdd {
   int64 chat_id = 1;
   ChatParticipant participant = 2;
@@ -2379,6 +2444,16 @@ message UpdateChatParticipantAdd {
 message UpdateChatParticipantDelete {
   int64 chat_id = 1;
   int64 user_id = 2;
+}
+
+message UpdateChatParticipantGroupAdd {
+  int64 chat_id = 1;
+  ChatParticipantGroup group_participant = 2;
+}
+
+message UpdateChatParticipantGroupDelete {
+  int64 chat_id = 1;
+  int64 group_id = 2;
 }
 
 message UserStatus {
@@ -2445,18 +2520,26 @@ message GetChatParticipantsInput { int64 chat_id = 1; }
 message GetChatParticipantsResult {
   repeated ChatParticipant participants = 1;
   repeated User users = 2;
+  repeated ChatParticipantGroup group_participants = 3;
+  repeated UserGroup groups = 4;
 }
 
 message AddChatParticipantInput {
   int64 chat_id = 1;
-  int64 user_id = 2;
+  optional int64 user_id = 2;
+  optional int64 group_id = 3;
 }
 
-message AddChatParticipantResult { ChatParticipant participant = 1; }
+message AddChatParticipantResult {
+  optional ChatParticipant participant = 1;
+  optional ChatParticipantGroup group_participant = 2;
+  optional UserGroup group = 3;
+}
 
 message RemoveChatParticipantInput {
   int64 chat_id = 1;
-  int64 user_id = 2;
+  optional int64 user_id = 2;
+  optional int64 group_id = 3;
 }
 
 message RemoveChatParticipantResult {}

@@ -29,6 +29,9 @@ export const relations = defineRelations(
     updates: schema.updates,
     botCommands: schema.botCommands,
     spaceUrlPreviewExclusions: schema.spaceUrlPreviewExclusions,
+    userGroups: schema.userGroups,
+    userGroupMembers: schema.userGroupMembers,
+    chatParticipantGroups: schema.chatParticipantGroups,
   },
   (r) => ({
     users: {
@@ -45,6 +48,7 @@ export const relations = defineRelations(
       }),
       botCommands: r.many.botCommands(),
       chatIdReservations: r.many.chatIdReservations(),
+      userGroupMemberships: r.many.userGroupMembers(),
     },
 
     chatIdReservations: {
@@ -88,6 +92,7 @@ export const relations = defineRelations(
 
       dialogs: r.many.dialogs(),
       participants: r.many.chatParticipants(),
+      participantGroups: r.many.chatParticipantGroups(),
     },
 
     // Chat participants relations - handles chat membership
@@ -98,6 +103,41 @@ export const relations = defineRelations(
       }),
       user: r.one.users({
         from: r.chatParticipants.userId,
+        to: r.users.id,
+      }),
+    },
+
+    chatParticipantGroups: {
+      chat: r.one.chats({
+        from: r.chatParticipantGroups.chatId,
+        to: r.chats.id,
+      }),
+      group: r.one.userGroups({
+        from: r.chatParticipantGroups.groupId,
+        to: r.userGroups.id,
+      }),
+    },
+
+    userGroups: {
+      space: r.one.spaces({
+        from: r.userGroups.spaceId,
+        to: r.spaces.id,
+      }),
+      creator: r.one.users({
+        from: r.userGroups.createdBy,
+        to: r.users.id,
+      }),
+      members: r.many.userGroupMembers(),
+      chatGrants: r.many.chatParticipantGroups(),
+    },
+
+    userGroupMembers: {
+      group: r.one.userGroups({
+        from: r.userGroupMembers.groupId,
+        to: r.userGroups.id,
+      }),
+      user: r.one.users({
+        from: r.userGroupMembers.userId,
         to: r.users.id,
       }),
     },

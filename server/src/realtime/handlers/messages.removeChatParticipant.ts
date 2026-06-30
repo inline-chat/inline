@@ -1,9 +1,4 @@
-import {
-  AddChatParticipantInput,
-  AddChatParticipantResult,
-  RemoveChatParticipantResult,
-  RemoveChatParticipantInput,
-} from "@inline-chat/protocol/core"
+import { RemoveChatParticipantResult, RemoveChatParticipantInput } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { Functions } from "@in/server/functions"
 import { Method } from "@inline-chat/protocol/core"
@@ -17,7 +12,8 @@ export const removeChatParticipant = async (
   await Functions.messages.removeChatParticipant(
     {
       chatId: Number(input.chatId),
-      userId: Number(input.userId),
+      userId: input.userId != null ? Number(input.userId) : undefined,
+      groupId: input.groupId != null ? Number(input.groupId) : undefined,
     },
     {
       currentUserId: handlerContext.userId,

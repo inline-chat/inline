@@ -15,21 +15,27 @@ public struct AddChatParticipantTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     let chatID: Int64
-    let userID: Int64
+    let userID: Int64?
+    let groupID: Int64?
   }
 
-  public init(chatID: Int64, userID: Int64) {
+  public init(chatID: Int64, userID: Int64? = nil, groupID: Int64? = nil) {
     if chatID == 0 {
       log.error("chat ID is zero")
     }
 
-    context = Context(chatID: chatID, userID: userID)
+    context = Context(chatID: chatID, userID: userID, groupID: groupID)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .addChatParticipant(.with {
       $0.chatID = context.chatID
-      $0.userID = context.userID
+      if let userID = context.userID {
+        $0.userID = userID
+      }
+      if let groupID = context.groupID {
+        $0.groupID = groupID
+      }
     })
   }
 
@@ -54,7 +60,17 @@ public struct AddChatParticipantTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        try ChatParticipant.save(db, from: response.participant, chatId: context.chatID)
+        if response.hasParticipant {
+          ChatParticipant.save(db, from: response.participant, chatId: context.chatID)
+        }
+
+        if response.hasGroup {
+          try UserGroup.save(db, from: response.group)
+        }
+
+        if response.hasGroupParticipant {
+          try ChatParticipantGroup.save(db, from: response.groupParticipant, chatId: context.chatID)
+        }
       }
       log.trace("addChatParticipant saved")
     } catch {
@@ -77,5 +93,9 @@ public struct AddChatParticipantTransaction: Transaction2 {
 public extension Transaction2 where Self == AddChatParticipantTransaction {
   static func addChatParticipant(chatID: Int64, userID: Int64) -> AddChatParticipantTransaction {
     AddChatParticipantTransaction(chatID: chatID, userID: userID)
+  }
+
+  static func addChatParticipant(chatID: Int64, groupID: Int64) -> AddChatParticipantTransaction {
+    AddChatParticipantTransaction(chatID: chatID, groupID: groupID)
   }
 }

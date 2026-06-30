@@ -16,6 +16,7 @@ struct SpaceSettingsView: View {
   @StateObject private var viewModel: FullSpaceViewModel
   @StateObject private var membershipStatus: SpaceMembershipStatusViewModel
   @StateObject private var urlPreviewExclusions: SpaceUrlPreviewExclusionsViewModel
+  @StateObject private var userGroups: UserGroupsViewModel
   @State private var showDeleteConfirm = false
   @State private var showLeaveConfirm = false
   @State private var actionError: String?
@@ -34,6 +35,7 @@ struct SpaceSettingsView: View {
     _viewModel = StateObject(wrappedValue: FullSpaceViewModel(db: AppDatabase.shared, spaceId: spaceId))
     _membershipStatus = StateObject(wrappedValue: SpaceMembershipStatusViewModel(db: AppDatabase.shared, spaceId: spaceId))
     _urlPreviewExclusions = StateObject(wrappedValue: SpaceUrlPreviewExclusionsViewModel(spaceId: spaceId))
+    _userGroups = StateObject(wrappedValue: UserGroupsViewModel(db: AppDatabase.shared, spaceId: spaceId))
   }
 
   private var isCreator: Bool {
@@ -194,6 +196,8 @@ struct SpaceSettingsView: View {
       }
 
       if isAdminOrOwner {
+        UserGroupsSettingsView(viewModel: userGroups, canManage: true)
+
         Section("URL Previews") {
           SpaceUrlPreviewExclusionsSettingsView(viewModel: urlPreviewExclusions)
         }
@@ -219,6 +223,7 @@ struct SpaceSettingsView: View {
       await membershipStatus.refreshIfNeeded()
       try? await data.getSpace(spaceId: spaceId)
       if isAdminOrOwner {
+        await userGroups.loadIfNeeded()
         await urlPreviewExclusions.loadIfNeeded()
       }
     }

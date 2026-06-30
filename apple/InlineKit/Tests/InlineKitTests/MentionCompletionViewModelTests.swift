@@ -14,7 +14,7 @@ struct MentionCompletionViewModelTests {
     ])
 
     model.filter(with: "bo")
-    #expect(model.items.map(\.user.id) == [2])
+    #expect(userIds(model.items) == [2])
 
     model.updateParticipants([
       user(1, firstName: "Alice"),
@@ -24,7 +24,7 @@ struct MentionCompletionViewModelTests {
     ])
 
     #expect(model.query == "bo")
-    #expect(model.items.map(\.user.id) == [2, 4])
+    #expect(userIds(model.items) == [2, 4])
   }
 
   @Test("filters pending and current users")
@@ -36,7 +36,7 @@ struct MentionCompletionViewModelTests {
       user(3, firstName: "Pending", pendingSetup: true),
     ])
 
-    #expect(model.items.map(\.user.id) == [1])
+    #expect(userIds(model.items) == [1])
   }
 
   @Test("search matches usernames and compact names")
@@ -48,10 +48,10 @@ struct MentionCompletionViewModelTests {
     ])
 
     model.filter(with: "maryj")
-    #expect(model.items.map(\.user.id) == [1])
+    #expect(userIds(model.items) == [1])
 
     model.filter(with: "ada")
-    #expect(model.items.map(\.user.id) == [2])
+    #expect(userIds(model.items) == [2])
   }
 
   @Test("bare at shows participants and space members before direct chats")
@@ -63,10 +63,10 @@ struct MentionCompletionViewModelTests {
       candidate(1, firstName: "Alice", source: .participant),
     ])
 
-    #expect(model.items.map(\.user.id) == [1, 2])
+    #expect(userIds(model.items) == [1, 2])
 
     model.filter(with: "char")
-    #expect(model.items.map(\.user.id) == [3])
+    #expect(userIds(model.items) == [3])
   }
 
   @Test("direct chat candidates require a last message")
@@ -79,7 +79,7 @@ struct MentionCompletionViewModelTests {
     ])
 
     model.filter(with: "ala")
-    #expect(model.items.map(\.user.id) == [3])
+    #expect(userIds(model.items) == [3])
   }
 
   @Test("participant source wins over lower priority duplicates")
@@ -90,7 +90,7 @@ struct MentionCompletionViewModelTests {
       candidate(1, firstName: "Alice", source: .participant),
     ])
 
-    #expect(model.items.map(\.user.id) == [1])
+    #expect(userIds(model.items) == [1])
   }
 
   @Test("exact query match accepts first name username and diacritics")
@@ -133,5 +133,9 @@ struct MentionCompletionViewModelTests {
       source: source,
       lastMsgId: lastMsgId
     )
+  }
+
+  private func userIds(_ items: [MentionCompletionItem]) -> [Int64] {
+    items.compactMap { $0.userInfo?.user.id }
   }
 }

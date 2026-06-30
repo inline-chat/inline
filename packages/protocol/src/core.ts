@@ -1096,6 +1096,12 @@ export interface MessageEntity {
          */
         threadTitle: MessageEntity_MessageEntityThreadTitle;
     } | {
+        oneofKind: "groupMention";
+        /**
+         * @generated from protobuf field: MessageEntity.MessageEntityGroupMention group_mention = 9;
+         */
+        groupMention: MessageEntity_MessageEntityGroupMention;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1107,6 +1113,15 @@ export interface MessageEntity_MessageEntityMention {
      * @generated from protobuf field: int64 user_id = 1;
      */
     userId: bigint;
+}
+/**
+ * @generated from protobuf message MessageEntity.MessageEntityGroupMention
+ */
+export interface MessageEntity_MessageEntityGroupMention {
+    /**
+     * @generated from protobuf field: int64 group_id = 1;
+     */
+    groupId: bigint;
 }
 /**
  * @generated from protobuf message MessageEntity.MessageEntityTextUrl
@@ -1207,7 +1222,11 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_BOT_COMMAND = 13;
      */
-    BOT_COMMAND = 13
+    BOT_COMMAND = 13,
+    /**
+     * @generated from protobuf enum value: TYPE_GROUP_MENTION = 14;
+     */
+    GROUP_MENTION = 14
 }
 /**
  * @generated from protobuf message MessageReactions
@@ -1339,6 +1358,43 @@ export interface Space {
      * @generated from protobuf field: optional bool is_public = 5;
      */
     isPublic?: boolean;
+}
+/**
+ * @generated from protobuf message UserGroup
+ */
+export interface UserGroup {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: int64 space_id = 2;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: string name = 3;
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: optional string description = 4;
+     */
+    description?: string;
+    /**
+     * @generated from protobuf field: int32 member_count = 5;
+     */
+    memberCount: number;
+    /**
+     * @generated from protobuf field: repeated int64 user_ids = 6;
+     */
+    userIds: bigint[];
+    /**
+     * @generated from protobuf field: bool current_user_is_member = 7;
+     */
+    currentUserIsMember: boolean;
+    /**
+     * @generated from protobuf field: int64 date = 8;
+     */
+    date: bigint;
 }
 /**
  * Add reaction input
@@ -2654,6 +2710,30 @@ export interface RpcCall {
          */
         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput;
     } | {
+        oneofKind: "getUserGroups";
+        /**
+         * @generated from protobuf field: GetUserGroupsInput getUserGroups = 69;
+         */
+        getUserGroups: GetUserGroupsInput;
+    } | {
+        oneofKind: "createUserGroup";
+        /**
+         * @generated from protobuf field: CreateUserGroupInput createUserGroup = 70;
+         */
+        createUserGroup: CreateUserGroupInput;
+    } | {
+        oneofKind: "updateUserGroup";
+        /**
+         * @generated from protobuf field: UpdateUserGroupInput updateUserGroup = 71;
+         */
+        updateUserGroup: UpdateUserGroupInput;
+    } | {
+        oneofKind: "deleteUserGroup";
+        /**
+         * @generated from protobuf field: DeleteUserGroupInput deleteUserGroup = 72;
+         */
+        deleteUserGroup: DeleteUserGroupInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3070,6 +3150,30 @@ export interface RpcResult {
          * @generated from protobuf field: RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
          */
         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult;
+    } | {
+        oneofKind: "getUserGroups";
+        /**
+         * @generated from protobuf field: GetUserGroupsResult getUserGroups = 69;
+         */
+        getUserGroups: GetUserGroupsResult;
+    } | {
+        oneofKind: "createUserGroup";
+        /**
+         * @generated from protobuf field: CreateUserGroupResult createUserGroup = 70;
+         */
+        createUserGroup: CreateUserGroupResult;
+    } | {
+        oneofKind: "updateUserGroup";
+        /**
+         * @generated from protobuf field: UpdateUserGroupResult updateUserGroup = 71;
+         */
+        updateUserGroup: UpdateUserGroupResult;
+    } | {
+        oneofKind: "deleteUserGroup";
+        /**
+         * @generated from protobuf field: DeleteUserGroupResult deleteUserGroup = 72;
+         */
+        deleteUserGroup: DeleteUserGroupResult;
     } | {
         oneofKind: undefined;
     };
@@ -5173,9 +5277,13 @@ export interface SearchMessagesResult {
  */
 export interface InputChatParticipant {
     /**
-     * @generated from protobuf field: int64 user_id = 1;
+     * @generated from protobuf field: optional int64 user_id = 1;
      */
-    userId: bigint;
+    userId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 group_id = 2;
+     */
+    groupId?: bigint;
 }
 /**
  * @generated from protobuf message ReserveChatIdsInput
@@ -5347,6 +5455,102 @@ export interface GetSpaceMembersResult {
      * @generated from protobuf field: repeated User users = 2;
      */
     users: User[];
+}
+/**
+ * @generated from protobuf message GetUserGroupsInput
+ */
+export interface GetUserGroupsInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetUserGroupsResult
+ */
+export interface GetUserGroupsResult {
+    /**
+     * @generated from protobuf field: repeated UserGroup groups = 1;
+     */
+    groups: UserGroup[];
+    /**
+     * @generated from protobuf field: repeated User users = 2;
+     */
+    users: User[];
+}
+/**
+ * @generated from protobuf message CreateUserGroupInput
+ */
+export interface CreateUserGroupInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: string name = 2;
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: optional string description = 3;
+     */
+    description?: string;
+    /**
+     * @generated from protobuf field: repeated int64 user_ids = 4;
+     */
+    userIds: bigint[];
+}
+/**
+ * @generated from protobuf message CreateUserGroupResult
+ */
+export interface CreateUserGroupResult {
+    /**
+     * @generated from protobuf field: UserGroup group = 1;
+     */
+    group?: UserGroup;
+}
+/**
+ * @generated from protobuf message UpdateUserGroupInput
+ */
+export interface UpdateUserGroupInput {
+    /**
+     * @generated from protobuf field: int64 group_id = 1;
+     */
+    groupId: bigint;
+    /**
+     * @generated from protobuf field: string name = 2;
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: optional string description = 3;
+     */
+    description?: string;
+    /**
+     * @generated from protobuf field: repeated int64 user_ids = 4;
+     */
+    userIds: bigint[];
+}
+/**
+ * @generated from protobuf message UpdateUserGroupResult
+ */
+export interface UpdateUserGroupResult {
+    /**
+     * @generated from protobuf field: UserGroup group = 1;
+     */
+    group?: UserGroup;
+}
+/**
+ * @generated from protobuf message DeleteUserGroupInput
+ */
+export interface DeleteUserGroupInput {
+    /**
+     * @generated from protobuf field: int64 group_id = 1;
+     */
+    groupId: bigint;
+}
+/**
+ * @generated from protobuf message DeleteUserGroupResult
+ */
+export interface DeleteUserGroupResult {
 }
 /**
  * / ------------------------------
@@ -5588,6 +5792,18 @@ export interface Update {
          * @generated from protobuf field: UpdateUpdatedUser updated_user = 40;
          */
         updatedUser: UpdateUpdatedUser;
+    } | {
+        oneofKind: "participantGroupAdd";
+        /**
+         * @generated from protobuf field: UpdateChatParticipantGroupAdd participant_group_add = 41;
+         */
+        participantGroupAdd: UpdateChatParticipantGroupAdd;
+    } | {
+        oneofKind: "participantGroupDelete";
+        /**
+         * @generated from protobuf field: UpdateChatParticipantGroupDelete participant_group_delete = 42;
+         */
+        participantGroupDelete: UpdateChatParticipantGroupDelete;
     } | {
         oneofKind: undefined;
     };
@@ -6311,6 +6527,19 @@ export interface ChatParticipant {
     date: bigint;
 }
 /**
+ * @generated from protobuf message ChatParticipantGroup
+ */
+export interface ChatParticipantGroup {
+    /**
+     * @generated from protobuf field: int64 group_id = 1;
+     */
+    groupId: bigint;
+    /**
+     * @generated from protobuf field: int64 date = 2;
+     */
+    date: bigint;
+}
+/**
  * @generated from protobuf message UpdateChatParticipantAdd
  */
 export interface UpdateChatParticipantAdd {
@@ -6335,6 +6564,32 @@ export interface UpdateChatParticipantDelete {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+}
+/**
+ * @generated from protobuf message UpdateChatParticipantGroupAdd
+ */
+export interface UpdateChatParticipantGroupAdd {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatParticipantGroup group_participant = 2;
+     */
+    groupParticipant?: ChatParticipantGroup;
+}
+/**
+ * @generated from protobuf message UpdateChatParticipantGroupDelete
+ */
+export interface UpdateChatParticipantGroupDelete {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 group_id = 2;
+     */
+    groupId: bigint;
 }
 /**
  * @generated from protobuf message UserStatus
@@ -6515,6 +6770,14 @@ export interface GetChatParticipantsResult {
      * @generated from protobuf field: repeated User users = 2;
      */
     users: User[];
+    /**
+     * @generated from protobuf field: repeated ChatParticipantGroup group_participants = 3;
+     */
+    groupParticipants: ChatParticipantGroup[];
+    /**
+     * @generated from protobuf field: repeated UserGroup groups = 4;
+     */
+    groups: UserGroup[];
 }
 /**
  * @generated from protobuf message AddChatParticipantInput
@@ -6525,18 +6788,30 @@ export interface AddChatParticipantInput {
      */
     chatId: bigint;
     /**
-     * @generated from protobuf field: int64 user_id = 2;
+     * @generated from protobuf field: optional int64 user_id = 2;
      */
-    userId: bigint;
+    userId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 group_id = 3;
+     */
+    groupId?: bigint;
 }
 /**
  * @generated from protobuf message AddChatParticipantResult
  */
 export interface AddChatParticipantResult {
     /**
-     * @generated from protobuf field: ChatParticipant participant = 1;
+     * @generated from protobuf field: optional ChatParticipant participant = 1;
      */
     participant?: ChatParticipant;
+    /**
+     * @generated from protobuf field: optional ChatParticipantGroup group_participant = 2;
+     */
+    groupParticipant?: ChatParticipantGroup;
+    /**
+     * @generated from protobuf field: optional UserGroup group = 3;
+     */
+    group?: UserGroup;
 }
 /**
  * @generated from protobuf message RemoveChatParticipantInput
@@ -6547,9 +6822,13 @@ export interface RemoveChatParticipantInput {
      */
     chatId: bigint;
     /**
-     * @generated from protobuf field: int64 user_id = 2;
+     * @generated from protobuf field: optional int64 user_id = 2;
      */
-    userId: bigint;
+    userId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 group_id = 3;
+     */
+    groupId?: bigint;
 }
 /**
  * @generated from protobuf message RemoveChatParticipantResult
@@ -6979,7 +7258,23 @@ export enum Method {
     /**
      * @generated from protobuf enum value: REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
      */
-    REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67
+    REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67,
+    /**
+     * @generated from protobuf enum value: GET_USER_GROUPS = 68;
+     */
+    GET_USER_GROUPS = 68,
+    /**
+     * @generated from protobuf enum value: CREATE_USER_GROUP = 69;
+     */
+    CREATE_USER_GROUP = 69,
+    /**
+     * @generated from protobuf enum value: UPDATE_USER_GROUP = 70;
+     */
+    UPDATE_USER_GROUP = 70,
+    /**
+     * @generated from protobuf enum value: DELETE_USER_GROUP = 71;
+     */
+    DELETE_USER_GROUP = 71
 }
 /**
  * @generated from protobuf enum UsernameAvailability
@@ -9572,7 +9867,8 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
             { no: 5, name: "text_url", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityTextUrl },
             { no: 6, name: "pre", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityPre },
             { no: 7, name: "thread", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThread },
-            { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle }
+            { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle },
+            { no: 9, name: "group_mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityGroupMention }
         ]);
     }
     create(value?: PartialMessage<MessageEntity>): MessageEntity {
@@ -9629,6 +9925,12 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
                         threadTitle: MessageEntity_MessageEntityThreadTitle.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).threadTitle)
                     };
                     break;
+                case /* MessageEntity.MessageEntityGroupMention group_mention */ 9:
+                    message.entity = {
+                        oneofKind: "groupMention",
+                        groupMention: MessageEntity_MessageEntityGroupMention.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).groupMention)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9665,6 +9967,9 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
         /* MessageEntity.MessageEntityThreadTitle thread_title = 8; */
         if (message.entity.oneofKind === "threadTitle")
             MessageEntity_MessageEntityThreadTitle.internalBinaryWrite(message.entity.threadTitle, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* MessageEntity.MessageEntityGroupMention group_mention = 9; */
+        if (message.entity.oneofKind === "groupMention")
+            MessageEntity_MessageEntityGroupMention.internalBinaryWrite(message.entity.groupMention, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9722,6 +10027,53 @@ class MessageEntity_MessageEntityMention$Type extends MessageType<MessageEntity_
  * @generated MessageType for protobuf message MessageEntity.MessageEntityMention
  */
 export const MessageEntity_MessageEntityMention = new MessageEntity_MessageEntityMention$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityGroupMention$Type extends MessageType<MessageEntity_MessageEntityGroupMention> {
+    constructor() {
+        super("MessageEntity.MessageEntityGroupMention", [
+            { no: 1, name: "group_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityGroupMention>): MessageEntity_MessageEntityGroupMention {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.groupId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityGroupMention>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityGroupMention): MessageEntity_MessageEntityGroupMention {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 group_id */ 1:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityGroupMention, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 group_id = 1; */
+        if (message.groupId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityGroupMention
+ */
+export const MessageEntity_MessageEntityGroupMention = new MessageEntity_MessageEntityGroupMention$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageEntity_MessageEntityTextUrl$Type extends MessageType<MessageEntity_MessageEntityTextUrl> {
     constructor() {
@@ -10208,6 +10560,116 @@ class Space$Type extends MessageType<Space> {
  * @generated MessageType for protobuf message Space
  */
 export const Space = new Space$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UserGroup$Type extends MessageType<UserGroup> {
+    constructor() {
+        super("UserGroup", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "member_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "current_user_is_member", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 8, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UserGroup>): UserGroup {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.spaceId = 0n;
+        message.name = "";
+        message.memberCount = 0;
+        message.userIds = [];
+        message.currentUserIsMember = false;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UserGroup>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UserGroup): UserGroup {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* string name */ 3:
+                    message.name = reader.string();
+                    break;
+                case /* optional string description */ 4:
+                    message.description = reader.string();
+                    break;
+                case /* int32 member_count */ 5:
+                    message.memberCount = reader.int32();
+                    break;
+                case /* repeated int64 user_ids */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.userIds.push(reader.int64().toBigInt());
+                    else
+                        message.userIds.push(reader.int64().toBigInt());
+                    break;
+                case /* bool current_user_is_member */ 7:
+                    message.currentUserIsMember = reader.bool();
+                    break;
+                case /* int64 date */ 8:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UserGroup, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* int64 space_id = 2; */
+        if (message.spaceId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
+        /* string name = 3; */
+        if (message.name !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.name);
+        /* optional string description = 4; */
+        if (message.description !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.description);
+        /* int32 member_count = 5; */
+        if (message.memberCount !== 0)
+            writer.tag(5, WireType.Varint).int32(message.memberCount);
+        /* repeated int64 user_ids = 6; */
+        if (message.userIds.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.userIds.length; i++)
+                writer.int64(message.userIds[i]);
+            writer.join();
+        }
+        /* bool current_user_is_member = 7; */
+        if (message.currentUserIsMember !== false)
+            writer.tag(7, WireType.Varint).bool(message.currentUserIsMember);
+        /* int64 date = 8; */
+        if (message.date !== 0n)
+            writer.tag(8, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UserGroup
+ */
+export const UserGroup = new UserGroup$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class AddReactionInput$Type extends MessageType<AddReactionInput> {
     constructor() {
@@ -11977,7 +12439,11 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 65, name: "updateProfile", kind: "message", oneof: "input", T: () => UpdateProfileInput },
             { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "input", T: () => GetSpaceUrlPreviewExclusionsInput },
             { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => AddSpaceUrlPreviewExclusionInput },
-            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => RemoveSpaceUrlPreviewExclusionInput }
+            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => RemoveSpaceUrlPreviewExclusionInput },
+            { no: 69, name: "getUserGroups", kind: "message", oneof: "input", T: () => GetUserGroupsInput },
+            { no: 70, name: "createUserGroup", kind: "message", oneof: "input", T: () => CreateUserGroupInput },
+            { no: 71, name: "updateUserGroup", kind: "message", oneof: "input", T: () => UpdateUserGroupInput },
+            { no: 72, name: "deleteUserGroup", kind: "message", oneof: "input", T: () => DeleteUserGroupInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -12398,6 +12864,30 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).removeSpaceUrlPreviewExclusion)
                     };
                     break;
+                case /* GetUserGroupsInput getUserGroups */ 69:
+                    message.input = {
+                        oneofKind: "getUserGroups",
+                        getUserGroups: GetUserGroupsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getUserGroups)
+                    };
+                    break;
+                case /* CreateUserGroupInput createUserGroup */ 70:
+                    message.input = {
+                        oneofKind: "createUserGroup",
+                        createUserGroup: CreateUserGroupInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createUserGroup)
+                    };
+                    break;
+                case /* UpdateUserGroupInput updateUserGroup */ 71:
+                    message.input = {
+                        oneofKind: "updateUserGroup",
+                        updateUserGroup: UpdateUserGroupInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateUserGroup)
+                    };
+                    break;
+                case /* DeleteUserGroupInput deleteUserGroup */ 72:
+                    message.input = {
+                        oneofKind: "deleteUserGroup",
+                        deleteUserGroup: DeleteUserGroupInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteUserGroup)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12614,6 +13104,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68; */
         if (message.input.oneofKind === "removeSpaceUrlPreviewExclusion")
             RemoveSpaceUrlPreviewExclusionInput.internalBinaryWrite(message.input.removeSpaceUrlPreviewExclusion, writer.tag(68, WireType.LengthDelimited).fork(), options).join();
+        /* GetUserGroupsInput getUserGroups = 69; */
+        if (message.input.oneofKind === "getUserGroups")
+            GetUserGroupsInput.internalBinaryWrite(message.input.getUserGroups, writer.tag(69, WireType.LengthDelimited).fork(), options).join();
+        /* CreateUserGroupInput createUserGroup = 70; */
+        if (message.input.oneofKind === "createUserGroup")
+            CreateUserGroupInput.internalBinaryWrite(message.input.createUserGroup, writer.tag(70, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUserGroupInput updateUserGroup = 71; */
+        if (message.input.oneofKind === "updateUserGroup")
+            UpdateUserGroupInput.internalBinaryWrite(message.input.updateUserGroup, writer.tag(71, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteUserGroupInput deleteUserGroup = 72; */
+        if (message.input.oneofKind === "deleteUserGroup")
+            DeleteUserGroupInput.internalBinaryWrite(message.input.deleteUserGroup, writer.tag(72, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12695,7 +13197,11 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 65, name: "updateProfile", kind: "message", oneof: "result", T: () => UpdateProfileResult },
             { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "result", T: () => GetSpaceUrlPreviewExclusionsResult },
             { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => AddSpaceUrlPreviewExclusionResult },
-            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => RemoveSpaceUrlPreviewExclusionResult }
+            { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => RemoveSpaceUrlPreviewExclusionResult },
+            { no: 69, name: "getUserGroups", kind: "message", oneof: "result", T: () => GetUserGroupsResult },
+            { no: 70, name: "createUserGroup", kind: "message", oneof: "result", T: () => CreateUserGroupResult },
+            { no: 71, name: "updateUserGroup", kind: "message", oneof: "result", T: () => UpdateUserGroupResult },
+            { no: 72, name: "deleteUserGroup", kind: "message", oneof: "result", T: () => DeleteUserGroupResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -13116,6 +13622,30 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).removeSpaceUrlPreviewExclusion)
                     };
                     break;
+                case /* GetUserGroupsResult getUserGroups */ 69:
+                    message.result = {
+                        oneofKind: "getUserGroups",
+                        getUserGroups: GetUserGroupsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getUserGroups)
+                    };
+                    break;
+                case /* CreateUserGroupResult createUserGroup */ 70:
+                    message.result = {
+                        oneofKind: "createUserGroup",
+                        createUserGroup: CreateUserGroupResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createUserGroup)
+                    };
+                    break;
+                case /* UpdateUserGroupResult updateUserGroup */ 71:
+                    message.result = {
+                        oneofKind: "updateUserGroup",
+                        updateUserGroup: UpdateUserGroupResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateUserGroup)
+                    };
+                    break;
+                case /* DeleteUserGroupResult deleteUserGroup */ 72:
+                    message.result = {
+                        oneofKind: "deleteUserGroup",
+                        deleteUserGroup: DeleteUserGroupResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteUserGroup)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13332,6 +13862,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68; */
         if (message.result.oneofKind === "removeSpaceUrlPreviewExclusion")
             RemoveSpaceUrlPreviewExclusionResult.internalBinaryWrite(message.result.removeSpaceUrlPreviewExclusion, writer.tag(68, WireType.LengthDelimited).fork(), options).join();
+        /* GetUserGroupsResult getUserGroups = 69; */
+        if (message.result.oneofKind === "getUserGroups")
+            GetUserGroupsResult.internalBinaryWrite(message.result.getUserGroups, writer.tag(69, WireType.LengthDelimited).fork(), options).join();
+        /* CreateUserGroupResult createUserGroup = 70; */
+        if (message.result.oneofKind === "createUserGroup")
+            CreateUserGroupResult.internalBinaryWrite(message.result.createUserGroup, writer.tag(70, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUserGroupResult updateUserGroup = 71; */
+        if (message.result.oneofKind === "updateUserGroup")
+            UpdateUserGroupResult.internalBinaryWrite(message.result.updateUserGroup, writer.tag(71, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteUserGroupResult deleteUserGroup = 72; */
+        if (message.result.oneofKind === "deleteUserGroup")
+            DeleteUserGroupResult.internalBinaryWrite(message.result.deleteUserGroup, writer.tag(72, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20201,12 +20743,12 @@ export const SearchMessagesResult = new SearchMessagesResult$Type();
 class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
     constructor() {
         super("InputChatParticipant", [
-            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<InputChatParticipant>): InputChatParticipant {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.userId = 0n;
         if (value !== undefined)
             reflectionMergePartial<InputChatParticipant>(this, message, value);
         return message;
@@ -20216,8 +20758,11 @@ class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int64 user_id */ 1:
+                case /* optional int64 user_id */ 1:
                     message.userId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 group_id */ 2:
+                    message.groupId = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -20231,9 +20776,12 @@ class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
         return message;
     }
     internalBinaryWrite(message: InputChatParticipant, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int64 user_id = 1; */
-        if (message.userId !== 0n)
+        /* optional int64 user_id = 1; */
+        if (message.userId !== undefined)
             writer.tag(1, WireType.Varint).int64(message.userId);
+        /* optional int64 group_id = 2; */
+        if (message.groupId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.groupId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20782,6 +21330,428 @@ class GetSpaceMembersResult$Type extends MessageType<GetSpaceMembersResult> {
  */
 export const GetSpaceMembersResult = new GetSpaceMembersResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class GetUserGroupsInput$Type extends MessageType<GetUserGroupsInput> {
+    constructor() {
+        super("GetUserGroupsInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetUserGroupsInput>): GetUserGroupsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetUserGroupsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetUserGroupsInput): GetUserGroupsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetUserGroupsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetUserGroupsInput
+ */
+export const GetUserGroupsInput = new GetUserGroupsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetUserGroupsResult$Type extends MessageType<GetUserGroupsResult> {
+    constructor() {
+        super("GetUserGroupsResult", [
+            { no: 1, name: "groups", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => UserGroup },
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<GetUserGroupsResult>): GetUserGroupsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.groups = [];
+        message.users = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetUserGroupsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetUserGroupsResult): GetUserGroupsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated UserGroup groups */ 1:
+                    message.groups.push(UserGroup.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated User users */ 2:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetUserGroupsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated UserGroup groups = 1; */
+        for (let i = 0; i < message.groups.length; i++)
+            UserGroup.internalBinaryWrite(message.groups[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 2; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetUserGroupsResult
+ */
+export const GetUserGroupsResult = new GetUserGroupsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateUserGroupInput$Type extends MessageType<CreateUserGroupInput> {
+    constructor() {
+        super("CreateUserGroupInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateUserGroupInput>): CreateUserGroupInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.name = "";
+        message.userIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<CreateUserGroupInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateUserGroupInput): CreateUserGroupInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* string name */ 2:
+                    message.name = reader.string();
+                    break;
+                case /* optional string description */ 3:
+                    message.description = reader.string();
+                    break;
+                case /* repeated int64 user_ids */ 4:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.userIds.push(reader.int64().toBigInt());
+                    else
+                        message.userIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateUserGroupInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* string name = 2; */
+        if (message.name !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.name);
+        /* optional string description = 3; */
+        if (message.description !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.description);
+        /* repeated int64 user_ids = 4; */
+        if (message.userIds.length) {
+            writer.tag(4, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.userIds.length; i++)
+                writer.int64(message.userIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateUserGroupInput
+ */
+export const CreateUserGroupInput = new CreateUserGroupInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateUserGroupResult$Type extends MessageType<CreateUserGroupResult> {
+    constructor() {
+        super("CreateUserGroupResult", [
+            { no: 1, name: "group", kind: "message", T: () => UserGroup }
+        ]);
+    }
+    create(value?: PartialMessage<CreateUserGroupResult>): CreateUserGroupResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<CreateUserGroupResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateUserGroupResult): CreateUserGroupResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* UserGroup group */ 1:
+                    message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateUserGroupResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* UserGroup group = 1; */
+        if (message.group)
+            UserGroup.internalBinaryWrite(message.group, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateUserGroupResult
+ */
+export const CreateUserGroupResult = new CreateUserGroupResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateUserGroupInput$Type extends MessageType<UpdateUserGroupInput> {
+    constructor() {
+        super("UpdateUserGroupInput", [
+            { no: 1, name: "group_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateUserGroupInput>): UpdateUserGroupInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.groupId = 0n;
+        message.name = "";
+        message.userIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateUserGroupInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateUserGroupInput): UpdateUserGroupInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 group_id */ 1:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                case /* string name */ 2:
+                    message.name = reader.string();
+                    break;
+                case /* optional string description */ 3:
+                    message.description = reader.string();
+                    break;
+                case /* repeated int64 user_ids */ 4:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.userIds.push(reader.int64().toBigInt());
+                    else
+                        message.userIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateUserGroupInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 group_id = 1; */
+        if (message.groupId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.groupId);
+        /* string name = 2; */
+        if (message.name !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.name);
+        /* optional string description = 3; */
+        if (message.description !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.description);
+        /* repeated int64 user_ids = 4; */
+        if (message.userIds.length) {
+            writer.tag(4, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.userIds.length; i++)
+                writer.int64(message.userIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateUserGroupInput
+ */
+export const UpdateUserGroupInput = new UpdateUserGroupInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateUserGroupResult$Type extends MessageType<UpdateUserGroupResult> {
+    constructor() {
+        super("UpdateUserGroupResult", [
+            { no: 1, name: "group", kind: "message", T: () => UserGroup }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateUserGroupResult>): UpdateUserGroupResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateUserGroupResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateUserGroupResult): UpdateUserGroupResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* UserGroup group */ 1:
+                    message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateUserGroupResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* UserGroup group = 1; */
+        if (message.group)
+            UserGroup.internalBinaryWrite(message.group, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateUserGroupResult
+ */
+export const UpdateUserGroupResult = new UpdateUserGroupResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteUserGroupInput$Type extends MessageType<DeleteUserGroupInput> {
+    constructor() {
+        super("DeleteUserGroupInput", [
+            { no: 1, name: "group_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteUserGroupInput>): DeleteUserGroupInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.groupId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<DeleteUserGroupInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteUserGroupInput): DeleteUserGroupInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 group_id */ 1:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteUserGroupInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 group_id = 1; */
+        if (message.groupId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteUserGroupInput
+ */
+export const DeleteUserGroupInput = new DeleteUserGroupInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteUserGroupResult$Type extends MessageType<DeleteUserGroupResult> {
+    constructor() {
+        super("DeleteUserGroupResult", []);
+    }
+    create(value?: PartialMessage<DeleteUserGroupResult>): DeleteUserGroupResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<DeleteUserGroupResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteUserGroupResult): DeleteUserGroupResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: DeleteUserGroupResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteUserGroupResult
+ */
+export const DeleteUserGroupResult = new DeleteUserGroupResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class Update$Type extends MessageType<Update> {
     constructor() {
         super("Update", [
@@ -20823,7 +21793,9 @@ class Update$Type extends MessageType<Update> {
             { no: 37, name: "clear_chat_history", kind: "message", oneof: "update", T: () => UpdateClearChatHistory },
             { no: 38, name: "bot_presence", kind: "message", oneof: "update", T: () => UpdateBotPresence },
             { no: 39, name: "dialog_follow_mode", kind: "message", oneof: "update", T: () => UpdateDialogFollowMode },
-            { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser }
+            { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser },
+            { no: 41, name: "participant_group_add", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupAdd },
+            { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -21066,6 +22038,18 @@ class Update$Type extends MessageType<Update> {
                         updatedUser: UpdateUpdatedUser.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).updatedUser)
                     };
                     break;
+                case /* UpdateChatParticipantGroupAdd participant_group_add */ 41:
+                    message.update = {
+                        oneofKind: "participantGroupAdd",
+                        participantGroupAdd: UpdateChatParticipantGroupAdd.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).participantGroupAdd)
+                    };
+                    break;
+                case /* UpdateChatParticipantGroupDelete participant_group_delete */ 42:
+                    message.update = {
+                        oneofKind: "participantGroupDelete",
+                        participantGroupDelete: UpdateChatParticipantGroupDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).participantGroupDelete)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21195,6 +22179,12 @@ class Update$Type extends MessageType<Update> {
         /* UpdateUpdatedUser updated_user = 40; */
         if (message.update.oneofKind === "updatedUser")
             UpdateUpdatedUser.internalBinaryWrite(message.update.updatedUser, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatParticipantGroupAdd participant_group_add = 41; */
+        if (message.update.oneofKind === "participantGroupAdd")
+            UpdateChatParticipantGroupAdd.internalBinaryWrite(message.update.participantGroupAdd, writer.tag(41, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatParticipantGroupDelete participant_group_delete = 42; */
+        if (message.update.oneofKind === "participantGroupDelete")
+            UpdateChatParticipantGroupDelete.internalBinaryWrite(message.update.participantGroupDelete, writer.tag(42, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23309,6 +24299,61 @@ class ChatParticipant$Type extends MessageType<ChatParticipant> {
  */
 export const ChatParticipant = new ChatParticipant$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ChatParticipantGroup$Type extends MessageType<ChatParticipantGroup> {
+    constructor() {
+        super("ChatParticipantGroup", [
+            { no: 1, name: "group_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatParticipantGroup>): ChatParticipantGroup {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.groupId = 0n;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ChatParticipantGroup>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatParticipantGroup): ChatParticipantGroup {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 group_id */ 1:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 2:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatParticipantGroup, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 group_id = 1; */
+        if (message.groupId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.groupId);
+        /* int64 date = 2; */
+        if (message.date !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatParticipantGroup
+ */
+export const ChatParticipantGroup = new ChatParticipantGroup$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class UpdateChatParticipantAdd$Type extends MessageType<UpdateChatParticipantAdd> {
     constructor() {
         super("UpdateChatParticipantAdd", [
@@ -23417,6 +24462,115 @@ class UpdateChatParticipantDelete$Type extends MessageType<UpdateChatParticipant
  * @generated MessageType for protobuf message UpdateChatParticipantDelete
  */
 export const UpdateChatParticipantDelete = new UpdateChatParticipantDelete$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatParticipantGroupAdd$Type extends MessageType<UpdateChatParticipantGroupAdd> {
+    constructor() {
+        super("UpdateChatParticipantGroupAdd", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_participant", kind: "message", T: () => ChatParticipantGroup }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatParticipantGroupAdd>): UpdateChatParticipantGroupAdd {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatParticipantGroupAdd>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatParticipantGroupAdd): UpdateChatParticipantGroupAdd {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatParticipantGroup group_participant */ 2:
+                    message.groupParticipant = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.groupParticipant);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatParticipantGroupAdd, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatParticipantGroup group_participant = 2; */
+        if (message.groupParticipant)
+            ChatParticipantGroup.internalBinaryWrite(message.groupParticipant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatParticipantGroupAdd
+ */
+export const UpdateChatParticipantGroupAdd = new UpdateChatParticipantGroupAdd$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatParticipantGroupDelete$Type extends MessageType<UpdateChatParticipantGroupDelete> {
+    constructor() {
+        super("UpdateChatParticipantGroupDelete", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatParticipantGroupDelete>): UpdateChatParticipantGroupDelete {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.groupId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatParticipantGroupDelete>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatParticipantGroupDelete): UpdateChatParticipantGroupDelete {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 group_id */ 2:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatParticipantGroupDelete, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 group_id = 2; */
+        if (message.groupId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatParticipantGroupDelete
+ */
+export const UpdateChatParticipantGroupDelete = new UpdateChatParticipantGroupDelete$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UserStatus$Type extends MessageType<UserStatus> {
     constructor() {
@@ -23924,13 +25078,17 @@ class GetChatParticipantsResult$Type extends MessageType<GetChatParticipantsResu
     constructor() {
         super("GetChatParticipantsResult", [
             { no: 1, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ChatParticipant },
-            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
+            { no: 3, name: "group_participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ChatParticipantGroup },
+            { no: 4, name: "groups", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => UserGroup }
         ]);
     }
     create(value?: PartialMessage<GetChatParticipantsResult>): GetChatParticipantsResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.participants = [];
         message.users = [];
+        message.groupParticipants = [];
+        message.groups = [];
         if (value !== undefined)
             reflectionMergePartial<GetChatParticipantsResult>(this, message, value);
         return message;
@@ -23945,6 +25103,12 @@ class GetChatParticipantsResult$Type extends MessageType<GetChatParticipantsResu
                     break;
                 case /* repeated User users */ 2:
                     message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated ChatParticipantGroup group_participants */ 3:
+                    message.groupParticipants.push(ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated UserGroup groups */ 4:
+                    message.groups.push(UserGroup.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -23964,6 +25128,12 @@ class GetChatParticipantsResult$Type extends MessageType<GetChatParticipantsResu
         /* repeated User users = 2; */
         for (let i = 0; i < message.users.length; i++)
             User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated ChatParticipantGroup group_participants = 3; */
+        for (let i = 0; i < message.groupParticipants.length; i++)
+            ChatParticipantGroup.internalBinaryWrite(message.groupParticipants[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* repeated UserGroup groups = 4; */
+        for (let i = 0; i < message.groups.length; i++)
+            UserGroup.internalBinaryWrite(message.groups[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23979,13 +25149,13 @@ class AddChatParticipantInput$Type extends MessageType<AddChatParticipantInput> 
     constructor() {
         super("AddChatParticipantInput", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "group_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<AddChatParticipantInput>): AddChatParticipantInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
-        message.userId = 0n;
         if (value !== undefined)
             reflectionMergePartial<AddChatParticipantInput>(this, message, value);
         return message;
@@ -23998,8 +25168,11 @@ class AddChatParticipantInput$Type extends MessageType<AddChatParticipantInput> 
                 case /* int64 chat_id */ 1:
                     message.chatId = reader.int64().toBigInt();
                     break;
-                case /* int64 user_id */ 2:
+                case /* optional int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 group_id */ 3:
+                    message.groupId = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -24016,9 +25189,12 @@ class AddChatParticipantInput$Type extends MessageType<AddChatParticipantInput> 
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
-        /* int64 user_id = 2; */
-        if (message.userId !== 0n)
+        /* optional int64 user_id = 2; */
+        if (message.userId !== undefined)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* optional int64 group_id = 3; */
+        if (message.groupId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.groupId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24033,7 +25209,9 @@ export const AddChatParticipantInput = new AddChatParticipantInput$Type();
 class AddChatParticipantResult$Type extends MessageType<AddChatParticipantResult> {
     constructor() {
         super("AddChatParticipantResult", [
-            { no: 1, name: "participant", kind: "message", T: () => ChatParticipant }
+            { no: 1, name: "participant", kind: "message", T: () => ChatParticipant },
+            { no: 2, name: "group_participant", kind: "message", T: () => ChatParticipantGroup },
+            { no: 3, name: "group", kind: "message", T: () => UserGroup }
         ]);
     }
     create(value?: PartialMessage<AddChatParticipantResult>): AddChatParticipantResult {
@@ -24047,8 +25225,14 @@ class AddChatParticipantResult$Type extends MessageType<AddChatParticipantResult
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* ChatParticipant participant */ 1:
+                case /* optional ChatParticipant participant */ 1:
                     message.participant = ChatParticipant.internalBinaryRead(reader, reader.uint32(), options, message.participant);
+                    break;
+                case /* optional ChatParticipantGroup group_participant */ 2:
+                    message.groupParticipant = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.groupParticipant);
+                    break;
+                case /* optional UserGroup group */ 3:
+                    message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -24062,9 +25246,15 @@ class AddChatParticipantResult$Type extends MessageType<AddChatParticipantResult
         return message;
     }
     internalBinaryWrite(message: AddChatParticipantResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* ChatParticipant participant = 1; */
+        /* optional ChatParticipant participant = 1; */
         if (message.participant)
             ChatParticipant.internalBinaryWrite(message.participant, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatParticipantGroup group_participant = 2; */
+        if (message.groupParticipant)
+            ChatParticipantGroup.internalBinaryWrite(message.groupParticipant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional UserGroup group = 3; */
+        if (message.group)
+            UserGroup.internalBinaryWrite(message.group, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24080,13 +25270,13 @@ class RemoveChatParticipantInput$Type extends MessageType<RemoveChatParticipantI
     constructor() {
         super("RemoveChatParticipantInput", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "group_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<RemoveChatParticipantInput>): RemoveChatParticipantInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.chatId = 0n;
-        message.userId = 0n;
         if (value !== undefined)
             reflectionMergePartial<RemoveChatParticipantInput>(this, message, value);
         return message;
@@ -24099,8 +25289,11 @@ class RemoveChatParticipantInput$Type extends MessageType<RemoveChatParticipantI
                 case /* int64 chat_id */ 1:
                     message.chatId = reader.int64().toBigInt();
                     break;
-                case /* int64 user_id */ 2:
+                case /* optional int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 group_id */ 3:
+                    message.groupId = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -24117,9 +25310,12 @@ class RemoveChatParticipantInput$Type extends MessageType<RemoveChatParticipantI
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
-        /* int64 user_id = 2; */
-        if (message.userId !== 0n)
+        /* optional int64 user_id = 2; */
+        if (message.userId !== undefined)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* optional int64 group_id = 3; */
+        if (message.groupId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.groupId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

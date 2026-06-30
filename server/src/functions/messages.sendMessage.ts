@@ -3,7 +3,6 @@ import {
   MessageActions,
   MessageAttachment,
   MessageEntities,
-  MessageEntity_Type,
   MessageSendMode,
   Update,
 } from "@inline-chat/protocol/core"
@@ -16,7 +15,7 @@ import { db } from "@in/server/db"
 import { dialogs, messageAttachments, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
-import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -25,7 +24,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
-import { isUserMentioned } from "@in/server/modules/message/helpers"
+import { getMentionedGroupIds, getMentionedUserIds, isUserMentioned } from "@in/server/modules/message/helpers"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { decideNotification } from "@in/server/modules/notifications/decision"
 import {
@@ -36,7 +35,6 @@ import { normalizeGlobalNotificationMode } from "@in/server/modules/notification
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { debugDelay } from "@in/server/utils/helpers/time"
 import { connectionManager } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
@@ -72,6 +70,7 @@ import {
 } from "@in/server/modules/dialogFollow"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
+import { resolveMentionedGroupUserIds } from "@in/server/modules/userGroups"
 
 type Input = {
   peerId: InputPeer
@@ -148,6 +147,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
     throw RealtimeRpcError.InternalError()
   }
+
+  const groupMentionedUserIds = await resolveMentionedGroupUserIds({
+    chat,
+    currentUserId,
+    groupIds: getMentionedGroupIds(entities),
+  })
+  const mentionedUserIds = new Set<number>([
+    ...getMentionedUserIds(entities),
+    ...groupMentionedUserIds,
+  ])
 
   const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
   const previewRoutes = text && !input.skipLinkProcessing && !hasInputUrlPreview
@@ -302,6 +311,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     document: dbFullDocument,
     voice: dbFullVoice,
     sendMode: input.sendMode,
+    mentionedUserIds,
   }
 
   //await debugDelay(5000)
@@ -332,7 +342,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     chat,
     currentUserId,
     replyToMessageId: replyToMsgIdNumber ?? undefined,
-    entities,
+    mentionedUserIds,
     updateGroup,
   })
   if (sidebarOpenUserIds.length > 0) {
@@ -407,6 +417,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     chat,
     unencryptedEntities: entities,
+    mentionedUserIds,
     unencryptedText: text,
     inputPeer,
     sendMode: input.sendMode,
@@ -525,40 +536,17 @@ async function scheduleThreadTitleGenerationWithMessageAttachments(input: {
   })
 }
 
-const getMentionedUserIds = (entities: MessageEntities | undefined): number[] => {
-  if (!entities) {
-    return []
-  }
-
-  const userIds = new Set<number>()
-
-  for (const entity of entities.entities) {
-    if (
-      entity &&
-      entity.type === MessageEntity_Type.MENTION &&
-      entity.entity.oneofKind === "mention"
-    ) {
-      const userId = Number(entity.entity.mention.userId)
-      if (Number.isSafeInteger(userId) && userId > 0) {
-        userIds.add(userId)
-      }
-    }
-  }
-
-  return Array.from(userIds)
-}
-
 const getSidebarOpenUserIds = async ({
   chat,
   currentUserId,
   replyToMessageId,
-  entities,
+  mentionedUserIds,
   updateGroup,
 }: {
   chat: DbChat
   currentUserId: number
   replyToMessageId: number | undefined
-  entities: MessageEntities | undefined
+  mentionedUserIds: ReadonlySet<number>
   updateGroup: UpdateGroup
 }): Promise<number[]> => {
   const eligibleUserIds = new Set(updateGroup.userIds.filter((userId) => userId !== currentUserId))
@@ -570,7 +558,7 @@ const getSidebarOpenUserIds = async ({
     }
   }
 
-  for (const mentionedUserId of getMentionedUserIds(entities)) {
+  for (const mentionedUserId of mentionedUserIds) {
     if (eligibleUserIds.has(mentionedUserId)) {
       openUserIds.add(mentionedUserId)
     }
@@ -703,10 +691,6 @@ const pushUpdates = async ({
 
   if (resolvedUpdateGroup.type === "dmUsers") {
     resolvedUpdateGroup.userIds.forEach((userId) => {
-      const encodingForUserId = userId
-      const encodingForInputPeer: InputPeer =
-        userId === currentUserId ? inputPeer : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
-
       let newMessageUpdate: Update = {
         update: {
           oneofKind: "newMessage",
@@ -949,6 +933,7 @@ type SendPushForMsgInput = {
   chat: DbChat
   unencryptedText: string | undefined
   unencryptedEntities: MessageEntities | undefined
+  mentionedUserIds: ReadonlySet<number>
   inputPeer: InputPeer
   sendMode?: MessageSendMode
 }
@@ -959,7 +944,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
     return
   }
 
-  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, inputPeer } = input
+  const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, inputPeer, mentionedUserIds } = input
   const isNudge = isNudgeMessage({ messageInfo })
   const trimmedText = unencryptedText?.trim()
   const isUrgentNudge = isNudge && trimmedText === "🚨"
@@ -1020,6 +1005,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
             messageInfo,
             messageText,
             messageEntities,
+            mentionedUserIds,
             replyMentionUserIds,
             chat,
             isNudge,
@@ -1049,6 +1035,7 @@ async function sendNotificationToUser({
   messageInfo,
   messageText,
   messageEntities,
+  mentionedUserIds,
   replyMentionUserIds,
   chat,
   isNudge,
@@ -1064,6 +1051,7 @@ async function sendNotificationToUser({
   messageInfo: MessageInfo
   messageText: string | undefined
   messageEntities: MessageEntities | undefined
+  mentionedUserIds: ReadonlySet<number>
   replyMentionUserIds: Set<number>
   chat?: DbChat
   isNudge: boolean
@@ -1086,7 +1074,8 @@ async function sendNotificationToUser({
 
   const isDM = inputPeer.type.oneofKind === "user"
   const isReplyToUser = replyMentionUserIds.has(userId)
-  const isExplicitlyMentioned = messageEntities ? isUserMentioned(messageEntities, userId) : false
+  const isExplicitlyMentioned =
+    mentionedUserIds.has(userId) || (messageEntities ? isUserMentioned(messageEntities, userId, mentionedUserIds) : false)
 
   const decision = decideNotification({
     mode: effectiveMode,

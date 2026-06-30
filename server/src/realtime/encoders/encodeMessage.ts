@@ -75,6 +75,7 @@ export const encodeMessage = ({
   encodingForPeer,
   sendMode,
   replies,
+  mentionedUserIds,
 }: {
   message: EncodableMessage
   encodingForUserId: number
@@ -86,6 +87,7 @@ export const encodeMessage = ({
   voice?: DbFullVoice | undefined
   sendMode?: MessageSendMode
   replies?: MessageReplies
+  mentionedUserIds?: ReadonlySet<number>
 }): Message => {
   // Decrypt
   let text = message.text ? message.text : undefined
@@ -215,7 +217,7 @@ export const encodeMessage = ({
     date: encodeDateStrict(message.date),
     editDate: message.editDate ? encodeDateStrict(message.editDate) : undefined,
     rev: BigInt(message.rev ?? 0),
-    mentioned: entities ? isUserMentioned(entities, encodingForUserId) : false,
+    mentioned: entities ? isUserMentioned(entities, encodingForUserId, mentionedUserIds) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker || undefined,

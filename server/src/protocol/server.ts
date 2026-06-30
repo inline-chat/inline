@@ -20,6 +20,7 @@ import { Space } from "@inline-chat/protocol/core";
 import { Peer } from "@inline-chat/protocol/core";
 import { User } from "@inline-chat/protocol/core";
 import { Member } from "@inline-chat/protocol/core";
+import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
 /**
  * @generated from protobuf message server.ServerUpdate
@@ -221,6 +222,30 @@ export interface ServerUpdate {
          */
         updatedUser: ServerUserUpdateUser;
     } | {
+        oneofKind: "participantGroupAdd";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateParticipantGroupAdd participant_group_add = 34;
+         */
+        participantGroupAdd: ServerChatUpdateParticipantGroupAdd;
+    } | {
+        oneofKind: "participantGroupDelete";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateParticipantGroupDelete participant_group_delete = 35;
+         */
+        participantGroupDelete: ServerChatUpdateParticipantGroupDelete;
+    } | {
+        oneofKind: "userChatParticipantGroupAdd";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateChatParticipantGroupAdd user_chat_participant_group_add = 36;
+         */
+        userChatParticipantGroupAdd: ServerUserUpdateChatParticipantGroupAdd;
+    } | {
+        oneofKind: "userChatParticipantGroupDelete";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete = 37;
+         */
+        userChatParticipantGroupDelete: ServerUserUpdateChatParticipantGroupDelete;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -363,6 +388,36 @@ export interface ServerChatUpdateParticipantAdd {
      * @generated from protobuf field: ChatParticipant participant = 2;
      */
     participant?: ChatParticipant;
+}
+/**
+ * Update for a chat when a user group participant grant is added
+ *
+ * @generated from protobuf message server.ServerChatUpdateParticipantGroupAdd
+ */
+export interface ServerChatUpdateParticipantGroupAdd {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatParticipantGroup group_participant = 2;
+     */
+    groupParticipant?: ChatParticipantGroup;
+}
+/**
+ * Update for a chat when a user group participant grant is removed
+ *
+ * @generated from protobuf message server.ServerChatUpdateParticipantGroupDelete
+ */
+export interface ServerChatUpdateParticipantGroupDelete {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 group_id = 2;
+     */
+    groupId: bigint;
 }
 /**
  * Update for a chat when visibility changes
@@ -578,6 +633,36 @@ export interface ServerUserUpdateChatParticipantAdd {
      * @generated from protobuf field: ChatParticipant participant = 2;
      */
     participant?: ChatParticipant;
+}
+/**
+ * Update for a user when a group granted them chat access
+ *
+ * @generated from protobuf message server.ServerUserUpdateChatParticipantGroupAdd
+ */
+export interface ServerUserUpdateChatParticipantGroupAdd {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatParticipantGroup group_participant = 2;
+     */
+    groupParticipant?: ChatParticipantGroup;
+}
+/**
+ * Update for a user when a group chat access grant was removed
+ *
+ * @generated from protobuf message server.ServerUserUpdateChatParticipantGroupDelete
+ */
+export interface ServerUserUpdateChatParticipantGroupDelete {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 group_id = 2;
+     */
+    groupId: bigint;
 }
 /**
  * Update for a user when a dialog is archived or unarchived
@@ -839,7 +924,11 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 27, name: "clear_chat_history", kind: "message", oneof: "update", T: () => ServerChatUpdateClearHistory },
             { no: 29, name: "message_attachment", kind: "message", oneof: "update", T: () => ServerChatUpdateMessageAttachment },
             { no: 32, name: "user_dialog_follow_mode", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFollowMode },
-            { no: 33, name: "updated_user", kind: "message", oneof: "update", T: () => ServerUserUpdateUser }
+            { no: 33, name: "updated_user", kind: "message", oneof: "update", T: () => ServerUserUpdateUser },
+            { no: 34, name: "participant_group_add", kind: "message", oneof: "update", T: () => ServerChatUpdateParticipantGroupAdd },
+            { no: 35, name: "participant_group_delete", kind: "message", oneof: "update", T: () => ServerChatUpdateParticipantGroupDelete },
+            { no: 36, name: "user_chat_participant_group_add", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupAdd },
+            { no: 37, name: "user_chat_participant_group_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupDelete }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1042,6 +1131,30 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         updatedUser: ServerUserUpdateUser.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).updatedUser)
                     };
                     break;
+                case /* server.ServerChatUpdateParticipantGroupAdd participant_group_add */ 34:
+                    message.update = {
+                        oneofKind: "participantGroupAdd",
+                        participantGroupAdd: ServerChatUpdateParticipantGroupAdd.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).participantGroupAdd)
+                    };
+                    break;
+                case /* server.ServerChatUpdateParticipantGroupDelete participant_group_delete */ 35:
+                    message.update = {
+                        oneofKind: "participantGroupDelete",
+                        participantGroupDelete: ServerChatUpdateParticipantGroupDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).participantGroupDelete)
+                    };
+                    break;
+                case /* server.ServerUserUpdateChatParticipantGroupAdd user_chat_participant_group_add */ 36:
+                    message.update = {
+                        oneofKind: "userChatParticipantGroupAdd",
+                        userChatParticipantGroupAdd: ServerUserUpdateChatParticipantGroupAdd.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatParticipantGroupAdd)
+                    };
+                    break;
+                case /* server.ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete */ 37:
+                    message.update = {
+                        oneofKind: "userChatParticipantGroupDelete",
+                        userChatParticipantGroupDelete: ServerUserUpdateChatParticipantGroupDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatParticipantGroupDelete)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1150,6 +1263,18 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateUser updated_user = 33; */
         if (message.update.oneofKind === "updatedUser")
             ServerUserUpdateUser.internalBinaryWrite(message.update.updatedUser, writer.tag(33, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateParticipantGroupAdd participant_group_add = 34; */
+        if (message.update.oneofKind === "participantGroupAdd")
+            ServerChatUpdateParticipantGroupAdd.internalBinaryWrite(message.update.participantGroupAdd, writer.tag(34, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateParticipantGroupDelete participant_group_delete = 35; */
+        if (message.update.oneofKind === "participantGroupDelete")
+            ServerChatUpdateParticipantGroupDelete.internalBinaryWrite(message.update.participantGroupDelete, writer.tag(35, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateChatParticipantGroupAdd user_chat_participant_group_add = 36; */
+        if (message.update.oneofKind === "userChatParticipantGroupAdd")
+            ServerUserUpdateChatParticipantGroupAdd.internalBinaryWrite(message.update.userChatParticipantGroupAdd, writer.tag(36, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete = 37; */
+        if (message.update.oneofKind === "userChatParticipantGroupDelete")
+            ServerUserUpdateChatParticipantGroupDelete.internalBinaryWrite(message.update.userChatParticipantGroupDelete, writer.tag(37, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1646,6 +1771,115 @@ class ServerChatUpdateParticipantAdd$Type extends MessageType<ServerChatUpdatePa
  * @generated MessageType for protobuf message server.ServerChatUpdateParticipantAdd
  */
 export const ServerChatUpdateParticipantAdd = new ServerChatUpdateParticipantAdd$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateParticipantGroupAdd$Type extends MessageType<ServerChatUpdateParticipantGroupAdd> {
+    constructor() {
+        super("server.ServerChatUpdateParticipantGroupAdd", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_participant", kind: "message", T: () => ChatParticipantGroup }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateParticipantGroupAdd>): ServerChatUpdateParticipantGroupAdd {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateParticipantGroupAdd>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateParticipantGroupAdd): ServerChatUpdateParticipantGroupAdd {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatParticipantGroup group_participant */ 2:
+                    message.groupParticipant = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.groupParticipant);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateParticipantGroupAdd, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatParticipantGroup group_participant = 2; */
+        if (message.groupParticipant)
+            ChatParticipantGroup.internalBinaryWrite(message.groupParticipant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateParticipantGroupAdd
+ */
+export const ServerChatUpdateParticipantGroupAdd = new ServerChatUpdateParticipantGroupAdd$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateParticipantGroupDelete$Type extends MessageType<ServerChatUpdateParticipantGroupDelete> {
+    constructor() {
+        super("server.ServerChatUpdateParticipantGroupDelete", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateParticipantGroupDelete>): ServerChatUpdateParticipantGroupDelete {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.groupId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateParticipantGroupDelete>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateParticipantGroupDelete): ServerChatUpdateParticipantGroupDelete {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 group_id */ 2:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateParticipantGroupDelete, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 group_id = 2; */
+        if (message.groupId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateParticipantGroupDelete
+ */
+export const ServerChatUpdateParticipantGroupDelete = new ServerChatUpdateParticipantGroupDelete$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerChatUpdateVisibility$Type extends MessageType<ServerChatUpdateVisibility> {
     constructor() {
@@ -2361,6 +2595,115 @@ class ServerUserUpdateChatParticipantAdd$Type extends MessageType<ServerUserUpda
  * @generated MessageType for protobuf message server.ServerUserUpdateChatParticipantAdd
  */
 export const ServerUserUpdateChatParticipantAdd = new ServerUserUpdateChatParticipantAdd$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateChatParticipantGroupAdd$Type extends MessageType<ServerUserUpdateChatParticipantGroupAdd> {
+    constructor() {
+        super("server.ServerUserUpdateChatParticipantGroupAdd", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_participant", kind: "message", T: () => ChatParticipantGroup }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateChatParticipantGroupAdd>): ServerUserUpdateChatParticipantGroupAdd {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateChatParticipantGroupAdd>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateChatParticipantGroupAdd): ServerUserUpdateChatParticipantGroupAdd {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatParticipantGroup group_participant */ 2:
+                    message.groupParticipant = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.groupParticipant);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateChatParticipantGroupAdd, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatParticipantGroup group_participant = 2; */
+        if (message.groupParticipant)
+            ChatParticipantGroup.internalBinaryWrite(message.groupParticipant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateChatParticipantGroupAdd
+ */
+export const ServerUserUpdateChatParticipantGroupAdd = new ServerUserUpdateChatParticipantGroupAdd$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateChatParticipantGroupDelete$Type extends MessageType<ServerUserUpdateChatParticipantGroupDelete> {
+    constructor() {
+        super("server.ServerUserUpdateChatParticipantGroupDelete", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateChatParticipantGroupDelete>): ServerUserUpdateChatParticipantGroupDelete {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.groupId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateChatParticipantGroupDelete>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateChatParticipantGroupDelete): ServerUserUpdateChatParticipantGroupDelete {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 group_id */ 2:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateChatParticipantGroupDelete, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 group_id = 2; */
+        if (message.groupId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateChatParticipantGroupDelete
+ */
+export const ServerUserUpdateChatParticipantGroupDelete = new ServerUserUpdateChatParticipantGroupDelete$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateDialogArchived$Type extends MessageType<ServerUserUpdateDialogArchived> {
     constructor() {
