@@ -201,6 +201,10 @@ describe("thread title generation", () => {
     parseCompletion.mockResolvedValue(completion("Launch Checklist 🚀", "🚀"))
 
     const user = await testUtils.createUser("thread-title-user@example.com")
+    const userTimeZone = "Pacific/Honolulu"
+    const expectedToday = formatTestDate(userTimeZone)
+    await db.update(schema.users).set({ timeZone: userTimeZone }).where(eq(schema.users.id, user.id))
+
     const [chat] = await db
       .insert(schema.chats)
       .values({
@@ -242,6 +246,54 @@ describe("thread title generation", () => {
       | undefined
     const systemMessage = request?.messages?.find((message) => message.role === "system")?.content
     expect(systemMessage).toContain("roughly half of the time")
+    expect(systemMessage).toContain("Default to sentence casing")
+    expect(systemMessage).toContain("If the messages themselves are all lowercase")
+    expect(systemMessage).toContain("Prefer 3-10 title words")
+    expect(systemMessage).toContain("allow a longer title")
+    expect(systemMessage).toContain("append today's date at the end in parentheses")
+    expect(systemMessage).toContain(`Today's date is ${expectedToday}`)
+    expect(systemMessage).toContain(`for example: (${expectedToday})`)
+  })
+
+  test("allows generated titles longer than the old short cap", async () => {
+    const longTitle = "Customer onboarding migration checklist and release coordination plan for mobile beta"
+    expect(longTitle.length).toBeGreaterThan(70)
+    parseCompletion.mockResolvedValue(completion(longTitle))
+
+    const user = await testUtils.createUser("long-thread-title-user@example.com")
+    const [chat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: null,
+        publicThread: false,
+        createdBy: user.id,
+      })
+      .returning()
+
+    if (!chat) {
+      throw new Error("Chat not created")
+    }
+
+    await testUtils.addParticipant(chat.id, user.id)
+
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    const result = await generateAndApplyThreadTitle({
+      chatId: chat.id,
+      messageId: 1,
+      text: "Can you prepare the full customer onboarding migration checklist and coordinate the mobile beta release plan?",
+      currentUserId: user.id,
+    })
+
+    expect(result.didUpdate).toBe(true)
+
+    const updated = await db
+      .select({ title: schema.chats.title })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, chat.id))
+      .then((rows) => rows[0])
+
+    expect(updated?.title).toBe(longTitle)
   })
 
   test("ignores invalid generated emoji values", async () => {
@@ -359,6 +411,8 @@ describe("thread title generation", () => {
       entities: undefined,
       currentUserId: user.id,
     })
+    await waitForParseCallCount(1)
+
     maybeScheduleThreadTitleGeneration({
       chat,
       message: { ...textMessage, messageId: 2 },
@@ -401,4 +455,25 @@ async function waitForChatTitle(chatId: number, title: string) {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitForParseCallCount(count: number) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (parseCompletion.mock.calls.length >= count) {
+      return
+    }
+
+    await sleep(10)
+  }
+
+  throw new Error(`Timed out waiting for ${count} title generation call(s)`)
+}
+
+function formatTestDate(timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  }).format(new Date())
 }

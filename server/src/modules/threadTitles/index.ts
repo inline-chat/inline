@@ -5,10 +5,11 @@ import { z } from "zod/v4"
 import { db } from "@in/server/db"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel, type ProcessedMessageAttachment } from "@in/server/db/models/messages"
-import { messageAttachments, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { updateThreadInfo } from "@in/server/functions/messages.updateChatInfo"
 import { openaiClient } from "@in/server/libs/openAI"
 import { Log } from "@in/server/utils/log"
+import { validateIanaTimezone } from "@in/server/utils/validate"
 import { eq } from "drizzle-orm"
 
 const log = new Log("modules.threadTitles")
@@ -16,7 +17,7 @@ const log = new Log("modules.threadTitles")
 const MIN_SOURCE_CHARS = 12
 const MIN_SOURCE_WORDS = 3
 const MAX_SOURCE_CHARS = 1600
-const MAX_TITLE_CHARS = 70
+const MAX_TITLE_CHARS = 100
 const MODEL: ChatModel = "gpt-5.4-mini" as ChatModel
 
 const excludedEntityTypes = new Set<MessageEntity_Type>([
@@ -137,7 +138,7 @@ export async function generateAndApplyThreadTitle(input: GenerateInput): Promise
       return { didUpdate: false }
     }
 
-    const generated = await generateThreadTitle(input.text)
+    const generated = await generateThreadTitle(input.text, input.currentUserId)
     if (!generated) {
       return { didUpdate: false }
     }
@@ -242,11 +243,13 @@ export function getThreadTitleSourceText(input: MaybeScheduleInput): string | un
   return Array.from(sourceText).slice(0, MAX_SOURCE_CHARS).join("")
 }
 
-async function generateThreadTitle(text: string): Promise<GeneratedThreadTitle | undefined> {
+async function generateThreadTitle(text: string, currentUserId: number): Promise<GeneratedThreadTitle | undefined> {
   if (!openaiClient) {
     log.debug("Skipping thread title generation because OpenAI client is not initialized")
     return undefined
   }
+
+  const today = formatTodayForThreadTitle(await getUserTimeZone(currentUserId))
 
   const completion = await openaiClient.chat.completions.parse({
     model: MODEL,
@@ -256,7 +259,7 @@ async function generateThreadTitle(text: string): Promise<GeneratedThreadTitle |
       {
         role: "system",
         content:
-          "Generate a concise, plain chat thread title from the first substantial message and attachment context. Keep emoji out of the title. Optionally return one emoji only when it strongly matches the topic or intent; omit it for ordinary or ambiguous cases, roughly half of the time. No quotes. Prefer 3-7 title words.",
+          `Generate a concise, plain chat thread title from the first substantial message and attachment context. Default to sentence casing, not title case. If the messages themselves are all lowercase, return the title in lowercase. Prefer 3-10 title words, but allow a longer title when that is clearer. Today's date is ${today}. For recurring or common things that benefit from date disambiguation, such as meetings, diaries, journals, standups, check-ins, or daily notes, append today's date at the end in parentheses, for example: (${today}). Keep emoji out of the title. Optionally return one emoji only when it strongly matches the topic or intent; omit it for ordinary or ambiguous cases, roughly half of the time. No quotes.`,
       },
       {
         role: "user",
@@ -303,6 +306,28 @@ function sanitizeEmoji(value: string | null | undefined): string | undefined {
   }
 
   return emoji
+}
+
+async function getUserTimeZone(userId: number): Promise<string | undefined> {
+  const user = await db._query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { timeZone: true },
+  })
+  const timeZone = user?.timeZone?.trim()
+  return timeZone && validateIanaTimezone(timeZone) ? timeZone : undefined
+}
+
+function formatTodayForThreadTitle(timeZone: string | undefined): string {
+  const options: Intl.DateTimeFormatOptions = {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }
+  if (timeZone) {
+    options.timeZone = timeZone
+  }
+
+  return new Intl.DateTimeFormat("en-US", options).format(new Date())
 }
 
 function isSingleEmoji(value: string): boolean {
