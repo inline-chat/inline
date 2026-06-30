@@ -15,6 +15,11 @@ coverage/
 cli/target/
 cli/dist/
 
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
 # Local files
 .DS_Store
 .tmp/

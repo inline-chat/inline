@@ -1,0 +1,132 @@
+name: inline-platform
+label: Inline
+kind: platform
+version: 0.0.1
+description: >
+  Inline platform adapter for Hermes Agent. The adapter runs as a native
+  Hermes Python platform plugin and supervises a local Node sidecar that uses
+  the official Inline realtime SDK for inbound updates, catch-up, outbound
+  sends, uploads, message actions, and presence.
+author: Inline
+requires_env:
+  - name: INLINE_TOKEN
+    description: "Inline bot or user token. Canonical env var; INLINE_BOT_TOKEN, platforms.inline.token, inline.token, and simple ${ENV_NAME} config references are also accepted."
+    prompt: "Inline token"
+    password: true
+optional_env:
+  - name: INLINE_BOT_TOKEN
+    description: "Compatibility alias for INLINE_TOKEN"
+    prompt: "Inline token"
+    password: true
+  - name: INLINE_BASE_URL
+    description: "Inline API base URL (default https://api.inline.chat)"
+    prompt: "Inline API base URL"
+    password: false
+  - name: INLINE_PARSE_MARKDOWN
+    description: "Parse outbound Hermes Markdown in Inline messages (true/false, default true)"
+    prompt: "Parse outbound Markdown?"
+    password: false
+  - name: INLINE_SYNC_COMMANDS
+    description: "Sync Hermes slash commands into Inline's native / command menu on gateway connect (true/false, default true)"
+    prompt: "Sync native slash commands?"
+    password: false
+  - name: INLINE_COMMAND_LIMIT
+    description: "Maximum Inline bot commands to register, 1-100 (default 100)"
+    prompt: "Native slash command limit"
+    password: false
+  - name: INLINE_MEDIA_MAX_MB
+    description: "Maximum inbound media download size in MB (default 25)"
+    prompt: "Inbound media max MB"
+    password: false
+  - name: INLINE_UPLOAD_MAX_MB
+    description: "Maximum outbound local upload size in MB (default 300)"
+    prompt: "Outbound upload max MB"
+    password: false
+  - name: INLINE_ALLOWED_USERS
+    description: "Comma-separated Inline user ids allowed to DM the bot"
+    prompt: "Allowed Inline user ids"
+    password: false
+  - name: INLINE_ALLOW_ALL_USERS
+    description: "Allow any sender to trigger the bot"
+    prompt: "Allow all users? (true/false)"
+    password: false
+  - name: INLINE_DM_POLICY
+    description: "DM policy: open, allowlist, or disabled"
+    prompt: "Inline DM policy"
+    password: false
+  - name: INLINE_GROUP_POLICY
+    description: "Group policy: open, allowlist, or disabled"
+    prompt: "Inline group policy"
+    password: false
+  - name: INLINE_GROUP_ALLOW_FROM
+    description: "Comma-separated Inline user ids allowed in groups"
+    prompt: "Allowed group sender ids"
+    password: false
+  - name: INLINE_REQUIRE_MENTION
+    description: "Require a mention/wake word in group chats (default true)"
+    prompt: "Require group mention? (true/false)"
+    password: false
+  - name: INLINE_STRICT_MENTION
+    description: "Require an explicit mention/wake word on every group-chat turn, including replies to the bot (true/false, default false)"
+    prompt: "Require every group turn to mention Hermes? (true/false)"
+    password: false
+  - name: INLINE_ALLOWED_CHATS
+    description: "Comma-separated Inline group/thread chat ids where the bot may respond. Empty means no chat restriction."
+    prompt: "Allowed Inline chat ids"
+    password: false
+  - name: INLINE_FREE_RESPONSE_CHATS
+    description: "Comma-separated Inline group/thread chat ids where no mention is required"
+    prompt: "Free-response Inline chat ids"
+    password: false
+  - name: INLINE_REPLY_THREADS
+    description: "Create/use Inline reply threads for top-level group replies by default (true/false, default true)"
+    prompt: "Reply in Inline threads by default? (true/false)"
+    password: false
+  - name: INLINE_SYSTEM_EVENTS
+    description: "Deliver Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages (true/false, default false)"
+    prompt: "Deliver lifecycle events? (true/false)"
+    password: false
+  - name: INLINE_MENTION_PATTERNS
+    description: "Mention wake-word regexes, JSON list or comma/newline-separated"
+    prompt: "Mention patterns"
+    password: false
+  - name: INLINE_HOME_CHANNEL
+    description: "Default target for cron/standalone sends, for example chat:123"
+    prompt: "Home Inline target"
+    password: false
+  - name: INLINE_HOME_CHANNEL_NAME
+    description: "Human label for the home target"
+    prompt: "Home target display name"
+    password: false
+  - name: INLINE_SIDECAR_PORT
+    description: "Loopback port for the Node sidecar, 1-65535 (default 8794)"
+    prompt: "Sidecar port"
+    password: false
+  - name: INLINE_SIDECAR_BIND
+    description: "Loopback bind host for the Node sidecar (127.0.0.1, localhost, or ::1)"
+    prompt: "Sidecar bind host"
+    password: false
+  - name: INLINE_STATE_PATH
+    description: "Persistent Inline SDK state file path"
+    prompt: "Inline SDK state path"
+    password: false
+  - name: INLINE_SETTINGS_PATH
+    description: "Adapter settings file for per-chat slash-command overrides. Defaults next to INLINE_STATE_PATH."
+    prompt: "Inline adapter settings path"
+    password: false
+  - name: INLINE_RPC_TIMEOUT_MS
+    description: "Inline realtime RPC timeout in milliseconds"
+    prompt: "Inline RPC timeout"
+    password: false
+  - name: INLINE_CONNECT_TIMEOUT_MS
+    description: "Adapter sidecar readiness timeout in milliseconds (default 20000)"
+    prompt: "Sidecar readiness timeout"
+    password: false
+  - name: INLINE_SIDECAR_AUTOSTART
+    description: "Spawn the sidecar on connect (true/false, default true)"
+    prompt: "Auto-start sidecar?"
+    password: false
+  - name: INLINE_NODE_BIN
+    description: "Path to Node.js 20+ binary"
+    prompt: "Node executable path"
+    password: false

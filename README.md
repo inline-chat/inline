@@ -11,13 +11,8 @@
 
 Inline is a fast, lightweight, scalable, and powerful work chat app which enables unprecedented collaboration bandwidth.
 
-## Download
-
-Inline is currently invite-only. If you have access, you can use the alpha builds here:
-
-- [Download for macOS](https://inline.chat/download/mac/beta)
-- [Join the iOS TestFlight](https://testflight.apple.com/join/FkC3f7fz)
-- [Join the waitlist](https://inline.chat)
+> [!NOTE]
+> We used to have the source code for the server and native clients in this repository under AGPLv3. After agonizing over it for months, I've decided to keep the core source code closed source, at least for now, after more than a year of being open source. I may reverse this later, especially when we want to officially support self-hosting. For more, see the FAQ below. This repository now hosts the protocol, CLI, MCP server, OpenClaw plugin, SDK, and everything needed to build on top of Inline under Apache-2.0.
 
 ## What's Inline
 
@@ -81,6 +76,15 @@ We think of friend groups and communities as first-class citizens. At this point
 | Windows  | Not started               |
 | Linux    | Not started               |
 
+## Download
+
+Inline is currently invite-only. If you have access, you can use the alpha builds here:
+
+- [Download for macOS](https://inline.chat/download/mac/beta)
+- [Join the iOS TestFlight](https://testflight.apple.com/join/FkC3f7fz)
+- [Join the waitlist](https://inline.chat)
+- [Install the Hermes Agent adapter](docs/hermes.md)
+
 ## Support the project
 
 Inline is built by a team of two focused solely on this project since September 2024, mostly using our savings (I sold my car :)). We love building Inline in public, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
@@ -90,6 +94,7 @@ Inline is built by a team of two focused solely on this project since September 
 If you're building on top of Inline, start here:
 
 - [Docs](https://inline.chat/docs)
+- [Hermes Agent adapter](docs/hermes.md)
 - [OpenClaw setup](https://inline.chat/docs/openclaw)
 - [MCP setup](https://inline.chat/docs/mcp)
 - [Bot API](https://inline.chat/docs/bot-api)
@@ -100,9 +105,6 @@ If you're building on top of Inline, start here:
 
 - We are not accepting external code contributions at this time.
 - The project is under heavy development and we don't have the capacity or a process for accepting contributions, especially given that LLMs have changed the dynamics here.
-
-> [!NOTE]
-> We used to have the source code for the server and native clients in this repository under AGPLv3. After agonizing over it for months, I've decided to keep the core source code closed source, at least for now, after more than a year of being open source. I may reverse this later, especially when we want to officially support self-hosting. For more, see the FAQ below. This repository now hosts the protocol, CLI, MCP server, OpenClaw plugin, SDK, and everything needed to build on top of Inline under Apache-2.0.
 
 ## FAQ
 

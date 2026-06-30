@@ -1,0 +1,81 @@
+{
+  "name": "@inline-chat/hermes-agent-adapter",
+  "version": "0.0.1",
+  "description": "Hermes Agent platform adapter for Inline, with a native Python plugin and bundled Inline realtime sidecar.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "keywords": [
+    "inline",
+    "inline-chat",
+    "hermes",
+    "hermes-agent",
+    "agent",
+    "plugin",
+    "adapter",
+    "realtime"
+  ],
+  "homepage": "https://github.com/inline-chat/inline/tree/main/packages/hermes-agent#readme",
+  "bugs": {
+    "url": "https://github.com/inline-chat/inline/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "packages/hermes-agent"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist/install.d.ts",
+    "dist/install.js",
+    "plugin/inline/__init__.py",
+    "plugin/inline/adapter.py",
+    "plugin/inline/cli.py",
+    "plugin/inline/plugin.yaml",
+    "plugin/inline/tools.py",
+    "plugin/inline/sidecar/index.mjs"
+  ],
+  "bin": {
+    "inline-hermes": "dist/install.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/install.d.ts",
+      "default": "./dist/install.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "mkdir -p plugin/inline/sidecar && bun build ./src/install.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle && bun build ./src/sidecar/index.ts --outdir plugin/inline/sidecar --entry-naming 'index.mjs' --target=node --format=esm --packages=bundle && tsc -p tsconfig.json --emitDeclarationOnly",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src/install.ts src/sidecar/contract.ts src/sidecar/index.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts vitest.config.ts",
+    "pretest": "bun run build && rm -rf coverage",
+    "prepack": "bun run build",
+    "prepublishOnly": "bun run check",
+    "release:preflight": "npm publish --dry-run --access public",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage",
+    "check": "bun run typecheck && bun run lint && bun run test"
+  },
+  "dependencies": {
+    "@inline-chat/realtime-sdk": "0.0.11",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.19",
+    "@vitest/coverage-v8": "4.0.16",
+    "typescript": "5.8.3",
+    "vitest": "4.0.16"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "inlineHermes": {
+    "pluginId": "inline",
+    "pluginPath": "plugin/inline",
+    "minHermesVersion": "0.17.0",
+    "testedHermesVersion": "0.17.0",
+    "testedHermesCommit": "824f2279"
+  }
+}

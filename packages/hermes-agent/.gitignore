@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.tmp/
+coverage/
+inline-sdk-state.json
+dist/sidecar/
+plugin/inline/sidecar/*.mjs.map
+src/sidecar/*.mjs
+src/sidecar/*.mjs.map
