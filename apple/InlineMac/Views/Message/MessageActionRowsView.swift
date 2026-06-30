@@ -6,27 +6,21 @@ import InlineMacUI
 final class MessageActionRowsView: NSView {
   var onActionTap: ((MessageAction) -> Void)?
 
-  private let rowsStack: NSStackView = {
-    let stack = NSStackView()
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    stack.orientation = .vertical
-    stack.spacing = 4
-    stack.alignment = .leading
-    stack.distribution = .fill
-    return stack
-  }()
+  private enum Metrics {
+    static let rowSpacing: CGFloat = 4
+    static let buttonSpacing: CGFloat = 4
+  }
+
+  private var buttonRows: [[MessageActionButtonView]] = []
+  private var rowHeight: CGFloat = 28
+
+  override var isFlipped: Bool {
+    true
+  }
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     translatesAutoresizingMaskIntoConstraints = false
-    addSubview(rowsStack)
-
-    NSLayoutConstraint.activate([
-      rowsStack.topAnchor.constraint(equalTo: topAnchor),
-      rowsStack.leadingAnchor.constraint(equalTo: leadingAnchor),
-      rowsStack.trailingAnchor.constraint(equalTo: trailingAnchor),
-      rowsStack.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
   }
 
   @available(*, unavailable)
@@ -41,21 +35,16 @@ final class MessageActionRowsView: NSView {
     rowHeight: CGFloat,
     messageFontSize: CGFloat
   ) {
-    rowsStack.arrangedSubviews.forEach { row in
-      rowsStack.removeArrangedSubview(row)
-      row.removeFromSuperview()
+    self.rowHeight = rowHeight
+
+    let buttonCounts = rows.map(\.actions.count)
+    if buttonRows.map(\.count) != buttonCounts {
+      rebuildButtonRows(buttonCounts: buttonCounts)
     }
 
-    for row in rows {
-      let rowStack = NSStackView()
-      rowStack.translatesAutoresizingMaskIntoConstraints = false
-      rowStack.orientation = .horizontal
-      rowStack.spacing = 4
-      rowStack.alignment = .centerY
-      rowStack.distribution = .fillEqually
-
-      for action in row.actions {
-        let buttonView = MessageActionButtonView()
+    for (rowIndex, row) in rows.enumerated() {
+      for (buttonIndex, action) in row.actions.enumerated() {
+        let buttonView = buttonRows[rowIndex][buttonIndex]
         let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
         buttonView.configure(
           action: action,
@@ -64,14 +53,67 @@ final class MessageActionRowsView: NSView {
           rowHeight: rowHeight,
           messageFontSize: messageFontSize
         )
+      }
+    }
+
+    needsLayout = true
+  }
+
+  private func rebuildButtonRows(buttonCounts: [Int]) {
+    buttonRows.flatMap(\.self).forEach { $0.removeFromSuperview() }
+    buttonRows = buttonCounts.map { buttonCount in
+      (0 ..< buttonCount).map { _ in
+        let buttonView = MessageActionButtonView()
         buttonView.onTap = { [weak self] tappedAction in
           self?.onActionTap?(tappedAction)
         }
-        rowStack.addArrangedSubview(buttonView)
+        addSubview(buttonView)
+        return buttonView
+      }
+    }
+  }
+
+  override func layout() {
+    super.layout()
+
+    var y: CGFloat = 0
+    for row in buttonRows {
+      let buttonCount = row.count
+      guard buttonCount > 0 else { continue }
+
+      let totalSpacing = CGFloat(buttonCount - 1) * Metrics.buttonSpacing
+      let buttonWidth = max(0, (bounds.width - totalSpacing) / CGFloat(buttonCount))
+      var x: CGFloat = 0
+
+      for (index, button) in row.enumerated() {
+        let width: CGFloat
+        if index == buttonCount - 1 {
+          width = max(0, bounds.width - x)
+        } else {
+          width = buttonWidth
+        }
+
+        button.frame = NSRect(x: x, y: y, width: width, height: rowHeight)
+        x += width + Metrics.buttonSpacing
       }
 
-      rowsStack.addArrangedSubview(rowStack)
+      y += rowHeight + Metrics.rowSpacing
     }
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
+
+    for row in buttonRows.reversed() {
+      for button in row.reversed() {
+        let pointInButton = button.convert(point, from: self)
+        if let hit = button.hitTest(pointInButton) {
+          return hit
+        }
+      }
+    }
+
+    return nil
   }
 }
 
@@ -84,76 +126,49 @@ final class MessageActionButtonView: NSView {
     var messageFontSize: CGFloat
   }
 
-  private final class ActionButton: NSButton {
-    var onPressChange: ((Bool) -> Void)?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-      true
-    }
-
-    override func mouseDown(with event: NSEvent) {
-      MessageGestureTrace.debug(
-        "MessageActionButtonView.ActionButton.mouseDown type=\(event.type.rawValue) clicks=\(event.clickCount)"
-      )
-      onPressChange?(true)
-      super.mouseDown(with: event)
-      onPressChange?(false)
-      MessageGestureTrace.debug("MessageActionButtonView.ActionButton.mouseDown ended")
-    }
-  }
-
   var onTap: ((MessageAction) -> Void)?
 
-  private let button: ActionButton = {
-    let button = ActionButton(title: "", target: nil, action: nil)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.isBordered = false
-    button.cell?.lineBreakMode = .byTruncatingTail
-    button.font = .systemFont(ofSize: 12, weight: .medium)
-    button.setButtonType(.momentaryChange)
-    button.imagePosition = .noImage
-    return button
+  private let titleField: NSTextField = {
+    let field = NSTextField(labelWithString: "")
+    field.alignment = .center
+    field.cell?.lineBreakMode = .byTruncatingTail
+    field.maximumNumberOfLines = 1
+    field.backgroundColor = .clear
+    field.drawsBackground = false
+    field.isBordered = false
+    field.isEditable = false
+    field.isSelectable = false
+    return field
   }()
 
   private let spinner: NSProgressIndicator = {
     let spinner = NSProgressIndicator()
-    spinner.translatesAutoresizingMaskIntoConstraints = false
     spinner.style = .spinning
     spinner.controlSize = .small
     spinner.isDisplayedWhenStopped = false
     return spinner
   }()
 
-  private var heightConstraint: NSLayoutConstraint?
   private var action: MessageAction?
   private var appearanceStyle: AppearanceStyle?
   private var trackingAreaRef: NSTrackingArea?
   private var isHovered = false
   private var isPressed = false
 
+  private var isLoading: Bool {
+    appearanceStyle?.isLoading == true
+  }
+
+  override var isFlipped: Bool {
+    true
+  }
+
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
-    translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
 
-    addSubview(button)
+    addSubview(titleField)
     addSubview(spinner)
-
-    NSLayoutConstraint.activate([
-      button.topAnchor.constraint(equalTo: topAnchor),
-      button.leadingAnchor.constraint(equalTo: leadingAnchor),
-      button.trailingAnchor.constraint(equalTo: trailingAnchor),
-      button.bottomAnchor.constraint(equalTo: bottomAnchor),
-      spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-      spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
-
-    button.target = self
-    button.action = #selector(handleTap)
-    button.focusRingType = .none
-    button.onPressChange = { [weak self] isPressed in
-      self?.setPressed(isPressed)
-    }
     PressScaleAnimator.prepare(self)
   }
 
@@ -169,6 +184,7 @@ final class MessageActionButtonView: NSView {
     rowHeight: CGFloat,
     messageFontSize: CGFloat
   ) {
+    let previousActionId = self.action?.actionID
     self.action = action
     appearanceStyle = AppearanceStyle(
       title: action.text,
@@ -177,20 +193,58 @@ final class MessageActionButtonView: NSView {
       rowHeight: rowHeight,
       messageFontSize: messageFontSize
     )
-    applyAppearance()
 
-    if let heightConstraint {
-      heightConstraint.constant = rowHeight
-    } else {
-      let next = heightAnchor.constraint(equalToConstant: rowHeight)
-      next.isActive = true
-      heightConstraint = next
+    if isLoading || previousActionId != action.actionID {
+      isPressed = false
+      PressScaleAnimator.setPressed(false, on: self)
     }
+
+    applyAppearance()
   }
 
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
     applyAppearance()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil {
+      setPressed(false)
+    } else {
+      layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
+      PressScaleAnimator.prepare(self)
+    }
+  }
+
+  override func viewDidMoveToSuperview() {
+    super.viewDidMoveToSuperview()
+    if superview == nil {
+      setPressed(false)
+    }
+  }
+
+  override func layout() {
+    super.layout()
+
+    let titleHeight = min(bounds.height, max(0, ceil(titleField.intrinsicContentSize.height)))
+    titleField.frame = NSRect(
+      x: 8,
+      y: floor((bounds.height - titleHeight) / 2),
+      width: max(0, bounds.width - 16),
+      height: titleHeight
+    )
+
+    var spinnerSize = spinner.fittingSize
+    if spinnerSize.width <= 0 || spinnerSize.height <= 0 {
+      spinnerSize = NSSize(width: 16, height: 16)
+    }
+    spinner.frame = NSRect(
+      x: floor((bounds.width - spinnerSize.width) / 2),
+      y: floor((bounds.height - spinnerSize.height) / 2),
+      width: spinnerSize.width,
+      height: spinnerSize.height
+    )
   }
 
   override func updateTrackingAreas() {
@@ -225,7 +279,60 @@ final class MessageActionButtonView: NSView {
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard !isHidden, bounds.contains(point) else { return nil }
-    return button.isEnabled ? button : self
+    return self
+  }
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    true
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.debug(
+      "MessageActionButtonView.mouseDown type=\(event.type.rawValue) clicks=\(event.clickCount)"
+    )
+
+    guard event.type == .leftMouseDown else {
+      super.mouseDown(with: event)
+      return
+    }
+
+    guard !isLoading, action != nil else {
+      MessageGestureTrace.debug("MessageActionButtonView.mouseDown ignored reason=loadingOrMissingAction")
+      return
+    }
+
+    setPressed(true)
+    guard let window else {
+      setPressed(false)
+      return
+    }
+
+    while let next = window.nextEvent(
+      matching: [.leftMouseDragged, .leftMouseUp],
+      until: .distantFuture,
+      inMode: .eventTracking,
+      dequeue: true
+    ) {
+      let point = convert(next.locationInWindow, from: nil)
+      let isInside = bounds.contains(point)
+
+      switch next.type {
+      case .leftMouseDragged:
+        setPressed(isInside)
+      case .leftMouseUp:
+        setPressed(false)
+        if isInside {
+          handleTap()
+        } else {
+          MessageGestureTrace.debug("MessageActionButtonView.mouseUp cancelledOutside")
+        }
+        return
+      default:
+        break
+      }
+    }
+
+    setPressed(false)
   }
 
   private func applyAppearance() {
@@ -238,22 +345,22 @@ final class MessageActionButtonView: NSView {
       .resolvedColor(with: appearance)
     let disabledColor = textColor.withAlphaComponent(0.45)
 
-    button.attributedTitle = NSAttributedString(
+    titleField.attributedStringValue = NSAttributedString(
       string: appearanceStyle.title,
       attributes: [
         .font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
         .foregroundColor: appearanceStyle.isLoading ? disabledColor : textColor,
       ]
     )
+    titleField.toolTip = appearanceStyle.title
+    toolTip = appearanceStyle.title
 
     if appearanceStyle.isLoading {
       spinner.startAnimation(nil)
-      button.alphaValue = 0
-      button.isEnabled = false
+      titleField.alphaValue = 0
     } else {
       spinner.stopAnimation(nil)
-      button.alphaValue = 1
-      button.isEnabled = true
+      titleField.alphaValue = 1
     }
 
     let backgroundColor: NSColor
@@ -294,12 +401,30 @@ final class MessageActionButtonView: NSView {
     applyAppearance()
   }
 
-  @objc private func handleTap() {
+  private func handleTap() {
     guard let action else {
       MessageGestureTrace.debug("MessageActionButtonView.handleTap result=noAction")
       return
     }
     MessageGestureTrace.debug("MessageActionButtonView.handleTap actionId=\(action.actionID)")
     onTap?(action)
+  }
+
+  override func isAccessibilityElement() -> Bool {
+    true
+  }
+
+  override func accessibilityRole() -> NSAccessibility.Role? {
+    .button
+  }
+
+  override func accessibilityLabel() -> String? {
+    appearanceStyle?.title
+  }
+
+  override func accessibilityPerformPress() -> Bool {
+    guard !isLoading, action != nil else { return false }
+    handleTap()
+    return true
   }
 }
