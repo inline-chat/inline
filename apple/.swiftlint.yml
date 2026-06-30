@@ -1,119 +1,71 @@
-# SwiftLint configuration file
-# Disables style rules and focuses on code quality and bug prevention
+# SwiftLint <https://realm.github.io/SwiftLint/>
+#
+check_for_updates: false
 
-# Disabled rules (style-related)
-disabled_rules:
-  # Formatting and style
-  - colon
-  - comma
-  - control_statement
-  - file_length
-  - identifier_name
-  - switch_case_alignment
-  - no_extension_access_modifier
-  - force_cast
-  - force_try
-  - function_body_length
-  - function_parameter_count
-  - leading_whitespace
-  - line_length
-  - nesting
-  - opening_brace
-  - operator_whitespace
-  - return_arrow_whitespace
-  - statement_position
-  - todo
-  - trailing_semicolon
-  - trailing_whitespace
-  - type_body_length
-  - type_name
-  - missing_docs
-  - valid_ibinspectable
-  - vertical_whitespace
+included:
+  - InlineIOS
+  - InlineIOSUI
+  - InlineKit
+  - InlineMac
+  - InlineMacUI
+  - InlineNotificationExtension
+  - InlineShareExtension
+  - InlineUI
 
-# Opt-in rules (quality and bug prevention focused)
-opt_in_rules:
-  - array_init
-  - attributes
-  - closure_end_indentation
-  - closure_spacing
-  - collection_alignment
-  - contains_over_filter_count
-  - contains_over_filter_is_empty
-  - contains_over_first_not_nil
-  - discouraged_optional_boolean
-  - empty_count
-  - empty_string
-  - empty_xctest_method
-  - explicit_init
-  - fallthrough
-  - fatal_error_message
-  - first_where
-  - force_unwrapping
-  - identical_operands
-  - implicitly_unwrapped_optional
-  - joined_default_parameter
-  - last_where
-  - legacy_random
-  - let_var_whitespace
-  - literal_expression_end_indentation
-  - lower_acl_than_parent
-  - modifier_order
-  - multiline_parameters
-  - nimble_operator
-  - no_extension_access_modifier
-  - no_fallthrough_only
-  - notification_center_detachment
-  - number_separator
-  - object_literal
-  - operator_usage_whitespace
-  - overridden_super_call
-  - override_in_extension
-  - pattern_matching_keywords
-  - prefer_self_type_over_type_of_self
-  - private_action
-  - private_outlet
-  - prohibited_super_call
-  - quick_discouraged_call
-  - quick_discouraged_focused_test
-  - quick_discouraged_pending_test
-  - redundant_nil_coalescing
-  - redundant_type_annotation
-  - required_enum_case
-  - single_test_class
-  - sorted_first_last
-  - static_operator
-  - strong_iboutlet
-  - toggle_bool
-  - unavailable_function
-  - unneeded_parentheses_in_closure_argument
-  - unowned_variable_capture
-  - untyped_error_in_catch
-  - vertical_parameter_alignment_on_call
-  - xct_specific_matcher
-  - yoda_condition
-
-# Rule configurations
-force_unwrapping:
-  severity: error
-
-implicitly_unwrapped_optional:
-  severity: error
-
-force_cast:
-  severity: error
-
-force_try:
-  severity: error
-
-# Paths to ignore during linting
 excluded:
+  - build
+  - DerivedData
   - Carthage
   - Pods
-  - DerivedData
-  - .build
-  - fastlane
-  - vendor
+  - InlineIOSUI/.build
+  - InlineKit/.build
+  - InlineMacUI/.build
+  - InlineUI/.build
+  - InlineKit/Sources/InlineProtocol
+  - InlineUI/Sources/EmojiAutocomplete/EmojiAutocompleteData.generated.swift
 
-# Reporter type (xcode, json, csv, checkstyle, codeclimate, junit, html, emoji, sonarqube, markdown)
+disabled_rules:
+  - cyclomatic_complexity
+  - file_length
+  - function_body_length
+  - line_length
+  - nesting
+  - no_fallthrough_only
+  - todo
+  - trailing_comma
+  - trailing_newline
+  - type_body_length
+
+identifier_name:
+  min_length: 1
+  allowed_symbols: ["_"]
+  # TODO: Fix existing uppercase local variable names, then make this an error.
+  validates_start_with_lowercase: warning
+  excluded:
+    - Core.*
+
+type_name:
+  min_length: 2
+  allowed_symbols: ["_"]
+  excluded:
+    - iOS_.*
+
+function_parameter_count:
+  warning: 6
+
+# TODO: Replace existing force casts with checked casts, then make this an error.
+force_cast:
+  severity: warning
+
+# TODO: Replace existing force tries with explicit error handling, then make this an error.
+force_try:
+  severity: warning
+
+# TODO: Fix existing shorthand operator violations, then make this an error.
+shorthand_operator:
+  severity: warning
+
+large_tuple:
+  warning: 3
+
 reporter: "xcode"

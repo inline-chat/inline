@@ -1,0 +1,42 @@
+name: Apple Lint
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/apple-lint.yml"
+      - "apple/**"
+      - "scripts/apple/swiftlint.sh"
+      - "package.json"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/apple-lint.yml"
+      - "apple/**"
+      - "scripts/apple/swiftlint.sh"
+      - "package.json"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swiftlint:
+    name: SwiftLint
+    runs-on: macos-26
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run SwiftLint
+        run: bash scripts/apple/swiftlint.sh --quiet --reporter summary
