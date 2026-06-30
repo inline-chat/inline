@@ -31,6 +31,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
     items: [
       { title: "MCP", to: "/docs/mcp" },
       { title: "OpenClaw", to: "/docs/openclaw" },
+      { title: "Hermes Agent", to: "/docs/hermes" },
     ],
   },
   {

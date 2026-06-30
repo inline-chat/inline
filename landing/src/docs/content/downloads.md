@@ -4,6 +4,7 @@
 
 - macOS beta (.dmg): [Download for macOS](/download/mac/beta)
 - iOS beta: [Join TestFlight](https://testflight.apple.com/join/FkC3f7fz)
+- Hermes Agent adapter: [Install](/docs/hermes#install)
 
 ## Switching from TestFlight to DMG (macOS)
 

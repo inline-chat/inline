@@ -1,0 +1,137 @@
+# Hermes Agent
+
+Use the Inline adapter to run Hermes Agent from Inline DMs, group chats, and reply threads.
+
+Need a bot token first? See [Creating a Bot](/docs/creating-a-bot).
+
+## Install
+
+```bash
+npm install -g @inline-chat/hermes-agent-adapter
+inline-hermes install
+hermes plugins enable inline-platform
+```
+
+## Configure
+
+Set an Inline token where the Hermes gateway runs:
+
+```bash
+export INLINE_TOKEN="<INLINE_BOT_TOKEN>"
+```
+
+Enable Inline in `~/.hermes/config.yaml`:
+
+```yaml
+platforms:
+  inline:
+    enabled: true
+```
+
+Inline uses work-chat defaults: typing/presence while Hermes is working, final
+answers in chat, and no durable tool-call progress bubbles. If your Hermes
+config has global tool progress enabled, add this per-platform override:
+
+```yaml
+display:
+  platforms:
+    inline:
+      tool_progress: off
+      cleanup_progress: true
+      streaming: false
+      interim_assistant_messages: false
+```
+
+If a process manager cannot inject the token directly, point Hermes config at
+an environment variable instead of storing the token in the file:
+
+```yaml
+platforms:
+  inline:
+    enabled: true
+    token: ${INLINE_TOKEN}
+```
+
+## Verify
+
+Check the local plugin install:
+
+```bash
+inline-hermes doctor --json
+hermes inline status
+inline-hermes --version
+```
+
+Validate wiring without sending a message:
+
+```bash
+inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json
+```
+
+Send a real test message after replacing the target, with a token in the
+environment or Hermes config:
+
+```bash
+export INLINE_TOKEN="<INLINE_BOT_TOKEN>"
+inline-hermes test-send --to chat:123 --text "Inline Hermes test"
+```
+
+Hermes' built-in send command uses the `inline:<chat-id>` target form:
+
+```bash
+hermes send --to inline:123 "Hello from Hermes"
+```
+
+## Update
+
+After upgrading the npm package, refresh the Hermes plugin copy:
+
+```bash
+npm install -g @inline-chat/hermes-agent-adapter@latest
+inline-hermes install --force
+inline-hermes --version
+inline-hermes doctor --json
+```
+
+This does not edit `~/.hermes/config.yaml` or tokens. It only replaces the
+installed plugin files and verifies the bundled sidecar hash.
+
+## Feature Support
+
+Supported:
+
+- DMs, group chats, Inline reply threads, and `hermes send --to inline:<chat-id>`.
+- Token setup through `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`, including simple `${ENV_NAME}` config references.
+- Realtime inbound messages, catch-up, replies, action callbacks, opt-in edit-message streaming, edits, deletes, typing, presence, and long outbound replies.
+- Inline-native clarify, approval, slash confirmation, and model picker buttons.
+- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads` and `/update`.
+- Native Hermes `inline` tool for bounded current-chat/thread history, exact message lookup, sending, editing, deleting bot-owned messages, typing/presence, and reply-thread creation.
+- Per-turn Inline sender/chat/thread IDs, with prompt guidance for sender mentions and current chat/thread Markdown links.
+- Local photo, video, voice, and document uploads; URL-backed inbound media caching when available.
+- User/group allowlists, group sender allowlists, mention controls, allowed chats, free-response chats, default reply-thread routing with `/threads` controls, thread prompts, and skill bindings.
+- Inline entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
+- Reactions on bot messages and opt-in lifecycle/system events.
+- Hermes-native `typing_indicator` and `gateway_restart_notification` toggles.
+
+Unsupported or intentionally limited:
+
+- Multiple Inline accounts in one Hermes process.
+- Full Inline member, space, search, and admin tools beyond bounded current-chat/thread message access.
+- Full Inline rich-text span conversion. Rich entities are summarized for the agent instead of converted into Hermes-specific spans.
+- Native animated draft streaming. Inline can stream by editing a preview message, but edit-based streaming is off by default like Discord and Slack.
+- Ephemeral in-channel private replies or realtime voice/calls.
+- Media without a usable Inline CDN/local URL. Hermes still receives a text summary, but may not receive a local file path.
+
+## Notes
+
+- Requires Hermes Agent `0.17.x` and Node.js `20` or newer.
+- Tokens are read from `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
+- Room controls are available through `INLINE_ALLOWED_CHATS`, `INLINE_FREE_RESPONSE_CHATS`, and `INLINE_STRICT_MENTION`. Parent chat ids also match Inline reply threads.
+- Top-level DM and group replies use Inline reply threads by default. Use `/threads on`, `/threads off`, or `/threads auto` in Inline to configure a chat, or set `INLINE_REPLY_THREADS=false` globally.
+- Thread-specific prompts and skill bindings are supported through `platforms.inline.channel_prompts` and `platforms.inline.channel_skill_bindings`; Inline checks the thread chat id first, then the parent chat id.
+- Set `platforms.inline.typing_indicator: false` if Inline rooms should stay visually quiet while Hermes is thinking.
+- Set `display.platforms.inline.tool_progress: off` to suppress tool-call progress messages. If you opt into progress, keep `display.platforms.inline.cleanup_progress: true` so successful runs do not leave progress bubbles behind.
+- Slash commands typed as text always work; the native `/` menu is synced on gateway connect and can be disabled with `INLINE_SYNC_COMMANDS=false` or `platforms.inline.sync_commands: false`.
+- `SESSION_REVOKED` means the token reached Inline realtime but is expired or revoked.
+- Missing-token diagnostics mean the Hermes gateway needs `INLINE_TOKEN`/`INLINE_BOT_TOKEN`, or `platforms.inline.token`/`inline.token` in config.
+- Source and package docs live in the [public Inline repo](https://github.com/inline-chat/inline/tree/main/packages/hermes-agent).

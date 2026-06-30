@@ -9,6 +9,7 @@ const TESTFLIGHT_URL = "https://testflight.apple.com/join/FkC3f7fz"
 const DOC_LINKS = [
   { title: "MCP", label: "Setup", href: "/docs/mcp#quick-setup" },
   { title: "OpenClaw", label: "Install", href: "/docs/openclaw#install" },
+  { title: "Hermes Agent", label: "Install", href: "/docs/hermes#install" },
   { title: "CLI", label: "Install", href: "/docs/cli#install" },
 ]
 
