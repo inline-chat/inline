@@ -10,6 +10,7 @@ const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
 const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
 const githubTagPrefix = process.env.INLINE_CLI_GITHUB_TAG_PREFIX ?? "cli-v";
 const githubRemote = process.env.INLINE_CLI_GIT_REMOTE ?? "origin";
+const githubReleaseTarget = process.env.INLINE_CLI_GITHUB_TARGET;
 const homebrewTapPath =
   process.env.INLINE_HOMEBREW_TAP_PATH ?? resolve(rootDir, "..", "homebrew-inline");
 const homebrewTapRemote = process.env.INLINE_HOMEBREW_TAP_REMOTE ?? "origin";
@@ -681,28 +682,34 @@ async function publishGitHubRelease(context: ReleaseContext) {
     }
   }
 
-  if (!(await localTagExists(tag))) {
-    await runCommand("git", ["tag", "-a", tag, "-m", `Inline CLI v${context.version}`], {
-      cwd: rootDir,
-    });
+  const createArgs = [
+    "release",
+    "create",
+    tag,
+    "--repo",
+    githubRepo,
+    "--title",
+    `Inline CLI v${context.version}`,
+    "--notes",
+    `Automated release for Inline CLI v${context.version}.`,
+  ];
+
+  if (githubReleaseTarget) {
+    createArgs.push("--target", githubReleaseTarget);
+  } else {
+    if (!(await localTagExists(tag))) {
+      await runCommand("git", ["tag", "-a", tag, "-m", `Inline CLI v${context.version}`], {
+        cwd: rootDir,
+      });
+    }
+    if (!(await remoteTagExists(tag))) {
+      await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
+    }
   }
-  if (!(await remoteTagExists(tag))) {
-    await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
-  }
+
   await runCommand(
     "gh",
-    [
-      "release",
-      "create",
-      tag,
-      "--repo",
-      githubRepo,
-      "--title",
-      `Inline CLI v${context.version}`,
-      "--notes",
-      `Automated release for Inline CLI v${context.version}.`,
-      ...assets,
-    ],
+    [...createArgs, ...assets],
     { cwd: rootDir },
   );
 }
