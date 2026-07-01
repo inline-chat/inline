@@ -14,7 +14,7 @@ const githubReleaseTarget = process.env.INLINE_CLI_GITHUB_TARGET;
 const homebrewTapPath =
   process.env.INLINE_HOMEBREW_TAP_PATH ?? resolve(rootDir, "..", "homebrew-inline");
 const homebrewTapRemote = process.env.INLINE_HOMEBREW_TAP_REMOTE ?? "origin";
-const signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
+const signingIdentity = process.env.APPLE_SIGNING_IDENTITY ?? process.env.MACOS_CERTIFICATE_NAME;
 const appleId = process.env.APPLE_ID;
 const applePassword = process.env.APPLE_PASSWORD;
 const appleTeamId = process.env.APPLE_TEAM_ID;
