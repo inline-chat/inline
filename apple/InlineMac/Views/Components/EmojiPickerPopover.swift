@@ -19,9 +19,18 @@ enum EmojiPickerValue {
 struct EmojiPickerPopover: View {
   var onSelect: (String) -> Void
 
+  static var preferredContentSize: NSSize {
+    NSSize(width: EmojiPickerLayout.width, height: EmojiPickerLayout.height)
+  }
+
   var body: some View {
     EmojiPickerAppKitView(onSelect: onSelect)
-      .frame(width: EmojiPickerLayout.width, height: EmojiPickerLayout.height)
+      .frame(width: Self.preferredContentSize.width, height: Self.preferredContentSize.height)
+  }
+
+  @MainActor
+  static func makeViewController(onSelect: @escaping (String) -> Void) -> NSViewController {
+    EmojiPickerPopoverViewController(onSelect: onSelect)
   }
 }
 
@@ -56,6 +65,31 @@ private struct EmojiPickerAppKitView: NSViewRepresentable {
   }
 }
 
+private final class EmojiPickerPopoverViewController: NSViewController, EmojiPickerRootViewDelegate {
+  private var onSelect: (String) -> Void
+
+  init(onSelect: @escaping (String) -> Void) {
+    self.onSelect = onSelect
+    super.init(nibName: nil, bundle: nil)
+    preferredContentSize = EmojiPickerPopover.preferredContentSize
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func loadView() {
+    let view = EmojiPickerRootView()
+    view.delegate = self
+    self.view = view
+  }
+
+  func emojiPickerRootView(_: EmojiPickerRootView, didSelect emoji: String) {
+    onSelect(emoji)
+  }
+}
+
 @MainActor
 private protocol EmojiPickerRootViewDelegate: AnyObject {
   func emojiPickerRootView(_ view: EmojiPickerRootView, didSelect emoji: String)
@@ -66,31 +100,33 @@ private final class EmojiPickerRootView: NSView {
   weak var delegate: EmojiPickerRootViewDelegate?
 
   private let effectView = NSVisualEffectView()
+  private let searchBarView = EmojiPickerAccessoryBarView(separatorEdge: .bottom)
   private let searchField = EmojiPickerSearchField()
-  private let topDivider = NSBox()
   private let scrollView = NSScrollView()
   private let collectionView = NSCollectionView()
   private let collectionLayout = NSCollectionViewFlowLayout()
   private let emptyLabel = NSTextField(labelWithString: "No emoji found")
-  private let bottomDivider = NSBox()
+  private let categoryBarView = EmojiPickerAccessoryBarView(separatorEdge: .top)
   private let categoryScrollView = NSScrollView()
   private let categoryStack = NSStackView()
 
-	  private var sections = EmojiPickerData.defaultSections
-	  private var query = ""
-	  private var sectionOffsets: [CGFloat] = []
-	  private var focusedSearchOnAttach = false
+  private var sections = EmojiPickerData.defaultSections
+  private var query = ""
+  private var sectionOffsets: [CGFloat] = []
+  private var categoryButtons: [EmojiPickerCategoryButton] = []
+  private var focusedSearchOnAttach = false
+  private var lastCollectionLayoutWidth: CGFloat = 0
 
   private let tabs = EmojiPickerCategoryTab.makeTabs(from: EmojiPickerData.defaultSections)
   private let imageCache = EmojiPickerImageCache.shared
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
-	    setupView()
-	    setupCollectionView()
-	    setupCategories()
-	    applySections(EmojiPickerData.defaultSections, resetScroll: true)
-	  }
+    setupView()
+    setupCollectionView()
+    setupCategories()
+    applySections(EmojiPickerData.defaultSections, resetScroll: true)
+  }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) {
@@ -110,6 +146,7 @@ private final class EmojiPickerRootView: NSView {
 
   override func layout() {
     super.layout()
+    updateCollectionLayoutMetrics()
     rebuildSectionOffsets()
   }
 
@@ -124,27 +161,16 @@ private final class EmojiPickerRootView: NSView {
     effectView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(effectView)
 
-    searchField.placeholderString = "Search emoji"
-    searchField.controlSize = .regular
-    searchField.font = .systemFont(ofSize: 13)
-    searchField.focusRingType = .default
-    searchField.sendsSearchStringImmediately = true
-    searchField.sendsWholeSearchString = false
-    searchField.delegate = self
-    searchField.target = self
-    searchField.action = #selector(searchChanged(_:))
-    searchField.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(searchField)
-
-    topDivider.boxType = .separator
-    topDivider.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(topDivider)
-
     scrollView.drawsBackground = false
     scrollView.contentView.drawsBackground = false
     scrollView.contentView.backgroundColor = .clear
+    scrollView.contentView.automaticallyAdjustsContentInsets = false
+    scrollView.automaticallyAdjustsContentInsets = false
+    scrollView.borderType = .noBorder
     scrollView.hasHorizontalScroller = false
     scrollView.hasVerticalScroller = true
+    scrollView.autohidesScrollers = true
+    scrollView.verticalScrollElasticity = .allowed
     scrollView.scrollerStyle = .overlay
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(scrollView)
@@ -155,9 +181,24 @@ private final class EmojiPickerRootView: NSView {
     emptyLabel.translatesAutoresizingMaskIntoConstraints = false
     addSubview(emptyLabel)
 
-    bottomDivider.boxType = .separator
-    bottomDivider.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(bottomDivider)
+    searchBarView.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(searchBarView)
+
+    searchField.placeholderString = "Search emoji"
+    searchField.controlSize = .large
+    searchField.font = .systemFont(ofSize: NSFont.systemFontSize(for: searchField.controlSize))
+    searchField.focusRingType = .default
+    searchField.sendsSearchStringImmediately = true
+    searchField.sendsWholeSearchString = false
+    searchField.delegate = self
+    searchField.target = self
+    searchField.action = #selector(searchChanged(_:))
+    searchField.setAccessibilityLabel("Search emoji")
+    searchField.translatesAutoresizingMaskIntoConstraints = false
+    searchBarView.contentView.addSubview(searchField)
+
+    categoryBarView.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(categoryBarView)
 
     categoryScrollView.drawsBackground = false
     categoryScrollView.contentView.drawsBackground = false
@@ -166,7 +207,7 @@ private final class EmojiPickerRootView: NSView {
     categoryScrollView.hasHorizontalScroller = false
     categoryScrollView.scrollerStyle = .overlay
     categoryScrollView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(categoryScrollView)
+    categoryBarView.contentView.addSubview(categoryScrollView)
 
     categoryStack.orientation = .horizontal
     categoryStack.alignment = .centerY
@@ -187,33 +228,48 @@ private final class EmojiPickerRootView: NSView {
       effectView.topAnchor.constraint(equalTo: topAnchor),
       effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      searchField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: EmojiPickerLayout.searchHorizontalPadding),
-      searchField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -EmojiPickerLayout.searchHorizontalPadding),
-      searchField.topAnchor.constraint(equalTo: topAnchor, constant: EmojiPickerLayout.searchVerticalPadding),
-      searchField.heightAnchor.constraint(equalToConstant: EmojiPickerLayout.searchHeight),
-
-      topDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
-      topDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
-      topDivider.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: EmojiPickerLayout.searchVerticalPadding),
-      topDivider.heightAnchor.constraint(equalToConstant: 1),
-
       scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      scrollView.topAnchor.constraint(equalTo: topDivider.bottomAnchor),
-      scrollView.bottomAnchor.constraint(equalTo: bottomDivider.topAnchor),
+      scrollView.topAnchor.constraint(equalTo: searchBarView.bottomAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: categoryBarView.topAnchor),
 
       emptyLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
       emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
 
-      bottomDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
-      bottomDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
-      bottomDivider.bottomAnchor.constraint(equalTo: categoryScrollView.topAnchor),
-      bottomDivider.heightAnchor.constraint(equalToConstant: 1),
+      searchBarView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      searchBarView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      searchBarView.topAnchor.constraint(equalTo: topAnchor),
+      searchBarView.bottomAnchor.constraint(
+        equalTo: safeAreaLayoutGuide.topAnchor,
+        constant: EmojiPickerLayout.searchBarHeight
+      ),
 
-      categoryScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      categoryScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      categoryScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      categoryScrollView.heightAnchor.constraint(equalToConstant: EmojiPickerLayout.categoryBarHeight),
+      searchField.leadingAnchor.constraint(
+        equalTo: safeAreaLayoutGuide.leadingAnchor,
+        constant: EmojiPickerLayout.searchHorizontalPadding
+      ),
+      searchField.trailingAnchor.constraint(
+        equalTo: safeAreaLayoutGuide.trailingAnchor,
+        constant: -EmojiPickerLayout.searchHorizontalPadding
+      ),
+      searchField.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: EmojiPickerLayout.searchVerticalPadding),
+      searchField.heightAnchor.constraint(equalToConstant: EmojiPickerLayout.searchHeight),
+
+      categoryBarView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      categoryBarView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      categoryBarView.topAnchor.constraint(
+        equalTo: safeAreaLayoutGuide.bottomAnchor,
+        constant: -EmojiPickerLayout.categoryBarHeight
+      ),
+      categoryBarView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      categoryScrollView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+      categoryScrollView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+      categoryScrollView.topAnchor.constraint(
+        equalTo: safeAreaLayoutGuide.bottomAnchor,
+        constant: -EmojiPickerLayout.categoryBarHeight
+      ),
+      categoryScrollView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor),
 
       categoryStack.leadingAnchor.constraint(equalTo: categoryScrollView.contentView.leadingAnchor),
       categoryStack.trailingAnchor.constraint(equalTo: categoryScrollView.contentView.trailingAnchor),
@@ -228,7 +284,7 @@ private final class EmojiPickerRootView: NSView {
     collectionLayout.itemSize = NSSize(width: EmojiPickerLayout.itemSize, height: EmojiPickerLayout.itemSize)
     collectionLayout.minimumInteritemSpacing = EmojiPickerLayout.itemSpacing
     collectionLayout.minimumLineSpacing = EmojiPickerLayout.itemSpacing
-    collectionLayout.sectionInset = EmojiPickerLayout.collectionSectionInset
+    collectionLayout.sectionInset = EmojiPickerLayout.collectionSectionInset(for: EmojiPickerLayout.width)
     collectionLayout.headerReferenceSize = NSSize(width: EmojiPickerLayout.width, height: EmojiPickerLayout.sectionHeaderHeight)
 
     collectionView.collectionViewLayout = collectionLayout
@@ -251,14 +307,18 @@ private final class EmojiPickerRootView: NSView {
     )
 
     scrollView.documentView = collectionView
+
+    let widthConstraint = collectionView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
+    widthConstraint.priority = .required
+    widthConstraint.isActive = true
+    updateCollectionLayoutMetrics()
   }
 
   private func setupCategories() {
     for (index, tab) in tabs.enumerated() {
       let button = EmojiPickerCategoryButton(categoryIndex: index)
       button.toolTip = tab.title
-      button.image = EmojiPickerSymbolCache.image(named: tab.symbolName)
-      button.title = tab.fallback
+      button.configure(symbol: EmojiPickerSymbolCache.image(named: tab.symbolName), fallback: tab.fallback)
       button.target = self
       button.action = #selector(categoryButtonPressed(_:))
       button.translatesAutoresizingMaskIntoConstraints = false
@@ -269,7 +329,10 @@ private final class EmojiPickerRootView: NSView {
       ])
 
       categoryStack.addArrangedSubview(button)
+      categoryButtons.append(button)
     }
+
+    setActiveCategory(0)
   }
 
   private func applySections(_ newSections: [EmojiPickerSection], resetScroll: Bool) {
@@ -325,11 +388,13 @@ private final class EmojiPickerRootView: NSView {
     query = value
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
+      setActiveCategory(0)
       applySections(EmojiPickerData.defaultSections, resetScroll: true)
       return
     }
 
     let results = EmojiPickerData.suggestions(matching: trimmed, limit: 120)
+    setActiveCategory(nil)
     applySections(
       results.isEmpty ? [] : [EmojiPickerSection(id: "search", title: "Results", items: results)],
       resetScroll: true
@@ -345,6 +410,7 @@ private final class EmojiPickerRootView: NSView {
       applySections(EmojiPickerData.defaultSections, resetScroll: false)
     }
 
+    setActiveCategory(index)
     scrollToSection(index)
   }
 
@@ -359,11 +425,9 @@ private final class EmojiPickerRootView: NSView {
   }
 
   private func rebuildSectionOffsets() {
-    let width = max(collectionView.bounds.width, EmojiPickerLayout.width)
-    let inset = EmojiPickerLayout.collectionSectionInset
-    let availableWidth = max(1, width - inset.left - inset.right)
-    let stride = EmojiPickerLayout.itemSize + EmojiPickerLayout.itemSpacing
-    let columns = max(1, Int((availableWidth + EmojiPickerLayout.itemSpacing) / stride))
+    let width = max(collectionView.bounds.width, scrollView.contentView.bounds.width, EmojiPickerLayout.width)
+    let inset = EmojiPickerLayout.collectionSectionInset(for: width)
+    let columns = EmojiPickerLayout.columnCount(for: width)
 
     var y: CGFloat = 0
     sectionOffsets = sections.map { section in
@@ -382,6 +446,22 @@ private final class EmojiPickerRootView: NSView {
 
   @objc private func categoryButtonPressed(_ sender: EmojiPickerCategoryButton) {
     selectCategory(sender.categoryIndex)
+  }
+
+  private func updateCollectionLayoutMetrics() {
+    let width = max(scrollView.contentView.bounds.width, EmojiPickerLayout.width)
+    guard abs(width - lastCollectionLayoutWidth) > 0.5 else { return }
+
+    lastCollectionLayoutWidth = width
+    collectionLayout.sectionInset = EmojiPickerLayout.collectionSectionInset(for: width)
+    collectionLayout.headerReferenceSize = NSSize(width: width, height: EmojiPickerLayout.sectionHeaderHeight)
+    collectionLayout.invalidateLayout()
+  }
+
+  private func setActiveCategory(_ index: Int?) {
+    for button in categoryButtons {
+      button.isActive = button.categoryIndex == index
+    }
   }
 }
 
@@ -479,7 +559,7 @@ extension EmojiPickerRootView: NSCollectionViewDelegateFlowLayout {
     layout _: NSCollectionViewLayout,
     insetForSectionAt _: Int
   ) -> NSEdgeInsets {
-    EmojiPickerLayout.collectionSectionInset
+    EmojiPickerLayout.collectionSectionInset(for: max(collectionView.bounds.width, EmojiPickerLayout.width))
   }
 
   func collectionView(
@@ -503,7 +583,10 @@ extension EmojiPickerRootView: NSCollectionViewDelegateFlowLayout {
     layout _: NSCollectionViewLayout,
     referenceSizeForHeaderInSection _: Int
   ) -> NSSize {
-    NSSize(width: EmojiPickerLayout.width, height: EmojiPickerLayout.sectionHeaderHeight)
+    NSSize(
+      width: max(collectionView.bounds.width, EmojiPickerLayout.width),
+      height: EmojiPickerLayout.sectionHeaderHeight
+    )
   }
 }
 
@@ -511,6 +594,141 @@ private final class EmojiPickerSearchField: NSSearchField {
   override func cancelOperation(_ sender: Any?) {
     stringValue = ""
     sendAction(action, to: target)
+  }
+}
+
+private final class EmojiPickerAccessoryBarView: NSView {
+  let contentView = NSView()
+  private let separatorEdge: ToolbarBackgroundSeparatorEdge
+  private let separatorView = NSView()
+  private var separatorHeightConstraint: NSLayoutConstraint?
+
+  init(separatorEdge: ToolbarBackgroundSeparatorEdge) {
+    self.separatorEdge = separatorEdge
+    super.init(frame: .zero)
+    setupView()
+  }
+
+  override init(frame frameRect: NSRect) {
+    separatorEdge = .bottom
+    super.init(frame: frameRect)
+    setupView()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupView() {
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+    contentView.translatesAutoresizingMaskIntoConstraints = false
+
+    if #available(macOS 26.0, *) {
+      let glassView = NSGlassEffectView()
+      glassView.translatesAutoresizingMaskIntoConstraints = false
+      glassView.cornerRadius = 0
+      glassView.style = .clear
+      glassView.contentView = contentView
+      addSubview(glassView)
+      pin(glassView, in: self)
+      pinEmbeddedContentView(contentView, fallbackSuperview: glassView)
+    } else {
+      let materialView = NSVisualEffectView()
+      materialView.material = .popover
+      materialView.blendingMode = .withinWindow
+      materialView.state = .active
+      materialView.translatesAutoresizingMaskIntoConstraints = false
+      addSubview(materialView)
+      addSubview(contentView)
+      pin(materialView, in: self)
+      pin(contentView, in: self)
+    }
+
+    setupSeparator()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    updateSeparatorHeight()
+    updateSeparatorColor()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateSeparatorColor()
+  }
+
+  private func pin(_ view: NSView, in parent: NSView) {
+    if view.superview == nil {
+      parent.addSubview(view)
+    }
+
+    NSLayoutConstraint.activate([
+      view.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
+      view.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
+      view.topAnchor.constraint(equalTo: parent.topAnchor),
+      view.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
+    ])
+  }
+
+  private func pinEmbeddedContentView(_ contentView: NSView, fallbackSuperview: NSView) {
+    if contentView.superview == nil {
+      fallbackSuperview.addSubview(contentView)
+    }
+
+    guard let superview = contentView.superview else { return }
+    NSLayoutConstraint.activate([
+      contentView.leadingAnchor.constraint(equalTo: superview.leadingAnchor),
+      contentView.trailingAnchor.constraint(equalTo: superview.trailingAnchor),
+      contentView.topAnchor.constraint(equalTo: superview.topAnchor),
+      contentView.bottomAnchor.constraint(equalTo: superview.bottomAnchor),
+    ])
+  }
+
+  private func setupSeparator() {
+    guard separatorEdge != .none else { return }
+
+    separatorView.translatesAutoresizingMaskIntoConstraints = false
+    separatorView.wantsLayer = true
+    addSubview(separatorView)
+
+    let heightConstraint = separatorView.heightAnchor.constraint(equalToConstant: 1)
+    separatorHeightConstraint = heightConstraint
+
+    let edgeConstraint: NSLayoutConstraint
+    switch separatorEdge {
+    case .top:
+      edgeConstraint = separatorView.topAnchor.constraint(equalTo: topAnchor)
+    case .bottom:
+      edgeConstraint = separatorView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    case .none:
+      edgeConstraint = separatorView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    }
+
+    NSLayoutConstraint.activate([
+      separatorView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      separatorView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      edgeConstraint,
+      heightConstraint,
+    ])
+
+    updateSeparatorHeight()
+    updateSeparatorColor()
+  }
+
+  private func updateSeparatorHeight() {
+    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    separatorHeightConstraint?.constant = 1 / scale
+  }
+
+  private func updateSeparatorColor() {
+    let appearance = effectiveAppearance
+    separatorView.layer?.backgroundColor = NSColor.separatorColor
+      .resolvedColor(with: appearance)
+      .withAlphaComponent(0.04)
+      .cgColor
   }
 }
 
@@ -532,12 +750,12 @@ private final class EmojiPickerCollectionItem: NSCollectionViewItem {
 
   override func prepareForReuse() {
     super.prepareForReuse()
-    cellView?.configure(image: nil, toolTip: nil)
+    cellView?.configure(image: nil, accessibilityLabel: nil, toolTip: nil)
   }
 
   func configure(with item: EmojiPickerItem, image: CGImage?) {
     let hint = ":\(item.shortcode):"
-    cellView?.configure(image: image, toolTip: hint)
+    cellView?.configure(image: image, accessibilityLabel: "\(item.label), \(hint)", toolTip: hint)
   }
 }
 
@@ -567,10 +785,11 @@ private final class EmojiPickerCellView: NSView {
     }
   }
 
-  func configure(image: CGImage?, toolTip: String?) {
+  func configure(image: CGImage?, accessibilityLabel: String?, toolTip: String?) {
     CATransaction.withoutActions {
       imageLayer.contents = image
     }
+    setAccessibilityLabel(accessibilityLabel)
     self.toolTip = toolTip
   }
 
@@ -578,6 +797,7 @@ private final class EmojiPickerCellView: NSView {
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
     layer?.cornerRadius = EmojiPickerLayout.itemCornerRadius
+    setAccessibilityRole(.button)
 
     imageLayer.contentsGravity = .resizeAspect
     imageLayer.contentsScale = EmojiPickerLayout.imageScale
@@ -622,7 +842,7 @@ private final class EmojiPickerHeaderView: NSView {
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
 
-    label.font = .systemFont(ofSize: 11, weight: .semibold)
+    label.font = .systemFont(ofSize: 12, weight: .semibold)
     label.textColor = .secondaryLabelColor
     label.translatesAutoresizingMaskIntoConstraints = false
     addSubview(label)
@@ -630,13 +850,18 @@ private final class EmojiPickerHeaderView: NSView {
     NSLayoutConstraint.activate([
       label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: EmojiPickerLayout.sectionHeaderHorizontalInset),
       label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -EmojiPickerLayout.sectionHeaderHorizontalInset),
-      label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+      label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
     ])
   }
 }
 
 private final class EmojiPickerCategoryButton: NSButton {
   let categoryIndex: Int
+  var isActive = false {
+    didSet {
+      updateAppearance()
+    }
+  }
 
   init(categoryIndex: Int) {
     self.categoryIndex = categoryIndex
@@ -649,7 +874,25 @@ private final class EmojiPickerCategoryButton: NSButton {
     fatalError("init(coder:) has not been implemented")
   }
 
+  func configure(symbol: NSImage?, fallback: String) {
+    image = symbol
+    title = symbol == nil ? fallback : ""
+    alternateTitle = ""
+    imagePosition = symbol == nil ? .noImage : .imageOnly
+  }
+
+  override func layout() {
+    super.layout()
+    layer?.cornerRadius = min(bounds.width, bounds.height) / 2
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateAppearance()
+  }
+
   private func setupView() {
+    wantsLayer = true
     bezelStyle = .rounded
     setButtonType(.momentaryPushIn)
     imagePosition = .imageOnly
@@ -657,7 +900,17 @@ private final class EmojiPickerCategoryButton: NSButton {
     isBordered = false
     showsBorderOnlyWhileMouseInside = true
     focusRingType = .none
-    contentTintColor = .secondaryLabelColor
+    setAccessibilityRole(.button)
+    updateAppearance()
+  }
+
+  private func updateAppearance() {
+    let appearance = effectiveAppearance
+    contentTintColor = isActive ? .labelColor : .secondaryLabelColor
+    layer?.backgroundColor = (isActive ? NSColor.controlAccentColor : NSColor.clear)
+      .resolvedColor(with: appearance)
+      .withAlphaComponent(isActive ? 0.12 : 0)
+      .cgColor
   }
 }
 
@@ -850,32 +1103,51 @@ private final class EmojiPickerImageCache {
 }
 
 private enum EmojiPickerLayout {
-  static let width: CGFloat = 306
-  static let height: CGFloat = 318
+  static let width: CGFloat = 304
+  static let height: CGFloat = 348
   static let searchHeight: CGFloat = 28
-  static let searchHorizontalPadding: CGFloat = 10
-  static let searchVerticalPadding: CGFloat = 7
-  static let categoryBarHeight: CGFloat = 34
+  static let searchBarHeight: CGFloat = 40
+  static let searchHorizontalPadding: CGFloat = 8
+  static let searchVerticalPadding: CGFloat = 6
+  static let categoryBarHeight: CGFloat = 32
   static let categoryHorizontalPadding: CGFloat = 10
-  static let categoryButtonSize: CGFloat = 26
+  static let categoryButtonSize: CGFloat = 24
   static let categoryButtonSpacing: CGFloat = 4
-  static let itemSize: CGFloat = 30
-  static let itemSpacing: CGFloat = 3
+  static let itemSize: CGFloat = 31
+  static let itemSpacing: CGFloat = 6
   static let itemCornerRadius: CGFloat = 7
-  static let emojiImageSize: CGFloat = 24
+  static let emojiImageSize: CGFloat = 25
   static let imageScale: CGFloat = 2
-  static let sectionHeaderHeight: CGFloat = 24
-  static let sectionHeaderHorizontalInset: CGFloat = 12
-  static let emojiFontSize: CGFloat = 22
+  static let sectionHeaderHeight: CGFloat = 30
+  static let sectionHeaderHorizontalInset: CGFloat = 22
+  static let preferredColumnCount = 7
+  static let minCollectionHorizontalInset: CGFloat = 22
+  static let collectionTopInset: CGFloat = 12
+  static let collectionBottomInset: CGFloat = 18
+  static let emojiFontSize: CGFloat = 23
   static let emojiFont = CTFontCreateWithName(
     "AppleColorEmoji" as CFString,
     emojiFontSize,
     nil
   )
-  static let collectionSectionInset = NSEdgeInsets(
-    top: 4,
-    left: 9,
-    bottom: 12,
-    right: 9
-  )
+
+  static func columnCount(for width: CGFloat) -> Int {
+    let availableWidth = max(1, width - minCollectionHorizontalInset * 2)
+    let stride = itemSize + itemSpacing
+    let fittedColumns = Int((availableWidth + itemSpacing) / stride)
+    return max(1, min(preferredColumnCount, fittedColumns))
+  }
+
+  static func collectionSectionInset(for width: CGFloat) -> NSEdgeInsets {
+    let columns = columnCount(for: width)
+    let rowWidth = CGFloat(columns) * itemSize + CGFloat(max(0, columns - 1)) * itemSpacing
+    let horizontalInset = max(minCollectionHorizontalInset, floor((width - rowWidth) / 2))
+
+    return NSEdgeInsets(
+      top: collectionTopInset,
+      left: horizontalInset,
+      bottom: collectionBottomInset,
+      right: horizontalInset
+    )
+  }
 }
