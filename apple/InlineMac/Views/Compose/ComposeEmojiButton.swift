@@ -9,24 +9,18 @@ final class ComposeEmojiButton: NSView {
   private let mode: ComposeControlMode
   private var size: CGFloat { mode.emojiButtonSize }
   private let button: NSButton
-  private let textView: NSTextView
-  private let scrollView: NSScrollView
-  private var isHandlingChange = false
-  private let stickerDetector = ComposeStickerDetector()
   private var trackingArea: NSTrackingArea?
+  private var emojiPopover: NSPopover?
   private var isHovering = false
   weak var delegate: ComposeEmojiButtonDelegate?
 
-  private var canShowEmojiPanel: Bool {
+  private var canShowEmojiPopover: Bool {
     !isHidden && alphaValue > 0 && window != nil
   }
 
   override init(frame frameRect: NSRect) {
     mode = .legacy
     button = Self.makeButton(mode: mode)
-
-    textView = NSTextView(frame: .zero)
-    scrollView = NSScrollView(frame: .zero)
     super.init(frame: frameRect)
     setupView()
   }
@@ -34,9 +28,6 @@ final class ComposeEmojiButton: NSView {
   init(mode: ComposeControlMode) {
     self.mode = mode
     button = Self.makeButton(mode: mode)
-
-    textView = NSTextView(frame: .zero)
-    scrollView = NSScrollView(frame: .zero)
     super.init(frame: .zero)
     setupView()
   }
@@ -59,32 +50,8 @@ final class ComposeEmojiButton: NSView {
     button.target = self
     button.action = #selector(handleClick)
     button.toolTip = "Emoji"
+    button.setAccessibilityLabel("Emoji")
 
-    textView.isEditable = true
-    textView.isSelectable = true
-    textView.isRichText = true
-    textView.drawsBackground = false
-    textView.textColor = NSColor.clear
-    textView.insertionPointColor = NSColor.clear
-    textView.importsGraphics = true
-    textView.alignment = .center
-    textView.isVerticallyResizable = false
-    textView.isHorizontallyResizable = false
-    textView.delegate = self
-
-    scrollView.drawsBackground = false
-    scrollView.borderType = .noBorder
-    scrollView.hasVerticalScroller = false
-    scrollView.hasHorizontalScroller = false
-    scrollView.autohidesScrollers = true
-    // AppKit's emoji panel inserts into the first responder text view. Keep a
-    // tiny receiver around for insertion, but make the visible affordance a
-    // real button.
-    scrollView.alphaValue = 0
-    scrollView.documentView = textView
-    scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-    addSubview(scrollView)
     addSubview(button)
 
     NSLayoutConstraint.activate([
@@ -95,11 +62,6 @@ final class ComposeEmojiButton: NSView {
       button.trailingAnchor.constraint(equalTo: trailingAnchor),
       button.topAnchor.constraint(equalTo: topAnchor),
       button.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-      scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      scrollView.topAnchor.constraint(equalTo: topAnchor),
-      scrollView.widthAnchor.constraint(equalToConstant: 1),
-      scrollView.heightAnchor.constraint(equalToConstant: 1),
     ])
   }
 
@@ -119,8 +81,8 @@ final class ComposeEmojiButton: NSView {
     focusWindowIfNeeded()
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
-      guard self.canShowEmojiPanel else { return }
-      self.showEmojiPanel()
+      guard self.canShowEmojiPopover else { return }
+      self.showEmojiPopover()
     }
   }
 
@@ -186,61 +148,43 @@ final class ComposeEmojiButton: NSView {
     }
   }
 
-  private func showEmojiPanel() {
-    guard canShowEmojiPanel else { return }
-    _ = window?.makeFirstResponder(textView)
-    let showSelector = Selector(("showEmojiAndSymbols:"))
-    if NSApplication.shared.sendAction(showSelector, to: nil, from: textView) == false {
-      NSApplication.shared.orderFrontCharacterPalette(nil)
+  private func showEmojiPopover() {
+    guard canShowEmojiPopover else { return }
+    if emojiPopover?.isShown == true {
+      emojiPopover?.performClose(nil)
+      return
     }
+
+    let popover = makeEmojiPopover()
+    emojiPopover = popover
+    popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
   }
 
   func resignEmojiFocus() {
-    guard window?.firstResponder === textView else { return }
-    window?.makeFirstResponder(nil)
+    emojiPopover?.performClose(nil)
+  }
+
+  private func makeEmojiPopover() -> NSPopover {
+    let popover = NSPopover()
+    popover.delegate = self
+    popover.behavior = .transient
+    popover.animates = true
+    if #available(macOS 14.0, *) {
+      popover.hasFullSizeContent = true
+    }
+    popover.contentSize = EmojiPickerPopover.preferredContentSize
+    popover.contentViewController = EmojiPickerPopover.makeViewController { [weak self, weak popover] emoji in
+      guard let self else { return }
+      delegate?.composeEmojiButton(self, didReceiveText: emoji)
+      popover?.performClose(nil)
+    }
+    return popover
   }
 }
 
-extension ComposeEmojiButton: NSTextViewDelegate {
-  func textDidChange(_ notification: Notification) {
-    guard isHandlingChange == false else { return }
-    let attributedString = textView.attributedString()
-    var didHandle = false
-
-    if #available(macOS 15.0, *) {
-      let stickers = stickerDetector.detectStickers(in: attributedString)
-      if stickers.isEmpty == false {
-        for sticker in stickers {
-          delegate?.composeEmojiButton(self, didReceiveSticker: sticker.image)
-        }
-        didHandle = true
-      }
-    }
-
-    if !didHandle {
-      let text = filteredPlainText(from: attributedString)
-      if text.isEmpty == false {
-        delegate?.composeEmojiButton(self, didReceiveText: text)
-        didHandle = true
-      }
-    }
-
-    isHandlingChange = true
-    if didHandle {
-      textView.textStorage?.setAttributedString(NSAttributedString(string: ""))
-    }
-    isHandlingChange = false
-  }
-
-  private func filteredPlainText(from attributedString: NSAttributedString) -> String {
-    let placeholder = "\u{FFFC}"
-    let raw = attributedString.string
-    let cleaned = raw
-      .replacingOccurrences(of: placeholder, with: "")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    let filtered = cleaned.filter { character in
-      character.unicodeScalars.contains { !$0.isASCII }
-    }
-    return String(filtered)
+extension ComposeEmojiButton: NSPopoverDelegate {
+  func popoverDidClose(_ notification: Notification) {
+    guard notification.object as? NSPopover === emojiPopover else { return }
+    emojiPopover = nil
   }
 }
