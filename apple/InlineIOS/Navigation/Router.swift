@@ -7,8 +7,8 @@ import SwiftUI
 
 /// A generic navigation model that provides tab-based navigation with persistent state.
 ///
-/// This model automatically persists the selected tab, navigation paths for each tab,
-/// and any presented sheet to UserDefaults. State is restored when the model is initialized.
+/// This model automatically persists the selected tab and navigation paths for each tab
+/// to UserDefaults. State is restored when the model is initialized.
 ///
 /// - Parameters:
 ///   - Tab: Must conform to TabType and Codable
@@ -29,11 +29,7 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     }
   }
 
-  public var presentedSheet: Sheet? {
-    didSet {
-      savePersistentState()
-    }
-  }
+  public var presentedSheet: Sheet?
 
   // Store the initial tab for proper reset behavior
   private let initialTab: Tab
@@ -101,13 +97,13 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   private func savePersistentState() {
     savePaths()
     saveSelectedTab()
-    savePresentedSheet()
+    clearPersistedSheet()
   }
 
   private func loadPersistentState() {
     loadPaths()
     loadSelectedTab()
-    loadPresentedSheet()
+    clearPersistedSheet()
   }
 
   // MARK: - Paths Persistence
@@ -154,23 +150,8 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   // MARK: - Presented Sheet Persistence
 
-  private func savePresentedSheet() {
-    let currentPresentedSheet = presentedSheet
-    let presentedSheetKey = presentedSheetKey
-
-    Task.detached(priority: .background) {
-      if let presentedSheetData = try? JSONEncoder().encode(currentPresentedSheet) {
-        UserDefaults.standard.set(presentedSheetData, forKey: presentedSheetKey)
-      }
-    }
-  }
-
-  private func loadPresentedSheet() {
-    if let presentedSheetData = UserDefaults.standard.data(forKey: presentedSheetKey),
-       let decodedPresentedSheet = try? JSONDecoder().decode(Sheet?.self, from: presentedSheetData)
-    {
-      presentedSheet = decodedPresentedSheet
-    }
+  private func clearPersistedSheet() {
+    UserDefaults.standard.removeObject(forKey: presentedSheetKey)
   }
 
   /// Reset all navigation state and clear persistence

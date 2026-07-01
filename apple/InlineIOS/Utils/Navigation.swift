@@ -130,15 +130,12 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   func saveNavigationState() {
     let pathComponents_ = pathComponents
-    let activeSheet_ = activeSheet
 
     Task.detached(priority: .background) {
       if let encodedPath = try? JSONEncoder().encode(pathComponents_) {
         UserDefaults.standard.set(encodedPath, forKey: Self.pathKey)
       }
-      if let encodedSheet = try? JSONEncoder().encode(activeSheet_) {
-        UserDefaults.standard.set(encodedSheet, forKey: Self.sheetKey)
-      }
+      UserDefaults.standard.removeObject(forKey: Self.sheetKey)
     }
   }
 
@@ -149,11 +146,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
       pathComponents = decodedPath
     }
 
-    if let sheetData = UserDefaults.standard.data(forKey: Self.sheetKey),
-       let decodedSheet = try? JSONDecoder().decode(Destination?.self, from: sheetData)
-    {
-      activeSheet = decodedSheet
-    }
+    UserDefaults.standard.removeObject(forKey: Self.sheetKey)
   }
 
   // MARK: - Navigation Actions (updated to use pathComponents)
