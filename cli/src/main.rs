@@ -24,8 +24,8 @@ use std::{env, fs, io};
 use tokio::io::AsyncWriteExt;
 
 use crate::api::{
-    ApiClient, ApiError, CreateLinearIssueInput, CreateNotionTaskInput, UploadFileInput,
-    UploadFileResult, UploadFileType, UploadVideoMetadata,
+    ApiClient, ApiError, AuthMetadata, CreateLinearIssueInput, CreateNotionTaskInput,
+    UploadFileInput, UploadFileResult, UploadFileType, UploadVideoMetadata,
 };
 use crate::auth::AuthStore;
 use crate::config::Config;
@@ -3040,8 +3040,15 @@ async fn handle_login(
     let device_name = hostname::get()
         .ok()
         .and_then(|name| name.into_string().ok());
+    let device_id = auth_store.device_id()?;
     let client_type = "cli";
     let client_version = env!("CARGO_PKG_VERSION");
+    let auth_metadata = AuthMetadata {
+        device_id: &device_id,
+        client_type,
+        client_version,
+        device_name: device_name.as_deref(),
+    };
 
     let mut contact = contact_from_args(args)?;
 
@@ -3051,14 +3058,17 @@ async fn handle_login(
             None => prompt_contact()?,
         };
 
-        match &current {
+        let email_challenge_token = match &current {
             Contact::Email(email) => {
-                api.send_email_code(email).await?;
+                api.send_email_code(email, auth_metadata)
+                    .await?
+                    .challenge_token
             }
             Contact::Phone(phone) => {
-                api.send_sms_code(phone).await?;
+                api.send_sms_code(phone, auth_metadata).await?;
+                None
             }
-        }
+        };
 
         loop {
             let code = prompt_code()?;
@@ -3067,22 +3077,12 @@ async fn handle_login(
                     api.verify_email_code(
                         email,
                         &code,
-                        client_type,
-                        client_version,
-                        device_name.as_deref(),
+                        email_challenge_token.as_deref(),
+                        auth_metadata,
                     )
                     .await
                 }
-                Contact::Phone(phone) => {
-                    api.verify_sms_code(
-                        phone,
-                        &code,
-                        client_type,
-                        client_version,
-                        device_name.as_deref(),
-                    )
-                    .await
-                }
+                Contact::Phone(phone) => api.verify_sms_code(phone, &code, auth_metadata).await,
             };
 
             match result {

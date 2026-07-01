@@ -23,6 +23,14 @@ pub struct ApiClient {
     http: Client,
 }
 
+#[derive(Clone, Copy)]
+pub struct AuthMetadata<'a> {
+    pub device_id: &'a str,
+    pub client_type: &'a str,
+    pub client_version: &'a str,
+    pub device_name: Option<&'a str>,
+}
+
 impl ApiClient {
     pub fn new(base_url: String) -> Self {
         Self {
@@ -31,10 +39,15 @@ impl ApiClient {
         }
     }
 
-    pub async fn send_email_code(&self, email: &str) -> Result<SendCodeResult, ApiError> {
+    pub async fn send_email_code(
+        &self,
+        email: &str,
+        metadata: AuthMetadata<'_>,
+    ) -> Result<SendCodeResult, ApiError> {
         let url = format!("{}/sendEmailCode", self.base_url);
         let mut payload = serde_json::Map::new();
         payload.insert("email".to_string(), json!(email));
+        add_auth_metadata(&mut payload, metadata);
         self.post(url, payload).await
     }
 
@@ -42,26 +55,31 @@ impl ApiClient {
         &self,
         email: &str,
         code: &str,
-        client_type: &str,
-        client_version: &str,
-        device_name: Option<&str>,
+        challenge_token: Option<&str>,
+        metadata: AuthMetadata<'_>,
     ) -> Result<VerifyCodeResult, ApiError> {
         let url = format!("{}/verifyEmailCode", self.base_url);
         let mut payload = serde_json::Map::new();
         payload.insert("email".to_string(), json!(email));
         payload.insert("code".to_string(), json!(code));
-        payload.insert("clientType".to_string(), json!(client_type));
-        payload.insert("clientVersion".to_string(), json!(client_version));
-        if let Some(device_name) = device_name {
-            payload.insert("deviceName".to_string(), json!(device_name));
+        if let Some(challenge_token) = challenge_token {
+            if !challenge_token.trim().is_empty() {
+                payload.insert("challengeToken".to_string(), json!(challenge_token));
+            }
         }
+        add_auth_metadata(&mut payload, metadata);
         self.post(url, payload).await
     }
 
-    pub async fn send_sms_code(&self, phone_number: &str) -> Result<SendCodeResult, ApiError> {
+    pub async fn send_sms_code(
+        &self,
+        phone_number: &str,
+        metadata: AuthMetadata<'_>,
+    ) -> Result<SendCodeResult, ApiError> {
         let url = format!("{}/sendSmsCode", self.base_url);
         let mut payload = serde_json::Map::new();
         payload.insert("phoneNumber".to_string(), json!(phone_number));
+        add_auth_metadata(&mut payload, metadata);
         self.post(url, payload).await
     }
 
@@ -69,19 +87,13 @@ impl ApiClient {
         &self,
         phone_number: &str,
         code: &str,
-        client_type: &str,
-        client_version: &str,
-        device_name: Option<&str>,
+        metadata: AuthMetadata<'_>,
     ) -> Result<VerifyCodeResult, ApiError> {
         let url = format!("{}/verifySmsCode", self.base_url);
         let mut payload = serde_json::Map::new();
         payload.insert("phoneNumber".to_string(), json!(phone_number));
         payload.insert("code".to_string(), json!(code));
-        payload.insert("clientType".to_string(), json!(client_type));
-        payload.insert("clientVersion".to_string(), json!(client_version));
-        if let Some(device_name) = device_name {
-            payload.insert("deviceName".to_string(), json!(device_name));
-        }
+        add_auth_metadata(&mut payload, metadata);
         self.post(url, payload).await
     }
 
@@ -268,6 +280,9 @@ impl ApiClient {
 pub struct SendCodeResult {
     #[allow(dead_code)]
     pub existing_user: bool,
+    #[allow(dead_code)]
+    pub needs_invite_code: bool,
+    pub challenge_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -387,4 +402,16 @@ enum ApiResponse<T> {
         error_code: Option<i32>,
         description: Option<String>,
     },
+}
+
+fn add_auth_metadata(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    metadata: AuthMetadata<'_>,
+) {
+    payload.insert("deviceId".to_string(), json!(metadata.device_id));
+    payload.insert("clientType".to_string(), json!(metadata.client_type));
+    payload.insert("clientVersion".to_string(), json!(metadata.client_version));
+    if let Some(device_name) = metadata.device_name {
+        payload.insert("deviceName".to_string(), json!(device_name));
+    }
 }
