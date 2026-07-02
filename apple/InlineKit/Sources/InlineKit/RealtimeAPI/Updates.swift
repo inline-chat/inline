@@ -29,7 +29,8 @@ public actor UpdatesEngine: Sendable {
               db,
               publishChanges: false,
               suppressNotifications: true,
-              materializeMissingReferences: true
+              materializeMissingReferences: true,
+              incrementUnreadCount: false
             )
             reloadPeers.insert(newMessageUpdate.message.peerID.toPeer())
           } else {
@@ -599,7 +600,8 @@ extension InlineProtocol.UpdateNewMessage {
     _ db: Database,
     publishChanges: Bool,
     suppressNotifications: Bool,
-    materializeMissingReferences: Bool
+    materializeMissingReferences: Bool,
+    incrementUnreadCount: Bool = true
   ) throws {
     // Avoid double-applying side effects when the same message is replayed (eg. sync catch-up,
     // duplicate delivery, history prefill).
@@ -616,9 +618,14 @@ extension InlineProtocol.UpdateNewMessage {
     try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
 
     // Increase unread count only when this message is newly inserted, not ours,
-    // and newer than the dialog's read cursor. This prevents catch-up replays
-    // from reintroducing unread state after a read update has already been applied.
-    if !hadMessage, msg.out == false, var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
+    // and newer than the dialog's read cursor. Catch-up applies dialog sidecars
+    // before updates, and those sidecars already include server-computed unread
+    // totals for delivered messages; applying this local delta too would double
+    // count missed messages.
+    if incrementUnreadCount,
+       !hadMessage,
+       msg.out == false,
+       var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
       let readInboxMaxId = dialog.readInboxMaxId ?? 0
       if msg.messageId > readInboxMaxId {
         dialog.unreadCount = (dialog.unreadCount ?? 0) + 1

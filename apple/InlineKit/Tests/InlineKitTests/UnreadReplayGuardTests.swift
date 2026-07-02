@@ -118,6 +118,35 @@ struct UnreadReplayGuardTests {
     }
   }
 
+  @Test("sync catch-up message does not increment sidecar unread total")
+  func catchupMessageDoesNotIncrementSidecarUnreadTotal() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, readInboxMaxId: nil, unreadCount: 1)
+
+      var update = InlineProtocol.Update()
+      update.seq = 1
+      update.date = 2
+      update.update = .newMessage(makeNewMessageUpdate(messageId: 1))
+
+      var reloadPeers = Set<InlineKit.Peer>()
+      let applied = UpdatesEngine.shared.apply(
+        update: update,
+        db: db,
+        source: .syncCatchup,
+        reloadPeers: &reloadPeers
+      )
+
+      #expect(applied)
+      let dialog = try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)
+      #expect(dialog?.unreadCount == 1)
+
+      let message = try Message.fetchOne(db, key: ["messageId": 1, "chatId": chatId])
+      #expect(message != nil)
+    }
+  }
+
   @Test("thread message materializes missing local chat references")
   func threadMessageMaterializesMissingChatReferences() throws {
     let dbQueue = try makeInMemoryDB()
