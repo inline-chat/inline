@@ -1,0 +1,4 @@
+interface:
+  display_name: "Swift Language Updates"
+  short_description: "Swift 6.3/6.4 release guidance"
+  default_prompt: "Use $swift-language-updates to modernize this Swift code for the latest Swift language and library changes."
