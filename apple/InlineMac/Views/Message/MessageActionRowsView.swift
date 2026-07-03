@@ -344,12 +344,16 @@ final class MessageActionButtonView: NSView {
     let textColor: NSColor = (appearanceStyle.outgoing ? NSColor.white : NSColor.labelColor)
       .resolvedColor(with: appearance)
     let disabledColor = textColor.withAlphaComponent(0.45)
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.alignment = .center
+    paragraphStyle.lineBreakMode = .byTruncatingTail
 
     titleField.attributedStringValue = NSAttributedString(
       string: appearanceStyle.title,
       attributes: [
         .font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
         .foregroundColor: appearanceStyle.isLoading ? disabledColor : textColor,
+        .paragraphStyle: paragraphStyle,
       ]
     )
     titleField.toolTip = appearanceStyle.title
