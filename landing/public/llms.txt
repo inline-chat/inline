@@ -9,12 +9,12 @@ Primary hosts:
 - Realtime API: wss://api.inline.chat/realtime
 
 Authentication:
-- HTTP APIs and the CLI use bearer tokens.
+- The Bot HTTP API and CLI use bearer tokens.
 - The hosted MCP server uses OAuth 2.1 with PKCE through https://api.inline.chat/.well-known/oauth-authorization-server.
 
 ## Agent Surfaces
 
-- [Integration declaration](https://inline.chat/.well-known/integrations.json): Machine-readable surface metadata for Inline's HTTP APIs, Realtime API, MCP server, CLI, and shared credentials.
+- [Integration declaration](https://inline.chat/.well-known/integrations.json): Machine-readable surface metadata for Inline's Bot HTTP API, MCP server, CLI, and shared credentials.
 - [OpenAPI spec](https://inline.chat/openapi.json): Canonical Bot HTTP API OpenAPI 3.0 JSON.
 - [MCP server card](https://inline.chat/.well-known/mcp/server-card.json): Hosted MCP connection endpoint and OAuth metadata.
 
@@ -31,7 +31,6 @@ Authentication:
 ## Documentation
 
 - [Bot API](https://inline.chat/docs/bot-api): HTTP API for bots and automations.
-- [HTTP API](https://inline.chat/docs/developers): Core Inline HTTP API documentation.
 - [Realtime API](https://inline.chat/docs/realtime-api): WebSocket API and SDK guidance.
 - [MCP server](https://inline.chat/docs/mcp): Connect agents to Inline over MCP.
 - [CLI](https://inline.chat/docs/cli): Install and use the Inline command line tool.

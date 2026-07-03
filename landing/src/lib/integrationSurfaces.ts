@@ -3,7 +3,6 @@ export const INLINE_API_ORIGIN = "https://api.inline.chat"
 export const INLINE_MCP_ORIGIN = "https://mcp.inline.chat"
 
 export const CANONICAL_OPENAPI_SOURCE_URL = `${INLINE_API_ORIGIN}/bot-api-reference/json`
-export const V1_OPENAPI_SOURCE_URL = `${INLINE_API_ORIGIN}/v1/reference/json`
 export const MCP_CONNECT_URL = `${INLINE_MCP_ORIGIN}/mcp`
 export const MCP_AUTHORIZATION_SERVER_URL = `${INLINE_API_ORIGIN}/.well-known/oauth-authorization-server`
 export const INTEGRATIONS_DECLARATION_URL = `${INLINE_ORIGIN}/.well-known/integrations.json`
@@ -45,14 +44,14 @@ export const mcpServerCard = {
 export const integrationsDeclaration = {
   version: 3,
   summary:
-    "Inline exposes a Bot HTTP API, a full Realtime WebSocket API and SDK, a hosted MCP server, and a CLI for work chat automation.",
+    "Inline exposes a Bot HTTP API, a hosted MCP server, and a CLI for work chat automation.",
   credentials: {
     [inlineBearerCredentialId]: {
       type: "bearer",
       label: "Inline bearer token",
       generateUrl: `${INLINE_ORIGIN}/docs/creating-a-bot`,
       setup:
-        "Create or reveal a bot token in Inline, or run `inline auth login` for a user token. Send it as `Authorization: Bearer <token>` for HTTP APIs, or set `INLINE_TOKEN` for the CLI and Realtime SDK.",
+        "Create or reveal a bot token in Inline, or run `inline auth login` for a user token. Send it as `Authorization: Bearer <token>` for the Bot HTTP API, or set `INLINE_TOKEN` for the CLI and Realtime SDK.",
     },
     [inlineOauthCredentialId]: {
       type: "oauth2",
@@ -68,34 +67,6 @@ export const integrationsDeclaration = {
       type: "http",
       docs: `${INLINE_ORIGIN}/docs/bot-api`,
       spec: `${INLINE_ORIGIN}/openapi.json`,
-      url: INLINE_API_ORIGIN,
-      basis: declaredBasis,
-      auth: {
-        status: "required",
-        entries: [
-          {
-            use: [
-              {
-                id: inlineBearerCredentialId,
-                mechanics: {
-                  source: "http",
-                  in: "header",
-                  headerName: "Authorization",
-                  scheme: "Bearer",
-                },
-              },
-            ],
-            basis: declaredBasis,
-          },
-        ],
-      },
-    },
-    {
-      slug: "inline-http-api",
-      name: "Inline HTTP API",
-      type: "http",
-      docs: `${INLINE_ORIGIN}/docs/developers`,
-      spec: V1_OPENAPI_SOURCE_URL,
       url: INLINE_API_ORIGIN,
       basis: declaredBasis,
       auth: {
@@ -178,12 +149,6 @@ export const apiCatalog = {
       anchor: INLINE_API_ORIGIN,
       "service-desc": [{ href: `${INLINE_ORIGIN}/openapi.json`, type: "application/json" }],
       "service-doc": [{ href: `${INLINE_ORIGIN}/docs/bot-api`, type: "text/html" }],
-      "service-meta": [{ href: INTEGRATIONS_DECLARATION_URL, type: "application/json" }],
-    },
-    {
-      anchor: `${INLINE_API_ORIGIN}/v1`,
-      "service-desc": [{ href: V1_OPENAPI_SOURCE_URL, type: "application/json" }],
-      "service-doc": [{ href: `${INLINE_ORIGIN}/docs/developers`, type: "text/html" }],
       "service-meta": [{ href: INTEGRATIONS_DECLARATION_URL, type: "application/json" }],
     },
     {
