@@ -299,7 +299,7 @@ describe("plugin manifest", () => {
       moltbot?: unknown
     }
 
-    expect(json.openclaw?.install?.clawhubSpec).toBe("@inline-openclaw/inline")
+    expect(json.openclaw?.install?.clawhubSpec).toBe("clawhub:@inline-openclaw/inline")
     expect(json.openclaw?.install?.defaultChoice).toBe("clawhub")
     expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.6.11")
     expect(json.peerDependencies?.openclaw).toBe(">=2026.6.11")

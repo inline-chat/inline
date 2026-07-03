@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.49",
+  "version": "0.0.50",
   "license": "Apache-2.0",
   "type": "module",
   "files": [
@@ -85,7 +85,7 @@
       ]
     },
     "install": {
-      "clawhubSpec": "@inline-openclaw/inline",
+      "clawhubSpec": "clawhub:@inline-openclaw/inline",
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "packages/openclaw",
       "defaultChoice": "clawhub",
