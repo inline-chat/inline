@@ -473,7 +473,7 @@ extension NSTextView {
 
     let checkPosition = selectedRange.location - 1
     let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
-    return attributes[.mentionUserId] != nil
+    return attributes[.mentionUserId] != nil || attributes[.mentionGroupId] != nil
   }
 
   var isCursorAfterThreadLink: Bool {
@@ -489,6 +489,7 @@ extension NSTextView {
   var hasTypingAttributesMentionStyling: Bool {
     let currentTypingAttributes = typingAttributes
     return currentTypingAttributes[.mentionUserId] != nil ||
+      currentTypingAttributes[.mentionGroupId] != nil ||
       (currentTypingAttributes[.foregroundColor] as? NSColor) == NSColor.systemBlue
   }
 

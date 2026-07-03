@@ -26,11 +26,130 @@ struct EmojiPickerPopover: View {
   var body: some View {
     EmojiPickerAppKitView(onSelect: onSelect)
       .frame(width: Self.preferredContentSize.width, height: Self.preferredContentSize.height)
+      .fixedSize()
   }
 
   @MainActor
   static func makeViewController(onSelect: @escaping (String) -> Void) -> NSViewController {
     EmojiPickerPopoverViewController(onSelect: onSelect)
+  }
+
+  @MainActor
+  static func makePopover(onSelect: @escaping (String) -> Void) -> NSPopover {
+    let popover = NSPopover()
+    popover.behavior = .transient
+    popover.animates = true
+    if #available(macOS 14.0, *) {
+      popover.hasFullSizeContent = true
+    }
+    popover.contentSize = preferredContentSize
+    popover.contentViewController = makeViewController { [weak popover] emoji in
+      onSelect(emoji)
+      popover?.performClose(nil)
+    }
+    return popover
+  }
+}
+
+struct EmojiPickerPopoverPresenter: NSViewRepresentable {
+  @Binding var isPresented: Bool
+  var preferredEdge: NSRectEdge = .maxY
+  var onSelect: (String) -> Void
+  var onDismiss: () -> Void = {}
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator()
+  }
+
+  func makeNSView(context _: Context) -> EmojiPickerPopoverAnchorView {
+    EmojiPickerPopoverAnchorView()
+  }
+
+  func updateNSView(_ view: EmojiPickerPopoverAnchorView, context: Context) {
+    context.coordinator.update(configuration: self, anchorView: view)
+  }
+
+  static func dismantleNSView(_ nsView: EmojiPickerPopoverAnchorView, coordinator: Coordinator) {
+    coordinator.closePopover(sendDismiss: false)
+  }
+
+  @MainActor
+  final class Coordinator: NSObject, NSPopoverDelegate {
+    private var configuration: EmojiPickerPopoverPresenter?
+    private weak var anchorView: NSView?
+    private var popover: NSPopover?
+    private var isPresentationDeferred = false
+
+    func update(configuration: EmojiPickerPopoverPresenter, anchorView: NSView) {
+      self.configuration = configuration
+      self.anchorView = anchorView
+
+      if configuration.isPresented {
+        showPopover(from: anchorView)
+      } else {
+        closePopover(sendDismiss: false)
+      }
+    }
+
+    func closePopover(sendDismiss: Bool) {
+      guard let popover else { return }
+
+      if sendDismiss, let configuration, configuration.isPresented {
+        configuration.isPresented = false
+        configuration.onDismiss()
+      }
+
+      popover.delegate = nil
+      popover.performClose(nil)
+      self.popover = nil
+    }
+
+    private func showPopover(from anchorView: NSView) {
+      guard let configuration else { return }
+
+      guard anchorView.window != nil else {
+        deferPresentation()
+        return
+      }
+
+      guard popover?.isShown != true else { return }
+
+      let popover = EmojiPickerPopover.makePopover { [weak self] emoji in
+        guard let self, let configuration = self.configuration else { return }
+        configuration.onSelect(emoji)
+        configuration.isPresented = false
+      }
+      popover.delegate = self
+      self.popover = popover
+      popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: configuration.preferredEdge)
+    }
+
+    private func deferPresentation() {
+      guard !isPresentationDeferred else { return }
+      isPresentationDeferred = true
+
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        isPresentationDeferred = false
+        guard let configuration, configuration.isPresented, let anchorView else { return }
+        showPopover(from: anchorView)
+      }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+      guard notification.object as? NSPopover === popover else { return }
+      popover = nil
+
+      guard let configuration, configuration.isPresented else { return }
+      configuration.isPresented = false
+      configuration.onDismiss()
+    }
+  }
+}
+
+final class EmojiPickerPopoverAnchorView: NSView {
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    nil
   }
 }
 
@@ -42,7 +161,7 @@ private struct EmojiPickerAppKitView: NSViewRepresentable {
   }
 
   func makeNSView(context: Context) -> EmojiPickerRootView {
-    let view = EmojiPickerRootView()
+    let view = EmojiPickerRootView(frame: NSRect(origin: .zero, size: EmojiPickerPopover.preferredContentSize))
     view.delegate = context.coordinator
     return view
   }
@@ -80,7 +199,7 @@ private final class EmojiPickerPopoverViewController: NSViewController, EmojiPic
   }
 
   override func loadView() {
-    let view = EmojiPickerRootView()
+    let view = EmojiPickerRootView(frame: NSRect(origin: .zero, size: EmojiPickerPopover.preferredContentSize))
     view.delegate = self
     self.view = view
   }
@@ -113,7 +232,6 @@ private final class EmojiPickerRootView: NSView {
   private var sections = EmojiPickerData.defaultSections
   private var query = ""
   private var sectionOffsets: [CGFloat] = []
-  private var categoryButtons: [EmojiPickerCategoryButton] = []
   private var focusedSearchOnAttach = false
   private var lastCollectionLayoutWidth: CGFloat = 0
 
@@ -144,6 +262,10 @@ private final class EmojiPickerRootView: NSView {
     }
   }
 
+  override var intrinsicContentSize: NSSize {
+    EmojiPickerPopover.preferredContentSize
+  }
+
   override func layout() {
     super.layout()
     updateCollectionLayoutMetrics()
@@ -154,6 +276,10 @@ private final class EmojiPickerRootView: NSView {
     translatesAutoresizingMaskIntoConstraints = false
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
+    setContentHuggingPriority(.required, for: .horizontal)
+    setContentHuggingPriority(.required, for: .vertical)
+    setContentCompressionResistancePriority(.required, for: .horizontal)
+    setContentCompressionResistancePriority(.required, for: .vertical)
 
     effectView.material = .popover
     effectView.blendingMode = .withinWindow
@@ -185,7 +311,7 @@ private final class EmojiPickerRootView: NSView {
     addSubview(searchBarView)
 
     searchField.placeholderString = "Search emoji"
-    searchField.controlSize = .large
+    searchField.controlSize = .regular
     searchField.font = .systemFont(ofSize: NSFont.systemFontSize(for: searchField.controlSize))
     searchField.focusRingType = .default
     searchField.sendsSearchStringImmediately = true
@@ -329,10 +455,7 @@ private final class EmojiPickerRootView: NSView {
       ])
 
       categoryStack.addArrangedSubview(button)
-      categoryButtons.append(button)
     }
-
-    setActiveCategory(0)
   }
 
   private func applySections(_ newSections: [EmojiPickerSection], resetScroll: Bool) {
@@ -388,13 +511,11 @@ private final class EmojiPickerRootView: NSView {
     query = value
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
-      setActiveCategory(0)
       applySections(EmojiPickerData.defaultSections, resetScroll: true)
       return
     }
 
     let results = EmojiPickerData.suggestions(matching: trimmed, limit: 120)
-    setActiveCategory(nil)
     applySections(
       results.isEmpty ? [] : [EmojiPickerSection(id: "search", title: "Results", items: results)],
       resetScroll: true
@@ -410,7 +531,6 @@ private final class EmojiPickerRootView: NSView {
       applySections(EmojiPickerData.defaultSections, resetScroll: false)
     }
 
-    setActiveCategory(index)
     scrollToSection(index)
   }
 
@@ -456,12 +576,6 @@ private final class EmojiPickerRootView: NSView {
     collectionLayout.sectionInset = EmojiPickerLayout.collectionSectionInset(for: width)
     collectionLayout.headerReferenceSize = NSSize(width: width, height: EmojiPickerLayout.sectionHeaderHeight)
     collectionLayout.invalidateLayout()
-  }
-
-  private func setActiveCategory(_ index: Int?) {
-    for button in categoryButtons {
-      button.isActive = button.categoryIndex == index
-    }
   }
 }
 
@@ -751,6 +865,7 @@ private final class EmojiPickerCollectionItem: NSCollectionViewItem {
   override func prepareForReuse() {
     super.prepareForReuse()
     cellView?.configure(image: nil, accessibilityLabel: nil, toolTip: nil)
+    cellView?.resetHover()
   }
 
   func configure(with item: EmojiPickerItem, image: CGImage?) {
@@ -761,6 +876,8 @@ private final class EmojiPickerCollectionItem: NSCollectionViewItem {
 
 private final class EmojiPickerCellView: NSView {
   private let imageLayer = CALayer()
+  private var trackingArea: NSTrackingArea?
+  private var isHovering = false
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -785,6 +902,34 @@ private final class EmojiPickerCellView: NSView {
     }
   }
 
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let trackingArea = NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil)
+    self.trackingArea = trackingArea
+    addTrackingArea(trackingArea)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    isHovering = true
+    updateBackground()
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    isHovering = false
+    updateBackground()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateBackground()
+  }
+
   func configure(image: CGImage?, accessibilityLabel: String?, toolTip: String?) {
     CATransaction.withoutActions {
       imageLayer.contents = image
@@ -793,11 +938,16 @@ private final class EmojiPickerCellView: NSView {
     self.toolTip = toolTip
   }
 
+  func resetHover() {
+    isHovering = false
+    updateBackground()
+  }
+
   private func setupView() {
     wantsLayer = true
-    layer?.backgroundColor = NSColor.clear.cgColor
     layer?.cornerRadius = EmojiPickerLayout.itemCornerRadius
     setAccessibilityRole(.button)
+    updateBackground()
 
     imageLayer.contentsGravity = .resizeAspect
     imageLayer.contentsScale = EmojiPickerLayout.imageScale
@@ -807,6 +957,13 @@ private final class EmojiPickerCellView: NSView {
       "position": NSNull(),
     ]
     layer?.addSublayer(imageLayer)
+  }
+
+  private func updateBackground() {
+    let color = isHovering
+      ? NSColor.labelColor.resolvedColor(with: effectiveAppearance).withAlphaComponent(0.08)
+      : NSColor.clear
+    layer?.backgroundColor = color.cgColor
   }
 }
 
@@ -857,11 +1014,6 @@ private final class EmojiPickerHeaderView: NSView {
 
 private final class EmojiPickerCategoryButton: NSButton {
   let categoryIndex: Int
-  var isActive = false {
-    didSet {
-      updateAppearance()
-    }
-  }
 
   init(categoryIndex: Int) {
     self.categoryIndex = categoryIndex
@@ -881,18 +1033,7 @@ private final class EmojiPickerCategoryButton: NSButton {
     imagePosition = symbol == nil ? .noImage : .imageOnly
   }
 
-  override func layout() {
-    super.layout()
-    layer?.cornerRadius = min(bounds.width, bounds.height) / 2
-  }
-
-  override func viewDidChangeEffectiveAppearance() {
-    super.viewDidChangeEffectiveAppearance()
-    updateAppearance()
-  }
-
   private func setupView() {
-    wantsLayer = true
     bezelStyle = .rounded
     setButtonType(.momentaryPushIn)
     imagePosition = .imageOnly
@@ -901,16 +1042,7 @@ private final class EmojiPickerCategoryButton: NSButton {
     showsBorderOnlyWhileMouseInside = true
     focusRingType = .none
     setAccessibilityRole(.button)
-    updateAppearance()
-  }
-
-  private func updateAppearance() {
-    let appearance = effectiveAppearance
-    contentTintColor = isActive ? .labelColor : .secondaryLabelColor
-    layer?.backgroundColor = (isActive ? NSColor.controlAccentColor : NSColor.clear)
-      .resolvedColor(with: appearance)
-      .withAlphaComponent(isActive ? 0.12 : 0)
-      .cgColor
+    contentTintColor = .secondaryLabelColor
   }
 }
 
@@ -1105,8 +1237,8 @@ private final class EmojiPickerImageCache {
 private enum EmojiPickerLayout {
   static let width: CGFloat = 304
   static let height: CGFloat = 348
-  static let searchHeight: CGFloat = 28
-  static let searchBarHeight: CGFloat = 40
+  static let searchHeight: CGFloat = 24
+  static let searchBarHeight: CGFloat = 36
   static let searchHorizontalPadding: CGFloat = 8
   static let searchVerticalPadding: CGFloat = 6
   static let categoryBarHeight: CGFloat = 32
@@ -1122,7 +1254,7 @@ private enum EmojiPickerLayout {
   static let sectionHeaderHorizontalInset: CGFloat = 22
   static let preferredColumnCount = 7
   static let minCollectionHorizontalInset: CGFloat = 22
-  static let collectionTopInset: CGFloat = 12
+  static let collectionTopInset: CGFloat = 8
   static let collectionBottomInset: CGFloat = 18
   static let emojiFontSize: CGFloat = 23
   static let emojiFont = CTFontCreateWithName(

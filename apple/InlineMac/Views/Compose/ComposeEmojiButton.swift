@@ -165,19 +165,11 @@ final class ComposeEmojiButton: NSView {
   }
 
   private func makeEmojiPopover() -> NSPopover {
-    let popover = NSPopover()
-    popover.delegate = self
-    popover.behavior = .transient
-    popover.animates = true
-    if #available(macOS 14.0, *) {
-      popover.hasFullSizeContent = true
-    }
-    popover.contentSize = EmojiPickerPopover.preferredContentSize
-    popover.contentViewController = EmojiPickerPopover.makeViewController { [weak self, weak popover] emoji in
+    let popover = EmojiPickerPopover.makePopover { [weak self] emoji in
       guard let self else { return }
       delegate?.composeEmojiButton(self, didReceiveText: emoji)
-      popover?.performClose(nil)
     }
+    popover.delegate = self
     return popover
   }
 }

@@ -39,8 +39,15 @@ struct ReactionOverlayView: View {
   @State private var isEmojiPickerPresented = false
   @State private var isSelectingCustomEmoji = false
 
-  private let pageWidth: CGFloat = 280 // Width of one page of reactions
-  private static let buttonSize: CGFloat = 32
+  private enum Metrics {
+    static let width: CGFloat = 280
+    static let height: CGFloat = 46
+    static let outerPadding: CGFloat = 4
+    static let horizontalPadding: CGFloat = 6
+    static let itemSpacing: CGFloat = 2
+    static let buttonSize: CGFloat = 32
+  }
+
   private static let moreReactionsKey = "__more_reactions"
 
   private func handleReactionSelected(_ emoji: String) {
@@ -92,22 +99,7 @@ struct ReactionOverlayView: View {
   }
 
   var body: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 2) {
-        ForEach(Self.defaultReactions, id: \.self) { emoji in
-          reactionButton(emoji)
-        }
-        moreReactionsButton
-      }
-      .padding(.vertical, 2)
-      .padding(.horizontal, 6)
-    }
-    .background(
-      RoundedRectangle(cornerRadius: 20)
-        .fill(.ultraThinMaterial)
-        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-    )
-    .frame(width: pageWidth, height: 50)
+    reactionBar
     .scaleEffect(appearScale)
     .opacity(appearOpacity)
     .onAppear {
@@ -127,17 +119,59 @@ struct ReactionOverlayView: View {
 
       onEmojiPickerDismissed()
     }
-    .padding(5)
+    .padding(Metrics.outerPadding)
+  }
+
+  private var reactionBar: some View {
+    ZStack {
+      reactionBarBackground
+
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: Metrics.itemSpacing) {
+          ForEach(Self.defaultReactions, id: \.self) { emoji in
+            reactionButton(emoji)
+          }
+          moreReactionsButton
+        }
+        .padding(.horizontal, Metrics.horizontalPadding)
+        .frame(height: Metrics.height, alignment: .center)
+      }
+      .frame(width: Metrics.width, height: Metrics.height)
+      .background(ReactionScrollViewConfigurator().allowsHitTesting(false))
+    }
+    .frame(width: Metrics.width, height: Metrics.height)
+    .contentShape(Capsule())
+  }
+
+  @ViewBuilder
+  private var reactionBarBackground: some View {
+    if #available(macOS 26.0, *) {
+      GlassEffectContainer(spacing: 0) {
+        Color.clear
+          .frame(width: Metrics.width, height: Metrics.height)
+          .glassEffect(.regular.interactive(), in: Capsule())
+      }
+      .allowsHitTesting(false)
+      .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    } else {
+      Capsule()
+        .fill(.ultraThinMaterial)
+        .allowsHitTesting(false)
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+    }
   }
 
   private func reactionButton(_ emoji: String) -> some View {
-    Button(action: {
-      handleReactionSelected(emoji)
-    }) {
-      Text(emoji)
-        .font(.system(size: 22))
-        .frame(width: Self.buttonSize, height: Self.buttonSize)
-    }
+    Button(
+      action: {
+        handleReactionSelected(emoji)
+      },
+      label: {
+        Text(emoji)
+          .font(.system(size: 22))
+          .frame(width: Metrics.buttonSize, height: Metrics.buttonSize)
+      }
+    )
     .buttonStyle(.plain)
     .background(buttonBackground(key: emoji))
     .contentShape(Circle())
@@ -149,12 +183,15 @@ struct ReactionOverlayView: View {
   }
 
   private var moreReactionsButton: some View {
-    Button(action: showEmojiPicker) {
-      Image(systemName: "plus")
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .frame(width: Self.buttonSize, height: Self.buttonSize)
-    }
+    Button(
+      action: showEmojiPicker,
+      label: {
+        Image(systemName: "plus")
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: Metrics.buttonSize, height: Metrics.buttonSize)
+      }
+    )
     .buttonStyle(.plain)
     .background(buttonBackground(key: Self.moreReactionsKey))
     .contentShape(Circle())
@@ -164,14 +201,60 @@ struct ReactionOverlayView: View {
       isHovered[Self.moreReactionsKey] = hovering
     }
     .help("More reactions")
-    .popover(isPresented: $isEmojiPickerPresented, arrowEdge: .bottom) {
-      EmojiPickerPopover(onSelect: handleCustomEmojiSelected)
+    .background {
+      EmojiPickerPopoverPresenter(
+        isPresented: $isEmojiPickerPresented,
+        preferredEdge: .maxY,
+        onSelect: handleCustomEmojiSelected
+      )
+      .allowsHitTesting(false)
     }
   }
 
   private func buttonBackground(key: String) -> some View {
     Circle()
-      .fill(Color(NSColor.windowBackgroundColor).opacity(isHovered[key] == true ? 0.6 : 0))
+      .fill(Color.primary.opacity(isHovered[key] == true ? 0.08 : 0))
       .animation(.easeOut(duration: 0.15), value: isHovered[key])
+  }
+}
+
+private struct ReactionScrollViewConfigurator: NSViewRepresentable {
+  func makeNSView(context _: Context) -> NSView {
+    let view = NSView(frame: .zero)
+    DispatchQueue.main.async {
+      configure(from: view)
+    }
+    return view
+  }
+
+  func updateNSView(_ nsView: NSView, context _: Context) {
+    DispatchQueue.main.async {
+      configure(from: nsView)
+    }
+  }
+
+  private func configure(from view: NSView) {
+    guard let scrollView = view.firstSuperview(of: NSScrollView.self) else { return }
+
+    scrollView.drawsBackground = false
+    scrollView.hasHorizontalScroller = false
+    scrollView.hasVerticalScroller = false
+    scrollView.autohidesScrollers = true
+    scrollView.scrollerStyle = .overlay
+    scrollView.horizontalScrollElasticity = .allowed
+    scrollView.verticalScrollElasticity = .none
+  }
+}
+
+private extension NSView {
+  func firstSuperview<T: NSView>(of _: T.Type) -> T? {
+    var current = superview
+    while let view = current {
+      if let match = view as? T {
+        return match
+      }
+      current = view.superview
+    }
+    return nil
   }
 }

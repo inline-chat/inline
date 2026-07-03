@@ -41,11 +41,20 @@ struct ReactionPickerView: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
-      .background(
-        Capsule()
-          .fill(Color(UIColor.secondarySystemBackground))
+      .background {
+        if #available(iOS 26.0, *) {
+          GlassEffectContainer(spacing: 0) {
+            Color.clear
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+              .glassEffect(.regular, in: Capsule())
+          }
           .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
-      )
+        } else {
+          Capsule()
+            .fill(Color(UIColor.secondarySystemBackground))
+            .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
+        }
+      }
     }
   }
 }
@@ -56,14 +65,25 @@ struct ReactionButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .padding(8)
-      .background(
-        Circle()
-          .fill(
-            configuration.isPressed ?
-              Color(UIColor.systemGray5) :
-              Color(UIColor.systemBackground)
-          )
-      )
+      .background {
+        if #available(iOS 26.0, *) {
+          Circle()
+            .fill(Color(UIColor.systemBackground).opacity(0.2))
+            .glassEffect(
+              .regular
+                .tint(configuration.isPressed ? Color(UIColor.systemGray5).opacity(0.7) : nil)
+                .interactive(),
+              in: Circle()
+            )
+        } else {
+          Circle()
+            .fill(
+              configuration.isPressed ?
+                Color(UIColor.systemGray5) :
+                Color(UIColor.systemBackground)
+            )
+        }
+      }
       .scaleEffect(configuration.isPressed ? 0.9 : 1.0)
       .animation(.spring(response: 0.3), value: configuration.isPressed)
   }

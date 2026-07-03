@@ -916,7 +916,7 @@ class GlassComposeAppKit: NSView {
     chatParticipantsViewModel?.$mentionCandidates
       .sink { [weak self] candidates in
         guard let self else { return }
-        log.trace("Mention candidates updated: \(candidates.count) candidates")
+        log.trace("Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
         mentionCompletionMenu?.updateCandidates(candidates)
 
         if let currentMentionRange,
@@ -2561,19 +2561,31 @@ extension GlassComposeAppKit: ComposeMenuButtonDelegate {
 // MARK: MentionCompletionMenuDelegate
 
 extension GlassComposeAppKit: MentionCompletionMenuDelegate {
-  func mentionMenu(_ menu: MentionCompletionMenu, didSelectUser user: UserInfo, withText text: String, userId: Int64) {
+  func mentionMenu(_ menu: MentionCompletionMenu, didSelectItem item: MentionCompletionItem, withText text: String) {
     guard let mentionRange = currentMentionRange else { return }
-    log.trace("mentionMenu didSelectUser: \(text), \(userId)")
+    log.trace("mentionMenu didSelectItem: \(text)")
 
     let currentAttributedText = textEditor.attributedString
-    let result = mentionDetector.replaceMention(
-      in: currentAttributedText,
-      range: mentionRange.range,
-      with: text,
-      userId: userId,
-      mentionAttributes: composeMentionAttributes,
-      trailingAttributes: composeBaseTextAttributes
-    )
+    let result = switch item {
+    case let .user(user):
+      mentionDetector.replaceMention(
+        in: currentAttributedText,
+        range: mentionRange.range,
+        with: text,
+        userId: user.userInfo.user.id,
+        mentionAttributes: composeMentionAttributes,
+        trailingAttributes: composeBaseTextAttributes
+      )
+    case let .group(group):
+      mentionDetector.replaceGroupMention(
+        in: currentAttributedText,
+        range: mentionRange.range,
+        with: text,
+        groupId: group.id,
+        mentionAttributes: composeMentionAttributes,
+        trailingAttributes: composeBaseTextAttributes
+      )
+    }
 
     // Update attributed text and cursor position
     ignoreNextHeightChange = true
