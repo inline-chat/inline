@@ -1,8 +1,10 @@
 # Hermes Agent
 
+Source: https://inline.chat/docs/hermes
+
 Use the Inline adapter to run Hermes Agent from Inline DMs, group chats, and reply threads.
 
-Need a bot token first? See [Creating a Bot](/docs/creating-a-bot).
+Need a bot token first? See [Creating a Bot](https://inline.chat/docs/creating-a-bot).
 
 ## Install
 

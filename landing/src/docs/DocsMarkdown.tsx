@@ -15,6 +15,12 @@ type Slugger = {
   slug: (text: string) => string
 }
 
+type TocItem = {
+  id: string
+  level: 2 | 3
+  text: string
+}
+
 function createSlugger(): Slugger {
   const used = new Map<string, number>()
 
@@ -33,6 +39,34 @@ function createSlugger(): Slugger {
   }
 
   return { slug: slugify }
+}
+
+function extractToc(markdown: string): TocItem[] {
+  const slugger = createSlugger()
+  const items: TocItem[] = []
+  let inFence = false
+
+  for (const line of markdown.split("\n")) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+
+    if (inFence) continue
+
+    const match = /^(#{1,4})\s+(.+?)\s*#*\s*$/.exec(line)
+    if (!match) continue
+
+    const level = match[1].length
+    const text = match[2].replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/`([^`]+)`/g, "$1").trim()
+    const id = slugger.slug(text)
+
+    if (level === 2 || level === 3) {
+      items.push({ id, level, text })
+    }
+  }
+
+  return items
 }
 
 function nodeText(node: ReactNode): string {
@@ -77,6 +111,8 @@ function PreWithCopy({ children, ...props }: { children?: ReactNode; [key: strin
 
 export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
   const slugger = createSlugger()
+  const toc = extractToc(markdown)
+  const showToc = toc.length >= 5 && markdown.split("\n").length >= 45
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const copiedEmailTimeout = useRef<number | null>(null)
@@ -105,7 +141,7 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
       )
     }
 
-  return (
+  const content = (
     <Markdown
       remarkPlugins={[remarkGfm]}
       className={className}
@@ -180,5 +216,21 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
     >
       {markdown}
     </Markdown>
+  )
+
+  if (!showToc) return content
+
+  return (
+    <div className="docs-markdown-with-toc">
+      {content}
+      <nav className="docs-page-toc" aria-label="On this page">
+        <div className="docs-page-toc-title">On this page</div>
+        {toc.map((item) => (
+          <a key={item.id} href={`#${item.id}`} className="docs-page-toc-link" data-level={item.level}>
+            {item.text}
+          </a>
+        ))}
+      </nav>
+    </div>
   )
 }

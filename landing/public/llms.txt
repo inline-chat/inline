@@ -1,44 +1,26 @@
 # Inline
 
-> Inline is a work chat app for teams and agents. It exposes a Bot HTTP API, a Realtime WebSocket API and SDK, a hosted MCP server, and a CLI for automating chats, messages, spaces, and workflows.
+> Inline is a work chat app for teams and agents. Use these docs for app setup, developer APIs, the hosted MCP server, CLI, and integrations.
 
-Primary hosts:
-- User and docs site: https://inline.chat
-- HTTP API: https://api.inline.chat
-- MCP server: https://mcp.inline.chat/mcp
-- Realtime API: wss://api.inline.chat/realtime
+## Docs
 
-Authentication:
-- The Bot HTTP API and CLI use bearer tokens.
-- The hosted MCP server uses OAuth 2.1 with PKCE through https://api.inline.chat/.well-known/oauth-authorization-server.
+- [Welcome](https://inline.chat/docs/index.md): Start here for Inline docs and product status.
+- [What's Inline](https://inline.chat/docs/whats-inline.md): Product goals and design principles.
+- [Downloads](https://inline.chat/docs/downloads.md): Current app download links.
+- [Roadmap](https://inline.chat/docs/roadmap.md): Current product roadmap status.
+- [CLI](https://inline.chat/docs/cli.md): Install and authenticate the Inline command line tool.
+- [Developers](https://inline.chat/docs/developers.md): Overview of Inline developer surfaces.
+- [Realtime API](https://inline.chat/docs/realtime-api.md): WebSocket API and TypeScript SDK quick start.
+- [Bot API](https://inline.chat/docs/bot-api.md): HTTP API for bot integrations and automations.
+- [Creating a Bot](https://inline.chat/docs/creating-a-bot.md): Create or reveal an Inline bot token.
+- [MCP](https://inline.chat/docs/mcp.md): Connect MCP-compatible agents to Inline with OAuth consent.
+- [OpenClaw](https://inline.chat/docs/openclaw.md): Configure the official Inline OpenClaw plugin.
+- [Hermes Agent](https://inline.chat/docs/hermes.md): Run Hermes Agent from Inline chats.
+- [Security](https://inline.chat/docs/security.md): Security posture, encryption, and vulnerability reporting.
 
-## Agent Surfaces
+## Machine-readable References
 
-- [Integration declaration](https://inline.chat/.well-known/integrations.json): Machine-readable surface metadata for Inline's Bot HTTP API, MCP server, CLI, and shared credentials.
-- [OpenAPI spec](https://inline.chat/openapi.json): Canonical Bot HTTP API OpenAPI 3.0 JSON.
-- [MCP server card](https://inline.chat/.well-known/mcp/server-card.json): Hosted MCP connection endpoint and OAuth metadata.
-
-## Source And Packages
-
-- [GitHub repository](https://github.com/inline-chat/inline): Public builder repository for Inline protocol, CLI, SDKs, MCP server, OpenClaw plugin, Hermes adapter, and package source.
-- [TypeScript Realtime SDK source](https://github.com/inline-chat/inline/tree/main/packages/sdk): `@inline-chat/realtime-sdk`; realtime transport, protocol client, state helpers, IDs, and tests.
-- [Protocol Buffers API schema](https://github.com/inline-chat/inline/tree/main/proto): Public `.proto` contract used by the realtime API and generated clients.
-- [TypeScript protocol package](https://github.com/inline-chat/inline/tree/main/packages/protocol): `@inline-chat/protocol`; generated TypeScript package for the public protobuf schema.
-- [CLI source](https://github.com/inline-chat/inline/tree/main/cli): Rust source for the `inline` CLI, including auth, chat/message commands, realtime commands, and bundled protobuf schema output.
-- [OpenClaw plugin source](https://github.com/inline-chat/inline/tree/main/packages/openclaw): `@inline-openclaw/inline`; OpenClaw channel plugin for using OpenClaw from Inline DMs and chats with an Inline bot token.
-- [Hermes Agent adapter source](https://github.com/inline-chat/inline/tree/main/packages/hermes-agent): `@inline-chat/hermes-agent-adapter`; Hermes external platform plugin and Inline realtime sidecar.
-
-## Documentation
-
-- [Bot API](https://inline.chat/docs/bot-api): HTTP API for bots and automations.
-- [Realtime API](https://inline.chat/docs/realtime-api): WebSocket API and SDK guidance.
-- [MCP server](https://inline.chat/docs/mcp): Connect agents to Inline over MCP.
-- [CLI](https://inline.chat/docs/cli): Install and use the Inline command line tool.
-- [Creating a bot](https://inline.chat/docs/creating-a-bot): Create or reveal a bot token.
-- [OpenClaw setup](https://inline.chat/docs/openclaw): Configure the official Inline OpenClaw plugin.
-- [Hermes Agent adapter](https://github.com/inline-chat/inline/blob/main/docs/hermes.md): Install and configure the Inline Hermes Agent adapter.
-
-## Optional
-
-- [Security](https://inline.chat/docs/security): Security practices and access guidance.
-- [Downloads](https://inline.chat/download): Inline app downloads.
+- [Full docs corpus](https://inline.chat/llms-full.txt): All public docs concatenated as Markdown.
+- [OpenAPI spec](https://inline.chat/openapi.json): Bot HTTP API schema.
+- [Integration declaration](https://inline.chat/.well-known/integrations.json): Machine-readable integration metadata.
+- [MCP server card](https://inline.chat/.well-known/mcp/server-card.json): Hosted MCP endpoint and OAuth metadata.

@@ -1,5 +1,7 @@
 # Security
 
+Source: https://inline.chat/docs/security
+
 Last updated: February 11, 2026.
 
 Inline is in alpha and this page is still evolving. We're actively tightening security as we build.

@@ -1,5 +1,7 @@
 # MCP
 
+Source: https://inline.chat/docs/mcp
+
 Inline MCP lets MCP-compatible clients use your Inline workspace with explicit OAuth consent.
 
 Use it when you want assistants to read conversations, find context, create threads, and send text/media in approved spaces.
@@ -136,5 +138,5 @@ Access tokens last 1 hour. Refresh tokens last 30 days and are issued only when 
 ## MCP vs Other Inline APIs
 
 - Use MCP for assistant workflows in MCP-native clients.
-- Use [Realtime API](/docs/realtime-api) for fully custom client/app integrations.
-- Use [Bot API](/docs/bot-api) for direct HTTP bot integrations.
+- Use [Realtime API](https://inline.chat/docs/realtime-api) for fully custom client/app integrations.
+- Use [Bot API](https://inline.chat/docs/bot-api) for direct HTTP bot integrations.

@@ -27,7 +27,7 @@
 
 .docs-container {
   margin: 0 auto;
-  max-width: 1100px;
+  max-width: 1180px;
   width: 100%;
   padding-left: 0;
   padding-right: 0;
@@ -195,7 +195,7 @@
 
 .docs-main {
   min-width: 0;
-  max-width: 860px;
+  max-width: 920px;
   width: 100%;
 }
 
@@ -304,6 +304,48 @@
 .docs-content.page-content {
   font-size: 17px;
   line-height: 1.55;
+}
+
+.docs-markdown-with-toc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px;
+  gap: 30px;
+  align-items: start;
+}
+
+.docs-page-toc {
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding-left: 14px;
+  border-left: 1px solid var(--docs-faint);
+  font-size: 13px;
+}
+
+.docs-page-toc-title {
+  margin-bottom: 8px;
+  color: var(--docs-muted);
+  font-weight: 650;
+}
+
+.docs-page-toc-link {
+  display: block;
+  padding: 4px 0;
+  color: var(--docs-muted);
+  text-decoration: none;
+  line-height: 1.25;
+}
+
+.docs-page-toc-link:hover {
+  color: var(--docs-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.docs-page-toc-link[data-level="3"] {
+  padding-left: 10px;
 }
 
 .legal-content.page-content {
@@ -654,5 +696,13 @@ html[data-theme="light"] .docs-page {
     border-bottom: 1px solid var(--docs-faint);
     padding-bottom: 12px;
     border-radius: 14px;
+  }
+
+  .docs-markdown-with-toc {
+    display: block;
+  }
+
+  .docs-page-toc {
+    display: none;
   }
 }

@@ -1,0 +1,743 @@
+# Inline Docs
+
+Source: https://inline.chat
+
+Generated from the same Markdown files used by the HTML docs.
+
+## Contents
+
+- [Welcome](https://inline.chat/docs/index.md): Start here for Inline docs and product status.
+- [What's Inline](https://inline.chat/docs/whats-inline.md): Product goals and design principles.
+- [Downloads](https://inline.chat/docs/downloads.md): Current app download links.
+- [Roadmap](https://inline.chat/docs/roadmap.md): Current product roadmap status.
+- [CLI](https://inline.chat/docs/cli.md): Install and authenticate the Inline command line tool.
+- [Developers](https://inline.chat/docs/developers.md): Overview of Inline developer surfaces.
+- [Realtime API](https://inline.chat/docs/realtime-api.md): WebSocket API and TypeScript SDK quick start.
+- [Bot API](https://inline.chat/docs/bot-api.md): HTTP API for bot integrations and automations.
+- [Creating a Bot](https://inline.chat/docs/creating-a-bot.md): Create or reveal an Inline bot token.
+- [MCP](https://inline.chat/docs/mcp.md): Connect MCP-compatible agents to Inline with OAuth consent.
+- [OpenClaw](https://inline.chat/docs/openclaw.md): Configure the official Inline OpenClaw plugin.
+- [Hermes Agent](https://inline.chat/docs/hermes.md): Run Hermes Agent from Inline chats.
+- [Security](https://inline.chat/docs/security.md): Security posture, encryption, and vulnerability reporting.
+
+# Welcome
+
+Source: https://inline.chat/docs
+
+Inline is a fast, lightweight work chat for high-performance teams.
+
+## Status
+
+- Closed alpha.
+- macOS and iOS are live for early teams.
+- Web is in active development.
+
+## Pages
+
+- [What's Inline](https://inline.chat/docs/whats-inline)
+- [Roadmap](https://inline.chat/docs/roadmap)
+- [Downloads](https://inline.chat/docs/downloads)
+- [CLI](https://inline.chat/docs/cli)
+- [Developers](https://inline.chat/docs/developers)
+- [Realtime API](https://inline.chat/docs/realtime-api)
+- [Bot API](https://inline.chat/docs/bot-api)
+- [Legal](https://inline.chat/legal)
+- [Security](https://inline.chat/docs/security)
+- [GitHub Repository](https://github.com/inline-chat/inline)
+
+# What's Inline
+
+Source: https://inline.chat/docs/whats-inline
+
+It's designed to be a calm, fast interface for coordination between humans, agents, and shared memory.
+
+## Goals
+
+### A place where new ideas take shape
+
+An idea doesn't form in the issue tracker, the company wiki, or Google Docs. The earliest sparks of ideas often aren't shared. They're jotted down in private notes or mentioned in the office and then get lost. Work chat should encourage collecting these unpolished ideas in threads, allowing them to develop slowly with others.
+
+### Maximum sharing
+
+It should accommodate maximum sharing of ideas and information. Sharing less information directly impacts team alignment, collaboration, and the development of new ideas. Friction kills collective thinking. Sharing more should not cause more notifications or chaos in large chats.
+
+### Highest signal-to-noise ratio
+
+Minimum distraction, so you can stay in the zone as long as possible without quitting the app. It should be calm and in your control. Everything you see should matter to you.
+
+### Simplicity = flexibility = power
+
+A simple concept can have infinite applications: a shareable thread containing messages or more threads. You can use it to collect feedback, track bugs, review work, write specs, brainstorm, take notes, build a team library, and share assets.
+
+## How We're Designing It
+
+### Threads
+
+Threads are the building blocks of organized and focused chats. You can move from rapid back-and-forth to async discussions spanning days without losing track.
+
+### Sidebar
+
+The sidebar is your working set: chats you want right now, plus chats that need your attention. You can close what you do not need and reopen anytime.
+
+### Spaces
+
+Spaces help you keep contexts separate. Open the ones you care about now and ignore the rest.
+
+### Home
+
+You can use Inline without being part of any team. In Home, you can start direct messages, get invited to threads, or create threads.
+
+### Communities
+
+We treat friend groups and communities as first-class citizens. Right now we're primarily focused on team chat so we can build a sustainable business faster.
+
+## Additional Principles
+
+- Humans and agents should both be first-class participants.
+- Threads should become shared memory over time.
+- The right view should be generated from context when needed.
+
+# Downloads
+
+Source: https://inline.chat/docs/downloads
+
+## Current Links
+
+- macOS beta (.dmg): [Download for macOS](https://inline.chat/download/mac/beta)
+- iOS beta: [Join TestFlight](https://testflight.apple.com/join/FkC3f7fz)
+- Hermes Agent adapter: [Install](https://inline.chat/docs/hermes#install)
+
+## Switching from TestFlight to DMG (macOS)
+
+If you previously installed Inline via TestFlight and now want to use the `.dmg` build:
+
+1. Open TestFlight and click **Stop Testing** for Inline.
+2. In `Applications`, delete the existing Inline app.
+3. Install Inline from the `.dmg`.
+
+If Finder shows a replace prompt while copying from the `.dmg`, click **Replace**.
+
+Need an older macOS build? See [previous versions](https://inline.chat/docs/downloads/previous).
+
+# Roadmap
+
+Source: https://inline.chat/docs/roadmap
+
+As we're actively working on the macOS and iOS apps, we'll update this page with latest state of the product. With the goal that teams who find the current featureset sufficient for their day-to-day work can enroll the paid beta.
+
+In progress
+
+-
+
+Planned
+
+-
+
+Done
+
+-
+
+# CLI
+
+Source: https://inline.chat/docs/cli
+
+Inline CLI is in alpha.
+In this version, it is primarily optimized for AI and agent workflows. A more polished UX for regular users is coming.
+
+## Install
+
+### Homebrew (recommended)
+
+```bash
+brew tap inline-chat/homebrew-inline
+brew install --cask inline
+```
+
+### Script
+
+```bash
+curl -fsSL https://inline.chat/cli/install.sh | sh
+```
+
+## Login
+
+```bash
+inline auth login
+```
+
+## Useful Commands
+
+- `inline chats list`
+- `inline messages send --chat-id <id> --text "hello"`
+- `inline search --chat-id <id> --query "<text>"`
+
+## References
+
+- Source: `cli/`
+- CLI README: `cli/README.md`
+
+# Developers
+
+Source: https://inline.chat/docs/developers
+
+Inline currently exposes two API entry points.
+
+## Bot HTTP API
+
+- Best for simpler bot workflows and alerts.
+- Request/response over HTTP.
+- Good fit for lightweight automations.
+
+## Full Realtime API
+
+- Best for full two-way interactions and richer bot behavior.
+- WebSocket RPC with live state sync.
+- Recommended when your bot behaves like an active participant in chats.
+
+See: [Realtime API](https://inline.chat/docs/realtime-api)
+
+## Quick Start
+
+- Method reference: [Bot API](https://inline.chat/docs/bot-api)
+- OpenClaw integration: [OpenClaw](https://inline.chat/docs/openclaw)
+- Bot token guide: [Creating a Bot](https://inline.chat/docs/creating-a-bot)
+
+## Deep Links
+
+Supported deep links on native apps:
+
+```text
+inline://user/{userId}
+inline://chat/{chatId}
+inline://chat/{chatId}/message/{messageId}
+```
+
+## Repository
+
+Inline publishes public protocol definitions, SDK packages, bot tools, MCP, CLI, and plugins on GitHub.
+
+Start here: [inline-chat/inline on GitHub](https://github.com/inline-chat/inline)  
+More setup and architecture details are in the README.
+
+# Realtime API
+
+Source: https://inline.chat/docs/realtime-api
+
+Inline Realtime API is the full API surface over WebSocket RPC.
+
+## Endpoint
+
+- `wss://api.inline.chat/realtime`
+
+## SDK
+
+- Package: `@inline-chat/realtime-sdk`
+
+## Install
+
+```bash
+bun add @inline-chat/realtime-sdk
+```
+
+## Quick Start
+
+```ts
+import { InlineSdkClient } from "@inline-chat/realtime-sdk"
+
+const client = new InlineSdkClient({
+  token: process.env.INLINE_TOKEN!,
+})
+
+await client.connect()
+const me = await client.getMe()
+console.log(me.userId)
+
+await client.sendMessage({
+  chatId: 42,
+  text: "hello from realtime sdk",
+})
+
+await client.close()
+```
+
+## Use Cases
+
+- Full client integrations
+- Rich two-way bot interactions
+- Live state sync and realtime updates
+
+## Protocol Buffers
+
+- [core.proto](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
+- [Generated protocol npm package (`packages/protocol`)](https://github.com/inline-chat/inline/tree/main/packages/protocol)
+
+# Bot API
+
+Source: https://inline.chat/docs/bot-api
+
+Inline Bot API is a simple HTTP API for bot integrations.
+It is intended for simpler bot workflows and alerts.
+
+## Status
+
+Alpha. Endpoints may change.
+
+## Base URL
+
+- [Inline API](https://api.inline.chat)
+
+## Authentication
+
+Use either:
+
+1. Header auth (recommended): `Authorization: Bearer <token>`
+2. Token in path: `/bot<token>/<method>`
+
+## Common Methods
+
+- `GET /bot/getMe`
+- `GET /bot/getChat`
+- `GET /bot/getChatHistory`
+- `POST /bot/sendMessage`
+- `POST /bot/editMessageText`
+- `POST /bot/deleteMessage`
+- `POST /bot/sendReaction`
+
+## Targeting Chats
+
+- Use exactly one target per request: `chat_id` or `user_id`.
+- For compatibility in alpha, `peer_thread_id` and `peer_user_id` are still accepted.
+
+## When To Use This API
+
+- Use Bot HTTP API for simpler workflows and alerts.
+- For full two-way bot interactions, we recommend the Full Realtime API (`@inline-chat/realtime-sdk`).
+
+## Quick Example
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -X POST "https://api.inline.chat/bot/sendMessage" \
+  -d '{"chat_id":42,"text":"hello"}'
+```
+
+## Response Format
+
+Success:
+
+```json
+{ "ok": true, "result": {} }
+```
+
+Error:
+
+```json
+{ "ok": false, "error_code": 400, "description": "Invalid arguments was provided" }
+```
+
+## SDK and Reference
+
+- SDK package: `@inline-chat/bot-api`
+- [Developers overview](https://inline.chat/docs/developers)
+- [Realtime API](https://inline.chat/docs/realtime-api)
+- [API reference UI](https://api.inline.chat/bot-api-reference)
+
+# Creating a Bot
+
+Source: https://inline.chat/docs/creating-a-bot
+
+## macOS App
+
+1. Open Inline for macOS.
+2. Open `Inline -> Settings…` (`Cmd+,`).
+3. Select `Bots`.
+4. Enter `Name` and `Username` (must end with `bot`).
+5. Click `Create Bot`.
+6. Copy the `New Token`.
+
+## CLI
+
+```bash
+inline auth login
+inline bots create --name "My Inline Bot" --username myinlinebot
+inline bots list
+inline bots reveal-token --bot-user-id <BOT_USER_ID>
+```
+
+## Use Token in OpenClaw
+
+```yaml
+channels:
+  inline:
+    enabled: true
+    token: "<INLINE_BOT_TOKEN>"
+```
+
+Continue with [OpenClaw](https://inline.chat/docs/openclaw).
+
+# MCP
+
+Source: https://inline.chat/docs/mcp
+
+Inline MCP lets MCP-compatible clients use your Inline workspace with explicit OAuth consent.
+
+Use it when you want assistants to read conversations, find context, create threads, and send text/media in approved spaces.
+
+## Status
+
+Alpha (first-cohort release). Stable enough for early production usage; surface may evolve.
+
+## Quick Setup
+
+### ChatGPT Apps
+
+1. Add an MCP connector in ChatGPT Apps.
+2. Set server URL to `https://mcp.inline.chat/mcp`.
+3. Complete Inline OAuth sign-in and consent.
+
+### Claude
+
+```bash
+claude mcp add --transport http inline https://mcp.inline.chat/mcp
+```
+
+Then complete Inline OAuth sign-in in Claude.
+
+### Other Clients
+
+Use these values for any remote MCP client with OAuth 2.1 + PKCE:
+
+- Server URL: `https://mcp.inline.chat/mcp`
+- OAuth metadata: `https://api.inline.chat/.well-known/oauth-authorization-server`
+- Protected resource metadata: `https://mcp.inline.chat/.well-known/oauth-protected-resource`
+
+Compatibility: `https://mcp.inline.chat/oauth/*` is proxied to the Inline OAuth server.
+
+## Tools
+
+Current MCP tools are grouped around agent workflows instead of raw API endpoints:
+
+- `account.me`: inspect the current authorization, granted scopes, and allowed chat context.
+- `spaces.list`: list spaces visible to the current grant.
+- `people.search`: resolve people by name, username, or user ID in allowed contexts.
+- `conversations.list`: list recent conversations or resolve a conversation by name/title/ID.
+- `conversations.get`: inspect one resolved chat or DM, including participants and pinned message IDs.
+- `conversations.create`: create a new conversation in an allowed space or home threads.
+- `messages.list`: list recent messages in one chat or DM with filters (`since`, `until`, `content`, etc).
+- `messages.context`: fetch a before/after window around a message ID, or latest compact context.
+- `messages.search`: search messages in one chat or DM (not global search).
+- `messages.unread`: list unread messages across approved conversations.
+- `messages.send`: send a text message to a chat or DM.
+- `files.upload`: upload media from `base64` or an HTTPS URL and get Inline media IDs.
+- `files.get`: extract file/media metadata from specific message IDs or recent messages.
+- `messages.send_media`: send uploaded photo/video/document with optional caption.
+- `messages.send_batch`: send ordered text/media items in one call.
+
+Legacy tools `search` and `fetch` are removed.
+
+## Entity URIs
+
+Chat, message, and person entities include a canonical `uri` field using Inline deep links:
+
+```text
+inline://chat/{chatId}
+inline://chat/{chatId}/message/{messageId}
+inline://user/{userId}
+```
+
+Use IDs for tool calls. Use `uri` when showing, storing, or handing links back to a user.
+
+## Common Workflows
+
+- Inspect the current grant: `account.me`.
+- Resolve a target: `spaces.list` or `people.search`, then `conversations.list`, then `conversations.get`.
+- Summarize a thread: `messages.list` with `since`/`until`, then summarize in the model.
+- Read around a found message: `messages.search` or `messages.unread`, then `messages.context`.
+- Find links/media/files: `messages.search` with `content: "links" | "media" | "files"`, or `files.get` for concrete file metadata.
+- Create a thread then post: `conversations.create`, then `messages.send`.
+- Send media: `files.upload`, then `messages.send_media`.
+- Import a compact batch: `conversations.create`, then `messages.send_batch`.
+
+## Configuration
+
+Authorization flow:
+
+1. Client performs dynamic OAuth registration.
+2. User signs in to Inline.
+3. User grants scopes and chooses allowed spaces.
+4. Client exchanges the authorization code with PKCE (`S256`).
+
+Scopes:
+
+- `messages:read`
+- `messages:write`
+- `spaces:read`
+- `offline_access`
+
+Default scope: `messages:read spaces:read`
+
+Access tokens last 1 hour. Refresh tokens last 30 days and are issued only when `offline_access` is requested.
+
+## Permissions
+
+- Space access is limited to spaces selected during consent.
+- DM access is available only if `DMs` is enabled.
+- Home-thread access is available only if `Home threads` is enabled.
+- Tool scopes are enforced on every call.
+
+## Limits
+
+- `messages.list` and `messages.search`: up to 50 messages per call.
+- `messages.unread`: up to 200 messages per call.
+- `messages.send_batch`: up to 100 items per call.
+- `files.upload`: max file size 25 MB.
+- `files.upload` URL source: HTTPS only, private/local network targets are blocked, up to 3 redirects.
+- New MCP session initialization (`POST /mcp` without `mcp-session-id`) is rate-limited per IP.
+- MCP sessions are in-memory and have idle expiry; server restart drops active sessions.
+- Each active MCP session uses one Inline realtime WebSocket connection.
+
+## Agent Compatibility
+
+- Tools advertise output schemas, annotations, and `_meta.securitySchemes` through `tools/list`.
+- Tool responses include structured content plus a JSON text fallback for clients that need text content.
+- Missing read/write scopes return normal MCP tool errors with `_meta["mcp/www_authenticate"]` so compatible clients can reauthorize without treating the request as a server failure.
+- Time filters accept natural values such as `today`, `yesterday`, `2d ago`, `YYYY-MM-DD`, or epoch seconds.
+
+## Troubleshooting
+
+- `401 invalid_token`: reconnect and complete OAuth again.
+- `403 insufficient_scope`: reconnect and grant needed scopes.
+- `429 rate_limited`: wait and retry initialization.
+- `404 unknown_session`: session expired/restarted; reconnect to create a new session.
+- Missing expected chats: reconnect and expand consent (spaces, DMs, home threads).
+- No refresh behavior: ensure client requested `offline_access`.
+
+## MCP vs Other Inline APIs
+
+- Use MCP for assistant workflows in MCP-native clients.
+- Use [Realtime API](https://inline.chat/docs/realtime-api) for fully custom client/app integrations.
+- Use [Bot API](https://inline.chat/docs/bot-api) for direct HTTP bot integrations.
+
+# OpenClaw
+
+Source: https://inline.chat/docs/openclaw
+
+Need a bot token first? See [Creating a Bot](https://inline.chat/docs/creating-a-bot).
+
+## Setup
+
+### Install
+
+```bash
+openclaw plugins install @inline-openclaw/inline
+```
+
+### Keep It Updated
+
+Set the plugin spec to latest:
+
+```bash
+openclaw config set plugins.installs.inline.spec '"@inline-openclaw/inline@latest"'
+```
+
+Then update the installed plugin:
+
+```bash
+openclaw plugins update inline
+```
+
+## Config
+
+```yaml
+channels:
+  inline:
+    enabled: true
+    token: "<INLINE_BOT_TOKEN>"
+```
+
+Plugin entry id is `inline`:
+
+```yaml
+plugins:
+  entries:
+    inline:
+      enabled: true
+```
+
+## Run / Verify
+
+```bash
+openclaw gateway
+openclaw plugins list
+openclaw status --deep
+```
+
+If a stale config appears, keep `plugins.entries.inline`.
+
+## Report Issues
+
+Report issues here: [inline-chat/inline issues](https://github.com/inline-chat/inline/issues).
+
+# Hermes Agent
+
+Source: https://inline.chat/docs/hermes
+
+Use the Inline adapter to run Hermes Agent from Inline DMs, group chats, and reply threads.
+
+Need a bot token first? See [Creating a Bot](https://inline.chat/docs/creating-a-bot).
+
+## Install
+
+```bash
+npm install -g @inline-chat/hermes-agent-adapter
+inline-hermes install
+hermes plugins enable inline-platform
+```
+
+## Configure
+
+Set the token where the Hermes gateway runs:
+
+```bash
+export INLINE_TOKEN="<INLINE_BOT_TOKEN>"
+```
+
+Enable Inline in `~/.hermes/config.yaml`:
+
+```yaml
+platforms:
+  inline:
+    enabled: true
+```
+
+If Hermes cannot read environment variables directly, reference the token in config:
+
+```yaml
+platforms:
+  inline:
+    enabled: true
+    token: ${INLINE_TOKEN}
+```
+
+## Verify
+
+Check the plugin install:
+
+```bash
+inline-hermes doctor --json
+hermes inline status
+inline-hermes --version
+```
+
+Validate wiring without sending a message:
+
+```bash
+inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json
+```
+
+Send a real message after replacing the chat ID:
+
+```bash
+inline-hermes test-send --to chat:123 --text "Inline Hermes test"
+```
+
+Hermes' built-in send command uses the `inline:<chat-id>` target form:
+
+```bash
+hermes send --to inline:123 "Hello from Hermes"
+```
+
+## Update
+
+After upgrading the npm package, refresh the Hermes plugin copy:
+
+```bash
+npm install -g @inline-chat/hermes-agent-adapter@latest
+inline-hermes install --force
+inline-hermes doctor --json
+```
+
+This replaces installed plugin files. It does not edit tokens or `~/.hermes/config.yaml`.
+
+## Configuration
+
+Inline uses quiet work-chat defaults: typing/presence while Hermes is working, final answers in chat, and no durable tool-call progress bubbles.
+
+If global Hermes config enables progress messages, keep Inline quiet with:
+
+```yaml
+display:
+  platforms:
+    inline:
+      tool_progress: off
+      cleanup_progress: true
+      streaming: false
+      interim_assistant_messages: false
+```
+
+## Feature Support
+
+Supported:
+
+- DMs, group chats, reply threads, and `hermes send --to inline:<chat-id>`.
+- Realtime inbound messages, replies, edits, deletes, typing, presence, long replies, and media uploads.
+- Inline-native clarify, approval, slash confirmation, model picker, and command-menu sync.
+- Bounded current-chat/thread history through the Hermes `inline` tool.
+- Allowlists, mention controls, thread prompts, skill bindings, and reply-thread routing.
+
+Unsupported or intentionally limited:
+
+- Multiple Inline accounts in one Hermes process.
+- Full Inline member, space, search, and admin tools.
+- Full rich-text span conversion. Rich entities are summarized for the agent.
+- Native animated draft streaming.
+- Ephemeral in-channel private replies or realtime voice/calls.
+
+## Advanced
+
+- Requires Hermes Agent `0.17.x` and Node.js `20` or newer.
+- Tokens are read from `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
+- Room controls are available through `INLINE_ALLOWED_CHATS`, `INLINE_FREE_RESPONSE_CHATS`, and `INLINE_STRICT_MENTION`.
+- Top-level DM and group replies use Inline reply threads by default. Use `/threads on`, `/threads off`, or `/threads auto` in Inline to configure a chat, or set `INLINE_REPLY_THREADS=false` globally.
+- Full adapter reference: [public Inline repo](https://github.com/inline-chat/inline/tree/main/packages/hermes-agent).
+
+# Security
+
+Source: https://inline.chat/docs/security
+
+Last updated: February 11, 2026.
+
+Inline is in alpha and this page is still evolving. We're actively tightening security as we build.
+
+## TL;DR
+
+- We do not sell your data.
+- Traffic is encrypted in transit (HTTPS/WSS over TLS).
+- Sensitive cloud data is encrypted at rest.
+- Local app data on Apple devices is encrypted.
+
+## What We Do Today
+
+- We ship frequent updates and security patches.
+- Native releases are signed. macOS direct builds are notarized.
+- We only ask for sensitive permissions when a feature needs them.
+- We use service providers to run infrastructure, but we do not sell personal data.
+
+## Will It Have End-to-End Encryption?
+
+Not at launch.
+
+Inline is optimizing first for fast sync, search, large chats, shared threads, and agent workflows. End-to-end encryption makes those features harder to support well across devices and teams.
+
+For launch, we are focusing on security at every layer: encrypted transport, encrypted cloud storage, signed native apps, and encrypted local app data on Apple devices. We will keep exploring stronger options, including ephemeral messages or selectively encrypted chats with clear feature trade-offs.
+
+If you have suggestions, questions, or concerns, please reach out to [founders@inline.chat](mailto:founders@inline.chat).
+
+## Report A Vulnerability
+
+- Email: [hey@inline.chat](mailto:hey@inline.chat)
+- Subject: Security
+- Include clear reproduction steps and impact.
+- Please avoid public disclosure until we have time to investigate and patch.

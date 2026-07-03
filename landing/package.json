@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && bun run scripts/copy-ssr-css-assets.ts",
+    "build": "bun run scripts/generate-llms-docs.ts && vite build && bun run scripts/copy-ssr-css-assets.ts",
+    "docs:llms": "bun run scripts/generate-llms-docs.ts",
     "start": "bun run .output/server/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "bunx oxlint --ignore-path ../.oxlintignore src packages vite.config.ts vitest.config.ts",
