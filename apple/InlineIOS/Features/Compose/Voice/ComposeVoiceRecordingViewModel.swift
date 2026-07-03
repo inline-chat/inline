@@ -33,6 +33,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   private var playbackSessionActive = false
   private var stopRecordingAction: (@Sendable () -> Void)?
   private var operationId = UUID()
+  private var isPreparingStart = false
   private var cancellables: Set<AnyCancellable> = []
 
   var isActive: Bool {
@@ -75,42 +76,30 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
-  @discardableResult
-  func prepareToStart() -> Bool {
-    guard phase == .idle else { return false }
+  func start(peerId: InlineKit.Peer) async {
+    guard phase == .idle, !isPreparingStart else { return }
 
     let operationId = UUID()
-    enterStarting(operationId: operationId)
-    return true
-  }
-
-  func start(peerId: InlineKit.Peer) async {
-    let operationId: UUID
-    switch phase {
-    case .idle:
-      operationId = UUID()
-      enterStarting(operationId: operationId)
-    case .starting:
-      operationId = self.operationId
-    case .recording, .finishing, .review:
-      return
-    }
-
-    await Task.yield()
-    try? await Task.sleep(nanoseconds: 25_000_000)
-
-    guard await ensureMicrophoneAccess() else {
+    self.operationId = operationId
+    isPreparingStart = true
+    defer {
       if self.operationId == operationId {
-        reset()
+        isPreparingStart = false
       }
-      return
     }
+
+    guard let access = await ensureMicrophoneAccess() else { return }
+    guard await waitForActiveApplication(operationId: operationId) else { return }
+    guard await settleMicrophoneAccessIfNeeded(access, operationId: operationId) else { return }
 
     guard self.operationId == operationId else { return }
     guard UIApplication.shared.applicationState == .active else {
-      reset()
       return
     }
+
+    enterStarting(operationId: operationId)
+    await Task.yield()
+    guard self.operationId == operationId, phase == .starting else { return }
 
     do {
       SharedAudioPlayer.shared.stop()
@@ -181,6 +170,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
   func cancel() {
     operationId = UUID()
+    isPreparingStart = false
     recorder?.cancel()
     recorder = nil
     stopRecordingAction?()
@@ -392,6 +382,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func handleSystemStop() async {
+    if isPreparingStart {
+      cancelPendingStart()
+      return
+    }
+
     switch phase {
     case .recording:
       await finishRecording(showTooShortToast: false)
@@ -416,6 +411,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func handleAppBackground() async {
+    if isPreparingStart {
+      cancelPendingStart()
+      return
+    }
+
     switch phase {
     case .recording:
       await finishRecording(showTooShortToast: false)
@@ -471,24 +471,58 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
-  private func ensureMicrophoneAccess() async -> Bool {
+  private func ensureMicrophoneAccess() async -> MicrophoneAccessGrant? {
     switch AVAudioApplication.shared.recordPermission {
     case .granted:
-      return true
+      return .authorized
     case .undetermined:
       let granted = await requestMicrophoneAccess()
       if !granted {
         showError("Microphone access is required to record voice messages.")
+        return nil
       }
-      return granted
+      return .newlyAuthorized
     case .denied:
       showError("Allow microphone access to record voice messages.")
       openAppSettings()
-      return false
+      return nil
     @unknown default:
       showError("Microphone access is unavailable.")
-      return false
+      return nil
     }
+  }
+
+  private func settleMicrophoneAccessIfNeeded(_ access: MicrophoneAccessGrant, operationId: UUID) async -> Bool {
+    guard access == .newlyAuthorized else { return true }
+
+    await Task.yield()
+    try? await Task.sleep(nanoseconds: Self.microphonePermissionSettleDelay)
+    guard self.operationId == operationId else { return false }
+
+    if AVAudioApplication.shared.recordPermission == .granted {
+      return true
+    }
+
+    showError("Microphone access is unavailable.")
+    return false
+  }
+
+  private func waitForActiveApplication(operationId: UUID) async -> Bool {
+    for _ in 0...Self.applicationActivationWaitAttempts {
+      guard self.operationId == operationId, !Task.isCancelled else { return false }
+      if UIApplication.shared.applicationState == .active {
+        return true
+      }
+      try? await Task.sleep(nanoseconds: Self.applicationActivationPollInterval)
+    }
+
+    return false
+  }
+
+  private func cancelPendingStart() {
+    guard isPreparingStart else { return }
+    operationId = UUID()
+    isPreparingStart = false
   }
 
   private func requestMicrophoneAccess() async -> Bool {
@@ -589,6 +623,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func reset() {
+    isPreparingStart = false
     duration = 0
     samples = []
     playbackProgress = 0
@@ -612,6 +647,14 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
   private static let minimumDuration: TimeInterval = 0.5
   private static let discardConfirmationDuration: TimeInterval = 10
+  private static let microphonePermissionSettleDelay: UInt64 = 120_000_000
+  private static let applicationActivationPollInterval: UInt64 = 50_000_000
+  private static let applicationActivationWaitAttempts = 40
+}
+
+private enum MicrophoneAccessGrant: Equatable {
+  case authorized
+  case newlyAuthorized
 }
 
 private enum ComposeVoicePlaybackError: LocalizedError {
