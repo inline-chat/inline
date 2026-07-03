@@ -3,6 +3,7 @@ export const INLINE_API_ORIGIN = "https://api.inline.chat"
 export const INLINE_MCP_ORIGIN = "https://mcp.inline.chat"
 
 export const CANONICAL_OPENAPI_SOURCE_URL = `${INLINE_API_ORIGIN}/bot-api-reference/json`
+export const REALTIME_API_DOCS_URL = `${INLINE_ORIGIN}/docs/realtime-api`
 export const MCP_CONNECT_URL = `${INLINE_MCP_ORIGIN}/mcp`
 export const MCP_AUTHORIZATION_SERVER_URL = `${INLINE_API_ORIGIN}/.well-known/oauth-authorization-server`
 export const INTEGRATIONS_DECLARATION_URL = `${INLINE_ORIGIN}/.well-known/integrations.json`
@@ -44,7 +45,7 @@ export const mcpServerCard = {
 export const integrationsDeclaration = {
   version: 3,
   summary:
-    "Inline exposes a Bot HTTP API, a hosted MCP server, and a CLI for work chat automation.",
+    `Inline exposes a Bot HTTP API, a hosted MCP server, and a CLI for work chat automation. For full two-way chat participation and live state sync, use the Realtime WebSocket API documented at ${REALTIME_API_DOCS_URL}.`,
   credentials: {
     [inlineBearerCredentialId]: {
       type: "bearer",
@@ -66,6 +67,7 @@ export const integrationsDeclaration = {
       name: "Inline Bot HTTP API",
       type: "http",
       docs: `${INLINE_ORIGIN}/docs/bot-api`,
+      notes: `For full two-way chat participation and live state sync, use the Realtime WebSocket API and TypeScript SDK: ${REALTIME_API_DOCS_URL}.`,
       spec: `${INLINE_ORIGIN}/openapi.json`,
       url: INLINE_API_ORIGIN,
       basis: declaredBasis,
