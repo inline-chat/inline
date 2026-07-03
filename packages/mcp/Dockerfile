@@ -4,6 +4,7 @@ WORKDIR /app
 FROM base AS deps
 COPY package.json bun.lock bunfig.toml ./
 COPY proto ./proto
+COPY cli ./cli
 COPY packages ./packages
 RUN bun install --frozen-lockfile
 
@@ -16,6 +17,7 @@ RUN bun run --cwd packages/mcp build
 FROM base AS release
 COPY package.json bun.lock bunfig.toml ./
 COPY proto ./proto
+COPY cli ./cli
 COPY packages ./packages
 RUN bun install --frozen-lockfile --production
 COPY --from=build /app/packages/protocol/dist ./packages/protocol/dist
