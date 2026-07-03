@@ -36,10 +36,8 @@ impl AuthStore {
     }
 
     pub fn load_token(&self) -> Result<Option<String>, AuthError> {
-        if let Ok(token) = env::var("INLINE_TOKEN") {
-            if !token.trim().is_empty() {
-                return Ok(Some(token));
-            }
+        if let Some(token) = load_env_token() {
+            return Ok(Some(token));
         }
 
         let secrets = match self.read_secrets()? {
@@ -149,6 +147,17 @@ impl AuthStore {
         set_file_permissions(&self.path, 0o600)?;
         Ok(())
     }
+}
+
+pub fn env_token_present() -> bool {
+    load_env_token().is_some()
+}
+
+fn load_env_token() -> Option<String> {
+    env::var("INLINE_TOKEN")
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
 }
 
 fn ensure_dir(path: &Path) -> Result<(), io::Error> {

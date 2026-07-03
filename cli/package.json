@@ -3,8 +3,10 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
-    "typecheck": "cargo check",
-    "lint": "cargo clippy --all-targets -- -D warnings",
-    "test": "cargo test"
+    "build": "cargo build --locked",
+    "format": "cargo fmt -- --check",
+    "typecheck": "cargo check --locked",
+    "lint": "cargo clippy --locked --all-targets -- -D warnings",
+    "test": "cargo test --locked"
   }
 }

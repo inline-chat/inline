@@ -1,9 +1,11 @@
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use thiserror::Error;
+use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
+use thiserror::Error;
+
+use crate::client_info::{self, AuthMetadata, ClientIdentity};
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -11,10 +13,21 @@ pub enum ApiError {
     Http(#[from] reqwest::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("unexpected status: {0}")]
-    Status(u16),
-    #[error("api error: {error} ({description})")]
-    Api { error: String, description: String },
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("api request failed with HTTP {status}: {message}")]
+    Status {
+        status: u16,
+        message: String,
+        body: Option<String>,
+    },
+    #[error("api error: {error}: {description}")]
+    Api {
+        status: Option<u16>,
+        error: String,
+        error_code: Option<i32>,
+        description: String,
+    },
 }
 
 #[derive(Clone)]
@@ -23,19 +36,18 @@ pub struct ApiClient {
     http: Client,
 }
 
-#[derive(Clone, Copy)]
-pub struct AuthMetadata<'a> {
-    pub device_id: &'a str,
-    pub client_type: &'a str,
-    pub client_version: &'a str,
-    pub device_name: Option<&'a str>,
-}
-
 impl ApiClient {
     pub fn new(base_url: String) -> Self {
+        Self::new_with_identity(base_url, ClientIdentity::cli())
+    }
+
+    pub fn new_with_identity(base_url: String, identity: ClientIdentity<'_>) -> Self {
+        let http = client_info::http_client_builder_for(identity)
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            http: Client::new(),
+            http,
         }
     }
 
@@ -97,7 +109,11 @@ impl ApiClient {
         self.post(url, payload).await
     }
 
-    pub async fn upload_file(&self, token: &str, input: UploadFileInput) -> Result<UploadFileResult, ApiError> {
+    pub async fn upload_file(
+        &self,
+        token: &str,
+        input: UploadFileInput,
+    ) -> Result<UploadFileResult, ApiError> {
         let url = format!("{}/uploadFile", self.base_url);
         let mut form = reqwest::multipart::Form::new().text("type", input.file_type.as_str());
         let bytes = fs::read(&input.path)?;
@@ -122,22 +138,7 @@ impl ApiClient {
             .multipart(form)
             .send()
             .await?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(ApiError::Status(status.as_u16()));
-        }
-        let api_response: ApiResponse<UploadFileResult> = response.json().await?;
-        match api_response {
-            ApiResponse::Ok { result, .. } => Ok(result),
-            ApiResponse::Err {
-                error,
-                description,
-                ..
-            } => Err(ApiError::Api {
-                error,
-                description: description.unwrap_or_else(|| "Unknown error".to_string()),
-            }),
-        }
+        decode_api_response(response).await
     }
 
     pub async fn read_messages(
@@ -225,22 +226,7 @@ impl ApiClient {
         payload: serde_json::Map<String, serde_json::Value>,
     ) -> Result<T, ApiError> {
         let response = self.http.post(url).json(&payload).send().await?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(ApiError::Status(status.as_u16()));
-        }
-        let api_response: ApiResponse<T> = response.json().await?;
-        match api_response {
-            ApiResponse::Ok { result, .. } => Ok(result),
-            ApiResponse::Err {
-                error,
-                description,
-                ..
-            } => Err(ApiError::Api {
-                error,
-                description: description.unwrap_or_else(|| "Unknown error".to_string()),
-            }),
-        }
+        decode_api_response(response).await
     }
 
     async fn post_with_token<T: for<'de> Deserialize<'de>>(
@@ -256,22 +242,7 @@ impl ApiClient {
             .json(&payload)
             .send()
             .await?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(ApiError::Status(status.as_u16()));
-        }
-        let api_response: ApiResponse<T> = response.json().await?;
-        match api_response {
-            ApiResponse::Ok { result, .. } => Ok(result),
-            ApiResponse::Err {
-                error,
-                description,
-                ..
-            } => Err(ApiError::Api {
-                error,
-                description: description.unwrap_or_else(|| "Unknown error".to_string()),
-            }),
-        }
+        decode_api_response(response).await
     }
 }
 
@@ -404,14 +375,271 @@ enum ApiResponse<T> {
     },
 }
 
+async fn decode_api_response<T: for<'de> Deserialize<'de>>(
+    response: reqwest::Response,
+) -> Result<T, ApiError> {
+    let status = response.status();
+    let text = response.text().await?;
+    decode_api_response_text(status, &text)
+}
+
+fn decode_api_response_text<T: for<'de> Deserialize<'de>>(
+    status: StatusCode,
+    text: &str,
+) -> Result<T, ApiError> {
+    let value: Value = serde_json::from_str(text).map_err(|err| {
+        if status.is_success() {
+            ApiError::Json(err)
+        } else {
+            ApiError::Status {
+                status: status.as_u16(),
+                message: status
+                    .canonical_reason()
+                    .unwrap_or("HTTP error")
+                    .to_string(),
+                body: body_preview(text),
+            }
+        }
+    })?;
+
+    if !status.is_success() {
+        return Err(
+            api_error_from_value(status, &value).unwrap_or_else(|| ApiError::Status {
+                status: status.as_u16(),
+                message: status
+                    .canonical_reason()
+                    .unwrap_or("HTTP error")
+                    .to_string(),
+                body: body_preview(text),
+            }),
+        );
+    }
+
+    if value.get("ok").and_then(Value::as_bool) == Some(false) {
+        return Err(
+            api_error_from_value(status, &value).unwrap_or_else(|| ApiError::Api {
+                status: None,
+                error: "API_ERROR".to_string(),
+                error_code: None,
+                description: "The server returned ok=false without an error description."
+                    .to_string(),
+            }),
+        );
+    }
+
+    let api_response: ApiResponse<T> = serde_json::from_value(value)?;
+    match api_response {
+        ApiResponse::Ok { result, .. } => Ok(result),
+        ApiResponse::Err {
+            error,
+            error_code,
+            description,
+            ..
+        } => Err(ApiError::Api {
+            status: None,
+            error,
+            error_code,
+            description: description.unwrap_or_else(|| "Unknown error".to_string()),
+        }),
+    }
+}
+
+fn api_error_from_value(status: StatusCode, value: &Value) -> Option<ApiError> {
+    let object = value.as_object()?;
+    let error = string_field(value, "error")
+        .or_else(|| string_field(value, "code"))
+        .or_else(|| string_field(value, "name"))
+        .unwrap_or_else(|| {
+            if value.get("ok").and_then(Value::as_bool) == Some(false) && status.is_success() {
+                return "API_ERROR".to_string();
+            }
+            status
+                .canonical_reason()
+                .unwrap_or("HTTP error")
+                .to_string()
+        });
+    let description = string_field(value, "description")
+        .or_else(|| string_field(value, "message"))
+        .or_else(|| string_field(value, "detail"))
+        .unwrap_or_else(|| "No server error description was provided.".to_string());
+    let error_code = object
+        .get("error_code")
+        .or_else(|| object.get("errorCode"))
+        .and_then(|value| value.as_i64())
+        .and_then(|value| i32::try_from(value).ok());
+
+    Some(ApiError::Api {
+        status: Some(status.as_u16()),
+        error,
+        error_code,
+        description,
+    })
+}
+
+fn string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn body_preview(text: &str) -> Option<String> {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    const MAX_BODY_PREVIEW_BYTES: usize = 500;
+    if normalized.len() <= MAX_BODY_PREVIEW_BYTES {
+        return Some(normalized);
+    }
+
+    let mut end = MAX_BODY_PREVIEW_BYTES;
+    while !normalized.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(format!("{}...", &normalized[..end]))
+}
+
 fn add_auth_metadata(
     payload: &mut serde_json::Map<String, serde_json::Value>,
     metadata: AuthMetadata<'_>,
 ) {
     payload.insert("deviceId".to_string(), json!(metadata.device_id));
-    payload.insert("clientType".to_string(), json!(metadata.client_type));
-    payload.insert("clientVersion".to_string(), json!(metadata.client_version));
+    payload.insert("clientType".to_string(), json!(metadata.client.client_type));
+    payload.insert(
+        "clientVersion".to_string(),
+        json!(metadata.client.client_version),
+    );
     if let Some(device_name) = metadata.device_name {
         payload.insert("deviceName".to_string(), json!(device_name));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    struct TestResult {
+        value: String,
+    }
+
+    #[test]
+    fn decodes_success_envelope() {
+        let result: TestResult =
+            decode_api_response_text(StatusCode::OK, r#"{"ok":true,"result":{"value":"done"}}"#)
+                .unwrap();
+
+        assert_eq!(
+            result,
+            TestResult {
+                value: "done".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn preserves_json_api_error_fields() {
+        let err = decode_api_response_text::<TestResult>(
+            StatusCode::BAD_REQUEST,
+            r#"{"ok":false,"error":"INVALID_CODE","error_code":123,"description":"Code is invalid"}"#,
+        )
+        .unwrap_err();
+
+        match err {
+            ApiError::Api {
+                status,
+                error,
+                error_code,
+                description,
+            } => {
+                assert_eq!(status, Some(400));
+                assert_eq!(error, "INVALID_CODE");
+                assert_eq!(error_code, Some(123));
+                assert_eq!(description, "Code is invalid");
+            }
+            other => panic!("expected api error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_nonstandard_ok_false_message() {
+        let err = decode_api_response_text::<TestResult>(
+            StatusCode::OK,
+            r#"{"ok":false,"message":"Not enough permissions"}"#,
+        )
+        .unwrap_err();
+
+        match err {
+            ApiError::Api {
+                status,
+                error,
+                error_code,
+                description,
+            } => {
+                assert_eq!(status, Some(200));
+                assert_eq!(error, "API_ERROR");
+                assert_eq!(error_code, None);
+                assert_eq!(description, "Not enough permissions");
+            }
+            other => panic!("expected api error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_non_json_http_body_preview() {
+        let err = decode_api_response_text::<TestResult>(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "upstream failed\nwith details",
+        )
+        .unwrap_err();
+
+        match err {
+            ApiError::Status {
+                status,
+                message,
+                body,
+            } => {
+                assert_eq!(status, 500);
+                assert_eq!(message, "Internal Server Error");
+                assert_eq!(body.as_deref(), Some("upstream failed with details"));
+            }
+            other => panic!("expected status error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn auth_metadata_includes_client_identity() {
+        let mut payload = serde_json::Map::new();
+        add_auth_metadata(&mut payload, AuthMetadata::cli("device-1", Some("mo-mac")));
+
+        assert_eq!(payload.get("deviceId"), Some(&json!("device-1")));
+        assert_eq!(payload.get("clientType"), Some(&json!("cli")));
+        assert_eq!(
+            payload.get("clientVersion"),
+            Some(&json!(client_info::client_version()))
+        );
+        assert_eq!(payload.get("deviceName"), Some(&json!("mo-mac")));
+    }
+
+    #[test]
+    fn auth_metadata_accepts_non_cli_client_identity() {
+        let mut payload = serde_json::Map::new();
+        add_auth_metadata(
+            &mut payload,
+            AuthMetadata::new(
+                "device-1",
+                None,
+                client_info::ClientIdentity::new("my-agent", "0.1.0"),
+            ),
+        );
+
+        assert_eq!(payload.get("deviceId"), Some(&json!("device-1")));
+        assert_eq!(payload.get("clientType"), Some(&json!("my-agent")));
+        assert_eq!(payload.get("clientVersion"), Some(&json!("0.1.0")));
+        assert!(payload.get("deviceName").is_none());
     }
 }

@@ -8,12 +8,19 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 ## Global flags
 
 - `--json`: Output raw JSON payloads (proto/RPC results) to stdout (available on all commands).
-  - When `--json` is set and a command fails, the CLI prints a structured error JSON to stderr: `{"error":{"code","message","hint","examples"}}` and exits non-zero.
-  - Table-only convenience flags are disabled in `--json` mode. Specifically: `inline users list --filter/--ids/--id`, `inline bots list --filter/--ids/--id`, and `inline chats list --ids/--id`.
-  - `inline chats list --json` still supports `--filter`, `--limit`, and `--offset` for pre-filtered/paginated payloads.
-  - Destructive commands never prompt in `--json` mode; pass `--yes` explicitly.
+  - When `--json` is set and a command fails, the CLI prints a structured error JSON to stderr and exits non-zero. Common fields are `code`, `message`, `status`, `apiError`, `apiErrorCode`, `body`, `hint`, and `examples`.
+  - Table-only convenience flags are disabled in `--json` mode. Specifically: `inline users list --ids/--id`, `inline bots list --ids/--id`, and `inline chats list --ids/--id`.
+  - `inline chats list --json` supports `--filter`, `--limit`, and `--offset` for pre-filtered/paginated payloads. `inline users list --json --filter ...` and `inline bots list --json --filter ...` also return pre-filtered payloads.
+  - Destructive commands never prompt in `--json` mode; pass `--yes`/`-y` explicitly.
 - `--pretty`: Pretty-print JSON output (default).
 - `--compact`: Compact JSON output (no whitespace).
+
+## Output behavior
+
+- Use `--json --compact` for pipelines and agent parsing.
+- Human table output adapts to terminal width through the `COLUMNS` environment variable. Set `COLUMNS=120` before a command to allow wider previews, or a smaller value to force denser truncation.
+- Non-JSON runtime errors print a short human report with `Error`, `Code`, and any available status/API error/body preview/hint/examples.
+- Color is only used on TTY stdout/stderr by default. Set `NO_COLOR=1` to disable it, or `CLICOLOR_FORCE=1` to force it in a non-TTY.
 
 ## Subcommands
 
@@ -21,11 +28,13 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline auth login [--email you@x.com | --phone +15551234567]`
   - Run an interactive login flow.
+  - Requires an interactive terminal. In agent/CI/non-interactive flows, use an existing token via `INLINE_TOKEN`.
   - If code is wrong, prompt to try again or edit email/phone (no hard exit).
 - `inline auth me`
   - Fetch and print the current user (verifies your token is still valid).
 - `inline auth logout`
   - Clear the stored token and current user.
+  - If `INLINE_TOKEN` is set, the CLI remains authenticated from the environment; JSON output reports this as `effectiveTokenSource: "INLINE_TOKEN"`.
 
 ### shortcuts and aliases
 
@@ -33,6 +42,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Shortcut for `inline auth me`.
 - `inline search ...`
   - Shortcut for `inline messages search ...`.
+  - Supports the same message search filters, including `--translate`.
 - `inline chat ...`, `inline thread ...`, `inline threads ...`
   - Aliases for `inline chats ...`.
 - `inline bot ...`
@@ -67,13 +77,14 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline chats mark-read [--chat-id 123 | --user-id 42] [--max-id 456]`
   - Mark a chat or DM as read. If `--max-id` is omitted, marks through the latest message.
 - `inline chats delete --chat-id 123`
-  - Delete a chat (space thread). Prompts for confirmation unless `--yes` is provided (`--json` requires `--yes`).
+  - Delete a chat (space thread). Prompts for confirmation unless `--yes`/`-y` is provided (`--json` requires `--yes`/`-y`).
 
 ### bots
 
 - Alias: `inline bot ...` maps to `inline bots ...`.
 - `inline bots list [--filter "name"] [--ids | --id]`
   - List bots you can access.
+  - `--filter` works in table and JSON modes. `--ids`/`--id` are table-only line-output helpers.
 - `inline bots create --name "Build Bot" --username build_bot [--add-to-space 31]`
   - Create a bot. Token is not printed in table output; use `inline bots reveal-token` explicitly. JSON includes the token.
 - `inline bots reveal-token --bot-user-id 42`
@@ -90,9 +101,10 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline users list [--filter "name"] [--ids | --id]`
   - List users that appear in your chats (derived from getChats).
-  - `--filter` matches name, username, email, or phone.
+  - `--filter` matches name, username, email, or phone in table and JSON modes.
   - `--ids` prints one user id per line.
   - `--id` requires exactly one match and prints that id.
+  - `--ids`/`--id` are table-only line-output helpers.
 - `inline users get --id 42`
   - Fetch one user by id (from the same getChats payload).
 
@@ -105,7 +117,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline spaces invite --space-id 31 [--user-id 42 | --email you@x.com | --phone +15551234567] [--admin] [--public-chats]`
   - Invite a user to a space (role is optional; defaults to server behavior).
 - `inline spaces delete-member --space-id 31 --user-id 42`
-  - Remove a member from a space (prompts for confirmation; use `--yes` to skip; `--json` requires `--yes`).
+  - Remove a member from a space (prompts for confirmation; use `--yes`/`-y` to skip; `--json` requires `--yes`/`-y`).
 - `inline spaces update-member-access --space-id 31 --user-id 42 [--admin | --member] [--public-chats]`
   - Update a member's access/role. Provide `--admin` or `--member` (and optional `--public-chats`).
 
@@ -125,6 +137,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline doctor`
   - Print diagnostic info (system, config, paths, auth state).
+  - `--json` includes client identity diagnostics: client type/version, user-agent, OS version, device name, and metadata header names sent to the server.
 
 ### tasks
 
@@ -143,28 +156,31 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline messages list [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--translate en] [--since "yesterday"] [--until "today"]`
   - List chat history for a chat or DM.
   - `--translate <lang>` fetches translations and includes them in output.
-- `inline messages export [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--since "1w ago"] [--until "today"] --output PATH`
+- `inline messages export [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--translate en] [--since "1w ago"] [--until "today"] --output PATH`
   - Export chat history to a JSON file.
-- `inline messages search [--chat-id 123 | --user-id 42] --query "onboarding" [--query "alpha beta"] [--limit 50] [--since "today"] [--until "tomorrow"]`
+  - With `--translate`, exported JSON keeps the raw history fields and adds a top-level `translations` array.
+- `inline messages search [--chat-id 123 | --user-id 42] --query "onboarding" [--query "alpha beta"] [--limit 50] [--translate en] [--since "today"] [--until "tomorrow"]`
   - Search messages in a chat or DM.
   - `--query` is repeatable; each query can contain space-separated terms (ANDed within a query, ORed across queries). Extra whitespace is collapsed.
   - `--since` and `--until` accept relative time expressions like `yesterday`, `2h ago`, `monday`, `2024-01-15`, or RFC3339.
-- `inline messages get --chat-id 123 --message-id 456 [--translate en]`
-  - Fetch one full message by id (includes media + attachments).
+  - With `--translate`, JSON output keeps raw search fields and adds a top-level `translations` array; table output includes translated previews.
+- `inline messages get [--chat-id 123 | --user-id 42] --message-id 456 [--translate en]`
+  - Fetch one full message by id from a chat or DM (includes media + attachments).
 - `inline messages send [--chat-id 123 | --user-id 42] [--text "hi" | --message "hi" | --msg "hi" | -m "hi"] [--stdin] [--reply-to 456] [--mention USER_ID:OFFSET:LENGTH ...] [--attach PATH ...] [--force-file]`
   - Send a message (markdown parsing enabled). Mentions are provided via `--mention` with UTF-16 offsets.
-  - `--stdin` reads message text from stdin.
+  - `--stdin` reads message text from piped or redirected stdin; it fails fast if stdin is an interactive terminal.
   - `--attach` is repeatable. Each attachment is sent as its own message; `--text` is reused as the caption.
   - Folders are zipped before upload. Attachments over 200MB are rejected.
   - `--force-file` uploads photos/videos as files (documents).
   - `--mention` is repeatable and must match the message text (`user_id:offset:length` with UTF-16 units).
-- `inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789 [--no-header]`
+- `inline messages forward [--from-chat-id 123 | --from-user-id 42] --message-id 456 [--message-id 789] [--to-chat-id 321 | --to-user-id 84] [--no-header]`
   - Forward one or more messages between chats or DMs.
   - Repeat `--message-id` to forward multiple messages.
 - `inline messages edit [--chat-id 123 | --user-id 42] --message-id 456 [--text "updated" | --message "updated" | --msg "updated" | -m "updated" | --stdin]`
   - Edit a message by id.
+  - `--stdin` expects piped or redirected stdin, not an interactive prompt.
 - `inline messages delete [--chat-id 123 | --user-id 42] --message-id 456 [--message-id 789]`
-  - Delete one or more messages (prompts for confirmation; use `--yes` to skip; `--json` requires `--yes`).
+  - Delete one or more messages (prompts for confirmation; use `--yes`/`-y` to skip; `--json` requires `--yes`/`-y`).
 - `inline messages add-reaction [--chat-id 123 | --user-id 42] --message-id 456 --emoji "👍"`
   - Add an emoji reaction to a message (emoji characters only, no `:shortcode:`).
 - `inline messages delete-reaction [--chat-id 123 | --user-id 42] --message-id 456 --emoji "👍"`
@@ -190,6 +206,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - Search messages in a chat:
   - `inline messages search --chat-id 123 --query "design review"`
   - JSON: `inline messages search --chat-id 123 --query "design review" --json`
+  - Translated JSON: `inline messages search --chat-id 123 --query "diseño" --translate en --json`
   - Shortcut: `inline search --chat-id 123 --query "design review"`
 - Translate and list messages:
   - `inline messages list --chat-id 123 --translate en`
@@ -199,12 +216,14 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - Export messages to a file:
   - `inline messages export --chat-id 123 --output ./messages.json`
   - `inline messages export --chat-id 123 --since "1w ago" --output ./recent.json`
+  - `inline messages export --chat-id 123 --translate en --output ./translated.json`
 - Send message with multiple attachments:
   - `inline messages send --chat-id 123 --text "FYI" --attach ./photo.jpg --attach ./spec.pdf`
 - Reply to a message:
   - `inline messages send --chat-id 123 --reply-to 456 --text "on it"`
 - Forward a message:
   - `inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789`
+  - `inline messages forward --from-user-id 42 --message-id 456 --to-user-id 84`
 - Send a message with a mention entity:
   - `inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4`
 - Download an attachment:
@@ -228,8 +247,8 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline spaces invite --space-id 31 --email you@example.com`
   - `inline spaces update-member-access --space-id 31 --user-id 42 --admin`
 - JQ pipelines for lists:
-  - `inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'`
-  - `inline users list --json | jq -r '.users[] | select((.first_name + " " + (.last_name // "") + " " + (.username // "") + " " + (.email // "")) | ascii_downcase | contains("mo")) | "\(.id)\t\(.first_name) \(.last_name)"'`
+  - `inline users list --json --filter "mo" | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'`
+  - `inline bots list --json --filter "deploy" | jq -r '.bots[] | "\(.id)\t\(.first_name)\t@\(.username // "")"'`
 - `inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'`
 - `inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'`
 - `inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'`
