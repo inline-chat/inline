@@ -39,10 +39,11 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.48` | `>=2026.6.11` | `0.0.11` | Current | Uses the latest focused OpenClaw plugin SDK entrypoints and is the supported line for current stable OpenClaw. |
-| `0.0.47` and earlier | `>=2026.5.18`, tested before the `2026.6.11` floor | `0.0.11` | Legacy | Use this line only when an older OpenClaw host cannot be upgraded yet. It keeps the previous broad SDK compatibility path. |
+| `0.0.50` | `>=2026.6.11` | `0.0.11` | Current | Supported line for current stable OpenClaw. Uses focused plugin SDK entrypoints and canonical ClawHub install metadata. |
+| `0.0.48` - `0.0.49` | `>=2026.6.11` | `0.0.11` | Superseded | Transitional 2026.6.11 compatibility releases. Prefer `0.0.50`; `0.0.49` fixed metadata shape but still used the non-canonical ClawHub spec. |
+| `0.0.47` and earlier | `>=2026.5.18`, tested before the `2026.6.11` floor | `0.0.11` | Legacy | Use only when an older OpenClaw host cannot be upgraded yet. Keeps the previous broad SDK compatibility path. |
 
-From npm (once published):
+From npm:
 
 ```sh
 openclaw plugins install @inline-openclaw/inline
