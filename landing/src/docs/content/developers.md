@@ -22,6 +22,16 @@ See: [Realtime API](/docs/realtime-api)
 - OpenClaw integration: [OpenClaw](/docs/openclaw)
 - Bot token guide: [Creating a Bot](/docs/creating-a-bot)
 
+## Deep Links
+
+Supported deep links on native apps:
+
+```text
+inline://user/{userId}
+inline://chat/{chatId}
+inline://chat/{chatId}/message/{messageId}
+```
+
 ## Repository
 
 Inline publishes public protocol definitions, SDK packages, bot tools, MCP, CLI, and plugins on GitHub.
