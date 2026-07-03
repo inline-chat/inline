@@ -39,8 +39,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var prevTextHeight: CGFloat = 0.0
   var overlayView: UIView?
   var isOverlayVisible = false
+  weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
   var phaseObserver: AnyCancellable?
   private var voicePhaseObserver: AnyCancellable?
+  private var pendingSendAnimationHeightChange = false
   private var composeLeadingToPlusConstraint: NSLayoutConstraint?
   private var composeLeadingExpandedConstraint: NSLayoutConstraint?
 
@@ -120,7 +122,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     )
   }
 
-  var onHeightChange: ((CGFloat) -> Void)?
+  var onHeightChange: ((CGFloat, ComposeHeightChangeAnimation) -> Void)?
   var peerId: InlineKit.Peer? {
     didSet {
       updateEmbedState(animated: false)
@@ -347,7 +349,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     ChatState.shared.clearEditingMessageId(peer: peerId)
     ChatState.shared.clearReplyingMessageId(peer: peerId)
 
-    resetComposeState()
+    resetComposeStateWithoutSendAnimation()
   }
 
   func sendMediaItemImmediately(_ mediaItem: FileMediaItem) {
@@ -677,6 +679,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   @objc func sendTapped() {
+    SendMessageAnimationDiagnostics.debug(
+      "compose sendTapped canSend=\(canSend) textLen=\((textView.text ?? "").count) focused=\(textView.isFirstResponder) window=\(window != nil)"
+    )
+
     if handleVoiceSendTapped(sendMode: nil) {
       return
     }
@@ -684,6 +690,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     guard canSend else { return }
 
     sendMessage()
+  }
+
+  func consumePendingSendAnimationHeightChange() -> Bool {
+    let value = pendingSendAnimationHeightChange
+    pendingSendAnimationHeightChange = false
+    return value
   }
 
   private var isVoiceActive: Bool {
@@ -945,7 +957,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       )
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
-      resetComposeState()
+      resetComposeStateWithoutSendAnimation()
       reconcileVoiceControls(animated: true)
     } catch {
       log.error("Failed to send voice recording", error: error)
@@ -1013,32 +1025,95 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       rawText
     }
 
+    let sendAnimationEligibility = SendMessageAnimationEligibility(
+      hasText: hasText,
+      hasAttachments: hasAttachments,
+      hasPendingVideos: hasPendingVideos,
+      hasActiveAttachmentUploads: hasActiveUploads,
+      isEditing: isEditing,
+      isForwarding: hasForward,
+      isReplying: state.replyingMessageId != nil,
+      isComposeFocused: textView.isFirstResponder,
+      hasWindow: window != nil,
+      isEmojiOnlyText: rawText.containsOnlyEmojis
+    )
+    let shouldAttemptSendAnimation = sendMode == nil &&
+      SendMessageAnimationFeatureGate.shouldAttemptTextSend(sendAnimationEligibility)
+    SendMessageAnimationDiagnostics.event(
+      "compose sendMessage gate should=\(shouldAttemptSendAnimation) sendMode=\(sendMode.map { String(describing: $0) } ?? "nil") rawTextLen=\(rawText.count) textLen=\(text?.count ?? 0) \(sendAnimationEligibility.diagnosticSummary)"
+    )
+
+    func makeTextSendTransaction(replyToMessageId: Int64?) -> SendMessageTransaction {
+      SendMessageTransaction(
+        text: text ?? "",
+        peerId: peerId,
+        chatId: chatId,
+        replyToMsgId: replyToMessageId,
+        isSticker: nil,
+        entities: entities,
+        sendMode: sendMode
+      )
+    }
+
+    func sendTextTransaction(_ transaction: SendMessageTransaction) async {
+      let identity = SendMessageAnimationIdentity(
+        randomId: transaction.context.randomId,
+        temporaryMessageId: transaction.context.temporaryMessageId
+      )
+
+      do {
+        try await Api.realtime.send(transaction)
+      } catch {
+        sendAnimationCoordinator?.cancel(identity: identity)
+        log.error("Send message failed", error: error)
+      }
+    }
+
+    func prepareTextSendAnimationIfNeeded(
+      transaction: SendMessageTransaction,
+      replyToMessageId: Int64?,
+      shouldCoordinateSendAnimationReset: Bool
+    ) -> Bool {
+      SendMessageAnimationDiagnostics.debug(
+        "compose prepare-check random=\(transaction.context.randomId) temp=\(transaction.context.temporaryMessageId) should=\(shouldAttemptSendAnimation) coordinateReset=\(shouldCoordinateSendAnimationReset) reply=\(replyToMessageId.map(String.init) ?? "nil") textLen=\((transaction.context.text ?? "").count) composeH=\(composeHeightConstraint.constant) focused=\(textView.isFirstResponder) window=\(window != nil)"
+      )
+      guard shouldCoordinateSendAnimationReset else { return false }
+
+      let identity = SendMessageAnimationIdentity(
+        randomId: transaction.context.randomId,
+        temporaryMessageId: transaction.context.temporaryMessageId
+      )
+
+      guard let source = makeTextSendAnimationSource(
+        identity: identity,
+        text: transaction.context.text ?? ""
+      ) else {
+        SendMessageAnimationDiagnostics.event(
+          "compose source-capture-nil random=\(identity.randomId) temp=\(identity.temporaryMessageId) coordinateReset=\(shouldCoordinateSendAnimationReset)"
+        )
+        return false
+      }
+
+      return sendAnimationCoordinator?.prepare(source: source) == true
+    }
+
+    func shouldCoordinateTextSendAnimationReset(replyToMessageId: Int64?) -> Bool {
+      let canPrepareSourceLayout = sendAnimationCoordinator?.canPrepareTextSendSource() != false
+      let shouldCoordinate = shouldAttemptSendAnimation &&
+        canPrepareSourceLayout
+      SendMessageAnimationDiagnostics.debug(
+        "compose coordinate-reset-check should=\(shouldCoordinate) attempt=\(shouldAttemptSendAnimation) reply=\(replyToMessageId.map(String.init) ?? "nil") sourceLayout=\(canPrepareSourceLayout)"
+      )
+      return shouldCoordinate
+    }
+
     func sendTextAndAttachments(replyToMessageId: Int64?, queueOnly: Bool) async {
       if attachmentItemsToSend.isEmpty {
+        let transaction = makeTextSendTransaction(replyToMessageId: replyToMessageId)
         if queueOnly {
-          _ = await Api.realtime.sendQueued(.sendMessage(
-            text: text ?? "",
-            peerId: peerId,
-            chatId: chatId,
-            replyToMsgId: replyToMessageId,
-            isSticker: nil,
-            entities: entities,
-            sendMode: sendMode
-          ))
+          _ = await Api.realtime.sendQueued(transaction)
         } else {
-          do {
-            try await Api.realtime.send(.sendMessage(
-              text: text ?? "",
-              peerId: peerId,
-              chatId: chatId,
-              replyToMsgId: replyToMessageId,
-              isSticker: nil,
-              entities: entities,
-              sendMode: sendMode
-            ))
-          } catch {
-            log.error("Send message failed", error: error)
-          }
+          await sendTextTransaction(transaction)
         }
       } else {
         for (index, (_, attachment)) in attachmentItemsToSend.enumerated() {
@@ -1064,6 +1139,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         }
       }
     }
+
+    var didPrepareSendAnimationPreview = false
+    var shouldCoordinateSendAnimationReset = false
 
     if isEditing {
       mentionedParticipantsAccess.handle(entities: entities, peer: peerId, chatId: chatId)
@@ -1106,18 +1184,39 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     } else {
       let replyToMessageId = state.replyingMessageId
       mentionedParticipantsAccess.handle(entities: entities, peer: peerId, chatId: chatId)
-      Task(priority: .userInitiated) { @MainActor in
-        await sendTextAndAttachments(replyToMessageId: replyToMessageId, queueOnly: false)
+      if attachmentItemsToSend.isEmpty {
+        let transaction = makeTextSendTransaction(replyToMessageId: replyToMessageId)
+        shouldCoordinateSendAnimationReset = shouldCoordinateTextSendAnimationReset(
+          replyToMessageId: replyToMessageId
+        )
+        didPrepareSendAnimationPreview = prepareTextSendAnimationIfNeeded(
+          transaction: transaction,
+          replyToMessageId: replyToMessageId,
+          shouldCoordinateSendAnimationReset: shouldCoordinateSendAnimationReset
+        )
+        Task(priority: .userInitiated) { @MainActor in
+          await sendTextTransaction(transaction)
+        }
+      } else {
+        Task(priority: .userInitiated) { @MainActor in
+          await sendTextAndAttachments(replyToMessageId: replyToMessageId, queueOnly: false)
+        }
       }
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }
 
     if shouldSendTextOnly {
-      clearComposeTextAfterSend()
+      clearTextOnlyComposeAfterSend(
+        shouldCoordinateSendAnimationReset: shouldCoordinateSendAnimationReset,
+        didPrepareSendAnimationPreview: didPrepareSendAnimationPreview
+      )
     } else {
       // Clear everything
-      resetComposeState()
+      resetFullComposeStateAfterTextSend(
+        shouldCoordinateSendAnimationReset: shouldCoordinateSendAnimationReset,
+        didPrepareSendAnimationPreview: didPrepareSendAnimationPreview
+      )
     }
   }
 
@@ -1485,7 +1584,38 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
 
-  private func resetComposeState() {
+  private enum ComposeResetHeightBehavior {
+    case normal
+    case coordinatedSendAnimation
+
+    var debugName: String {
+      switch self {
+      case .normal:
+        return "normal"
+      case .coordinatedSendAnimation:
+        return "coordinated-send-animation"
+      }
+    }
+  }
+
+  private func resetComposeStateWithoutSendAnimation() {
+    resetFullComposeState(heightBehavior: .normal)
+  }
+
+  private func resetFullComposeStateAfterTextSend(
+    shouldCoordinateSendAnimationReset: Bool,
+    didPrepareSendAnimationPreview: Bool
+  ) {
+    resetFullComposeState(
+      heightBehavior: shouldCoordinateSendAnimationReset ? .coordinatedSendAnimation : .normal,
+      didPrepareSendAnimationPreview: didPrepareSendAnimationPreview
+    )
+  }
+
+  private func resetFullComposeState(
+    heightBehavior: ComposeResetHeightBehavior,
+    didPrepareSendAnimationPreview: Bool = false
+  ) {
     let hadAttachments = !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty
     let shouldAnimateHeightReset = ComposeResetBehavior.shouldAnimateHeightResetAfterSend(
       hadAttachments: hadAttachments
@@ -1497,6 +1627,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     if shouldHideSendButtonImmediately {
       buttonDisappear(animated: false)
     }
+
+    let heightBeforeClear = composeHeightConstraint.constant
+    let shouldDeferSendHeightReset = heightBehavior == .coordinatedSendAnimation
+      && shouldAnimateHeightReset
+      && abs(heightBeforeClear - Self.minHeight) > 1
+    pendingSendAnimationHeightChange = shouldDeferSendHeightReset
+    SendMessageAnimationDiagnostics.event(
+      "compose reset-full heightBehavior=\(heightBehavior.debugName) shouldCoordinateHeight=\(heightBehavior == .coordinatedSendAnimation) preview=\(didPrepareSendAnimationPreview) shouldDeferHeight=\(shouldDeferSendHeightReset) shouldAnimateHeightReset=\(shouldAnimateHeightReset) hadAttachments=\(hadAttachments) heightBefore=\(String(format: "%.1f", heightBeforeClear)) minHeight=\(String(format: "%.1f", Self.minHeight))"
+    )
 
     clearDraft()
     // Keep already-started uploads alive after tapping send; the transaction may still be awaiting them.
@@ -1518,11 +1657,24 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     if !shouldHideSendButtonImmediately {
       buttonDisappear()
     }
+    if !shouldDeferSendHeightReset {
+      pendingSendAnimationHeightChange = false
+    }
 
     sendButton.configuration?.showsActivityIndicator = false
   }
 
-  private func clearComposeTextAfterSend() {
+  private func clearTextOnlyComposeAfterSend(
+    shouldCoordinateSendAnimationReset: Bool,
+    didPrepareSendAnimationPreview: Bool
+  ) {
+    let heightBeforeClear = composeHeightConstraint.constant
+    let shouldAnimateHeight = shouldCoordinateSendAnimationReset && abs(heightBeforeClear - Self.minHeight) > 1
+    pendingSendAnimationHeightChange = shouldAnimateHeight
+    SendMessageAnimationDiagnostics.event(
+      "compose reset-text-only shouldCoordinateHeight=\(shouldCoordinateSendAnimationReset) preview=\(didPrepareSendAnimationPreview) shouldAnimateHeight=\(shouldAnimateHeight) heightBefore=\(String(format: "%.1f", heightBeforeClear)) minHeight=\(String(format: "%.1f", Self.minHeight))"
+    )
+
     clearDraft()
     stopDraftSaveTimer()
     textView.text = ""
@@ -1530,8 +1682,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.font = .systemFont(ofSize: 17)
     textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
     textView.showPlaceholder(true)
-    updateSendButtonVisibility()
-    updateHeight()
+    updateSendButtonVisibility(syncVoiceAvailability: false)
+    updateHeight(
+      animated: shouldAnimateHeight,
+      duration: SendMessageAnimationTiming.duration,
+      timingParameters: shouldAnimateHeight ? SendMessageAnimationTiming.verticalTimingParameters : nil
+    )
+    if !shouldAnimateHeight {
+      pendingSendAnimationHeightChange = false
+    }
     sendButton.configuration?.showsActivityIndicator = false
   }
 

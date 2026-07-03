@@ -10,6 +10,7 @@ protocol MessageCellDelegate: AnyObject {
 
 class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelegate {
   static let reuseIdentifier = "MessageCell"
+  static let sendAnimationHorizontalPadding: CGFloat = 8
   private static let contentTransform = CGAffineTransform(scaleX: 1, y: -1)
   private static let insertionContentTransform = contentTransform.scaledBy(x: 0.985, y: 0.985)
 
@@ -25,6 +26,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var initialTranslation: CGFloat = 0
   private var prevText: String?
   private var canReply: Bool = true
+  private(set) var isPreparedForSendAnimationTarget = false
 
   // MARK: - Props
 
@@ -65,7 +67,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private let nameLabelLeading: CGFloat = 9
   private let nameLabelTop: CGFloat = 9
   private let nameLabelHeight: CGFloat = 16
-  private let horizontalPadding: CGFloat = 8
+  private let horizontalPadding = MessageCollectionViewCell.sendAnimationHorizontalPadding
 
   // MARK: - Views
 
@@ -102,15 +104,15 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     firstInGroup: Bool,
     lastInGroup: Bool,
     spaceId: Int64?,
-    displayMode: MessageDisplayMode = .normal
+    displayMode: MessageDisplayMode = .normal,
+    animateTail: Bool = true
   ) {
     let newOutgoing = message.message.out == true
 
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
-         self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode
-      {
+         self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode {
         // skip only if everything is exact match including outgoing state
         return
       }
@@ -125,7 +127,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       ) {
         self.lastInGroup = lastInGroup
         canReply = message.canReply && displayMode != .threadAnchor
-        messageView?.updateBubbleTail(side: bubbleTailSide, animated: true)
+        messageView?.updateBubbleTail(side: bubbleTailSide, animated: animateTail)
         updateSwipeAvailability()
         return
       }
@@ -156,7 +158,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   func prepareInsertionAnimation() {
+    isPreparedForSendAnimationTarget = false
     alpha = 0
+    contentView.alpha = 1
     contentView.transform = Self.insertionContentTransform
   }
 
@@ -169,15 +173,291 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       options: [.allowUserInteraction, .beginFromCurrentState]
     ) {
       self.alpha = 1
+      self.contentView.alpha = 1
       self.contentView.transform = Self.contentTransform
     }
+  }
+
+  func prepareSendAnimationTarget() {
+    setSendAnimationTargetPrepared(true)
+  }
+
+  func revealSendAnimationTarget() {
+    setSendAnimationTargetPrepared(false)
+  }
+
+  private func setSendAnimationTargetPrepared(_ prepared: Bool) {
+    SendMessageAnimationActions.performWithoutAnimation {
+      clearSendAnimationTargetLayerAnimations()
+      isPreparedForSendAnimationTarget = prepared
+      alpha = 1
+      contentView.alpha = prepared ? 0 : 1
+      contentView.transform = Self.contentTransform
+      setNeedsLayout()
+      layoutIfNeeded()
+      contentView.layoutIfNeeded()
+      messageView?.layoutIfNeeded()
+    }
+  }
+
+  func sendAnimationTargetPresentationInWindow() -> SendMessageAnimationTargetPresentation? {
+    snapshotSendAnimationTargetWithStableVisibleContent {
+      guard let messageView else { return nil }
+
+      return withSendAnimationFittedTargetLayout { geometry in
+        let bubbleSnapshotView = SendMessageAnimationTargetSnapshotting.makeSnapshot(
+          from: messageView.bubbleView,
+          side: bubbleTailSide
+        )
+        guard let bubbleSnapshotView else {
+          return nil
+        }
+        bubbleSnapshotView.frame = CGRect(
+          origin: .zero,
+          size: geometry.bubbleFrame.size
+        )
+        bubbleSnapshotView.backgroundColor = .clear
+        bubbleSnapshotView.isOpaque = false
+        bubbleSnapshotView.clipsToBounds = false
+        bubbleSnapshotView.isUserInteractionEnabled = false
+
+        return SendMessageAnimationTargetPresentation(
+          cellFrame: geometry.cellFrame,
+          bubbleFrame: geometry.bubbleFrame,
+          textFrame: geometry.textFrame,
+          bubbleSnapshotView: bubbleSnapshotView,
+          textFrameInBubble: geometry.textFrameInBubble,
+          textFirstBaselineYInWindow: geometry.textFirstBaselineYInWindow,
+          textFirstBaselineYInBubble: geometry.textFirstBaselineYInBubble
+        )
+      }
+    }
+  }
+
+  private func withSendAnimationFittedTargetLayout<T>(
+    _ body: (SendMessageAnimationTargetGeometry) -> T?
+  ) -> T? {
+    guard let window, bounds.width > 0, bounds.height > 0 else {
+      return sendAnimationTargetGeometryInWindow().flatMap(body)
+    }
+
+    let originalBounds = bounds
+    let fittedHeight = sendAnimationFittedTargetHeight()
+    let shouldUseFittedHeight = fittedHeight.map {
+      $0.isFinite && $0 > 0 && abs($0 - originalBounds.height) > 0.25
+    } ?? false
+
+    guard shouldUseFittedHeight, let fittedHeight else {
+      return sendAnimationTargetGeometryInWindow().flatMap(body)
+    }
+
+    let bottomAlignedWindowOffsetY = originalBounds.height - fittedHeight
+    SendMessageAnimationActions.performWithoutAnimation {
+      bounds = CGRect(
+        origin: originalBounds.origin,
+        size: CGSize(width: originalBounds.width, height: fittedHeight)
+      )
+      setNeedsLayout()
+      layoutIfNeeded()
+      contentView.layoutIfNeeded()
+      messageView?.layoutIfNeeded()
+      messageView?.bubbleView.layoutIfNeeded()
+      messageView?.messageLabel.layoutIfNeeded()
+    }
+
+    defer {
+      SendMessageAnimationActions.performWithoutAnimation {
+        bounds = originalBounds
+        setNeedsLayout()
+        layoutIfNeeded()
+        contentView.layoutIfNeeded()
+        messageView?.layoutIfNeeded()
+      }
+    }
+
+    guard let geometry = sendAnimationTargetGeometryInWindow() else {
+      return nil
+    }
+
+    let adjustedGeometry = geometry.offsetInWindowBy(y: bottomAlignedWindowOffsetY)
+    SendMessageAnimationDiagnostics.debug(
+      "target fitted-layout stable=\(message?.id.description ?? "nil") currentH=\(String(format: "%.1f", originalBounds.height)) fittedH=\(String(format: "%.1f", fittedHeight)) bottomAlignDy=\(String(format: "%.1f", bottomAlignedWindowOffsetY)) rawBubble=[\(SendMessageAnimationDiagnostics.rect(geometry.bubbleFrame))] adjustedBubble=[\(SendMessageAnimationDiagnostics.rect(adjustedGeometry.bubbleFrame))] window=\(window.bounds.isFiniteAndVisible)"
+    )
+    return body(adjustedGeometry)
+  }
+
+  private func sendAnimationFittedTargetHeight() -> CGFloat? {
+    guard bounds.width > 0 else { return nil }
+
+    layoutIfNeeded()
+    contentView.layoutIfNeeded()
+
+    let targetSize = CGSize(
+      width: bounds.width,
+      height: UIView.layoutFittingCompressedSize.height
+    )
+    let size = contentView.systemLayoutSizeFitting(
+      targetSize,
+      withHorizontalFittingPriority: .required,
+      verticalFittingPriority: .fittingSizeLevel
+    )
+    guard size.height.isFinite, size.height > 0 else { return nil }
+    return size.height
+  }
+
+  func stabilizeSendAnimationTargetForSnapshot() {
+    SendMessageAnimationActions.performWithoutAnimation {
+      clearSendAnimationTargetLayerAnimations()
+      alpha = 1
+      contentView.transform = Self.contentTransform
+      setNeedsLayout()
+      layoutIfNeeded()
+      contentView.layoutIfNeeded()
+      messageView?.layoutIfNeeded()
+      messageView?.bubbleView.layoutIfNeeded()
+      messageView?.messageLabel.layoutIfNeeded()
+      clearSendAnimationTargetLayerAnimations()
+    }
+  }
+
+  private func snapshotSendAnimationTargetWithStableVisibleContent<T>(_ body: () -> T) -> T {
+    let previousCellAlpha = alpha
+    let previousAlpha = contentView.alpha
+    let previousHidden = contentView.isHidden
+    let previousTransform = contentView.transform
+    let previousMessageAlpha = messageView?.alpha
+    let previousMessageHidden = messageView?.isHidden
+    let animationCountBefore = sendAnimationLayerAnimationCount(in: self)
+    SendMessageAnimationDiagnostics.debug(
+      "target snapshot-stabilize stable=\(message?.id.description ?? "nil") prepared=\(isPreparedForSendAnimationTarget) cellAlpha=\(String(format: "%.2f", previousCellAlpha)) contentAlpha=\(String(format: "%.2f", previousAlpha)) contentHidden=\(previousHidden) animationsBefore=\(animationCountBefore) animationsEnabled=\(UIView.areAnimationsEnabled) inheritedDuration=\(String(format: "%.3f", UIView.inheritedAnimationDuration))"
+    )
+
+    SendMessageAnimationActions.performWithoutAnimation {
+      clearSendAnimationTargetLayerAnimations()
+      alpha = 1
+      contentView.alpha = 1
+      contentView.isHidden = false
+      contentView.transform = Self.contentTransform
+      messageView?.alpha = 1
+      messageView?.isHidden = false
+      setNeedsLayout()
+      layoutIfNeeded()
+      contentView.layoutIfNeeded()
+      messageView?.layoutIfNeeded()
+      messageView?.bubbleView.layoutIfNeeded()
+      messageView?.messageLabel.layoutIfNeeded()
+      clearSendAnimationTargetLayerAnimations()
+    }
+
+    defer {
+      SendMessageAnimationActions.performWithoutAnimation {
+        clearSendAnimationTargetLayerAnimations()
+        alpha = previousCellAlpha
+        contentView.alpha = previousAlpha
+        contentView.isHidden = previousHidden
+        contentView.transform = previousTransform
+        if let previousMessageAlpha {
+          messageView?.alpha = previousMessageAlpha
+        }
+        if let previousMessageHidden {
+          messageView?.isHidden = previousMessageHidden
+        }
+        setNeedsLayout()
+        layoutIfNeeded()
+        contentView.layoutIfNeeded()
+        clearSendAnimationTargetLayerAnimations()
+      }
+      let animationCountAfter = sendAnimationLayerAnimationCount(in: self)
+      SendMessageAnimationDiagnostics.debug(
+        "target snapshot-restore stable=\(message?.id.description ?? "nil") contentAlpha=\(String(format: "%.2f", contentView.alpha)) animationsAfter=\(animationCountAfter)"
+      )
+    }
+
+    return SendMessageAnimationActions.performWithoutAnimation {
+      body()
+    }
+  }
+
+  private func sendAnimationLayerAnimationCount(in view: UIView) -> Int {
+    var count = view.layer.animationKeys()?.count ?? 0
+    for subview in view.subviews {
+      count += sendAnimationLayerAnimationCount(in: subview)
+    }
+    return count
+  }
+
+  private func clearSendAnimationTargetLayerAnimations() {
+    SendMessageAnimationActions.removeAnimationsRecursively(from: self)
+  }
+
+  func sendAnimationTargetGeometryInWindow() -> SendMessageAnimationTargetGeometry? {
+    layoutIfNeeded()
+    contentView.layoutIfNeeded()
+
+    guard let window, let messageView else { return nil }
+
+    messageView.layoutIfNeeded()
+    messageView.bubbleView.layoutIfNeeded()
+    messageView.messageLabel.layoutIfNeeded()
+
+    let cellFrame = convert(bounds, to: window)
+    let bubbleFrame = messageView.bubbleView.convert(messageView.bubbleView.bounds, to: window)
+    let textGeometry = messageView.messageLabel.sendAnimationTextFrame()
+    let textFrameInLabel = textGeometry?.visibleTextFrame
+    let textFrame = textGeometry.map {
+      messageView.messageLabel.convert($0.visibleTextFrame, to: window)
+    }
+    let textFrameInBubble = textGeometry.map {
+      messageView.messageLabel.convert($0.visibleTextFrame, to: messageView.bubbleView)
+    }
+    let textFirstBaselineYInWindow = textGeometry.map {
+      messageView.messageLabel.convert(CGPoint(x: 0, y: $0.firstBaselineY), to: window).y
+    }
+    let textFirstBaselineYInBubble = textGeometry.map {
+      messageView.messageLabel.convert(CGPoint(x: 0, y: $0.firstBaselineY), to: messageView.bubbleView).y
+    }
+
+    guard cellFrame.isFiniteAndVisible,
+          bubbleFrame.isFiniteAndVisible,
+          let textFrameInLabel,
+          let textFrame,
+          let textFrameInBubble,
+          let textFirstBaselineYInWindow,
+          let textFirstBaselineYInBubble,
+          textFrameInLabel.isFiniteAndVisible,
+          textFrame.isFiniteAndVisible,
+          textFrameInBubble.isFiniteAndVisible,
+          textFirstBaselineYInWindow.isFinite,
+          textFirstBaselineYInBubble.isFinite
+    else {
+      SendMessageAnimationDiagnostics.event(
+        "target cell-geometry-unavailable stable=\(message?.id.description ?? "nil") cell=[\(SendMessageAnimationDiagnostics.rect(cellFrame))] bubble=[\(SendMessageAnimationDiagnostics.rect(bubbleFrame))] text=\(textFrame.map { "[\(SendMessageAnimationDiagnostics.rect($0))]" } ?? "nil") textInLabel=\(textFrameInLabel.map { "[\(SendMessageAnimationDiagnostics.rect($0))]" } ?? "nil") textInBubble=\(textFrameInBubble.map { "[\(SendMessageAnimationDiagnostics.rect($0))]" } ?? "nil") baselineY=\(textFirstBaselineYInWindow.map { String(format: "%.1f", $0) } ?? "nil") baselineBubbleY=\(textFirstBaselineYInBubble.map { String(format: "%.1f", $0) } ?? "nil") preparedTarget=\(isPreparedForSendAnimationTarget)"
+      )
+      return nil
+    }
+
+    return SendMessageAnimationTargetGeometry(
+      cellFrame: cellFrame,
+      bubbleFrame: bubbleFrame,
+      textFrame: textFrame,
+      textFrameInBubble: textFrameInBubble,
+      textFrameInLabel: textFrameInLabel,
+      textFirstBaselineYInWindow: textFirstBaselineYInWindow,
+      textFirstBaselineYInBubble: textFirstBaselineYInBubble
+    )
+  }
+
+  func bubbleTailSideForSendAnimation() -> MessageBubbleTailSide {
+    bubbleTailSide
   }
 
   override func prepareForReuse() {
     super.prepareForReuse()
 
     alpha = 1
+    contentView.alpha = 1
     contentView.transform = Self.contentTransform
+    isPreparedForSendAnimationTarget = false
 
     // Reset swipe state
     resetSwipeState()

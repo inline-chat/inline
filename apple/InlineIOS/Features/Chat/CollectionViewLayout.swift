@@ -2,14 +2,48 @@ import InlineKit
 import UIKit
 
 final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
+  private var sendAnimationSuppressedIndexPaths: Set<IndexPath> = []
+  private var sendAnimationSuppressedAppearingItems: Set<MessageListItem> = []
+
+  func suppressSendAnimationAppearingItems(
+    _ items: Set<MessageListItem>,
+    at indexPaths: Set<IndexPath>
+  ) {
+    sendAnimationSuppressedAppearingItems = items
+    sendAnimationSuppressedIndexPaths = indexPaths
+  }
+
+  func clearSendAnimationAppearingItemSuppression() {
+    sendAnimationSuppressedAppearingItems.removeAll(keepingCapacity: true)
+    sendAnimationSuppressedIndexPaths.removeAll(keepingCapacity: true)
+  }
+
   override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath)
-    -> UICollectionViewLayoutAttributes?
-  {
-    guard let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath) else {
-      return nil
+    -> UICollectionViewLayoutAttributes? {
+    let attributes = super.initialLayoutAttributesForAppearingItem(at: itemIndexPath)
+
+    if shouldSuppressSendAnimationAppearingItem(at: itemIndexPath) {
+      guard let baseAttributes = layoutAttributesForItem(at: itemIndexPath) ?? attributes else {
+        SendMessageAnimationDiagnostics.debug(
+          "layout suppress-appearing-missing-attributes indexPath=\(itemIndexPath)"
+        )
+        return nil
+      }
+      guard let stableAttributes = baseAttributes.copy() as? UICollectionViewLayoutAttributes else {
+        return baseAttributes
+      }
+      stableAttributes.alpha = 1
+      stableAttributes.transform = .identity
+      stableAttributes.transform3D = CATransform3DIdentity
+      return stableAttributes
     }
 
-    let modifiedAttributes = attributes.copy() as! UICollectionViewLayoutAttributes
+    guard let attributes else {
+      return nil
+    }
+    guard let modifiedAttributes = attributes.copy() as? UICollectionViewLayoutAttributes else {
+      return attributes
+    }
 
     // Since the collection view is inverted, negative Y gives new messages a subtle upward settle.
     modifiedAttributes.transform = CGAffineTransform(translationX: 0, y: -18)
@@ -18,9 +52,34 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
     return modifiedAttributes
   }
 
+  private func shouldSuppressSendAnimationAppearingItem(at indexPath: IndexPath) -> Bool {
+    let isSuppressedIndexPath = sendAnimationSuppressedIndexPaths.contains(indexPath)
+
+    guard !sendAnimationSuppressedAppearingItems.isEmpty else {
+      return isSuppressedIndexPath
+    }
+
+    guard let collectionView,
+          indexPath.section < collectionView.numberOfSections,
+          indexPath.item < collectionView.numberOfItems(inSection: indexPath.section),
+          let dataSource = collectionView.dataSource
+            as? UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>,
+          let item = dataSource.itemIdentifier(for: indexPath)
+    else {
+      return isSuppressedIndexPath
+    }
+
+    let isSuppressedItem = sendAnimationSuppressedAppearingItems.contains(item)
+    if isSuppressedIndexPath, !isSuppressedItem {
+      SendMessageAnimationDiagnostics.debug(
+        "layout suppress-indexpath-fallback indexPath=\(indexPath) item=\(item)"
+      )
+    }
+    return isSuppressedItem || isSuppressedIndexPath
+  }
+
   override func finalLayoutAttributesForDisappearingItem(at itemIndexPath: IndexPath)
-    -> UICollectionViewLayoutAttributes?
-  {
+    -> UICollectionViewLayoutAttributes? {
     guard
       let attributes = super.finalLayoutAttributesForDisappearingItem(at: itemIndexPath)?.copy()
       as? UICollectionViewLayoutAttributes

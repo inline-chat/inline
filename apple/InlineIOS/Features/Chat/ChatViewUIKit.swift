@@ -14,6 +14,7 @@ public class ChatContainerView: UIView {
   }
 
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
+  private lazy var sendAnimationCoordinator = SendMessageAnimationCoordinator(hostView: self)
 
   private lazy var keyboardDismissTapGestureRecognizer: UITapGestureRecognizer = {
     let gesture = UITapGestureRecognizer(target: self, action: #selector(handleTapOutsideCompose))
@@ -23,7 +24,12 @@ public class ChatContainerView: UIView {
   }()
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
-    let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0, spaceId: spaceId)
+    let collectionView = MessagesCollectionView(
+      peerId: peerId,
+      chatId: chatId ?? 0,
+      spaceId: spaceId,
+      sendAnimationCoordinator: sendAnimationCoordinator
+    )
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
@@ -41,12 +47,13 @@ public class ChatContainerView: UIView {
   lazy var composeView: ComposeView = {
     let view = ComposeView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.onHeightChange = { [weak self] newHeight in
-      self?.handleComposeViewHeightChange(newHeight)
+    view.onHeightChange = { [weak self] newHeight, animation in
+      self?.handleComposeViewHeightChange(newHeight, animation: animation)
     }
     view.peerId = peerId
     view.chatId = chatId
     view.spaceId = spaceId
+    view.sendAnimationCoordinator = sendAnimationCoordinator
     view.setPeerUser(peerUser)
     return view
   }()
@@ -96,7 +103,8 @@ public class ChatContainerView: UIView {
   private var isComposeKeyboardVisible = false
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
 
-  deinit {
+  isolated deinit {
+    sendAnimationCoordinator.cancelAll()
     NotificationCenter.default.removeObserver(self)
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
@@ -120,6 +128,11 @@ public class ChatContainerView: UIView {
 
   override public func didMoveToWindow() {
     super.didMoveToWindow()
+    if window == nil {
+      sendAnimationCoordinator.cancelAll()
+    }
+    sendAnimationCoordinator.setHostView(window == nil ? nil : self)
+    sendAnimationCoordinator.setSourceLayoutView(window == nil ? nil : messagesCollectionView)
     attachEdgePanHandlerIfNeeded()
     resetComposeToSafeAreaIfKeyboardClosed()
   }
@@ -136,6 +149,7 @@ public class ChatContainerView: UIView {
     backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
+    sendAnimationCoordinator.setSourceLayoutView(messagesCollectionView)
     messagesCollectionView.addGestureRecognizer(keyboardDismissTapGestureRecognizer)
     addSubview(pinnedHeaderView)
     addSubview(composeContainerView)
@@ -596,8 +610,22 @@ public class ChatContainerView: UIView {
     }
   }
 
-  private func handleComposeViewHeightChange(_ newHeight: CGFloat) {
-    messagesCollectionView.updateComposeInset(composeHeight: newHeight)
+  private func handleComposeViewHeightChange(
+    _ newHeight: CGFloat,
+    animation: ComposeHeightChangeAnimation
+  ) {
+    let animatedForSend = composeView.consumePendingSendAnimationHeightChange()
+    if animatedForSend {
+      SendMessageAnimationDiagnostics.event(
+        "compose height-change-deferred-to-list newHeight=\(String(format: "%.1f", newHeight))"
+      )
+      messagesCollectionView.deferComposeInsetForPendingSendAnimation(composeHeight: newHeight)
+    } else {
+      messagesCollectionView.updateComposeInset(
+        composeHeight: newHeight,
+        animation: animation
+      )
+    }
 
     setNeedsLayout()
   }

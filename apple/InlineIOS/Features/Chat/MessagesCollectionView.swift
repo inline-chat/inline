@@ -20,12 +20,23 @@ final class MessagesCollectionView: UICollectionView {
   static var contextMenuOpen: Bool = false
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
+  private let sendAnimationScrollState = SendMessageAnimationScrollState()
 
-  init(peerId: Peer, chatId: Int64, spaceId: Int64?) {
+  init(
+    peerId: Peer,
+    chatId: Int64,
+    spaceId: Int64?,
+    sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
+  ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
-    let coordinator = Coordinator(peerId: peerId, chatId: chatId, spaceId: spaceId)
+    let coordinator = Coordinator(
+      peerId: peerId,
+      chatId: chatId,
+      spaceId: spaceId,
+      sendAnimationCoordinator: sendAnimationCoordinator
+    )
     self.coordinator = coordinator
     let layout = MessagesCollectionView.createLayout { [weak coordinator] sectionIndex in
       coordinator?.sectionId(at: sectionIndex)
@@ -84,6 +95,7 @@ final class MessagesCollectionView: UICollectionView {
   override func didMoveToWindow() {
     updateContentInsets()
     if window == nil {
+      cancelSendAnimationScrollAnimations()
       coordinator.detachAvatarOverlay()
     } else {
       coordinator.attachAvatarOverlay(over: self, parent: findViewController())
@@ -100,6 +112,7 @@ final class MessagesCollectionView: UICollectionView {
     NotificationCenter.default.removeObserver(self)
     Log.shared.debug("CollectionView deinit")
 
+    cancelSendAnimationScrollAnimations()
     coordinator.dispose()
 
     Task {
@@ -113,23 +126,154 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
+  private struct PendingSendAnimationComposeInset {
+    let height: CGFloat
+    let token: Int
+  }
+
   private var composeHeight: CGFloat = ComposeView.minHeight
+  private var pendingSendAnimationComposeInset: PendingSendAnimationComposeInset?
+  private var pendingSendAnimationComposeInsetToken = 0
   private var pinnedHeaderHeight: CGFloat = 0
+
+  var hasDeferredSendComposeInset: Bool {
+    pendingSendAnimationComposeInset != nil
+  }
 
   func updatePinnedHeaderHeight(_ height: CGFloat) {
     pinnedHeaderHeight = height
     updateContentInsets()
   }
 
-  func updateComposeInset(composeHeight: CGFloat) {
+  func updateComposeInset(
+    composeHeight: CGFloat,
+    animation: ComposeHeightChangeAnimation
+  ) {
+    pendingSendAnimationComposeInset = nil
+    applyComposeInset(composeHeight: composeHeight, animation: animation)
+  }
+
+  func deferComposeInsetForPendingSendAnimation(composeHeight: CGFloat) {
+    guard abs(self.composeHeight - composeHeight) > 0.5 else {
+      pendingSendAnimationComposeInset = nil
+      return
+    }
+
+    stopComposeInsetAnimationAtPresentation()
+    pendingSendAnimationComposeInsetToken += 1
+    let token = pendingSendAnimationComposeInsetToken
+    pendingSendAnimationComposeInset = PendingSendAnimationComposeInset(
+      height: composeHeight,
+      token: token
+    )
+
+    SendMessageAnimationDiagnostics.event(
+      "list compose-inset-deferred oldHeight=\(String(format: "%.1f", self.composeHeight)) newHeight=\(String(format: "%.1f", composeHeight)) insetTop=\(String(format: "%.1f", contentInset.top)) offsetY=\(String(format: "%.1f", contentOffset.y))"
+    )
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + (SendMessageAnimationTiming.duration + 0.25)) { [weak self] in
+      self?.flushDeferredComposeInsetForPendingSendAnimation(
+        token: token,
+        reason: "timeout"
+      )
+    }
+  }
+
+  @discardableResult
+  func applyDeferredComposeInsetForPendingSendAnimationIfNeeded(reason: String) -> Bool {
+    guard let pending = pendingSendAnimationComposeInset else { return false }
+
+    pendingSendAnimationComposeInset = nil
+    SendMessageAnimationDiagnostics.event(
+      "list compose-inset-apply-deferred reason=\(reason) oldHeight=\(String(format: "%.1f", composeHeight)) newHeight=\(String(format: "%.1f", pending.height)) insetTop=\(String(format: "%.1f", contentInset.top)) offsetY=\(String(format: "%.1f", contentOffset.y))"
+    )
+    applyComposeInset(
+      composeHeight: pending.height,
+      animation: .immediate,
+      scrollToBottomIfNeeded: false
+    )
+    return true
+  }
+
+  private func flushDeferredComposeInsetForPendingSendAnimation(token: Int, reason: String) {
+    guard
+      let pending = pendingSendAnimationComposeInset,
+      pending.token == token
+    else {
+      return
+    }
+
+    pendingSendAnimationComposeInset = nil
+    SendMessageAnimationDiagnostics.event(
+      "list compose-inset-flush-deferred reason=\(reason) oldHeight=\(String(format: "%.1f", composeHeight)) newHeight=\(String(format: "%.1f", pending.height)) insetTop=\(String(format: "%.1f", contentInset.top)) offsetY=\(String(format: "%.1f", contentOffset.y))"
+    )
+    applyComposeInset(
+      composeHeight: pending.height,
+      animation: .animated(
+        duration: SendMessageAnimationTiming.duration,
+        timingParameters: SendMessageAnimationTiming.verticalTimingParameters
+      )
+    )
+  }
+
+  private func applyComposeInset(
+    composeHeight: CGFloat,
+    animation: ComposeHeightChangeAnimation,
+    scrollToBottomIfNeeded: Bool = true
+  ) {
+    guard animation.isAnimated else {
+      stopComposeInsetAnimationAtPresentation()
+      self.composeHeight = composeHeight
+      UIView.performWithoutAnimation {
+        updateContentInsets()
+        if scrollToBottomIfNeeded, !itemsEmpty, shouldScrollToBottom {
+          safeScrollToTop(animated: false)
+        }
+        layoutIfNeeded()
+      }
+      return
+    }
+
+    stopComposeInsetAnimationAtPresentation()
+    let wasAtBottom = !itemsEmpty && shouldScrollToBottom
+    let previousTopInset = contentInset.top
+    let previousOffset = contentOffset
     self.composeHeight = composeHeight
+
     UIView.performWithoutAnimation {
       updateContentInsets()
-      if !itemsEmpty, shouldScrollToBottom {
-        safeScrollToTop(animated: false)
+      if wasAtBottom {
+        setContentOffset(previousOffset, animated: false)
       }
-      layoutIfNeeded()
     }
+
+    guard wasAtBottom else { return }
+
+    let insetDelta = contentInset.top - previousTopInset
+    let targetOffset = CGPoint(
+      x: previousOffset.x,
+      y: previousOffset.y - insetDelta
+    )
+
+    sendAnimationScrollState.startComposeInsetAnimation(
+      to: targetOffset,
+      duration: animation.duration,
+      timingParameters: animation.timingParameters,
+      in: self
+    )
+  }
+
+  @discardableResult
+  private func stopComposeInsetAnimationAtPresentation() -> Bool {
+    sendAnimationScrollState.stopComposeInsetAnimationAtPresentation(in: self)
+  }
+
+  private func cancelSendAnimationScrollAnimations() {
+    sendAnimationScrollState.cancel(in: self)
+  }
+
+  private func clampedSendAnimationContentOffset(_ offset: CGPoint) -> CGPoint {
+    sendAnimationScrollState.clampedContentOffset(offset, in: self)
   }
 
   static let messagesBottomPadding = 12.0
@@ -279,6 +423,77 @@ final class MessagesCollectionView: UICollectionView {
 
     let indexPath = IndexPath(item: 0, section: 0)
     scrollToItem(at: indexPath, at: .top, animated: animated)
+  }
+
+  private func makeSendAnimationScrollPlanToBottom(
+    currentOffsetY: CGFloat? = nil
+  ) -> SendMessageAnimationScrollPlan? {
+    guard coordinator.numberOfSections() > 0,
+          coordinator.numberOfItems(in: 0) > 0,
+          numberOfSections > 0,
+          numberOfItems(inSection: 0) > 0
+    else {
+      return nil
+    }
+
+    layoutIfNeeded()
+
+    let indexPath = IndexPath(item: 0, section: 0)
+    guard let attributes = layoutAttributesForItem(at: indexPath) else { return nil }
+
+    let unclampedTargetOffset = CGPoint(
+      x: contentOffset.x,
+      y: attributes.frame.minY - contentInset.top
+    )
+    let targetOffset = sendAnimationScrollState.clampedContentOffset(
+      unclampedTargetOffset,
+      in: self
+    )
+    if abs(unclampedTargetOffset.y - targetOffset.y) > 0.5 {
+      SendMessageAnimationDiagnostics.debug(
+        "list scroll-plan-clamped rawY=\(String(format: "%.1f", unclampedTargetOffset.y)) clampedY=\(String(format: "%.1f", targetOffset.y)) minY=\(String(format: "%.1f", -contentInset.top)) maxY=\(String(format: "%.1f", max(-contentInset.top, contentSize.height - bounds.height + contentInset.bottom)))"
+      )
+    }
+    let modelContentOffsetYDeltaToTarget = targetOffset.y - contentOffset.y
+    let effectiveCurrentOffsetY = currentOffsetY ?? contentOffset.y
+    let presentationContentOffsetYDeltaToTarget = targetOffset.y - effectiveCurrentOffsetY
+    guard abs(modelContentOffsetYDeltaToTarget) > 0.5 ||
+      abs(presentationContentOffsetYDeltaToTarget) > 0.5
+    else {
+      return nil
+    }
+
+    let presentationDelta: CGFloat?
+    if currentOffsetY == nil {
+      presentationDelta = nil
+    } else {
+      presentationDelta = presentationContentOffsetYDeltaToTarget
+    }
+
+    return SendMessageAnimationScrollPlan(
+      targetOffset: targetOffset,
+      modelContentOffsetYDeltaToTarget: modelContentOffsetYDeltaToTarget,
+      presentationContentOffsetYDeltaToTarget: presentationDelta
+    )
+  }
+
+  private var isSendAnimationScrollInFlight: Bool {
+    sendAnimationScrollState.isScrollInFlight
+  }
+
+  private func activeSendAnimationScrollPlanToTarget() -> SendMessageAnimationScrollPlan? {
+    sendAnimationScrollState.activeScrollPlanToTarget(in: self)
+  }
+
+  private func animateSendAnimationScrollToBottom(
+    targetOffset: CGPoint,
+    duration: TimeInterval
+  ) {
+    sendAnimationScrollState.animateScroll(
+      to: targetOffset,
+      duration: duration,
+      in: self
+    )
   }
 
   @objc func orientationDidChange(_ notification: Notification) {
@@ -582,11 +797,19 @@ private extension MessagesCollectionView {
     private let avatarOverlayController = MessageAvatarOverlayViewController()
     private var groupInfoByItem: [MessageListItem: MessageGroupInfo] = [:]
     private var pendingAppearingItems: Set<MessageListItem> = []
+    private var sendAnimationListTransaction = SendMessageAnimationListTransaction()
+    private weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
       let isFirst: Bool
       let isLast: Bool
+    }
+
+    private struct SendAnimationContentAnchor {
+      let item: MessageListItem
+      let frameInWindow: CGRect
+      let contentOffset: CGPoint
     }
 
     private struct AvatarOverlayDraft {
@@ -612,12 +835,44 @@ private extension MessagesCollectionView {
       willDisplay cell: UICollectionViewCell,
       forItemAt indexPath: IndexPath
     ) {
-      guard let item = item(at: indexPath), pendingAppearingItems.remove(item) != nil else {
+      guard let item = item(at: indexPath) else {
         cell.alpha = 1
+        if let cell = cell as? MessageCollectionViewCell {
+          cell.revealSendAnimationTarget()
+        }
+        return
+      }
+
+      guard pendingAppearingItems.remove(item) != nil else {
+        cell.alpha = 1
+        if let cell = cell as? MessageCollectionViewCell {
+          if cell.isPreparedForSendAnimationTarget,
+             let identity = sendAnimationIdentity(for: item) {
+            if sendAnimationCoordinator?.isAnimating(identity: identity) == true {
+              SendMessageAnimationDiagnostics.debug(
+                "willDisplay keep-hidden item=\(item) preparedTarget=true state=animating"
+              )
+              return
+            }
+
+            SendMessageAnimationDiagnostics.debug(
+              "willDisplay keep-hidden item=\(item) preparedTarget=true state=pending-final-layout"
+            )
+            return
+          }
+          cell.revealSendAnimationTarget()
+        }
         return
       }
 
       if let cell = cell as? MessageCollectionViewCell {
+        if cell.isPreparedForSendAnimationTarget,
+           let identity = sendAnimationIdentity(for: item) {
+          SendMessageAnimationDiagnostics.debug(
+            "willDisplay keep-hidden item=\(item) preparedTarget=true state=\(sendAnimationCoordinator?.isAnimating(identity: identity) == true ? "animating" : "pending-final-layout")"
+          )
+          return
+        }
         cell.animateInsertion()
       } else {
         cell.alpha = 0
@@ -629,6 +884,94 @@ private extension MessagesCollectionView {
           cell.alpha = 1
         }
       }
+    }
+
+    private func beginSendAnimationTargetIfPossible(
+      for item: MessageListItem,
+      at indexPath: IndexPath,
+      cell: MessageCollectionViewCell,
+      finalizedScrollPlan: SendMessageAnimationScrollPlan? = nil,
+      fallbackAnimatesInsertion: Bool
+    ) -> Bool {
+      let wasSendAnimationTarget = cell.isPreparedForSendAnimationTarget
+      guard wasSendAnimationTarget else {
+        return false
+      }
+
+      if let targetStart = makeSendAnimationTargetStart(
+        for: item,
+        at: indexPath,
+        cell: cell,
+        finalizedScrollPlan: finalizedScrollPlan
+      ) {
+        let target = targetStart.target
+        let didBegin = SendMessageAnimationActions.performWithAnimationsEnabled(
+          reason: "begin-preview-and-scroll"
+        ) {
+          let didBegin = sendAnimationCoordinator?.beginIfPossible(
+            target: target,
+            revealTarget: { [weak self, weak cell] latestTarget in
+              guard let cell,
+                    Self.cell(cell, matchesSendAnimationTarget: latestTarget)
+              else {
+                return
+              }
+              cell.revealSendAnimationTarget()
+              self?.logFinalSendAnimationTargetFrame(
+                target: latestTarget,
+                expectedBubbleFrameInWindow: latestTarget.bubbleFrameInWindow,
+                expectedTextFrameInWindow: latestTarget.textFrameInWindow,
+                cell: cell
+              )
+            }
+          ) == true
+
+          if didBegin,
+             let scrollTargetOffset = targetStart.scrollTargetOffset,
+             let scrollDuration = targetStart.scrollDuration,
+             let collectionView = currentCollectionView as? MessagesCollectionView {
+            collectionView.animateSendAnimationScrollToBottom(
+              targetOffset: scrollTargetOffset,
+              duration: scrollDuration
+            )
+          }
+
+          return didBegin
+        }
+
+        if didBegin {
+          removePendingSendAnimationScrollTarget(item: item, identity: target.identity)
+          return true
+        }
+
+        sendAnimationCoordinator?.cancel(identity: target.identity)
+        removePendingSendAnimationScrollTarget(item: item, identity: target.identity)
+        SendMessageAnimationDiagnostics.event(
+          "willDisplay fallback-cancel-preview item=\(item) preparedTarget=\(wasSendAnimationTarget)"
+        )
+      } else if wasSendAnimationTarget {
+        let identity = sendAnimationIdentity(for: item)
+        removePendingSendAnimationScrollTarget(item: item, identity: identity)
+        if let identity {
+          sendAnimationCoordinator?.cancel(identity: identity)
+        }
+        SendMessageAnimationDiagnostics.event(
+          "willDisplay fallback-cancel-unavailable-target item=\(item) random=\(identity.map { String($0.randomId) } ?? "nil")"
+        )
+      }
+
+      if wasSendAnimationTarget {
+        SendMessageAnimationDiagnostics.event(
+          "willDisplay fallback-default item=\(item) preparedTarget=true insertion=\(fallbackAnimatesInsertion)"
+        )
+        cell.revealSendAnimationTarget()
+        if fallbackAnimatesInsertion {
+          cell.prepareInsertionAnimation()
+        } else {
+          return true
+        }
+      }
+      return false
     }
 
     func collectionView(
@@ -802,6 +1145,623 @@ private extension MessagesCollectionView {
       }
     }
 
+    private static func cell(
+      _ cell: MessageCollectionViewCell,
+      matchesSendAnimationTarget target: SendMessageAnimationTarget
+    ) -> Bool {
+      guard let message = cell.message else { return false }
+      if message.id == target.messageStableId {
+        return true
+      }
+      if message.message.messageId == target.identity.temporaryMessageId {
+        return true
+      }
+      if let randomId = message.message.randomId,
+         randomId == target.identity.randomId {
+        return true
+      }
+      return false
+    }
+
+    private func sendAnimationIdentity(for item: MessageListItem) -> SendMessageAnimationIdentity? {
+      guard let message = message(for: item) else { return nil }
+      return sendAnimationCoordinator?.pendingIdentity(for: message)
+    }
+
+    private func isPendingSendAnimationScrollTarget(
+      item: MessageListItem,
+      identity: SendMessageAnimationIdentity
+    ) -> Bool {
+      sendAnimationListTransaction.contains(item: item, identity: identity)
+    }
+
+    private func removePendingSendAnimationScrollTarget(
+      item: MessageListItem,
+      identity: SendMessageAnimationIdentity?
+    ) {
+      sendAnimationListTransaction.remove(item: item, identity: identity)
+    }
+
+    private func beginPendingSendAnimationTargetsAfterApply(
+      _ items: Set<MessageListItem>,
+      identities: Set<SendMessageAnimationIdentity>,
+      collectionView: MessagesCollectionView,
+      contentAnchor: SendAnimationContentAnchor?
+    ) {
+      let beginTargets = { [weak self, weak collectionView] in
+        guard let self, let collectionView else { return }
+
+        let remaining = self.sendAnimationListTransaction.remainder(
+          for: items,
+          identities: identities
+        )
+        guard !remaining.isEmpty else {
+          SendMessageAnimationDiagnostics.debug(
+            "post-apply target-start skipped remaining=empty items=\(items.count) identities=\(identities.count)"
+          )
+          return
+        }
+
+        SendMessageAnimationActions.performWithoutAnimation {
+          let hadScrollInFlight = collectionView.isSendAnimationScrollInFlight
+          let stoppedComposeInset = collectionView.stopComposeInsetAnimationAtPresentation()
+          if hadScrollInFlight {
+            collectionView.cancelSendAnimationScrollAnimations()
+          }
+          let appliedDeferredComposeInset = collectionView.applyDeferredComposeInsetForPendingSendAnimationIfNeeded(
+            reason: "post-apply"
+          )
+          if stoppedComposeInset || hadScrollInFlight || appliedDeferredComposeInset {
+            SendMessageAnimationDiagnostics.debug(
+              "list anchor-scroll-state-stopped compose=\(stoppedComposeInset) scroll=\(hadScrollInFlight) deferredCompose=\(appliedDeferredComposeInset) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+            )
+          }
+          collectionView.layoutIfNeeded()
+          self.restoreSendAnimationContentAnchor(
+            contentAnchor,
+            in: collectionView
+          )
+        }
+
+        let scrollPlan = collectionView.makeSendAnimationScrollPlanToBottom()
+        SendMessageAnimationDiagnostics.event(
+          "post-apply target-start remainingItems=\(remaining.items.count) remainingIdentities=\(remaining.identities.count) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y)) scrollDy=\(scrollPlan.map { String(format: "%.1f", $0.modelContentOffsetYDeltaToTarget) } ?? "nil") targetOffsetY=\(scrollPlan.map { String(format: "%.1f", $0.targetOffset.y) } ?? "nil")"
+        )
+
+        self.retargetActiveSendAnimationTargetsAfterApply(
+          excluding: identities,
+          finalizedScrollPlan: scrollPlan,
+          collectionView: collectionView
+        )
+
+        var consumedItems = Set<MessageListItem>()
+        var consumedIdentities = Set<SendMessageAnimationIdentity>()
+
+        for item in remaining.items {
+          guard let identity = self.sendAnimationIdentity(for: item) else {
+            consumedItems.insert(item)
+            continue
+          }
+
+          guard let indexPath = self.dataSource.indexPath(for: item),
+                let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell
+          else {
+            consumedItems.insert(item)
+            consumedIdentities.insert(identity)
+            self.sendAnimationCoordinator?.cancel(identity: identity)
+            SendMessageAnimationDiagnostics.event(
+              "post-apply target-start unavailable-cell item=\(item) random=\(identity.randomId)"
+            )
+            continue
+          }
+
+          if self.beginSendAnimationTargetIfPossible(
+            for: item,
+            at: indexPath,
+            cell: cell,
+            finalizedScrollPlan: scrollPlan,
+            fallbackAnimatesInsertion: false
+          ) {
+            consumedItems.insert(item)
+            consumedIdentities.insert(identity)
+            continue
+          }
+
+          consumedItems.insert(item)
+          consumedIdentities.insert(identity)
+          cell.revealSendAnimationTarget()
+          self.sendAnimationCoordinator?.cancel(identity: identity)
+          SendMessageAnimationDiagnostics.event(
+            "post-apply target-start fallback-reveal item=\(item) random=\(identity.randomId)"
+          )
+        }
+
+        self.sendAnimationListTransaction.subtract(
+          SendMessageAnimationListRemainder(
+            items: consumedItems,
+            identities: consumedIdentities
+          )
+        )
+      }
+
+      if Thread.isMainThread {
+        beginTargets()
+      } else {
+        DispatchQueue.main.async(execute: beginTargets)
+      }
+    }
+
+    private func applyDeferredComposeInsetAfterFallbackInsert(
+      collectionView: MessagesCollectionView,
+      contentAnchor: SendAnimationContentAnchor?
+    ) {
+      SendMessageAnimationActions.performWithoutAnimation {
+        let hadScrollInFlight = collectionView.isSendAnimationScrollInFlight
+        let stoppedComposeInset = collectionView.stopComposeInsetAnimationAtPresentation()
+        if hadScrollInFlight {
+          collectionView.cancelSendAnimationScrollAnimations()
+        }
+        let appliedDeferredComposeInset = collectionView.applyDeferredComposeInsetForPendingSendAnimationIfNeeded(
+          reason: "post-apply-no-preview"
+        )
+        if stoppedComposeInset || hadScrollInFlight || appliedDeferredComposeInset {
+          SendMessageAnimationDiagnostics.debug(
+            "list fallback-anchor-scroll-state-stopped compose=\(stoppedComposeInset) scroll=\(hadScrollInFlight) deferredCompose=\(appliedDeferredComposeInset) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+          )
+        }
+        collectionView.layoutIfNeeded()
+        restoreSendAnimationContentAnchor(
+          contentAnchor,
+          in: collectionView
+        )
+      }
+
+      guard let scrollPlan = collectionView.makeSendAnimationScrollPlanToBottom() else {
+        SendMessageAnimationDiagnostics.event(
+          "post-apply deferred-compose-only no-scroll-needed offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+        return
+      }
+
+      SendMessageAnimationDiagnostics.event(
+        "post-apply deferred-compose-only scrollDy=\(String(format: "%.1f", scrollPlan.modelContentOffsetYDeltaToTarget)) targetOffsetY=\(String(format: "%.1f", scrollPlan.targetOffset.y))"
+      )
+      SendMessageAnimationActions.performWithAnimationsEnabled(
+        reason: "deferred-compose-only-scroll"
+      ) {
+        collectionView.animateSendAnimationScrollToBottom(
+          targetOffset: scrollPlan.targetOffset,
+          duration: SendMessageAnimationTiming.duration
+        )
+      }
+    }
+
+    private func retargetActiveSendAnimationTargetsAfterApply(
+      excluding identities: Set<SendMessageAnimationIdentity>,
+      finalizedScrollPlan: SendMessageAnimationScrollPlan?,
+      collectionView: MessagesCollectionView
+    ) {
+      guard let activeIdentitiesByStableMessageId = sendAnimationCoordinator?
+        .activeAnimatingIdentitiesByStableMessageId(excluding: identities),
+        !activeIdentitiesByStableMessageId.isEmpty
+      else {
+        return
+      }
+
+      let scrollProjectionY = finalizedScrollPlan?.modelContentOffsetYDeltaToTarget ?? 0
+      let durationFromPlan: (SendMessageAnimationIdentity) -> TimeInterval = { [weak self] identity in
+        if finalizedScrollPlan != nil {
+          return self?.sendAnimationCoordinator?.retargetDuration(for: identity)
+            ?? SendMessageAnimationTiming.duration
+        }
+        return SendMessageAnimationTiming.duration
+      }
+
+      var attemptedCount = 0
+      var retargetedCount = 0
+      var unavailableCount = 0
+
+      for (stableMessageId, identity) in activeIdentitiesByStableMessageId.sorted(by: { $0.key < $1.key }) {
+        attemptedCount += 1
+        let item = MessageListItem.message(id: stableMessageId)
+        guard let message = message(for: item),
+              let indexPath = dataSource.indexPath(for: item),
+              let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell
+        else {
+          unavailableCount += 1
+          SendMessageAnimationDiagnostics.debug(
+            "retarget active-skip unavailable-cell stable=\(stableMessageId) random=\(identity.randomId) scrollWindowDy=\(String(format: "%.1f", scrollProjectionY))"
+          )
+          continue
+        }
+
+        guard let target = makeSendAnimationTarget(
+          for: item,
+          message: message,
+          identity: identity,
+          cell: cell,
+          scrollProjectionY: scrollProjectionY
+        ) else {
+          unavailableCount += 1
+          cell.revealSendAnimationTarget()
+          sendAnimationCoordinator?.cancel(identity: identity)
+          SendMessageAnimationDiagnostics.event(
+            "retarget active-cancel unavailable-target stable=\(stableMessageId) random=\(identity.randomId) scrollWindowDy=\(String(format: "%.1f", scrollProjectionY))"
+          )
+          continue
+        }
+
+        let duration = durationFromPlan(identity)
+        let didRetarget = sendAnimationCoordinator?.retargetIfPossible(
+          target: target,
+          duration: duration,
+          revealTarget: { [weak self, weak cell] latestTarget in
+            guard let cell,
+                  Self.cell(cell, matchesSendAnimationTarget: latestTarget)
+            else {
+              return
+            }
+            cell.revealSendAnimationTarget()
+            self?.logFinalSendAnimationTargetFrame(
+              target: latestTarget,
+              expectedBubbleFrameInWindow: latestTarget.bubbleFrameInWindow,
+              expectedTextFrameInWindow: latestTarget.textFrameInWindow,
+              cell: cell
+            )
+          }
+        ) == true
+
+        if didRetarget {
+          retargetedCount += 1
+        } else {
+          cell.revealSendAnimationTarget()
+          sendAnimationCoordinator?.cancel(identity: identity)
+          SendMessageAnimationDiagnostics.event(
+            "retarget active-cancel failed stable=\(stableMessageId) random=\(identity.randomId) scrollWindowDy=\(String(format: "%.1f", scrollProjectionY))"
+          )
+        }
+      }
+
+      SendMessageAnimationDiagnostics.event(
+        "retarget active-summary attempted=\(attemptedCount) retargeted=\(retargetedCount) unavailable=\(unavailableCount) scrollDy=\(String(format: "%.1f", scrollProjectionY))"
+      )
+    }
+
+    private func makeSendAnimationContentAnchor(
+      in snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>,
+      sectionId: MessageListSectionID,
+      collectionView: MessagesCollectionView
+    ) -> SendAnimationContentAnchor? {
+      collectionView.layoutIfNeeded()
+
+      let sectionItems = snapshot.itemIdentifiers(inSection: sectionId)
+      guard let item = sectionItems.first else {
+        SendMessageAnimationDiagnostics.debug(
+          "list anchor-capture skipped reason=empty-section offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+        return nil
+      }
+
+      guard let frameInWindow = sendAnimationAnchorFrameInWindow(
+        for: item,
+        in: collectionView
+      ) else {
+        SendMessageAnimationDiagnostics.debug(
+          "list anchor-capture skipped item=\(item) reason=missing-frame offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+        return nil
+      }
+
+      SendMessageAnimationDiagnostics.debug(
+        "list anchor-capture item=\(item) frame=[\(SendMessageAnimationDiagnostics.rect(frameInWindow))] offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+      )
+
+      return SendAnimationContentAnchor(
+        item: item,
+        frameInWindow: frameInWindow,
+        contentOffset: collectionView.contentOffset
+      )
+    }
+
+    private func restoreSendAnimationContentAnchor(
+      _ anchor: SendAnimationContentAnchor?,
+      in collectionView: MessagesCollectionView
+    ) {
+      guard let anchor else {
+        SendMessageAnimationDiagnostics.debug(
+          "list anchor-restore skipped reason=nil offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+        return
+      }
+
+      guard let currentFrameInWindow = sendAnimationAnchorFrameInWindow(
+        for: anchor.item,
+        in: collectionView
+      ) else {
+        SendMessageAnimationDiagnostics.debug(
+          "list anchor-restore skipped item=\(anchor.item) reason=missing-frame oldOffsetY=\(String(format: "%.1f", anchor.contentOffset.y)) currentOffsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+        return
+      }
+
+      let visualDeltaY = anchor.frameInWindow.minY - currentFrameInWindow.minY
+      guard abs(visualDeltaY) > 0.5 else {
+        SendMessageAnimationDiagnostics.debug(
+          "list anchor-restore unchanged item=\(anchor.item) oldY=\(String(format: "%.1f", anchor.frameInWindow.minY)) currentY=\(String(format: "%.1f", currentFrameInWindow.minY)) oldOffsetY=\(String(format: "%.1f", anchor.contentOffset.y)) currentOffsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+        return
+      }
+
+      let isVerticallyFlipped = collectionView.transform.d < 0
+      let offsetDeltaY = isVerticallyFlipped ? visualDeltaY : -visualDeltaY
+      let requestedOffset = CGPoint(
+        x: collectionView.contentOffset.x,
+        y: collectionView.contentOffset.y + offsetDeltaY
+      )
+      let restoredOffset = collectionView.clampedSendAnimationContentOffset(requestedOffset)
+      let beforeOffsetY = collectionView.contentOffset.y
+
+      collectionView.setContentOffset(restoredOffset, animated: false)
+      collectionView.layoutIfNeeded()
+
+      let restoredFrameInWindow = sendAnimationAnchorFrameInWindow(
+        for: anchor.item,
+        in: collectionView
+      )
+      let residualY = restoredFrameInWindow.map {
+        $0.minY - anchor.frameInWindow.minY
+      } ?? 0
+
+      SendMessageAnimationDiagnostics.event(
+        "list anchor-restore item=\(anchor.item) flipped=\(isVerticallyFlipped) oldY=\(String(format: "%.1f", anchor.frameInWindow.minY)) currentY=\(String(format: "%.1f", currentFrameInWindow.minY)) visualDeltaY=\(String(format: "%.1f", visualDeltaY)) oldOffsetY=\(String(format: "%.1f", anchor.contentOffset.y)) beforeOffsetY=\(String(format: "%.1f", beforeOffsetY)) requestedOffsetY=\(String(format: "%.1f", requestedOffset.y)) restoredOffsetY=\(String(format: "%.1f", restoredOffset.y)) residualY=\(String(format: "%.1f", residualY))"
+      )
+    }
+
+    private func sendAnimationAnchorFrameInWindow(
+      for item: MessageListItem,
+      in collectionView: UICollectionView
+    ) -> CGRect? {
+      guard let window = collectionView.window,
+            let indexPath = dataSource.indexPath(for: item)
+      else {
+        return nil
+      }
+
+      if let cell = collectionView.cellForItem(at: indexPath) {
+        return cell.convert(cell.bounds, to: window)
+      }
+
+      guard let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+        return nil
+      }
+
+      return collectionView.convert(attributes.frame, to: window)
+    }
+
+    private func makeSendAnimationTarget(
+      for item: MessageListItem,
+      message: FullMessage,
+      identity: SendMessageAnimationIdentity,
+      cell: MessageCollectionViewCell,
+      scrollProjectionY: CGFloat
+    ) -> SendMessageAnimationTarget? {
+      SendMessageAnimationActions.performWithoutAnimation {
+        currentCollectionView?.layoutIfNeeded()
+        cell.stabilizeSendAnimationTargetForSnapshot()
+      }
+
+      guard let presentation = cell.sendAnimationTargetPresentationInWindow() else {
+        SendMessageAnimationDiagnostics.event(
+          "target unavailable item=\(item) stable=\(message.id) preparedTarget=\(cell.isPreparedForSendAnimationTarget)"
+        )
+        return nil
+      }
+
+      let projected = SendMessageAnimationProjectedTarget(
+        presentation: presentation,
+        scrollWindowY: scrollProjectionY
+      )
+
+      SendMessageAnimationDiagnostics.debug(
+        "target frames item=\(item) stable=\(message.id) mode=\(projected.mode) cell=[\(SendMessageAnimationDiagnostics.rect(projected.originalCellFrame))] bubble=[\(SendMessageAnimationDiagnostics.rect(projected.originalBubbleFrame))] text=[\(SendMessageAnimationDiagnostics.rect(projected.originalTextFrame))] projectedCell=[\(SendMessageAnimationDiagnostics.rect(projected.cellFrame))] projectedBubble=[\(SendMessageAnimationDiagnostics.rect(projected.bubbleFrame))] projectedText=[\(SendMessageAnimationDiagnostics.rect(projected.textFrame))] scrollWindowDy=\(String(format: "%.1f", scrollProjectionY)) textInBubble=[\(SendMessageAnimationDiagnostics.rect(presentation.textFrameInBubble))] baselineY=\(String(format: "%.1f", projected.textFirstBaselineYInWindow)) baselineBubbleY=\(String(format: "%.1f", presentation.textFirstBaselineYInBubble)) targetSnapshot=\(type(of: presentation.bubbleSnapshotView))"
+      )
+
+      let target = SendMessageAnimationTarget(
+        identity: identity,
+        messageStableId: message.id,
+        bubbleFrameInWindow: projected.bubbleFrame,
+        textFrameInWindow: projected.textFrame,
+        bubbleSnapshotView: presentation.bubbleSnapshotView,
+        textFrameInBubble: presentation.textFrameInBubble,
+        textFirstBaselineYInWindow: projected.textFirstBaselineYInWindow,
+        textFirstBaselineYInBubble: presentation.textFirstBaselineYInBubble,
+        bubbleTailSide: cell.bubbleTailSideForSendAnimation()
+      )
+      return target
+    }
+
+    private func makeSendAnimationTargetStart(
+      for item: MessageListItem,
+      at _: IndexPath,
+      cell: MessageCollectionViewCell,
+      finalizedScrollPlan: SendMessageAnimationScrollPlan? = nil
+    ) -> SendMessageAnimationTargetStart? {
+      guard let message = message(for: item),
+            let identity = sendAnimationCoordinator?.pendingIdentity(for: message)
+      else {
+        return nil
+      }
+
+      var scrollProjectionY: CGFloat = 0
+      var scrollPlanToStart: SendMessageAnimationScrollPlan?
+
+      if let finalizedScrollPlan {
+        scrollProjectionY = finalizedScrollPlan.modelContentOffsetYDeltaToTarget
+        scrollPlanToStart = finalizedScrollPlan
+        let duration = sendAnimationCoordinator?.retargetDuration(for: identity)
+          ?? SendMessageAnimationTiming.duration
+        SendMessageAnimationDiagnostics.event(
+          "target scroll-finalized item=\(item) modelContentDy=\(String(format: "%.1f", finalizedScrollPlan.modelContentOffsetYDeltaToTarget)) presentationContentDy=\(finalizedScrollPlan.presentationContentOffsetYDeltaToTarget.map { String(format: "%.1f", $0) } ?? "nil") targetOffsetY=\(String(format: "%.1f", finalizedScrollPlan.targetOffset.y)) duration=\(String(format: "%.3f", duration)) windowDy=\(String(format: "%.1f", scrollProjectionY))"
+        )
+      } else if isPendingSendAnimationScrollTarget(item: item, identity: identity),
+         let collectionView = currentCollectionView as? MessagesCollectionView {
+        if collectionView.isSendAnimationScrollInFlight {
+          if let scrollPlan = collectionView.activeSendAnimationScrollPlanToTarget() {
+            scrollProjectionY = scrollPlan.presentationContentOffsetYDeltaToTarget
+              ?? scrollPlan.modelContentOffsetYDeltaToTarget
+            SendMessageAnimationDiagnostics.debug(
+              "target scroll-active-project item=\(item) modelContentDy=\(String(format: "%.1f", scrollPlan.modelContentOffsetYDeltaToTarget)) presentationContentDy=\(scrollPlan.presentationContentOffsetYDeltaToTarget.map { String(format: "%.1f", $0) } ?? "nil") targetOffsetY=\(String(format: "%.1f", scrollPlan.targetOffset.y)) modelOffsetY=\(String(format: "%.1f", collectionView.contentOffset.y)) windowDy=\(String(format: "%.1f", scrollProjectionY))"
+            )
+          } else {
+            SendMessageAnimationDiagnostics.debug(
+              "target scroll-adjust-active-none item=\(item) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+            )
+          }
+        } else if let scrollPlan = collectionView.makeSendAnimationScrollPlanToBottom() {
+          let duration = sendAnimationCoordinator?.retargetDuration(for: identity)
+            ?? SendMessageAnimationTiming.duration
+          let presentationOffsetY = collectionView.layer.presentation()?.bounds.origin.y
+          let presentationAwarePlan = presentationOffsetY.flatMap {
+            collectionView.makeSendAnimationScrollPlanToBottom(currentOffsetY: $0)
+          } ?? scrollPlan
+          if presentationAwarePlan.presentationContentOffsetYDeltaToTarget != nil,
+             collectionView.stopComposeInsetAnimationAtPresentation() {
+            SendMessageAnimationDiagnostics.debug(
+              "target scroll-retarget-compose-presentation item=\(item) presentationOffsetY=\(String(format: "%.1f", presentationOffsetY ?? collectionView.contentOffset.y)) modelOffsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+            )
+          }
+          if let retargetedPlan = collectionView.makeSendAnimationScrollPlanToBottom() {
+            scrollProjectionY = presentationAwarePlan.presentationContentOffsetYDeltaToTarget
+              ?? retargetedPlan.modelContentOffsetYDeltaToTarget
+            scrollPlanToStart = retargetedPlan
+          } else {
+            scrollProjectionY = 0
+            scrollPlanToStart = nil
+          }
+          let loggedScrollPlan = scrollPlanToStart ?? presentationAwarePlan
+          SendMessageAnimationDiagnostics.event(
+            "target scroll-project-before-start item=\(item) modelContentDy=\(String(format: "%.1f", loggedScrollPlan.modelContentOffsetYDeltaToTarget)) presentationContentDy=\(presentationAwarePlan.presentationContentOffsetYDeltaToTarget.map { String(format: "%.1f", $0) } ?? "nil") targetOffsetY=\(String(format: "%.1f", loggedScrollPlan.targetOffset.y)) duration=\(String(format: "%.3f", duration)) windowDy=\(String(format: "%.1f", scrollProjectionY))"
+          )
+        } else {
+          SendMessageAnimationDiagnostics.debug(
+            "target scroll-adjust-none item=\(item) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+          )
+        }
+      }
+
+      guard let target = makeSendAnimationTarget(
+        for: item,
+        message: message,
+        identity: identity,
+        cell: cell,
+        scrollProjectionY: scrollProjectionY
+      ) else {
+        return nil
+      }
+
+      return SendMessageAnimationTargetStart(
+        target: target,
+        scrollTargetOffset: scrollPlanToStart?.targetOffset,
+        scrollDuration: scrollPlanToStart.map { _ in
+          sendAnimationCoordinator?.retargetDuration(for: identity)
+            ?? SendMessageAnimationTiming.duration
+        }
+      )
+    }
+
+    private func logFinalSendAnimationTargetFrame(
+      target: SendMessageAnimationTarget,
+      expectedBubbleFrameInWindow: CGRect,
+      expectedTextFrameInWindow: CGRect,
+      cell: MessageCollectionViewCell?
+    ) {
+      #if DEBUG || DEBUG_BUILD
+      guard let cell,
+            Self.cell(cell, matchesSendAnimationTarget: target),
+            let geometry = cell.sendAnimationTargetGeometryInWindow()
+      else {
+        SendMessageAnimationDiagnostics.event(
+          "target final-frame-unavailable stable=\(target.messageStableId) random=\(target.identity.randomId) temp=\(target.identity.temporaryMessageId)"
+        )
+        return
+      }
+
+      SendMessageAnimationDiagnostics.event(
+        "target final-frame stable=\(target.messageStableId) actualStable=\(cell.message?.id.description ?? "nil") random=\(cell.message?.message.randomId.map(String.init) ?? "nil") temp=\(target.identity.temporaryMessageId) cell=[\(SendMessageAnimationDiagnostics.rect(geometry.cellFrame))] bubble=[\(SendMessageAnimationDiagnostics.rect(geometry.bubbleFrame))] text=[\(SendMessageAnimationDiagnostics.rect(geometry.textFrame))] baselineY=\(String(format: "%.1f", geometry.textFirstBaselineYInWindow)) expectedBubble=[\(SendMessageAnimationDiagnostics.rect(expectedBubbleFrameInWindow))] expectedText=[\(SendMessageAnimationDiagnostics.rect(expectedTextFrameInWindow))] expectedBaselineY=\(String(format: "%.1f", target.textFirstBaselineYInWindow)) bubbleDelta=[\(SendMessageAnimationGeometry.rectDelta(from: expectedBubbleFrameInWindow, to: geometry.bubbleFrame))] textDelta=[\(SendMessageAnimationGeometry.rectDelta(from: expectedTextFrameInWindow, to: geometry.textFrame))] baselineDelta=\(String(format: "%.1f", geometry.textFirstBaselineYInWindow - target.textFirstBaselineYInWindow))"
+      )
+      #endif
+    }
+
+    private func finishPendingSendAnimationScrollIfNeeded(
+      _ items: Set<MessageListItem>,
+      identities: Set<SendMessageAnimationIdentity>,
+      collectionView: MessagesCollectionView
+    ) {
+      let remaining = sendAnimationListTransaction.remainder(
+        for: items,
+        identities: identities
+      )
+      guard !remaining.isEmpty else {
+        if collectionView.isSendAnimationScrollInFlight {
+          SendMessageAnimationDiagnostics.debug(
+            "list scroll-completion skipped consumed=true scroll=in-flight items=\(items.count) identities=\(identities.count)"
+          )
+          return
+        }
+
+        SendMessageAnimationDiagnostics.debug(
+          "list scroll-completion skipped consumed=true scroll=not-starting-late items=\(items.count) identities=\(identities.count)"
+        )
+        return
+      }
+
+      let remainingIdentityCandidates = Set(
+        remaining.items.compactMap(sendAnimationIdentity(for:))
+      ).union(remaining.identities)
+      let duration = remainingIdentityCandidates
+        .compactMap { sendAnimationCoordinator?.retargetDuration(for: $0) }
+        .max() ?? SendMessageAnimationTiming.duration
+      if collectionView.isSendAnimationScrollInFlight {
+        SendMessageAnimationDiagnostics.debug(
+          "list scroll-completion in-flight items=\(remaining.items.count) identities=\(remaining.identities.count) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+      } else if let scrollPlan = collectionView.makeSendAnimationScrollPlanToBottom() {
+        SendMessageAnimationDiagnostics.event(
+          "list scroll-completion coordinated-fallback items=\(remaining.items.count) identities=\(remaining.identities.count) modelContentDy=\(String(format: "%.1f", scrollPlan.modelContentOffsetYDeltaToTarget)) targetOffsetY=\(String(format: "%.1f", scrollPlan.targetOffset.y)) duration=\(String(format: "%.3f", duration))"
+        )
+        SendMessageAnimationActions.performWithAnimationsEnabled(
+          reason: "completion-scroll-fallback"
+        ) {
+          collectionView.animateSendAnimationScrollToBottom(
+            targetOffset: scrollPlan.targetOffset,
+            duration: duration
+          )
+        }
+      } else {
+        SendMessageAnimationDiagnostics.debug(
+          "list scroll-completion no-scroll-needed items=\(remaining.items.count) identities=\(remaining.identities.count) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
+        )
+      }
+
+      SendMessageAnimationDiagnostics.debug(
+        "list scroll-completion pending-preserved items=\(remaining.items.count) identities=\(remaining.identities.count)"
+      )
+      DispatchQueue.main.asyncAfter(
+        deadline: .now() + SendMessageAnimationTiming.duration + 0.4
+      ) { [weak self] in
+        guard let self else { return }
+        let stale = self.sendAnimationListTransaction.remainder(
+          for: remaining.items,
+          identities: remaining.identities
+        )
+        guard !stale.isEmpty else { return }
+        self.sendAnimationListTransaction.subtract(stale)
+        SendMessageAnimationDiagnostics.event(
+          "list scroll-completion cleanup-stale items=\(stale.items.count) identities=\(stale.identities.count)"
+        )
+      }
+    }
+
     func numberOfSections() -> Int {
       listSections.count
     }
@@ -810,10 +1770,16 @@ private extension MessagesCollectionView {
       listSection(at: section)?.items.count ?? 0
     }
 
-    init(peerId: Peer, chatId: Int64, spaceId: Int64?) {
+    init(
+      peerId: Peer,
+      chatId: Int64,
+      spaceId: Int64?,
+      sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
+    ) {
       self.peerId = peerId
       self.chatId = chatId
       self.spaceId = spaceId
+      self.sendAnimationCoordinator = sendAnimationCoordinator
       viewModel = MessagesSectionedViewModel(peer: peerId, reversed: true)
       translationViewModel = TranslationViewModel(peerId: peerId)
 
@@ -1010,19 +1976,56 @@ private extension MessagesCollectionView {
         }
         let firstInGroup = item.isThreadAnchor ? true : isFirstInGroup(at: indexPath)
         let lastInGroup = item.isThreadAnchor ? true : isLastInGroup(at: indexPath)
+        let isPendingAppearingItem = pendingAppearingItems.contains(item)
+        let sendTargetIdentity = sendAnimationIdentity(for: item)
+        let isPendingSendAnimationTarget = sendTargetIdentity.map {
+          self.sendAnimationListTransaction.contains(item: item, identity: $0)
+        } ?? false
+        let isAnimatingSendAnimationTarget = sendTargetIdentity.map {
+          self.sendAnimationCoordinator?.isAnimating(identity: $0) == true
+        } ?? false
+        let shouldPrepareSendAnimationTarget = isPendingAppearingItem && isPendingSendAnimationTarget
+        let currentSpaceId = spaceId
 
-        cell.configure(
-          with: message,
-          firstInGroup: firstInGroup,
-          lastInGroup: lastInGroup,
-          spaceId: spaceId,
-          displayMode: displayMode
-        )
+        let configureCell = {
+          cell.configure(
+            with: message,
+            firstInGroup: firstInGroup,
+            lastInGroup: lastInGroup,
+            spaceId: currentSpaceId,
+            displayMode: displayMode,
+            animateTail: true
+          )
+        }
 
-        if pendingAppearingItems.contains(item) {
-          cell.prepareInsertionAnimation()
+        if shouldPrepareSendAnimationTarget || isAnimatingSendAnimationTarget {
+          SendMessageAnimationActions.performWithoutAnimation {
+            configureCell()
+            if isAnimatingSendAnimationTarget {
+              SendMessageAnimationDiagnostics.debug(
+                "cell keep-hidden-animating-target item=\(item) random=\(sendTargetIdentity.map { String($0.randomId) } ?? "nil")"
+              )
+            } else {
+              SendMessageAnimationDiagnostics.debug(
+                "cell prepare-target item=\(item) random=\(sendTargetIdentity.map { String($0.randomId) } ?? "nil")"
+              )
+            }
+            cell.prepareSendAnimationTarget()
+            if shouldPrepareSendAnimationTarget {
+              cell.stabilizeSendAnimationTargetForSnapshot()
+            }
+          }
         } else {
-          cell.alpha = 1
+          configureCell()
+          if isPendingAppearingItem {
+            SendMessageAnimationDiagnostics.debug(
+              "cell prepare-default-no-identity item=\(item) stable=\(message.id) msgId=\(message.message.messageId) random=\(message.message.randomId.map(String.init) ?? "nil") textLen=\(message.message.text?.count ?? 0)"
+            )
+            cell.prepareInsertionAnimation()
+          } else {
+            cell.alpha = 1
+            cell.revealSendAnimationTarget()
+          }
         }
 
         cell.onUserTap = { userId in
@@ -1189,18 +2192,19 @@ private extension MessagesCollectionView {
         ]
       )
 
-      safeApplySnapshot(snapshot, animatingDifferences: animated ?? false) { [weak self] in
+      safeApplySnapshot(snapshot, animatingDifferences: animated ?? false, completion: { [weak self] in
         // Kick-off the auto-hide timer on first load as well (after layout pass)
         DispatchQueue.main.async {
           self?.scheduleHideDateSeparators()
         }
-      }
+      })
     }
 
     private func safeApplySnapshot(
       _ snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>,
       animatingDifferences: Bool,
       withCustomTiming: Bool = false,
+      immediateAfterApply: (() -> Void)? = nil,
       completion: (() -> Void)? = nil
     ) {
       guard Thread.isMainThread else {
@@ -1214,6 +2218,7 @@ private extension MessagesCollectionView {
             snapshot,
             animatingDifferences: animatingDifferences,
             withCustomTiming: withCustomTiming,
+            immediateAfterApply: immediateAfterApply,
             completion: completion
           )
         }
@@ -1231,8 +2236,8 @@ private extension MessagesCollectionView {
 
       if withCustomTiming, animatingDifferences {
         CATransaction.begin()
-        CATransaction.setAnimationDuration(0.22)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.16, 0.9, 0.24, 1.0))
+        CATransaction.setAnimationDuration(SendMessageAnimationTiming.duration)
+        CATransaction.setAnimationTimingFunction(SendMessageAnimationTiming.verticalMediaTimingFunction)
       }
 
       dataSource.apply(snapshot, animatingDifferences: animatingDifferences) {
@@ -1252,12 +2257,52 @@ private extension MessagesCollectionView {
           ]
         )
         self.syncAvatarOverlay(animate: false)
+        (self.currentCollectionView?.collectionViewLayout as? AnimatedCompositionalLayout)?
+          .clearSendAnimationAppearingItemSuppression()
         completion?()
+      }
+
+      if !animatingDifferences, let immediateAfterApply {
+        SendMessageAnimationDiagnostics.debug(
+          "snapshot immediate-post-apply sections=\(sectionCount) items=\(itemCount)"
+        )
+        immediateAfterApply()
       }
 
       if withCustomTiming, animatingDifferences {
         CATransaction.commit()
       }
+    }
+
+    private func suppressDefaultAppearingAnimationForSendTargets(
+      _ items: [MessageListItem],
+      in snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>
+    ) {
+      guard let layout = currentCollectionView?.collectionViewLayout as? AnimatedCompositionalLayout else {
+        return
+      }
+
+      let sendTargetItems = Set(items.filter { sendAnimationIdentity(for: $0) != nil })
+      guard !sendTargetItems.isEmpty else {
+        layout.clearSendAnimationAppearingItemSuppression()
+        return
+      }
+
+      var suppressedIndexPaths: Set<IndexPath> = []
+      for (sectionIndex, sectionId) in snapshot.sectionIdentifiers.enumerated() {
+        let sectionItems = snapshot.itemIdentifiers(inSection: sectionId)
+        for (itemIndex, item) in sectionItems.enumerated() where sendTargetItems.contains(item) {
+          suppressedIndexPaths.insert(IndexPath(item: itemIndex, section: sectionIndex))
+        }
+      }
+
+      layout.suppressSendAnimationAppearingItems(
+        sendTargetItems,
+        at: suppressedIndexPaths
+      )
+      SendMessageAnimationDiagnostics.debug(
+        "layout suppress-appearing count=\(suppressedIndexPaths.count) items=\(sendTargetItems.count)"
+      )
     }
 
     private func groupBoundaryItems(
@@ -1301,7 +2346,10 @@ private extension MessagesCollectionView {
       return items
     }
 
-    private func reconfigureVisibleItems(_ items: [MessageListItem]) {
+    private func reconfigureVisibleItems(
+      _ items: [MessageListItem],
+      animateTail: Bool = true
+    ) {
       guard let collectionView = currentCollectionView else { return }
 
       for item in Set(items) {
@@ -1320,7 +2368,8 @@ private extension MessagesCollectionView {
           firstInGroup: firstInGroup,
           lastInGroup: lastInGroup,
           spaceId: spaceId,
-          displayMode: displayMode
+          displayMode: displayMode,
+          animateTail: animateTail
         )
       }
     }
@@ -1464,7 +2513,21 @@ private extension MessagesCollectionView {
 
           // Check if this is the first section (most recent)
           let shouldScroll = sectionIndex == 0
-          let wasAtBottom = (currentCollectionView as? MessagesCollectionView)?.shouldScrollToBottom ?? false
+          let coordinatedCollectionView = currentCollectionView as? MessagesCollectionView
+          let wasAtBottom = coordinatedCollectionView?.shouldScrollToBottom ?? false
+          let sendAnimationScrollItems = Set(items.filter { sendAnimationIdentity(for: $0) != nil })
+          let sendAnimationScrollIdentities = Set(sendAnimationScrollItems.compactMap(sendAnimationIdentity(for:)))
+          let hasSendAnimationTargets = !sendAnimationScrollIdentities.isEmpty
+          let hasDeferredSendComposeInset = coordinatedCollectionView?
+            .hasDeferredSendComposeInset == true
+          let shouldCoordinateSendAnimationScroll = shouldScroll && hasSendAnimationTargets && wasAtBottom
+          let shouldCoordinateDeferredComposeOnly = shouldScroll &&
+            !hasSendAnimationTargets &&
+            hasDeferredSendComposeInset &&
+            wasAtBottom
+          let shouldCoordinateOutgoingInsert = shouldCoordinateSendAnimationScroll ||
+            shouldCoordinateDeferredComposeOnly
+          let animatesDiffableInsertion = !shouldCoordinateOutgoingInsert
 
           // Convert section index to date
           guard let section = viewModel.section(at: sectionIndex) else {
@@ -1477,26 +2540,90 @@ private extension MessagesCollectionView {
             return
           }
 
+          let sendAnimationContentAnchor: SendAnimationContentAnchor?
+          if shouldCoordinateOutgoingInsert,
+             let collectionView = coordinatedCollectionView {
+            sendAnimationContentAnchor = makeSendAnimationContentAnchor(
+              in: snapshot,
+              sectionId: sectionId,
+              collectionView: collectionView
+            )
+          } else {
+            sendAnimationContentAnchor = nil
+          }
+
           if let firstItemInSection = snapshot.itemIdentifiers(inSection: sectionId).first {
             snapshot.insertItems(items, beforeItem: firstItemInSection)
           } else {
             snapshot.appendItems(items, toSection: sectionId)
           }
-          let boundaryItems = reconfigureGroupBoundaryItems(around: items, in: &snapshot)
-          reconfigureVisibleItems(boundaryItems)
+          let boundaryItems: [MessageListItem]
+          if shouldCoordinateSendAnimationScroll {
+            boundaryItems = groupBoundaryItems(around: items, in: snapshot)
+              .filter { snapshot.itemIdentifiers.contains($0) }
+            sendAnimationListTransaction.insert(
+              items: sendAnimationScrollItems,
+              identities: sendAnimationScrollIdentities
+            )
+            SendMessageAnimationDiagnostics.debug(
+              "layout boundary-tail-local-animation count=\(boundaryItems.count)"
+            )
+          } else {
+            boundaryItems = reconfigureGroupBoundaryItems(around: items, in: &snapshot)
+          }
+          reconfigureVisibleItems(
+            boundaryItems,
+            animateTail: true
+          )
           pendingAppearingItems.formUnion(items)
+          suppressDefaultAppearingAnimationForSendTargets(
+            shouldCoordinateSendAnimationScroll ? Array(sendAnimationScrollItems) : [],
+            in: snapshot
+          )
+          if shouldCoordinateSendAnimationScroll {
+            SendMessageAnimationDiagnostics.event(
+              "list scroll-plan-pending items=\(sendAnimationScrollItems.count) identities=\(sendAnimationScrollIdentities.count) wasAtBottomNow=\(wasAtBottom) applyAnimated=\(animatesDiffableInsertion) targetAppearingSuppressed=\(hasSendAnimationTargets)"
+            )
+          } else if shouldCoordinateDeferredComposeOnly {
+            SendMessageAnimationDiagnostics.event(
+              "list scroll-plan-pending-deferred-compose-only items=\(items.count) wasAtBottomNow=\(wasAtBottom) applyAnimated=\(animatesDiffableInsertion)"
+            )
+          }
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return }
             updateUnreadIfNeeded()
           }
 
-          safeApplySnapshot(snapshot, animatingDifferences: true, withCustomTiming: true) { [weak self] in
-            if shouldScroll, wasAtBottom,
-               let collectionView = self?.currentCollectionView as? MessagesCollectionView {
-              collectionView.safeScrollToTop(animated: true)
+          safeApplySnapshot(
+            snapshot,
+            animatingDifferences: animatesDiffableInsertion,
+            withCustomTiming: true,
+            immediateAfterApply: shouldCoordinateOutgoingInsert ? { [weak self, weak collectionView = coordinatedCollectionView] in
+              guard let self, let collectionView else { return }
+              if shouldCoordinateSendAnimationScroll {
+                self.beginPendingSendAnimationTargetsAfterApply(
+                  sendAnimationScrollItems,
+                  identities: sendAnimationScrollIdentities,
+                  collectionView: collectionView,
+                  contentAnchor: sendAnimationContentAnchor
+                )
+              } else {
+                self.applyDeferredComposeInsetAfterFallbackInsert(
+                  collectionView: collectionView,
+                  contentAnchor: sendAnimationContentAnchor
+                )
+              }
+            } : nil,
+            completion: { [weak self] in
+              if shouldScroll,
+                 let collectionView = self?.currentCollectionView as? MessagesCollectionView {
+                if !shouldCoordinateOutgoingInsert, wasAtBottom {
+                  collectionView.safeScrollToTop(animated: true)
+                }
+              }
             }
-          }
+          )
           handleIncomingMessages()
 
         case let .messagesDeleted(_, messageIds):
