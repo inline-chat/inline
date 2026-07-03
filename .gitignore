@@ -19,6 +19,8 @@ yarn.lock
 
 # Local temp
 .tmp/
+.traces/
+.context/snapshots/
 
 # React
 /build
