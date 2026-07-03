@@ -29,6 +29,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   private var stopRecordingAction: (@Sendable () -> Void)?
   private var draftVoice: Client_MessageVoiceContent?
   private var isStarting = false
+  private var startId = UUID()
 
   var isActive: Bool {
     phase != .idle
@@ -61,12 +62,19 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 
   func start() async {
     guard phase == .idle, !isStarting else { return }
+
+    let startId = UUID()
+    self.startId = startId
     isStarting = true
     defer {
-      isStarting = false
+      if self.startId == startId {
+        isStarting = false
+      }
     }
 
-    guard await ensureMicrophoneAccess() else { return }
+    guard let access = await ensureMicrophoneAccess() else { return }
+    guard await settleMicrophoneAccessIfNeeded(access, startId: startId) else { return }
+    guard self.startId == startId, phase == .idle else { return }
 
     do {
       let recorder = ComposeVoiceRecorder()
@@ -75,6 +83,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
         self?.samples = samples
       }
       try recorder.start()
+
+      guard self.startId == startId, phase == .idle else {
+        recorder.cancel()
+        return
+      }
 
       self.recorder = recorder
       draftVoice = nil
@@ -115,6 +128,8 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   func cancel() {
+    startId = UUID()
+    isStarting = false
     recorder?.cancel()
     recorder = nil
     stopRecordingAction?()
@@ -259,24 +274,40 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     return true
   }
 
-  private func ensureMicrophoneAccess() async -> Bool {
+  private func ensureMicrophoneAccess() async -> MicrophoneAccessGrant? {
     switch MacPermissions.mediaStatus(for: .audio) {
     case .authorized:
-      return true
+      return .authorized
     case .notDetermined:
       let granted = await MacPermissions.requestMediaAccess(for: .audio)
       if !granted {
         ToastCenter.shared.showError("Microphone access is required to record voice messages.")
+        return nil
       }
-      return granted
+      return .newlyAuthorized
     case .denied, .restricted:
       ToastCenter.shared.showError("Allow microphone access to record voice messages.")
       MacPermissions.openSystemSettings(.microphone)
-      return false
+      return nil
     @unknown default:
       ToastCenter.shared.showError("Microphone access is unavailable.")
-      return false
+      return nil
     }
+  }
+
+  private func settleMicrophoneAccessIfNeeded(_ access: MicrophoneAccessGrant, startId: UUID) async -> Bool {
+    guard access == .newlyAuthorized else { return true }
+
+    await Task.yield()
+    try? await Task.sleep(nanoseconds: Self.microphonePermissionSettleDelay)
+    guard self.startId == startId else { return false }
+
+    if MacPermissions.mediaStatus(for: .audio) == .authorized {
+      return true
+    }
+
+    ToastCenter.shared.showError("Microphone access is unavailable.")
+    return false
   }
 
   private func startPlaybackTimer() {
@@ -340,4 +371,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     isPlaying = false
     phase = .idle
   }
+
+  private static let microphonePermissionSettleDelay: UInt64 = 120_000_000
+}
+
+private enum MicrophoneAccessGrant: Equatable {
+  case authorized
+  case newlyAuthorized
 }

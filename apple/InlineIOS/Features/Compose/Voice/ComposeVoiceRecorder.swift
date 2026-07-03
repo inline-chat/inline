@@ -34,21 +34,25 @@ final class ComposeVoiceRecorder: NSObject {
     let finalURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("inline-ios-voice-\(id).m4a")
 
-    let recorder = try AVAudioRecorder(url: finalURL, settings: Self.recordingSettings)
-    recorder.isMeteringEnabled = true
-    recorder.prepareToRecord()
+    do {
+      let recorder = try AVAudioRecorder(url: finalURL, settings: Self.recordingSettings)
+      recorder.isMeteringEnabled = true
+      recorder.prepareToRecord()
 
-    guard recorder.record() else {
+      guard recorder.record() else {
+        throw ComposeVoiceRecorderError.startFailed
+      }
+
+      self.recorder = recorder
+      fileURL = finalURL
+      samples = []
+      startedAt = Date()
+      startMetering()
+    } catch {
       try? FileManager.default.removeItem(at: finalURL)
       cleanupSession()
-      throw ComposeVoiceRecorderError.startFailed
+      throw error
     }
-
-    self.recorder = recorder
-    fileURL = finalURL
-    samples = []
-    startedAt = Date()
-    startMetering()
   }
 
   func finish() async throws -> ComposeVoiceRecording {
