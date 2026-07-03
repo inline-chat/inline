@@ -4,13 +4,41 @@ import UIKit
 
 // MARK: - Height Management
 
+struct ComposeHeightChangeAnimation {
+  let isAnimated: Bool
+  let duration: TimeInterval
+  let timingParameters: UITimingCurveProvider?
+
+  static let immediate = ComposeHeightChangeAnimation(
+    isAnimated: false,
+    duration: 0,
+    timingParameters: nil
+  )
+
+  static func animated(
+    duration: TimeInterval,
+    timingParameters: UITimingCurveProvider?
+  ) -> ComposeHeightChangeAnimation {
+    ComposeHeightChangeAnimation(
+      isAnimated: true,
+      duration: duration,
+      timingParameters: timingParameters
+    )
+  }
+}
+
 extension ComposeView {
   func textViewHeightByContentHeight(_ contentHeight: CGFloat) -> CGFloat {
     let newHeight = min(maxHeight, max(Self.minHeight, contentHeight + Self.textViewVerticalPadding * 2))
     return newHeight
   }
 
-  func updateHeight(animated: Bool = false, completion: (() -> Void)? = nil) {
+  func updateHeight(
+    animated: Bool = false,
+    duration: TimeInterval = 0.2,
+    timingParameters: UITimingCurveProvider? = nil,
+    completion: (() -> Void)? = nil
+  ) {
     // If textView doesn't have proper bounds yet, force a layout pass before bailing.
     if textView.bounds.width == 0 {
       superview?.layoutIfNeeded()
@@ -29,11 +57,29 @@ extension ComposeView {
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
 
     composeHeightConstraint.constant = newHeight
+    onHeightChange?(
+      newHeight,
+      animated
+        ? .animated(duration: duration, timingParameters: timingParameters)
+        : .immediate
+    )
+
     if animated {
-      UIView.animate(withDuration: 0.2) {
-        self.superview?.layoutIfNeeded()
-      } completion: { _ in
-        completion?()
+      if let timingParameters {
+        let animator = UIViewPropertyAnimator(duration: duration, timingParameters: timingParameters)
+        animator.addAnimations {
+          self.superview?.layoutIfNeeded()
+        }
+        animator.addCompletion { _ in
+          completion?()
+        }
+        animator.startAnimation()
+      } else {
+        UIView.animate(withDuration: duration) {
+          self.superview?.layoutIfNeeded()
+        } completion: { _ in
+          completion?()
+        }
       }
     } else {
       superview?.layoutIfNeeded()
@@ -45,7 +91,6 @@ extension ComposeView {
       self.textView.scrollRangeToVisible(bottomRange)
     }
 
-    onHeightChange?(newHeight)
   }
 
   func resetHeight(animated: Bool = true) {
@@ -58,6 +103,11 @@ extension ComposeView {
       composeHeightConstraint.constant = Self.minHeight
       superview?.layoutIfNeeded()
     }
-    onHeightChange?(Self.minHeight)
+    onHeightChange?(
+      Self.minHeight,
+      animated
+        ? .animated(duration: 0.2, timingParameters: nil)
+        : .immediate
+    )
   }
 }

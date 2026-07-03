@@ -14,21 +14,33 @@ launch=1
 list=0
 select=0
 verbose=0
+stream_logs=${STREAM_LOGS:-1}
+allow_simulator=${ALLOW_SIMULATOR:-0}
+live_log_filter=${LIVE_LOG_FILTER:-}
 
 usage() {
   cat <<'EOF'
 Usage: open-debug-app.sh [options]
 
 Builds and runs the regular Xcode Debug iOS app without launching Xcode.
-The first run asks for a preferred physical iOS device and a simulator fallback.
-Later runs use the physical device when it is available and use the simulator
-only when the preferred device is unavailable.
+The first run asks for a preferred physical iOS device. Later runs reuse it.
+Simulator fallback is opt-in so physical-device debug runs do not accidentally
+boot Simulator.
 
 Options:
-  --select        Re-prompt for preferred device and simulator fallback
+  --select        Re-prompt for preferred device and optional simulator fallback
   --list          List available devices and simulators, then exit
   --no-build      Install/launch the most recent Debug build without rebuilding
   --no-launch     Build and resolve the app path, but do not install or launch
+  --logs          Stream app stdout/stderr after launch (default)
+  --no-logs       Launch and exit without streaming app stdout/stderr
+  --live-log-filter <regex>
+                  Filter only live terminal log output; saved LOG_PATH stays complete
+  --send-animation-logs
+                  Show only SEND_ANIM lines live; saved LOG_PATH stays complete
+  --allow-simulator
+                  Allow simulator fallback when no preferred device is available
+  --device-only   Require a physical device (default)
   --verbose       Show full command output
   -h, --help      Show help
 
@@ -38,6 +50,9 @@ Environment:
   CONFIGURATION   Build configuration (default: Debug)
   CACHE_PATH      Target cache path (default: .tmp/ios-debug-target.json)
   LOG_PATH        Non-verbose command log path (default: .tmp/ios-debug-<timestamp>.log)
+  STREAM_LOGS     Stream app stdout/stderr after launch (default: 1)
+  ALLOW_SIMULATOR Allow simulator fallback (default: 0)
+  LIVE_LOG_FILTER Optional regex for live terminal output only
 EOF
 }
 
@@ -59,6 +74,34 @@ while [[ $# -gt 0 ]]; do
       launch=0
       shift
       ;;
+    --logs)
+      stream_logs=1
+      shift
+      ;;
+    --no-logs)
+      stream_logs=0
+      shift
+      ;;
+    --live-log-filter)
+      if [[ $# -lt 2 ]]; then
+        echo "--live-log-filter requires a regex argument" >&2
+        exit 1
+      fi
+      live_log_filter="$2"
+      shift 2
+      ;;
+    --send-animation-logs)
+      live_log_filter="SEND_ANIM|Launch on|Streaming app logs|failed with exit code"
+      shift
+      ;;
+    --allow-simulator)
+      allow_simulator=1
+      shift
+      ;;
+    --device-only)
+      allow_simulator=0
+      shift
+      ;;
     --verbose)
       verbose=1
       shift
@@ -74,6 +117,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${stream_logs}" != "1" ]]; then
+  stream_logs=0
+fi
+
+if [[ "${allow_simulator}" != "1" ]]; then
+  allow_simulator=0
+fi
 
 if [[ "${verbose}" != "1" ]]; then
   mkdir -p "$(dirname "${LOG_PATH}")"
@@ -132,6 +183,48 @@ run_cmd() {
   fi
 }
 
+stream_cmd() {
+  local desc="$1"
+  shift
+
+  if [[ "${verbose}" == "1" ]]; then
+    echo "${desc}..."
+    "$@"
+    return
+  fi
+
+  {
+    echo
+    echo "### ${desc}"
+    printf '$'
+    printf ' %q' "$@"
+    echo
+  } >>"${LOG_PATH}"
+
+  echo "${desc}..."
+  echo "Streaming app logs. Press Ctrl-C to stop the stream; the app may also stop."
+  if [[ -n "${live_log_filter}" ]]; then
+    echo "Live log filter: ${live_log_filter}"
+    echo "Full unfiltered log: ${LOG_PATH}"
+  fi
+
+  set +e
+  if [[ -n "${live_log_filter}" ]]; then
+    "$@" 2>&1 | tee -a "${LOG_PATH}" | awk -v pattern="${live_log_filter}" '$0 ~ pattern { print; fflush(); }'
+    local command_ec=${PIPESTATUS[0]}
+  else
+    "$@" 2>&1 | tee -a "${LOG_PATH}"
+    local command_ec=${PIPESTATUS[0]}
+  fi
+  set -e
+
+  if [[ "${command_ec}" -ne 0 ]]; then
+    echo "${desc} failed with exit code ${command_ec}. Log: ${LOG_PATH}" >&2
+    tail -n 120 "${LOG_PATH}" >&2 || true
+    return "${command_ec}"
+  fi
+}
+
 capture_cmd() {
   local desc="$1"
   local output_path="$2"
@@ -165,16 +258,17 @@ run_cmd "List physical iOS devices" xcrun devicectl list devices --json-output "
 
 capture_cmd "List iOS simulators" "${sims_json}" xcrun simctl list devices available -j
 
-python3 - "${devices_json}" "${sims_json}" "${CACHE_PATH}" "${target_json}" "${select}" "${list}" "${verbose}" <<'PY'
+python3 - "${devices_json}" "${sims_json}" "${CACHE_PATH}" "${target_json}" "${select}" "${list}" "${verbose}" "${allow_simulator}" <<'PY'
 import json
 import os
 import re
 import sys
 
-devices_path, sims_path, cache_path, target_path, select_arg, list_arg, verbose_arg = sys.argv[1:]
+devices_path, sims_path, cache_path, target_path, select_arg, list_arg, verbose_arg, allow_simulator_arg = sys.argv[1:]
 force_select = select_arg == "1"
 list_only = list_arg == "1"
 verbose = verbose_arg == "1"
+allow_simulator = allow_simulator_arg == "1"
 
 
 def load_json(path, fallback):
@@ -267,6 +361,8 @@ for device in devices_data.get("result", {}).get("devices", []):
     props = device.get("deviceProperties", {})
     if hardware.get("platform") != "iOS":
         continue
+    if hardware.get("reality") != "physical":
+        continue
 
     device_id = hardware.get("udid") or device.get("identifier")
     name = props.get("name") or device.get("name") or device_id
@@ -341,24 +437,39 @@ if force_select or not cache:
             "Choose preferred physical iOS device:",
             devices,
             device_label,
-            allow_none=True,
+            allow_none=allow_simulator,
         )
+    elif not allow_simulator:
+        print("No physical iOS devices are available.", file=sys.stderr)
+        print("Connect a device, or pass --allow-simulator to opt into Simulator fallback.", file=sys.stderr)
+        sys.exit(1)
     else:
         print("No physical iOS devices are available. Simulator fallback will be used.")
 
-    if not sims:
-        if preferred:
-            fallback = None
+    if allow_simulator:
+        if not sims:
+            if preferred:
+                fallback = None
+            else:
+                print("No available iOS simulators found.", file=sys.stderr)
+                sys.exit(1)
         else:
+            fallback = prompt_choice(
+                "Choose simulator fallback:",
+                sims,
+                sim_label,
+                allow_none=False,
+            )
+    elif not preferred:
+        print("No preferred physical device was selected.", file=sys.stderr)
+        sys.exit(1)
+
+    if not preferred and not fallback:
+        if allow_simulator:
             print("No available iOS simulators found.", file=sys.stderr)
-            sys.exit(1)
-    else:
-        fallback = prompt_choice(
-            "Choose simulator fallback:",
-            sims,
-            sim_label,
-            allow_none=False,
-        )
+        else:
+            print("No physical iOS device is available.", file=sys.stderr)
+        sys.exit(1)
 
     cache = {
         "preferredDevice": preferred,
@@ -368,12 +479,12 @@ if force_select or not cache:
 
 if preferred and preferred.get("id") in device_by_id:
     selected = device_by_id[preferred["id"]]
-elif fallback and fallback.get("id") in sim_by_id:
+elif allow_simulator and fallback and fallback.get("id") in sim_by_id:
     if preferred:
         name = preferred.get("name") or preferred.get("id")
         print(f"Preferred device is unavailable: {name}. Falling back to simulator.")
     selected = sim_by_id[fallback["id"]]
-elif sims:
+elif allow_simulator and sims:
     if preferred:
         name = preferred.get("name") or preferred.get("id")
         print(f"Preferred device is unavailable: {name}.")
@@ -383,7 +494,11 @@ elif sims:
     selected = fallback
     needs_save = True
 else:
-    print("No preferred physical device or simulator fallback is available.", file=sys.stderr)
+    if preferred:
+        name = preferred.get("name") or preferred.get("id")
+        print(f"Preferred device is unavailable: {name}.", file=sys.stderr)
+    print("No physical iOS device is available.", file=sys.stderr)
+    print("Connect the device, or pass --allow-simulator to opt into Simulator fallback.", file=sys.stderr)
     sys.exit(1)
 
 if needs_save:
@@ -479,7 +594,11 @@ case "${kind}" in
     log "Installing on ${target_name}..."
     run_cmd "Install on ${target_name}" xcrun devicectl device install app --device "${target_id}" "${app_path}"
     log "Launching on ${target_name}..."
-    run_cmd "Launch on ${target_name}" xcrun devicectl device process launch --device "${target_id}" --terminate-existing "${bundle_id}"
+    if [[ "${stream_logs}" == "1" ]]; then
+      stream_cmd "Launch on ${target_name} and stream logs" xcrun devicectl device process launch --device "${target_id}" --terminate-existing --console "${bundle_id}"
+    else
+      run_cmd "Launch on ${target_name}" xcrun devicectl device process launch --device "${target_id}" --terminate-existing "${bundle_id}"
+    fi
     ;;
   simulator)
     sim_state="$(target_value state)"
@@ -492,8 +611,12 @@ case "${kind}" in
     run_cmd "Open Simulator" /usr/bin/open -a Simulator --args -CurrentDeviceUDID "${target_id}"
     log "Installing on simulator ${target_name}..."
     run_cmd "Install on simulator ${target_name}" xcrun simctl install "${target_id}" "${app_path}"
-    xcrun simctl terminate "${target_id}" "${bundle_id}" >/dev/null 2>&1 || true
     log "Launching on simulator ${target_name}..."
-    run_cmd "Launch on simulator ${target_name}" xcrun simctl launch "${target_id}" "${bundle_id}"
+    if [[ "${stream_logs}" == "1" ]]; then
+      stream_cmd "Launch on simulator ${target_name} and stream logs" xcrun simctl launch --console --terminate-running-process "${target_id}" "${bundle_id}"
+    else
+      xcrun simctl terminate "${target_id}" "${bundle_id}" >/dev/null 2>&1 || true
+      run_cmd "Launch on simulator ${target_name}" xcrun simctl launch "${target_id}" "${bundle_id}"
+    fi
     ;;
 esac
