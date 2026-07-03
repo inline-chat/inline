@@ -19,6 +19,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - Use `--json --compact` for pipelines and agent parsing.
 - Human table output adapts to terminal width through the `COLUMNS` environment variable. Set `COLUMNS=120` before a command to allow wider previews, or a smaller value to force denser truncation.
+- `inline chats list` gives chat titles extra room and wraps long titles onto a second table row before truncating, so prefer the normal table before falling back to JSON for title disambiguation.
 - Non-JSON runtime errors print a short human report with `Error`, `Code`, and any available status/API error/body preview/hint/examples.
 - Color is only used on TTY stdout/stderr by default. Set `NO_COLOR=1` to disable it, or `CLICOLOR_FORCE=1` to force it in a non-TTY.
 
@@ -26,13 +27,16 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ### auth
 
-- `inline auth login [--email you@x.com | --phone +15551234567]`
+- `inline login [--email you@x.com | --phone +15551234567]`
+  - Shortcut for `inline auth login`.
   - Run an interactive login flow.
   - Requires an interactive terminal. In agent/CI/non-interactive flows, use an existing token via `INLINE_TOKEN`.
   - If code is wrong, prompt to try again or edit email/phone (no hard exit).
-- `inline auth me`
+- `inline me`
+  - Shortcut for `inline auth me`.
   - Fetch and print the current user (verifies your token is still valid).
-- `inline auth logout`
+- `inline logout`
+  - Shortcut for `inline auth logout`.
   - Clear the stored token and current user.
   - If `INLINE_TOKEN` is set, the CLI remains authenticated from the environment; JSON output reports this as `effectiveTokenSource: "INLINE_TOKEN"`.
 
@@ -40,9 +44,17 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline me` and `inline whoami`
   - Shortcut for `inline auth me`.
+- `inline login`
+  - Shortcut for `inline auth login`.
+- `inline logout`
+  - Shortcut for `inline auth logout`.
 - `inline search ...`
   - Shortcut for `inline messages search ...`.
   - Supports the same message search filters, including `--translate`.
+- `inline transcript ...`
+  - Shortcut for `inline messages transcript ...`.
+  - Preferred starting point for long thread review, summarization, and Notion-friendly pasteable transcripts.
+  - For media-heavy chats, use `inline transcript --chat-id ID --limit 500 --download-media --output ./transcript-bundle` so the CLI writes `transcript.md` plus local media links in `media/`.
 - `inline chat ...`, `inline thread ...`, `inline threads ...`
   - Aliases for `inline chats ...`.
 - `inline bot ...`
@@ -153,19 +165,32 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ### messages
 
-- `inline messages list [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--translate en] [--since "yesterday"] [--until "today"]`
+- `inline messages list [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--has-media] [--empty-text] [--forwarded] [--translate en] [--since "yesterday"] [--until "today"]`
   - List chat history for a chat or DM.
+  - `--has-media`, `--empty-text`, and `--forwarded` can be combined and work in table or JSON mode.
   - `--translate <lang>` fetches translations and includes them in output.
-- `inline messages export [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--translate en] [--since "1w ago"] [--until "today"] --output PATH`
-  - Export chat history to a JSON file.
-  - With `--translate`, exported JSON keeps the raw history fields and adds a top-level `translations` array.
+- `inline messages transcript [--chat-id 123 | --user-id 42] [--limit 500] [--offset-id 456 | --from-msg-id 456 | --message-id SELECTOR ...] [--output PATH]`
+  - Export a clean markdown transcript for reading, summarizing, or pasting into Notion.
+  - Root shortcut: `inline transcript ...`.
+  - Transcript output keeps metadata minimal: sender, sparse timestamps, content, natural reply/forward context, media/file links, an Open in Inline link, and hidden `MSG` comments.
+  - Markdown media links use CDN URLs by default. Add `--download-media [--media-dir DIR] [--parallel N]` to download photos/files in one pass and rewrite transcript links to local paths.
+  - If `--output` is a directory, or a no-extension path with `--download-media`, transcript writes `transcript.md` and uses `media/` inside that directory.
+  - Messages without downloadable media are skipped during media download; failed media downloads are reported without failing the whole export.
+- `inline messages export [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456 | --from-msg-id 456 | --message-id SELECTOR ...] [--format json|jsonl|markdown|csv] [--since "1w ago"] [--until "today"] [--output PATH]`
+  - Export chat history or exact message IDs to JSON, JSONL, markdown, or CSV.
+  - If `--output` is omitted, payload content prints to stdout.
+  - Add `--download-media [--media-dir DIR] [--parallel N]` to populate media `localPath` values; markdown and CSV include those local paths.
+  - If `--output` is a directory, or a no-extension path with `--download-media`, export writes `transcript.<format>` there and defaults media to `media/`.
+  - JSON exports include top-level `users`, `chats`, and `spaces` records so agents do not need jq joins for common sender/source names.
 - `inline messages search [--chat-id 123 | --user-id 42] --query "onboarding" [--query "alpha beta"] [--limit 50] [--translate en] [--since "today"] [--until "tomorrow"]`
   - Search messages in a chat or DM.
   - `--query` is repeatable; each query can contain space-separated terms (ANDed within a query, ORed across queries). Extra whitespace is collapsed.
   - `--since` and `--until` accept relative time expressions like `yesterday`, `2h ago`, `monday`, `2024-01-15`, or RFC3339.
   - With `--translate`, JSON output keeps raw search fields and adds a top-level `translations` array; table output includes translated previews.
-- `inline messages get [--chat-id 123 | --user-id 42] --message-id 456 [--translate en]`
-  - Fetch one full message by id from a chat or DM (includes media + attachments).
+- `inline messages get [--chat-id 123 | --user-id 42] --message-id SELECTOR [--message-id SELECTOR ...] [--translate en]`
+  - Fetch one or more full messages from a chat or DM (includes media + attachments).
+  - Selectors support single IDs (`456`), comma lists (`91,92,100`), ranges (`91-100`), and repeated flags.
+  - Single-ID output keeps the detailed message view. Multiple IDs print a compact table, or JSON with `messages` and any `missingMessageIds`.
 - `inline messages send [--chat-id 123 | --user-id 42] [--text "hi" | --message "hi" | --msg "hi" | -m "hi"] [--stdin] [--reply-to 456] [--mention USER_ID:OFFSET:LENGTH ...] [--attach PATH ...] [--force-file]`
   - Send a message (markdown parsing enabled). Mentions are provided via `--mention` with UTF-16 offsets.
   - `--stdin` reads message text from piped or redirected stdin; it fails fast if stdin is an interactive terminal.
@@ -185,16 +210,21 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Add an emoji reaction to a message (emoji characters only, no `:shortcode:`).
 - `inline messages delete-reaction [--chat-id 123 | --user-id 42] --message-id 456 --emoji "👍"`
   - Remove an emoji reaction from a message (emoji characters only, no `:shortcode:`).
-- `inline messages download [--chat-id 123 | --user-id 42] --message-id 456 [--output PATH | --dir PATH]`
-  - Download the attachment from a message.
+- `inline messages download [--chat-id 123 | --user-id 42] [--message-id SELECTOR ... | --from-msg-id 456 --limit 50] [--output PATH | --dir PATH] [--parallel 8]`
+  - Download media from one or more messages.
+  - Single-ID downloads may use `--output` or `--dir`.
+  - Batch downloads require `--dir`, use bounded concurrency, skip messages without media, and prefix filenames with date, `MSG` ID, media type, and media ID.
+  - Use `--from-msg-id ID --limit N --dir DIR` to download media from a contiguous history window without enumerating IDs.
+  - Human output reports downloaded, skipped, missing, and failed counts; JSON output includes `files`, `skippedMessageIds`, `missingMessageIds`, and `errors`.
 
 ## Examples
 
 - Login and greet user:
-  - `inline auth login` (prompts for email/phone + code, then prints welcome name)
+  - `inline login` (prompts for email/phone + code, then prints welcome name)
 - Verify who you are:
-  - `inline auth me`
-  - Shortcut: `inline me`
+  - `inline me`
+- Log out:
+  - `inline logout`
 - Check diagnostics:
   - `inline doctor`
 - List chats/threads:
@@ -214,9 +244,13 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline messages list --chat-id 123 --since "yesterday"`
   - `inline messages list --chat-id 123 --since "2h ago" --until "1h ago"`
 - Export messages to a file:
+  - `inline transcript --chat-id 123 --limit 500 --download-media --output ./feedback-bundle`
+  - `inline transcript --chat-id 123 --from-msg-id 600 --limit 50 --download-media --output ./feedback-bundle`
+  - `inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output ./feedback.md`
   - `inline messages export --chat-id 123 --output ./messages.json`
+  - `inline messages export --chat-id 123 --format markdown --output ./messages.md`
+  - `inline messages export --chat-id 123 --format csv --output ./messages.csv`
   - `inline messages export --chat-id 123 --since "1w ago" --output ./recent.json`
-  - `inline messages export --chat-id 123 --translate en --output ./translated.json`
 - Send message with multiple attachments:
   - `inline messages send --chat-id 123 --text "FYI" --attach ./photo.jpg --attach ./spec.pdf`
 - Reply to a message:
@@ -228,6 +262,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4`
 - Download an attachment:
   - `inline messages download --chat-id 123 --message-id 456 --dir ./downloads`
+  - `inline messages download --chat-id 123 --message-id 80-100 --dir ./downloads`
 - Rename a thread:
   - `inline chats rename --chat-id 123 --title "New title"`
 - Bots:
@@ -246,13 +281,6 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - Invite and manage members:
   - `inline spaces invite --space-id 31 --email you@example.com`
   - `inline spaces update-member-access --space-id 31 --user-id 42 --admin`
-- JQ pipelines for lists:
-  - `inline users list --json --filter "mo" | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'`
-  - `inline bots list --json --filter "deploy" | jq -r '.bots[] | "\(.id)\t\(.first_name)\t@\(.username // "")"'`
-- `inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'`
-- `inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'`
-- `inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'`
-- `inline schema proto --json --compact | jq -r '.files[].name'`
 
 ## Agent Tips
 
@@ -264,7 +292,7 @@ inline users list | grep -i "partial_name"
 
 Faster than parsing JSON when you just need user ID.
 
-### DM: last 5 messages + download media
+### DM: review recent messages and download known media
 
 ```bash
 # Find the DM user id by name/email/username
@@ -273,22 +301,21 @@ USER_ID="$(inline users list --filter "sam" --id)"
 # Read the last 5 messages
 inline messages list --user-id "$USER_ID" --limit 5 --json --compact
 
-# Download media from the last 50 messages
-inline messages list --user-id "$USER_ID" --limit 50 --json --compact \
-  | jq -r '.messages[] | select(.media != null) | .id' \
-  | while read -r MESSAGE_ID; do
-      inline messages download --user-id "$USER_ID" --message-id "$MESSAGE_ID" --dir ./downloads
-    done
+# Fetch exact messages once you know their IDs
+inline messages get --user-id "$USER_ID" --message-id 91,92,100 --json
+
+# Download several media messages at once
+inline messages download --user-id "$USER_ID" --message-id 80-100 --dir ./downloads
 ```
 
-### Filtering messages with jq
+### Batch message selectors
 
 ```bash
-# Get last N outgoing messages (your messages)
-inline messages list --user-id ID --json | jq '[.messages[] | select(.out == true)] | .[0:3]'
-
-# Get last N incoming messages (their messages)
-inline messages list --user-id ID --json | jq '[.messages[] | select(.out == false)] | .[0:3]'
+inline messages get --chat-id ID --message-id 1
+inline messages get --chat-id ID --message-id 1,2,4 --json
+inline messages get --chat-id ID --message-id 10-20 --json
+inline messages download --chat-id ID --message-id 10-20 --dir ./media --parallel 8
+inline messages download --chat-id ID --from-msg-id 600 --limit 50 --dir ./media --parallel 8
 ```
 
 ### Multi-term search for feedback/bugs
@@ -302,8 +329,10 @@ Each --query is ORed together - useful for finding feedback items.
 ### Common patterns
 
 - Use --user-id for DMs instead of looking up chat IDs
-- Use --json + jq for programmatic filtering
+- For long thread review/summarization, start with `inline transcript --chat-id ID --limit 500 --download-media --output ./transcript-bundle` when media might matter
+- Prefer built-in filters, selectors, and export commands before shell pipelines
 - Use default (non-JSON) mode for quick human-readable output
+- Use jq only for advanced ad hoc JSON analysis, not for basic joins, media loops, or transcript reconstruction
 
 ### More quick tips
 
@@ -311,14 +340,26 @@ Each --query is ORed together - useful for finding feedback items.
 # Page back with offset-id
 inline messages list --chat-id ID --limit 50 --offset-id 1234
 
-# Get the latest message id
-inline messages list --chat-id ID --limit 1 --json | jq '.messages[0].id'
+# Get the latest message id from the first table row
+inline messages list --chat-id ID --limit 1
 
 # Export a batch for offline review
+inline transcript --chat-id ID --limit 500 --download-media --output ./chat-bundle
+inline transcript --chat-id ID --from-msg-id 600 --limit 50 --download-media --output ./chat-bundle
 inline messages export --chat-id ID --limit 500 --output ./chat.json
 
-# Compact JSON for pipelines
-inline messages list --chat-id ID --json --compact | jq '.messages | length'
+# Fetch exact IDs in one request
+inline messages get --chat-id ID --message-id 91,92,100 --json --compact
+```
+
+### Advanced JSON pipelines
+
+```bash
+# Count fetched messages
+inline messages list --chat-id ID --limit 500 --json --compact | jq '.messages | length'
+
+# Extract media message IDs for custom workflows
+inline messages list --chat-id ID --limit 500 --has-media --json --compact | jq -r '.messages[].id'
 ```
 
 ## JSON samples

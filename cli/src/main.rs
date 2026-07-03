@@ -10,7 +10,9 @@ mod doctor;
 mod downloads;
 mod errors;
 mod media;
+mod message_export;
 mod message_output;
+mod message_selectors;
 mod notifications;
 mod output;
 mod peer;
@@ -23,12 +25,13 @@ mod validation;
 use chrono::Utc;
 use clap::{ArgAction, Args, Parser, Subcommand, error::ErrorKind};
 use dialoguer::Confirm;
+use futures_util::stream::{self, StreamExt};
 use rand::{RngCore, rngs::OsRng};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use std::{env, fs, io};
 
@@ -45,14 +48,21 @@ use crate::chat_output::{
 };
 use crate::config::Config;
 use crate::doctor::{build_doctor_output, print_doctor};
-use crate::downloads::{download_message_media, resolve_download_path};
+use crate::downloads::{
+    download_message_media, resolve_batch_download_path, resolve_download_path,
+};
 use crate::errors::{
     CliError, JsonCliError, JsonErrorEnvelope, human_cli_error_from_error,
     json_cli_error_from_error,
 };
+use crate::message_export::{
+    ExportPeer, MessageExportBuildInput, MessageExportFormat, apply_media_local_paths,
+    build_message_export_bundle, forward_source_key, infer_export_format, render_export,
+};
 use crate::message_output::{
     build_message_list, build_message_list_from_messages, message_summary,
 };
+use crate::message_selectors::parse_message_id_selectors;
 use crate::notifications::{
     NotificationModeArg, notification_mode_from_arg, notification_settings_values,
     print_notification_settings,
@@ -106,16 +116,25 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     about = "Inline CLI",
     disable_version_flag = true,
     propagate_version = true,
-    after_help = r#"Mini skill guide:
-  Identity and setup:
-    inline auth login [--email you@example.com | --phone +15551234567]
+    after_help = r#"Common workflows:
+  Start:
+    inline login [--email you@example.com | --phone +15551234567]
     inline me
+    inline logout
     inline doctor
-    inline update
+
+  Review a thread:
+    inline chats list --filter "launch"
+    inline transcript --chat-id 123 --limit 500 --output ./feedback.md
+    inline transcript --chat-id 123 --limit 500 --download-media --output ./feedback-bundle
+    inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output ./feedback.md
+    inline messages export --chat-id 123 --output ./messages.json
+    inline messages get --chat-id 123 --message-id 91,92,100 --json
+    inline messages download --chat-id 123 --message-id 80-100 --dir ./media
 
   Core command groups:
     chats         list|get|participants|add-participant|remove-participant|create|create-dm|update-visibility|rename|mark-unread|mark-read|delete
-    messages      list|search|get|send|forward|edit|delete|add-reaction|delete-reaction|download|export
+    messages      list|search|get|send|forward|edit|delete|add-reaction|delete-reaction|download|export|transcript
     users         list|get
     spaces        list|members|invite|delete-member|update-member-access
     notifications get|set
@@ -125,10 +144,13 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     schema        proto
 
   Aliases and shortcuts:
+    inline login                  -> inline auth login
+    inline logout                 -> inline auth logout
     inline chat/thread/threads ... -> inline chats ...
     inline bot ...                  -> inline bots ...
     inline me, inline whoami        -> inline auth me
     inline search ...               -> inline messages search ...
+    inline transcript ...           -> inline messages transcript ... (supports --download-media)
     inline messages send/edit accept: --text | --message | --msg | -m
 
   JSON mode:
@@ -148,9 +170,14 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     inline chats update-visibility --chat-id 123 --private --participant 42
     inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4
     inline messages list --chat-id 123 --since "2h ago" --until "1h ago"
+    inline transcript --chat-id 123 --limit 500 --output ./feedback.md
+    inline transcript --chat-id 123 --limit 500 --download-media --output ./feedback-bundle
+    inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output ./feedback.md
     inline messages export --chat-id 123 --output ./messages.json
+    inline messages get --chat-id 123 --message-id 91,92,100 --json
+    inline messages download --chat-id 123 --message-id 80-100 --dir ./media
     inline tasks create-linear --chat-id 123 --message-id 456
-    inline schema proto --json --compact | jq -r '.files[].name'
+    inline schema proto
 
 Docs:
   https://github.com/inline-chat/inline/blob/main/cli/README.md
@@ -195,6 +222,10 @@ enum Command {
         #[command(subcommand)]
         command: AuthCommand,
     },
+    #[command(about = "Log in (shortcut for auth login)")]
+    Login(AuthLoginArgs),
+    #[command(about = "Log out (shortcut for auth logout)")]
+    Logout,
     #[command(about = "Update the CLI to the latest release")]
     Update,
     #[command(about = "Print diagnostic information about this CLI")]
@@ -252,6 +283,21 @@ enum Command {
     Me,
     #[command(about = "Search messages (shortcut for messages search)")]
     Search(MessagesSearchArgs),
+    #[command(
+        about = "Export a clean markdown transcript (shortcut for messages transcript)",
+        after_help = r#"Examples:
+  inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output feedback.md
+  inline transcript --chat-id 123 --limit 500 --download-media --output ./feedback-bundle
+  inline transcript --chat-id 123 --from-msg-id 600 --limit 50 --output feedback.md
+  inline transcript --chat-id 123 --limit 500 --output feedback.md
+  inline transcript --chat-id 123 --message-id 91,92,100
+
+One-pass review:
+  Use --download-media to download photos/files and rewrite transcript links to local paths.
+  If --output is a directory or no-extension bundle path, transcript writes transcript.md plus a media/ folder.
+"#
+    )]
+    Transcript(MessagesTranscriptArgs),
 
     #[command(about = "Show local API schema info")]
     Schema {
@@ -567,15 +613,64 @@ enum MessagesCommand {
     List(MessagesListArgs),
     #[command(about = "Search messages in a chat or DM")]
     Search(MessagesSearchArgs),
-    #[command(about = "Fetch a single message by id")]
+    #[command(
+        about = "Fetch one or more messages by id",
+        after_help = r#"Examples:
+  inline messages get --chat-id 123 --message-id 456
+  inline messages get --chat-id 123 --message-id 91,92,100 --json
+  inline messages get --chat-id 123 --message-id 91-100 --json --compact
+"#
+    )]
     Get(MessagesGetArgs),
     #[command(about = "Send a message to a chat or user")]
     Send(MessagesSendArgs),
     #[command(about = "Forward messages between chats or DMs")]
     Forward(MessagesForwardArgs),
-    #[command(about = "Export messages to a JSON file")]
+    #[command(
+        about = "Export messages as json, jsonl, markdown, or csv",
+        after_help = r#"Examples:
+  inline messages export --chat-id 123 --limit 500 --format markdown --output feedback.md
+  inline messages export --chat-id 123 --limit 500 --format markdown --download-media --output ./feedback-bundle
+  inline messages export --chat-id 123 --limit 500 --format markdown --download-media --media-dir ./feedback-media --output feedback.md
+  inline messages export --chat-id 123 --limit 500 --format json --output feedback.json
+  inline messages export --chat-id 123 --message-id 91,92,100 --format jsonl
+  inline messages export --chat-id 123 --from-msg-id 600 --limit 50 --format markdown --output feedback.md
+
+Output directories:
+  If --output is a directory, export writes transcript.<format> inside it.
+  With --download-media, a no-extension output path is treated as a bundle directory.
+  With --download-media and no --media-dir, media files go in ./media inside that directory.
+"#
+    )]
     Export(MessagesExportArgs),
-    #[command(about = "Download a message attachment (photo/video/file)")]
+    #[command(
+        about = "Export a clean markdown transcript",
+        after_help = r#"Examples:
+  inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output feedback.md
+  inline transcript --chat-id 123 --limit 500 --download-media --output ./feedback-bundle
+  inline transcript --chat-id 123 --from-msg-id 600 --limit 50 --output feedback.md
+  inline messages transcript --chat-id 123 --limit 500 --output feedback.md
+  inline messages transcript --chat-id 123 --message-id 91,92,100
+
+One-pass review:
+  Use --download-media to download photos/files and rewrite transcript links to local paths.
+  If --output is a directory or no-extension bundle path, transcript writes transcript.md plus a media/ folder.
+"#
+    )]
+    Transcript(MessagesTranscriptArgs),
+    #[command(
+        about = "Download media from one or more messages",
+        after_help = r#"Examples:
+  inline messages download --chat-id 123 --message-id 456 --dir ./media
+  inline messages download --chat-id 123 --message-id 80-100 --dir ./media --parallel 8
+  inline messages download --user-id 42 --message-id 3,7,13,14 --dir ./media
+  inline messages download --chat-id 123 --from-msg-id 600 --limit 50 --dir ./media
+
+Batch behavior:
+  Ranges and comma selectors skip messages without media instead of failing the command.
+  Human output reports downloaded, skipped, missing, and failed counts; --json includes details.
+"#
+    )]
     Download(MessagesDownloadArgs),
     #[command(about = "Delete message(s) by id (asks for confirmation)")]
     Delete(MessagesDeleteArgs),
@@ -600,6 +695,15 @@ struct MessagesListArgs {
 
     #[arg(long, help = "Offset message id for pagination")]
     offset_id: Option<i64>,
+
+    #[arg(long, help = "Only include messages with media")]
+    has_media: bool,
+
+    #[arg(long, help = "Only include messages with empty or missing text")]
+    empty_text: bool,
+
+    #[arg(long, help = "Only include forwarded messages")]
+    forwarded: bool,
 
     #[arg(
         long,
@@ -667,8 +771,14 @@ struct MessagesGetArgs {
     #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Message id")]
-    message_id: i64,
+    #[arg(
+        long = "message-id",
+        value_name = "ID[,ID|START-END]",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Message id selector. Supports single IDs, comma lists, ranges, and repeated flags."
+    )]
+    message_ids: Vec<String>,
 
     #[arg(
         long,
@@ -775,13 +885,52 @@ struct MessagesExportArgs {
 
     #[arg(
         long,
-        value_name = "LANG",
-        help = "Translate exported messages to language code (e.g., en)"
+        value_name = "ID",
+        help = "Start a history window from this message id",
+        conflicts_with_all = ["offset_id", "message_ids"]
     )]
-    translate: Option<String>,
+    from_msg_id: Option<i64>,
 
-    #[arg(long, value_name = "PATH", help = "Output file path")]
-    output: PathBuf,
+    #[arg(
+        long = "message-id",
+        value_name = "ID[,ID|START-END]",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Message id selector. Supports single IDs, comma lists, ranges, and repeated flags."
+    )]
+    message_ids: Vec<String>,
+
+    #[arg(
+        long,
+        value_enum,
+        value_name = "FORMAT",
+        help = "Export format: json, jsonl, markdown, or csv"
+    )]
+    format: Option<MessageExportFormat>,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Output file path or bundle directory"
+    )]
+    output: Option<PathBuf>,
+
+    #[arg(long, help = "Download media and write local paths into the export")]
+    download_media: bool,
+
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Directory for --download-media files (default: output-dir/media, <output-stem>-media, or ./inline-media)"
+    )]
+    media_dir: Option<PathBuf>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Maximum concurrent media downloads for --download-media"
+    )]
+    parallel: Option<usize>,
 
     #[arg(
         long,
@@ -799,6 +948,99 @@ struct MessagesExportArgs {
 }
 
 #[derive(Args)]
+struct MessagesTranscriptArgs {
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    chat_id: Option<i64>,
+
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    user_id: Option<i64>,
+
+    #[arg(long, help = "Maximum number of messages to return")]
+    limit: Option<i32>,
+
+    #[arg(long, help = "Offset message id for pagination")]
+    offset_id: Option<i64>,
+
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Start a history window from this message id",
+        conflicts_with_all = ["offset_id", "message_ids"]
+    )]
+    from_msg_id: Option<i64>,
+
+    #[arg(
+        long = "message-id",
+        value_name = "ID[,ID|START-END]",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Message id selector. Supports single IDs, comma lists, ranges, and repeated flags."
+    )]
+    message_ids: Vec<String>,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Output markdown file path or bundle directory"
+    )]
+    output: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Download media and rewrite transcript links to local paths"
+    )]
+    download_media: bool,
+
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Directory for --download-media files (default: output-dir/media, <output-stem>-media, or ./inline-media)"
+    )]
+    media_dir: Option<PathBuf>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Maximum concurrent media downloads for --download-media"
+    )]
+    parallel: Option<usize>,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter messages since time (e.g., yesterday, 2h ago, 2024-01-15)"
+    )]
+    since: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter messages until time (e.g., today, 1d ago, 2024-01-20)"
+    )]
+    until: Option<String>,
+}
+
+impl From<MessagesTranscriptArgs> for MessagesExportArgs {
+    fn from(args: MessagesTranscriptArgs) -> Self {
+        Self {
+            chat_id: args.chat_id,
+            user_id: args.user_id,
+            limit: args.limit,
+            offset_id: args.offset_id,
+            from_msg_id: args.from_msg_id,
+            message_ids: args.message_ids,
+            format: Some(MessageExportFormat::Markdown),
+            output: args.output,
+            download_media: args.download_media,
+            media_dir: args.media_dir,
+            parallel: args.parallel,
+            since: args.since,
+            until: args.until,
+        }
+    }
+}
+
+#[derive(Args)]
 struct MessagesDownloadArgs {
     #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
@@ -806,8 +1048,29 @@ struct MessagesDownloadArgs {
     #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Message id containing the attachment")]
-    message_id: i64,
+    #[arg(
+        long = "message-id",
+        value_name = "ID[,ID|START-END]",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Message id selector. Supports single IDs, comma lists, ranges, and repeated flags; batch downloads skip messages without media."
+    )]
+    message_ids: Vec<String>,
+
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Download media from a history window starting at this message id",
+        conflicts_with = "message_ids"
+    )]
+    from_msg_id: Option<i64>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Maximum messages to fetch with --from-msg-id"
+    )]
+    limit: Option<i32>,
 
     #[arg(
         long,
@@ -822,6 +1085,13 @@ struct MessagesDownloadArgs {
         conflicts_with = "output"
     )]
     dir: Option<PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = 8,
+        help = "Maximum concurrent downloads for batch selectors"
+    )]
+    parallel: usize,
 }
 
 #[derive(Args)]
@@ -891,6 +1161,12 @@ struct ExportOutput {
     format: String,
     messages: usize,
     bytes: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    media_files: Vec<DownloadedFileOutput>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skipped_message_ids: Vec<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    media_errors: Vec<DownloadErrorOutput>,
 }
 
 #[derive(Serialize)]
@@ -898,6 +1174,40 @@ struct ExportOutput {
 struct DownloadOutput {
     path: String,
     bytes: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadedFileOutput {
+    message_id: i64,
+    path: String,
+    bytes: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadErrorOutput {
+    message_id: i64,
+    error: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadBatchOutput {
+    files: Vec<DownloadedFileOutput>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skipped_message_ids: Vec<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    missing_message_ids: Vec<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    errors: Vec<DownloadErrorOutput>,
+}
+
+#[derive(Default)]
+struct MediaDownloadSummary {
+    files: Vec<DownloadedFileOutput>,
+    skipped_message_ids: Vec<i64>,
+    errors: Vec<DownloadErrorOutput>,
 }
 
 #[derive(Serialize)]
@@ -921,6 +1231,16 @@ struct TranslatedSearchMessagesOutput {
 struct TranslatedMessageOutput {
     #[serde(flatten)]
     message: proto::Message,
+    translations: Vec<proto::MessageTranslation>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MessagesGetBatchOutput {
+    messages: Vec<proto::Message>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    missing_message_ids: Vec<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     translations: Vec<proto::MessageTranslation>,
 }
 
@@ -1132,9 +1452,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
     let api = ApiClient::new(config.api_base_url.clone());
     let skip_update_check = matches!(
         &cli.command,
-        Command::Auth {
-            command: AuthCommand::Login(_)
-        } | Command::Update
+        Command::Login(_)
+            | Command::Auth {
+                command: AuthCommand::Login(_)
+            }
+            | Command::Update
             | Command::Doctor
     );
     let update_handle = if skip_update_check || cli.json || !io::stdout().is_terminal() {
@@ -1145,6 +1467,28 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
 
     let result = async {
         match cli.command {
+            Command::Login(args) => {
+                handle_login(
+                    args,
+                    &api,
+                    &auth_store,
+                    &config.realtime_url,
+                    &local_db,
+                    cli.json,
+                )
+                .await?;
+            }
+            Command::Logout => {
+                let env_token_present = auth::env_token_present();
+                auth_store.clear_token()?;
+                local_db.clear_current_user()?;
+                let output = build_auth_logout_output(env_token_present);
+                if cli.json {
+                    output::print_json(&output, json_format)?;
+                } else {
+                    print_auth_logout(&output);
+                }
+            }
             Command::Auth { command } => match command {
                 AuthCommand::Login(args) => {
                     handle_login(
@@ -1306,6 +1650,17 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                     _ => return Err(CliError::unexpected_rpc_result("searchMessages").into()),
                 }
+            }
+            Command::Transcript(args) => {
+                handle_messages_export(
+                    args.into(),
+                    &config,
+                    &auth_store,
+                    cli.json,
+                    json_format,
+                    MessageExportFormat::Markdown,
+                )
+                .await?;
             }
             Command::Schema { command } => match command {
                 SchemaCommand::Proto => {
@@ -2043,6 +2398,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     match result {
                         proto::rpc_result::Result::GetChatHistory(mut payload) => {
                             filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+                            filter_messages_by_list_options(&mut payload.messages, &args);
 
                             if cli.json {
                                 if let Some(language) = translation_language.as_deref() {
@@ -2238,7 +2594,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
                 MessagesCommand::Get(args) => {
-                    let message_id = validate_message_id_arg("--message-id", args.message_id)?;
+                    let message_ids = parse_message_id_selectors("--message-id", &args.message_ids)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let peer_label = peer_label_from_input(&peer);
                     let translation_language = args
@@ -2249,35 +2605,98 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let token = require_token(&auth_store)?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let message = fetch_message_by_id(&mut realtime, &peer, message_id).await?;
-                    if cli.json {
-                        if let Some(language) = translation_language.as_deref() {
-                            let message_ids = [message.id];
+                    let (messages, missing_message_ids) =
+                        fetch_messages_by_ids(&mut realtime, &peer, &message_ids).await?;
+                    if message_ids.len() == 1 {
+                        let message = messages.into_iter().next().ok_or_else(|| {
+                            CliError::invalid_args("Message not found for that peer.")
+                        })?;
+                        if cli.json {
+                            if let Some(language) = translation_language.as_deref() {
+                                let message_ids = [message.id];
+                                let translations_by_id = fetch_message_translations(
+                                    &mut realtime,
+                                    &peer,
+                                    &message_ids,
+                                    language,
+                                )
+                                .await?;
+                                let output = TranslatedMessageOutput {
+                                    message,
+                                    translations: translations_in_message_order(
+                                        &message_ids,
+                                        &translations_by_id,
+                                    ),
+                                };
+                                output::print_json(&output, json_format)?;
+                            } else {
+                                output::print_json(&message, json_format)?;
+                            }
+                        } else {
+                            let translations_by_id =
+                                if let Some(language) = translation_language.as_deref() {
+                                    fetch_message_translations(
+                                        &mut realtime,
+                                        &peer,
+                                        &[message.id],
+                                        language,
+                                    )
+                                    .await?
+                                } else {
+                                    HashMap::new()
+                                };
+                            let chats_result = realtime
+                                .call_rpc(
+                                    proto::Method::GetChats,
+                                    proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
+                                )
+                                .await?;
+                            let users_by_id = match chats_result {
+                                proto::rpc_result::Result::GetChats(chats_payload) => chats_payload
+                                    .users
+                                    .into_iter()
+                                    .map(|user| (user.id, user))
+                                    .collect(),
+                                _ => return Err(CliError::unexpected_rpc_result("getChats").into()),
+                            };
+                            let current_user_id = local_db.load()?.current_user.map(|user| user.id);
+                            let summary = message_summary(
+                                &message,
+                                &users_by_id,
+                                current_user_id,
+                                current_epoch_seconds() as i64,
+                                Some(&translations_by_id),
+                            );
+                            print_message_detail(&summary, &peer_label);
+                        }
+                    } else if cli.json {
+                        let translations = if let Some(language) = translation_language.as_deref() {
+                            let found_ids = collect_message_ids(&messages);
                             let translations_by_id = fetch_message_translations(
                                 &mut realtime,
                                 &peer,
-                                &message_ids,
+                                &found_ids,
                                 language,
                             )
                             .await?;
-                            let output = TranslatedMessageOutput {
-                                message,
-                                translations: translations_in_message_order(
-                                    &message_ids,
-                                    &translations_by_id,
-                                ),
-                            };
-                            output::print_json(&output, json_format)?;
+                            translations_in_message_order(&found_ids, &translations_by_id)
                         } else {
-                            output::print_json(&message, json_format)?;
-                        }
+                            Vec::new()
+                        };
+                        let output = MessagesGetBatchOutput {
+                            messages,
+                            missing_message_ids,
+                            translations,
+                        };
+                        output::print_json(&output, json_format)?;
                     } else {
                         let translations_by_id =
                             if let Some(language) = translation_language.as_deref() {
+                                let found_ids = collect_message_ids(&messages);
                                 fetch_message_translations(
                                     &mut realtime,
                                     &peer,
-                                    &[message.id],
+                                    &found_ids,
                                     language,
                                 )
                                 .await?
@@ -2290,23 +2709,43 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                 proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
                             )
                             .await?;
-                        let users_by_id = match chats_result {
-                            proto::rpc_result::Result::GetChats(chats_payload) => chats_payload
-                                .users
-                                .into_iter()
-                                .map(|user| (user.id, user))
-                                .collect(),
+                        let (users_by_id, chats_by_id) = match chats_result {
+                            proto::rpc_result::Result::GetChats(chats_payload) => {
+                                let users = chats_payload
+                                    .users
+                                    .into_iter()
+                                    .map(|user| (user.id, user))
+                                    .collect();
+                                let chats = chats_payload
+                                    .chats
+                                    .into_iter()
+                                    .map(|chat| (chat.id, chat))
+                                    .collect();
+                                (users, chats)
+                            }
                             _ => return Err(CliError::unexpected_rpc_result("getChats").into()),
                         };
                         let current_user_id = local_db.load()?.current_user.map(|user| user.id);
-                        let summary = message_summary(
-                            &message,
+                        let output = build_message_list_from_messages(
+                            &messages,
                             &users_by_id,
                             current_user_id,
-                            current_epoch_seconds() as i64,
+                            peer_summary_from_input(&peer),
+                            peer_name_from_input(&peer, &users_by_id, &chats_by_id),
                             Some(&translations_by_id),
                         );
-                        print_message_detail(&summary, &peer_label);
+                        output::print_messages(&output, false, json_format)?;
+                        if !missing_message_ids.is_empty() {
+                            eprintln!(
+                                "Warning: {} message id(s) were not found: {}",
+                                missing_message_ids.len(),
+                                missing_message_ids
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            );
+                        }
                     }
                 }
                 MessagesCommand::Send(args) => {
@@ -2480,85 +2919,60 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
                 MessagesCommand::Export(args) => {
-                    let limit = validate_message_limit(args.limit)?;
-                    let offset_id = validate_optional_message_id_arg("--offset-id", args.offset_id)?;
-                    let (since_ts, until_ts) =
-                        parse_time_filters(args.since.as_deref(), args.until.as_deref(), Utc::now())?;
-                    let translation_language = args
-                        .translate
-                        .as_deref()
-                        .map(normalize_translation_language)
-                        .transpose()?;
-                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    validate_output_file_path_arg("--output", &args.output)?;
-                    let token = require_token(&auth_store)?;
-                    let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let input = proto::GetChatHistoryInput {
-                        peer_id: Some(peer.clone()),
-                        offset_id,
-                        limit,
-                        ..Default::default()
-                    };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChatHistory,
-                            proto::rpc_call::Input::GetChatHistory(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::GetChatHistory(mut payload) => {
-                            filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
-
-                            let output_path = args.output;
-                            let message_count = payload.messages.len();
-                            let payload_text =
-                                if let Some(language) = translation_language.as_deref() {
-                                    let message_ids = collect_message_ids(&payload.messages);
-                                    let translations_by_id = fetch_message_translations(
-                                        &mut realtime,
-                                        &peer,
-                                        &message_ids,
-                                        language,
-                                    )
-                                    .await?;
-                                    let output = TranslatedChatHistoryOutput {
-                                        payload,
-                                        translations: translations_in_message_order(
-                                            &message_ids,
-                                            &translations_by_id,
-                                        ),
-                                    };
-                                    output::json_string(&output, json_format)?
-                                } else {
-                                    output::json_string(&payload, json_format)?
-                                };
-                            if let Some(parent) = output_path.parent() {
-                                fs::create_dir_all(parent)?;
-                            }
-                            fs::write(&output_path, payload_text.as_bytes())?;
-                            let bytes = payload_text.len();
-                            if cli.json {
-                                let output = ExportOutput {
-                                    path: output_path.display().to_string(),
-                                    format: "json".to_string(),
-                                    messages: message_count,
-                                    bytes,
-                                };
-                                output::print_json(&output, json_format)?;
-                            } else {
-                                println!(
-                                    "Exported {} message(s) to {}.",
-                                    message_count,
-                                    output_path.display()
-                                );
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("getChatHistory").into()),
-                    }
+                    handle_messages_export(
+                        args,
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                        MessageExportFormat::Json,
+                    )
+                    .await?;
+                }
+                MessagesCommand::Transcript(args) => {
+                    handle_messages_export(
+                        args.into(),
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                        MessageExportFormat::Markdown,
+                    )
+                    .await?;
                 }
                 MessagesCommand::Download(args) => {
-                    let message_id = validate_message_id_arg("--message-id", args.message_id)?;
+                    if args.message_ids.is_empty() && args.from_msg_id.is_none() {
+                        return Err(CliError::missing_message_ids().into());
+                    }
+                    if args.limit.is_some() && args.from_msg_id.is_none() {
+                        return Err(CliError::invalid_args(
+                            "--limit requires --from-msg-id for downloads",
+                        )
+                        .into());
+                    }
+                    let message_ids = if args.message_ids.is_empty() {
+                        Vec::new()
+                    } else {
+                        parse_message_id_selectors("--message-id", &args.message_ids)?
+                    };
+                    let from_msg_id =
+                        validate_optional_message_id_arg("--from-msg-id", args.from_msg_id)?;
+                    let limit = validate_message_limit(args.limit)?;
+                    let parallel = validate_download_parallel(args.parallel)?;
+                    let history_window_download = from_msg_id.is_some();
+                    let batch_download = history_window_download || message_ids.len() > 1;
+                    if batch_download && args.output.is_some() {
+                        return Err(CliError::invalid_args(
+                            "--output can only be used with one --message-id; use --dir for batch or history-window downloads",
+                        )
+                        .into());
+                    }
+                    if batch_download && args.dir.is_none() {
+                        return Err(CliError::invalid_args(
+                            "Batch and history-window downloads require --dir so every file has a destination directory",
+                        )
+                        .into());
+                    }
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     if let Some(output) = args.output.as_ref() {
                         validate_output_file_path_arg("--output", output)?;
@@ -2569,17 +2983,47 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let token = require_token(&auth_store)?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let message = fetch_message_by_id(&mut realtime, &peer, message_id).await?;
-                    let output_path = resolve_download_path(&message, args.output, args.dir)?;
-                    let bytes = download_message_media(&message, &output_path).await?;
-                    if cli.json {
-                        let output = DownloadOutput {
-                            path: output_path.display().to_string(),
-                            bytes,
-                        };
-                        output::print_json(&output, json_format)?;
+                    let (messages, missing_message_ids) = if let Some(from_msg_id) = from_msg_id {
+                        (
+                            fetch_history_messages(&mut realtime, &peer, Some(from_msg_id), limit)
+                                .await?,
+                            Vec::new(),
+                        )
                     } else {
-                        println!("Downloaded to {}", output_path.display());
+                        fetch_messages_by_ids(&mut realtime, &peer, &message_ids).await?
+                    };
+                    if !history_window_download && message_ids.len() == 1 {
+                        let message = messages.into_iter().next().ok_or_else(|| {
+                            CliError::invalid_args("Message not found for that peer.")
+                        })?;
+                        let output_path = resolve_download_path(&message, args.output, args.dir)?;
+                        let bytes = download_message_media(&message, &output_path).await?;
+                        if cli.json {
+                            let output = DownloadOutput {
+                                path: output_path.display().to_string(),
+                                bytes,
+                            };
+                            output::print_json(&output, json_format)?;
+                        } else {
+                            println!("Downloaded to {}", output_path.display());
+                        }
+                    } else {
+                        let Some(dir) = args.dir else {
+                            unreachable!("batch download directory is validated before auth");
+                        };
+                        let summary = download_messages_media(&messages, &dir, parallel).await?;
+
+                        let output = DownloadBatchOutput {
+                            files: summary.files,
+                            skipped_message_ids: summary.skipped_message_ids,
+                            missing_message_ids,
+                            errors: summary.errors,
+                        };
+                        if cli.json {
+                            output::print_json(&output, json_format)?;
+                        } else {
+                            print_download_batch_summary(&output, &dir);
+                        }
                     }
                 }
                 MessagesCommand::Delete(args) => {
@@ -3203,6 +3647,427 @@ async fn send_messages_with_attachments(
     Ok(proto::SendMessageResult { updates })
 }
 
+async fn handle_messages_export(
+    args: MessagesExportArgs,
+    config: &Config,
+    auth_store: &AuthStore,
+    json: bool,
+    json_format: output::JsonFormat,
+    default_format: MessageExportFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limit = validate_message_limit(args.limit)?;
+    let offset_id = validate_optional_message_id_arg("--offset-id", args.offset_id)?;
+    let from_msg_id = validate_optional_message_id_arg("--from-msg-id", args.from_msg_id)?;
+    let history_offset_id = from_msg_id.or(offset_id);
+    let (since_ts, until_ts) =
+        parse_time_filters(args.since.as_deref(), args.until.as_deref(), Utc::now())?;
+    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+    let requested_output_path = args.output;
+    let output_bundle_dir = requested_output_path
+        .as_ref()
+        .filter(|path| is_export_output_bundle_dir(path, args.download_media))
+        .cloned();
+    let format_inference_path = if output_bundle_dir.is_some() {
+        None
+    } else {
+        requested_output_path.as_deref()
+    };
+    let format = infer_export_format(args.format, format_inference_path, default_format);
+    let output_path =
+        resolve_export_output_path(requested_output_path, output_bundle_dir.as_deref(), format);
+    if let Some(output_path) = output_path.as_ref() {
+        validate_output_file_path_arg("--output", output_path)?;
+    }
+    let media_download = resolve_export_media_download(
+        args.download_media,
+        args.media_dir,
+        args.parallel,
+        output_path.as_deref(),
+        output_bundle_dir.as_deref(),
+    )?;
+    if let Some((media_dir, _)) = media_download.as_ref() {
+        validate_output_dir_path_arg("--media-dir", media_dir)?;
+    }
+    let token = require_token(auth_store)?;
+    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+
+    let mut messages = if args.message_ids.is_empty() {
+        fetch_history_messages(&mut realtime, &peer, history_offset_id, limit).await?
+    } else {
+        let message_ids = parse_message_id_selectors("--message-id", &args.message_ids)?;
+        let (messages, missing_message_ids) =
+            fetch_messages_by_ids(&mut realtime, &peer, &message_ids).await?;
+        if !missing_message_ids.is_empty() {
+            eprintln!(
+                "Warning: {} message id(s) were not found: {}",
+                missing_message_ids.len(),
+                missing_message_ids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+        }
+        messages
+    };
+    filter_messages_by_time(&mut messages, since_ts, until_ts);
+
+    let (users_by_id, chats_by_id, spaces_by_id) = fetch_export_indexes(&mut realtime).await?;
+    let mut warnings = Vec::new();
+    let mut related_messages_by_id = messages
+        .iter()
+        .cloned()
+        .map(|message| (message.id, message))
+        .collect::<HashMap<_, _>>();
+    let missing_reply_ids = collect_missing_reply_ids(&messages, &related_messages_by_id);
+    if !missing_reply_ids.is_empty() {
+        let (reply_messages, missing_message_ids) =
+            fetch_messages_by_ids(&mut realtime, &peer, &missing_reply_ids).await?;
+        for message in reply_messages {
+            related_messages_by_id.insert(message.id, message);
+        }
+        if !missing_message_ids.is_empty() {
+            warnings.push(format!(
+                "Could not resolve {} reply target(s): {}",
+                missing_message_ids.len(),
+                missing_message_ids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+    }
+
+    let mut forward_messages_by_key = HashMap::new();
+    for (source_peer, message_ids) in collect_forward_sources(&messages) {
+        let Some(input_peer) = input_peer_from_proto_peer(&source_peer) else {
+            warnings.push("Could not resolve a forwarded source peer.".to_string());
+            continue;
+        };
+        let (forward_messages, missing_message_ids) =
+            fetch_messages_by_ids(&mut realtime, &input_peer, &message_ids).await?;
+        for message in forward_messages {
+            if let Some(key) = forward_source_key(&source_peer, message.id) {
+                forward_messages_by_key.insert(key, message);
+            }
+        }
+        if !missing_message_ids.is_empty() {
+            warnings.push(format!(
+                "Could not resolve {} forwarded source message(s): {}",
+                missing_message_ids.len(),
+                missing_message_ids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+    }
+
+    let export_peer = export_peer_from_input_peer(&peer, &users_by_id, &chats_by_id);
+    let message_count = messages.len();
+    let media_download_summary = if let Some((media_dir, parallel)) = media_download.as_ref() {
+        download_messages_media(&messages, media_dir, *parallel).await?
+    } else {
+        MediaDownloadSummary::default()
+    };
+    for error in &media_download_summary.errors {
+        warnings.push(format!(
+            "Could not download media for message {}: {}",
+            error.message_id, error.error
+        ));
+    }
+    let media_paths_by_message_id = media_download_summary
+        .files
+        .iter()
+        .map(|file| (file.message_id, file.path.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut bundle = build_message_export_bundle(MessageExportBuildInput {
+        peer: export_peer,
+        messages,
+        users_by_id: &users_by_id,
+        chats_by_id: &chats_by_id,
+        spaces_by_id: &spaces_by_id,
+        related_messages_by_id: &related_messages_by_id,
+        forward_messages_by_key: &forward_messages_by_key,
+        translations: Vec::new(),
+        warnings,
+    });
+    apply_media_local_paths(&mut bundle, &media_paths_by_message_id);
+    let payload_text = render_export(&bundle, format, json_format)?;
+    let bytes = payload_text.len();
+    let media_file_count = media_download_summary.files.len();
+    if let Some(output_path) = output_path {
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&output_path, payload_text.as_bytes())?;
+        if json {
+            let output = ExportOutput {
+                path: output_path.display().to_string(),
+                format: format.as_str().to_string(),
+                messages: message_count,
+                bytes,
+                media_files: media_download_summary.files.clone(),
+                skipped_message_ids: media_download_summary.skipped_message_ids.clone(),
+                media_errors: media_download_summary.errors.clone(),
+            };
+            output::print_json(&output, json_format)?;
+        } else if let Some((media_dir, _)) = media_download.as_ref() {
+            print_export_media_summary(
+                message_count,
+                format,
+                &output_path,
+                media_dir,
+                &media_download_summary,
+            );
+        } else {
+            println!(
+                "Exported {} message(s) as {} to {}.",
+                message_count,
+                format.as_str(),
+                output_path.display()
+            );
+        }
+    } else {
+        print!("{payload_text}");
+        if let Some((media_dir, _)) = media_download.as_ref() {
+            eprintln!(
+                "Downloaded {} media file(s) to {}.{}{}",
+                media_file_count,
+                media_dir.display(),
+                skipped_suffix(media_download_summary.skipped_message_ids.len()),
+                failed_suffix(media_download_summary.errors.len())
+            );
+            print_download_errors(&media_download_summary.errors);
+        }
+    }
+    Ok(())
+}
+
+fn print_download_batch_summary(output: &DownloadBatchOutput, dir: &Path) {
+    println!(
+        "Downloaded {} file(s) to {}.{}{}{}",
+        output.files.len(),
+        dir.display(),
+        skipped_suffix(output.skipped_message_ids.len()),
+        missing_suffix(output.missing_message_ids.len()),
+        failed_suffix(output.errors.len())
+    );
+    if !output.missing_message_ids.is_empty() {
+        eprintln!(
+            "Warning: {} message id(s) were not found: {}",
+            output.missing_message_ids.len(),
+            output
+                .missing_message_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+    print_download_errors(&output.errors);
+}
+
+fn print_export_media_summary(
+    message_count: usize,
+    format: MessageExportFormat,
+    output_path: &Path,
+    media_dir: &Path,
+    media_download_summary: &MediaDownloadSummary,
+) {
+    println!(
+        "Exported {} message(s) as {} to {}. Downloaded {} media file(s) to {}.{}{}",
+        message_count,
+        format.as_str(),
+        output_path.display(),
+        media_download_summary.files.len(),
+        media_dir.display(),
+        skipped_suffix(media_download_summary.skipped_message_ids.len()),
+        failed_suffix(media_download_summary.errors.len())
+    );
+    print_download_errors(&media_download_summary.errors);
+}
+
+fn skipped_suffix(count: usize) -> String {
+    if count == 0 {
+        String::new()
+    } else {
+        format!(" Skipped {count} message(s) without media.")
+    }
+}
+
+fn missing_suffix(count: usize) -> String {
+    if count == 0 {
+        String::new()
+    } else {
+        format!(" Missing {count} message(s).")
+    }
+}
+
+fn failed_suffix(count: usize) -> String {
+    if count == 0 {
+        String::new()
+    } else {
+        format!(" Failed {count} media download(s).")
+    }
+}
+
+fn print_download_errors(errors: &[DownloadErrorOutput]) {
+    for error in errors.iter().take(5) {
+        eprintln!(
+            "Warning: message {} failed: {}",
+            error.message_id, error.error
+        );
+    }
+    if errors.len() > 5 {
+        eprintln!(
+            "Warning: {} additional media download(s) failed.",
+            errors.len() - 5
+        );
+    }
+}
+
+async fn fetch_export_indexes(
+    realtime: &mut RealtimeClient,
+) -> Result<
+    (
+        HashMap<i64, proto::User>,
+        HashMap<i64, proto::Chat>,
+        HashMap<i64, proto::Space>,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let result = realtime
+        .call_rpc(
+            proto::Method::GetChats,
+            proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
+        )
+        .await?;
+    match result {
+        proto::rpc_result::Result::GetChats(payload) => {
+            let users = payload
+                .users
+                .into_iter()
+                .map(|user| (user.id, user))
+                .collect();
+            let chats = payload
+                .chats
+                .into_iter()
+                .map(|chat| (chat.id, chat))
+                .collect();
+            let spaces = payload
+                .spaces
+                .into_iter()
+                .map(|space| (space.id, space))
+                .collect();
+            Ok((users, chats, spaces))
+        }
+        _ => Err(CliError::unexpected_rpc_result("getChats").into()),
+    }
+}
+
+fn collect_missing_reply_ids(
+    messages: &[proto::Message],
+    related_messages_by_id: &HashMap<i64, proto::Message>,
+) -> Vec<i64> {
+    let mut ids = Vec::new();
+    for message in messages {
+        let Some(reply_to_msg_id) = message.reply_to_msg_id else {
+            continue;
+        };
+        if related_messages_by_id.contains_key(&reply_to_msg_id) || ids.contains(&reply_to_msg_id) {
+            continue;
+        }
+        ids.push(reply_to_msg_id);
+    }
+    ids
+}
+
+fn collect_forward_sources(messages: &[proto::Message]) -> Vec<(proto::Peer, Vec<i64>)> {
+    let mut indexes = HashMap::<String, usize>::new();
+    let mut groups = Vec::<(proto::Peer, Vec<i64>)>::new();
+    for message in messages {
+        let Some(forward) = message.fwd_from.as_ref() else {
+            continue;
+        };
+        let Some(peer) = forward.from_peer_id.as_ref() else {
+            continue;
+        };
+        let Some(peer_key) = forward_peer_group_key(peer) else {
+            continue;
+        };
+        let index = if let Some(index) = indexes.get(&peer_key) {
+            *index
+        } else {
+            let index = groups.len();
+            groups.push((peer.clone(), Vec::new()));
+            indexes.insert(peer_key, index);
+            index
+        };
+        if forward.from_message_id > 0 && !groups[index].1.contains(&forward.from_message_id) {
+            groups[index].1.push(forward.from_message_id);
+        }
+    }
+    groups
+}
+
+fn forward_peer_group_key(peer: &proto::Peer) -> Option<String> {
+    match &peer.r#type {
+        Some(proto::peer::Type::Chat(chat)) => Some(format!("chat:{}", chat.chat_id)),
+        Some(proto::peer::Type::User(user)) => Some(format!("user:{}", user.user_id)),
+        None => None,
+    }
+}
+
+fn input_peer_from_proto_peer(peer: &proto::Peer) -> Option<proto::InputPeer> {
+    match &peer.r#type {
+        Some(proto::peer::Type::Chat(chat)) => Some(proto::InputPeer {
+            r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+                chat_id: chat.chat_id,
+            })),
+        }),
+        Some(proto::peer::Type::User(user)) => Some(proto::InputPeer {
+            r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                user_id: user.user_id,
+            })),
+        }),
+        None => None,
+    }
+}
+
+fn export_peer_from_input_peer(
+    peer: &proto::InputPeer,
+    users_by_id: &HashMap<i64, proto::User>,
+    chats_by_id: &HashMap<i64, proto::Chat>,
+) -> ExportPeer {
+    match &peer.r#type {
+        Some(proto::input_peer::Type::Chat(chat)) => ExportPeer {
+            peer_type: "chat".to_string(),
+            id: chat.chat_id,
+            name: chats_by_id
+                .get(&chat.chat_id)
+                .map(|chat| chat_display_name(chat, users_by_id)),
+        },
+        Some(proto::input_peer::Type::User(user)) => ExportPeer {
+            peer_type: "user".to_string(),
+            id: user.user_id,
+            name: users_by_id.get(&user.user_id).map(user_display_name),
+        },
+        Some(proto::input_peer::Type::Self_(_)) => ExportPeer {
+            peer_type: "self".to_string(),
+            id: 0,
+            name: Some("You".to_string()),
+        },
+        None => ExportPeer {
+            peer_type: "unknown".to_string(),
+            id: 0,
+            name: None,
+        },
+    }
+}
+
 fn require_token(auth_store: &AuthStore) -> Result<String, Box<dyn std::error::Error>> {
     match auth_store.load_token()? {
         Some(token) => Ok(token),
@@ -3387,6 +4252,33 @@ fn filter_messages_by_time(
     });
 }
 
+fn filter_messages_by_list_options(messages: &mut Vec<proto::Message>, args: &MessagesListArgs) {
+    if !args.has_media && !args.empty_text && !args.forwarded {
+        return;
+    }
+
+    messages.retain(|message| {
+        (!args.has_media || message_has_any_media(message))
+            && (!args.empty_text || message_has_empty_text(message))
+            && (!args.forwarded || message.fwd_from.is_some())
+    });
+}
+
+fn message_has_any_media(message: &proto::Message) -> bool {
+    message
+        .media
+        .as_ref()
+        .and_then(|media| media.media.as_ref())
+        .is_some()
+}
+
+fn message_has_empty_text(message: &proto::Message) -> bool {
+    message
+        .message
+        .as_deref()
+        .is_none_or(|text| text.trim().is_empty())
+}
+
 fn parse_mention_entities(
     raw_mentions: &[String],
 ) -> Result<Option<proto::MessageEntities>, Box<dyn std::error::Error>> {
@@ -3458,6 +4350,174 @@ fn translations_in_message_order(
         .iter()
         .filter_map(|message_id| translations_by_id.get(message_id).cloned())
         .collect()
+}
+
+fn validate_download_parallel(value: usize) -> Result<usize, Box<dyn std::error::Error>> {
+    if value == 0 {
+        return Err(CliError::invalid_args("--parallel must be greater than 0").into());
+    }
+    if value > 64 {
+        return Err(CliError::invalid_args("--parallel must be 64 or less").into());
+    }
+    Ok(value)
+}
+
+fn is_export_output_bundle_dir(path: &Path, download_media: bool) -> bool {
+    path.is_dir() || (download_media && path.extension().is_none())
+}
+
+fn resolve_export_output_path(
+    output_path: Option<PathBuf>,
+    output_bundle_dir: Option<&Path>,
+    format: MessageExportFormat,
+) -> Option<PathBuf> {
+    match (output_path, output_bundle_dir) {
+        (Some(_), Some(bundle_dir)) => {
+            Some(bundle_dir.join(format!("transcript.{}", format.extension())))
+        }
+        (Some(path), None) => Some(path),
+        (None, _) => None,
+    }
+}
+
+fn resolve_export_media_download(
+    download_media: bool,
+    media_dir: Option<PathBuf>,
+    parallel: Option<usize>,
+    output_path: Option<&Path>,
+    output_bundle_dir: Option<&Path>,
+) -> Result<Option<(PathBuf, usize)>, Box<dyn std::error::Error>> {
+    if !download_media {
+        if media_dir.is_some() {
+            return Err(CliError::invalid_args("--media-dir requires --download-media").into());
+        }
+        if parallel.is_some() {
+            return Err(CliError::invalid_args(
+                "--parallel requires --download-media for export/transcript",
+            )
+            .into());
+        }
+        return Ok(None);
+    }
+
+    let parallel = validate_download_parallel(parallel.unwrap_or(8))?;
+    let media_dir = media_dir.unwrap_or_else(|| {
+        output_bundle_dir
+            .map(|dir| dir.join("media"))
+            .unwrap_or_else(|| default_export_media_dir(output_path))
+    });
+    Ok(Some((media_dir, parallel)))
+}
+
+fn default_export_media_dir(output_path: Option<&Path>) -> PathBuf {
+    let Some(output_path) = output_path else {
+        return PathBuf::from("inline-media");
+    };
+    let stem = output_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("inline");
+    let dir_name = format!("{stem}-media");
+    output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| parent.join(&dir_name))
+        .unwrap_or_else(|| PathBuf::from(dir_name))
+}
+
+async fn download_messages_media(
+    messages: &[proto::Message],
+    dir: &Path,
+    parallel: usize,
+) -> Result<MediaDownloadSummary, Box<dyn std::error::Error>> {
+    fs::create_dir_all(dir)?;
+    let skipped_message_ids = messages
+        .iter()
+        .filter(|message| !message_has_downloadable_media(message))
+        .map(|message| message.id)
+        .collect::<Vec<_>>();
+    let downloadable_messages = messages
+        .iter()
+        .filter(|message| message_has_downloadable_media(message))
+        .cloned()
+        .collect::<Vec<_>>();
+    let requested_order = messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| (message.id, index))
+        .collect::<HashMap<_, _>>();
+
+    let results = stream::iter(downloadable_messages.into_iter())
+        .map(|message| {
+            let dir = dir.to_path_buf();
+            async move {
+                let message_id = message.id;
+                let output_path = match resolve_batch_download_path(&message, &dir) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        return Err(DownloadErrorOutput {
+                            message_id,
+                            error: error.to_string(),
+                        });
+                    }
+                };
+                match download_message_media(&message, &output_path).await {
+                    Ok(bytes) => Ok(DownloadedFileOutput {
+                        message_id,
+                        path: output_path.display().to_string(),
+                        bytes,
+                    }),
+                    Err(error) => Err(DownloadErrorOutput {
+                        message_id,
+                        error: error.to_string(),
+                    }),
+                }
+            }
+        })
+        .buffer_unordered(parallel)
+        .collect::<Vec<_>>()
+        .await;
+
+    let mut files = Vec::new();
+    let mut errors = Vec::new();
+    for result in results {
+        match result {
+            Ok(file) => files.push(file),
+            Err(error) => errors.push(error),
+        }
+    }
+
+    files.sort_by_key(|file| {
+        requested_order
+            .get(&file.message_id)
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    errors.sort_by_key(|error| {
+        requested_order
+            .get(&error.message_id)
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    Ok(MediaDownloadSummary {
+        files,
+        skipped_message_ids,
+        errors,
+    })
+}
+
+fn message_has_downloadable_media(message: &proto::Message) -> bool {
+    matches!(
+        message
+            .media
+            .as_ref()
+            .and_then(|media| media.media.as_ref()),
+        Some(proto::message_media::Media::Document(_))
+            | Some(proto::message_media::Media::Video(_))
+            | Some(proto::message_media::Media::Photo(_))
+            | Some(proto::message_media::Media::Voice(_))
+    )
 }
 
 async fn fetch_message_translations(
@@ -3581,7 +4641,47 @@ async fn fetch_message_by_id(
     peer: &proto::InputPeer,
     message_id: i64,
 ) -> Result<proto::Message, Box<dyn std::error::Error>> {
-    let input = get_messages_input_for_id(peer, message_id);
+    let (messages, _) = fetch_messages_by_ids(realtime, peer, &[message_id]).await?;
+    messages
+        .into_iter()
+        .next()
+        .ok_or_else(|| CliError::invalid_args("Message not found for that peer.").into())
+}
+
+async fn fetch_history_messages(
+    realtime: &mut RealtimeClient,
+    peer: &proto::InputPeer,
+    offset_id: Option<i64>,
+    limit: Option<i32>,
+) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>> {
+    let input = proto::GetChatHistoryInput {
+        peer_id: Some(peer.clone()),
+        offset_id,
+        limit,
+        ..Default::default()
+    };
+    let result = realtime
+        .call_rpc(
+            proto::Method::GetChatHistory,
+            proto::rpc_call::Input::GetChatHistory(input),
+        )
+        .await?;
+    match result {
+        proto::rpc_result::Result::GetChatHistory(payload) => Ok(payload.messages),
+        _ => Err(CliError::unexpected_rpc_result("getChatHistory").into()),
+    }
+}
+
+async fn fetch_messages_by_ids(
+    realtime: &mut RealtimeClient,
+    peer: &proto::InputPeer,
+    message_ids: &[i64],
+) -> Result<(Vec<proto::Message>, Vec<i64>), Box<dyn std::error::Error>> {
+    if message_ids.is_empty() {
+        return Err(CliError::missing_message_ids().into());
+    }
+
+    let input = get_messages_input_for_ids(peer, message_ids);
     let result = realtime
         .call_rpc(
             proto::Method::GetMessages,
@@ -3590,23 +4690,33 @@ async fn fetch_message_by_id(
         .await?;
     match result {
         proto::rpc_result::Result::GetMessages(payload) => {
-            if let Some(message) = payload
+            let mut messages_by_id = payload
                 .messages
                 .into_iter()
-                .find(|msg| msg.id == message_id)
-            {
-                return Ok(message);
+                .map(|message| (message.id, message))
+                .collect::<HashMap<_, _>>();
+            let mut messages = Vec::new();
+            let mut missing_message_ids = Vec::new();
+            for message_id in message_ids {
+                if let Some(message) = messages_by_id.remove(message_id) {
+                    messages.push(message);
+                } else {
+                    missing_message_ids.push(*message_id);
+                }
             }
+            Ok((messages, missing_message_ids))
         }
-        _ => return Err(CliError::unexpected_rpc_result("getMessages").into()),
+        _ => Err(CliError::unexpected_rpc_result("getMessages").into()),
     }
-    Err(CliError::invalid_args("Message not found for that peer.").into())
 }
 
-fn get_messages_input_for_id(peer: &proto::InputPeer, message_id: i64) -> proto::GetMessagesInput {
+fn get_messages_input_for_ids(
+    peer: &proto::InputPeer,
+    message_ids: &[i64],
+) -> proto::GetMessagesInput {
     proto::GetMessagesInput {
         peer_id: Some(peer.clone()),
-        message_ids: vec![message_id],
+        message_ids: message_ids.to_vec(),
     }
 }
 
@@ -3669,6 +4779,18 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn parses_login_and_logout_shortcuts() {
+        let cli = Cli::try_parse_from(["inline", "login", "--email", "agent@example.com"]).unwrap();
+        match cli.command {
+            Command::Login(args) => assert_eq!(args.email.as_deref(), Some("agent@example.com")),
+            _ => panic!("expected login shortcut"),
+        }
+
+        let cli = Cli::try_parse_from(["inline", "logout"]).unwrap();
+        assert!(matches!(cli.command, Command::Logout));
+    }
+
+    #[test]
     fn help_and_version_exit_successfully() {
         let help_err = Cli::try_parse_from(["inline", "--help"]).err().unwrap();
         assert_eq!(help_err.kind(), clap::error::ErrorKind::DisplayHelp);
@@ -3688,8 +4810,13 @@ mod cli_parsing_tests {
         command.write_long_help(&mut output).unwrap();
         let help_text = String::from_utf8(output).unwrap();
 
-        assert!(help_text.contains("Mini skill guide:"));
+        assert!(help_text.contains("Common workflows:"));
+        assert!(help_text.contains("inline login"));
+        assert!(
+            help_text.contains("inline messages get --chat-id 123 --message-id 91,92,100 --json")
+        );
         assert!(help_text.contains("Aliases and shortcuts:"));
+        assert!(help_text.contains("inline transcript"));
         assert!(help_text.contains("JSON mode:"));
         assert!(
             help_text
@@ -3779,6 +4906,70 @@ mod cli_parsing_tests {
         let cli_err = err.downcast_ref::<CliError>().unwrap();
         assert_eq!(cli_err.code, "invalid_args");
         assert_eq!(cli_err.message, "message text is empty");
+    }
+
+    #[test]
+    fn message_list_filters_are_composable() {
+        let mut messages = vec![
+            proto::Message {
+                id: 1,
+                message: Some("   ".to_string()),
+                media: Some(proto::MessageMedia {
+                    media: Some(proto::message_media::Media::Document(
+                        proto::MessageDocument {
+                            document: Some(proto::Document {
+                                id: 10,
+                                ..Default::default()
+                            }),
+                        },
+                    )),
+                }),
+                fwd_from: Some(proto::MessageFwdHeader::default()),
+                ..Default::default()
+            },
+            proto::Message {
+                id: 2,
+                message: Some("caption".to_string()),
+                media: Some(proto::MessageMedia {
+                    media: Some(proto::message_media::Media::Document(
+                        proto::MessageDocument {
+                            document: Some(proto::Document {
+                                id: 11,
+                                ..Default::default()
+                            }),
+                        },
+                    )),
+                }),
+                ..Default::default()
+            },
+            proto::Message {
+                id: 3,
+                message: None,
+                ..Default::default()
+            },
+        ];
+        let args = MessagesListArgs {
+            chat_id: Some(1),
+            user_id: None,
+            limit: None,
+            offset_id: None,
+            has_media: true,
+            empty_text: true,
+            forwarded: true,
+            translate: None,
+            since: None,
+            until: None,
+        };
+
+        filter_messages_by_list_options(&mut messages, &args);
+
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]
@@ -3931,6 +5122,38 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn parses_transcript_shortcut() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "transcript",
+            "--chat-id",
+            "42",
+            "--limit",
+            "500",
+            "--download-media",
+            "--media-dir",
+            "feedback-media",
+            "--parallel",
+            "4",
+            "--output",
+            "feedback.md",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Transcript(args) => {
+                assert_eq!(args.chat_id, Some(42));
+                assert_eq!(args.limit, Some(500));
+                assert_eq!(args.output, Some(PathBuf::from("feedback.md")));
+                assert!(args.download_media);
+                assert_eq!(args.media_dir, Some(PathBuf::from("feedback-media")));
+                assert_eq!(args.parallel, Some(4));
+            }
+            _ => panic!("expected transcript shortcut"),
+        }
+    }
+
+    #[test]
     fn parses_schema_proto() {
         let cli = Cli::try_parse_from(["inline", "schema", "proto"]).unwrap();
         assert!(matches!(
@@ -4050,6 +5273,63 @@ mod cli_parsing_tests {
         let cli_err = err.downcast_ref::<CliError>().unwrap();
         assert_eq!(cli_err.code, "invalid_args");
         assert!(cli_err.message.contains("--to-user-id"));
+    }
+
+    #[test]
+    fn export_media_download_options_validate_and_default() {
+        let (media_dir, parallel) = resolve_export_media_download(
+            true,
+            None,
+            None,
+            Some(Path::new("out/feedback.md")),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(media_dir, PathBuf::from("out").join("feedback-media"));
+        assert_eq!(parallel, 8);
+
+        let (media_dir, parallel) =
+            resolve_export_media_download(true, Some(PathBuf::from("media")), Some(4), None, None)
+                .unwrap()
+                .unwrap();
+        assert_eq!(media_dir, PathBuf::from("media"));
+        assert_eq!(parallel, 4);
+
+        let bundle_dir = std::env::temp_dir().join(format!(
+            "inline-cli-export-bundle-test-{}-{}",
+            std::process::id(),
+            current_epoch_seconds()
+        ));
+        fs::create_dir_all(&bundle_dir).unwrap();
+        let output_path = resolve_export_output_path(
+            Some(bundle_dir.clone()),
+            Some(&bundle_dir),
+            MessageExportFormat::Markdown,
+        )
+        .unwrap();
+        assert_eq!(output_path, bundle_dir.join("transcript.md"));
+        let (media_dir, _) =
+            resolve_export_media_download(true, None, None, Some(&output_path), Some(&bundle_dir))
+                .unwrap()
+                .unwrap();
+        assert_eq!(media_dir, bundle_dir.join("media"));
+
+        let bundle_dir = PathBuf::from("feedback-bundle");
+        let output_path = resolve_export_output_path(
+            Some(bundle_dir.clone()),
+            Some(&bundle_dir),
+            MessageExportFormat::Markdown,
+        )
+        .unwrap();
+        assert_eq!(output_path, bundle_dir.join("transcript.md"));
+
+        let err =
+            resolve_export_media_download(false, Some(PathBuf::from("media")), None, None, None)
+                .unwrap_err();
+        let cli_err = err.downcast_ref::<CliError>().unwrap();
+        assert_eq!(cli_err.code, "invalid_args");
+        assert!(cli_err.message.contains("--download-media"));
     }
 
     #[test]
@@ -4225,10 +5505,233 @@ mod cli_parsing_tests {
             } => {
                 assert_eq!(args.chat_id, None);
                 assert_eq!(args.user_id, Some(42));
-                assert_eq!(args.message_id, 99);
+                assert_eq!(args.message_ids, vec!["99".to_string()]);
                 assert_eq!(args.translate.as_deref(), Some("en"));
             }
             _ => panic!("expected messages get"),
+        }
+    }
+
+    #[test]
+    fn parses_messages_get_selector_values() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "get",
+            "--chat-id",
+            "42",
+            "--message-id",
+            "1,2,4",
+            "--message-id",
+            "10-12",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Get(args),
+            } => {
+                assert_eq!(args.chat_id, Some(42));
+                assert_eq!(
+                    args.message_ids,
+                    vec!["1,2,4".to_string(), "10-12".to_string()]
+                );
+            }
+            _ => panic!("expected messages get"),
+        }
+    }
+
+    #[test]
+    fn parses_messages_download_selector_values() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "download",
+            "--chat-id",
+            "42",
+            "--message-id",
+            "3,7",
+            "--message-id",
+            "13-14",
+            "--dir",
+            "./media",
+            "--parallel",
+            "4",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Download(args),
+            } => {
+                assert_eq!(args.chat_id, Some(42));
+                assert_eq!(
+                    args.message_ids,
+                    vec!["3,7".to_string(), "13-14".to_string()]
+                );
+                assert_eq!(args.dir, Some(PathBuf::from("./media")));
+                assert_eq!(args.parallel, 4);
+            }
+            _ => panic!("expected messages download"),
+        }
+    }
+
+    #[test]
+    fn parses_messages_download_history_window() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "download",
+            "--chat-id",
+            "42",
+            "--from-msg-id",
+            "600",
+            "--limit",
+            "50",
+            "--dir",
+            "./media",
+            "--parallel",
+            "4",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Download(args),
+            } => {
+                assert_eq!(args.chat_id, Some(42));
+                assert!(args.message_ids.is_empty());
+                assert_eq!(args.from_msg_id, Some(600));
+                assert_eq!(args.limit, Some(50));
+                assert_eq!(args.dir, Some(PathBuf::from("./media")));
+                assert_eq!(args.parallel, 4);
+            }
+            _ => panic!("expected messages download"),
+        }
+
+        let err = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "download",
+            "--chat-id",
+            "42",
+            "--message-id",
+            "1",
+            "--from-msg-id",
+            "600",
+            "--dir",
+            "./media",
+        ])
+        .err()
+        .unwrap();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn parses_messages_export_formats_and_selectors() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "export",
+            "--chat-id",
+            "42",
+            "--message-id",
+            "91,92,100",
+            "--format",
+            "markdown",
+            "--output",
+            "feedback.md",
+            "--download-media",
+            "--media-dir",
+            "feedback-media",
+            "--parallel",
+            "4",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Export(args),
+            } => {
+                assert_eq!(args.chat_id, Some(42));
+                assert_eq!(args.message_ids, vec!["91,92,100".to_string()]);
+                assert_eq!(args.format, Some(MessageExportFormat::Markdown));
+                assert_eq!(args.output, Some(PathBuf::from("feedback.md")));
+                assert!(args.download_media);
+                assert_eq!(args.media_dir, Some(PathBuf::from("feedback-media")));
+                assert_eq!(args.parallel, Some(4));
+            }
+            _ => panic!("expected messages export"),
+        }
+    }
+
+    #[test]
+    fn parses_messages_export_history_window() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "export",
+            "--chat-id",
+            "42",
+            "--from-msg-id",
+            "600",
+            "--limit",
+            "50",
+            "--format",
+            "markdown",
+            "--output",
+            "feedback.md",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Export(args),
+            } => {
+                assert_eq!(args.chat_id, Some(42));
+                assert_eq!(args.from_msg_id, Some(600));
+                assert_eq!(args.limit, Some(50));
+                assert!(args.message_ids.is_empty());
+                assert_eq!(args.format, Some(MessageExportFormat::Markdown));
+                assert_eq!(args.output, Some(PathBuf::from("feedback.md")));
+            }
+            _ => panic!("expected messages export"),
+        }
+    }
+
+    #[test]
+    fn parses_messages_transcript_alias() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "transcript",
+            "--chat-id",
+            "42",
+            "--limit",
+            "500",
+            "--download-media",
+            "--media-dir",
+            "feedback-media",
+            "--parallel",
+            "4",
+            "--output",
+            "feedback.md",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Transcript(args),
+            } => {
+                assert_eq!(args.chat_id, Some(42));
+                assert_eq!(args.limit, Some(500));
+                assert_eq!(args.from_msg_id, None);
+                assert_eq!(args.output, Some(PathBuf::from("feedback.md")));
+                assert!(args.download_media);
+                assert_eq!(args.media_dir, Some(PathBuf::from("feedback-media")));
+                assert_eq!(args.parallel, Some(4));
+            }
+            _ => panic!("expected messages transcript"),
         }
     }
 
@@ -4300,7 +5803,7 @@ mod cli_parsing_tests {
     #[test]
     fn message_get_input_uses_exact_message_id() {
         let peer = input_peer_from_args(Some(123), None).unwrap();
-        let input = get_messages_input_for_id(&peer, 456);
+        let input = get_messages_input_for_ids(&peer, &[456]);
 
         assert_eq!(input.message_ids, vec![456]);
         match input.peer_id.and_then(|peer| peer.r#type) {
@@ -4310,9 +5813,21 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn message_get_input_accepts_multiple_message_ids() {
+        let peer = input_peer_from_args(Some(123), None).unwrap();
+        let input = get_messages_input_for_ids(&peer, &[456, 789]);
+
+        assert_eq!(input.message_ids, vec![456, 789]);
+        match input.peer_id.and_then(|peer| peer.r#type) {
+            Some(proto::input_peer::Type::Chat(chat)) => assert_eq!(chat.chat_id, 123),
+            other => panic!("expected chat peer, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn message_get_input_supports_user_peer() {
         let peer = input_peer_from_args(None, Some(42)).unwrap();
-        let input = get_messages_input_for_id(&peer, 456);
+        let input = get_messages_input_for_ids(&peer, &[456]);
 
         assert_eq!(input.message_ids, vec![456]);
         match input.peer_id.and_then(|peer| peer.r#type) {

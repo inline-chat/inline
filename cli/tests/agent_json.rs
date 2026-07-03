@@ -241,22 +241,6 @@ fn message_content_validation_runs_before_auth_lookup() {
 #[test]
 fn message_filesystem_validation_runs_before_auth_lookup() {
     assert_json_error_before_auth(
-        "export-output-directory",
-        &[
-            "--json",
-            "--compact",
-            "messages",
-            "export",
-            "--chat-id",
-            "1",
-            "--output",
-            ".",
-        ],
-        "invalid_args",
-        "--output",
-    );
-
-    assert_json_error_before_auth(
         "download-output-directory",
         &[
             "--json",
@@ -272,6 +256,40 @@ fn message_filesystem_validation_runs_before_auth_lookup() {
         ],
         "invalid_args",
         "--output",
+    );
+
+    assert_json_error_before_auth(
+        "batch-download-output-file",
+        &[
+            "--json",
+            "--compact",
+            "messages",
+            "download",
+            "--chat-id",
+            "1",
+            "--message-id",
+            "2,3",
+            "--output",
+            "media.bin",
+        ],
+        "invalid_args",
+        "--output",
+    );
+
+    assert_json_error_before_auth(
+        "batch-download-missing-dir",
+        &[
+            "--json",
+            "--compact",
+            "messages",
+            "download",
+            "--chat-id",
+            "1",
+            "--message-id",
+            "2,3",
+        ],
+        "invalid_args",
+        "--dir",
     );
 
     let (root, secrets, state) = isolated_paths("download-dir-file");

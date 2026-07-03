@@ -279,7 +279,7 @@ pub fn print_chat_list(
                 header: "name",
                 content_width: name_width,
                 min_width: 12,
-                max_width: 28,
+                max_width: 60,
             },
             FlexibleColumn {
                 header: "space",
@@ -312,17 +312,26 @@ pub fn print_chat_list(
     for item in &output.items {
         let preview = item.last_message_line.as_deref().unwrap_or("<no messages>");
         let space = item.space_name.as_deref().unwrap_or("-");
+        let name_lines = wrap_display_lines(&item.display_name, name_width, 2);
+        let name = name_lines.first().map(String::as_str).unwrap_or("");
         println!(
             "{}  {}  {}  {}  {}",
             pad_left(&item.chat.id.to_string(), 6),
-            pad_right(
-                &truncate_display(&item.display_name, name_width),
-                name_width
-            ),
+            pad_right(name, name_width),
             pad_right(&truncate_display(space, space_width), space_width),
             pad_left(&item.unread_count.unwrap_or(0).to_string(), 6),
             pad_right(&truncate_display(preview, last_width), last_width),
         );
+        for continuation in name_lines.iter().skip(1) {
+            println!(
+                "{}  {}  {}  {}  {}",
+                pad_left("", 6),
+                pad_right(continuation, name_width),
+                pad_right("", space_width),
+                pad_left("", 6),
+                pad_right("", last_width),
+            );
+        }
     }
     Ok(())
 }
@@ -1083,6 +1092,66 @@ fn truncate_display(value: &str, max_width: usize) -> String {
     output
 }
 
+fn wrap_display_lines(value: &str, max_width: usize, max_lines: usize) -> Vec<String> {
+    if max_width == 0 || max_lines == 0 {
+        return Vec::new();
+    }
+
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if display_width(&normalized) <= max_width {
+        return vec![normalized];
+    }
+
+    let mut lines = Vec::new();
+    let mut remaining = normalized.as_str();
+    while !remaining.is_empty() && lines.len() < max_lines {
+        let is_last_line = lines.len() + 1 == max_lines;
+        if display_width(remaining) <= max_width {
+            lines.push(remaining.to_string());
+            break;
+        }
+        if is_last_line {
+            lines.push(truncate_display(remaining, max_width));
+            break;
+        }
+
+        let (line, rest) = take_display_line(remaining, max_width);
+        if line.is_empty() {
+            lines.push(truncate_display(remaining, max_width));
+            break;
+        }
+        lines.push(line);
+        remaining = rest.trim_start();
+    }
+
+    lines
+}
+
+fn take_display_line(value: &str, max_width: usize) -> (String, &str) {
+    let mut width = 0usize;
+    let mut end_index = 0usize;
+    let mut last_space_index = None;
+
+    for (index, ch) in value.char_indices() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + ch_width > max_width {
+            break;
+        }
+        if ch.is_whitespace() {
+            last_space_index = Some(index);
+        }
+        width += ch_width;
+        end_index = index + ch.len_utf8();
+    }
+
+    let split_index = last_space_index
+        .filter(|index| *index > 0)
+        .unwrap_or(end_index);
+    let line = value[..split_index].trim_end().to_string();
+    let rest = &value[split_index..];
+    (line, rest)
+}
+
 fn pad_right(value: &str, width: usize) -> String {
     let mut output = value.to_string();
     let current = display_width(value);
@@ -1163,6 +1232,27 @@ mod tests {
     fn truncate_display_preserves_display_width() {
         assert_eq!(truncate_display("hello world", 8), "hello...");
         assert_eq!(display_width(&truncate_display("hello world", 8)), 8);
+    }
+
+    #[test]
+    fn wrap_display_lines_uses_second_line_before_truncating() {
+        let lines = wrap_display_lines(
+            "jun 27 list of bugs and quality of life improvements for launch",
+            24,
+            2,
+        );
+
+        assert_eq!(lines.len(), 2);
+        assert!(!lines[0].ends_with("..."));
+        assert!(lines[1].ends_with("..."));
+        assert!(lines.iter().all(|line| display_width(line) <= 24));
+    }
+
+    #[test]
+    fn wrap_display_lines_keeps_titles_that_fit_two_rows() {
+        let lines = wrap_display_lines("jun 27 list of bugs and qol", 18, 2);
+
+        assert_eq!(lines, vec!["jun 27 list of", "bugs and qol"]);
     }
 
     #[test]

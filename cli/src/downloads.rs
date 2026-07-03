@@ -1,3 +1,4 @@
+use chrono::{TimeZone, Utc};
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
@@ -22,6 +23,29 @@ pub(crate) fn resolve_download_path(
         .unwrap_or_else(|| format!("message-{}.bin", message.id));
     let base_dir = dir.unwrap_or_else(|| PathBuf::from("."));
     Ok(base_dir.join(file_name))
+}
+
+pub(crate) fn resolve_batch_download_path(
+    message: &proto::Message,
+    dir: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let Some(media) = message.media.as_ref() else {
+        return Err(CliError::invalid_args("Message has no downloadable media.").into());
+    };
+    let descriptor = media_download_descriptor(media)?;
+    let prefix = format!(
+        "{}-MSG{}-{}-{}",
+        compact_message_date(message.date),
+        message.id,
+        descriptor.kind,
+        descriptor.media_id
+    );
+    let file_name = if let Some(original_name) = descriptor.original_name {
+        format!("{prefix}-{original_name}")
+    } else {
+        format!("{prefix}.{}", descriptor.extension)
+    };
+    Ok(available_path(dir.join(file_name)))
 }
 
 pub(crate) async fn download_message_media(
@@ -110,6 +134,120 @@ fn http_body_preview(body: &str) -> Option<String> {
     Some(preview)
 }
 
+struct MediaDownloadDescriptor {
+    kind: &'static str,
+    media_id: i64,
+    extension: String,
+    original_name: Option<String>,
+}
+
+fn media_download_descriptor(
+    media: &proto::MessageMedia,
+) -> Result<MediaDownloadDescriptor, CliError> {
+    match &media.media {
+        Some(proto::message_media::Media::Document(document)) => {
+            let document = document.document.as_ref().ok_or_else(|| {
+                CliError::invalid_args("Document media is missing file metadata.")
+            })?;
+            let original_name = sanitize_file_name(&document.file_name);
+            Ok(MediaDownloadDescriptor {
+                kind: "document",
+                media_id: document.id,
+                extension: original_name
+                    .as_deref()
+                    .and_then(file_extension)
+                    .unwrap_or("bin")
+                    .to_string(),
+                original_name,
+            })
+        }
+        Some(proto::message_media::Media::Video(video)) => {
+            let video = video
+                .video
+                .as_ref()
+                .ok_or_else(|| CliError::invalid_args("Video media is missing file metadata."))?;
+            Ok(MediaDownloadDescriptor {
+                kind: "video",
+                media_id: video.id,
+                extension: "mp4".to_string(),
+                original_name: None,
+            })
+        }
+        Some(proto::message_media::Media::Photo(photo)) => {
+            let photo = photo
+                .photo
+                .as_ref()
+                .ok_or_else(|| CliError::invalid_args("Photo media is missing file metadata."))?;
+            let extension = match proto::photo::Format::try_from(photo.format) {
+                Ok(proto::photo::Format::Png) => "png",
+                Ok(proto::photo::Format::Jpeg) => "jpg",
+                _ => "jpg",
+            };
+            Ok(MediaDownloadDescriptor {
+                kind: "photo",
+                media_id: photo.id,
+                extension: extension.to_string(),
+                original_name: None,
+            })
+        }
+        Some(proto::message_media::Media::Voice(voice)) => {
+            let voice = voice
+                .voice
+                .as_ref()
+                .ok_or_else(|| CliError::invalid_args("Voice media is missing file metadata."))?;
+            let extension = match voice.mime_type.as_str() {
+                "audio/mpeg" => "mp3",
+                "audio/wav" | "audio/x-wav" => "wav",
+                "audio/flac" => "flac",
+                _ => "ogg",
+            };
+            Ok(MediaDownloadDescriptor {
+                kind: "voice",
+                media_id: voice.id,
+                extension: extension.to_string(),
+                original_name: None,
+            })
+        }
+        Some(proto::message_media::Media::Nudge(_)) => Err(CliError::invalid_args(
+            "Nudge messages do not contain downloadable media.",
+        )),
+        None => Err(CliError::invalid_args("Message media is empty.")),
+    }
+}
+
+fn compact_message_date(timestamp: i64) -> String {
+    Utc.timestamp_opt(timestamp, 0)
+        .single()
+        .map(|date| date.format("%Y%m%d-%H%M").to_string())
+        .unwrap_or_else(|| "00000000-0000".to_string())
+}
+
+fn available_path(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let extension = path.extension().and_then(|value| value.to_str());
+
+    for suffix in 2.. {
+        let file_name = match extension {
+            Some(extension) if !extension.is_empty() => format!("{stem}-{suffix}.{extension}"),
+            _ => format!("{stem}-{suffix}"),
+        };
+        let candidate = parent.join(file_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded suffix loop should return a candidate path")
+}
+
 fn media_file_name(media: &proto::MessageMedia) -> Option<String> {
     match &media.media {
         Some(proto::message_media::Media::Document(document)) => document
@@ -141,6 +279,13 @@ fn media_file_name(media: &proto::MessageMedia) -> Option<String> {
         Some(proto::message_media::Media::Nudge(_)) => None,
         None => None,
     }
+}
+
+fn file_extension(name: &str) -> Option<&str> {
+    Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.trim().is_empty())
 }
 
 fn sanitize_file_name(name: &str) -> Option<String> {
@@ -217,5 +362,47 @@ mod tests {
             resolve_download_path(&fallback, None, Some(PathBuf::from("downloads"))).unwrap(),
             PathBuf::from("downloads").join("message-99.bin")
         );
+    }
+
+    #[test]
+    fn resolve_batch_download_path_prefixes_date_message_and_media_id() {
+        let message = proto::Message {
+            id: 91,
+            date: 0,
+            media: Some(proto::MessageMedia {
+                media: Some(proto::message_media::Media::Document(
+                    proto::MessageDocument {
+                        document: Some(proto::Document {
+                            id: 9981,
+                            file_name: "reports/report.pdf".to_string(),
+                            ..Default::default()
+                        }),
+                    },
+                )),
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_batch_download_path(&message, Path::new("downloads")).unwrap(),
+            PathBuf::from("downloads").join("19700101-0000-MSG91-document-9981-report.pdf")
+        );
+    }
+
+    #[test]
+    fn available_path_suffixes_existing_files() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "inline-cli-download-path-test-{}-{suffix}",
+            std::process::id(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("file.txt");
+        std::fs::write(&first, b"existing").unwrap();
+
+        assert_eq!(available_path(first), dir.join("file-2.txt"));
     }
 }
