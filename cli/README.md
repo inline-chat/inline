@@ -130,6 +130,19 @@ state diagnostics. Client identity includes the CLI client type/version,
 user-agent, OS version, and metadata header names sent to the API/realtime
 server.
 
+## Development
+
+Before committing CLI changes, run the local pre-commit check:
+
+```bash
+bun run --cwd cli precommit
+```
+
+That runs `cargo fmt`, applies machine-fixable clippy suggestions, then runs
+the same `bun run --cwd cli ci` command used by GitHub Actions. CI keeps
+rustfmt as the formatting authority; clippy still denies warnings, but allows
+format-argument style churn such as inlined format args.
+
 ## Notes
 
 The CLI is still early and may have bugs.
