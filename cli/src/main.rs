@@ -3190,7 +3190,7 @@ async fn send_messages_with_attachments(
         )
         .await?;
         let updates_len = send.updates.len();
-        updates.extend(send.updates.into_iter());
+        updates.extend(send.updates);
         if !json {
             println!(
                 "Sent {} (updates: {}).",
@@ -3538,30 +3538,40 @@ fn proto_user_matches_filter(user: &proto::User, needle: &str) -> bool {
     if user_display_name(user).to_lowercase().contains(needle) {
         return true;
     }
-    if let Some(first) = user.first_name.as_deref() {
-        if first.to_lowercase().contains(needle) {
-            return true;
-        }
+    if user
+        .first_name
+        .as_deref()
+        .is_some_and(|first| first.to_lowercase().contains(needle))
+    {
+        return true;
     }
-    if let Some(last) = user.last_name.as_deref() {
-        if last.to_lowercase().contains(needle) {
-            return true;
-        }
+    if user
+        .last_name
+        .as_deref()
+        .is_some_and(|last| last.to_lowercase().contains(needle))
+    {
+        return true;
     }
-    if let Some(username) = user.username.as_deref() {
-        if username.to_lowercase().contains(needle) {
-            return true;
-        }
+    if user
+        .username
+        .as_deref()
+        .is_some_and(|username| username.to_lowercase().contains(needle))
+    {
+        return true;
     }
-    if let Some(email) = user.email.as_deref() {
-        if email.to_lowercase().contains(needle) {
-            return true;
-        }
+    if user
+        .email
+        .as_deref()
+        .is_some_and(|email| email.to_lowercase().contains(needle))
+    {
+        return true;
     }
-    if let Some(phone) = user.phone_number.as_deref() {
-        if phone.to_lowercase().contains(needle) {
-            return true;
-        }
+    if user
+        .phone_number
+        .as_deref()
+        .is_some_and(|phone| phone.to_lowercase().contains(needle))
+    {
+        return true;
     }
     false
 }

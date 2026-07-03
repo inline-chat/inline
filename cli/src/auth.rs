@@ -44,10 +44,12 @@ impl AuthStore {
             Some(secrets) => secrets,
             None => return Ok(None),
         };
-        if let Some(api_base_url) = secrets.api_base_url.as_deref() {
-            if api_base_url != self.api_base_url {
-                return Ok(None);
-            }
+        if secrets
+            .api_base_url
+            .as_deref()
+            .is_some_and(|api_base_url| api_base_url != self.api_base_url)
+        {
+            return Ok(None);
         }
         Ok(secrets.token.filter(|token| !token.trim().is_empty()))
     }
@@ -118,10 +120,12 @@ impl AuthStore {
             None => return Ok(None),
         };
 
-        if let Some(api_base_url) = secrets.api_base_url.as_deref() {
-            if api_base_url != self.api_base_url {
-                return Ok(None);
-            }
+        if secrets
+            .api_base_url
+            .as_deref()
+            .is_some_and(|api_base_url| api_base_url != self.api_base_url)
+        {
+            return Ok(None);
         }
 
         Ok(Some(secrets))

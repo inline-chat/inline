@@ -74,10 +74,10 @@ impl ApiClient {
         let mut payload = serde_json::Map::new();
         payload.insert("email".to_string(), json!(email));
         payload.insert("code".to_string(), json!(code));
-        if let Some(challenge_token) = challenge_token {
-            if !challenge_token.trim().is_empty() {
-                payload.insert("challengeToken".to_string(), json!(challenge_token));
-            }
+        if let Some(challenge_token) =
+            challenge_token.filter(|challenge_token| !challenge_token.trim().is_empty())
+        {
+            payload.insert("challengeToken".to_string(), json!(challenge_token));
         }
         add_auth_metadata(&mut payload, metadata);
         self.post(url, payload).await

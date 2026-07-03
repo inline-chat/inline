@@ -468,10 +468,8 @@ fn should_use_stderr_color() -> bool {
     if std::env::var_os("NO_COLOR").is_some() {
         return false;
     }
-    if let Some(force) = std::env::var_os("CLICOLOR_FORCE") {
-        if force != "0" {
-            return true;
-        }
+    if std::env::var_os("CLICOLOR_FORCE").is_some_and(|force| force != "0") {
+        return true;
     }
     io::stderr().is_terminal()
 }

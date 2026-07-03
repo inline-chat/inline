@@ -47,10 +47,12 @@ impl LocalDb {
             Err(err) => return Err(StateError::Io(err)),
         };
         let state: LocalState = serde_json::from_str(&contents)?;
-        if let Some(api_base_url) = state.api_base_url.as_deref() {
-            if api_base_url != self.api_base_url {
-                return Ok(LocalState::default());
-            }
+        if state
+            .api_base_url
+            .as_deref()
+            .is_some_and(|api_base_url| api_base_url != self.api_base_url)
+        {
+            return Ok(LocalState::default());
         }
         Ok(state)
     }

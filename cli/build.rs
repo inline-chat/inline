@@ -52,6 +52,7 @@ fn main() {
     let include_paths = [proto_dir.to_string_lossy().to_string()];
 
     let mut config = prost_build::Config::new();
+    config.type_attribute(".", "#[allow(dead_code)]");
     config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
     config
         .compile_protos(&proto_paths, &include_paths)

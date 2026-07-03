@@ -483,33 +483,48 @@ pub(crate) fn user_summary(user: &proto::User) -> UserSummary {
 
 pub(crate) fn user_display_name(user: &proto::User) -> String {
     let mut parts = Vec::new();
-    if let Some(first) = user.first_name.as_deref() {
-        if !first.trim().is_empty() {
-            parts.push(first.trim());
-        }
+    if let Some(first) = user
+        .first_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|first| !first.is_empty())
+    {
+        parts.push(first);
     }
-    if let Some(last) = user.last_name.as_deref() {
-        if !last.trim().is_empty() {
-            parts.push(last.trim());
-        }
+    if let Some(last) = user
+        .last_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|last| !last.is_empty())
+    {
+        parts.push(last);
     }
     if !parts.is_empty() {
         return parts.join(" ");
     }
-    if let Some(username) = user.username.as_deref() {
-        if !username.trim().is_empty() {
-            return format!("@{}", username.trim());
-        }
+    if let Some(username) = user
+        .username
+        .as_deref()
+        .map(str::trim)
+        .filter(|username| !username.is_empty())
+    {
+        return format!("@{username}");
     }
-    if let Some(email) = user.email.as_deref() {
-        if !email.trim().is_empty() {
-            return email.trim().to_string();
-        }
+    if let Some(email) = user
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+    {
+        return email.to_string();
     }
-    if let Some(phone) = user.phone_number.as_deref() {
-        if !phone.trim().is_empty() {
-            return phone.trim().to_string();
-        }
+    if let Some(phone) = user
+        .phone_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|phone| !phone.is_empty())
+    {
+        return phone.to_string();
     }
     format!("user {}", user.id)
 }
@@ -1043,10 +1058,8 @@ fn should_use_color() -> bool {
     if env::var_os("NO_COLOR").is_some() {
         return false;
     }
-    if let Some(force) = env::var_os("CLICOLOR_FORCE") {
-        if force != "0" {
-            return true;
-        }
+    if env::var_os("CLICOLOR_FORCE").is_some_and(|force| force != "0") {
+        return true;
     }
     io::stdout().is_terminal()
 }

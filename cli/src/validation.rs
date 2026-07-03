@@ -92,14 +92,12 @@ pub(crate) fn validate_output_file_path_arg(
     name: &str,
     path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if let Ok(metadata) = fs::metadata(path) {
-        if metadata.is_dir() {
-            return Err(CliError::invalid_args(format!(
-                "{name} must be a file path, got directory: {}",
-                path.display()
-            ))
-            .into());
-        }
+    if fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
+        return Err(CliError::invalid_args(format!(
+            "{name} must be a file path, got directory: {}",
+            path.display()
+        ))
+        .into());
     }
 
     validate_parent_directory(name, path)
@@ -131,14 +129,12 @@ fn validate_parent_directory(name: &str, path: &Path) -> Result<(), Box<dyn std:
         return Ok(());
     };
 
-    if let Ok(metadata) = fs::metadata(parent) {
-        if !metadata.is_dir() {
-            return Err(CliError::invalid_args(format!(
-                "Parent for {name} must be a directory: {}",
-                parent.display()
-            ))
-            .into());
-        }
+    if fs::metadata(parent).is_ok_and(|metadata| !metadata.is_dir()) {
+        return Err(CliError::invalid_args(format!(
+            "Parent for {name} must be a directory: {}",
+            parent.display()
+        ))
+        .into());
     }
 
     Ok(())
@@ -210,10 +206,8 @@ pub(crate) fn parse_time_filters(
         .transpose()
         .map_err(|e| CliError::invalid_args(format!("invalid --until: {e}")))?;
 
-    if let (Some(s), Some(u)) = (since_ts, until_ts) {
-        if u < s {
-            return Err(CliError::invalid_time_range().into());
-        }
+    if matches!((since_ts, until_ts), (Some(s), Some(u)) if u < s) {
+        return Err(CliError::invalid_time_range().into());
     }
 
     Ok((since_ts, until_ts))
@@ -328,7 +322,8 @@ mod tests {
         assert_invalid_args(err, "Attachment not found");
 
         let empty_dir = TempTestDir::new("empty-attachment-dir");
-        let err = validate_attachment_inputs(&[empty_dir.path.clone()], u64::MAX).unwrap_err();
+        let err = validate_attachment_inputs(std::slice::from_ref(&empty_dir.path), u64::MAX)
+            .unwrap_err();
         assert_invalid_args(err, "Folder has no files to upload");
     }
 

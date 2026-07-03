@@ -31,10 +31,11 @@ pub(crate) fn apply_chat_list_limits(
     }
 
     payload.dialogs.retain(|dialog| {
-        if let Some(chat_id) = dialog.chat_id {
-            if kept_chat_ids.contains(&chat_id) {
-                return true;
-            }
+        if dialog
+            .chat_id
+            .is_some_and(|chat_id| kept_chat_ids.contains(&chat_id))
+        {
+            return true;
         }
         dialog
             .peer
@@ -120,12 +121,12 @@ pub(crate) fn apply_chat_list_filter(
             return true;
         }
 
-        if let Some(space_id) = chat.space_id {
-            if let Some(space) = spaces_by_id.get(&space_id) {
-                if space.name.to_lowercase().contains(needle) {
-                    return true;
-                }
-            }
+        if chat
+            .space_id
+            .and_then(|space_id| spaces_by_id.get(&space_id))
+            .is_some_and(|space| space.name.to_lowercase().contains(needle))
+        {
+            return true;
         }
 
         if chat.id.to_string().contains(needle) {
@@ -196,10 +197,8 @@ pub(crate) fn build_chat_list(
     let mut dialog_by_peer: HashMap<PeerKey, proto::Dialog> = HashMap::new();
     let mut dialog_by_chat_id: HashMap<i64, proto::Dialog> = HashMap::new();
     for dialog in &result.dialogs {
-        if let Some(peer) = dialog.peer.as_ref() {
-            if let Some(peer_key) = peer_key_from_peer(peer) {
-                dialog_by_peer.insert(peer_key, dialog.clone());
-            }
+        if let Some(peer_key) = dialog.peer.as_ref().and_then(peer_key_from_peer) {
+            dialog_by_peer.insert(peer_key, dialog.clone());
         }
         if let Some(chat_id) = dialog.chat_id {
             dialog_by_chat_id.insert(chat_id, dialog.clone());
@@ -326,29 +325,32 @@ pub(crate) fn chat_display_name(
     chat: &proto::Chat,
     users_by_id: &HashMap<i64, proto::User>,
 ) -> String {
-    if let Some(peer) = chat.peer_id.as_ref() {
-        if let Some(peer_user_id) = match &peer.r#type {
-            Some(proto::peer::Type::User(user)) => Some(user.user_id),
-            _ => None,
-        } {
-            if let Some(user) = users_by_id.get(&peer_user_id) {
-                let mut name = user_display_name(user);
-                if let Some(emoji) = chat.emoji.as_deref() {
-                    if !emoji.trim().is_empty() {
-                        name = format!("{} {}", emoji.trim(), name);
-                    }
-                }
-                return name;
-            }
+    let peer_user_id = chat.peer_id.as_ref().and_then(|peer| match &peer.r#type {
+        Some(proto::peer::Type::User(user)) => Some(user.user_id),
+        _ => None,
+    });
+    if let Some(user) = peer_user_id.and_then(|peer_user_id| users_by_id.get(&peer_user_id)) {
+        let mut name = user_display_name(user);
+        if let Some(emoji) = chat
+            .emoji
+            .as_deref()
+            .map(str::trim)
+            .filter(|emoji| !emoji.is_empty())
+        {
+            name = format!("{emoji} {name}");
         }
+        return name;
     }
 
     let title = chat.title.trim();
     if !title.is_empty() {
-        if let Some(emoji) = chat.emoji.as_deref() {
-            if !emoji.trim().is_empty() {
-                return format!("{} {}", emoji.trim(), title);
-            }
+        if let Some(emoji) = chat
+            .emoji
+            .as_deref()
+            .map(str::trim)
+            .filter(|emoji| !emoji.is_empty())
+        {
+            return format!("{emoji} {title}");
         }
         return title.to_string();
     }

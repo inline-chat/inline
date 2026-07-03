@@ -137,13 +137,14 @@ async fn run_update_inner(
                 "Updated inline to v{latest} (installed to {}).",
                 install_outcome.install_path.display()
             );
-            if !install_outcome.path_on_env {
-                if let Some(parent) = install_outcome.install_path.parent() {
-                    eprintln!(
-                        "{} is not on your PATH. Add it to run the updated inline.",
-                        parent.display()
-                    );
-                }
+            if let Some(parent) = (!install_outcome.path_on_env)
+                .then(|| install_outcome.install_path.parent())
+                .flatten()
+            {
+                eprintln!(
+                    "{} is not on your PATH. Add it to run the updated inline.",
+                    parent.display()
+                );
             }
         } else {
             println!("Updated inline to v{latest}.");
@@ -168,23 +169,21 @@ pub fn spawn_update_check(
         return None;
     }
     let now = current_epoch_seconds();
-    if let Ok(state) = local_db.load() {
-        if state.release_manifest_url.as_deref() == Some(&manifest_url) {
-            if let Some(last_attempt) = state.last_update_attempt_at {
-                if now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS {
-                    return None;
-                }
-            }
-        }
+    let recently_attempted = local_db.load().ok().is_some_and(|state| {
+        state.release_manifest_url.as_deref() == Some(&manifest_url)
+            && state.last_update_attempt_at.is_some_and(|last_attempt| {
+                now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS
+            })
+    });
+    if recently_attempted {
+        return None;
     }
 
     Some(tokio::spawn(async move {
-        if let Err(error) =
-            check_for_update(manifest_url, install_url, local_db, current_version, json).await
-        {
-            if cfg!(debug_assertions) {
-                eprintln!("update check failed: {error}");
-            }
+        let update_result =
+            check_for_update(manifest_url, install_url, local_db, current_version, json).await;
+        if let (true, Err(error)) = (cfg!(debug_assertions), update_result) {
+            eprintln!("update check failed: {error}");
         }
     }))
 }
@@ -220,10 +219,11 @@ async fn check_for_update(
         state.last_seen_release_version = None;
     }
 
-    if let Some(last_attempt) = state.last_update_attempt_at {
-        if now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS {
-            return Ok(());
-        }
+    if state
+        .last_update_attempt_at
+        .is_some_and(|last_attempt| now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS)
+    {
+        return Ok(());
     }
 
     // Mark attempt early so we don't keep spawning checks if the CLI exits quickly.
@@ -469,7 +469,7 @@ fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(
         if status.success() {
             return Ok(());
         }
-        return Err(io::Error::new(io::ErrorKind::Other, "sudo install failed"));
+        return Err(io::Error::other("sudo install failed"));
     }
 
     let status = Command::new("sudo")
@@ -478,7 +478,7 @@ fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(
         .arg(install_path)
         .status()?;
     if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "sudo copy failed"));
+        return Err(io::Error::other("sudo copy failed"));
     }
     let status = Command::new("sudo")
         .arg("chmod")
@@ -486,7 +486,7 @@ fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(
         .arg(install_path)
         .status()?;
     if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "sudo chmod failed"));
+        return Err(io::Error::other("sudo chmod failed"));
     }
     Ok(())
 }
