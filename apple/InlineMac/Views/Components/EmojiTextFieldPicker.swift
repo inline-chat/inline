@@ -43,13 +43,18 @@ struct EmojiTextFieldPicker<Label: View>: View {
       .disabled(isDisabled)
       .help(isDisabled ? "" : "Change icon")
       .accessibilityLabel(accessibilityLabel)
-      .popover(isPresented: $isPickerPresented, arrowEdge: .bottom) {
-        EmojiPickerPopover { selectedEmoji in
-          if let selectedEmoji = EmojiPickerValue.normalizedEmoji(from: selectedEmoji) {
-            emoji = selectedEmoji
+      .background {
+        EmojiPickerPopoverPresenter(
+          isPresented: $isPickerPresented,
+          preferredEdge: .maxY,
+          onSelect: { selectedEmoji in
+            if let selectedEmoji = EmojiPickerValue.normalizedEmoji(from: selectedEmoji) {
+              emoji = selectedEmoji
+            }
+            isPickerPresented = false
           }
-          isPickerPresented = false
-        }
+        )
+        .allowsHitTesting(false)
       }
 
       if showsClearButton {
