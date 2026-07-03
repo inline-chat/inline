@@ -7,10 +7,18 @@ export const V1_OPENAPI_SOURCE_URL = `${INLINE_API_ORIGIN}/v1/reference/json`
 export const MCP_CONNECT_URL = `${INLINE_MCP_ORIGIN}/mcp`
 export const MCP_AUTHORIZATION_SERVER_URL = `${INLINE_API_ORIGIN}/.well-known/oauth-authorization-server`
 export const INTEGRATIONS_DECLARATION_URL = `${INLINE_ORIGIN}/.well-known/integrations.json`
+export const API_CATALOG_URL = `${INLINE_ORIGIN}/.well-known/api-catalog`
+export const API_CATALOG_PROFILE_URL = "https://www.rfc-editor.org/info/rfc9727"
 
 export const PUBLIC_JSON_HEADERS = {
   "cache-control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
   "content-type": "application/json; charset=utf-8",
+} as const
+
+export const PUBLIC_LINKSET_HEADERS = {
+  "cache-control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+  "content-type": `application/linkset+json; profile="${API_CATALOG_PROFILE_URL}"; charset=utf-8`,
+  link: `<${API_CATALOG_URL}>; rel="api-catalog"; type="application/linkset+json"; profile="${API_CATALOG_PROFILE_URL}"`,
 } as const
 
 export const UNCACHED_JSON_HEADERS = {
@@ -49,7 +57,6 @@ export const integrationsDeclaration = {
     [inlineOauthCredentialId]: {
       type: "oauth2",
       label: "Inline MCP OAuth",
-      authorizationServer: MCP_AUTHORIZATION_SERVER_URL,
       setup:
         "Connect to the MCP server and complete Inline OAuth 2.1 with PKCE. Grant the requested MCP scopes and choose the spaces, DMs, and home threads the client may access.",
     },
@@ -112,33 +119,6 @@ export const integrationsDeclaration = {
       },
     },
     {
-      slug: "inline-realtime-api",
-      name: "Inline Realtime API",
-      type: "websocket",
-      docs: `${INLINE_ORIGIN}/docs/realtime-api`,
-      url: "wss://api.inline.chat/realtime",
-      package: "@inline-chat/realtime-sdk",
-      basis: declaredBasis,
-      auth: {
-        status: "required",
-        entries: [
-          {
-            use: [
-              {
-                id: inlineBearerCredentialId,
-                mechanics: {
-                  source: "websocket",
-                  in: "connection_init",
-                  fieldName: "token",
-                },
-              },
-            ],
-            basis: declaredBasis,
-          },
-        ],
-      },
-    },
-    {
       slug: "inline-mcp-server",
       name: "Inline MCP server",
       type: "mcp",
@@ -154,8 +134,7 @@ export const integrationsDeclaration = {
               {
                 id: inlineOauthCredentialId,
                 mechanics: {
-                  source: "oauth2",
-                  authorizationServer: MCP_AUTHORIZATION_SERVER_URL,
+                  source: "well-known",
                 },
               },
             ],
@@ -169,12 +148,7 @@ export const integrationsDeclaration = {
       name: "Inline CLI",
       type: "cli",
       docs: `${INLINE_ORIGIN}/docs/cli`,
-      url: `${INLINE_ORIGIN}/cli/install.sh`,
       command: "inline",
-      install: {
-        homebrew: "brew tap inline-chat/homebrew-inline && brew install --cask inline",
-        script: "curl -fsSL https://inline.chat/cli/install.sh | sh",
-      },
       basis: declaredBasis,
       auth: {
         status: "required",
@@ -184,8 +158,9 @@ export const integrationsDeclaration = {
               {
                 id: inlineBearerCredentialId,
                 mechanics: {
-                  source: "environment",
-                  variable: "INLINE_TOKEN",
+                  source: "cli",
+                  command: "inline auth login",
+                  env: ["INLINE_TOKEN"],
                 },
               },
             ],
@@ -195,6 +170,40 @@ export const integrationsDeclaration = {
       },
     },
   ],
+} as const
+
+export const apiCatalog = {
+  linkset: [
+    {
+      anchor: INLINE_API_ORIGIN,
+      "service-desc": [{ href: `${INLINE_ORIGIN}/openapi.json`, type: "application/json" }],
+      "service-doc": [{ href: `${INLINE_ORIGIN}/docs/bot-api`, type: "text/html" }],
+      "service-meta": [{ href: INTEGRATIONS_DECLARATION_URL, type: "application/json" }],
+    },
+    {
+      anchor: `${INLINE_API_ORIGIN}/v1`,
+      "service-desc": [{ href: V1_OPENAPI_SOURCE_URL, type: "application/json" }],
+      "service-doc": [{ href: `${INLINE_ORIGIN}/docs/developers`, type: "text/html" }],
+      "service-meta": [{ href: INTEGRATIONS_DECLARATION_URL, type: "application/json" }],
+    },
+    {
+      anchor: MCP_CONNECT_URL,
+      "service-doc": [{ href: `${INLINE_ORIGIN}/docs/mcp`, type: "text/html" }],
+      "service-meta": [
+        { href: `${INLINE_ORIGIN}/.well-known/mcp/server-card.json`, type: "application/json" },
+        { href: `${INLINE_MCP_ORIGIN}/.well-known/oauth-protected-resource`, type: "application/json" },
+      ],
+    },
+  ],
+} as const
+
+export const oauthProtectedResource = {
+  resource: INLINE_MCP_ORIGIN,
+  authorization_servers: [INLINE_API_ORIGIN],
+  scopes_supported: ["offline_access", "messages:read", "messages:write", "spaces:read"],
+  bearer_methods_supported: ["header"],
+  resource_name: "Inline MCP server",
+  resource_documentation: `${INLINE_ORIGIN}/docs/mcp`,
 } as const
 
 export async function fetchCanonicalOpenApiResponse(): Promise<Response> {
