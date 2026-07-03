@@ -13,6 +13,81 @@ tool_dir="${root_dir}/.tmp/tools/swiftlint-${SWIFTLINT_VERSION}"
 zip_path="${tool_dir}/portable_swiftlint.zip"
 swiftlint_bin="${tool_dir}/swiftlint"
 
+normalize_lint_path() {
+  local path="$1"
+
+  case "${path}" in
+    "${apple_dir}" | "${root_dir}/apple" | apple | ./apple)
+      printf '.\n'
+      return
+      ;;
+    "${apple_dir}/"*)
+      printf '%s\n' "${path#"${apple_dir}/"}"
+      return
+      ;;
+    "${root_dir}/apple/"*)
+      printf '%s\n' "${path#"${root_dir}/apple/"}"
+      return
+      ;;
+    apple/*)
+      printf '%s\n' "${path#apple/}"
+      return
+      ;;
+    ./apple/*)
+      printf '%s\n' "${path#./apple/}"
+      return
+      ;;
+  esac
+
+  if [ -e "${apple_dir}/${path}" ]; then
+    printf '%s\n' "${path}"
+    return
+  fi
+
+  if [ -e "${root_dir}/${path}" ]; then
+    printf '%s\n' "${root_dir}/${path}"
+    return
+  fi
+
+  printf '%s\n' "${path}"
+}
+
+swiftlint_args=()
+expecting_option_value=false
+normalizing_paths=false
+for arg in "$@"; do
+  if [ "${expecting_option_value}" = true ]; then
+    swiftlint_args+=("${arg}")
+    expecting_option_value=false
+    continue
+  fi
+
+  if [ "${normalizing_paths}" = true ]; then
+    swiftlint_args+=("$(normalize_lint_path "${arg}")")
+    continue
+  fi
+
+  case "${arg}" in
+    --)
+      swiftlint_args+=("${arg}")
+      normalizing_paths=true
+      ;;
+    --config | --reporter | --baseline | --write-baseline | --working-directory | --output | --only-rule | --cache-path)
+      swiftlint_args+=("${arg}")
+      expecting_option_value=true
+      ;;
+    --config=* | --reporter=* | --baseline=* | --write-baseline=* | --working-directory=* | --output=* | --only-rule=* | --cache-path=*)
+      swiftlint_args+=("${arg}")
+      ;;
+    -*)
+      swiftlint_args+=("${arg}")
+      ;;
+    *)
+      swiftlint_args+=("$(normalize_lint_path "${arg}")")
+      ;;
+  esac
+done
+
 use_system_swiftlint=false
 if command -v swiftlint >/dev/null 2>&1; then
   system_version="$(swiftlint version 2>/dev/null || true)"
@@ -47,4 +122,4 @@ if [ "${use_system_swiftlint}" = false ]; then
 fi
 
 cd "${apple_dir}"
-exec "${swiftlint_bin}" lint --force-exclude "$@"
+exec "${swiftlint_bin}" lint --force-exclude "${swiftlint_args[@]}"
