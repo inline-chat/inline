@@ -11,6 +11,6 @@
     "lint:fix": "cargo clippy --fix --locked --all-targets --allow-dirty --allow-staged -- -D warnings -A clippy::uninlined_format_args -A clippy::to_string_in_format_args -A clippy::literal_string_with_formatting_args",
     "test": "cargo test --locked",
     "ci": "bun run format && bun run typecheck && bun run build && bun run lint && bun run test",
-    "precommit": "bun run format:fix && bun run lint:fix && bun run ci"
+    "precommit": "bun run format:fix && bun run lint:fix && bun run format:fix && bun run ci"
   }
 }

@@ -138,10 +138,11 @@ Before committing CLI changes, run the local pre-commit check:
 bun run --cwd cli precommit
 ```
 
-That runs `cargo fmt`, applies machine-fixable clippy suggestions, then runs
-the same `bun run --cwd cli ci` command used by GitHub Actions. CI keeps
-rustfmt as the formatting authority; clippy still denies warnings, but allows
-format-argument style churn such as inlined format args.
+That uses the pinned Rust toolchain in `cli/rust-toolchain.toml`, runs
+`cargo fmt`, applies machine-fixable clippy suggestions, runs `cargo fmt`
+again, then runs the same `bun run --cwd cli ci` command used by GitHub
+Actions. CI keeps rustfmt as the formatting authority; clippy still denies
+warnings, but allows format-argument style churn such as inlined format args.
 
 ## Notes
 

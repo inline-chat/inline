@@ -218,10 +218,10 @@ pub(crate) fn build_message_export_bundle(
 
     for row in &rows {
         user_ids.insert(row.from_id);
-        if let Some(reply) = &row.reply_to {
-            if let Some(from_id) = reply.from_id {
-                user_ids.insert(from_id);
-            }
+        if let Some(reply) = &row.reply_to
+            && let Some(from_id) = reply.from_id
+        {
+            user_ids.insert(from_id);
         }
         if let Some(forward) = &row.forwarded_from {
             user_ids.insert(forward.from_id);
@@ -240,10 +240,10 @@ pub(crate) fn build_message_export_bundle(
     }
 
     for chat_id in &chat_ids {
-        if let Some(chat) = chats_by_id.get(chat_id) {
-            if let Some(space_id) = chat.space_id {
-                space_ids.insert(space_id);
-            }
+        if let Some(chat) = chats_by_id.get(chat_id)
+            && let Some(space_id) = chat.space_id
+        {
+            space_ids.insert(space_id);
         }
     }
 
@@ -630,14 +630,14 @@ fn render_markdown(bundle: &MessageExportBundle) -> String {
         }
         output.push_str("\n\n");
 
-        if let Some(reply) = &message.reply_to {
-            if let Some(display_text) = reply.display_text.as_deref() {
-                output.push_str("*Replying to ");
-                output.push_str(reply.sender_name.as_deref().unwrap_or("message"));
-                output.push_str(": \"");
-                output.push_str(&markdown_inline_preview(display_text));
-                output.push_str("\"*\n\n");
-            }
+        if let Some(reply) = &message.reply_to
+            && let Some(display_text) = reply.display_text.as_deref()
+        {
+            output.push_str("*Replying to ");
+            output.push_str(reply.sender_name.as_deref().unwrap_or("message"));
+            output.push_str(": \"");
+            output.push_str(&markdown_inline_preview(display_text));
+            output.push_str("\"*\n\n");
         }
 
         if let Some(forward) = &message.forwarded_from {
@@ -648,12 +648,12 @@ fn render_markdown(bundle: &MessageExportBundle) -> String {
             }
             output.push_str(forward.sender_name.as_deref().unwrap_or("unknown sender"));
             output.push_str(":\n\n");
-            if let Some(source) = &forward.message {
-                if let Some(display_text) = source.display_text.as_deref() {
-                    output.push_str("> ");
-                    output.push_str(&display_text.replace('\n', "\n> "));
-                    output.push_str("\n\n");
-                }
+            if let Some(source) = &forward.message
+                && let Some(display_text) = source.display_text.as_deref()
+            {
+                output.push_str("> ");
+                output.push_str(&display_text.replace('\n', "\n> "));
+                output.push_str("\n\n");
             }
         }
 

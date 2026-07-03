@@ -4448,7 +4448,7 @@ async fn download_messages_media(
         .map(|(index, message)| (message.id, index))
         .collect::<HashMap<_, _>>();
 
-    let results = stream::iter(downloadable_messages.into_iter())
+    let results = stream::iter(downloadable_messages)
         .map(|message| {
             let dir = dir.to_path_buf();
             async move {
