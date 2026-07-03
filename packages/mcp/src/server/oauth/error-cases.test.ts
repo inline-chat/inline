@@ -19,6 +19,8 @@ describe("oauth proxy error cases", () => {
     expect(body.resource).toBe("https://mcp.inline.chat")
     expect(body.authorization_servers).toEqual(["https://api.inline.chat"])
     expect(body.bearer_methods_supported).toEqual(["header"])
+    expect(body.resource_name).toBe("Inline MCP")
+    expect(body.resource_documentation).toBe("https://inline.chat")
   })
 
   it("returns 502 when oauth upstream throws", async () => {

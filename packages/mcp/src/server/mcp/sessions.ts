@@ -49,7 +49,7 @@ export class McpSessionManager {
     close: () => Promise<void>
   }): { transport: WebStandardStreamableHTTPServerTransport } {
     const transport = new WebStandardStreamableHTTPServerTransport({
-      ...(params.transportOptions ?? {}),
+      ...params.transportOptions,
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: async (sid: string) => {
         const now = Date.now()

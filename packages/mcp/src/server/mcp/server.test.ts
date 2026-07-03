@@ -7,6 +7,7 @@ import type { McpGrant } from "./grant"
 import type {
   InlineApi,
   InlineConversationResolution,
+  InlineEligibleChat,
   InlineRecentMessagesResult,
   InlineSearchMessagesResult,
   InlineUnreadMessagesResult,
@@ -44,6 +45,28 @@ async function waitForResponse(sent: Sent[], id: number, timeoutMs = 500): Promi
   throw new Error("missing response")
 }
 
+function createAuthInfo(scopes: string[]): AuthInfo {
+  return { token: "t", clientId: "c1", scopes, expiresAt: Math.floor(Date.now() / 1000) + 3600 }
+}
+
+async function connectAndInitialize(server: ReturnType<typeof createInlineMcpServer>, authInfo: AuthInfo) {
+  const { transport, sent } = createFakeTransport()
+  await server.connect(transport as any)
+  await sendRequest(
+    transport,
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "0" } },
+    } as any,
+    { authInfo },
+  )
+  const initialize = await waitForResponse(sent, 1)
+  await sendRequest(transport, { jsonrpc: "2.0", method: "notifications/initialized", params: {} } as any, { authInfo })
+  return { transport, sent, initialize }
+}
+
 function lastMessagesSendAuditRecord(infoSpy: ReturnType<typeof vi.spyOn>) {
   const serialized = infoSpy.mock.calls
     .map((call: unknown[]) => call[0])
@@ -76,34 +99,93 @@ const grant: McpGrant = {
   allowHomeThreads: false,
 }
 
+function defaultEligibleChat(overrides: Partial<InlineEligibleChat> = {}): InlineEligibleChat {
+  return {
+    chatId: 7n,
+    title: "General",
+    chatTitle: "General",
+    kind: "space_chat",
+    spaceId: 10n,
+    spaceName: "Inline",
+    peerUserId: null,
+    peerDisplayName: null,
+    peerUsername: null,
+    archived: false,
+    pinned: false,
+    unreadCount: 0,
+    readMaxId: null,
+    lastMessageId: null,
+    lastMessageDate: null,
+    ...overrides,
+  }
+}
+
 function createInlineStub(overrides: Partial<InlineApi>): InlineApi {
   return {
     async close() {},
+    async listSpaces() {
+      return [
+        {
+          id: 10n,
+          name: "Inline",
+          creator: true,
+          date: 100n,
+          isPublic: false,
+          chatCount: 1,
+          unreadCount: 0,
+          lastMessageDate: null,
+        },
+      ]
+    },
+    async searchPeople() {
+      return {
+        query: null,
+        bestMatch: null,
+        items: [],
+      }
+    },
     async getEligibleChats() {
       return []
     },
     async resolveConversation(): Promise<InlineConversationResolution> {
       return { query: "", selected: null, candidates: [] }
     },
+    async getConversation() {
+      return {
+        chat: defaultEligibleChat(),
+        description: null,
+        emoji: null,
+        isPublic: false,
+        date: 100n,
+        createdBy: 1n,
+        parentChatId: null,
+        parentMessageId: null,
+        number: null,
+        pinnedMessageIds: [],
+        groupParticipantCount: 0,
+        participants: [],
+      }
+    },
+    async messageContext() {
+      return {
+        chat: defaultEligibleChat(),
+        anchorMessageId: null,
+        before: 8,
+        after: 8,
+        includeAnchor: true,
+        content: "all",
+        messages: [],
+      }
+    },
+    async getMessages() {
+      return {
+        chat: defaultEligibleChat(),
+        messages: [],
+      }
+    },
     async recentMessages(): Promise<InlineRecentMessagesResult> {
       return {
-        chat: {
-          chatId: 7n,
-          title: "General",
-          chatTitle: "General",
-          kind: "space_chat",
-          spaceId: 10n,
-          spaceName: "Inline",
-          peerUserId: null,
-          peerDisplayName: null,
-          peerUsername: null,
-          archived: false,
-          pinned: false,
-          unreadCount: 0,
-          readMaxId: null,
-          lastMessageId: null,
-          lastMessageDate: null,
-        },
+        chat: defaultEligibleChat(),
         direction: "all",
         scannedCount: 0,
         nextOffsetId: null,
@@ -179,6 +261,270 @@ function createInlineStub(overrides: Partial<InlineApi>): InlineApi {
 describe("mcp tool server", () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it("tools/list exposes instructions, output schemas, annotations, and auth metadata", async () => {
+    const inline = createInlineStub({})
+    const server = createInlineMcpServer({ grant, inline })
+    const authInfo = createAuthInfo(["messages:read", "messages:write"])
+    const { transport, sent, initialize } = await connectAndInitialize(server, authInfo)
+
+    expect(initialize.result.serverInfo.title).toBe("Inline")
+    expect(initialize.result.serverInfo.description).toContain("work chats")
+    expect(initialize.result.instructions).toContain("Resolve people, spaces, or thread names")
+    expect(initialize.result.instructions).toContain("Use account.me")
+
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} } as any, { authInfo })
+
+    const res = await waitForResponse(sent, 2)
+    const tools = res.result.tools as Array<any>
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "account.me",
+      "spaces.list",
+      "people.search",
+      "conversations.list",
+      "conversations.get",
+      "conversations.create",
+      "files.upload",
+      "files.get",
+      "messages.send_media",
+      "messages.send_batch",
+      "messages.list",
+      "messages.context",
+      "messages.search",
+      "messages.unread",
+      "messages.send",
+    ])
+
+    for (const tool of tools) {
+      expect(tool.outputSchema?.type).toBe("object")
+      expect(tool._meta?.securitySchemes?.[0]?.type).toBe("oauth2")
+    }
+
+    const accountMe = tools.find((tool) => tool.name === "account.me")
+    expect(accountMe.inputSchema).toMatchObject({ type: "object", properties: {} })
+    expect(accountMe._meta.securitySchemes[0].scopes).toEqual([])
+
+    const send = tools.find((tool) => tool.name === "messages.send")
+    expect(send.description).toContain("Provide exactly one of chatId or userId")
+    expect(send.annotations.readOnlyHint).toBe(false)
+    expect(send.annotations.destructiveHint).toBe(false)
+    expect(send.annotations.idempotentHint).toBe(false)
+    expect(send._meta.securitySchemes[0].scopes).toEqual(["messages:write"])
+
+    const list = tools.find((tool) => tool.name === "messages.list")
+    expect(list.annotations.readOnlyHint).toBe(true)
+    expect(list.outputSchema.properties.messages.type).toBe("array")
+    expect(list.outputSchema.properties.messages.items.properties.uri.type).toBe("string")
+    expect(list.inputSchema.properties.direction).toBeUndefined()
+    expect(list.inputSchema.properties.unreadOnly).toBeUndefined()
+    expect(send.inputSchema.properties.parseMarkdown).toBeUndefined()
+
+    const spaces = tools.find((tool) => tool.name === "spaces.list")
+    expect(spaces._meta.securitySchemes[0].scopes).toEqual(["spaces:read"])
+    const context = tools.find((tool) => tool.name === "messages.context")
+    expect(context.outputSchema.properties.messages.type).toBe("array")
+  })
+
+  it("account.me returns scoped account and allowed context", async () => {
+    const inline = createInlineStub({})
+    const scopedGrant: McpGrant = {
+      ...grant,
+      inlineUserId: 42n,
+      scope: "messages:read",
+      spaceIds: [10n, 20n],
+      allowDms: true,
+      allowHomeThreads: true,
+    }
+    const server = createInlineMcpServer({ grant: scopedGrant, inline })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "account.me", arguments: {} } } as any, {
+      authInfo,
+    })
+
+    const res = await waitForResponse(sent, 2)
+    expect(res.result.isError).toBeUndefined()
+    expect(res.result.structuredContent).toEqual({
+      user: { id: "42" },
+      session: {
+        clientId: "c1",
+        scopes: ["messages:read"],
+        expiresAt: authInfo.expiresAt,
+      },
+      allowed: {
+        spaceIds: ["10", "20"],
+        allowDms: true,
+        allowHomeThreads: true,
+      },
+      hints: expect.arrayContaining([expect.stringContaining("conversations.list")]),
+    })
+  })
+
+  it("supports discovery, context, and file lookup workflow", async () => {
+    const calls: string[] = []
+    const fileMessage = {
+      id: 44n,
+      fromId: 2n,
+      chatId: 7n,
+      message: "Spec attached",
+      out: false,
+      date: 1700000000n,
+      media: {
+        media: {
+          oneofKind: "document",
+          document: {
+            document: {
+              id: 900n,
+              fileName: "spec.pdf",
+              mimeType: "application/pdf",
+              size: 4567,
+              cdnUrl: "https://cdn.example/spec.pdf",
+            },
+          },
+        },
+      },
+    } as any
+    const inline = createInlineStub({
+      async listSpaces({ query, limit }) {
+        calls.push("spaces")
+        expect(query).toBe("inline")
+        expect(limit).toBe(5)
+        return [
+          {
+            id: 10n,
+            name: "Inline",
+            creator: true,
+            date: 100n,
+            isPublic: false,
+            chatCount: 3,
+            unreadCount: 2,
+            lastMessageDate: 1700000000n,
+          },
+        ]
+      },
+      async searchPeople({ query, limit }) {
+        calls.push("people")
+        expect(query).toBe("dena")
+        expect(limit).toBe(5)
+        const dena = {
+          userId: 2n,
+          displayName: "Dena",
+          username: "dena",
+          firstName: "Dena",
+          lastName: null,
+          dmChatId: 70n,
+          spaceIds: [10n],
+          spaceNames: ["Inline"],
+          score: 850,
+          matchReasons: ["username_exact", "dm_preference"],
+        }
+        return { query: "dena", bestMatch: dena, items: [dena] }
+      },
+      async getConversation({ chatId }) {
+        calls.push("conversation")
+        expect(chatId).toBe(7n)
+        return {
+          chat: defaultEligibleChat({ chatId: 7n, title: "Roadmap", chatTitle: "Roadmap", lastMessageId: 44n, lastMessageDate: 1700000000n }),
+          description: "Shipping plan",
+          emoji: "R",
+          isPublic: true,
+          date: 100n,
+          createdBy: 1n,
+          parentChatId: null,
+          parentMessageId: null,
+          number: 12,
+          pinnedMessageIds: [40n],
+          groupParticipantCount: 0,
+          participants: [
+            {
+              userId: 2n,
+              displayName: "Dena",
+              username: "dena",
+              firstName: "Dena",
+              lastName: null,
+              dmChatId: null,
+              spaceIds: [10n],
+              spaceNames: ["Inline"],
+            },
+          ],
+        }
+      },
+      async messageContext({ chatId, anchorMessageId, before, after, includeAnchor, content }) {
+        calls.push("context")
+        expect(chatId).toBe(7n)
+        expect(anchorMessageId).toBe(44n)
+        expect(before).toBe(2)
+        expect(after).toBe(1)
+        expect(includeAnchor).toBe(true)
+        expect(content).toBe("all")
+        return {
+          chat: defaultEligibleChat({ chatId: 7n, title: "Roadmap", chatTitle: "Roadmap" }),
+          anchorMessageId: 44n,
+          before: 2,
+          after: 1,
+          includeAnchor: true,
+          content: "all",
+          messages: [fileMessage],
+        }
+      },
+      async getMessages({ chatId, messageIds }) {
+        calls.push("files")
+        expect(chatId).toBe(7n)
+        expect(messageIds).toEqual([44n])
+        return {
+          chat: defaultEligibleChat({ chatId: 7n, title: "Roadmap", chatTitle: "Roadmap" }),
+          messages: [fileMessage],
+        }
+      },
+    })
+
+    const server = createInlineMcpServer({ grant, inline })
+    const authInfo = createAuthInfo(["messages:read", "messages:write", "spaces:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "spaces.list", arguments: { query: "inline", limit: 5 } } } as any, {
+      authInfo,
+    })
+    expect((await waitForResponse(sent, 2)).result.structuredContent.items[0]).toMatchObject({ id: "10", name: "Inline", chatCount: 3 })
+
+    await sendRequest(transport, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "people.search", arguments: { query: "dena", limit: 5 } } } as any, {
+      authInfo,
+    })
+    expect((await waitForResponse(sent, 3)).result.structuredContent.bestMatch).toMatchObject({ userId: "2", uri: "inline://user/2", username: "dena", dmChatId: "70" })
+
+    await sendRequest(transport, { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "conversations.get", arguments: { chatId: "7" } } } as any, {
+      authInfo,
+    })
+    const conversation = await waitForResponse(sent, 4)
+    expect(conversation.result.structuredContent.chat.uri).toBe("inline://chat/7")
+    expect(conversation.result.structuredContent.details).toMatchObject({ description: "Shipping plan", number: 12, pinnedMessageIds: ["40"] })
+    expect(conversation.result.structuredContent.participants[0]).toMatchObject({ userId: "2", uri: "inline://user/2" })
+
+    await sendRequest(
+      transport,
+      { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "messages.context", arguments: { chatId: "7", anchorMessageId: "44", before: 2, after: 1 } } } as any,
+      { authInfo },
+    )
+    const context = await waitForResponse(sent, 5)
+    expect(context.result.structuredContent.anchorMessageId).toBe("44")
+    expect(context.result.structuredContent.messages[0].uri).toBe("inline://chat/7/message/44")
+    expect(context.result.structuredContent.messages[0].media.fileName).toBe("spec.pdf")
+
+    await sendRequest(transport, { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "files.get", arguments: { chatId: "7", messageId: "44" } } } as any, {
+      authInfo,
+    })
+    const files = await waitForResponse(sent, 6)
+    expect(files.result.structuredContent.items[0].message.uri).toBe("inline://chat/7/message/44")
+    expect(files.result.structuredContent.items[0].files[0]).toMatchObject({
+      source: "message_media",
+      messageId: "44",
+      kind: "document",
+      id: "900",
+      fileName: "spec.pdf",
+    })
+    expect(calls).toEqual(["spaces", "people", "conversation", "context", "files"])
   })
 
   it("conversations.list returns ranked candidates and best match for query", async () => {
@@ -294,6 +640,7 @@ describe("mcp tool server", () => {
     expect(typeof text).toBe("string")
     const payload = JSON.parse(text)
     expect(payload.query).toBe("dena")
+    expect(payload.sort).toBe("relevance")
     expect(payload.bestMatch.chatId).toBe("7")
     expect(payload.bestMatch.kind).toBe("dm")
     expect(payload.bestMatch.match.score).toBe(410)
@@ -302,17 +649,150 @@ describe("mcp tool server", () => {
     expect(payload.items[1].rank).toBe(2)
   })
 
-  it("messages.list returns messages with metadata", async () => {
+  it("supports resolve, read, and reply workflow over MCP tools", async () => {
+    const calls: string[] = []
+    const inline = createInlineStub({
+      async resolveConversation(query, limit) {
+        calls.push("resolve")
+        expect(query).toBe("roadmap")
+        expect(limit).toBe(3)
+        return {
+          query: "roadmap",
+          selected: {
+            chatId: 7n,
+            title: "Roadmap",
+            chatTitle: "Roadmap",
+            kind: "space_chat",
+            spaceId: 10n,
+            spaceName: "Inline",
+            peerUserId: null,
+            peerDisplayName: null,
+            peerUsername: null,
+            archived: false,
+            pinned: false,
+            unreadCount: 2,
+            readMaxId: 40n,
+            lastMessageId: 44n,
+            lastMessageDate: 1700000000n,
+            score: 350,
+            matchReasons: ["title_prefix"],
+          },
+          candidates: [
+            {
+              chatId: 7n,
+              title: "Roadmap",
+              chatTitle: "Roadmap",
+              kind: "space_chat",
+              spaceId: 10n,
+              spaceName: "Inline",
+              peerUserId: null,
+              peerDisplayName: null,
+              peerUsername: null,
+              archived: false,
+              pinned: false,
+              unreadCount: 2,
+              readMaxId: 40n,
+              lastMessageId: 44n,
+              lastMessageDate: 1700000000n,
+              score: 350,
+              matchReasons: ["title_prefix"],
+            },
+          ],
+        }
+      },
+      async recentMessages({ chatId, since, limit }) {
+        calls.push("list")
+        expect(chatId).toBe(7n)
+        expect(typeof since).toBe("bigint")
+        expect(limit).toBe(5)
+        return {
+          chat: {
+            chatId: chatId ?? 7n,
+            title: "Roadmap",
+            chatTitle: "Roadmap",
+            kind: "space_chat",
+            spaceId: 10n,
+            spaceName: "Inline",
+            peerUserId: null,
+            peerDisplayName: null,
+            peerUsername: null,
+            archived: false,
+            pinned: false,
+            unreadCount: 2,
+            readMaxId: 40n,
+            lastMessageId: 44n,
+            lastMessageDate: 1700000000n,
+          },
+          direction: "all",
+          scannedCount: 2,
+          nextOffsetId: null,
+          messages: [
+            { id: 44n, fromId: 2n, chatId: chatId ?? 7n, message: "Can we ship this week?", out: false, date: 1700000000n } as any,
+            { id: 43n, fromId: 1n, chatId: chatId ?? 7n, message: "Waiting on the API review", out: true, date: 1699999900n } as any,
+          ],
+        }
+      },
+      async sendMessage({ chatId, text, sendMode, parseMarkdown }) {
+        calls.push("send")
+        expect(chatId).toBe(7n)
+        expect(text).toBe("I'll review the API today and post a status update.")
+        expect(sendMode).toBe("normal")
+        expect(parseMarkdown).toBe(true)
+        return { messageId: 45n, spaceId: 10n }
+      },
+    })
+
+    const server = createInlineMcpServer({ grant, inline })
+    const authInfo = createAuthInfo(["messages:read", "messages:write"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+
+    await sendRequest(
+      transport,
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "conversations.list", arguments: { query: "roadmap", limit: 3 } } } as any,
+      { authInfo },
+    )
+    const resolved = await waitForResponse(sent, 2)
+    expect(resolved.result.structuredContent.bestMatch.chatId).toBe("7")
+
+    await sendRequest(
+      transport,
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "messages.list", arguments: { chatId: "7", since: "yesterday", limit: 5 } } } as any,
+      { authInfo },
+    )
+    const context = await waitForResponse(sent, 3)
+    expect(context.result.structuredContent.messages).toHaveLength(2)
+    expect(context.result.structuredContent.messages[0].text).toContain("ship")
+
+    await sendRequest(
+      transport,
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "messages.send", arguments: { chatId: "7", text: "I'll review the API today and post a status update." } },
+      } as any,
+      { authInfo },
+    )
+    const sentMessage = await waitForResponse(sent, 4)
+    expect(sentMessage.result.structuredContent).toMatchObject({
+      ok: true,
+      chatId: "7",
+      messageId: "45",
+    })
+    expect(calls).toEqual(["resolve", "list", "send"])
+  })
+
+  it("messages.list returns messages with useful context fields", async () => {
     const inline = createInlineStub({
       async recentMessages({ chatId, direction, limit, offsetId, since, until, unreadOnly, content }) {
         expect(chatId).toBe(7n)
-        expect(direction).toBe("all")
+        expect(direction).toBeUndefined()
         expect(limit).toBe(5)
         expect(offsetId).toBe(99n)
         expect(typeof since).toBe("bigint")
         expect(typeof until).toBe("bigint")
         expect((since ?? 0n) <= (until ?? 0n)).toBe(true)
-        expect(unreadOnly).toBe(true)
+        expect(unreadOnly).toBeUndefined()
         expect(content).toBe("links")
         const resolvedChatId = chatId ?? 7n
         return {
@@ -368,7 +848,7 @@ describe("mcp tool server", () => {
         method: "tools/call",
         params: {
           name: "messages.list",
-          arguments: { chatId: "7", direction: "all", limit: 5, offsetId: "99", since: "2024-12-31", until: "2024-12-31", unreadOnly: true, content: "links" },
+          arguments: { chatId: "7", limit: 5, offsetId: "99", since: "2024-12-31", until: "2024-12-31", content: "links" },
         },
       } as any,
       { authInfo },
@@ -377,15 +857,15 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     const payload = JSON.parse(res.result.content?.[0]?.text)
     expect(payload.chat.chatId).toBe("7")
-    expect(payload.direction).toBe("all")
-    expect(payload.scannedCount).toBe(3)
     expect(payload.nextOffsetId).toBe("8")
-    expect(payload.unreadOnly).toBe(true)
     expect(payload.content).toBe("links")
     expect(payload.messages).toHaveLength(1)
     expect(payload.messages[0].id).toBe("9")
     expect(payload.messages[0].text).toBe("hello from me")
-    expect(payload.messages[0].metadata.chatId).toBe("7")
+    expect(payload.messages[0].chatId).toBe("7")
+    expect(payload.messages[0].fromId).toBe("2")
+    expect(payload.messages[0].urlPreviews).toEqual([])
+    expect(payload.messages[0].externalTasks).toEqual([])
   })
 
   it("messages.search searches messages only in the selected chat", async () => {
@@ -455,7 +935,6 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     const payload = JSON.parse(res.result.content?.[0]?.text)
     expect(payload.query).toBe("invoice")
-    expect(payload.mode).toBe("search")
     expect(payload.content).toBe("documents")
     expect(payload.chat.chatId).toBe("7")
     expect(payload.messages).toHaveLength(1)
@@ -510,6 +989,44 @@ describe("mcp tool server", () => {
                   },
                 },
               },
+              attachments: {
+                attachments: [
+                  {
+                    id: 501n,
+                    attachment: {
+                      oneofKind: "urlPreview",
+                      urlPreview: {
+                        id: 88n,
+                        url: "https://example.com/spec",
+                        displayUrl: "example.com/spec",
+                        siteName: "Example",
+                        title: "Spec",
+                        description: "Spec preview",
+                        provider: "example",
+                        author: "Mo",
+                        mediaType: 1,
+                      },
+                    },
+                  },
+                  {
+                    id: 502n,
+                    attachment: {
+                      oneofKind: "externalTask",
+                      externalTask: {
+                        id: 99n,
+                        taskId: "task_99",
+                        application: "Linear",
+                        title: "Review spec",
+                        status: 3,
+                        assignedUserId: 2n,
+                        url: "https://linear.example/task_99",
+                        number: "LIN-99",
+                        date: 1000n,
+                      },
+                    },
+                  },
+                ],
+              },
             } as any,
           ],
         }
@@ -553,6 +1070,36 @@ describe("mcp tool server", () => {
       mimeType: "application/pdf",
       sizeBytes: 12345,
     })
+    expect(payload.messages[0].urlPreviews).toEqual([
+      {
+        attachmentId: "501",
+        id: "88",
+        url: "https://example.com/spec",
+        displayUrl: "example.com/spec",
+        siteName: "Example",
+        title: "Spec",
+        description: "Spec preview",
+        provider: "example",
+        author: "Mo",
+        mediaType: "article",
+        durationSeconds: null,
+        media: null,
+      },
+    ])
+    expect(payload.messages[0].externalTasks).toEqual([
+      {
+        attachmentId: "502",
+        id: "99",
+        taskId: "task_99",
+        application: "Linear",
+        title: "Review spec",
+        status: "in_progress",
+        assignedUserId: "2",
+        url: "https://linear.example/task_99",
+        number: "LIN-99",
+        date: "1000",
+      },
+    ])
   })
 
   it("messages.unread returns unread messages across chats", async () => {
@@ -830,7 +1377,6 @@ describe("mcp tool server", () => {
             text: "caption",
             replyToMsgId: "9",
             sendMode: "silent",
-            parseMarkdown: true,
           },
         },
       } as any,
@@ -843,7 +1389,7 @@ describe("mcp tool server", () => {
     expect(payload.userId).toBe("2")
     expect(payload.messageId).toBe("300")
     expect(payload.media).toEqual({ kind: "photo", id: "501" })
-    expect(payload.metadata).toEqual({ sendMode: "silent", parseMarkdown: true, replyToMsgId: "9" })
+    expect(payload.metadata).toEqual({ sendMode: "silent", replyToMsgId: "9" })
   })
 
   it("messages.send_batch sends mixed text/media items in order", async () => {
@@ -862,7 +1408,7 @@ describe("mcp tool server", () => {
         expect(media).toEqual({ kind: "document", id: 44n })
         expect(text).toBe("spec file")
         expect(sendMode).toBe("silent")
-        expect(parseMarkdown).toBe(false)
+        expect(parseMarkdown).toBe(true)
         messageCounter += 1n
         return { messageId: messageCounter, spaceId: 10n }
       },
@@ -896,7 +1442,7 @@ describe("mcp tool server", () => {
             chatId: "7",
             items: [
               { type: "text", text: "hello" },
-              { type: "media", mediaKind: "document", mediaId: "44", text: "spec file", sendMode: "silent", parseMarkdown: false },
+              { type: "media", mediaKind: "document", mediaId: "44", text: "spec file", sendMode: "silent" },
             ],
           },
         },
@@ -928,7 +1474,11 @@ describe("mcp tool server", () => {
       },
     })
 
-    const server = createInlineMcpServer({ grant, inline })
+    const server = createInlineMcpServer({
+      grant,
+      inline,
+      resourceMetadataUrl: "https://mcp.example/.well-known/oauth-protected-resource",
+    })
     const { transport, sent } = createFakeTransport()
     await server.connect(transport as any)
 
@@ -961,7 +1511,7 @@ describe("mcp tool server", () => {
         jsonrpc: "2.0",
         id: 2,
         method: "tools/call",
-        params: { name: "messages.send", arguments: { chatId: "7", text: "hi", sendMode: "normal", parseMarkdown: true, replyToMsgId: "9" } },
+        params: { name: "messages.send", arguments: { chatId: "7", text: "hi", sendMode: "normal", replyToMsgId: "9" } },
       } as any,
       { authInfo },
     )
@@ -969,6 +1519,10 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     expect(res.result.isError).toBe(true)
     expect(res.result.content?.[0]?.text).toContain("messages:write")
+    const challenges = res.result._meta?.["mcp/www_authenticate"]
+    expect(challenges).toEqual([expect.stringContaining('resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"')])
+    expect(challenges[0]).toContain('error="insufficient_scope"')
+    expect(challenges[0]).toContain('scope="messages:write"')
 
     const audit = lastMessagesSendAuditRecord(infoSpy)
     expect(audit.outcome).toBe("failure")
@@ -1029,7 +1583,7 @@ describe("mcp tool server", () => {
     expect(payload.ok).toBe(true)
     expect(payload.messageId).toBe("123")
     expect(payload.userId).toBe("2")
-    expect(payload.metadata).toEqual({ sendMode: "normal", parseMarkdown: true, replyToMsgId: "10" })
+    expect(payload.metadata).toEqual({ sendMode: "normal", replyToMsgId: "10" })
 
     const audit = lastMessagesSendAuditRecord(infoSpy)
     expect(audit.outcome).toBe("success")

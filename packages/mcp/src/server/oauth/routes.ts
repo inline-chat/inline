@@ -78,6 +78,8 @@ export const OAuth = {
         authorization_servers: [config.oauthIssuer],
         scopes_supported: [...MCP_SUPPORTED_SCOPES],
         bearer_methods_supported: ["header"],
+        resource_name: "Inline MCP",
+        resource_documentation: "https://inline.chat",
       })
     }
 

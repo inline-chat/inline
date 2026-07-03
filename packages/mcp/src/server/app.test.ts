@@ -34,6 +34,8 @@ describe("mcp app", () => {
     const body = await res.json()
     expect(body.resource).toBe("https://mcp.inline.chat")
     expect(body.authorization_servers).toEqual(["https://api.inline.chat"])
+    expect(body.resource_name).toBe("Inline MCP")
+    expect(body.resource_documentation).toBe("https://inline.chat")
   })
 
   it("returns oauth authorization metadata locally", async () => {
@@ -136,7 +138,7 @@ describe("mcp app", () => {
         headers: {
           origin: "https://good.example",
           "access-control-request-method": "POST",
-          "access-control-request-headers": "authorization, content-type, accept, mcp-session-id",
+          "access-control-request-headers": "authorization, content-type, accept, mcp-session-id, mcp-protocol-version",
         },
       }),
     )
@@ -150,6 +152,7 @@ describe("mcp app", () => {
     expect(allowHeaders).toContain("content-type")
     expect(allowHeaders).toContain("accept")
     expect(allowHeaders).toContain("mcp-session-id")
+    expect(allowHeaders).toContain("mcp-protocol-version")
   })
 
   it("rejects OPTIONS preflight from disallowed origins", async () => {

@@ -23,12 +23,15 @@ type IntrospectionSuccess = {
 }
 
 function json(status: number, body: unknown, headers?: HeadersInit): Response {
+  const responseHeaders = new Headers({ "content-type": "application/json" })
+  if (headers) {
+    for (const [key, value] of new Headers(headers)) {
+      responseHeaders.set(key, value)
+    }
+  }
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      "content-type": "application/json",
-      ...(headers ?? {}),
-    },
+    headers: responseHeaders,
   })
 }
 
@@ -38,9 +41,9 @@ function wwwAuthHeader(params: {
   resourceMetadataUrl: string
   scope?: string
 }): string {
-  let header = `Bearer error=\"${params.code}\", error_description=\"${params.desc}\"`
-  if (params.scope) header += `, scope=\"${params.scope}\"`
-  header += `, resource_metadata=\"${params.resourceMetadataUrl}\"`
+  let header = `Bearer error="${params.code}", error_description="${params.desc}"`
+  if (params.scope) header += `, scope="${params.scope}"`
+  header += `, resource_metadata="${params.resourceMetadataUrl}"`
   return header
 }
 
@@ -313,6 +316,7 @@ export const Mcp = {
           const server = createInlineMcpServer({
             grant: authRes.grant,
             inline,
+            resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
           })
 
           const { transport } = sessions.createTransport({

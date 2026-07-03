@@ -15,7 +15,7 @@ type RateLimitBucket = {
 }
 
 const CORS_ALLOWED_METHODS = "GET, POST, DELETE, OPTIONS"
-const CORS_ALLOWED_HEADERS = "authorization, content-type, accept, mcp-session-id"
+const CORS_ALLOWED_HEADERS = "authorization, content-type, accept, mcp-session-id, mcp-protocol-version"
 const CORS_EXPOSE_HEADERS = "mcp-session-id, www-authenticate"
 const CORS_MAX_AGE_SECONDS = "600"
 
@@ -111,7 +111,7 @@ function withCors(res: Response, origin: string): Response {
 
 export function createApp(options?: CreateAppOptions): InlineMcpApp {
   const defaulted = defaultConfig()
-  const config = { ...defaulted, ...(options ?? {}) }
+  const config = { ...defaulted, ...options }
 
   if (options?.issuer && options.allowedHosts == null) {
     config.allowedHosts = defaultAllowedHosts(config.issuer)

@@ -4,13 +4,18 @@ import { isIP } from "node:net"
 import * as z from "zod/v4"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import type { McpGrant } from "./grant"
-import { MessageEntity_Type, type Message } from "@inline-chat/protocol/core"
+import { MessageEntity_Type, type Message, type UrlPreview } from "@inline-chat/protocol/core"
 import type {
   InlineApi,
   InlineConversationCandidate,
+  InlineConversationDetails,
   InlineEligibleChat,
   InlineMessageContentFilter,
+  InlinePersonCandidate,
+  InlinePersonSummary,
+  InlineSpaceSummary,
   InlineSearchMessagesResult,
   InlineUploadedMediaKind,
 } from "../inline/inline-api"
@@ -21,6 +26,9 @@ const MAX_UPLOAD_REDIRECTS = 3
 const UPLOAD_FETCH_TIMEOUT_MS = 15_000
 const SUPPORTED_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 const SUPPORTED_VIDEO_MIME = new Set(["video/mp4"])
+const DEFAULT_RESOURCE_METADATA_URL = "https://mcp.inline.chat/.well-known/oauth-protected-resource"
+const INLINE_MCP_INSTRUCTIONS =
+  "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.list/search/context/unread; send only after the target is clear. IDs are strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds. Use account.me to inspect scopes and allowed chat contexts."
 
 type RequestedUploadKind = "auto" | InlineUploadedMediaKind
 
@@ -33,6 +41,7 @@ type ResolvedUploadSource = {
 }
 
 type SendMode = "normal" | "silent"
+type ConversationSort = "relevance" | "recent" | "unread"
 
 type SendBatchItem =
   | {
@@ -40,7 +49,6 @@ type SendBatchItem =
       text: string
       replyToMsgId?: string
       sendMode?: SendMode
-      parseMarkdown?: boolean
     }
   | {
       type: "media"
@@ -49,17 +57,65 @@ type SendBatchItem =
       text?: string
       replyToMsgId?: string
       sendMode?: SendMode
-      parseMarkdown?: boolean
     }
+
+class InsufficientScopeError extends Error {
+  constructor(readonly neededScope: string) {
+    super(`Authorization scope missing: this tool requires ${neededScope}. Re-authorize Inline MCP with that scope and try again.`)
+  }
+}
 
 function requireScope(scopes: string[], needed: string): void {
   if (!scopes.includes(needed)) {
-    throw new Error(`insufficient scope: requires ${needed}`)
+    throw new InsufficientScopeError(needed)
   }
 }
 
 function jsonText(obj: unknown): { type: "text"; text: string } {
   return { type: "text", text: JSON.stringify(obj) }
+}
+
+function escapeAuthParam(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+function wwwAuthenticateChallenge(resourceMetadataUrl: string, scope: string): string {
+  return `Bearer resource_metadata="${escapeAuthParam(resourceMetadataUrl)}", error="insufficient_scope", error_description="Inline MCP requires ${escapeAuthParam(
+    scope,
+  )}.", scope="${escapeAuthParam(scope)}"`
+}
+
+function toolExecutionError(error: unknown, resourceMetadataUrl: string): CallToolResult {
+  const message = error instanceof Error ? error.message : String(error)
+  const result: CallToolResult = {
+    isError: true,
+    content: [{ type: "text", text: message }],
+  }
+  if (error instanceof InsufficientScopeError) {
+    result._meta = {
+      "mcp/www_authenticate": [wwwAuthenticateChallenge(resourceMetadataUrl, error.neededScope)],
+    }
+  }
+  return result
+}
+
+type InlineToolConfig = Record<string, unknown>
+type InlineToolHandler = (args: any, extra: { authInfo?: AuthInfo }) => Promise<CallToolResult>
+
+function registerInlineTool(
+  server: McpServer,
+  resourceMetadataUrl: string,
+  name: string,
+  config: InlineToolConfig,
+  cb: InlineToolHandler,
+): void {
+  ;(server.registerTool as any)(name, config, async (args: any, extra: any) => {
+    try {
+      return await cb(args, extra as { authInfo?: AuthInfo })
+    } catch (error) {
+      return toolExecutionError(error, resourceMetadataUrl)
+    }
+  })
 }
 
 function toolMeta(scopes: string[], invoking: string, invoked: string): Record<string, unknown> {
@@ -80,6 +136,18 @@ function snippetOf(text: string | null | undefined, max = 200): string | undefin
 function sourceTitle(title: string | null | undefined, chatId: bigint): string {
   const cleaned = (title ?? "").trim()
   return cleaned.length > 0 ? cleaned : `chat ${chatId.toString()}`
+}
+
+function userUri(userId: bigint): string {
+  return `inline://user/${userId.toString()}`
+}
+
+function chatUri(chatId: bigint): string {
+  return `inline://chat/${chatId.toString()}`
+}
+
+function messageUri(chatId: bigint, messageId: bigint): string {
+  return `${chatUri(chatId)}/message/${messageId.toString()}`
 }
 
 function parseInlineId(input: string, field: string): bigint {
@@ -197,6 +265,19 @@ function parseContentFilter(raw: string | undefined): InlineMessageContentFilter
   }
 }
 
+function parseConversationSort(raw: string | undefined, hasQuery: boolean): ConversationSort {
+  switch ((raw ?? (hasQuery ? "relevance" : "recent")).toLowerCase()) {
+    case "relevance":
+      return "relevance"
+    case "recent":
+      return "recent"
+    case "unread":
+      return "unread"
+    default:
+      throw new Error("invalid conversation sort")
+  }
+}
+
 function parseTarget(args: { chatId?: string; userId?: string }, context: string): { chatId?: bigint; userId?: bigint } {
   const hasChatId = !!args.chatId
   const hasUserId = !!args.userId
@@ -237,8 +318,18 @@ function sanitizeFileName(raw: string | undefined): string {
   const normalized = trimmed.replace(/\\/g, "/")
   const leaf = normalized.split("/").pop() ?? normalized
   const noQuery = leaf.split(/[?#]/, 1)[0] ?? leaf
-  const sanitized = noQuery.replace(/[\u0000-\u001f\u007f]/g, "").trim()
+  const sanitized = stripControlCharacters(noQuery).trim()
   return sanitized
+}
+
+function stripControlCharacters(value: string): string {
+  let out = ""
+  for (const char of value) {
+    const code = char.charCodeAt(0)
+    if (code <= 0x1f || code === 0x7f) continue
+    out += char
+  }
+  return out
 }
 
 function ensureUploadFileName(input: string | undefined, type: InlineUploadedMediaKind, contentType: string | undefined): string {
@@ -656,7 +747,7 @@ function bestPhotoSize(photo: { sizes: Array<{ w: number; h: number; size: numbe
 
 function messageMediaSummary(message: Message):
   | {
-      kind: "photo" | "video" | "document" | "nudge"
+      kind: "photo" | "video" | "document" | "voice" | "nudge"
       id: string | null
       url: string | null
       fileName?: string | null
@@ -704,11 +795,168 @@ function messageMediaSummary(message: Message):
       sizeBytes: document?.size ?? null,
     }
   }
+  if (media.oneofKind === "voice") {
+    const voice = media.voice.voice
+    return {
+      kind: "voice",
+      id: voice?.id?.toString?.() ?? null,
+      url: voice?.cdnUrl ?? null,
+      mimeType: voice?.mimeType ?? null,
+      sizeBytes: voice?.size ?? null,
+      durationSeconds: voice?.duration ?? null,
+    }
+  }
   return {
     kind: "nudge",
     id: null,
     url: null,
   }
+}
+
+function previewMediaTypeLabel(mediaType: UrlPreview["mediaType"]): string | null {
+  switch (mediaType) {
+    case 1:
+      return "article"
+    case 2:
+      return "image"
+    case 3:
+      return "video"
+    case 4:
+      return "document"
+    case 5:
+      return "embed"
+    default:
+      return null
+  }
+}
+
+function previewMediaSummary(preview: UrlPreview):
+  | {
+      kind: "photo" | "video" | "document" | "external_video" | "embed"
+      url: string | null
+      width?: number | null
+      height?: number | null
+      durationSeconds?: number | null
+      mimeType?: string | null
+    }
+  | null {
+  const media = preview.media?.media
+  if (!media || !media.oneofKind) {
+    if (!preview.photo) return null
+    const best = bestPhotoSize(preview.photo)
+    return {
+      kind: "photo",
+      url: best.cdnUrl,
+      width: best.width,
+      height: best.height,
+    }
+  }
+  if (media.oneofKind === "photo") {
+    const best = bestPhotoSize(media.photo)
+    return {
+      kind: "photo",
+      url: best.cdnUrl,
+      width: best.width,
+      height: best.height,
+    }
+  }
+  if (media.oneofKind === "video") {
+    return {
+      kind: "video",
+      url: media.video.cdnUrl ?? null,
+      width: media.video.w ?? null,
+      height: media.video.h ?? null,
+      durationSeconds: media.video.duration ?? null,
+    }
+  }
+  if (media.oneofKind === "document") {
+    return {
+      kind: "document",
+      url: media.document.cdnUrl ?? null,
+      mimeType: media.document.mimeType ?? null,
+    }
+  }
+  if (media.oneofKind === "externalVideo") {
+    return {
+      kind: "external_video",
+      url: media.externalVideo.url,
+      width: media.externalVideo.w ?? null,
+      height: media.externalVideo.h ?? null,
+      durationSeconds: media.externalVideo.duration ?? null,
+      mimeType: media.externalVideo.mimeType ?? null,
+    }
+  }
+  if (media.oneofKind === "embed") {
+    return {
+      kind: "embed",
+      url: media.embed.url,
+      width: media.embed.w ?? null,
+      height: media.embed.h ?? null,
+      durationSeconds: media.embed.duration ?? null,
+    }
+  }
+  return null
+}
+
+function externalTaskStatusLabel(status: number): string {
+  switch (status) {
+    case 1:
+      return "backlog"
+    case 2:
+      return "todo"
+    case 3:
+      return "in_progress"
+    case 4:
+      return "done"
+    case 5:
+      return "cancelled"
+    default:
+      return "unspecified"
+  }
+}
+
+function messageUrlPreviews(message: Message) {
+  const previews = []
+  for (const attachment of message.attachments?.attachments ?? []) {
+    if (attachment.attachment.oneofKind !== "urlPreview") continue
+    const preview = attachment.attachment.urlPreview
+    previews.push({
+      attachmentId: attachment.id.toString(),
+      id: preview.id.toString(),
+      url: preview.url ?? null,
+      displayUrl: preview.displayUrl ?? null,
+      siteName: preview.siteName ?? null,
+      title: preview.title ?? null,
+      description: preview.description ?? null,
+      provider: preview.provider ?? null,
+      author: preview.author ?? null,
+      mediaType: previewMediaTypeLabel(preview.mediaType),
+      durationSeconds: preview.duration != null ? Number(preview.duration) : null,
+      media: previewMediaSummary(preview),
+    })
+  }
+  return previews
+}
+
+function messageExternalTasks(message: Message) {
+  const tasks = []
+  for (const attachment of message.attachments?.attachments ?? []) {
+    if (attachment.attachment.oneofKind !== "externalTask") continue
+    const task = attachment.attachment.externalTask
+    tasks.push({
+      attachmentId: attachment.id.toString(),
+      id: task.id.toString(),
+      taskId: task.taskId,
+      application: task.application,
+      title: task.title,
+      status: externalTaskStatusLabel(task.status),
+      assignedUserId: task.assignedUserId.toString(),
+      url: task.url,
+      number: task.number,
+      date: task.date.toString(),
+    })
+  }
+  return tasks
 }
 
 function messagePayload(message: Message) {
@@ -717,37 +965,39 @@ function messagePayload(message: Message) {
   const links = extractMessageUrls(message)
   return {
     id: message.id.toString(),
+    uri: messageUri(message.chatId, message.id),
     text: message.message ?? "",
     ...(snippet ? { snippet } : {}),
     out: message.out === true,
-    hasLink: message.hasLink === true || links.length > 0,
+    chatId: message.chatId.toString(),
+    fromId: message.fromId?.toString?.() ?? null,
+    date: message.date?.toString?.() ?? null,
+    replyToMsgId: message.replyToMsgId?.toString() ?? null,
+    editDate: message.editDate?.toString?.() ?? null,
+    groupedId: message.groupedId?.toString?.() ?? null,
+    ...(message.mentioned != null ? { mentioned: message.mentioned } : {}),
+    ...(message.isSticker != null ? { isSticker: message.isSticker } : {}),
     links,
     media,
-    metadata: {
-      chatId: message.chatId.toString(),
-      fromId: message.fromId?.toString?.() ?? null,
-      date: message.date?.toString?.() ?? null,
-      replyToMsgId: message.replyToMsgId?.toString() ?? null,
-    },
+    urlPreviews: messageUrlPreviews(message),
+    externalTasks: messageExternalTasks(message),
   }
 }
 
 function chatMetadata(chat: InlineEligibleChat): {
   chatId: string
+  uri: string
   title: string
   kind: "dm" | "home_thread" | "space_chat"
-  spaceId: string | null
-  spaceName: string | null
+  space: { id: string | null; name: string | null } | null
   peer: { userId: string | null; displayName: string | null; username: string | null } | null
-  metadata: {
-    chatTitle: string
-    archived: boolean
-    pinned: boolean
-    unreadCount: number
-    readMaxId: string | null
-    lastMessageId: string | null
-    lastMessageDate: string | null
-  }
+  chatTitle: string
+  archived: boolean
+  pinned: boolean
+  unreadCount: number
+  readMaxId: string | null
+  lastMessageId: string | null
+  lastMessageDate: string | null
 } {
   const peer =
     chat.peerUserId != null || chat.peerDisplayName != null || chat.peerUsername != null
@@ -757,23 +1007,28 @@ function chatMetadata(chat: InlineEligibleChat): {
           username: chat.peerUsername ?? null,
         }
       : null
+  const space =
+    chat.spaceId != null || chat.spaceName != null
+      ? {
+          id: chat.spaceId?.toString() ?? null,
+          name: chat.spaceName ?? null,
+        }
+      : null
 
   return {
     chatId: chat.chatId.toString(),
+    uri: chatUri(chat.chatId),
     title: sourceTitle(chat.title, chat.chatId),
     kind: chat.kind,
-    spaceId: chat.spaceId?.toString() ?? null,
-    spaceName: chat.spaceName ?? null,
+    space,
     peer,
-    metadata: {
-      chatTitle: chat.chatTitle,
-      archived: chat.archived,
-      pinned: chat.pinned,
-      unreadCount: chat.unreadCount,
-      readMaxId: chat.readMaxId?.toString() ?? null,
-      lastMessageId: chat.lastMessageId?.toString() ?? null,
-      lastMessageDate: chat.lastMessageDate?.toString() ?? null,
-    },
+    chatTitle: chat.chatTitle,
+    archived: chat.archived,
+    pinned: chat.pinned,
+    unreadCount: chat.unreadCount,
+    readMaxId: chat.readMaxId?.toString() ?? null,
+    lastMessageId: chat.lastMessageId?.toString() ?? null,
+    lastMessageDate: chat.lastMessageDate?.toString() ?? null,
   }
 }
 
@@ -795,36 +1050,681 @@ function conversationListItem(
             reasons: match.reasons,
           },
         }
+    : {}),
+  }
+}
+
+function compareRecentChats(left: InlineEligibleChat, right: InlineEligibleChat): number {
+  const leftDate = left.lastMessageDate ?? 0n
+  const rightDate = right.lastMessageDate ?? 0n
+  if (leftDate !== rightDate) return leftDate > rightDate ? -1 : 1
+  if (left.chatId === right.chatId) return 0
+  return left.chatId > right.chatId ? -1 : 1
+}
+
+function sortedConversations<T extends InlineEligibleChat>(items: T[], sort: ConversationSort): T[] {
+  if (sort === "relevance") return items
+  const copy = [...items]
+  if (sort === "recent") return copy.sort(compareRecentChats)
+  return copy.sort((left, right) => {
+    if (left.unreadCount !== right.unreadCount) return right.unreadCount - left.unreadCount
+    return compareRecentChats(left, right)
+  })
+}
+
+function spacePayload(space: InlineSpaceSummary) {
+  return {
+    id: space.id.toString(),
+    name: space.name,
+    creator: space.creator,
+    date: space.date?.toString() ?? null,
+    isPublic: space.isPublic,
+    chatCount: space.chatCount,
+    unreadCount: space.unreadCount,
+    lastMessageDate: space.lastMessageDate?.toString() ?? null,
+  }
+}
+
+function personPayload(person: InlinePersonSummary, match?: { score: number; reasons: string[] }) {
+  return {
+    userId: person.userId.toString(),
+    uri: userUri(person.userId),
+    displayName: person.displayName,
+    username: person.username,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    dmChatId: person.dmChatId?.toString() ?? null,
+    spaces: person.spaceIds.map((spaceId, index) => ({
+      id: spaceId.toString(),
+      name: person.spaceNames[index] ?? null,
+    })),
+    ...(match
+      ? {
+          match: {
+            score: match.score,
+            reasons: match.reasons,
+          },
+        }
       : {}),
   }
 }
 
+function personCandidatePayload(person: InlinePersonCandidate) {
+  return personPayload(person, {
+    score: person.score,
+    reasons: person.matchReasons,
+  })
+}
+
+function conversationDetailsPayload(details: InlineConversationDetails) {
+  return {
+    chat: chatMetadata(details.chat),
+    details: {
+      description: details.description,
+      emoji: details.emoji,
+      isPublic: details.isPublic,
+      date: details.date?.toString() ?? null,
+      createdBy: details.createdBy?.toString() ?? null,
+      parentChatId: details.parentChatId?.toString() ?? null,
+      parentMessageId: details.parentMessageId?.toString() ?? null,
+      number: details.number,
+      pinnedMessageIds: details.pinnedMessageIds.map((id) => id.toString()),
+      groupParticipantCount: details.groupParticipantCount,
+    },
+    participants: details.participants.map((person) => personPayload(person)),
+  }
+}
+
+function directFilePayload(message: Message) {
+  const media = messageMediaSummary(message)
+  if (!media || media.kind === "nudge") return null
+  return {
+    source: "message_media" as const,
+    messageId: message.id.toString(),
+    kind: media.kind,
+    id: media.id,
+    url: media.url,
+    fileName: media.kind === "document" ? media.fileName ?? null : null,
+    mimeType: media.kind === "document" || media.kind === "voice" ? media.mimeType ?? null : null,
+    sizeBytes: media.sizeBytes ?? null,
+    width: media.kind === "photo" || media.kind === "video" ? media.width ?? null : null,
+    height: media.kind === "photo" || media.kind === "video" ? media.height ?? null : null,
+    durationSeconds: media.kind === "video" || media.kind === "voice" ? media.durationSeconds ?? null : null,
+    title: null,
+    pageUrl: null,
+  }
+}
+
+function messageFilePayloads(message: Message, includeUrlPreviews: boolean) {
+  const files = []
+  const direct = directFilePayload(message)
+  if (direct) files.push(direct)
+
+  if (includeUrlPreviews) {
+    for (const preview of messageUrlPreviews(message)) {
+      const media = preview.media
+      if (!media) continue
+      files.push({
+        source: "url_preview_media" as const,
+        messageId: message.id.toString(),
+        attachmentId: preview.attachmentId,
+        kind: media.kind,
+        id: null,
+        url: media.url,
+        fileName: null,
+        mimeType: media.mimeType ?? null,
+        sizeBytes: null,
+        width: media.width ?? null,
+        height: media.height ?? null,
+        durationSeconds: media.durationSeconds ?? null,
+        title: preview.title,
+        pageUrl: preview.url,
+      })
+    }
+  }
+
+  return files
+}
+
+const chatMetadataOutputSchema = z.object({
+  chatId: z.string(),
+  uri: z.string(),
+  title: z.string(),
+  kind: z.enum(["dm", "home_thread", "space_chat"]),
+  space: z
+    .object({
+      id: z.string().nullable(),
+      name: z.string().nullable(),
+    })
+    .nullable(),
+  peer: z
+    .object({
+      userId: z.string().nullable(),
+      displayName: z.string().nullable(),
+      username: z.string().nullable(),
+    })
+    .nullable(),
+  chatTitle: z.string(),
+  archived: z.boolean(),
+  pinned: z.boolean(),
+  unreadCount: z.number(),
+  readMaxId: z.string().nullable(),
+  lastMessageId: z.string().nullable(),
+  lastMessageDate: z.string().nullable(),
+})
+
+const conversationListItemOutputSchema = chatMetadataOutputSchema.extend({
+  rank: z.number(),
+  match: z
+    .object({
+      score: z.number(),
+      reasons: z.array(z.string()),
+    })
+    .optional(),
+})
+
+const spaceOutputSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  creator: z.boolean(),
+  date: z.string().nullable(),
+  isPublic: z.boolean().nullable(),
+  chatCount: z.number(),
+  unreadCount: z.number(),
+  lastMessageDate: z.string().nullable(),
+})
+
+const spacesListOutputSchema = z.object({
+  query: z.string().nullable(),
+  items: z.array(spaceOutputSchema),
+})
+
+const personOutputSchema = z.object({
+  userId: z.string(),
+  uri: z.string(),
+  displayName: z.string(),
+  username: z.string().nullable(),
+  firstName: z.string().nullable(),
+  lastName: z.string().nullable(),
+  dmChatId: z.string().nullable(),
+  spaces: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string().nullable(),
+    }),
+  ),
+  match: z
+    .object({
+      score: z.number(),
+      reasons: z.array(z.string()),
+    })
+    .optional(),
+})
+
+const peopleSearchOutputSchema = z.object({
+  query: z.string().nullable(),
+  bestMatch: personOutputSchema.nullable(),
+  items: z.array(personOutputSchema),
+})
+
+const messageMediaOutputSchema = z
+  .union([
+    z.object({
+      kind: z.literal("photo"),
+      id: z.string().nullable(),
+      url: z.string().nullable(),
+      sizeBytes: z.number().nullable().optional(),
+      width: z.number().nullable().optional(),
+      height: z.number().nullable().optional(),
+    }),
+    z.object({
+      kind: z.literal("video"),
+      id: z.string().nullable(),
+      url: z.string().nullable(),
+      sizeBytes: z.number().nullable().optional(),
+      width: z.number().nullable().optional(),
+      height: z.number().nullable().optional(),
+      durationSeconds: z.number().nullable().optional(),
+    }),
+    z.object({
+      kind: z.literal("document"),
+      id: z.string().nullable(),
+      url: z.string().nullable(),
+      fileName: z.string().nullable().optional(),
+      mimeType: z.string().nullable().optional(),
+      sizeBytes: z.number().nullable().optional(),
+    }),
+    z.object({
+      kind: z.literal("voice"),
+      id: z.string().nullable(),
+      url: z.string().nullable(),
+      mimeType: z.string().nullable().optional(),
+      sizeBytes: z.number().nullable().optional(),
+      durationSeconds: z.number().nullable().optional(),
+    }),
+    z.object({
+      kind: z.literal("nudge"),
+      id: z.string().nullable(),
+      url: z.string().nullable(),
+    }),
+  ])
+  .nullable()
+
+const urlPreviewMediaOutputSchema = z
+  .object({
+    kind: z.enum(["photo", "video", "document", "external_video", "embed"]),
+    url: z.string().nullable(),
+    width: z.number().nullable().optional(),
+    height: z.number().nullable().optional(),
+    durationSeconds: z.number().nullable().optional(),
+    mimeType: z.string().nullable().optional(),
+  })
+  .nullable()
+
+const urlPreviewOutputSchema = z.object({
+  attachmentId: z.string(),
+  id: z.string(),
+  url: z.string().nullable(),
+  displayUrl: z.string().nullable(),
+  siteName: z.string().nullable(),
+  title: z.string().nullable(),
+  description: z.string().nullable(),
+  provider: z.string().nullable(),
+  author: z.string().nullable(),
+  mediaType: z.enum(["article", "image", "video", "document", "embed"]).nullable(),
+  durationSeconds: z.number().nullable(),
+  media: urlPreviewMediaOutputSchema,
+})
+
+const externalTaskOutputSchema = z.object({
+  attachmentId: z.string(),
+  id: z.string(),
+  taskId: z.string(),
+  application: z.string(),
+  title: z.string(),
+  status: z.enum(["unspecified", "backlog", "todo", "in_progress", "done", "cancelled"]),
+  assignedUserId: z.string(),
+  url: z.string(),
+  number: z.string(),
+  date: z.string(),
+})
+
+const messageOutputSchema = z.object({
+  id: z.string(),
+  uri: z.string(),
+  text: z.string(),
+  snippet: z.string().optional(),
+  out: z.boolean(),
+  chatId: z.string(),
+  fromId: z.string().nullable(),
+  date: z.string().nullable(),
+  replyToMsgId: z.string().nullable(),
+  editDate: z.string().nullable(),
+  groupedId: z.string().nullable(),
+  mentioned: z.boolean().optional(),
+  isSticker: z.boolean().optional(),
+  links: z.array(z.string()),
+  media: messageMediaOutputSchema,
+  urlPreviews: z.array(urlPreviewOutputSchema),
+  externalTasks: z.array(externalTaskOutputSchema),
+})
+
+const contentFilterOutputSchema = z.enum(["all", "links", "media", "photos", "videos", "documents", "files"])
+
+const sendMetadataOutputSchema = z.object({
+  sendMode: z.enum(["normal", "silent"]),
+  replyToMsgId: z.string().optional(),
+})
+
+const accountContextOutputSchema = z.object({
+  user: z.object({
+    id: z.string(),
+  }),
+  session: z.object({
+    clientId: z.string(),
+    scopes: z.array(z.string()),
+    expiresAt: z.number().nullable(),
+  }),
+  allowed: z.object({
+    spaceIds: z.array(z.string()),
+    allowDms: z.boolean(),
+    allowHomeThreads: z.boolean(),
+  }),
+  hints: z.array(z.string()),
+})
+
+const conversationsListOutputSchema = z.object({
+  query: z.string().nullable(),
+  sort: z.enum(["relevance", "recent", "unread"]),
+  bestMatch: conversationListItemOutputSchema.nullable(),
+  unreadOnly: z.boolean(),
+  items: z.array(conversationListItemOutputSchema),
+})
+
+const conversationGetOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+  details: z.object({
+    description: z.string().nullable(),
+    emoji: z.string().nullable(),
+    isPublic: z.boolean().nullable(),
+    date: z.string().nullable(),
+    createdBy: z.string().nullable(),
+    parentChatId: z.string().nullable(),
+    parentMessageId: z.string().nullable(),
+    number: z.number().nullable(),
+    pinnedMessageIds: z.array(z.string()),
+    groupParticipantCount: z.number(),
+  }),
+  participants: z.array(personOutputSchema),
+})
+
+const conversationCreatedOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+})
+
+const fileUploadOutputSchema = z.object({
+  ok: z.boolean(),
+  source: z.enum(["base64", "url"]),
+  sourceRef: z.string().nullable(),
+  sizeBytes: z.number(),
+  upload: z.object({
+    fileUniqueId: z.string(),
+    media: z.object({
+      kind: z.enum(["photo", "video", "document"]),
+      id: z.string(),
+    }),
+    uploadKind: z.enum(["photo", "video", "document"]),
+    fileName: z.string(),
+    contentType: z.string().nullable(),
+  }),
+})
+
+const sendMessageOutputSchema = z.object({
+  ok: z.boolean(),
+  chatId: z.string().optional(),
+  userId: z.string().optional(),
+  text: z.string().optional(),
+  messageId: z.string().nullable(),
+  metadata: sendMetadataOutputSchema,
+})
+
+const sendMediaMessageOutputSchema = z.object({
+  ok: z.boolean(),
+  chatId: z.string().optional(),
+  userId: z.string().optional(),
+  media: z.object({
+    kind: z.enum(["photo", "video", "document"]),
+    id: z.string(),
+  }),
+  text: z.string().optional(),
+  messageId: z.string().nullable(),
+  metadata: sendMetadataOutputSchema,
+})
+
+const sendBatchResultOutputSchema = z.object({
+  index: z.number(),
+  type: z.enum(["text", "media"]),
+  status: z.enum(["sent", "failed"]),
+  messageId: z.string().nullable().optional(),
+  media: z
+    .object({
+      kind: z.enum(["photo", "video", "document"]),
+      id: z.string(),
+    })
+    .optional(),
+  text: z.string().optional(),
+  metadata: sendMetadataOutputSchema.optional(),
+  error: z.string().optional(),
+})
+
+const sendBatchOutputSchema = z.object({
+  ok: z.boolean(),
+  chatId: z.string().optional(),
+  userId: z.string().optional(),
+  stopOnError: z.boolean(),
+  total: z.number(),
+  sentCount: z.number(),
+  failedCount: z.number(),
+  results: z.array(sendBatchResultOutputSchema),
+})
+
+const messagesListOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+  nextOffsetId: z.string().nullable(),
+  since: z.string().nullable(),
+  until: z.string().nullable(),
+  content: contentFilterOutputSchema,
+  messages: z.array(messageOutputSchema),
+})
+
+const messagesContextOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+  anchorMessageId: z.string().nullable(),
+  before: z.number(),
+  after: z.number(),
+  includeAnchor: z.boolean(),
+  content: contentFilterOutputSchema,
+  messages: z.array(messageOutputSchema),
+})
+
+const messagesSearchOutputSchema = z.object({
+  query: z.string().nullable(),
+  content: contentFilterOutputSchema,
+  since: z.string().nullable(),
+  until: z.string().nullable(),
+  chat: chatMetadataOutputSchema,
+  messages: z.array(messageOutputSchema),
+})
+
+const messagesUnreadOutputSchema = z.object({
+  scannedChats: z.number(),
+  since: z.string().nullable(),
+  until: z.string().nullable(),
+  content: contentFilterOutputSchema,
+  items: z.array(
+    z.object({
+      chat: chatMetadataOutputSchema,
+      message: messageOutputSchema,
+    }),
+  ),
+})
+
+const fileItemOutputSchema = z.object({
+  source: z.enum(["message_media", "url_preview_media"]),
+  messageId: z.string(),
+  attachmentId: z.string().optional(),
+  kind: z.enum(["photo", "video", "document", "voice", "external_video", "embed"]),
+  id: z.string().nullable(),
+  url: z.string().nullable(),
+  fileName: z.string().nullable(),
+  mimeType: z.string().nullable(),
+  sizeBytes: z.number().nullable(),
+  width: z.number().nullable(),
+  height: z.number().nullable(),
+  durationSeconds: z.number().nullable(),
+  title: z.string().nullable(),
+  pageUrl: z.string().nullable(),
+})
+
+const filesGetOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
+  source: z.enum(["messages", "recent"]),
+  messageIds: z.array(z.string()).nullable(),
+  includeUrlPreviews: z.boolean(),
+  items: z.array(
+    z.object({
+      message: messageOutputSchema,
+      files: z.array(fileItemOutputSchema),
+    }),
+  ),
+})
+
 export function createInlineMcpServer(params: {
   grant: McpGrant
   inline: InlineApi
+  resourceMetadataUrl?: string
 }): McpServer {
+  const resourceMetadataUrl = params.resourceMetadataUrl ?? DEFAULT_RESOURCE_METADATA_URL
   const server = new McpServer(
     {
       name: "inline",
       version: "0.1.0",
+      title: "Inline",
+      description: "Scoped access to Inline work chats for thread-first agents.",
+      websiteUrl: "https://inline.chat",
     },
     {
       capabilities: {
         tools: { listChanged: false },
       },
+      instructions: INLINE_MCP_INSTRUCTIONS,
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "account.me",
+    {
+      title: "Get Inline MCP Account Context",
+      description:
+        "Use this tool when you need to inspect the current Inline MCP authorization, granted scopes, and allowed chat contexts before choosing read/write tools.",
+      inputSchema: {},
+      outputSchema: accountContextOutputSchema,
+      annotations: {
+        title: "Account Context",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+      _meta: toolMeta([], "Checking Inline MCP context...", "Inline MCP context checked"),
+    },
+    async (_args: {}, extra: { authInfo?: AuthInfo }) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      const payload = {
+        user: {
+          id: params.grant.inlineUserId.toString(),
+        },
+        session: {
+          clientId: params.grant.clientId,
+          scopes,
+          expiresAt: auth?.expiresAt ?? null,
+        },
+        allowed: {
+          spaceIds: params.grant.spaceIds.map((spaceId) => spaceId.toString()),
+          allowDms: params.grant.allowDms,
+          allowHomeThreads: params.grant.allowHomeThreads,
+        },
+        hints: [
+          "Use people.search, spaces.list, and conversations.list to resolve users, spaces, DMs, thread titles, or chat IDs before reading or sending.",
+          "Use messages.context around search or unread results when a single message needs surrounding context.",
+          "Message reads require messages:read; space listing and people search require spaces:read; sends and uploads require messages:write.",
+        ],
+      }
+      return {
+        structuredContent: payload,
+        content: [jsonText(payload)],
+      }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "spaces.list",
+    {
+      title: "List Inline Spaces",
+      description:
+        "Use this tool to list the spaces available to this MCP grant, including chat and unread counts. Use it before creating a space thread or narrowing conversation searches by team/workspace.",
+      inputSchema: {
+        query: z.string().min(1).optional().describe("Optional space name or space ID filter"),
+        limit: z.number().int().min(1).max(50).default(20).describe("Maximum spaces to return"),
+      },
+      outputSchema: spacesListOutputSchema,
+      annotations: {
+        title: "List Spaces",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+      _meta: toolMeta(["spaces:read"], "Listing Inline spaces...", "Spaces listed"),
+    },
+    async ({ query, limit }: { query?: string; limit?: number }, extra: { authInfo?: AuthInfo }) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "spaces:read")
+
+      const safeQuery = query?.trim()
+      const spaces = await params.inline.listSpaces({ ...(safeQuery ? { query: safeQuery } : {}), limit: limit ?? 20 })
+      const payload = {
+        query: safeQuery || null,
+        items: spaces.map(spacePayload),
+      }
+      return {
+        structuredContent: payload,
+        content: [jsonText(payload)],
+      }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "people.search",
+    {
+      title: "Search Inline People",
+      description:
+        "Use this tool to resolve a person by name, @username, or user ID across allowed DMs and spaces. It returns userId for DMs and participant selection without exposing phone or email.",
+      inputSchema: {
+        query: z.string().min(1).optional().describe("Name, @username, or user ID. Omit to list known people in allowed contexts."),
+        limit: z.number().int().min(1).max(50).default(20).describe("Maximum people to return"),
+      },
+      outputSchema: peopleSearchOutputSchema,
+      annotations: {
+        title: "Search People",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+      _meta: toolMeta(["messages:read", "spaces:read"], "Searching Inline people...", "People searched"),
+    },
+    async ({ query, limit }: { query?: string; limit?: number }, extra: { authInfo?: AuthInfo }) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "messages:read")
+      requireScope(scopes, "spaces:read")
+
+      const safeQuery = query?.trim()
+      const result = await params.inline.searchPeople({ ...(safeQuery ? { query: safeQuery } : {}), limit: limit ?? 20 })
+      const items = result.items.map(personCandidatePayload)
+      const payload = {
+        query: result.query,
+        bestMatch: result.bestMatch ? personCandidatePayload(result.bestMatch) : null,
+        items,
+      }
+      return {
+        structuredContent: payload,
+        content: [jsonText(payload)],
+      }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "conversations.list",
     {
       title: "List Inline Conversations",
-      description: "List recent conversations or find by contact name/chat title/chat ID.",
+      description:
+        "Use this tool to find the chatId for a person, DM, thread, or space chat before listing messages or sending. Query can be a contact name, @username, chat title, or chat ID; omit query for recent approved conversations.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Optional contact name, chat title, or chat ID"),
         limit: z.number().int().min(1).max(50).default(20).describe("Maximum conversations to return"),
         unreadOnly: z.boolean().default(false).describe("Only include conversations with unread messages"),
+        sort: z
+          .enum(["relevance", "recent", "unread"])
+          .optional()
+          .describe("Sort mode. Defaults to `relevance` for queries and `recent` when listing without a query."),
       },
+      outputSchema: conversationsListOutputSchema,
       annotations: {
         title: "List Conversations",
         readOnlyHint: true,
@@ -832,7 +1732,10 @@ export function createInlineMcpServer(params: {
       },
       _meta: toolMeta(["messages:read"], "Listing Inline conversations...", "Conversations listed"),
     },
-    async ({ query, limit, unreadOnly }: { query?: string; limit?: number; unreadOnly?: boolean }, extra: { authInfo?: AuthInfo }) => {
+    async (
+      { query, limit, unreadOnly, sort }: { query?: string; limit?: number; unreadOnly?: boolean; sort?: ConversationSort },
+      extra: { authInfo?: AuthInfo },
+    ) => {
       const auth = extra.authInfo
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:read")
@@ -840,13 +1743,17 @@ export function createInlineMcpServer(params: {
       const safeLimit = Math.max(1, Math.min(50, limit ?? 20))
       const safeQuery = query?.trim()
       const onlyUnread = unreadOnly === true
+      const safeSort = parseConversationSort(sort, !!safeQuery)
 
       if (!safeQuery) {
         const chats = await params.inline.getEligibleChats()
         const filtered = onlyUnread ? chats.filter((chat) => chat.unreadCount > 0) : chats
-        const items = filtered.slice(0, safeLimit).map((chat, index) => conversationListItem(chat, index + 1))
+        const items = sortedConversations(filtered, safeSort)
+          .slice(0, safeLimit)
+          .map((chat, index) => conversationListItem(chat, index + 1))
         const payload = {
           query: null,
+          sort: safeSort,
           bestMatch: null,
           unreadOnly: onlyUnread,
           items,
@@ -859,7 +1766,8 @@ export function createInlineMcpServer(params: {
 
       const resolved = await params.inline.resolveConversation(safeQuery, safeLimit)
       const filtered = onlyUnread ? resolved.candidates.filter((candidate) => candidate.unreadCount > 0) : resolved.candidates
-      const items = filtered.map((candidate: InlineConversationCandidate, index: number) =>
+      const sorted = sortedConversations(filtered, safeSort)
+      const items = sorted.map((candidate: InlineConversationCandidate, index: number) =>
         conversationListItem(candidate, index + 1, {
           score: candidate.score,
           reasons: candidate.matchReasons,
@@ -873,6 +1781,7 @@ export function createInlineMcpServer(params: {
       const bestMatch = bestMatchChatId ? items.find((item) => item.chatId === bestMatchChatId) ?? null : null
       const payload = {
         query: resolved.query,
+        sort: safeSort,
         bestMatch,
         unreadOnly: onlyUnread,
         items,
@@ -884,11 +1793,49 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "conversations.get",
+    {
+      title: "Get Inline Conversation",
+      description:
+        "Use this tool after resolving a chatId or DM userId to inspect the conversation metadata, participants, pinned message IDs, and parent/thread details before reading or sending.",
+      inputSchema: {
+        chatId: z.string().min(1).optional().describe("Inline chat ID"),
+        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+      },
+      outputSchema: conversationGetOutputSchema,
+      annotations: {
+        title: "Get Conversation",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+      _meta: toolMeta(["messages:read"], "Getting conversation...", "Conversation loaded"),
+    },
+    async ({ chatId, userId }: { chatId?: string; userId?: string }, extra: { authInfo?: AuthInfo }) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "messages:read")
+
+      const target = parseTarget({ chatId, userId }, "conversations.get")
+      const details = await params.inline.getConversation(target)
+      const payload = conversationDetailsPayload(details)
+      return {
+        structuredContent: payload,
+        content: [jsonText(payload)],
+      }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "conversations.create",
     {
       title: "Create Inline Conversation",
-      description: "Create a new thread/chat in an allowed space or home threads.",
+      description:
+        "Use this tool to create a new Inline thread/chat in an allowed space or home threads. After creation, use messages.send or messages.send_batch with the returned chat.chatId.",
       inputSchema: {
         title: z.string().min(1).max(200).describe("Conversation title"),
         spaceId: z.string().min(1).optional().describe("Parent space ID for a thread"),
@@ -897,9 +1844,12 @@ export function createInlineMcpServer(params: {
         isPublic: z.boolean().default(false).describe("Whether the conversation is public"),
         participantUserIds: z.array(z.string().min(1)).max(50).default([]).describe("Participant user IDs (for private chats)"),
       },
+      outputSchema: conversationCreatedOutputSchema,
       annotations: {
         title: "Create Conversation",
         readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: false,
       },
       _meta: toolMeta(["messages:write"], "Creating conversation...", "Conversation created"),
@@ -938,11 +1888,14 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "files.upload",
     {
       title: "Upload File For Inline Media",
-      description: "Upload media (base64 or URL source) and return Inline media IDs for sending messages.",
+      description:
+        "Use this tool to upload a local base64 payload or public HTTPS URL before sending media. It returns an Inline media kind/id pair for messages.send_media or messages.send_batch.",
       inputSchema: {
         kind: z.enum(["auto", "photo", "video", "document"]).default("auto").describe("Upload kind (`auto` infers photo/video/document)"),
         base64: z.string().min(1).optional().describe("Base64 payload or data URL"),
@@ -953,9 +1906,12 @@ export function createInlineMcpServer(params: {
         height: z.number().int().positive().optional().describe("Video height (video uploads only)"),
         duration: z.number().int().positive().optional().describe("Video duration in seconds (video uploads only)"),
       },
+      outputSchema: fileUploadOutputSchema,
       annotations: {
         title: "Upload File",
         readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: true,
       },
       _meta: toolMeta(["messages:write"], "Uploading file...", "File uploaded"),
@@ -1033,11 +1989,97 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "files.get",
+    {
+      title: "Get Inline Message Files",
+      description:
+        "Use this tool to extract file/media metadata and URLs from specific message IDs, or from recent messages in one chat/DM when message IDs are not known.",
+      inputSchema: {
+        chatId: z.string().min(1).optional().describe("Inline chat ID"),
+        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+        messageId: z.string().min(1).optional().describe("Single message ID to inspect"),
+        messageIds: z.array(z.string().min(1)).max(20).optional().describe("Message IDs to inspect"),
+        limit: z.number().int().min(1).max(50).default(20).describe("Recent messages to scan when no message IDs are provided"),
+        includeUrlPreviews: z.boolean().default(true).describe("Include media embedded in URL previews"),
+      },
+      outputSchema: filesGetOutputSchema,
+      annotations: {
+        title: "Get Files",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+      _meta: toolMeta(["messages:read"], "Getting files...", "Files loaded"),
+    },
+    async (
+      {
+        chatId,
+        userId,
+        messageId,
+        messageIds,
+        limit,
+        includeUrlPreviews,
+      }: {
+        chatId?: string
+        userId?: string
+        messageId?: string
+        messageIds?: string[]
+        limit?: number
+        includeUrlPreviews?: boolean
+      },
+      extra: { authInfo?: AuthInfo },
+    ) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "messages:read")
+
+      const target = parseTarget({ chatId, userId }, "files.get")
+      const ids = [...(messageId ? [messageId] : []), ...(messageIds ?? [])].map((id) => parseInlineId(id, "messageId"))
+      if (ids.length > 20) throw new Error("messageIds length must be at most 20")
+      const includePreviews = includeUrlPreviews !== false
+      const result =
+        ids.length > 0
+          ? await params.inline.getMessages({
+              ...target,
+              messageIds: ids,
+            })
+          : await params.inline.recentMessages({
+              ...target,
+              limit: limit ?? 20,
+              content: "all",
+            })
+
+      const messages = result.messages
+      const items = messages
+        .map((message) => ({
+          message: messagePayload(message),
+          files: messageFilePayloads(message, includePreviews),
+        }))
+        .filter((item) => item.files.length > 0)
+      const payload = {
+        chat: chatMetadata(result.chat),
+        source: ids.length > 0 ? ("messages" as const) : ("recent" as const),
+        messageIds: ids.length > 0 ? ids.map((id) => id.toString()) : null,
+        includeUrlPreviews: includePreviews,
+        items,
+      }
+      return {
+        structuredContent: payload,
+        content: [jsonText(payload)],
+      }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "messages.send_media",
     {
       title: "Send Inline Media Message",
-      description: "Send uploaded media (photo/video/document) to a chat or DM, optionally with caption text.",
+      description:
+        "Use this tool to send an uploaded photo, video, or document to one chat or DM. Call files.upload first unless you already have an Inline media ID.",
       inputSchema: {
         chatId: z.string().min(1).optional().describe("Inline chat ID"),
         userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
@@ -1046,11 +2088,13 @@ export function createInlineMcpServer(params: {
         text: z.string().max(8000).optional().describe("Optional caption text"),
         replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
         sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
-        parseMarkdown: z.boolean().default(true).describe("Parse markdown formatting for caption"),
       },
+      outputSchema: sendMediaMessageOutputSchema,
       annotations: {
         title: "Send Media Message",
         readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: false,
       },
       _meta: toolMeta(["messages:write"], "Sending media message...", "Media message sent"),
@@ -1064,7 +2108,6 @@ export function createInlineMcpServer(params: {
         text,
         replyToMsgId,
         sendMode,
-        parseMarkdown,
       }: {
         chatId?: string
         userId?: string
@@ -1073,7 +2116,6 @@ export function createInlineMcpServer(params: {
         text?: string
         replyToMsgId?: string
         sendMode?: "normal" | "silent"
-        parseMarkdown?: boolean
       },
       extra: { authInfo?: AuthInfo },
     ) => {
@@ -1083,7 +2125,6 @@ export function createInlineMcpServer(params: {
 
       const target = parseTarget({ chatId, userId }, "messages.send_media")
       const safeSendMode: "normal" | "silent" = sendMode === "silent" ? "silent" : "normal"
-      const safeParseMarkdown = parseMarkdown ?? true
       const caption = text?.trim()
       const parsedMediaId = parseInlineId(mediaId, "mediaId")
       const res = await params.inline.sendMediaMessage({
@@ -1095,7 +2136,7 @@ export function createInlineMcpServer(params: {
         ...(caption ? { text: caption } : {}),
         ...(replyToMsgId ? { replyToMsgId: parseInlineId(replyToMsgId, "replyToMsgId") } : {}),
         sendMode: safeSendMode,
-        parseMarkdown: safeParseMarkdown,
+        parseMarkdown: true,
       })
 
       const payload = {
@@ -1110,7 +2151,6 @@ export function createInlineMcpServer(params: {
         messageId: res.messageId?.toString() ?? null,
         metadata: {
           sendMode: safeSendMode,
-          parseMarkdown: safeParseMarkdown,
           ...(replyToMsgId ? { replyToMsgId } : {}),
         },
       }
@@ -1121,11 +2161,14 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "messages.send_batch",
     {
       title: "Send Inline Message Batch",
-      description: "Send a list of text and media items in order to a chat or DM.",
+      description:
+        "Use this tool to send an ordered sequence of text and uploaded media items to one chat or DM. Prefer this over many separate sends when seeding a new thread or posting a multi-part update.",
       inputSchema: {
         chatId: z.string().min(1).optional().describe("Inline chat ID"),
         userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
@@ -1138,7 +2181,6 @@ export function createInlineMcpServer(params: {
                 text: z.string().min(1).max(8000),
                 replyToMsgId: z.string().min(1).optional(),
                 sendMode: z.enum(["normal", "silent"]).default("normal"),
-                parseMarkdown: z.boolean().default(true),
               }),
               z.object({
                 type: z.literal("media"),
@@ -1147,7 +2189,6 @@ export function createInlineMcpServer(params: {
                 text: z.string().max(8000).optional(),
                 replyToMsgId: z.string().min(1).optional(),
                 sendMode: z.enum(["normal", "silent"]).default("normal"),
-                parseMarkdown: z.boolean().default(true),
               }),
             ]),
           )
@@ -1155,9 +2196,12 @@ export function createInlineMcpServer(params: {
           .max(100)
           .describe("Ordered list of message items"),
       },
+      outputSchema: sendBatchOutputSchema,
       annotations: {
         title: "Send Message Batch",
         readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: false,
       },
       _meta: toolMeta(["messages:write"], "Sending batch...", "Batch sent"),
@@ -1190,14 +2234,13 @@ export function createInlineMcpServer(params: {
         const item = items[index]
         try {
           const safeSendMode: SendMode = item.sendMode === "silent" ? "silent" : "normal"
-          const safeParseMarkdown = item.parseMarkdown ?? true
           if (item.type === "text") {
             const sent = await params.inline.sendMessage({
               ...target,
               text: item.text,
               ...(item.replyToMsgId ? { replyToMsgId: parseInlineId(item.replyToMsgId, "replyToMsgId") } : {}),
               sendMode: safeSendMode,
-              parseMarkdown: safeParseMarkdown,
+              parseMarkdown: true,
             })
             sentCount += 1
             results.push({
@@ -1207,7 +2250,6 @@ export function createInlineMcpServer(params: {
               messageId: sent.messageId?.toString() ?? null,
               metadata: {
                 sendMode: safeSendMode,
-                parseMarkdown: safeParseMarkdown,
                 ...(item.replyToMsgId ? { replyToMsgId: item.replyToMsgId } : {}),
               },
             })
@@ -1225,7 +2267,7 @@ export function createInlineMcpServer(params: {
             ...(caption ? { text: caption } : {}),
             ...(item.replyToMsgId ? { replyToMsgId: parseInlineId(item.replyToMsgId, "replyToMsgId") } : {}),
             sendMode: safeSendMode,
-            parseMarkdown: safeParseMarkdown,
+            parseMarkdown: true,
           })
           sentCount += 1
           results.push({
@@ -1240,7 +2282,6 @@ export function createInlineMcpServer(params: {
             ...(caption ? { text: caption } : {}),
             metadata: {
               sendMode: safeSendMode,
-              parseMarkdown: safeParseMarkdown,
               ...(item.replyToMsgId ? { replyToMsgId: item.replyToMsgId } : {}),
             },
           })
@@ -1275,22 +2316,24 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "messages.list",
     {
       title: "List Inline Messages",
-      description: "List recent messages for a chat.",
+      description:
+        "Use this tool to read recent context from one resolved chatId or DM userId for summarization, answering questions, or preparing a reply. Supports time windows like today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds.",
       inputSchema: {
         chatId: z.string().min(1).optional().describe("Inline chat ID"),
         userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        direction: z.enum(["sent", "all"]).default("all").describe("`sent` returns only outgoing messages"),
         limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
         offsetId: z.string().min(1).optional().describe("Fetch messages older than this message ID"),
         since: z.string().min(1).optional().describe("Lower time bound (e.g. yesterday, 2d ago, 2026-02-20)"),
         until: z.string().min(1).optional().describe("Upper time bound"),
-        unreadOnly: z.boolean().default(false).describe("Only include unread messages"),
         content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
       },
+      outputSchema: messagesListOutputSchema,
       annotations: {
         title: "List Messages",
         readOnlyHint: true,
@@ -1302,22 +2345,18 @@ export function createInlineMcpServer(params: {
       {
         chatId,
         userId,
-        direction,
         limit,
         offsetId,
         since,
         until,
-        unreadOnly,
         content,
       }: {
         chatId?: string
         userId?: string
-        direction?: "sent" | "all"
         limit?: number
         offsetId?: string
         since?: string
         until?: string
-        unreadOnly?: boolean
         content?: InlineMessageContentFilter
       },
       extra: { authInfo?: AuthInfo },
@@ -1333,22 +2372,17 @@ export function createInlineMcpServer(params: {
       const safeContent = parseContentFilter(content)
       const recent = await params.inline.recentMessages({
         ...target,
-        direction: direction ?? "all",
         limit: limit ?? 20,
         offsetId: parsedOffsetId,
         since: parsedSince,
         until: parsedUntil,
-        unreadOnly: unreadOnly === true,
         content: safeContent,
       })
       const messages = recent.messages.map(messagePayload)
 
       const payload = {
         chat: chatMetadata(recent.chat),
-        direction: recent.direction,
-        scannedCount: recent.scannedCount,
         nextOffsetId: recent.nextOffsetId?.toString() ?? null,
-        unreadOnly: unreadOnly === true,
         since: parsedSince?.toString() ?? null,
         until: parsedUntil?.toString() ?? null,
         content: safeContent,
@@ -1362,11 +2396,89 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
+    "messages.context",
+    {
+      title: "Get Inline Message Context",
+      description:
+        "Use this tool after messages.search, messages.unread, or a known message ID to fetch a before/after window around that message. Omit anchorMessageId to get a compact latest context window.",
+      inputSchema: {
+        chatId: z.string().min(1).optional().describe("Inline chat ID"),
+        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+        anchorMessageId: z.string().min(1).optional().describe("Message ID to center the context window around"),
+        before: z.number().int().min(0).max(50).default(8).describe("Messages before/older than the anchor"),
+        after: z.number().int().min(0).max(50).default(8).describe("Messages after/newer than the anchor"),
+        includeAnchor: z.boolean().default(true).describe("Include the anchor message when anchorMessageId is provided"),
+        content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
+      },
+      outputSchema: messagesContextOutputSchema,
+      annotations: {
+        title: "Get Message Context",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+      _meta: toolMeta(["messages:read"], "Getting message context...", "Message context loaded"),
+    },
+    async (
+      {
+        chatId,
+        userId,
+        anchorMessageId,
+        before,
+        after,
+        includeAnchor,
+        content,
+      }: {
+        chatId?: string
+        userId?: string
+        anchorMessageId?: string
+        before?: number
+        after?: number
+        includeAnchor?: boolean
+        content?: InlineMessageContentFilter
+      },
+      extra: { authInfo?: AuthInfo },
+    ) => {
+      const auth = extra.authInfo
+      const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
+      requireScope(scopes, "messages:read")
+
+      const target = parseTarget({ chatId, userId }, "messages.context")
+      const safeContent = parseContentFilter(content)
+      const context = await params.inline.messageContext({
+        ...target,
+        ...(anchorMessageId ? { anchorMessageId: parseInlineId(anchorMessageId, "anchorMessageId") } : {}),
+        before: before ?? 8,
+        after: after ?? 8,
+        includeAnchor: includeAnchor !== false,
+        content: safeContent,
+      })
+      const payload = {
+        chat: chatMetadata(context.chat),
+        anchorMessageId: context.anchorMessageId?.toString() ?? null,
+        before: context.before,
+        after: context.after,
+        includeAnchor: context.includeAnchor,
+        content: context.content,
+        messages: context.messages.map(messagePayload),
+      }
+      return {
+        structuredContent: payload,
+        content: [jsonText(payload)],
+      }
+    },
+  )
+
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "messages.search",
     {
       title: "Search Inline Messages In Chat",
-      description: "Search messages in a specific chat (no global search).",
+      description:
+        "Use this tool to search within one resolved chatId or DM userId. This is intentionally scoped to a single conversation; use conversations.list first when the target is unclear.",
       inputSchema: {
         chatId: z.string().min(1).optional().describe("Inline chat ID"),
         userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
@@ -1376,6 +2488,7 @@ export function createInlineMcpServer(params: {
         until: z.string().min(1).optional().describe("Upper time bound"),
         content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
       },
+      outputSchema: messagesSearchOutputSchema,
       annotations: {
         title: "Search Messages",
         readOnlyHint: true,
@@ -1424,7 +2537,6 @@ export function createInlineMcpServer(params: {
 
       const payload = {
         query: found.query,
-        mode: found.mode,
         content: found.content,
         since: parsedSince?.toString() ?? null,
         until: parsedUntil?.toString() ?? null,
@@ -1439,17 +2551,21 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "messages.unread",
     {
       title: "List Unread Inline Messages",
-      description: "List unread messages across approved conversations.",
+      description:
+        "Use this tool to triage unread messages across all approved conversations. Results include chat metadata so you can follow up with messages.list on a specific chatId.",
       inputSchema: {
         limit: z.number().int().min(1).max(200).default(50).describe("Maximum unread messages to return"),
         since: z.string().min(1).optional().describe("Lower time bound"),
         until: z.string().min(1).optional().describe("Upper time bound"),
         content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
       },
+      outputSchema: messagesUnreadOutputSchema,
       annotations: {
         title: "Unread Messages",
         readOnlyHint: true,
@@ -1494,22 +2610,27 @@ export function createInlineMcpServer(params: {
     },
   )
 
-  server.registerTool(
+  registerInlineTool(
+    server,
+    resourceMetadataUrl,
     "messages.send",
     {
       title: "Send Inline Message",
-      description: "Send a message to a chat in your approved spaces, DMs, or home threads.",
+      description:
+        "Use this tool to send one text message after the target is clear. Provide exactly one of chatId or userId; use conversations.list first when resolving a person, DM, thread, or space chat.",
       inputSchema: {
         chatId: z.string().min(1).optional().describe("Inline chat ID"),
         userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
         text: z.string().min(1).max(8000).describe("Message text"),
         replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
         sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
-        parseMarkdown: z.boolean().default(true).describe("Parse markdown formatting"),
       },
+      outputSchema: sendMessageOutputSchema,
       annotations: {
         title: "Send Message",
         readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
         openWorldHint: false,
       },
       _meta: toolMeta(["messages:write"], "Sending Inline message...", "Message sent"),
@@ -1521,14 +2642,12 @@ export function createInlineMcpServer(params: {
         text,
         replyToMsgId,
         sendMode,
-        parseMarkdown,
       }: {
         chatId?: string
         userId?: string
         text: string
         replyToMsgId?: string
         sendMode?: "normal" | "silent"
-        parseMarkdown?: boolean
       },
       extra: { authInfo?: AuthInfo },
     ) => {
@@ -1544,13 +2663,12 @@ export function createInlineMcpServer(params: {
 
         const target = parseTarget({ chatId, userId }, "messages.send")
         const safeSendMode: "normal" | "silent" = sendMode === "silent" ? "silent" : "normal"
-        const safeParseMarkdown = parseMarkdown ?? true
         const res = await params.inline.sendMessage({
           ...target,
           text,
           ...(replyToMsgId ? { replyToMsgId: parseChatId(replyToMsgId) } : {}),
           sendMode: safeSendMode,
-          parseMarkdown: safeParseMarkdown,
+          parseMarkdown: true,
         })
         const payload = {
           ok: true,
@@ -1559,7 +2677,6 @@ export function createInlineMcpServer(params: {
           messageId: res.messageId?.toString() ?? null,
           metadata: {
             sendMode: safeSendMode,
-            parseMarkdown: safeParseMarkdown,
             ...(replyToMsgId ? { replyToMsgId } : {}),
           },
         }

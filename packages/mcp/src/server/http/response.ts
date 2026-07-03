@@ -1,30 +1,31 @@
+function withContentType(contentType: string, headers?: HeadersInit): Headers {
+  const out = new Headers({ "content-type": contentType })
+  if (headers) {
+    for (const [key, value] of new Headers(headers)) {
+      out.set(key, value)
+    }
+  }
+  return out
+}
+
 export function text(status: number, body: string, init?: Omit<ResponseInit, "status">): Response {
   return new Response(body, {
     status,
-    headers: {
-      "content-type": "text/plain; charset=utf-8",
-      ...(init?.headers ?? {}),
-    },
+    headers: withContentType("text/plain; charset=utf-8", init?.headers),
   })
 }
 
 export function html(status: number, body: string, init?: Omit<ResponseInit, "status">): Response {
   return new Response(body, {
     status,
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      ...(init?.headers ?? {}),
-    },
+    headers: withContentType("text/html; charset=utf-8", init?.headers),
   })
 }
 
 export function withJson(value: unknown, init?: Omit<ResponseInit, "status"> & { status?: number }): Response {
   return new Response(JSON.stringify(value), {
     status: init?.status ?? 200,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      ...(init?.headers ?? {}),
-    },
+    headers: withContentType("application/json; charset=utf-8", init?.headers),
   })
 }
 
@@ -39,4 +40,3 @@ export function unauthorized(message = "unauthorized"): Response {
 export function notFound(): Response {
   return text(404, "Not found")
 }
-
