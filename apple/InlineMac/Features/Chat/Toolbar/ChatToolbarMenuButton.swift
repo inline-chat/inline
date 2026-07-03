@@ -1,4 +1,5 @@
 import Auth
+import AppKit
 import Combine
 import GRDB
 import InlineKit
@@ -29,6 +30,10 @@ struct ChatToolbarMenuButton: View {
     Menu {
       Button("Chat Info", systemImage: "info.circle") {
         openChatInfo()
+      }
+
+      Button("Copy Link", systemImage: "link") {
+        copyChatLink()
       }
 
       Divider()
@@ -178,6 +183,27 @@ struct ChatToolbarMenuButton: View {
 
   private func openChatInfo() {
     dependencies.openChatInfo(peer: peer)
+  }
+
+  private func copyChatLink() {
+    guard let url = chatLinkURL else {
+      ToastCenter.shared.showError("Failed to copy link")
+      return
+    }
+
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(url.absoluteString, forType: .string)
+    ToastCenter.shared.showSuccess("Copied link")
+  }
+
+  private var chatLinkURL: URL? {
+    switch peer {
+    case let .user(id):
+      InlineDeepLink.user(id: id).url
+    case let .thread(id):
+      InlineDeepLink.chat(id: id).url
+    }
   }
 
   private func keepInChatList() {
