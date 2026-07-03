@@ -34,10 +34,9 @@ import {
   resolveThinkingDefault,
 } from "openclaw/plugin-sdk/agent-runtime"
 import {
-  loadSessionStore,
-  resolveSessionStoreEntry,
+  getSessionEntry,
+  patchSessionEntry,
   resolveStorePath,
-  updateSessionStore,
 } from "openclaw/plugin-sdk/session-store-runtime"
 import { applyModelOverrideToSessionEntry } from "openclaw/plugin-sdk/model-session-runtime"
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
@@ -1458,6 +1457,20 @@ function shouldStartInlineProgressPlaceholderNow(
   return typeof line === "object" && line?.kind === "patch" && Boolean(line.detail)
 }
 
+function resolveInlineParentSessionKeyCandidate(
+  sessionKey: string,
+  entry: { parentSessionKey?: string } | undefined,
+): string | undefined {
+  const explicit = normalizeOptionalString(entry?.parentSessionKey)
+  if (explicit && explicit !== sessionKey) return explicit
+
+  const inlineThreadMarker = ":inlineThread:"
+  const markerIndex = sessionKey.lastIndexOf(inlineThreadMarker)
+  if (markerIndex > 0) return sessionKey.slice(0, markerIndex)
+
+  return undefined
+}
+
 function resolveInlineCommandMenuModelContext(params: {
   cfg: OpenClawConfig
   agentId: string
@@ -1472,8 +1485,11 @@ function resolveInlineCommandMenuModelContext(params: {
       cfg: params.cfg,
       agentId: params.agentId,
     })
-    const store = loadSessionStore(storePath)
-    const entry = resolveSessionStoreEntry({ store, sessionKey: params.sessionKey }).existing
+    const entry = getSessionEntry({
+      agentId: params.agentId,
+      sessionKey: params.sessionKey,
+      storePath,
+    })
     const thinkingLevel = normalizeOptionalString(entry?.thinkingLevel)
     if (entry?.modelOverrideSource === "auto" && normalizeOptionalString(entry.modelOverride)) {
       return {
@@ -1482,9 +1498,18 @@ function resolveInlineCommandMenuModelContext(params: {
         ...(thinkingLevel ? { thinkingLevel } : {}),
       }
     }
+    const parentSessionKey = resolveInlineParentSessionKeyCandidate(params.sessionKey, entry)
+    const parentEntry = parentSessionKey
+      ? getSessionEntry({
+          agentId: params.agentId,
+          sessionKey: parentSessionKey,
+          storePath,
+        })
+      : undefined
     const override = resolveStoredModelOverride({
       ...(entry ? { sessionEntry: entry } : {}),
-      sessionStore: store,
+      ...(parentSessionKey ? { parentSessionKey } : {}),
+      ...(parentSessionKey && parentEntry ? { sessionStore: { [parentSessionKey]: parentEntry } } : {}),
       sessionKey: params.sessionKey,
       defaultProvider: defaultModel.provider,
     })
@@ -4137,20 +4162,28 @@ export async function monitorInlineProvider(params: {
             const isDefaultSelection =
               selection.provider === resolvedDefault.provider && selection.model === resolvedDefault.model
 
-            await updateSessionStore(storePath, (store) => {
-              const entry = store[inboundSessionKey] ?? {
+            await patchSessionEntry({
+              agentId: route.agentId,
+              sessionKey: inboundSessionKey,
+              storePath,
+              fallbackEntry: {
                 sessionId: inboundSessionKey,
                 updatedAt: Date.now(),
-              }
-              store[inboundSessionKey] = entry
-              applyModelOverrideToSessionEntry({
-                entry,
-                selection: {
-                  provider: selection.provider,
-                  model: selection.model,
-                  isDefault: isDefaultSelection,
-                },
-              })
+              },
+              preserveActivity: true,
+              replaceEntry: true,
+              update: (entry) => {
+                const next = { ...entry }
+                applyModelOverrideToSessionEntry({
+                  entry: next,
+                  selection: {
+                    provider: selection.provider,
+                    model: selection.model,
+                    isDefault: isDefaultSelection,
+                  },
+                })
+                return next
+              },
             })
 
             const actionText = isDefaultSelection

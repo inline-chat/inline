@@ -26,7 +26,7 @@ describe("plugin manifest", () => {
       description?: unknown
       channels?: unknown
       contracts?: { tools?: unknown }
-      channelEnvVars?: { inline?: unknown }
+      channelEnvVars?: unknown
       channelConfigs?: {
         inline?: {
           description?: unknown
@@ -59,7 +59,7 @@ describe("plugin manifest", () => {
         "inline_parent_context",
       ]),
     )
-    expect(json.channelEnvVars?.inline).toEqual(["INLINE_TOKEN", "INLINE_BOT_TOKEN"])
+    expect(json.channelEnvVars).toBeUndefined()
     const schema = json.channelConfigs?.inline?.schema
     const streaming = schema?.properties?.streaming as
       | {
@@ -274,7 +274,7 @@ describe("plugin manifest", () => {
     const raw = await readFile(packagePath, "utf8")
     const json = JSON.parse(raw) as {
       openclaw?: {
-        install?: { minHostVersion?: unknown }
+        install?: { clawhubSpec?: unknown; defaultChoice?: unknown; minHostVersion?: unknown }
         compat?: { pluginApi?: unknown }
         build?: { openclawVersion?: unknown }
         release?: { publishToClawHub?: unknown; publishToNpm?: unknown }
@@ -299,6 +299,8 @@ describe("plugin manifest", () => {
       moltbot?: unknown
     }
 
+    expect(json.openclaw?.install?.clawhubSpec).toBe("@inline-openclaw/inline")
+    expect(json.openclaw?.install?.defaultChoice).toBe("clawhub")
     expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.6.11")
     expect(json.peerDependencies?.openclaw).toBe(">=2026.6.11")
     expect(json.peerDependenciesMeta?.openclaw?.optional).toBe(true)

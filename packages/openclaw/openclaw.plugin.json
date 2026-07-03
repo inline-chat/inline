@@ -15,9 +15,6 @@
       "inline_parent_context"
     ]
   },
-  "channelEnvVars": {
-    "inline": ["INLINE_TOKEN", "INLINE_BOT_TOKEN"]
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

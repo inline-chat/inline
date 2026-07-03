@@ -9,7 +9,8 @@ import {
 const modelRuntimeMocks = vi.hoisted(() => ({
   buildModelsProviderData: vi.fn(),
   resolveDefaultModelForAgent: vi.fn(),
-  updateSessionStore: vi.fn(),
+  getSessionEntry: vi.fn(),
+  patchSessionEntry: vi.fn(),
   applyModelOverrideToSessionEntry: vi.fn(),
 }))
 
@@ -49,7 +50,8 @@ vi.mock("openclaw/plugin-sdk/session-store-runtime", async () => {
   )
   return {
     ...actual,
-    updateSessionStore: modelRuntimeMocks.updateSessionStore,
+    getSessionEntry: modelRuntimeMocks.getSessionEntry,
+    patchSessionEntry: modelRuntimeMocks.patchSessionEntry,
   }
 })
 
@@ -390,9 +392,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
   })
   modelRuntimeMocks.resolveDefaultModelForAgent.mockReset().mockImplementation(({ cfg }: any) => resolveMockModelRef(cfg))
-  modelRuntimeMocks.updateSessionStore.mockReset().mockImplementation(async (_storePath: string, update: (store: any) => void | Promise<void>) => {
-    const store: Record<string, unknown> = {}
-    await update(store)
+  modelRuntimeMocks.getSessionEntry.mockReset().mockReturnValue(undefined)
+  modelRuntimeMocks.patchSessionEntry.mockReset().mockImplementation(async ({ fallbackEntry, update }: any) => {
+    const entry = structuredClone(fallbackEntry ?? { sessionId: "test-session", updatedAt: 1 })
+    return await update(entry, { existingEntry: fallbackEntry ? undefined : entry })
   })
   modelRuntimeMocks.applyModelOverrideToSessionEntry.mockReset().mockImplementation(({ entry, selection }: any) => {
     entry.provider = selection.provider
@@ -4773,6 +4776,15 @@ describe("inline/monitor", () => {
     })
 
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    expect(modelRuntimeMocks.patchSessionEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replaceEntry: true,
+        preserveActivity: true,
+        fallbackEntry: expect.objectContaining({
+          sessionId: expect.any(String),
+        }),
+      }),
+    )
 
     await handle.stop()
   })
