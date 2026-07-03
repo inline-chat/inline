@@ -43,13 +43,22 @@ vi.mock("openclaw/plugin-sdk/agent-runtime", async () => {
   }
 })
 
-vi.mock("openclaw/plugin-sdk/config-runtime", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/config-runtime")>(
-    "openclaw/plugin-sdk/config-runtime",
+vi.mock("openclaw/plugin-sdk/session-store-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/session-store-runtime")>(
+    "openclaw/plugin-sdk/session-store-runtime",
   )
   return {
     ...actual,
     updateSessionStore: modelRuntimeMocks.updateSessionStore,
+  }
+})
+
+vi.mock("openclaw/plugin-sdk/model-session-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/model-session-runtime")>(
+    "openclaw/plugin-sdk/model-session-runtime",
+  )
+  return {
+    ...actual,
     applyModelOverrideToSessionEntry: modelRuntimeMocks.applyModelOverrideToSessionEntry,
   }
 })
@@ -10099,8 +10108,6 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           sessionKey: "agent:main:inline:group:88",
           contextKey: `inline:participant:added:88:777:${String(participantDate)}`,
-          forceSenderIsOwnerFalse: true,
-          trusted: false,
         }),
       )
       expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
@@ -10265,8 +10272,6 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           sessionKey: "agent:main:inline:group:88",
           contextKey: "inline:reaction:added:88:5000:51:🔥",
-          forceSenderIsOwnerFalse: true,
-          trusted: false,
         }),
       )
     })
@@ -10334,8 +10339,6 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           sessionKey: "agent:main:inline:group:7000:thread:7100",
           contextKey: "inline:reaction:added:7100:61002:51:🔥",
-          forceSenderIsOwnerFalse: true,
-          trusted: false,
         }),
       )
     })
@@ -10391,8 +10394,6 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           sessionKey: "agent:main:inline:group:88",
           contextKey: "inline:reaction:removed:88:5000:51:🔥",
-          forceSenderIsOwnerFalse: true,
-          trusted: false,
         }),
       )
     })

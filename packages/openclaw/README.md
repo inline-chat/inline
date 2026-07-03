@@ -33,7 +33,14 @@ Reply-thread behavior:
 
 ## Install
 
-Requires OpenClaw `2026.5.28` or newer.
+Requires OpenClaw `2026.6.11` or newer.
+
+## Compatibility
+
+| Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
+| --- | --- | --- | --- | --- |
+| `0.0.48` | `>=2026.6.11` | `0.0.11` | Current | Uses the latest focused OpenClaw plugin SDK entrypoints and is the supported line for current stable OpenClaw. |
+| `0.0.47` and earlier | `>=2026.5.18`, tested before the `2026.6.11` floor | `0.0.11` | Legacy | Use this line only when an older OpenClaw host cannot be upgraded yet. It keeps the previous broad SDK compatibility path. |
 
 From npm (once published):
 

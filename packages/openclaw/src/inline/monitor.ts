@@ -34,12 +34,12 @@ import {
   resolveThinkingDefault,
 } from "openclaw/plugin-sdk/agent-runtime"
 import {
-  applyModelOverrideToSessionEntry,
   loadSessionStore,
   resolveSessionStoreEntry,
   resolveStorePath,
   updateSessionStore,
-} from "openclaw/plugin-sdk/config-runtime"
+} from "openclaw/plugin-sdk/session-store-runtime"
+import { applyModelOverrideToSessionEntry } from "openclaw/plugin-sdk/model-session-runtime"
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
 import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
 import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
@@ -58,9 +58,9 @@ import {
 import {
   findCodeRegions,
   isInsideCode,
-  normalizeLowercaseStringOrEmpty,
   stripReasoningTagsFromText,
-} from "openclaw/plugin-sdk/text-runtime"
+} from "openclaw/plugin-sdk/text-chunking"
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime"
 import {
   DEFAULT_GROUP_HISTORY_LIMIT,
   clearHistoryEntriesIfEnabled,
@@ -3254,10 +3254,6 @@ export async function monitorInlineProvider(params: {
     const eventOptions = {
       sessionKey: ingress.sessionKey,
       contextKey: buildInlineReactionContextKey(params),
-      // Older OpenClaw hosts use these compatibility fields to keep
-      // untrusted reaction events from inheriting owner authority.
-      forceSenderIsOwnerFalse: true,
-      trusted: false,
     }
     core.system.enqueueSystemEvent(
       describeInlineReactionSystemEvent({
@@ -3338,8 +3334,6 @@ export async function monitorInlineProvider(params: {
       {
         sessionKey: ingress.sessionKey,
         contextKey,
-        forceSenderIsOwnerFalse: true,
-        trusted: false,
       },
     )
   }

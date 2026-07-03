@@ -1,4 +1,4 @@
-import { resolveNativeSkillsEnabled } from "openclaw/plugin-sdk/config-runtime"
+import { resolveNativeSkillsEnabled } from "openclaw/plugin-sdk/native-command-config-runtime"
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { parseAccessGroupAllowFromEntry } from "openclaw/plugin-sdk/security-runtime"
 import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from "../openclaw-compat.js"

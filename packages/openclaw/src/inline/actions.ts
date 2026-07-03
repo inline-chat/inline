@@ -1043,7 +1043,10 @@ function resolveInlineInteractiveButtonsParam(
     }
     if (block.type === "select") {
       chunkInteractiveButtons(
-        block.options.map((option) => ({ label: option.label, value: option.value })),
+        block.options.map((option) => ({
+          label: option.label,
+          ...(option.value !== undefined ? { value: option.value } : {}),
+        })),
         state,
       )
     }

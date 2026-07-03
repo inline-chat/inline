@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.47",
+  "version": "0.0.48",
   "license": "Apache-2.0",
   "type": "module",
   "files": [
@@ -17,10 +17,9 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist src/index.js src/index.js.map && bun build ./src/index.ts ./src/setup-entry.ts ./src/setup-plugin-api.ts ./src/configured-state.ts ./src/secret-contract-api.ts ./src/channel-plugin-api.ts ./src/inline/approval-handler.runtime.ts ./src/runtime-setter-api.ts ./src/account-inspect-api.ts ./src/runtime-register-api.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "bun build ./src/index.ts ./src/setup-entry.ts ./src/setup-plugin-api.ts ./src/configured-state.ts ./src/secret-contract-api.ts ./src/channel-plugin-api.ts ./src/inline/approval-handler.runtime.ts ./src/runtime-setter-api.ts ./src/account-inspect-api.ts ./src/runtime-register-api.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
     "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
     "prepack": "bun run build",
-    "pretest": "rm -rf coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage",
     "check": "bun run typecheck && bun run lint && bun run test && bun run build"
@@ -30,7 +29,7 @@
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.5.18"
+    "openclaw": ">=2026.6.11"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -40,7 +39,7 @@
   "devDependencies": {
     "@types/node": "20.17.19",
     "@vitest/coverage-v8": "4.0.16",
-    "openclaw": "2026.5.18",
+    "openclaw": "2026.6.11",
     "typescript": "5.8.3",
     "vitest": "4.0.16"
   },
@@ -89,13 +88,13 @@
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "packages/openclaw",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.5.18"
+      "minHostVersion": ">=2026.6.11"
     },
     "compat": {
-      "pluginApi": ">=2026.5.18"
+      "pluginApi": ">=2026.6.11"
     },
     "build": {
-      "openclawVersion": "2026.5.18"
+      "openclawVersion": "2026.6.11"
     },
     "release": {
       "publishToClawHub": true,
