@@ -66,9 +66,6 @@ class ReactionOverlayWindow: NSPanel {
 
     // Initialize hosting view
     hostingView = NSHostingView(rootView: overlayView)
-    hostingView?.wantsLayer = true
-    hostingView?.layer?.backgroundColor = NSColor.clear.cgColor
-    hostingView?.layer?.masksToBounds = false
 
     // Make window transparent and floating
     isOpaque = false
@@ -84,8 +81,6 @@ class ReactionOverlayWindow: NSPanel {
 
     // Make sure the window can receive mouse events
     contentView?.wantsLayer = true
-    contentView?.layer?.backgroundColor = NSColor.clear.cgColor
-    contentView?.layer?.masksToBounds = false
     contentView?.acceptsTouchEvents = true
 
     // Position the window
@@ -121,10 +116,9 @@ class ReactionOverlayWindow: NSPanel {
   private func positionWindow() {
     guard let hostingView else { return }
 
-    hostingView.layoutSubtreeIfNeeded()
     let windowSize = hostingView.fittingSize
     let cursorLocation = NSEvent.mouseLocation
-    let bottomGapFromCursor: CGFloat = 8
+    let bottomGapFromCursor: CGFloat = 6
 
     let preferredX = cursorLocation.x - (windowSize.width / 2)
     let preferredY = cursorLocation.y + bottomGapFromCursor
