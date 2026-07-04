@@ -2734,6 +2734,18 @@ export interface RpcCall {
          */
         deleteUserGroup: DeleteUserGroupInput;
     } | {
+        oneofKind: "getSpaceSettings";
+        /**
+         * @generated from protobuf field: GetSpaceSettingsInput getSpaceSettings = 73;
+         */
+        getSpaceSettings: GetSpaceSettingsInput;
+    } | {
+        oneofKind: "toggleSpaceGrid";
+        /**
+         * @generated from protobuf field: ToggleSpaceGridInput toggleSpaceGrid = 74;
+         */
+        toggleSpaceGrid: ToggleSpaceGridInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3175,6 +3187,18 @@ export interface RpcResult {
          */
         deleteUserGroup: DeleteUserGroupResult;
     } | {
+        oneofKind: "getSpaceSettings";
+        /**
+         * @generated from protobuf field: GetSpaceSettingsResult getSpaceSettings = 73;
+         */
+        getSpaceSettings: GetSpaceSettingsResult;
+    } | {
+        oneofKind: "toggleSpaceGrid";
+        /**
+         * @generated from protobuf field: ToggleSpaceGridResult toggleSpaceGrid = 74;
+         */
+        toggleSpaceGrid: ToggleSpaceGridResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3407,6 +3431,63 @@ export interface UpdateMemberAccessInput {
 export interface UpdateMemberAccessResult {
     /**
      * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message SpaceSettings
+ */
+export interface SpaceSettings {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: bool grid_enabled = 2;
+     */
+    gridEnabled: boolean;
+}
+/**
+ * @generated from protobuf message GetSpaceSettingsInput
+ */
+export interface GetSpaceSettingsInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetSpaceSettingsResult
+ */
+export interface GetSpaceSettingsResult {
+    /**
+     * @generated from protobuf field: SpaceSettings settings = 1;
+     */
+    settings?: SpaceSettings;
+}
+/**
+ * @generated from protobuf message ToggleSpaceGridInput
+ */
+export interface ToggleSpaceGridInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: bool enabled = 2;
+     */
+    enabled: boolean;
+}
+/**
+ * @generated from protobuf message ToggleSpaceGridResult
+ */
+export interface ToggleSpaceGridResult {
+    /**
+     * @generated from protobuf field: SpaceSettings settings = 1;
+     */
+    settings?: SpaceSettings;
+    /**
+     * @generated from protobuf field: repeated Update updates = 2;
      */
     updates: Update[];
 }
@@ -5805,6 +5886,12 @@ export interface Update {
          */
         participantGroupDelete: UpdateChatParticipantGroupDelete;
     } | {
+        oneofKind: "spaceSettings";
+        /**
+         * @generated from protobuf field: UpdateSpaceSettings space_settings = 43;
+         */
+        spaceSettings: UpdateSpaceSettings;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5987,6 +6074,19 @@ export interface UpdateUserSettings {
      * @generated from protobuf field: UserSettings settings = 1;
      */
     settings?: UserSettings;
+}
+/**
+ * @generated from protobuf message UpdateSpaceSettings
+ */
+export interface UpdateSpaceSettings {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: SpaceSettings settings = 2;
+     */
+    settings?: SpaceSettings;
 }
 /**
  * Update when a user's profile/account fields change.
@@ -7274,7 +7374,15 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_USER_GROUP = 71;
      */
-    DELETE_USER_GROUP = 71
+    DELETE_USER_GROUP = 71,
+    /**
+     * @generated from protobuf enum value: GET_SPACE_SETTINGS = 72;
+     */
+    GET_SPACE_SETTINGS = 72,
+    /**
+     * @generated from protobuf enum value: TOGGLE_SPACE_GRID = 73;
+     */
+    TOGGLE_SPACE_GRID = 73
 }
 /**
  * @generated from protobuf enum UsernameAvailability
@@ -12443,7 +12551,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 69, name: "getUserGroups", kind: "message", oneof: "input", T: () => GetUserGroupsInput },
             { no: 70, name: "createUserGroup", kind: "message", oneof: "input", T: () => CreateUserGroupInput },
             { no: 71, name: "updateUserGroup", kind: "message", oneof: "input", T: () => UpdateUserGroupInput },
-            { no: 72, name: "deleteUserGroup", kind: "message", oneof: "input", T: () => DeleteUserGroupInput }
+            { no: 72, name: "deleteUserGroup", kind: "message", oneof: "input", T: () => DeleteUserGroupInput },
+            { no: 73, name: "getSpaceSettings", kind: "message", oneof: "input", T: () => GetSpaceSettingsInput },
+            { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "input", T: () => ToggleSpaceGridInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -12888,6 +12998,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteUserGroup: DeleteUserGroupInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteUserGroup)
                     };
                     break;
+                case /* GetSpaceSettingsInput getSpaceSettings */ 73:
+                    message.input = {
+                        oneofKind: "getSpaceSettings",
+                        getSpaceSettings: GetSpaceSettingsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaceSettings)
+                    };
+                    break;
+                case /* ToggleSpaceGridInput toggleSpaceGrid */ 74:
+                    message.input = {
+                        oneofKind: "toggleSpaceGrid",
+                        toggleSpaceGrid: ToggleSpaceGridInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).toggleSpaceGrid)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13116,6 +13238,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteUserGroupInput deleteUserGroup = 72; */
         if (message.input.oneofKind === "deleteUserGroup")
             DeleteUserGroupInput.internalBinaryWrite(message.input.deleteUserGroup, writer.tag(72, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceSettingsInput getSpaceSettings = 73; */
+        if (message.input.oneofKind === "getSpaceSettings")
+            GetSpaceSettingsInput.internalBinaryWrite(message.input.getSpaceSettings, writer.tag(73, WireType.LengthDelimited).fork(), options).join();
+        /* ToggleSpaceGridInput toggleSpaceGrid = 74; */
+        if (message.input.oneofKind === "toggleSpaceGrid")
+            ToggleSpaceGridInput.internalBinaryWrite(message.input.toggleSpaceGrid, writer.tag(74, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13201,7 +13329,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 69, name: "getUserGroups", kind: "message", oneof: "result", T: () => GetUserGroupsResult },
             { no: 70, name: "createUserGroup", kind: "message", oneof: "result", T: () => CreateUserGroupResult },
             { no: 71, name: "updateUserGroup", kind: "message", oneof: "result", T: () => UpdateUserGroupResult },
-            { no: 72, name: "deleteUserGroup", kind: "message", oneof: "result", T: () => DeleteUserGroupResult }
+            { no: 72, name: "deleteUserGroup", kind: "message", oneof: "result", T: () => DeleteUserGroupResult },
+            { no: 73, name: "getSpaceSettings", kind: "message", oneof: "result", T: () => GetSpaceSettingsResult },
+            { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "result", T: () => ToggleSpaceGridResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -13646,6 +13776,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteUserGroup: DeleteUserGroupResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteUserGroup)
                     };
                     break;
+                case /* GetSpaceSettingsResult getSpaceSettings */ 73:
+                    message.result = {
+                        oneofKind: "getSpaceSettings",
+                        getSpaceSettings: GetSpaceSettingsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaceSettings)
+                    };
+                    break;
+                case /* ToggleSpaceGridResult toggleSpaceGrid */ 74:
+                    message.result = {
+                        oneofKind: "toggleSpaceGrid",
+                        toggleSpaceGrid: ToggleSpaceGridResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).toggleSpaceGrid)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13874,6 +14016,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteUserGroupResult deleteUserGroup = 72; */
         if (message.result.oneofKind === "deleteUserGroup")
             DeleteUserGroupResult.internalBinaryWrite(message.result.deleteUserGroup, writer.tag(72, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceSettingsResult getSpaceSettings = 73; */
+        if (message.result.oneofKind === "getSpaceSettings")
+            GetSpaceSettingsResult.internalBinaryWrite(message.result.getSpaceSettings, writer.tag(73, WireType.LengthDelimited).fork(), options).join();
+        /* ToggleSpaceGridResult toggleSpaceGrid = 74; */
+        if (message.result.oneofKind === "toggleSpaceGrid")
+            ToggleSpaceGridResult.internalBinaryWrite(message.result.toggleSpaceGrid, writer.tag(74, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14517,6 +14665,263 @@ class UpdateMemberAccessResult$Type extends MessageType<UpdateMemberAccessResult
  * @generated MessageType for protobuf message UpdateMemberAccessResult
  */
 export const UpdateMemberAccessResult = new UpdateMemberAccessResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SpaceSettings$Type extends MessageType<SpaceSettings> {
+    constructor() {
+        super("SpaceSettings", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "grid_enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SpaceSettings>): SpaceSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.gridEnabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<SpaceSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SpaceSettings): SpaceSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* bool grid_enabled */ 2:
+                    message.gridEnabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SpaceSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* bool grid_enabled = 2; */
+        if (message.gridEnabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.gridEnabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SpaceSettings
+ */
+export const SpaceSettings = new SpaceSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceSettingsInput$Type extends MessageType<GetSpaceSettingsInput> {
+    constructor() {
+        super("GetSpaceSettingsInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceSettingsInput>): GetSpaceSettingsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceSettingsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceSettingsInput): GetSpaceSettingsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceSettingsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceSettingsInput
+ */
+export const GetSpaceSettingsInput = new GetSpaceSettingsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceSettingsResult$Type extends MessageType<GetSpaceSettingsResult> {
+    constructor() {
+        super("GetSpaceSettingsResult", [
+            { no: 1, name: "settings", kind: "message", T: () => SpaceSettings }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceSettingsResult>): GetSpaceSettingsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceSettingsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceSettingsResult): GetSpaceSettingsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* SpaceSettings settings */ 1:
+                    message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceSettingsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* SpaceSettings settings = 1; */
+        if (message.settings)
+            SpaceSettings.internalBinaryWrite(message.settings, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceSettingsResult
+ */
+export const GetSpaceSettingsResult = new GetSpaceSettingsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ToggleSpaceGridInput$Type extends MessageType<ToggleSpaceGridInput> {
+    constructor() {
+        super("ToggleSpaceGridInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ToggleSpaceGridInput>): ToggleSpaceGridInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.enabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<ToggleSpaceGridInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ToggleSpaceGridInput): ToggleSpaceGridInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ToggleSpaceGridInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* bool enabled = 2; */
+        if (message.enabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ToggleSpaceGridInput
+ */
+export const ToggleSpaceGridInput = new ToggleSpaceGridInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ToggleSpaceGridResult$Type extends MessageType<ToggleSpaceGridResult> {
+    constructor() {
+        super("ToggleSpaceGridResult", [
+            { no: 1, name: "settings", kind: "message", T: () => SpaceSettings },
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<ToggleSpaceGridResult>): ToggleSpaceGridResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<ToggleSpaceGridResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ToggleSpaceGridResult): ToggleSpaceGridResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* SpaceSettings settings */ 1:
+                    message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+                    break;
+                case /* repeated Update updates */ 2:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ToggleSpaceGridResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* SpaceSettings settings = 1; */
+        if (message.settings)
+            SpaceSettings.internalBinaryWrite(message.settings, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Update updates = 2; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ToggleSpaceGridResult
+ */
+export const ToggleSpaceGridResult = new ToggleSpaceGridResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SpaceUrlPreviewExclusion$Type extends MessageType<SpaceUrlPreviewExclusion> {
     constructor() {
@@ -21795,7 +22200,8 @@ class Update$Type extends MessageType<Update> {
             { no: 39, name: "dialog_follow_mode", kind: "message", oneof: "update", T: () => UpdateDialogFollowMode },
             { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser },
             { no: 41, name: "participant_group_add", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupAdd },
-            { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete }
+            { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete },
+            { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -22050,6 +22456,12 @@ class Update$Type extends MessageType<Update> {
                         participantGroupDelete: UpdateChatParticipantGroupDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).participantGroupDelete)
                     };
                     break;
+                case /* UpdateSpaceSettings space_settings */ 43:
+                    message.update = {
+                        oneofKind: "spaceSettings",
+                        spaceSettings: UpdateSpaceSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceSettings)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22185,6 +22597,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateChatParticipantGroupDelete participant_group_delete = 42; */
         if (message.update.oneofKind === "participantGroupDelete")
             UpdateChatParticipantGroupDelete.internalBinaryWrite(message.update.participantGroupDelete, writer.tag(42, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateSpaceSettings space_settings = 43; */
+        if (message.update.oneofKind === "spaceSettings")
+            UpdateSpaceSettings.internalBinaryWrite(message.update.spaceSettings, writer.tag(43, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22704,6 +23119,60 @@ class UpdateUserSettings$Type extends MessageType<UpdateUserSettings> {
  * @generated MessageType for protobuf message UpdateUserSettings
  */
 export const UpdateUserSettings = new UpdateUserSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateSpaceSettings$Type extends MessageType<UpdateSpaceSettings> {
+    constructor() {
+        super("UpdateSpaceSettings", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "settings", kind: "message", T: () => SpaceSettings }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateSpaceSettings>): UpdateSpaceSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateSpaceSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateSpaceSettings): UpdateSpaceSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* SpaceSettings settings */ 2:
+                    message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateSpaceSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* SpaceSettings settings = 2; */
+        if (message.settings)
+            SpaceSettings.internalBinaryWrite(message.settings, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateSpaceSettings
+ */
+export const UpdateSpaceSettings = new UpdateSpaceSettings$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateUpdatedUser$Type extends MessageType<UpdateUpdatedUser> {
     constructor() {

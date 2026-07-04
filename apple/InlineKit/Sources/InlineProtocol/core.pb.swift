@@ -8,7 +8,11 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -16,12 +20,12 @@ import SwiftProtobuf
 // incompatible with the version of SwiftProtobuf to which you are linking.
 // Please ensure that you are building against the same version of the API
 // that was used to generate this file.
-fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
+fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
   struct _2: SwiftProtobuf.ProtobufAPIVersion_2 {}
   typealias Version = _2
 }
 
-public enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
   case following // = 1
@@ -55,7 +59,7 @@ public enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
-public enum MessageSendMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum MessageSendMode: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case modeUnspecified // = 0
   case modeSilent // = 1
@@ -89,7 +93,7 @@ public enum MessageSendMode: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
-public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
   case getMe // = 1
@@ -163,6 +167,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case createUserGroup // = 69
   case updateUserGroup // = 70
   case deleteUserGroup // = 71
+  case getSpaceSettings // = 72
+  case toggleSpaceGrid // = 73
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -243,6 +249,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 69: self = .createUserGroup
     case 70: self = .updateUserGroup
     case 71: self = .deleteUserGroup
+    case 72: self = .getSpaceSettings
+    case 73: self = .toggleSpaceGrid
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -321,6 +329,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .createUserGroup: return 69
     case .updateUserGroup: return 70
     case .deleteUserGroup: return 71
+    case .getSpaceSettings: return 72
+    case .toggleSpaceGrid: return 73
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -399,11 +409,13 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .createUserGroup,
     .updateUserGroup,
     .deleteUserGroup,
+    .getSpaceSettings,
+    .toggleSpaceGrid,
   ]
 
 }
 
-public enum UsernameAvailability: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum UsernameAvailability: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
   case usernameAvailable // = 1
@@ -453,7 +465,7 @@ public enum UsernameAvailability: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
-public enum PushNotificationProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum PushNotificationProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
   case apns // = 1
@@ -491,7 +503,7 @@ public enum PushNotificationProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
-public enum GetChatHistoryMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum GetChatHistoryMode: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case historyModeUnspecified // = 0
   case historyModeLatest // = 1
@@ -537,7 +549,7 @@ public enum GetChatHistoryMode: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
-public enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
+public nonisolated enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case filterUnspecified // = 0
   case filterPhotos // = 1
@@ -587,7 +599,7 @@ public enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
-public struct ClientMessage: Sendable {
+public nonisolated struct ClientMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -632,7 +644,7 @@ public struct ClientMessage: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Body: Equatable, Sendable {
+  public nonisolated enum OneOf_Body: Equatable, Sendable {
     case connectionInit(ConnectionInit)
     case rpcCall(RpcCall)
     case ack(Ack)
@@ -643,7 +655,7 @@ public struct ClientMessage: Sendable {
   public init() {}
 }
 
-public struct ConnectionInit: Sendable {
+public nonisolated struct ConnectionInit: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -652,41 +664,41 @@ public struct ConnectionInit: Sendable {
 
   /// Build number of the client app
   public var buildNumber: Int32 {
-    get {return _buildNumber ?? 0}
+    get {_buildNumber ?? 0}
     set {_buildNumber = newValue}
   }
   /// Returns true if `buildNumber` has been explicitly set.
-  public var hasBuildNumber: Bool {return self._buildNumber != nil}
+  public var hasBuildNumber: Bool {self._buildNumber != nil}
   /// Clears the value of `buildNumber`. Subsequent reads from it will return its default value.
   public mutating func clearBuildNumber() {self._buildNumber = nil}
 
   /// API layer, for specific API differentiation
   public var layer: UInt32 {
-    get {return _layer ?? 0}
+    get {_layer ?? 0}
     set {_layer = newValue}
   }
   /// Returns true if `layer` has been explicitly set.
-  public var hasLayer: Bool {return self._layer != nil}
+  public var hasLayer: Bool {self._layer != nil}
   /// Clears the value of `layer`. Subsequent reads from it will return its default value.
   public mutating func clearLayer() {self._layer = nil}
 
   /// Client version (semver)
   public var clientVersion: String {
-    get {return _clientVersion ?? String()}
+    get {_clientVersion ?? String()}
     set {_clientVersion = newValue}
   }
   /// Returns true if `clientVersion` has been explicitly set.
-  public var hasClientVersion: Bool {return self._clientVersion != nil}
+  public var hasClientVersion: Bool {self._clientVersion != nil}
   /// Clears the value of `clientVersion`. Subsequent reads from it will return its default value.
   public mutating func clearClientVersion() {self._clientVersion = nil}
 
   /// OS version (semver)
   public var osVersion: String {
-    get {return _osVersion ?? String()}
+    get {_osVersion ?? String()}
     set {_osVersion = newValue}
   }
   /// Returns true if `osVersion` has been explicitly set.
-  public var hasOsVersion: Bool {return self._osVersion != nil}
+  public var hasOsVersion: Bool {self._osVersion != nil}
   /// Clears the value of `osVersion`. Subsequent reads from it will return its default value.
   public mutating func clearOsVersion() {self._osVersion = nil}
 
@@ -700,7 +712,7 @@ public struct ConnectionInit: Sendable {
   fileprivate var _osVersion: String? = nil
 }
 
-public struct ServerProtocolMessage: Sendable {
+public nonisolated struct ServerProtocolMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -767,7 +779,7 @@ public struct ServerProtocolMessage: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Body: Equatable, Sendable {
+  public nonisolated enum OneOf_Body: Equatable, Sendable {
     case connectionOpen(ConnectionOpen)
     case rpcResult(RpcResult)
     case rpcError(RpcError)
@@ -781,7 +793,7 @@ public struct ServerProtocolMessage: Sendable {
   public init() {}
 }
 
-public struct ServerMessage: Sendable {
+public nonisolated struct ServerMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -798,7 +810,7 @@ public struct ServerMessage: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Payload: Equatable, Sendable {
+  public nonisolated enum OneOf_Payload: Equatable, Sendable {
     case update(UpdatesPayload)
 
   }
@@ -806,7 +818,7 @@ public struct ServerMessage: Sendable {
   public init() {}
 }
 
-public struct UpdatesPayload: Sendable {
+public nonisolated struct UpdatesPayload: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -818,7 +830,7 @@ public struct UpdatesPayload: Sendable {
   public init() {}
 }
 
-public struct Ack: Sendable {
+public nonisolated struct Ack: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -830,7 +842,7 @@ public struct Ack: Sendable {
   public init() {}
 }
 
-public struct ConnectionOpen: Sendable {
+public nonisolated struct ConnectionOpen: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -840,7 +852,7 @@ public struct ConnectionOpen: Sendable {
   public init() {}
 }
 
-public struct ConnectionError: Sendable {
+public nonisolated struct ConnectionError: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -849,7 +861,7 @@ public struct ConnectionError: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Reason: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Reason: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case unauthorized // = 1
@@ -894,7 +906,7 @@ public struct ConnectionError: Sendable {
   public init() {}
 }
 
-public struct Ping: Sendable {
+public nonisolated struct Ping: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -906,7 +918,7 @@ public struct Ping: Sendable {
   public init() {}
 }
 
-public struct Pong: Sendable {
+public nonisolated struct Pong: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -918,7 +930,7 @@ public struct Pong: Sendable {
   public init() {}
 }
 
-public struct InputPeer: Sendable {
+public nonisolated struct InputPeer: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -951,7 +963,7 @@ public struct InputPeer: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Type: Equatable, Sendable {
+  public nonisolated enum OneOf_Type: Equatable, Sendable {
     case self_p(InputPeerSelf)
     case chat(InputPeerChat)
     case user(InputPeerUser)
@@ -961,7 +973,7 @@ public struct InputPeer: Sendable {
   public init() {}
 }
 
-public struct InputPeerSelf: Sendable {
+public nonisolated struct InputPeerSelf: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -971,7 +983,7 @@ public struct InputPeerSelf: Sendable {
   public init() {}
 }
 
-public struct InputPeerChat: Sendable {
+public nonisolated struct InputPeerChat: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -983,7 +995,7 @@ public struct InputPeerChat: Sendable {
   public init() {}
 }
 
-public struct InputPeerUser: Sendable {
+public nonisolated struct InputPeerUser: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -995,7 +1007,7 @@ public struct InputPeerUser: Sendable {
   public init() {}
 }
 
-public struct Peer: Sendable {
+public nonisolated struct Peer: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1020,7 +1032,7 @@ public struct Peer: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Type: Equatable, Sendable {
+  public nonisolated enum OneOf_Type: Equatable, Sendable {
     case chat(PeerChat)
     case user(PeerUser)
 
@@ -1029,7 +1041,7 @@ public struct Peer: Sendable {
   public init() {}
 }
 
-public struct PeerChat: Sendable {
+public nonisolated struct PeerChat: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1041,7 +1053,7 @@ public struct PeerChat: Sendable {
   public init() {}
 }
 
-public struct PeerUser: Sendable {
+public nonisolated struct PeerUser: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1053,7 +1065,7 @@ public struct PeerUser: Sendable {
   public init() {}
 }
 
-public struct BotAvatar: Sendable {
+public nonisolated struct BotAvatar: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1063,35 +1075,35 @@ public struct BotAvatar: Sendable {
   public var displayName: String = String()
 
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
+    get {_cdnURL ?? String()}
     set {_cdnURL = newValue}
   }
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool {self._cdnURL != nil}
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
   public mutating func clearCdnURL() {self._cdnURL = nil}
 
   public var fileUniqueID: String {
-    get {return _fileUniqueID ?? String()}
+    get {_fileUniqueID ?? String()}
     set {_fileUniqueID = newValue}
   }
   /// Returns true if `fileUniqueID` has been explicitly set.
-  public var hasFileUniqueID: Bool {return self._fileUniqueID != nil}
+  public var hasFileUniqueID: Bool {self._fileUniqueID != nil}
   /// Clears the value of `fileUniqueID`. Subsequent reads from it will return its default value.
   public mutating func clearFileUniqueID() {self._fileUniqueID = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case codexAtlas // = 1
@@ -1132,7 +1144,7 @@ public struct BotAvatar: Sendable {
   fileprivate var _fileUniqueID: String? = nil
 }
 
-public struct BotPresenceState: Sendable {
+public nonisolated struct BotPresenceState: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1140,17 +1152,17 @@ public struct BotPresenceState: Sendable {
   public var kind: BotPresenceState.Kind = .unspecified
 
   public var comment: String {
-    get {return _comment ?? String()}
+    get {_comment ?? String()}
     set {_comment = newValue}
   }
   /// Returns true if `comment` has been explicitly set.
-  public var hasComment: Bool {return self._comment != nil}
+  public var hasComment: Bool {self._comment != nil}
   /// Clears the value of `comment`. Subsequent reads from it will return its default value.
   public mutating func clearComment() {self._comment = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case hidden // = 1
@@ -1221,132 +1233,132 @@ public struct BotPresenceState: Sendable {
   fileprivate var _comment: String? = nil
 }
 
-public struct User: @unchecked Sendable {
+public nonisolated struct User: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var id: Int64 {
-    get {return _storage._id}
+    get {_storage._id}
     set {_uniqueStorage()._id = newValue}
   }
 
   public var firstName: String {
-    get {return _storage._firstName ?? String()}
+    get {_storage._firstName ?? String()}
     set {_uniqueStorage()._firstName = newValue}
   }
   /// Returns true if `firstName` has been explicitly set.
-  public var hasFirstName: Bool {return _storage._firstName != nil}
+  public var hasFirstName: Bool {_storage._firstName != nil}
   /// Clears the value of `firstName`. Subsequent reads from it will return its default value.
   public mutating func clearFirstName() {_uniqueStorage()._firstName = nil}
 
   public var lastName: String {
-    get {return _storage._lastName ?? String()}
+    get {_storage._lastName ?? String()}
     set {_uniqueStorage()._lastName = newValue}
   }
   /// Returns true if `lastName` has been explicitly set.
-  public var hasLastName: Bool {return _storage._lastName != nil}
+  public var hasLastName: Bool {_storage._lastName != nil}
   /// Clears the value of `lastName`. Subsequent reads from it will return its default value.
   public mutating func clearLastName() {_uniqueStorage()._lastName = nil}
 
   public var username: String {
-    get {return _storage._username ?? String()}
+    get {_storage._username ?? String()}
     set {_uniqueStorage()._username = newValue}
   }
   /// Returns true if `username` has been explicitly set.
-  public var hasUsername: Bool {return _storage._username != nil}
+  public var hasUsername: Bool {_storage._username != nil}
   /// Clears the value of `username`. Subsequent reads from it will return its default value.
   public mutating func clearUsername() {_uniqueStorage()._username = nil}
 
   public var phoneNumber: String {
-    get {return _storage._phoneNumber ?? String()}
+    get {_storage._phoneNumber ?? String()}
     set {_uniqueStorage()._phoneNumber = newValue}
   }
   /// Returns true if `phoneNumber` has been explicitly set.
-  public var hasPhoneNumber: Bool {return _storage._phoneNumber != nil}
+  public var hasPhoneNumber: Bool {_storage._phoneNumber != nil}
   /// Clears the value of `phoneNumber`. Subsequent reads from it will return its default value.
   public mutating func clearPhoneNumber() {_uniqueStorage()._phoneNumber = nil}
 
   public var email: String {
-    get {return _storage._email ?? String()}
+    get {_storage._email ?? String()}
     set {_uniqueStorage()._email = newValue}
   }
   /// Returns true if `email` has been explicitly set.
-  public var hasEmail: Bool {return _storage._email != nil}
+  public var hasEmail: Bool {_storage._email != nil}
   /// Clears the value of `email`. Subsequent reads from it will return its default value.
   public mutating func clearEmail() {_uniqueStorage()._email = nil}
 
   /// If true, certain fields such as email or phone_number will be missing
   public var min: Bool {
-    get {return _storage._min ?? false}
+    get {_storage._min ?? false}
     set {_uniqueStorage()._min = newValue}
   }
   /// Returns true if `min` has been explicitly set.
-  public var hasMin: Bool {return _storage._min != nil}
+  public var hasMin: Bool {_storage._min != nil}
   /// Clears the value of `min`. Subsequent reads from it will return its default value.
   public mutating func clearMin() {_uniqueStorage()._min = nil}
 
   public var status: UserStatus {
-    get {return _storage._status ?? UserStatus()}
+    get {_storage._status ?? UserStatus()}
     set {_uniqueStorage()._status = newValue}
   }
   /// Returns true if `status` has been explicitly set.
-  public var hasStatus: Bool {return _storage._status != nil}
+  public var hasStatus: Bool {_storage._status != nil}
   /// Clears the value of `status`. Subsequent reads from it will return its default value.
   public mutating func clearStatus() {_uniqueStorage()._status = nil}
 
   public var profilePhoto: UserProfilePhoto {
-    get {return _storage._profilePhoto ?? UserProfilePhoto()}
+    get {_storage._profilePhoto ?? UserProfilePhoto()}
     set {_uniqueStorage()._profilePhoto = newValue}
   }
   /// Returns true if `profilePhoto` has been explicitly set.
-  public var hasProfilePhoto: Bool {return _storage._profilePhoto != nil}
+  public var hasProfilePhoto: Bool {_storage._profilePhoto != nil}
   /// Clears the value of `profilePhoto`. Subsequent reads from it will return its default value.
   public mutating func clearProfilePhoto() {_uniqueStorage()._profilePhoto = nil}
 
   /// If true, the user has not completed the setup process
   public var pendingSetup: Bool {
-    get {return _storage._pendingSetup ?? false}
+    get {_storage._pendingSetup ?? false}
     set {_uniqueStorage()._pendingSetup = newValue}
   }
   /// Returns true if `pendingSetup` has been explicitly set.
-  public var hasPendingSetup: Bool {return _storage._pendingSetup != nil}
+  public var hasPendingSetup: Bool {_storage._pendingSetup != nil}
   /// Clears the value of `pendingSetup`. Subsequent reads from it will return its default value.
   public mutating func clearPendingSetup() {_uniqueStorage()._pendingSetup = nil}
 
   public var timeZone: String {
-    get {return _storage._timeZone ?? String()}
+    get {_storage._timeZone ?? String()}
     set {_uniqueStorage()._timeZone = newValue}
   }
   /// Returns true if `timeZone` has been explicitly set.
-  public var hasTimeZone: Bool {return _storage._timeZone != nil}
+  public var hasTimeZone: Bool {_storage._timeZone != nil}
   /// Clears the value of `timeZone`. Subsequent reads from it will return its default value.
   public mutating func clearTimeZone() {_uniqueStorage()._timeZone = nil}
 
   public var bot: Bool {
-    get {return _storage._bot ?? false}
+    get {_storage._bot ?? false}
     set {_uniqueStorage()._bot = newValue}
   }
   /// Returns true if `bot` has been explicitly set.
-  public var hasBot: Bool {return _storage._bot != nil}
+  public var hasBot: Bool {_storage._bot != nil}
   /// Clears the value of `bot`. Subsequent reads from it will return its default value.
   public mutating func clearBot() {_uniqueStorage()._bot = nil}
 
   public var botAvatar: BotAvatar {
-    get {return _storage._botAvatar ?? BotAvatar()}
+    get {_storage._botAvatar ?? BotAvatar()}
     set {_uniqueStorage()._botAvatar = newValue}
   }
   /// Returns true if `botAvatar` has been explicitly set.
-  public var hasBotAvatar: Bool {return _storage._botAvatar != nil}
+  public var hasBotAvatar: Bool {_storage._botAvatar != nil}
   /// Clears the value of `botAvatar`. Subsequent reads from it will return its default value.
   public mutating func clearBotAvatar() {_uniqueStorage()._botAvatar = nil}
 
   public var bio: String {
-    get {return _storage._bio ?? String()}
+    get {_storage._bio ?? String()}
     set {_uniqueStorage()._bio = newValue}
   }
   /// Returns true if `bio` has been explicitly set.
-  public var hasBio: Bool {return _storage._bio != nil}
+  public var hasBio: Bool {_storage._bio != nil}
   /// Clears the value of `bio`. Subsequent reads from it will return its default value.
   public mutating func clearBio() {_uniqueStorage()._bio = nil}
 
@@ -1357,48 +1369,48 @@ public struct User: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct UserProfilePhoto: @unchecked Sendable {
+public nonisolated struct UserProfilePhoto: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// ID of the photo
   public var photoID: Int64 {
-    get {return _photoID ?? 0}
+    get {_photoID ?? 0}
     set {_photoID = newValue}
   }
   /// Returns true if `photoID` has been explicitly set.
-  public var hasPhotoID: Bool {return self._photoID != nil}
+  public var hasPhotoID: Bool {self._photoID != nil}
   /// Clears the value of `photoID`. Subsequent reads from it will return its default value.
   public mutating func clearPhotoID() {self._photoID = nil}
 
   /// Stripped thumbnail of the photo
   public var strippedThumb: Data {
-    get {return _strippedThumb ?? Data()}
+    get {_strippedThumb ?? Data()}
     set {_strippedThumb = newValue}
   }
   /// Returns true if `strippedThumb` has been explicitly set.
-  public var hasStrippedThumb: Bool {return self._strippedThumb != nil}
+  public var hasStrippedThumb: Bool {self._strippedThumb != nil}
   /// Clears the value of `strippedThumb`. Subsequent reads from it will return its default value.
   public mutating func clearStrippedThumb() {self._strippedThumb = nil}
 
   /// Photo
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
+    get {_cdnURL ?? String()}
     set {_cdnURL = newValue}
   }
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool {self._cdnURL != nil}
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
   public mutating func clearCdnURL() {self._cdnURL = nil}
 
   /// Unique identifier of the file for cache invalidation
   public var fileUniqueID: String {
-    get {return _fileUniqueID ?? String()}
+    get {_fileUniqueID ?? String()}
     set {_fileUniqueID = newValue}
   }
   /// Returns true if `fileUniqueID` has been explicitly set.
-  public var hasFileUniqueID: Bool {return self._fileUniqueID != nil}
+  public var hasFileUniqueID: Bool {self._fileUniqueID != nil}
   /// Clears the value of `fileUniqueID`. Subsequent reads from it will return its default value.
   public mutating func clearFileUniqueID() {self._fileUniqueID = nil}
 
@@ -1412,89 +1424,89 @@ public struct UserProfilePhoto: @unchecked Sendable {
   fileprivate var _fileUniqueID: String? = nil
 }
 
-public struct Dialog: Sendable {
+public nonisolated struct Dialog: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peer: Peer {
-    get {return _peer ?? Peer()}
+    get {_peer ?? Peer()}
     set {_peer = newValue}
   }
   /// Returns true if `peer` has been explicitly set.
-  public var hasPeer: Bool {return self._peer != nil}
+  public var hasPeer: Bool {self._peer != nil}
   /// Clears the value of `peer`. Subsequent reads from it will return its default value.
   public mutating func clearPeer() {self._peer = nil}
 
   public var spaceID: Int64 {
-    get {return _spaceID ?? 0}
+    get {_spaceID ?? 0}
     set {_spaceID = newValue}
   }
   /// Returns true if `spaceID` has been explicitly set.
-  public var hasSpaceID: Bool {return self._spaceID != nil}
+  public var hasSpaceID: Bool {self._spaceID != nil}
   /// Clears the value of `spaceID`. Subsequent reads from it will return its default value.
   public mutating func clearSpaceID() {self._spaceID = nil}
 
   public var archived: Bool {
-    get {return _archived ?? false}
+    get {_archived ?? false}
     set {_archived = newValue}
   }
   /// Returns true if `archived` has been explicitly set.
-  public var hasArchived: Bool {return self._archived != nil}
+  public var hasArchived: Bool {self._archived != nil}
   /// Clears the value of `archived`. Subsequent reads from it will return its default value.
   public mutating func clearArchived() {self._archived = nil}
 
   public var pinned: Bool {
-    get {return _pinned ?? false}
+    get {_pinned ?? false}
     set {_pinned = newValue}
   }
   /// Returns true if `pinned` has been explicitly set.
-  public var hasPinned: Bool {return self._pinned != nil}
+  public var hasPinned: Bool {self._pinned != nil}
   /// Clears the value of `pinned`. Subsequent reads from it will return its default value.
   public mutating func clearPinned() {self._pinned = nil}
 
   public var readMaxID: Int64 {
-    get {return _readMaxID ?? 0}
+    get {_readMaxID ?? 0}
     set {_readMaxID = newValue}
   }
   /// Returns true if `readMaxID` has been explicitly set.
-  public var hasReadMaxID: Bool {return self._readMaxID != nil}
+  public var hasReadMaxID: Bool {self._readMaxID != nil}
   /// Clears the value of `readMaxID`. Subsequent reads from it will return its default value.
   public mutating func clearReadMaxID() {self._readMaxID = nil}
 
   public var unreadCount: Int32 {
-    get {return _unreadCount ?? 0}
+    get {_unreadCount ?? 0}
     set {_unreadCount = newValue}
   }
   /// Returns true if `unreadCount` has been explicitly set.
-  public var hasUnreadCount: Bool {return self._unreadCount != nil}
+  public var hasUnreadCount: Bool {self._unreadCount != nil}
   /// Clears the value of `unreadCount`. Subsequent reads from it will return its default value.
   public mutating func clearUnreadCount() {self._unreadCount = nil}
 
   public var chatID: Int64 {
-    get {return _chatID ?? 0}
+    get {_chatID ?? 0}
     set {_chatID = newValue}
   }
   /// Returns true if `chatID` has been explicitly set.
-  public var hasChatID: Bool {return self._chatID != nil}
+  public var hasChatID: Bool {self._chatID != nil}
   /// Clears the value of `chatID`. Subsequent reads from it will return its default value.
   public mutating func clearChatID() {self._chatID = nil}
 
   public var unreadMark: Bool {
-    get {return _unreadMark ?? false}
+    get {_unreadMark ?? false}
     set {_unreadMark = newValue}
   }
   /// Returns true if `unreadMark` has been explicitly set.
-  public var hasUnreadMark: Bool {return self._unreadMark != nil}
+  public var hasUnreadMark: Bool {self._unreadMark != nil}
   /// Clears the value of `unreadMark`. Subsequent reads from it will return its default value.
   public mutating func clearUnreadMark() {self._unreadMark = nil}
 
   public var notificationSettings: DialogNotificationSettings {
-    get {return _notificationSettings ?? DialogNotificationSettings()}
+    get {_notificationSettings ?? DialogNotificationSettings()}
     set {_notificationSettings = newValue}
   }
   /// Returns true if `notificationSettings` has been explicitly set.
-  public var hasNotificationSettings: Bool {return self._notificationSettings != nil}
+  public var hasNotificationSettings: Bool {self._notificationSettings != nil}
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
@@ -1502,71 +1514,71 @@ public struct Dialog: Sendable {
   ///
   /// NOTE: This field was marked as deprecated in the .proto file.
   public var sidebarVisible: Bool {
-    get {return _sidebarVisible ?? false}
+    get {_sidebarVisible ?? false}
     set {_sidebarVisible = newValue}
   }
   /// Returns true if `sidebarVisible` has been explicitly set.
-  public var hasSidebarVisible: Bool {return self._sidebarVisible != nil}
+  public var hasSidebarVisible: Bool {self._sidebarVisible != nil}
   /// Clears the value of `sidebarVisible`. Subsequent reads from it will return its default value.
   public mutating func clearSidebarVisible() {self._sidebarVisible = nil}
 
   /// Hide noisy reply threads from normal chat lists; this is independent of sidebar inbox open state.
   public var chatListHidden: Bool {
-    get {return _chatListHidden ?? false}
+    get {_chatListHidden ?? false}
     set {_chatListHidden = newValue}
   }
   /// Returns true if `chatListHidden` has been explicitly set.
-  public var hasChatListHidden: Bool {return self._chatListHidden != nil}
+  public var hasChatListHidden: Bool {self._chatListHidden != nil}
   /// Clears the value of `chatListHidden`. Subsequent reads from it will return its default value.
   public mutating func clearChatListHidden() {self._chatListHidden = nil}
 
   /// Stable sidebar inbox membership.
   public var `open`: Bool {
-    get {return _open ?? false}
+    get {_open ?? false}
     set {_open = newValue}
   }
   /// Returns true if ``open`` has been explicitly set.
-  public var hasOpen: Bool {return self._open != nil}
+  public var hasOpen: Bool {self._open != nil}
   /// Clears the value of ``open``. Subsequent reads from it will return its default value.
   public mutating func clearOpen() {self._open = nil}
 
   /// Deprecated: sidebar ordering is now stored in order.
   public var openedDate: Int64 {
-    get {return _openedDate ?? 0}
+    get {_openedDate ?? 0}
     set {_openedDate = newValue}
   }
   /// Returns true if `openedDate` has been explicitly set.
-  public var hasOpenedDate: Bool {return self._openedDate != nil}
+  public var hasOpenedDate: Bool {self._openedDate != nil}
   /// Clears the value of `openedDate`. Subsequent reads from it will return its default value.
   public mutating func clearOpenedDate() {self._openedDate = nil}
 
   /// Stable fractional order for normal sidebar inbox rows.
   public var order: String {
-    get {return _order ?? String()}
+    get {_order ?? String()}
     set {_order = newValue}
   }
   /// Returns true if `order` has been explicitly set.
-  public var hasOrder: Bool {return self._order != nil}
+  public var hasOrder: Bool {self._order != nil}
   /// Clears the value of `order`. Subsequent reads from it will return its default value.
   public mutating func clearOrder() {self._order = nil}
 
   /// Stable fractional order for pinned sidebar rows.
   public var pinnedOrder: String {
-    get {return _pinnedOrder ?? String()}
+    get {_pinnedOrder ?? String()}
     set {_pinnedOrder = newValue}
   }
   /// Returns true if `pinnedOrder` has been explicitly set.
-  public var hasPinnedOrder: Bool {return self._pinnedOrder != nil}
+  public var hasPinnedOrder: Bool {self._pinnedOrder != nil}
   /// Clears the value of `pinnedOrder`. Subsequent reads from it will return its default value.
   public mutating func clearPinnedOrder() {self._pinnedOrder = nil}
 
   /// Reply-thread automatic surfacing policy.
   public var followMode: DialogFollowMode {
-    get {return _followMode ?? .unspecified}
+    get {_followMode ?? .unspecified}
     set {_followMode = newValue}
   }
   /// Returns true if `followMode` has been explicitly set.
-  public var hasFollowMode: Bool {return self._followMode != nil}
+  public var hasFollowMode: Bool {self._followMode != nil}
   /// Clears the value of `followMode`. Subsequent reads from it will return its default value.
   public mutating func clearFollowMode() {self._followMode = nil}
 
@@ -1593,7 +1605,7 @@ public struct Dialog: Sendable {
 }
 
 /// A thread
-public struct Chat: Sendable {
+public nonisolated struct Chat: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1605,121 +1617,121 @@ public struct Chat: Sendable {
 
   /// If it belongs to a space
   public var spaceID: Int64 {
-    get {return _spaceID ?? 0}
+    get {_spaceID ?? 0}
     set {_spaceID = newValue}
   }
   /// Returns true if `spaceID` has been explicitly set.
-  public var hasSpaceID: Bool {return self._spaceID != nil}
+  public var hasSpaceID: Bool {self._spaceID != nil}
   /// Clears the value of `spaceID`. Subsequent reads from it will return its default value.
   public mutating func clearSpaceID() {self._spaceID = nil}
 
   /// Optional description
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
   /// Emoji to show as the icon, can be null
   public var emoji: String {
-    get {return _emoji ?? String()}
+    get {_emoji ?? String()}
     set {_emoji = newValue}
   }
   /// Returns true if `emoji` has been explicitly set.
-  public var hasEmoji: Bool {return self._emoji != nil}
+  public var hasEmoji: Bool {self._emoji != nil}
   /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
   public mutating func clearEmoji() {self._emoji = nil}
 
   /// If true, everyone in parent space can accces it
   public var isPublic: Bool {
-    get {return _isPublic ?? false}
+    get {_isPublic ?? false}
     set {_isPublic = newValue}
   }
   /// Returns true if `isPublic` has been explicitly set.
-  public var hasIsPublic: Bool {return self._isPublic != nil}
+  public var hasIsPublic: Bool {self._isPublic != nil}
   /// Clears the value of `isPublic`. Subsequent reads from it will return its default value.
   public mutating func clearIsPublic() {self._isPublic = nil}
 
   /// Last message ID
   public var lastMsgID: Int64 {
-    get {return _lastMsgID ?? 0}
+    get {_lastMsgID ?? 0}
     set {_lastMsgID = newValue}
   }
   /// Returns true if `lastMsgID` has been explicitly set.
-  public var hasLastMsgID: Bool {return self._lastMsgID != nil}
+  public var hasLastMsgID: Bool {self._lastMsgID != nil}
   /// Clears the value of `lastMsgID`. Subsequent reads from it will return its default value.
   public mutating func clearLastMsgID() {self._lastMsgID = nil}
 
   /// ID of the peer that this chat belongs to
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// Date of creation
   public var date: Int64 {
-    get {return _date ?? 0}
+    get {_date ?? 0}
     set {_date = newValue}
   }
   /// Returns true if `date` has been explicitly set.
-  public var hasDate: Bool {return self._date != nil}
+  public var hasDate: Bool {self._date != nil}
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
   public mutating func clearDate() {self._date = nil}
 
   /// Creator user ID
   public var createdBy: Int64 {
-    get {return _createdBy ?? 0}
+    get {_createdBy ?? 0}
     set {_createdBy = newValue}
   }
   /// Returns true if `createdBy` has been explicitly set.
-  public var hasCreatedBy: Bool {return self._createdBy != nil}
+  public var hasCreatedBy: Bool {self._createdBy != nil}
   /// Clears the value of `createdBy`. Subsequent reads from it will return its default value.
   public mutating func clearCreatedBy() {self._createdBy = nil}
 
   /// Structural parent chat for linked subthreads.
   public var parentChatID: Int64 {
-    get {return _parentChatID ?? 0}
+    get {_parentChatID ?? 0}
     set {_parentChatID = newValue}
   }
   /// Returns true if `parentChatID` has been explicitly set.
-  public var hasParentChatID: Bool {return self._parentChatID != nil}
+  public var hasParentChatID: Bool {self._parentChatID != nil}
   /// Clears the value of `parentChatID`. Subsequent reads from it will return its default value.
   public mutating func clearParentChatID() {self._parentChatID = nil}
 
   /// Parent message anchor when this subthread is a reply thread.
   public var parentMessageID: Int64 {
-    get {return _parentMessageID ?? 0}
+    get {_parentMessageID ?? 0}
     set {_parentMessageID = newValue}
   }
   /// Returns true if `parentMessageID` has been explicitly set.
-  public var hasParentMessageID: Bool {return self._parentMessageID != nil}
+  public var hasParentMessageID: Bool {self._parentMessageID != nil}
   /// Clears the value of `parentMessageID`. Subsequent reads from it will return its default value.
   public mutating func clearParentMessageID() {self._parentMessageID = nil}
 
   /// True when this thread has not been explicitly titled.
   public var untitled: Bool {
-    get {return _untitled ?? false}
+    get {_untitled ?? false}
     set {_untitled = newValue}
   }
   /// Returns true if `untitled` has been explicitly set.
-  public var hasUntitled: Bool {return self._untitled != nil}
+  public var hasUntitled: Bool {self._untitled != nil}
   /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
   public mutating func clearUntitled() {self._untitled = nil}
 
   /// Per-space thread number. Unset for home threads and pre-backfill space threads.
   public var number: Int32 {
-    get {return _number ?? 0}
+    get {_number ?? 0}
     set {_number = newValue}
   }
   /// Returns true if `number` has been explicitly set.
-  public var hasNumber: Bool {return self._number != nil}
+  public var hasNumber: Bool {self._number != nil}
   /// Clears the value of `number`. Subsequent reads from it will return its default value.
   public mutating func clearNumber() {self._number = nil}
 
@@ -1741,7 +1753,7 @@ public struct Chat: Sendable {
   fileprivate var _number: Int32? = nil
 }
 
-public struct MessageReplies: Sendable {
+public nonisolated struct MessageReplies: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1763,7 +1775,7 @@ public struct MessageReplies: Sendable {
   public init() {}
 }
 
-public struct MessageActions: Sendable {
+public nonisolated struct MessageActions: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1775,7 +1787,7 @@ public struct MessageActions: Sendable {
   public init() {}
 }
 
-public struct MessageActionRow: Sendable {
+public nonisolated struct MessageActionRow: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1787,7 +1799,7 @@ public struct MessageActionRow: Sendable {
   public init() {}
 }
 
-public struct MessageAction: Sendable {
+public nonisolated struct MessageAction: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1818,7 +1830,7 @@ public struct MessageAction: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Action: Equatable, Sendable {
+  public nonisolated enum OneOf_Action: Equatable, Sendable {
     case callback(MessageActionCallback)
     case copyText(MessageActionCopyText)
 
@@ -1827,7 +1839,7 @@ public struct MessageAction: Sendable {
   public init() {}
 }
 
-public struct MessageActionCallback: @unchecked Sendable {
+public nonisolated struct MessageActionCallback: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1840,7 +1852,7 @@ public struct MessageActionCallback: @unchecked Sendable {
   public init() {}
 }
 
-public struct MessageActionCopyText: Sendable {
+public nonisolated struct MessageActionCopyText: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1853,7 +1865,7 @@ public struct MessageActionCopyText: Sendable {
   public init() {}
 }
 
-public struct MessageActionResponseUi: Sendable {
+public nonisolated struct MessageActionResponseUi: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1873,7 +1885,7 @@ public struct MessageActionResponseUi: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Kind: Equatable, Sendable {
+  public nonisolated enum OneOf_Kind: Equatable, Sendable {
     /// Reserved for future expandability:
     /// 2 => alert
     /// 3 => open_url
@@ -1884,7 +1896,7 @@ public struct MessageActionResponseUi: Sendable {
   public init() {}
 }
 
-public struct MessageActionToast: Sendable {
+public nonisolated struct MessageActionToast: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1896,7 +1908,7 @@ public struct MessageActionToast: Sendable {
   public init() {}
 }
 
-public struct MessageService: Sendable {
+public nonisolated struct MessageService: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1921,7 +1933,7 @@ public struct MessageService: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Event: Equatable, Sendable {
+  public nonisolated enum OneOf_Event: Equatable, Sendable {
     case threadBacklink(MessageServiceThreadBacklink)
     case pinnedMessage(MessageServicePinnedMessage)
 
@@ -1930,26 +1942,26 @@ public struct MessageService: Sendable {
   public init() {}
 }
 
-public struct MessageServiceThreadBacklink: Sendable {
+public nonisolated struct MessageServiceThreadBacklink: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var sourceChatID: Int64 {
-    get {return _sourceChatID ?? 0}
+    get {_sourceChatID ?? 0}
     set {_sourceChatID = newValue}
   }
   /// Returns true if `sourceChatID` has been explicitly set.
-  public var hasSourceChatID: Bool {return self._sourceChatID != nil}
+  public var hasSourceChatID: Bool {self._sourceChatID != nil}
   /// Clears the value of `sourceChatID`. Subsequent reads from it will return its default value.
   public mutating func clearSourceChatID() {self._sourceChatID = nil}
 
   public var sourceTitle: String {
-    get {return _sourceTitle ?? String()}
+    get {_sourceTitle ?? String()}
     set {_sourceTitle = newValue}
   }
   /// Returns true if `sourceTitle` has been explicitly set.
-  public var hasSourceTitle: Bool {return self._sourceTitle != nil}
+  public var hasSourceTitle: Bool {self._sourceTitle != nil}
   /// Clears the value of `sourceTitle`. Subsequent reads from it will return its default value.
   public mutating func clearSourceTitle() {self._sourceTitle = nil}
 
@@ -1961,18 +1973,18 @@ public struct MessageServiceThreadBacklink: Sendable {
   fileprivate var _sourceTitle: String? = nil
 }
 
-public struct MessageServicePinnedMessage: Sendable {
+public nonisolated struct MessageServicePinnedMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Per-chat message id of the pinned message, when known.
   public var messageID: Int64 {
-    get {return _messageID ?? 0}
+    get {_messageID ?? 0}
     set {_messageID = newValue}
   }
   /// Returns true if `messageID` has been explicitly set.
-  public var hasMessageID: Bool {return self._messageID != nil}
+  public var hasMessageID: Bool {self._messageID != nil}
   /// Clears the value of `messageID`. Subsequent reads from it will return its default value.
   public mutating func clearMessageID() {self._messageID = nil}
 
@@ -1983,218 +1995,218 @@ public struct MessageServicePinnedMessage: Sendable {
   fileprivate var _messageID: Int64? = nil
 }
 
-public struct Message: @unchecked Sendable {
+public nonisolated struct Message: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var id: Int64 {
-    get {return _storage._id}
+    get {_storage._id}
     set {_uniqueStorage()._id = newValue}
   }
 
   /// User ID of the sender
   public var fromID: Int64 {
-    get {return _storage._fromID}
+    get {_storage._fromID}
     set {_uniqueStorage()._fromID = newValue}
   }
 
   /// Peer ID of the recipient
   public var peerID: Peer {
-    get {return _storage._peerID ?? Peer()}
+    get {_storage._peerID ?? Peer()}
     set {_uniqueStorage()._peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return _storage._peerID != nil}
+  public var hasPeerID: Bool {_storage._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {_uniqueStorage()._peerID = nil}
 
   /// The "chat ID" of the message, for messages in a chat (deprecated)
   public var chatID: Int64 {
-    get {return _storage._chatID}
+    get {_storage._chatID}
     set {_uniqueStorage()._chatID = newValue}
   }
 
   /// Message text
   public var message: String {
-    get {return _storage._message ?? String()}
+    get {_storage._message ?? String()}
     set {_uniqueStorage()._message = newValue}
   }
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return _storage._message != nil}
+  public var hasMessage: Bool {_storage._message != nil}
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {_uniqueStorage()._message = nil}
 
   /// Whether the message is outgoing
   public var out: Bool {
-    get {return _storage._out}
+    get {_storage._out}
     set {_uniqueStorage()._out = newValue}
   }
 
   /// Date of the message
   public var date: Int64 {
-    get {return _storage._date}
+    get {_storage._date}
     set {_uniqueStorage()._date = newValue}
   }
 
   /// Whether user is mentioned
   public var mentioned: Bool {
-    get {return _storage._mentioned ?? false}
+    get {_storage._mentioned ?? false}
     set {_uniqueStorage()._mentioned = newValue}
   }
   /// Returns true if `mentioned` has been explicitly set.
-  public var hasMentioned: Bool {return _storage._mentioned != nil}
+  public var hasMentioned: Bool {_storage._mentioned != nil}
   /// Clears the value of `mentioned`. Subsequent reads from it will return its default value.
   public mutating func clearMentioned() {_uniqueStorage()._mentioned = nil}
 
   /// Message ID of the message being replied to
   public var replyToMsgID: Int64 {
-    get {return _storage._replyToMsgID ?? 0}
+    get {_storage._replyToMsgID ?? 0}
     set {_uniqueStorage()._replyToMsgID = newValue}
   }
   /// Returns true if `replyToMsgID` has been explicitly set.
-  public var hasReplyToMsgID: Bool {return _storage._replyToMsgID != nil}
+  public var hasReplyToMsgID: Bool {_storage._replyToMsgID != nil}
   /// Clears the value of `replyToMsgID`. Subsequent reads from it will return its default value.
   public mutating func clearReplyToMsgID() {_uniqueStorage()._replyToMsgID = nil}
 
   /// Media of the message
   public var media: MessageMedia {
-    get {return _storage._media ?? MessageMedia()}
+    get {_storage._media ?? MessageMedia()}
     set {_uniqueStorage()._media = newValue}
   }
   /// Returns true if `media` has been explicitly set.
-  public var hasMedia: Bool {return _storage._media != nil}
+  public var hasMedia: Bool {_storage._media != nil}
   /// Clears the value of `media`. Subsequent reads from it will return its default value.
   public mutating func clearMedia() {_uniqueStorage()._media = nil}
 
   /// Date of the last edit if edited
   public var editDate: Int64 {
-    get {return _storage._editDate ?? 0}
+    get {_storage._editDate ?? 0}
     set {_uniqueStorage()._editDate = newValue}
   }
   /// Returns true if `editDate` has been explicitly set.
-  public var hasEditDate: Bool {return _storage._editDate != nil}
+  public var hasEditDate: Bool {_storage._editDate != nil}
   /// Clears the value of `editDate`. Subsequent reads from it will return its default value.
   public mutating func clearEditDate() {_uniqueStorage()._editDate = nil}
 
   /// ID of the grouped message if it's part of an album
   public var groupedID: Int64 {
-    get {return _storage._groupedID ?? 0}
+    get {_storage._groupedID ?? 0}
     set {_uniqueStorage()._groupedID = newValue}
   }
   /// Returns true if `groupedID` has been explicitly set.
-  public var hasGroupedID: Bool {return _storage._groupedID != nil}
+  public var hasGroupedID: Bool {_storage._groupedID != nil}
   /// Clears the value of `groupedID`. Subsequent reads from it will return its default value.
   public mutating func clearGroupedID() {_uniqueStorage()._groupedID = nil}
 
   /// Attachments of the message
   public var attachments: MessageAttachments {
-    get {return _storage._attachments ?? MessageAttachments()}
+    get {_storage._attachments ?? MessageAttachments()}
     set {_uniqueStorage()._attachments = newValue}
   }
   /// Returns true if `attachments` has been explicitly set.
-  public var hasAttachments: Bool {return _storage._attachments != nil}
+  public var hasAttachments: Bool {_storage._attachments != nil}
   /// Clears the value of `attachments`. Subsequent reads from it will return its default value.
   public mutating func clearAttachments() {_uniqueStorage()._attachments = nil}
 
   /// Reactions of the message
   public var reactions: MessageReactions {
-    get {return _storage._reactions ?? MessageReactions()}
+    get {_storage._reactions ?? MessageReactions()}
     set {_uniqueStorage()._reactions = newValue}
   }
   /// Returns true if `reactions` has been explicitly set.
-  public var hasReactions: Bool {return _storage._reactions != nil}
+  public var hasReactions: Bool {_storage._reactions != nil}
   /// Clears the value of `reactions`. Subsequent reads from it will return its default value.
   public mutating func clearReactions() {_uniqueStorage()._reactions = nil}
 
   /// Whether the message is a sticker
   public var isSticker: Bool {
-    get {return _storage._isSticker ?? false}
+    get {_storage._isSticker ?? false}
     set {_uniqueStorage()._isSticker = newValue}
   }
   /// Returns true if `isSticker` has been explicitly set.
-  public var hasIsSticker: Bool {return _storage._isSticker != nil}
+  public var hasIsSticker: Bool {_storage._isSticker != nil}
   /// Clears the value of `isSticker`. Subsequent reads from it will return its default value.
   public mutating func clearIsSticker() {_uniqueStorage()._isSticker = nil}
 
   public var hasLink_p: Bool {
-    get {return _storage._hasLink_p ?? false}
+    get {_storage._hasLink_p ?? false}
     set {_uniqueStorage()._hasLink_p = newValue}
   }
   /// Returns true if `hasLink_p` has been explicitly set.
-  public var hasHasLink_p: Bool {return _storage._hasLink_p != nil}
+  public var hasHasLink_p: Bool {_storage._hasLink_p != nil}
   /// Clears the value of `hasLink_p`. Subsequent reads from it will return its default value.
   public mutating func clearHasLink_p() {_uniqueStorage()._hasLink_p = nil}
 
   /// Rich text entities
   public var entities: MessageEntities {
-    get {return _storage._entities ?? MessageEntities()}
+    get {_storage._entities ?? MessageEntities()}
     set {_uniqueStorage()._entities = newValue}
   }
   /// Returns true if `entities` has been explicitly set.
-  public var hasEntities: Bool {return _storage._entities != nil}
+  public var hasEntities: Bool {_storage._entities != nil}
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {_uniqueStorage()._entities = nil}
 
   /// Send mode for this message, if any
   public var sendMode: MessageSendMode {
-    get {return _storage._sendMode ?? .modeUnspecified}
+    get {_storage._sendMode ?? .modeUnspecified}
     set {_uniqueStorage()._sendMode = newValue}
   }
   /// Returns true if `sendMode` has been explicitly set.
-  public var hasSendMode: Bool {return _storage._sendMode != nil}
+  public var hasSendMode: Bool {_storage._sendMode != nil}
   /// Clears the value of `sendMode`. Subsequent reads from it will return its default value.
   public mutating func clearSendMode() {_uniqueStorage()._sendMode = nil}
 
   /// Forward header info
   public var fwdFrom: MessageFwdHeader {
-    get {return _storage._fwdFrom ?? MessageFwdHeader()}
+    get {_storage._fwdFrom ?? MessageFwdHeader()}
     set {_uniqueStorage()._fwdFrom = newValue}
   }
   /// Returns true if `fwdFrom` has been explicitly set.
-  public var hasFwdFrom: Bool {return _storage._fwdFrom != nil}
+  public var hasFwdFrom: Bool {_storage._fwdFrom != nil}
   /// Clears the value of `fwdFrom`. Subsequent reads from it will return its default value.
   public mutating func clearFwdFrom() {_uniqueStorage()._fwdFrom = nil}
 
   /// Replies shown under the parent message row when this message has an
   /// anchored child thread.
   public var replies: MessageReplies {
-    get {return _storage._replies ?? MessageReplies()}
+    get {_storage._replies ?? MessageReplies()}
     set {_uniqueStorage()._replies = newValue}
   }
   /// Returns true if `replies` has been explicitly set.
-  public var hasReplies: Bool {return _storage._replies != nil}
+  public var hasReplies: Bool {_storage._replies != nil}
   /// Clears the value of `replies`. Subsequent reads from it will return its default value.
   public mutating func clearReplies() {_uniqueStorage()._replies = nil}
 
   /// Optional interactive actions (bot messages only).
   public var actions: MessageActions {
-    get {return _storage._actions ?? MessageActions()}
+    get {_storage._actions ?? MessageActions()}
     set {_uniqueStorage()._actions = newValue}
   }
   /// Returns true if `actions` has been explicitly set.
-  public var hasActions: Bool {return _storage._actions != nil}
+  public var hasActions: Bool {_storage._actions != nil}
   /// Clears the value of `actions`. Subsequent reads from it will return its default value.
   public mutating func clearActions() {_uniqueStorage()._actions = nil}
 
   /// Monotonic edit revision for the message. Increments on every edit.
   public var rev: Int64 {
-    get {return _storage._rev ?? 0}
+    get {_storage._rev ?? 0}
     set {_uniqueStorage()._rev = newValue}
   }
   /// Returns true if `rev` has been explicitly set.
-  public var hasRev: Bool {return _storage._rev != nil}
+  public var hasRev: Bool {_storage._rev != nil}
   /// Clears the value of `rev`. Subsequent reads from it will return its default value.
   public mutating func clearRev() {_uniqueStorage()._rev = nil}
 
   /// Typed service/system message metadata. Older clients ignore this and use
   /// `message` as fallback text.
   public var serviceMessage: MessageService {
-    get {return _storage._serviceMessage ?? MessageService()}
+    get {_storage._serviceMessage ?? MessageService()}
     set {_uniqueStorage()._serviceMessage = newValue}
   }
   /// Returns true if `serviceMessage` has been explicitly set.
-  public var hasServiceMessage: Bool {return _storage._serviceMessage != nil}
+  public var hasServiceMessage: Bool {_storage._serviceMessage != nil}
   /// Clears the value of `serviceMessage`. Subsequent reads from it will return its default value.
   public mutating func clearServiceMessage() {_uniqueStorage()._serviceMessage = nil}
 
@@ -2205,18 +2217,18 @@ public struct Message: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct MessageFwdHeader: Sendable {
+public nonisolated struct MessageFwdHeader: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Original chat or user peer
   public var fromPeerID: Peer {
-    get {return _fromPeerID ?? Peer()}
+    get {_fromPeerID ?? Peer()}
     set {_fromPeerID = newValue}
   }
   /// Returns true if `fromPeerID` has been explicitly set.
-  public var hasFromPeerID: Bool {return self._fromPeerID != nil}
+  public var hasFromPeerID: Bool {self._fromPeerID != nil}
   /// Clears the value of `fromPeerID`. Subsequent reads from it will return its default value.
   public mutating func clearFromPeerID() {self._fromPeerID = nil}
 
@@ -2233,7 +2245,7 @@ public struct MessageFwdHeader: Sendable {
   fileprivate var _fromPeerID: Peer? = nil
 }
 
-public struct MessageEntities: Sendable {
+public nonisolated struct MessageEntities: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2245,7 +2257,7 @@ public struct MessageEntities: Sendable {
   public init() {}
 }
 
-public struct MessageEntity: Sendable {
+public nonisolated struct MessageEntity: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2308,7 +2320,7 @@ public struct MessageEntity: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Entity: Equatable, Sendable {
+  public nonisolated enum OneOf_Entity: Equatable, Sendable {
     case mention(MessageEntity.MessageEntityMention)
     case textURL(MessageEntity.MessageEntityTextUrl)
     case pre(MessageEntity.MessageEntityPre)
@@ -2318,7 +2330,7 @@ public struct MessageEntity: Sendable {
 
   }
 
-  public enum TypeEnum: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum TypeEnum: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case mention // = 1
@@ -2404,7 +2416,7 @@ public struct MessageEntity: Sendable {
 
   }
 
-  public struct MessageEntityMention: Sendable {
+  public nonisolated struct MessageEntityMention: Sendable {
     // SwiftProtobuf.Message conformance is added in an extension below. See the
     // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
     // methods supported on all messages.
@@ -2416,7 +2428,7 @@ public struct MessageEntity: Sendable {
     public init() {}
   }
 
-  public struct MessageEntityGroupMention: Sendable {
+  public nonisolated struct MessageEntityGroupMention: Sendable {
     // SwiftProtobuf.Message conformance is added in an extension below. See the
     // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
     // methods supported on all messages.
@@ -2428,7 +2440,7 @@ public struct MessageEntity: Sendable {
     public init() {}
   }
 
-  public struct MessageEntityTextUrl: Sendable {
+  public nonisolated struct MessageEntityTextUrl: Sendable {
     // SwiftProtobuf.Message conformance is added in an extension below. See the
     // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
     // methods supported on all messages.
@@ -2440,7 +2452,7 @@ public struct MessageEntity: Sendable {
     public init() {}
   }
 
-  public struct MessageEntityPre: Sendable {
+  public nonisolated struct MessageEntityPre: Sendable {
     // SwiftProtobuf.Message conformance is added in an extension below. See the
     // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
     // methods supported on all messages.
@@ -2452,7 +2464,7 @@ public struct MessageEntity: Sendable {
     public init() {}
   }
 
-  public struct MessageEntityThread: Sendable {
+  public nonisolated struct MessageEntityThread: Sendable {
     // SwiftProtobuf.Message conformance is added in an extension below. See the
     // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
     // methods supported on all messages.
@@ -2464,7 +2476,7 @@ public struct MessageEntity: Sendable {
     public init() {}
   }
 
-  public struct MessageEntityThreadTitle: Sendable {
+  public nonisolated struct MessageEntityThreadTitle: Sendable {
     // SwiftProtobuf.Message conformance is added in an extension below. See the
     // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
     // methods supported on all messages.
@@ -2481,7 +2493,7 @@ public struct MessageEntity: Sendable {
   public init() {}
 }
 
-public struct MessageReactions: Sendable {
+public nonisolated struct MessageReactions: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2494,7 +2506,7 @@ public struct MessageReactions: Sendable {
   public init() {}
 }
 
-public struct Reaction: Sendable {
+public nonisolated struct Reaction: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2519,7 +2531,7 @@ public struct Reaction: Sendable {
   public init() {}
 }
 
-public struct Member: Sendable {
+public nonisolated struct Member: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2531,11 +2543,11 @@ public struct Member: Sendable {
   public var userID: Int64 = 0
 
   public var role: Member.Role {
-    get {return _role ?? .owner}
+    get {_role ?? .owner}
     set {_role = newValue}
   }
   /// Returns true if `role` has been explicitly set.
-  public var hasRole: Bool {return self._role != nil}
+  public var hasRole: Bool {self._role != nil}
   /// Clears the value of `role`. Subsequent reads from it will return its default value.
   public mutating func clearRole() {self._role = nil}
 
@@ -2547,7 +2559,7 @@ public struct Member: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Role: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Role: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case owner // = 0
     case admin // = 1
@@ -2590,7 +2602,7 @@ public struct Member: Sendable {
   fileprivate var _role: Member.Role? = nil
 }
 
-public struct Space: Sendable {
+public nonisolated struct Space: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2609,11 +2621,11 @@ public struct Space: Sendable {
 
   /// Whether this is a public community space with stricter member privacy.
   public var isPublic: Bool {
-    get {return _isPublic ?? false}
+    get {_isPublic ?? false}
     set {_isPublic = newValue}
   }
   /// Returns true if `isPublic` has been explicitly set.
-  public var hasIsPublic: Bool {return self._isPublic != nil}
+  public var hasIsPublic: Bool {self._isPublic != nil}
   /// Clears the value of `isPublic`. Subsequent reads from it will return its default value.
   public mutating func clearIsPublic() {self._isPublic = nil}
 
@@ -2624,7 +2636,7 @@ public struct Space: Sendable {
   fileprivate var _isPublic: Bool? = nil
 }
 
-public struct UserGroup: Sendable {
+public nonisolated struct UserGroup: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2636,11 +2648,11 @@ public struct UserGroup: Sendable {
   public var name: String = String()
 
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
@@ -2660,7 +2672,7 @@ public struct UserGroup: Sendable {
 }
 
 /// Add reaction input
-public struct AddReactionInput: Sendable {
+public nonisolated struct AddReactionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2673,11 +2685,11 @@ public struct AddReactionInput: Sendable {
 
   /// ID of the peer that this reaction is for
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -2689,7 +2701,7 @@ public struct AddReactionInput: Sendable {
 }
 
 /// Add reaction result
-public struct AddReactionResult: Sendable {
+public nonisolated struct AddReactionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2702,7 +2714,7 @@ public struct AddReactionResult: Sendable {
 }
 
 /// Delete reaction input
-public struct DeleteReactionInput: Sendable {
+public nonisolated struct DeleteReactionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2710,11 +2722,11 @@ public struct DeleteReactionInput: Sendable {
   public var emoji: String = String()
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -2727,7 +2739,7 @@ public struct DeleteReactionInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct DeleteReactionResult: Sendable {
+public nonisolated struct DeleteReactionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2739,7 +2751,7 @@ public struct DeleteReactionResult: Sendable {
   public init() {}
 }
 
-public struct MessageAttachments: Sendable {
+public nonisolated struct MessageAttachments: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2751,7 +2763,7 @@ public struct MessageAttachments: Sendable {
   public init() {}
 }
 
-public struct MessageAttachment: Sendable {
+public nonisolated struct MessageAttachment: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -2779,7 +2791,7 @@ public struct MessageAttachment: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Attachment: Equatable, Sendable {
+  public nonisolated enum OneOf_Attachment: Equatable, Sendable {
     case externalTask(MessageAttachmentExternalTask)
     case urlPreview(UrlPreview)
 
@@ -2788,151 +2800,151 @@ public struct MessageAttachment: Sendable {
   public init() {}
 }
 
-public struct UrlPreview: @unchecked Sendable {
+public nonisolated struct UrlPreview: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// ID of the URL preview row in our database.
   public var id: Int64 {
-    get {return _storage._id}
+    get {_storage._id}
     set {_uniqueStorage()._id = newValue}
   }
 
   /// URL of the link
   public var url: String {
-    get {return _storage._url ?? String()}
+    get {_storage._url ?? String()}
     set {_uniqueStorage()._url = newValue}
   }
   /// Returns true if `url` has been explicitly set.
-  public var hasURL: Bool {return _storage._url != nil}
+  public var hasURL: Bool {_storage._url != nil}
   /// Clears the value of `url`. Subsequent reads from it will return its default value.
   public mutating func clearURL() {_uniqueStorage()._url = nil}
 
   /// Site name of the link
   public var siteName: String {
-    get {return _storage._siteName ?? String()}
+    get {_storage._siteName ?? String()}
     set {_uniqueStorage()._siteName = newValue}
   }
   /// Returns true if `siteName` has been explicitly set.
-  public var hasSiteName: Bool {return _storage._siteName != nil}
+  public var hasSiteName: Bool {_storage._siteName != nil}
   /// Clears the value of `siteName`. Subsequent reads from it will return its default value.
   public mutating func clearSiteName() {_uniqueStorage()._siteName = nil}
 
   /// Title of the link
   public var title: String {
-    get {return _storage._title ?? String()}
+    get {_storage._title ?? String()}
     set {_uniqueStorage()._title = newValue}
   }
   /// Returns true if `title` has been explicitly set.
-  public var hasTitle: Bool {return _storage._title != nil}
+  public var hasTitle: Bool {_storage._title != nil}
   /// Clears the value of `title`. Subsequent reads from it will return its default value.
   public mutating func clearTitle() {_uniqueStorage()._title = nil}
 
   /// Description of the link
   public var description_p: String {
-    get {return _storage._description_p ?? String()}
+    get {_storage._description_p ?? String()}
     set {_uniqueStorage()._description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return _storage._description_p != nil}
+  public var hasDescription_p: Bool {_storage._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {_uniqueStorage()._description_p = nil}
 
   /// Image ID of the link
   public var photo: Photo {
-    get {return _storage._photo ?? Photo()}
+    get {_storage._photo ?? Photo()}
     set {_uniqueStorage()._photo = newValue}
   }
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return _storage._photo != nil}
+  public var hasPhoto: Bool {_storage._photo != nil}
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
   public mutating func clearPhoto() {_uniqueStorage()._photo = nil}
 
   /// Duration of the content
   public var duration: Int64 {
-    get {return _storage._duration ?? 0}
+    get {_storage._duration ?? 0}
     set {_uniqueStorage()._duration = newValue}
   }
   /// Returns true if `duration` has been explicitly set.
-  public var hasDuration: Bool {return _storage._duration != nil}
+  public var hasDuration: Bool {_storage._duration != nil}
   /// Clears the value of `duration`. Subsequent reads from it will return its default value.
   public mutating func clearDuration() {_uniqueStorage()._duration = nil}
 
   /// Metadata-derived content type of the preview target
   public var mediaType: UrlPreview.MediaType {
-    get {return _storage._mediaType ?? .unspecified}
+    get {_storage._mediaType ?? .unspecified}
     set {_uniqueStorage()._mediaType = newValue}
   }
   /// Returns true if `mediaType` has been explicitly set.
-  public var hasMediaType: Bool {return _storage._mediaType != nil}
+  public var hasMediaType: Bool {_storage._mediaType != nil}
   /// Clears the value of `mediaType`. Subsequent reads from it will return its default value.
   public mutating func clearMediaType() {_uniqueStorage()._mediaType = nil}
 
   /// Sanitized URL text for display only, not a fetch target.
   public var displayURL: String {
-    get {return _storage._displayURL ?? String()}
+    get {_storage._displayURL ?? String()}
     set {_uniqueStorage()._displayURL = newValue}
   }
   /// Returns true if `displayURL` has been explicitly set.
-  public var hasDisplayURL: Bool {return _storage._displayURL != nil}
+  public var hasDisplayURL: Bool {_storage._displayURL != nil}
   /// Clears the value of `displayURL`. Subsequent reads from it will return its default value.
   public mutating func clearDisplayURL() {_uniqueStorage()._displayURL = nil}
 
   /// Stable provider key from the preview pipeline, such as "youtube" or "loom".
   public var provider: String {
-    get {return _storage._provider ?? String()}
+    get {_storage._provider ?? String()}
     set {_uniqueStorage()._provider = newValue}
   }
   /// Returns true if `provider` has been explicitly set.
-  public var hasProvider: Bool {return _storage._provider != nil}
+  public var hasProvider: Bool {_storage._provider != nil}
   /// Clears the value of `provider`. Subsequent reads from it will return its default value.
   public mutating func clearProvider() {_uniqueStorage()._provider = nil}
 
   /// Author, channel, account, or publisher when provided by metadata.
   public var author: String {
-    get {return _storage._author ?? String()}
+    get {_storage._author ?? String()}
     set {_uniqueStorage()._author = newValue}
   }
   /// Returns true if `author` has been explicitly set.
-  public var hasAuthor: Bool {return _storage._author != nil}
+  public var hasAuthor: Bool {_storage._author != nil}
   /// Clears the value of `author`. Subsequent reads from it will return its default value.
   public mutating func clearAuthor() {_uniqueStorage()._author = nil}
 
   /// Typed primary media for this preview.
   public var media: UrlPreviewMedia {
-    get {return _storage._media ?? UrlPreviewMedia()}
+    get {_storage._media ?? UrlPreviewMedia()}
     set {_uniqueStorage()._media = newValue}
   }
   /// Returns true if `media` has been explicitly set.
-  public var hasMedia: Bool {return _storage._media != nil}
+  public var hasMedia: Bool {_storage._media != nil}
   /// Clears the value of `media`. Subsequent reads from it will return its default value.
   public mutating func clearMedia() {_uniqueStorage()._media = nil}
 
   /// Server-provided layout hints that clients can adapt to available space.
   public var layout: UrlPreviewLayout {
-    get {return _storage._layout ?? UrlPreviewLayout()}
+    get {_storage._layout ?? UrlPreviewLayout()}
     set {_uniqueStorage()._layout = newValue}
   }
   /// Returns true if `layout` has been explicitly set.
-  public var hasLayout: Bool {return _storage._layout != nil}
+  public var hasLayout: Bool {_storage._layout != nil}
   /// Clears the value of `layout`. Subsequent reads from it will return its default value.
   public mutating func clearLayout() {_uniqueStorage()._layout = nil}
 
   /// Author, channel, account, or publisher avatar, separate from primary media.
   public var authorPhoto: Photo {
-    get {return _storage._authorPhoto ?? Photo()}
+    get {_storage._authorPhoto ?? Photo()}
     set {_uniqueStorage()._authorPhoto = newValue}
   }
   /// Returns true if `authorPhoto` has been explicitly set.
-  public var hasAuthorPhoto: Bool {return _storage._authorPhoto != nil}
+  public var hasAuthorPhoto: Bool {_storage._authorPhoto != nil}
   /// Clears the value of `authorPhoto`. Subsequent reads from it will return its default value.
   public mutating func clearAuthorPhoto() {_uniqueStorage()._authorPhoto = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Compatibility summary of the preview media.
-  public enum MediaType: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum MediaType: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
 
     /// No typed preview media was detected.
@@ -3000,7 +3012,7 @@ public struct UrlPreview: @unchecked Sendable {
 }
 
 /// Typed media attached to a URL preview.
-public struct UrlPreviewMedia: Sendable {
+public nonisolated struct UrlPreviewMedia: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3056,7 +3068,7 @@ public struct UrlPreviewMedia: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Exactly one primary preview media payload.
-  public enum OneOf_Media: Equatable, Sendable {
+  public nonisolated enum OneOf_Media: Equatable, Sendable {
     /// Existing cached photo type, used for image links and static visual previews.
     case photo(Photo)
     /// Existing cached video type, used when we import and store the video ourselves.
@@ -3074,7 +3086,7 @@ public struct UrlPreviewMedia: Sendable {
 }
 
 /// Direct remote video metadata for playable previews without duplicating Video storage.
-public struct UrlPreviewExternalVideo: Sendable {
+public nonisolated struct UrlPreviewExternalVideo: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3084,41 +3096,41 @@ public struct UrlPreviewExternalVideo: Sendable {
 
   /// MIME type from metadata or response headers.
   public var mimeType: String {
-    get {return _mimeType ?? String()}
+    get {_mimeType ?? String()}
     set {_mimeType = newValue}
   }
   /// Returns true if `mimeType` has been explicitly set.
-  public var hasMimeType: Bool {return self._mimeType != nil}
+  public var hasMimeType: Bool {self._mimeType != nil}
   /// Clears the value of `mimeType`. Subsequent reads from it will return its default value.
   public mutating func clearMimeType() {self._mimeType = nil}
 
   /// Video width in pixels when known.
   public var w: Int32 {
-    get {return _w ?? 0}
+    get {_w ?? 0}
     set {_w = newValue}
   }
   /// Returns true if `w` has been explicitly set.
-  public var hasW: Bool {return self._w != nil}
+  public var hasW: Bool {self._w != nil}
   /// Clears the value of `w`. Subsequent reads from it will return its default value.
   public mutating func clearW() {self._w = nil}
 
   /// Video height in pixels when known.
   public var h: Int32 {
-    get {return _h ?? 0}
+    get {_h ?? 0}
     set {_h = newValue}
   }
   /// Returns true if `h` has been explicitly set.
-  public var hasH: Bool {return self._h != nil}
+  public var hasH: Bool {self._h != nil}
   /// Clears the value of `h`. Subsequent reads from it will return its default value.
   public mutating func clearH() {self._h = nil}
 
   /// Duration in seconds when known.
   public var duration: Int32 {
-    get {return _duration ?? 0}
+    get {_duration ?? 0}
     set {_duration = newValue}
   }
   /// Returns true if `duration` has been explicitly set.
-  public var hasDuration: Bool {return self._duration != nil}
+  public var hasDuration: Bool {self._duration != nil}
   /// Clears the value of `duration`. Subsequent reads from it will return its default value.
   public mutating func clearDuration() {self._duration = nil}
 
@@ -3133,7 +3145,7 @@ public struct UrlPreviewExternalVideo: Sendable {
 }
 
 /// Provider/player embed metadata.
-public struct UrlPreviewEmbed: Sendable {
+public nonisolated struct UrlPreviewEmbed: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3143,41 +3155,41 @@ public struct UrlPreviewEmbed: Sendable {
 
   /// Provider/player type, such as "iframe", "player", or "video".
   public var type: String {
-    get {return _type ?? String()}
+    get {_type ?? String()}
     set {_type = newValue}
   }
   /// Returns true if `type` has been explicitly set.
-  public var hasType: Bool {return self._type != nil}
+  public var hasType: Bool {self._type != nil}
   /// Clears the value of `type`. Subsequent reads from it will return its default value.
   public mutating func clearType() {self._type = nil}
 
   /// Embed width in pixels when known.
   public var w: Int32 {
-    get {return _w ?? 0}
+    get {_w ?? 0}
     set {_w = newValue}
   }
   /// Returns true if `w` has been explicitly set.
-  public var hasW: Bool {return self._w != nil}
+  public var hasW: Bool {self._w != nil}
   /// Clears the value of `w`. Subsequent reads from it will return its default value.
   public mutating func clearW() {self._w = nil}
 
   /// Embed height in pixels when known.
   public var h: Int32 {
-    get {return _h ?? 0}
+    get {_h ?? 0}
     set {_h = newValue}
   }
   /// Returns true if `h` has been explicitly set.
-  public var hasH: Bool {return self._h != nil}
+  public var hasH: Bool {self._h != nil}
   /// Clears the value of `h`. Subsequent reads from it will return its default value.
   public mutating func clearH() {self._h = nil}
 
   /// Duration in seconds when known.
   public var duration: Int32 {
-    get {return _duration ?? 0}
+    get {_duration ?? 0}
     set {_duration = newValue}
   }
   /// Returns true if `duration` has been explicitly set.
-  public var hasDuration: Bool {return self._duration != nil}
+  public var hasDuration: Bool {self._duration != nil}
   /// Clears the value of `duration`. Subsequent reads from it will return its default value.
   public mutating func clearDuration() {self._duration = nil}
 
@@ -3192,7 +3204,7 @@ public struct UrlPreviewEmbed: Sendable {
 }
 
 /// Layout hints for URL preview clients.
-public struct UrlPreviewLayout: Sendable {
+public nonisolated struct UrlPreviewLayout: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3208,7 +3220,7 @@ public struct UrlPreviewLayout: Sendable {
   public init() {}
 }
 
-public struct MessageAttachmentExternalTask: Sendable {
+public nonisolated struct MessageAttachmentExternalTask: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3242,7 +3254,7 @@ public struct MessageAttachmentExternalTask: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Status: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Status: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case backlog // = 1
@@ -3296,7 +3308,7 @@ public struct MessageAttachmentExternalTask: Sendable {
 }
 
 /// WIP: add richer media/filtering metadata.
-public struct MessageMedia: Sendable {
+public nonisolated struct MessageMedia: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3345,7 +3357,7 @@ public struct MessageMedia: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Media: Equatable, Sendable {
+  public nonisolated enum OneOf_Media: Equatable, Sendable {
     case photo(MessagePhoto)
     case video(MessageVideo)
     case document(MessageDocument)
@@ -3357,17 +3369,17 @@ public struct MessageMedia: Sendable {
   public init() {}
 }
 
-public struct MessagePhoto: Sendable {
+public nonisolated struct MessagePhoto: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var photo: Photo {
-    get {return _photo ?? Photo()}
+    get {_photo ?? Photo()}
     set {_photo = newValue}
   }
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return self._photo != nil}
+  public var hasPhoto: Bool {self._photo != nil}
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
   public mutating func clearPhoto() {self._photo = nil}
 
@@ -3378,17 +3390,17 @@ public struct MessagePhoto: Sendable {
   fileprivate var _photo: Photo? = nil
 }
 
-public struct MessageVideo: Sendable {
+public nonisolated struct MessageVideo: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var video: Video {
-    get {return _video ?? Video()}
+    get {_video ?? Video()}
     set {_video = newValue}
   }
   /// Returns true if `video` has been explicitly set.
-  public var hasVideo: Bool {return self._video != nil}
+  public var hasVideo: Bool {self._video != nil}
   /// Clears the value of `video`. Subsequent reads from it will return its default value.
   public mutating func clearVideo() {self._video = nil}
 
@@ -3399,17 +3411,17 @@ public struct MessageVideo: Sendable {
   fileprivate var _video: Video? = nil
 }
 
-public struct MessageDocument: Sendable {
+public nonisolated struct MessageDocument: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var document: Document {
-    get {return _document ?? Document()}
+    get {_document ?? Document()}
     set {_document = newValue}
   }
   /// Returns true if `document` has been explicitly set.
-  public var hasDocument: Bool {return self._document != nil}
+  public var hasDocument: Bool {self._document != nil}
   /// Clears the value of `document`. Subsequent reads from it will return its default value.
   public mutating func clearDocument() {self._document = nil}
 
@@ -3420,17 +3432,17 @@ public struct MessageDocument: Sendable {
   fileprivate var _document: Document? = nil
 }
 
-public struct MessageVoice: Sendable {
+public nonisolated struct MessageVoice: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var voice: Voice {
-    get {return _voice ?? Voice()}
+    get {_voice ?? Voice()}
     set {_voice = newValue}
   }
   /// Returns true if `voice` has been explicitly set.
-  public var hasVoice: Bool {return self._voice != nil}
+  public var hasVoice: Bool {self._voice != nil}
   /// Clears the value of `voice`. Subsequent reads from it will return its default value.
   public mutating func clearVoice() {self._voice = nil}
 
@@ -3442,7 +3454,7 @@ public struct MessageVoice: Sendable {
 }
 
 /// Nudge message (empty payload)
-public struct MessageNudge: Sendable {
+public nonisolated struct MessageNudge: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3452,7 +3464,7 @@ public struct MessageNudge: Sendable {
   public init() {}
 }
 
-public struct Video: Sendable {
+public nonisolated struct Video: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3476,21 +3488,21 @@ public struct Video: Sendable {
 
   /// Thumbnail of the video
   public var photo: Photo {
-    get {return _photo ?? Photo()}
+    get {_photo ?? Photo()}
     set {_photo = newValue}
   }
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return self._photo != nil}
+  public var hasPhoto: Bool {self._photo != nil}
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
   public mutating func clearPhoto() {self._photo = nil}
 
   /// CDN URL
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
+    get {_cdnURL ?? String()}
     set {_cdnURL = newValue}
   }
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool {self._cdnURL != nil}
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
   public mutating func clearCdnURL() {self._cdnURL = nil}
 
@@ -3502,7 +3514,7 @@ public struct Video: Sendable {
   fileprivate var _cdnURL: String? = nil
 }
 
-public struct Document: Sendable {
+public nonisolated struct Document: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3520,11 +3532,11 @@ public struct Document: Sendable {
 
   /// CDN URL
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
+    get {_cdnURL ?? String()}
     set {_cdnURL = newValue}
   }
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool {self._cdnURL != nil}
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
   public mutating func clearCdnURL() {self._cdnURL = nil}
 
@@ -3533,11 +3545,11 @@ public struct Document: Sendable {
 
   /// Thumbnail of the document
   public var photo: Photo {
-    get {return _photo ?? Photo()}
+    get {_photo ?? Photo()}
     set {_photo = newValue}
   }
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return self._photo != nil}
+  public var hasPhoto: Bool {self._photo != nil}
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
   public mutating func clearPhoto() {self._photo = nil}
 
@@ -3549,7 +3561,7 @@ public struct Document: Sendable {
   fileprivate var _photo: Photo? = nil
 }
 
-public struct Voice: @unchecked Sendable {
+public nonisolated struct Voice: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3570,11 +3582,11 @@ public struct Voice: @unchecked Sendable {
 
   /// CDN URL
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
+    get {_cdnURL ?? String()}
     set {_cdnURL = newValue}
   }
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool {self._cdnURL != nil}
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
   public mutating func clearCdnURL() {self._cdnURL = nil}
 
@@ -3589,7 +3601,7 @@ public struct Voice: @unchecked Sendable {
 }
 
 /// Photo for message media, profile photo, space photo, or chat photo
-public struct Photo: Sendable {
+public nonisolated struct Photo: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3607,17 +3619,17 @@ public struct Photo: Sendable {
 
   /// Unique identifier of the file
   public var fileUniqueID: String {
-    get {return _fileUniqueID ?? String()}
+    get {_fileUniqueID ?? String()}
     set {_fileUniqueID = newValue}
   }
   /// Returns true if `fileUniqueID` has been explicitly set.
-  public var hasFileUniqueID: Bool {return self._fileUniqueID != nil}
+  public var hasFileUniqueID: Bool {self._fileUniqueID != nil}
   /// Clears the value of `fileUniqueID`. Subsequent reads from it will return its default value.
   public mutating func clearFileUniqueID() {self._fileUniqueID = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Format: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Format: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case jpeg // = 1
@@ -3660,7 +3672,7 @@ public struct Photo: Sendable {
   fileprivate var _fileUniqueID: String? = nil
 }
 
-public struct PhotoSize: @unchecked Sendable {
+public nonisolated struct PhotoSize: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3689,21 +3701,21 @@ public struct PhotoSize: @unchecked Sendable {
 
   /// Bytes for stripped size used in blur thumbnails
   public var bytes: Data {
-    get {return _bytes ?? Data()}
+    get {_bytes ?? Data()}
     set {_bytes = newValue}
   }
   /// Returns true if `bytes` has been explicitly set.
-  public var hasBytes: Bool {return self._bytes != nil}
+  public var hasBytes: Bool {self._bytes != nil}
   /// Clears the value of `bytes`. Subsequent reads from it will return its default value.
   public mutating func clearBytes() {self._bytes = nil}
 
   /// CDN URL
   public var cdnURL: String {
-    get {return _cdnURL ?? String()}
+    get {_cdnURL ?? String()}
     set {_cdnURL = newValue}
   }
   /// Returns true if `cdnURL` has been explicitly set.
-  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  public var hasCdnURL: Bool {self._cdnURL != nil}
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
   public mutating func clearCdnURL() {self._cdnURL = nil}
 
@@ -3715,7 +3727,7 @@ public struct PhotoSize: @unchecked Sendable {
   fileprivate var _cdnURL: String? = nil
 }
 
-public struct RpcError: Sendable {
+public nonisolated struct RpcError: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -3731,7 +3743,7 @@ public struct RpcError: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Type of error
-  public enum Code: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Code: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unknown // = 0
     case badRequest // = 1
@@ -3832,7 +3844,7 @@ public struct RpcError: Sendable {
   public init() {}
 }
 
-public struct RpcCall: Sendable {
+public nonisolated struct RpcCall: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -4409,9 +4421,25 @@ public struct RpcCall: Sendable {
     set {input = .deleteUserGroup(newValue)}
   }
 
+  public var getSpaceSettings: GetSpaceSettingsInput {
+    get {
+      if case .getSpaceSettings(let v)? = input {return v}
+      return GetSpaceSettingsInput()
+    }
+    set {input = .getSpaceSettings(newValue)}
+  }
+
+  public var toggleSpaceGrid: ToggleSpaceGridInput {
+    get {
+      if case .toggleSpaceGrid(let v)? = input {return v}
+      return ToggleSpaceGridInput()
+    }
+    set {input = .toggleSpaceGrid(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Input: Equatable, Sendable {
+  public nonisolated enum OneOf_Input: Equatable, Sendable {
     case getMe(GetMeInput)
     case getPeerPhoto(GetPeerPhotoInput)
     case deleteMessages(DeleteMessagesInput)
@@ -4483,13 +4511,15 @@ public struct RpcCall: Sendable {
     case createUserGroup(CreateUserGroupInput)
     case updateUserGroup(UpdateUserGroupInput)
     case deleteUserGroup(DeleteUserGroupInput)
+    case getSpaceSettings(GetSpaceSettingsInput)
+    case toggleSpaceGrid(ToggleSpaceGridInput)
 
   }
 
   public init() {}
 }
 
-public struct RpcResult: Sendable {
+public nonisolated struct RpcResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5066,9 +5096,25 @@ public struct RpcResult: Sendable {
     set {result = .deleteUserGroup(newValue)}
   }
 
+  public var getSpaceSettings: GetSpaceSettingsResult {
+    get {
+      if case .getSpaceSettings(let v)? = result {return v}
+      return GetSpaceSettingsResult()
+    }
+    set {result = .getSpaceSettings(newValue)}
+  }
+
+  public var toggleSpaceGrid: ToggleSpaceGridResult {
+    get {
+      if case .toggleSpaceGrid(let v)? = result {return v}
+      return ToggleSpaceGridResult()
+    }
+    set {result = .toggleSpaceGrid(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Result: Equatable, Sendable {
+  public nonisolated enum OneOf_Result: Equatable, Sendable {
     case getMe(GetMeResult)
     case getPeerPhoto(GetPeerPhotoResult)
     case deleteMessages(DeleteMessagesResult)
@@ -5140,13 +5186,15 @@ public struct RpcResult: Sendable {
     case createUserGroup(CreateUserGroupResult)
     case updateUserGroup(UpdateUserGroupResult)
     case deleteUserGroup(DeleteUserGroupResult)
+    case getSpaceSettings(GetSpaceSettingsResult)
+    case toggleSpaceGrid(ToggleSpaceGridResult)
 
   }
 
   public init() {}
 }
 
-public struct UpdateBucket: Sendable {
+public nonisolated struct UpdateBucket: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5179,7 +5227,7 @@ public struct UpdateBucket: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Type: Equatable, Sendable {
+  public nonisolated enum OneOf_Type: Equatable, Sendable {
     case user(UpdateBucketUser)
     case space(UpdateBucketSpace)
     case chat(UpdateBucketChat)
@@ -5189,7 +5237,7 @@ public struct UpdateBucket: Sendable {
   public init() {}
 }
 
-public struct UpdateBucketUser: Sendable {
+public nonisolated struct UpdateBucketUser: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5199,7 +5247,7 @@ public struct UpdateBucketUser: Sendable {
   public init() {}
 }
 
-public struct UpdateBucketSpace: Sendable {
+public nonisolated struct UpdateBucketSpace: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5211,17 +5259,17 @@ public struct UpdateBucketSpace: Sendable {
   public init() {}
 }
 
-public struct UpdateBucketChat: Sendable {
+public nonisolated struct UpdateBucketChat: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -5232,17 +5280,17 @@ public struct UpdateBucketChat: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct GetUpdatesInput: Sendable {
+public nonisolated struct GetUpdatesInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var bucket: UpdateBucket {
-    get {return _bucket ?? UpdateBucket()}
+    get {_bucket ?? UpdateBucket()}
     set {_bucket = newValue}
   }
   /// Returns true if `bucket` has been explicitly set.
-  public var hasBucket: Bool {return self._bucket != nil}
+  public var hasBucket: Bool {self._bucket != nil}
   /// Clears the value of `bucket`. Subsequent reads from it will return its default value.
   public mutating func clearBucket() {self._bucket = nil}
 
@@ -5265,7 +5313,7 @@ public struct GetUpdatesInput: Sendable {
   fileprivate var _bucket: UpdateBucket? = nil
 }
 
-public struct UpdateSidecars: Sendable {
+public nonisolated struct UpdateSidecars: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5283,7 +5331,7 @@ public struct UpdateSidecars: Sendable {
   public init() {}
 }
 
-public struct GetUpdatesResult: Sendable {
+public nonisolated struct GetUpdatesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5298,11 +5346,11 @@ public struct GetUpdatesResult: Sendable {
 
   /// Whether this is the final slice of updates
   public var final: Bool {
-    get {return _final ?? false}
+    get {_final ?? false}
     set {_final = newValue}
   }
   /// Returns true if `final` has been explicitly set.
-  public var hasFinal: Bool {return self._final != nil}
+  public var hasFinal: Bool {self._final != nil}
   /// Clears the value of `final`. Subsequent reads from it will return its default value.
   public mutating func clearFinal() {self._final = nil}
 
@@ -5311,17 +5359,17 @@ public struct GetUpdatesResult: Sendable {
 
   /// Entities required to apply this update slice.
   public var sidecars: UpdateSidecars {
-    get {return _sidecars ?? UpdateSidecars()}
+    get {_sidecars ?? UpdateSidecars()}
     set {_sidecars = newValue}
   }
   /// Returns true if `sidecars` has been explicitly set.
-  public var hasSidecars: Bool {return self._sidecars != nil}
+  public var hasSidecars: Bool {self._sidecars != nil}
   /// Clears the value of `sidecars`. Subsequent reads from it will return its default value.
   public mutating func clearSidecars() {self._sidecars = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum ResultType: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum ResultType: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case empty // = 1
@@ -5370,7 +5418,7 @@ public struct GetUpdatesResult: Sendable {
 }
 
 /// Remove member from space
-public struct DeleteMemberInput: Sendable {
+public nonisolated struct DeleteMemberInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5387,7 +5435,7 @@ public struct DeleteMemberInput: Sendable {
 }
 
 /// Remove member from space result
-public struct DeleteMemberResult: Sendable {
+public nonisolated struct DeleteMemberResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5400,7 +5448,7 @@ public struct DeleteMemberResult: Sendable {
 }
 
 /// Update an existing member's access/role within a space
-public struct UpdateMemberAccessInput: Sendable {
+public nonisolated struct UpdateMemberAccessInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5413,11 +5461,11 @@ public struct UpdateMemberAccessInput: Sendable {
 
   /// Updated role/options
   public var role: SpaceMemberRole {
-    get {return _role ?? SpaceMemberRole()}
+    get {_role ?? SpaceMemberRole()}
     set {_role = newValue}
   }
   /// Returns true if `role` has been explicitly set.
-  public var hasRole: Bool {return self._role != nil}
+  public var hasRole: Bool {self._role != nil}
   /// Clears the value of `role`. Subsequent reads from it will return its default value.
   public mutating func clearRole() {self._role = nil}
 
@@ -5428,7 +5476,7 @@ public struct UpdateMemberAccessInput: Sendable {
   fileprivate var _role: SpaceMemberRole? = nil
 }
 
-public struct UpdateMemberAccessResult: Sendable {
+public nonisolated struct UpdateMemberAccessResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5440,7 +5488,91 @@ public struct UpdateMemberAccessResult: Sendable {
   public init() {}
 }
 
-public struct SpaceUrlPreviewExclusion: Sendable {
+public nonisolated struct SpaceSettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var gridEnabled: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GetSpaceSettingsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GetSpaceSettingsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var settings: SpaceSettings {
+    get {_settings ?? SpaceSettings()}
+    set {_settings = newValue}
+  }
+  /// Returns true if `settings` has been explicitly set.
+  public var hasSettings: Bool {self._settings != nil}
+  /// Clears the value of `settings`. Subsequent reads from it will return its default value.
+  public mutating func clearSettings() {self._settings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _settings: SpaceSettings? = nil
+}
+
+public nonisolated struct ToggleSpaceGridInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var enabled: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct ToggleSpaceGridResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var settings: SpaceSettings {
+    get {_settings ?? SpaceSettings()}
+    set {_settings = newValue}
+  }
+  /// Returns true if `settings` has been explicitly set.
+  public var hasSettings: Bool {self._settings != nil}
+  /// Clears the value of `settings`. Subsequent reads from it will return its default value.
+  public mutating func clearSettings() {self._settings = nil}
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _settings: SpaceSettings? = nil
+}
+
+public nonisolated struct SpaceUrlPreviewExclusion: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5452,11 +5584,11 @@ public struct SpaceUrlPreviewExclusion: Sendable {
   public var host: String = String()
 
   public var pathPrefix: String {
-    get {return _pathPrefix ?? String()}
+    get {_pathPrefix ?? String()}
     set {_pathPrefix = newValue}
   }
   /// Returns true if `pathPrefix` has been explicitly set.
-  public var hasPathPrefix: Bool {return self._pathPrefix != nil}
+  public var hasPathPrefix: Bool {self._pathPrefix != nil}
   /// Clears the value of `pathPrefix`. Subsequent reads from it will return its default value.
   public mutating func clearPathPrefix() {self._pathPrefix = nil}
 
@@ -5471,7 +5603,7 @@ public struct SpaceUrlPreviewExclusion: Sendable {
   fileprivate var _pathPrefix: String? = nil
 }
 
-public struct GetSpaceUrlPreviewExclusionsInput: Sendable {
+public nonisolated struct GetSpaceUrlPreviewExclusionsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5483,7 +5615,7 @@ public struct GetSpaceUrlPreviewExclusionsInput: Sendable {
   public init() {}
 }
 
-public struct GetSpaceUrlPreviewExclusionsResult: Sendable {
+public nonisolated struct GetSpaceUrlPreviewExclusionsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5495,7 +5627,7 @@ public struct GetSpaceUrlPreviewExclusionsResult: Sendable {
   public init() {}
 }
 
-public struct AddSpaceUrlPreviewExclusionInput: Sendable {
+public nonisolated struct AddSpaceUrlPreviewExclusionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5505,29 +5637,29 @@ public struct AddSpaceUrlPreviewExclusionInput: Sendable {
   public var host: String = String()
 
   public var pathPrefix: String {
-    get {return _pathPrefix ?? String()}
+    get {_pathPrefix ?? String()}
     set {_pathPrefix = newValue}
   }
   /// Returns true if `pathPrefix` has been explicitly set.
-  public var hasPathPrefix: Bool {return self._pathPrefix != nil}
+  public var hasPathPrefix: Bool {self._pathPrefix != nil}
   /// Clears the value of `pathPrefix`. Subsequent reads from it will return its default value.
   public mutating func clearPathPrefix() {self._pathPrefix = nil}
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   public var messageID: Int64 {
-    get {return _messageID ?? 0}
+    get {_messageID ?? 0}
     set {_messageID = newValue}
   }
   /// Returns true if `messageID` has been explicitly set.
-  public var hasMessageID: Bool {return self._messageID != nil}
+  public var hasMessageID: Bool {self._messageID != nil}
   /// Clears the value of `messageID`. Subsequent reads from it will return its default value.
   public mutating func clearMessageID() {self._messageID = nil}
 
@@ -5540,17 +5672,17 @@ public struct AddSpaceUrlPreviewExclusionInput: Sendable {
   fileprivate var _messageID: Int64? = nil
 }
 
-public struct AddSpaceUrlPreviewExclusionResult: Sendable {
+public nonisolated struct AddSpaceUrlPreviewExclusionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var exclusion: SpaceUrlPreviewExclusion {
-    get {return _exclusion ?? SpaceUrlPreviewExclusion()}
+    get {_exclusion ?? SpaceUrlPreviewExclusion()}
     set {_exclusion = newValue}
   }
   /// Returns true if `exclusion` has been explicitly set.
-  public var hasExclusion: Bool {return self._exclusion != nil}
+  public var hasExclusion: Bool {self._exclusion != nil}
   /// Clears the value of `exclusion`. Subsequent reads from it will return its default value.
   public mutating func clearExclusion() {self._exclusion = nil}
 
@@ -5563,7 +5695,7 @@ public struct AddSpaceUrlPreviewExclusionResult: Sendable {
   fileprivate var _exclusion: SpaceUrlPreviewExclusion? = nil
 }
 
-public struct RemoveSpaceUrlPreviewExclusionInput: Sendable {
+public nonisolated struct RemoveSpaceUrlPreviewExclusionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5577,7 +5709,7 @@ public struct RemoveSpaceUrlPreviewExclusionInput: Sendable {
   public init() {}
 }
 
-public struct RemoveSpaceUrlPreviewExclusionResult: Sendable {
+public nonisolated struct RemoveSpaceUrlPreviewExclusionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5587,7 +5719,7 @@ public struct RemoveSpaceUrlPreviewExclusionResult: Sendable {
   public init() {}
 }
 
-public struct GetUpdatesStateInput: Sendable {
+public nonisolated struct GetUpdatesStateInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5600,7 +5732,7 @@ public struct GetUpdatesStateInput: Sendable {
   public init() {}
 }
 
-public struct GetUpdatesStateResult: Sendable {
+public nonisolated struct GetUpdatesStateResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5610,11 +5742,11 @@ public struct GetUpdatesStateResult: Sendable {
 
   /// Set by newer servers to tell clients whether discovery found any bucket work.
   public var updatesFound: Bool {
-    get {return _updatesFound ?? false}
+    get {_updatesFound ?? false}
     set {_updatesFound = newValue}
   }
   /// Returns true if `updatesFound` has been explicitly set.
-  public var hasUpdatesFound: Bool {return self._updatesFound != nil}
+  public var hasUpdatesFound: Bool {self._updatesFound != nil}
   /// Clears the value of `updatesFound`. Subsequent reads from it will return its default value.
   public mutating func clearUpdatesFound() {self._updatesFound = nil}
 
@@ -5625,18 +5757,18 @@ public struct GetUpdatesStateResult: Sendable {
   fileprivate var _updatesFound: Bool? = nil
 }
 
-public struct GetChatInput: Sendable {
+public nonisolated struct GetChatInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID to get chat for
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -5647,40 +5779,40 @@ public struct GetChatInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct GetChatResult: @unchecked Sendable {
+public nonisolated struct GetChatResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
   public var pinnedMessageIds: [Int64] {
-    get {return _storage._pinnedMessageIds}
+    get {_storage._pinnedMessageIds}
     set {_uniqueStorage()._pinnedMessageIds = newValue}
   }
 
   public var anchorMessage: Message {
-    get {return _storage._anchorMessage ?? Message()}
+    get {_storage._anchorMessage ?? Message()}
     set {_uniqueStorage()._anchorMessage = newValue}
   }
   /// Returns true if `anchorMessage` has been explicitly set.
-  public var hasAnchorMessage: Bool {return _storage._anchorMessage != nil}
+  public var hasAnchorMessage: Bool {_storage._anchorMessage != nil}
   /// Clears the value of `anchorMessage`. Subsequent reads from it will return its default value.
   public mutating func clearAnchorMessage() {_uniqueStorage()._anchorMessage = nil}
 
@@ -5691,18 +5823,18 @@ public struct GetChatResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct ShowInChatListInput: Sendable {
+public nonisolated struct ShowInChatListInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID to surface in the chat list.
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -5713,26 +5845,26 @@ public struct ShowInChatListInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct ShowInChatListResult: @unchecked Sendable {
+public nonisolated struct ShowInChatListResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
@@ -5743,18 +5875,18 @@ public struct ShowInChatListResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct UpdateDialogOpenInput: Sendable {
+public nonisolated struct UpdateDialogOpenInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID to open or close in the sidebar inbox.
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -5763,11 +5895,11 @@ public struct UpdateDialogOpenInput: Sendable {
 
   /// Client-generated fractional order for local-first open transitions.
   public var order: String {
-    get {return _order ?? String()}
+    get {_order ?? String()}
     set {_order = newValue}
   }
   /// Returns true if `order` has been explicitly set.
-  public var hasOrder: Bool {return self._order != nil}
+  public var hasOrder: Bool {self._order != nil}
   /// Clears the value of `order`. Subsequent reads from it will return its default value.
   public mutating func clearOrder() {self._order = nil}
 
@@ -5779,45 +5911,45 @@ public struct UpdateDialogOpenInput: Sendable {
   fileprivate var _order: String? = nil
 }
 
-public struct UpdateDialogOpenResult: @unchecked Sendable {
+public nonisolated struct UpdateDialogOpenResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
   public var user: User {
-    get {return _storage._user ?? User()}
+    get {_storage._user ?? User()}
     set {_uniqueStorage()._user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return _storage._user != nil}
+  public var hasUser: Bool {_storage._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {_uniqueStorage()._user = nil}
 
   /// True when closing the sidebar item deleted a safe empty untitled thread.
   public var deletedChat: Bool {
-    get {return _storage._deletedChat ?? false}
+    get {_storage._deletedChat ?? false}
     set {_uniqueStorage()._deletedChat = newValue}
   }
   /// Returns true if `deletedChat` has been explicitly set.
-  public var hasDeletedChat: Bool {return _storage._deletedChat != nil}
+  public var hasDeletedChat: Bool {_storage._deletedChat != nil}
   /// Clears the value of `deletedChat`. Subsequent reads from it will return its default value.
   public mutating func clearDeletedChat() {_uniqueStorage()._deletedChat = nil}
 
@@ -5828,48 +5960,48 @@ public struct UpdateDialogOpenResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct UpdateDialogOrderInput: Sendable {
+public nonisolated struct UpdateDialogOrderInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID to reorder in the sidebar inbox.
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// New normal sidebar fractional order.
   public var order: String {
-    get {return _order ?? String()}
+    get {_order ?? String()}
     set {_order = newValue}
   }
   /// Returns true if `order` has been explicitly set.
-  public var hasOrder: Bool {return self._order != nil}
+  public var hasOrder: Bool {self._order != nil}
   /// Clears the value of `order`. Subsequent reads from it will return its default value.
   public mutating func clearOrder() {self._order = nil}
 
   /// New pinned sidebar fractional order.
   public var pinnedOrder: String {
-    get {return _pinnedOrder ?? String()}
+    get {_pinnedOrder ?? String()}
     set {_pinnedOrder = newValue}
   }
   /// Returns true if `pinnedOrder` has been explicitly set.
-  public var hasPinnedOrder: Bool {return self._pinnedOrder != nil}
+  public var hasPinnedOrder: Bool {self._pinnedOrder != nil}
   /// Clears the value of `pinnedOrder`. Subsequent reads from it will return its default value.
   public mutating func clearPinnedOrder() {self._pinnedOrder = nil}
 
   /// Optional pin state change when reordering across sidebar lanes.
   public var pinned: Bool {
-    get {return _pinned ?? false}
+    get {_pinned ?? false}
     set {_pinned = newValue}
   }
   /// Returns true if `pinned` has been explicitly set.
-  public var hasPinned: Bool {return self._pinned != nil}
+  public var hasPinned: Bool {self._pinned != nil}
   /// Clears the value of `pinned`. Subsequent reads from it will return its default value.
   public mutating func clearPinned() {self._pinned = nil}
 
@@ -5883,35 +6015,35 @@ public struct UpdateDialogOrderInput: Sendable {
   fileprivate var _pinned: Bool? = nil
 }
 
-public struct UpdateDialogOrderResult: @unchecked Sendable {
+public nonisolated struct UpdateDialogOrderResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
   public var user: User {
-    get {return _storage._user ?? User()}
+    get {_storage._user ?? User()}
     set {_uniqueStorage()._user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return _storage._user != nil}
+  public var hasUser: Bool {_storage._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {_uniqueStorage()._user = nil}
 
@@ -5922,28 +6054,28 @@ public struct UpdateDialogOrderResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct UpdateDialogFollowModeInput: Sendable {
+public nonisolated struct UpdateDialogFollowModeInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer to update follow mode for.
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// If unset, reply thread uses default relevance mode.
   public var followMode: DialogFollowMode {
-    get {return _followMode ?? .unspecified}
+    get {_followMode ?? .unspecified}
     set {_followMode = newValue}
   }
   /// Returns true if `followMode` has been explicitly set.
-  public var hasFollowMode: Bool {return self._followMode != nil}
+  public var hasFollowMode: Bool {self._followMode != nil}
   /// Clears the value of `followMode`. Subsequent reads from it will return its default value.
   public mutating func clearFollowMode() {self._followMode = nil}
 
@@ -5955,7 +6087,7 @@ public struct UpdateDialogFollowModeInput: Sendable {
   fileprivate var _followMode: DialogFollowMode? = nil
 }
 
-public struct UpdateDialogFollowModeResult: Sendable {
+public nonisolated struct UpdateDialogFollowModeResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5968,18 +6100,18 @@ public struct UpdateDialogFollowModeResult: Sendable {
 }
 
 /// Mark dialog as unread
-public struct MarkAsUnreadInput: Sendable {
+public nonisolated struct MarkAsUnreadInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID to mark as unread
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -5991,7 +6123,7 @@ public struct MarkAsUnreadInput: Sendable {
 }
 
 /// Mark dialog as unread result
-public struct MarkAsUnreadResult: Sendable {
+public nonisolated struct MarkAsUnreadResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6004,28 +6136,28 @@ public struct MarkAsUnreadResult: Sendable {
 }
 
 /// Read dialog history up to max_id (Telegram-style: peer + optional max_id).
-public struct ReadMessagesInput: Sendable {
+public nonisolated struct ReadMessagesInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID to mark as read
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// If unset, server resolves to the latest message id for the peer.
   public var maxID: Int64 {
-    get {return _maxID ?? 0}
+    get {_maxID ?? 0}
     set {_maxID = newValue}
   }
   /// Returns true if `maxID` has been explicitly set.
-  public var hasMaxID: Bool {return self._maxID != nil}
+  public var hasMaxID: Bool {self._maxID != nil}
   /// Clears the value of `maxID`. Subsequent reads from it will return its default value.
   public mutating func clearMaxID() {self._maxID = nil}
 
@@ -6037,7 +6169,7 @@ public struct ReadMessagesInput: Sendable {
   fileprivate var _maxID: Int64? = nil
 }
 
-public struct ReadMessagesResult: Sendable {
+public nonisolated struct ReadMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6049,7 +6181,7 @@ public struct ReadMessagesResult: Sendable {
   public init() {}
 }
 
-public struct CreateBotInput: Sendable {
+public nonisolated struct CreateBotInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6062,11 +6194,11 @@ public struct CreateBotInput: Sendable {
 
   /// If not null, add the bot to this space
   public var addToSpace: Int64 {
-    get {return _addToSpace ?? 0}
+    get {_addToSpace ?? 0}
     set {_addToSpace = newValue}
   }
   /// Returns true if `addToSpace` has been explicitly set.
-  public var hasAddToSpace: Bool {return self._addToSpace != nil}
+  public var hasAddToSpace: Bool {self._addToSpace != nil}
   /// Clears the value of `addToSpace`. Subsequent reads from it will return its default value.
   public mutating func clearAddToSpace() {self._addToSpace = nil}
 
@@ -6077,17 +6209,17 @@ public struct CreateBotInput: Sendable {
   fileprivate var _addToSpace: Int64? = nil
 }
 
-public struct CreateBotResult: Sendable {
+public nonisolated struct CreateBotResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var bot: User {
-    get {return _bot ?? User()}
+    get {_bot ?? User()}
     set {_bot = newValue}
   }
   /// Returns true if `bot` has been explicitly set.
-  public var hasBot: Bool {return self._bot != nil}
+  public var hasBot: Bool {self._bot != nil}
   /// Clears the value of `bot`. Subsequent reads from it will return its default value.
   public mutating func clearBot() {self._bot = nil}
 
@@ -6101,7 +6233,7 @@ public struct CreateBotResult: Sendable {
   fileprivate var _bot: User? = nil
 }
 
-public struct ListBotsInput: Sendable {
+public nonisolated struct ListBotsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6111,7 +6243,7 @@ public struct ListBotsInput: Sendable {
   public init() {}
 }
 
-public struct ListBotsResult: Sendable {
+public nonisolated struct ListBotsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6123,7 +6255,7 @@ public struct ListBotsResult: Sendable {
   public init() {}
 }
 
-public struct DeleteBotInput: Sendable {
+public nonisolated struct DeleteBotInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6135,7 +6267,7 @@ public struct DeleteBotInput: Sendable {
   public init() {}
 }
 
-public struct DeleteBotResult: Sendable {
+public nonisolated struct DeleteBotResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6148,18 +6280,18 @@ public struct DeleteBotResult: Sendable {
 }
 
 /// Request to remove a single message attachment from a message.
-public struct DeleteMessageAttachmentInput: Sendable {
+public nonisolated struct DeleteMessageAttachmentInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer containing the message.
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -6177,7 +6309,7 @@ public struct DeleteMessageAttachmentInput: Sendable {
 }
 
 /// Result for removing a single message attachment.
-public struct DeleteMessageAttachmentResult: Sendable {
+public nonisolated struct DeleteMessageAttachmentResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6190,7 +6322,7 @@ public struct DeleteMessageAttachmentResult: Sendable {
   public init() {}
 }
 
-public struct RevokeSessionInput: Sendable {
+public nonisolated struct RevokeSessionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6202,7 +6334,7 @@ public struct RevokeSessionInput: Sendable {
   public init() {}
 }
 
-public struct RevokeSessionResult: Sendable {
+public nonisolated struct RevokeSessionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6216,7 +6348,7 @@ public struct RevokeSessionResult: Sendable {
   public init() {}
 }
 
-public struct GetSessionsInput: Sendable {
+public nonisolated struct GetSessionsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6226,7 +6358,7 @@ public struct GetSessionsInput: Sendable {
   public init() {}
 }
 
-public struct AccountSession: Sendable {
+public nonisolated struct AccountSession: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6236,56 +6368,56 @@ public struct AccountSession: Sendable {
   public var clientType: String = String()
 
   public var clientVersion: String {
-    get {return _clientVersion ?? String()}
+    get {_clientVersion ?? String()}
     set {_clientVersion = newValue}
   }
   /// Returns true if `clientVersion` has been explicitly set.
-  public var hasClientVersion: Bool {return self._clientVersion != nil}
+  public var hasClientVersion: Bool {self._clientVersion != nil}
   /// Clears the value of `clientVersion`. Subsequent reads from it will return its default value.
   public mutating func clearClientVersion() {self._clientVersion = nil}
 
   public var osVersion: String {
-    get {return _osVersion ?? String()}
+    get {_osVersion ?? String()}
     set {_osVersion = newValue}
   }
   /// Returns true if `osVersion` has been explicitly set.
-  public var hasOsVersion: Bool {return self._osVersion != nil}
+  public var hasOsVersion: Bool {self._osVersion != nil}
   /// Clears the value of `osVersion`. Subsequent reads from it will return its default value.
   public mutating func clearOsVersion() {self._osVersion = nil}
 
   public var deviceName: String {
-    get {return _deviceName ?? String()}
+    get {_deviceName ?? String()}
     set {_deviceName = newValue}
   }
   /// Returns true if `deviceName` has been explicitly set.
-  public var hasDeviceName: Bool {return self._deviceName != nil}
+  public var hasDeviceName: Bool {self._deviceName != nil}
   /// Clears the value of `deviceName`. Subsequent reads from it will return its default value.
   public mutating func clearDeviceName() {self._deviceName = nil}
 
   public var city: String {
-    get {return _city ?? String()}
+    get {_city ?? String()}
     set {_city = newValue}
   }
   /// Returns true if `city` has been explicitly set.
-  public var hasCity: Bool {return self._city != nil}
+  public var hasCity: Bool {self._city != nil}
   /// Clears the value of `city`. Subsequent reads from it will return its default value.
   public mutating func clearCity() {self._city = nil}
 
   public var country: String {
-    get {return _country ?? String()}
+    get {_country ?? String()}
     set {_country = newValue}
   }
   /// Returns true if `country` has been explicitly set.
-  public var hasCountry: Bool {return self._country != nil}
+  public var hasCountry: Bool {self._country != nil}
   /// Clears the value of `country`. Subsequent reads from it will return its default value.
   public mutating func clearCountry() {self._country = nil}
 
   public var timezone: String {
-    get {return _timezone ?? String()}
+    get {_timezone ?? String()}
     set {_timezone = newValue}
   }
   /// Returns true if `timezone` has been explicitly set.
-  public var hasTimezone: Bool {return self._timezone != nil}
+  public var hasTimezone: Bool {self._timezone != nil}
   /// Clears the value of `timezone`. Subsequent reads from it will return its default value.
   public mutating func clearTimezone() {self._timezone = nil}
 
@@ -6309,7 +6441,7 @@ public struct AccountSession: Sendable {
   fileprivate var _timezone: String? = nil
 }
 
-public struct GetSessionsResult: Sendable {
+public nonisolated struct GetSessionsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6321,7 +6453,7 @@ public struct GetSessionsResult: Sendable {
   public init() {}
 }
 
-public struct CheckUsernameInput: Sendable {
+public nonisolated struct CheckUsernameInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6333,7 +6465,7 @@ public struct CheckUsernameInput: Sendable {
   public init() {}
 }
 
-public struct CheckUsernameResult: Sendable {
+public nonisolated struct CheckUsernameResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6347,7 +6479,7 @@ public struct CheckUsernameResult: Sendable {
   public init() {}
 }
 
-public struct ChangeUsernameInput: Sendable {
+public nonisolated struct ChangeUsernameInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6359,17 +6491,17 @@ public struct ChangeUsernameInput: Sendable {
   public init() {}
 }
 
-public struct ChangeUsernameResult: Sendable {
+public nonisolated struct ChangeUsernameResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var user: User {
-    get {return _user ?? User()}
+    get {_user ?? User()}
     set {_user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return self._user != nil}
+  public var hasUser: Bool {self._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {self._user = nil}
 
@@ -6382,35 +6514,35 @@ public struct ChangeUsernameResult: Sendable {
   fileprivate var _user: User? = nil
 }
 
-public struct UpdateProfileInput: Sendable {
+public nonisolated struct UpdateProfileInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var firstName: String {
-    get {return _firstName ?? String()}
+    get {_firstName ?? String()}
     set {_firstName = newValue}
   }
   /// Returns true if `firstName` has been explicitly set.
-  public var hasFirstName: Bool {return self._firstName != nil}
+  public var hasFirstName: Bool {self._firstName != nil}
   /// Clears the value of `firstName`. Subsequent reads from it will return its default value.
   public mutating func clearFirstName() {self._firstName = nil}
 
   public var lastName: String {
-    get {return _lastName ?? String()}
+    get {_lastName ?? String()}
     set {_lastName = newValue}
   }
   /// Returns true if `lastName` has been explicitly set.
-  public var hasLastName: Bool {return self._lastName != nil}
+  public var hasLastName: Bool {self._lastName != nil}
   /// Clears the value of `lastName`. Subsequent reads from it will return its default value.
   public mutating func clearLastName() {self._lastName = nil}
 
   public var bio: String {
-    get {return _bio ?? String()}
+    get {_bio ?? String()}
     set {_bio = newValue}
   }
   /// Returns true if `bio` has been explicitly set.
-  public var hasBio: Bool {return self._bio != nil}
+  public var hasBio: Bool {self._bio != nil}
   /// Clears the value of `bio`. Subsequent reads from it will return its default value.
   public mutating func clearBio() {self._bio = nil}
 
@@ -6423,17 +6555,17 @@ public struct UpdateProfileInput: Sendable {
   fileprivate var _bio: String? = nil
 }
 
-public struct UpdateProfileResult: Sendable {
+public nonisolated struct UpdateProfileResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var user: User {
-    get {return _user ?? User()}
+    get {_user ?? User()}
     set {_user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return self._user != nil}
+  public var hasUser: Bool {self._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {self._user = nil}
 
@@ -6446,7 +6578,7 @@ public struct UpdateProfileResult: Sendable {
   fileprivate var _user: User? = nil
 }
 
-public struct BotCommand: Sendable {
+public nonisolated struct BotCommand: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6456,11 +6588,11 @@ public struct BotCommand: Sendable {
   public var description_p: String = String()
 
   public var sortOrder: Int32 {
-    get {return _sortOrder ?? 0}
+    get {_sortOrder ?? 0}
     set {_sortOrder = newValue}
   }
   /// Returns true if `sortOrder` has been explicitly set.
-  public var hasSortOrder: Bool {return self._sortOrder != nil}
+  public var hasSortOrder: Bool {self._sortOrder != nil}
   /// Clears the value of `sortOrder`. Subsequent reads from it will return its default value.
   public mutating func clearSortOrder() {self._sortOrder = nil}
 
@@ -6471,17 +6603,17 @@ public struct BotCommand: Sendable {
   fileprivate var _sortOrder: Int32? = nil
 }
 
-public struct PeerBotCommands: Sendable {
+public nonisolated struct PeerBotCommands: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var bot: User {
-    get {return _bot ?? User()}
+    get {_bot ?? User()}
     set {_bot = newValue}
   }
   /// Returns true if `bot` has been explicitly set.
-  public var hasBot: Bool {return self._bot != nil}
+  public var hasBot: Bool {self._bot != nil}
   /// Clears the value of `bot`. Subsequent reads from it will return its default value.
   public mutating func clearBot() {self._bot = nil}
 
@@ -6494,7 +6626,7 @@ public struct PeerBotCommands: Sendable {
   fileprivate var _bot: User? = nil
 }
 
-public struct GetBotCommandsInput: Sendable {
+public nonisolated struct GetBotCommandsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6506,7 +6638,7 @@ public struct GetBotCommandsInput: Sendable {
   public init() {}
 }
 
-public struct GetBotCommandsResult: Sendable {
+public nonisolated struct GetBotCommandsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6518,7 +6650,7 @@ public struct GetBotCommandsResult: Sendable {
   public init() {}
 }
 
-public struct SetBotCommandsInput: Sendable {
+public nonisolated struct SetBotCommandsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6532,7 +6664,7 @@ public struct SetBotCommandsInput: Sendable {
   public init() {}
 }
 
-public struct SetBotCommandsResult: Sendable {
+public nonisolated struct SetBotCommandsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6544,17 +6676,17 @@ public struct SetBotCommandsResult: Sendable {
   public init() {}
 }
 
-public struct GetPeerBotCommandsInput: Sendable {
+public nonisolated struct GetPeerBotCommandsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -6565,7 +6697,7 @@ public struct GetPeerBotCommandsInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct GetPeerBotCommandsResult: Sendable {
+public nonisolated struct GetPeerBotCommandsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6577,7 +6709,7 @@ public struct GetPeerBotCommandsResult: Sendable {
   public init() {}
 }
 
-public struct RevealBotTokenInput: Sendable {
+public nonisolated struct RevealBotTokenInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6589,7 +6721,7 @@ public struct RevealBotTokenInput: Sendable {
   public init() {}
 }
 
-public struct RevealBotTokenResult: Sendable {
+public nonisolated struct RevealBotTokenResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6601,7 +6733,7 @@ public struct RevealBotTokenResult: Sendable {
   public init() {}
 }
 
-public struct RotateBotTokenInput: Sendable {
+public nonisolated struct RotateBotTokenInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6613,7 +6745,7 @@ public struct RotateBotTokenInput: Sendable {
   public init() {}
 }
 
-public struct RotateBotTokenResult: Sendable {
+public nonisolated struct RotateBotTokenResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6626,7 +6758,7 @@ public struct RotateBotTokenResult: Sendable {
   public init() {}
 }
 
-public struct UpdateBotProfileInput: Sendable {
+public nonisolated struct UpdateBotProfileInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6635,21 +6767,21 @@ public struct UpdateBotProfileInput: Sendable {
 
   /// Full display name for the bot.
   public var name: String {
-    get {return _name ?? String()}
+    get {_name ?? String()}
     set {_name = newValue}
   }
   /// Returns true if `name` has been explicitly set.
-  public var hasName: Bool {return self._name != nil}
+  public var hasName: Bool {self._name != nil}
   /// Clears the value of `name`. Subsequent reads from it will return its default value.
   public mutating func clearName() {self._name = nil}
 
   /// Profile photo to use for the bot, from the /uploadFile REST API.
   public var photoFileUniqueID: String {
-    get {return _photoFileUniqueID ?? String()}
+    get {_photoFileUniqueID ?? String()}
     set {_photoFileUniqueID = newValue}
   }
   /// Returns true if `photoFileUniqueID` has been explicitly set.
-  public var hasPhotoFileUniqueID: Bool {return self._photoFileUniqueID != nil}
+  public var hasPhotoFileUniqueID: Bool {self._photoFileUniqueID != nil}
   /// Clears the value of `photoFileUniqueID`. Subsequent reads from it will return its default value.
   public mutating func clearPhotoFileUniqueID() {self._photoFileUniqueID = nil}
 
@@ -6661,17 +6793,17 @@ public struct UpdateBotProfileInput: Sendable {
   fileprivate var _photoFileUniqueID: String? = nil
 }
 
-public struct UpdateBotProfileResult: Sendable {
+public nonisolated struct UpdateBotProfileResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var bot: User {
-    get {return _bot ?? User()}
+    get {_bot ?? User()}
     set {_bot = newValue}
   }
   /// Returns true if `bot` has been explicitly set.
-  public var hasBot: Bool {return self._bot != nil}
+  public var hasBot: Bool {self._bot != nil}
   /// Clears the value of `bot`. Subsequent reads from it will return its default value.
   public mutating func clearBot() {self._bot = nil}
 
@@ -6682,7 +6814,7 @@ public struct UpdateBotProfileResult: Sendable {
   fileprivate var _bot: User? = nil
 }
 
-public struct SetBotAvatarInput: Sendable {
+public nonisolated struct SetBotAvatarInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6694,11 +6826,11 @@ public struct SetBotAvatarInput: Sendable {
   public var displayName: String = String()
 
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
@@ -6711,17 +6843,17 @@ public struct SetBotAvatarInput: Sendable {
   fileprivate var _description_p: String? = nil
 }
 
-public struct SetBotAvatarResult: Sendable {
+public nonisolated struct SetBotAvatarResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var bot: User {
-    get {return _bot ?? User()}
+    get {_bot ?? User()}
     set {_bot = newValue}
   }
   /// Returns true if `bot` has been explicitly set.
-  public var hasBot: Bool {return self._bot != nil}
+  public var hasBot: Bool {self._bot != nil}
   /// Clears the value of `bot`. Subsequent reads from it will return its default value.
   public mutating func clearBot() {self._bot = nil}
 
@@ -6732,7 +6864,7 @@ public struct SetBotAvatarResult: Sendable {
   fileprivate var _bot: User? = nil
 }
 
-public struct ClearBotAvatarInput: Sendable {
+public nonisolated struct ClearBotAvatarInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6744,17 +6876,17 @@ public struct ClearBotAvatarInput: Sendable {
   public init() {}
 }
 
-public struct ClearBotAvatarResult: Sendable {
+public nonisolated struct ClearBotAvatarResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var bot: User {
-    get {return _bot ?? User()}
+    get {_bot ?? User()}
     set {_bot = newValue}
   }
   /// Returns true if `bot` has been explicitly set.
-  public var hasBot: Bool {return self._bot != nil}
+  public var hasBot: Bool {self._bot != nil}
   /// Clears the value of `bot`. Subsequent reads from it will return its default value.
   public mutating func clearBot() {self._bot = nil}
 
@@ -6765,17 +6897,17 @@ public struct ClearBotAvatarResult: Sendable {
   fileprivate var _bot: User? = nil
 }
 
-public struct GetBotPresenceInput: Sendable {
+public nonisolated struct GetBotPresenceInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -6786,44 +6918,44 @@ public struct GetBotPresenceInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct GetBotPresenceResult: Sendable {
+public nonisolated struct GetBotPresenceResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var botUserID: Int64 {
-    get {return _botUserID ?? 0}
+    get {_botUserID ?? 0}
     set {_botUserID = newValue}
   }
   /// Returns true if `botUserID` has been explicitly set.
-  public var hasBotUserID: Bool {return self._botUserID != nil}
+  public var hasBotUserID: Bool {self._botUserID != nil}
   /// Clears the value of `botUserID`. Subsequent reads from it will return its default value.
   public mutating func clearBotUserID() {self._botUserID = nil}
 
   public var avatar: BotAvatar {
-    get {return _avatar ?? BotAvatar()}
+    get {_avatar ?? BotAvatar()}
     set {_avatar = newValue}
   }
   /// Returns true if `avatar` has been explicitly set.
-  public var hasAvatar: Bool {return self._avatar != nil}
+  public var hasAvatar: Bool {self._avatar != nil}
   /// Clears the value of `avatar`. Subsequent reads from it will return its default value.
   public mutating func clearAvatar() {self._avatar = nil}
 
   public var state: BotPresenceState {
-    get {return _state ?? BotPresenceState()}
+    get {_state ?? BotPresenceState()}
     set {_state = newValue}
   }
   /// Returns true if `state` has been explicitly set.
-  public var hasState: Bool {return self._state != nil}
+  public var hasState: Bool {self._state != nil}
   /// Clears the value of `state`. Subsequent reads from it will return its default value.
   public mutating func clearState() {self._state = nil}
 
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -6837,26 +6969,26 @@ public struct GetBotPresenceResult: Sendable {
   fileprivate var _peerID: Peer? = nil
 }
 
-public struct SetBotPresenceStateInput: Sendable {
+public nonisolated struct SetBotPresenceStateInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   public var state: BotPresenceState {
-    get {return _state ?? BotPresenceState()}
+    get {_state ?? BotPresenceState()}
     set {_state = newValue}
   }
   /// Returns true if `state` has been explicitly set.
-  public var hasState: Bool {return self._state != nil}
+  public var hasState: Bool {self._state != nil}
   /// Clears the value of `state`. Subsequent reads from it will return its default value.
   public mutating func clearState() {self._state = nil}
 
@@ -6868,7 +7000,7 @@ public struct SetBotPresenceStateInput: Sendable {
   fileprivate var _state: BotPresenceState? = nil
 }
 
-public struct SetBotPresenceStateResult: Sendable {
+public nonisolated struct SetBotPresenceStateResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6878,7 +7010,7 @@ public struct SetBotPresenceStateResult: Sendable {
   public init() {}
 }
 
-public struct GetUserSettingsInput: Sendable {
+public nonisolated struct GetUserSettingsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6888,17 +7020,17 @@ public struct GetUserSettingsInput: Sendable {
   public init() {}
 }
 
-public struct GetUserSettingsResult: Sendable {
+public nonisolated struct GetUserSettingsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var userSettings: UserSettings {
-    get {return _userSettings ?? UserSettings()}
+    get {_userSettings ?? UserSettings()}
     set {_userSettings = newValue}
   }
   /// Returns true if `userSettings` has been explicitly set.
-  public var hasUserSettings: Bool {return self._userSettings != nil}
+  public var hasUserSettings: Bool {self._userSettings != nil}
   /// Clears the value of `userSettings`. Subsequent reads from it will return its default value.
   public mutating func clearUserSettings() {self._userSettings = nil}
 
@@ -6909,17 +7041,17 @@ public struct GetUserSettingsResult: Sendable {
   fileprivate var _userSettings: UserSettings? = nil
 }
 
-public struct UserSettings: Sendable {
+public nonisolated struct UserSettings: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var notificationSettings: NotificationSettings {
-    get {return _notificationSettings ?? NotificationSettings()}
+    get {_notificationSettings ?? NotificationSettings()}
     set {_notificationSettings = newValue}
   }
   /// Returns true if `notificationSettings` has been explicitly set.
-  public var hasNotificationSettings: Bool {return self._notificationSettings != nil}
+  public var hasNotificationSettings: Bool {self._notificationSettings != nil}
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
@@ -6930,73 +7062,73 @@ public struct UserSettings: Sendable {
   fileprivate var _notificationSettings: NotificationSettings? = nil
 }
 
-public struct NotificationSettings: Sendable {
+public nonisolated struct NotificationSettings: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var mode: NotificationSettings.Mode {
-    get {return _mode ?? .unspecified}
+    get {_mode ?? .unspecified}
     set {_mode = newValue}
   }
   /// Returns true if `mode` has been explicitly set.
-  public var hasMode: Bool {return self._mode != nil}
+  public var hasMode: Bool {self._mode != nil}
   /// Clears the value of `mode`. Subsequent reads from it will return its default value.
   public mutating func clearMode() {self._mode = nil}
 
   /// If true, no sound will be played for notifications
   public var silent: Bool {
-    get {return _silent ?? false}
+    get {_silent ?? false}
     set {_silent = newValue}
   }
   /// Returns true if `silent` has been explicitly set.
-  public var hasSilent: Bool {return self._silent != nil}
+  public var hasSilent: Bool {self._silent != nil}
   /// Clears the value of `silent`. Subsequent reads from it will return its default value.
   public mutating func clearSilent() {self._silent = nil}
 
   /// If true, the notification requires mentioning the user
   public var zenModeRequiresMention: Bool {
-    get {return _zenModeRequiresMention ?? false}
+    get {_zenModeRequiresMention ?? false}
     set {_zenModeRequiresMention = newValue}
   }
   /// Returns true if `zenModeRequiresMention` has been explicitly set.
-  public var hasZenModeRequiresMention: Bool {return self._zenModeRequiresMention != nil}
+  public var hasZenModeRequiresMention: Bool {self._zenModeRequiresMention != nil}
   /// Clears the value of `zenModeRequiresMention`. Subsequent reads from it will return its default value.
   public mutating func clearZenModeRequiresMention() {self._zenModeRequiresMention = nil}
 
   /// If true, the default rules will be used
   public var zenModeUsesDefaultRules: Bool {
-    get {return _zenModeUsesDefaultRules ?? false}
+    get {_zenModeUsesDefaultRules ?? false}
     set {_zenModeUsesDefaultRules = newValue}
   }
   /// Returns true if `zenModeUsesDefaultRules` has been explicitly set.
-  public var hasZenModeUsesDefaultRules: Bool {return self._zenModeUsesDefaultRules != nil}
+  public var hasZenModeUsesDefaultRules: Bool {self._zenModeUsesDefaultRules != nil}
   /// Clears the value of `zenModeUsesDefaultRules`. Subsequent reads from it will return its default value.
   public mutating func clearZenModeUsesDefaultRules() {self._zenModeUsesDefaultRules = nil}
 
   /// Custom rules for notifications
   public var zenModeCustomRules: String {
-    get {return _zenModeCustomRules ?? String()}
+    get {_zenModeCustomRules ?? String()}
     set {_zenModeCustomRules = newValue}
   }
   /// Returns true if `zenModeCustomRules` has been explicitly set.
-  public var hasZenModeCustomRules: Bool {return self._zenModeCustomRules != nil}
+  public var hasZenModeCustomRules: Bool {self._zenModeCustomRules != nil}
   /// Clears the value of `zenModeCustomRules`. Subsequent reads from it will return its default value.
   public mutating func clearZenModeCustomRules() {self._zenModeCustomRules = nil}
 
   /// If true, direct message notifications are disabled
   public var disableDmNotifications: Bool {
-    get {return _disableDmNotifications ?? false}
+    get {_disableDmNotifications ?? false}
     set {_disableDmNotifications = newValue}
   }
   /// Returns true if `disableDmNotifications` has been explicitly set.
-  public var hasDisableDmNotifications: Bool {return self._disableDmNotifications != nil}
+  public var hasDisableDmNotifications: Bool {self._disableDmNotifications != nil}
   /// Clears the value of `disableDmNotifications`. Subsequent reads from it will return its default value.
   public mutating func clearDisableDmNotifications() {self._disableDmNotifications = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Mode: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Mode: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case all // = 1
@@ -7056,23 +7188,23 @@ public struct NotificationSettings: Sendable {
   fileprivate var _disableDmNotifications: Bool? = nil
 }
 
-public struct DialogNotificationSettings: Sendable {
+public nonisolated struct DialogNotificationSettings: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var mode: DialogNotificationSettings.Mode {
-    get {return _mode ?? .unspecified}
+    get {_mode ?? .unspecified}
     set {_mode = newValue}
   }
   /// Returns true if `mode` has been explicitly set.
-  public var hasMode: Bool {return self._mode != nil}
+  public var hasMode: Bool {self._mode != nil}
   /// Clears the value of `mode`. Subsequent reads from it will return its default value.
   public mutating func clearMode() {self._mode = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Mode: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Mode: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case all // = 1
@@ -7119,17 +7251,17 @@ public struct DialogNotificationSettings: Sendable {
   fileprivate var _mode: DialogNotificationSettings.Mode? = nil
 }
 
-public struct UpdateUserSettingsInput: Sendable {
+public nonisolated struct UpdateUserSettingsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var userSettings: UserSettings {
-    get {return _userSettings ?? UserSettings()}
+    get {_userSettings ?? UserSettings()}
     set {_userSettings = newValue}
   }
   /// Returns true if `userSettings` has been explicitly set.
-  public var hasUserSettings: Bool {return self._userSettings != nil}
+  public var hasUserSettings: Bool {self._userSettings != nil}
   /// Clears the value of `userSettings`. Subsequent reads from it will return its default value.
   public mutating func clearUserSettings() {self._userSettings = nil}
 
@@ -7140,7 +7272,7 @@ public struct UpdateUserSettingsInput: Sendable {
   fileprivate var _userSettings: UserSettings? = nil
 }
 
-public struct UpdateUserSettingsResult: Sendable {
+public nonisolated struct UpdateUserSettingsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7152,28 +7284,28 @@ public struct UpdateUserSettingsResult: Sendable {
   public init() {}
 }
 
-public struct UpdateDialogNotificationSettingsInput: Sendable {
+public nonisolated struct UpdateDialogNotificationSettingsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer to update settings for
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// If unset, chat follows global notification settings
   public var notificationSettings: DialogNotificationSettings {
-    get {return _notificationSettings ?? DialogNotificationSettings()}
+    get {_notificationSettings ?? DialogNotificationSettings()}
     set {_notificationSettings = newValue}
   }
   /// Returns true if `notificationSettings` has been explicitly set.
-  public var hasNotificationSettings: Bool {return self._notificationSettings != nil}
+  public var hasNotificationSettings: Bool {self._notificationSettings != nil}
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
@@ -7185,7 +7317,7 @@ public struct UpdateDialogNotificationSettingsInput: Sendable {
   fileprivate var _notificationSettings: DialogNotificationSettings? = nil
 }
 
-public struct UpdateDialogNotificationSettingsResult: Sendable {
+public nonisolated struct UpdateDialogNotificationSettingsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7197,28 +7329,28 @@ public struct UpdateDialogNotificationSettingsResult: Sendable {
   public init() {}
 }
 
-public struct SendComposeActionInput: Sendable {
+public nonisolated struct SendComposeActionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer - where user is typing/uploading
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// Compose action (optional, null means stop action)
   public var action: UpdateComposeAction.ComposeAction {
-    get {return _action ?? .none}
+    get {_action ?? .none}
     set {_action = newValue}
   }
   /// Returns true if `action` has been explicitly set.
-  public var hasAction: Bool {return self._action != nil}
+  public var hasAction: Bool {self._action != nil}
   /// Clears the value of `action`. Subsequent reads from it will return its default value.
   public mutating func clearAction() {self._action = nil}
 
@@ -7230,7 +7362,7 @@ public struct SendComposeActionInput: Sendable {
   fileprivate var _action: UpdateComposeAction.ComposeAction? = nil
 }
 
-public struct SendComposeActionResult: Sendable {
+public nonisolated struct SendComposeActionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7240,7 +7372,7 @@ public struct SendComposeActionResult: Sendable {
   public init() {}
 }
 
-public struct PushContentEncryptionKey: @unchecked Sendable {
+public nonisolated struct PushContentEncryptionKey: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7250,11 +7382,11 @@ public struct PushContentEncryptionKey: @unchecked Sendable {
 
   /// Optional key identifier to support rotation and debugging.
   public var keyID: String {
-    get {return _keyID ?? String()}
+    get {_keyID ?? String()}
     set {_keyID = newValue}
   }
   /// Returns true if `keyID` has been explicitly set.
-  public var hasKeyID: Bool {return self._keyID != nil}
+  public var hasKeyID: Bool {self._keyID != nil}
   /// Clears the value of `keyID`. Subsequent reads from it will return its default value.
   public mutating func clearKeyID() {self._keyID = nil}
 
@@ -7263,7 +7395,7 @@ public struct PushContentEncryptionKey: @unchecked Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Algorithm: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Algorithm: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case x25519HkdfSha256Aes256Gcm // = 1
@@ -7302,7 +7434,7 @@ public struct PushContentEncryptionKey: @unchecked Sendable {
   fileprivate var _keyID: String? = nil
 }
 
-public struct ApnsNotificationMethod: Sendable {
+public nonisolated struct ApnsNotificationMethod: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7315,7 +7447,7 @@ public struct ApnsNotificationMethod: Sendable {
   public init() {}
 }
 
-public struct ExpoAndroidNotificationMethod: Sendable {
+public nonisolated struct ExpoAndroidNotificationMethod: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7328,7 +7460,7 @@ public struct ExpoAndroidNotificationMethod: Sendable {
   public init() {}
 }
 
-public struct PushNotificationMethod: Sendable {
+public nonisolated struct PushNotificationMethod: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7358,7 +7490,7 @@ public struct PushNotificationMethod: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Exactly one notification method should be set for each session.
-  public enum OneOf_Method: Equatable, Sendable {
+  public nonisolated enum OneOf_Method: Equatable, Sendable {
     case apns(ApnsNotificationMethod)
     case expoAndroid(ExpoAndroidNotificationMethod)
 
@@ -7368,7 +7500,7 @@ public struct PushNotificationMethod: Sendable {
 }
 
 /// Register/update push notification details for the current session.
-public struct UpdatePushNotificationDetailsInput: Sendable {
+public nonisolated struct UpdatePushNotificationDetailsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7380,31 +7512,31 @@ public struct UpdatePushNotificationDetailsInput: Sendable {
 
   /// Optional metadata for encrypted push content rollout.
   public var pushContentEncryptionKey: PushContentEncryptionKey {
-    get {return _pushContentEncryptionKey ?? PushContentEncryptionKey()}
+    get {_pushContentEncryptionKey ?? PushContentEncryptionKey()}
     set {_pushContentEncryptionKey = newValue}
   }
   /// Returns true if `pushContentEncryptionKey` has been explicitly set.
-  public var hasPushContentEncryptionKey: Bool {return self._pushContentEncryptionKey != nil}
+  public var hasPushContentEncryptionKey: Bool {self._pushContentEncryptionKey != nil}
   /// Clears the value of `pushContentEncryptionKey`. Subsequent reads from it will return its default value.
   public mutating func clearPushContentEncryptionKey() {self._pushContentEncryptionKey = nil}
 
   /// Optional encrypted payload schema version/capability marker.
   public var pushContentVersion: UInt32 {
-    get {return _pushContentVersion ?? 0}
+    get {_pushContentVersion ?? 0}
     set {_pushContentVersion = newValue}
   }
   /// Returns true if `pushContentVersion` has been explicitly set.
-  public var hasPushContentVersion: Bool {return self._pushContentVersion != nil}
+  public var hasPushContentVersion: Bool {self._pushContentVersion != nil}
   /// Clears the value of `pushContentVersion`. Subsequent reads from it will return its default value.
   public mutating func clearPushContentVersion() {self._pushContentVersion = nil}
 
   /// New provider-specific method payload.
   public var notificationMethod: PushNotificationMethod {
-    get {return _notificationMethod ?? PushNotificationMethod()}
+    get {_notificationMethod ?? PushNotificationMethod()}
     set {_notificationMethod = newValue}
   }
   /// Returns true if `notificationMethod` has been explicitly set.
-  public var hasNotificationMethod: Bool {return self._notificationMethod != nil}
+  public var hasNotificationMethod: Bool {self._notificationMethod != nil}
   /// Clears the value of `notificationMethod`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationMethod() {self._notificationMethod = nil}
 
@@ -7417,7 +7549,7 @@ public struct UpdatePushNotificationDetailsInput: Sendable {
   fileprivate var _notificationMethod: PushNotificationMethod? = nil
 }
 
-public struct UpdatePushNotificationDetailsResult: Sendable {
+public nonisolated struct UpdatePushNotificationDetailsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7427,7 +7559,7 @@ public struct UpdatePushNotificationDetailsResult: Sendable {
   public init() {}
 }
 
-public struct GetChatsInput: Sendable {
+public nonisolated struct GetChatsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7437,7 +7569,7 @@ public struct GetChatsInput: Sendable {
   public init() {}
 }
 
-public struct GetChatsResult: Sendable {
+public nonisolated struct GetChatsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7462,18 +7594,18 @@ public struct GetChatsResult: Sendable {
   public init() {}
 }
 
-public struct TranslateMessagesInput: Sendable {
+public nonisolated struct TranslateMessagesInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// ID of the peer
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -7491,7 +7623,7 @@ public struct TranslateMessagesInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct TranslateMessagesResult: Sendable {
+public nonisolated struct TranslateMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7504,7 +7636,7 @@ public struct TranslateMessagesResult: Sendable {
   public init() {}
 }
 
-public struct MessageTranslation: Sendable {
+public nonisolated struct MessageTranslation: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7523,11 +7655,11 @@ public struct MessageTranslation: Sendable {
 
   /// Entities in the translation
   public var entities: MessageEntities {
-    get {return _entities ?? MessageEntities()}
+    get {_entities ?? MessageEntities()}
     set {_entities = newValue}
   }
   /// Returns true if `entities` has been explicitly set.
-  public var hasEntities: Bool {return self._entities != nil}
+  public var hasEntities: Bool {self._entities != nil}
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {self._entities = nil}
 
@@ -7541,7 +7673,7 @@ public struct MessageTranslation: Sendable {
   fileprivate var _entities: MessageEntities? = nil
 }
 
-public struct GetMeInput: Sendable {
+public nonisolated struct GetMeInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7551,17 +7683,17 @@ public struct GetMeInput: Sendable {
   public init() {}
 }
 
-public struct GetMeResult: Sendable {
+public nonisolated struct GetMeResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var user: User {
-    get {return _user ?? User()}
+    get {_user ?? User()}
     set {_user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return self._user != nil}
+  public var hasUser: Bool {self._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {self._user = nil}
 
@@ -7572,17 +7704,17 @@ public struct GetMeResult: Sendable {
   fileprivate var _user: User? = nil
 }
 
-public struct GetPeerPhotoInput: Sendable {
+public nonisolated struct GetPeerPhotoInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -7595,17 +7727,17 @@ public struct GetPeerPhotoInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct GetPeerPhotoResult: Sendable {
+public nonisolated struct GetPeerPhotoResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var photo: Photo {
-    get {return _photo ?? Photo()}
+    get {_photo ?? Photo()}
     set {_photo = newValue}
   }
   /// Returns true if `photo` has been explicitly set.
-  public var hasPhoto: Bool {return self._photo != nil}
+  public var hasPhoto: Bool {self._photo != nil}
   /// Clears the value of `photo`. Subsequent reads from it will return its default value.
   public mutating func clearPhoto() {self._photo = nil}
 
@@ -7616,7 +7748,7 @@ public struct GetPeerPhotoResult: Sendable {
   fileprivate var _photo: Photo? = nil
 }
 
-public struct DeleteMessagesInput: Sendable {
+public nonisolated struct DeleteMessagesInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7624,11 +7756,11 @@ public struct DeleteMessagesInput: Sendable {
   public var messageIds: [Int64] = []
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -7639,7 +7771,7 @@ public struct DeleteMessagesInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct DeleteMessagesResult: Sendable {
+public nonisolated struct DeleteMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7651,7 +7783,7 @@ public struct DeleteMessagesResult: Sendable {
   public init() {}
 }
 
-public struct ClearChatHistoryInput: Sendable {
+public nonisolated struct ClearChatHistoryInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7685,7 +7817,7 @@ public struct ClearChatHistoryInput: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Exactly one target must be set: peer_id for one chat/DM, or space_id for all chats in a space.
-  public enum OneOf_Target: Equatable, Sendable {
+  public nonisolated enum OneOf_Target: Equatable, Sendable {
     case peerID(InputPeer)
     case spaceID(Int64)
 
@@ -7694,7 +7826,7 @@ public struct ClearChatHistoryInput: Sendable {
   public init() {}
 }
 
-public struct ClearChatHistoryResult: Sendable {
+public nonisolated struct ClearChatHistoryResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7706,7 +7838,7 @@ public struct ClearChatHistoryResult: Sendable {
   public init() {}
 }
 
-public struct EditMessageInput: Sendable {
+public nonisolated struct EditMessageInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7714,31 +7846,31 @@ public struct EditMessageInput: Sendable {
   public var messageID: Int64 = 0
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   public var text: String = String()
 
   public var entities: MessageEntities {
-    get {return _entities ?? MessageEntities()}
+    get {_entities ?? MessageEntities()}
     set {_entities = newValue}
   }
   /// Returns true if `entities` has been explicitly set.
-  public var hasEntities: Bool {return self._entities != nil}
+  public var hasEntities: Bool {self._entities != nil}
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {self._entities = nil}
 
   public var parseMarkdown: Bool {
-    get {return _parseMarkdown ?? false}
+    get {_parseMarkdown ?? false}
     set {_parseMarkdown = newValue}
   }
   /// Returns true if `parseMarkdown` has been explicitly set.
-  public var hasParseMarkdown: Bool {return self._parseMarkdown != nil}
+  public var hasParseMarkdown: Bool {self._parseMarkdown != nil}
   /// Clears the value of `parseMarkdown`. Subsequent reads from it will return its default value.
   public mutating func clearParseMarkdown() {self._parseMarkdown = nil}
 
@@ -7747,11 +7879,11 @@ public struct EditMessageInput: Sendable {
   /// - present + empty rows: clear actions
   /// - present + non-empty rows: replace actions
   public var actions: MessageActions {
-    get {return _actions ?? MessageActions()}
+    get {_actions ?? MessageActions()}
     set {_actions = newValue}
   }
   /// Returns true if `actions` has been explicitly set.
-  public var hasActions: Bool {return self._actions != nil}
+  public var hasActions: Bool {self._actions != nil}
   /// Clears the value of `actions`. Subsequent reads from it will return its default value.
   public mutating func clearActions() {self._actions = nil}
 
@@ -7765,7 +7897,7 @@ public struct EditMessageInput: Sendable {
   fileprivate var _actions: MessageActions? = nil
 }
 
-public struct EditMessageResult: Sendable {
+public nonisolated struct EditMessageResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7777,7 +7909,7 @@ public struct EditMessageResult: Sendable {
   public init() {}
 }
 
-public struct InputMedia: Sendable {
+public nonisolated struct InputMedia: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7826,7 +7958,7 @@ public struct InputMedia: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Media: Equatable, Sendable {
+  public nonisolated enum OneOf_Media: Equatable, Sendable {
     case photo(InputMediaPhoto)
     case video(InputMediaVideo)
     case document(InputMediaDocument)
@@ -7838,7 +7970,7 @@ public struct InputMedia: Sendable {
   public init() {}
 }
 
-public struct InputMediaPhoto: Sendable {
+public nonisolated struct InputMediaPhoto: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7851,7 +7983,7 @@ public struct InputMediaPhoto: Sendable {
   public init() {}
 }
 
-public struct InputMediaVideo: Sendable {
+public nonisolated struct InputMediaVideo: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7864,7 +7996,7 @@ public struct InputMediaVideo: Sendable {
   public init() {}
 }
 
-public struct InputMediaDocument: Sendable {
+public nonisolated struct InputMediaDocument: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7877,7 +8009,7 @@ public struct InputMediaDocument: Sendable {
   public init() {}
 }
 
-public struct InputMediaVoice: Sendable {
+public nonisolated struct InputMediaVoice: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7891,7 +8023,7 @@ public struct InputMediaVoice: Sendable {
 }
 
 /// Nudge message (empty payload)
-public struct InputMediaNudge: Sendable {
+public nonisolated struct InputMediaNudge: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7901,126 +8033,126 @@ public struct InputMediaNudge: Sendable {
   public init() {}
 }
 
-public struct SendMessageInput: Sendable {
+public nonisolated struct SendMessageInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// Message text or caption
   public var message: String {
-    get {return _message ?? String()}
+    get {_message ?? String()}
     set {_message = newValue}
   }
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return self._message != nil}
+  public var hasMessage: Bool {self._message != nil}
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
 
   /// Message ID of the message being replied to
   public var replyToMsgID: Int64 {
-    get {return _replyToMsgID ?? 0}
+    get {_replyToMsgID ?? 0}
     set {_replyToMsgID = newValue}
   }
   /// Returns true if `replyToMsgID` has been explicitly set.
-  public var hasReplyToMsgID: Bool {return self._replyToMsgID != nil}
+  public var hasReplyToMsgID: Bool {self._replyToMsgID != nil}
   /// Clears the value of `replyToMsgID`. Subsequent reads from it will return its default value.
   public mutating func clearReplyToMsgID() {self._replyToMsgID = nil}
 
   /// Random ID to prevent duplicate messages
   public var randomID: Int64 {
-    get {return _randomID ?? 0}
+    get {_randomID ?? 0}
     set {_randomID = newValue}
   }
   /// Returns true if `randomID` has been explicitly set.
-  public var hasRandomID: Bool {return self._randomID != nil}
+  public var hasRandomID: Bool {self._randomID != nil}
   /// Clears the value of `randomID`. Subsequent reads from it will return its default value.
   public mutating func clearRandomID() {self._randomID = nil}
 
   /// Media to send
   public var media: InputMedia {
-    get {return _media ?? InputMedia()}
+    get {_media ?? InputMedia()}
     set {_media = newValue}
   }
   /// Returns true if `media` has been explicitly set.
-  public var hasMedia: Bool {return self._media != nil}
+  public var hasMedia: Bool {self._media != nil}
   /// Clears the value of `media`. Subsequent reads from it will return its default value.
   public mutating func clearMedia() {self._media = nil}
 
   /// Date of sending (until we fix the client reordering)
   public var temporarySendDate: Int64 {
-    get {return _temporarySendDate ?? 0}
+    get {_temporarySendDate ?? 0}
     set {_temporarySendDate = newValue}
   }
   /// Returns true if `temporarySendDate` has been explicitly set.
-  public var hasTemporarySendDate: Bool {return self._temporarySendDate != nil}
+  public var hasTemporarySendDate: Bool {self._temporarySendDate != nil}
   /// Clears the value of `temporarySendDate`. Subsequent reads from it will return its default value.
   public mutating func clearTemporarySendDate() {self._temporarySendDate = nil}
 
   /// Whether the message is a sticker
   public var isSticker: Bool {
-    get {return _isSticker ?? false}
+    get {_isSticker ?? false}
     set {_isSticker = newValue}
   }
   /// Returns true if `isSticker` has been explicitly set.
-  public var hasIsSticker: Bool {return self._isSticker != nil}
+  public var hasIsSticker: Bool {self._isSticker != nil}
   /// Clears the value of `isSticker`. Subsequent reads from it will return its default value.
   public mutating func clearIsSticker() {self._isSticker = nil}
 
   public var hasLink_p: Bool {
-    get {return _hasLink_p ?? false}
+    get {_hasLink_p ?? false}
     set {_hasLink_p = newValue}
   }
   /// Returns true if `hasLink_p` has been explicitly set.
-  public var hasHasLink_p: Bool {return self._hasLink_p != nil}
+  public var hasHasLink_p: Bool {self._hasLink_p != nil}
   /// Clears the value of `hasLink_p`. Subsequent reads from it will return its default value.
   public mutating func clearHasLink_p() {self._hasLink_p = nil}
 
   /// Entities in the message (bold, italic, mention, etc)
   public var entities: MessageEntities {
-    get {return _entities ?? MessageEntities()}
+    get {_entities ?? MessageEntities()}
     set {_entities = newValue}
   }
   /// Returns true if `entities` has been explicitly set.
-  public var hasEntities: Bool {return self._entities != nil}
+  public var hasEntities: Bool {self._entities != nil}
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {self._entities = nil}
 
   /// Parse markdown in message text and derive entities.
   public var parseMarkdown: Bool {
-    get {return _parseMarkdown ?? false}
+    get {_parseMarkdown ?? false}
     set {_parseMarkdown = newValue}
   }
   /// Returns true if `parseMarkdown` has been explicitly set.
-  public var hasParseMarkdown: Bool {return self._parseMarkdown != nil}
+  public var hasParseMarkdown: Bool {self._parseMarkdown != nil}
   /// Clears the value of `parseMarkdown`. Subsequent reads from it will return its default value.
   public mutating func clearParseMarkdown() {self._parseMarkdown = nil}
 
   /// Special send mode for this message
   public var sendMode: MessageSendMode {
-    get {return _sendMode ?? .modeUnspecified}
+    get {_sendMode ?? .modeUnspecified}
     set {_sendMode = newValue}
   }
   /// Returns true if `sendMode` has been explicitly set.
-  public var hasSendMode: Bool {return self._sendMode != nil}
+  public var hasSendMode: Bool {self._sendMode != nil}
   /// Clears the value of `sendMode`. Subsequent reads from it will return its default value.
   public mutating func clearSendMode() {self._sendMode = nil}
 
   /// Optional interactive actions (bot messages only).
   public var actions: MessageActions {
-    get {return _actions ?? MessageActions()}
+    get {_actions ?? MessageActions()}
     set {_actions = newValue}
   }
   /// Returns true if `actions` has been explicitly set.
-  public var hasActions: Bool {return self._actions != nil}
+  public var hasActions: Bool {self._actions != nil}
   /// Clears the value of `actions`. Subsequent reads from it will return its default value.
   public mutating func clearActions() {self._actions = nil}
 
@@ -8042,7 +8174,7 @@ public struct SendMessageInput: Sendable {
   fileprivate var _actions: MessageActions? = nil
 }
 
-public struct SendMessageResult: Sendable {
+public nonisolated struct SendMessageResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8054,17 +8186,17 @@ public struct SendMessageResult: Sendable {
   public init() {}
 }
 
-public struct InvokeMessageActionInput: Sendable {
+public nonisolated struct InvokeMessageActionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -8079,7 +8211,7 @@ public struct InvokeMessageActionInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct InvokeMessageActionResult: Sendable {
+public nonisolated struct InvokeMessageActionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8092,7 +8224,7 @@ public struct InvokeMessageActionResult: Sendable {
   public init() {}
 }
 
-public struct AnswerMessageActionInput: Sendable {
+public nonisolated struct AnswerMessageActionInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8100,11 +8232,11 @@ public struct AnswerMessageActionInput: Sendable {
   public var interactionID: Int64 = 0
 
   public var ui: MessageActionResponseUi {
-    get {return _ui ?? MessageActionResponseUi()}
+    get {_ui ?? MessageActionResponseUi()}
     set {_ui = newValue}
   }
   /// Returns true if `ui` has been explicitly set.
-  public var hasUi: Bool {return self._ui != nil}
+  public var hasUi: Bool {self._ui != nil}
   /// Clears the value of `ui`. Subsequent reads from it will return its default value.
   public mutating func clearUi() {self._ui = nil}
 
@@ -8115,7 +8247,7 @@ public struct AnswerMessageActionInput: Sendable {
   fileprivate var _ui: MessageActionResponseUi? = nil
 }
 
-public struct AnswerMessageActionResult: Sendable {
+public nonisolated struct AnswerMessageActionResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8125,18 +8257,18 @@ public struct AnswerMessageActionResult: Sendable {
   public init() {}
 }
 
-public struct ForwardMessagesInput: Sendable {
+public nonisolated struct ForwardMessagesInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Source chat/user peer
   public var fromPeerID: InputPeer {
-    get {return _fromPeerID ?? InputPeer()}
+    get {_fromPeerID ?? InputPeer()}
     set {_fromPeerID = newValue}
   }
   /// Returns true if `fromPeerID` has been explicitly set.
-  public var hasFromPeerID: Bool {return self._fromPeerID != nil}
+  public var hasFromPeerID: Bool {self._fromPeerID != nil}
   /// Clears the value of `fromPeerID`. Subsequent reads from it will return its default value.
   public mutating func clearFromPeerID() {self._fromPeerID = nil}
 
@@ -8145,21 +8277,21 @@ public struct ForwardMessagesInput: Sendable {
 
   /// Destination chat/user peer
   public var toPeerID: InputPeer {
-    get {return _toPeerID ?? InputPeer()}
+    get {_toPeerID ?? InputPeer()}
     set {_toPeerID = newValue}
   }
   /// Returns true if `toPeerID` has been explicitly set.
-  public var hasToPeerID: Bool {return self._toPeerID != nil}
+  public var hasToPeerID: Bool {self._toPeerID != nil}
   /// Clears the value of `toPeerID`. Subsequent reads from it will return its default value.
   public mutating func clearToPeerID() {self._toPeerID = nil}
 
   /// Whether to include forward header (defaults to true on server)
   public var shareForwardHeader: Bool {
-    get {return _shareForwardHeader ?? false}
+    get {_shareForwardHeader ?? false}
     set {_shareForwardHeader = newValue}
   }
   /// Returns true if `shareForwardHeader` has been explicitly set.
-  public var hasShareForwardHeader: Bool {return self._shareForwardHeader != nil}
+  public var hasShareForwardHeader: Bool {self._shareForwardHeader != nil}
   /// Clears the value of `shareForwardHeader`. Subsequent reads from it will return its default value.
   public mutating func clearShareForwardHeader() {self._shareForwardHeader = nil}
 
@@ -8172,7 +8304,7 @@ public struct ForwardMessagesInput: Sendable {
   fileprivate var _shareForwardHeader: Bool? = nil
 }
 
-public struct ForwardMessagesResult: Sendable {
+public nonisolated struct ForwardMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8184,109 +8316,109 @@ public struct ForwardMessagesResult: Sendable {
   public init() {}
 }
 
-public struct GetChatHistoryInput: Sendable {
+public nonisolated struct GetChatHistoryInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// Legacy older-history cursor.
   /// When `mode` is not provided, this preserves old behavior and fetches messages with ID < offset_id.
   public var offsetID: Int64 {
-    get {return _offsetID ?? 0}
+    get {_offsetID ?? 0}
     set {_offsetID = newValue}
   }
   /// Returns true if `offsetID` has been explicitly set.
-  public var hasOffsetID: Bool {return self._offsetID != nil}
+  public var hasOffsetID: Bool {self._offsetID != nil}
   /// Clears the value of `offsetID`. Subsequent reads from it will return its default value.
   public mutating func clearOffsetID() {self._offsetID = nil}
 
   /// Number of messages to return.
   /// For `mode = HISTORY_MODE_AROUND`, this acts as a fallback split if before/after limits are not provided.
   public var limit: Int32 {
-    get {return _limit ?? 0}
+    get {_limit ?? 0}
     set {_limit = newValue}
   }
   /// Returns true if `limit` has been explicitly set.
-  public var hasLimit: Bool {return self._limit != nil}
+  public var hasLimit: Bool {self._limit != nil}
   /// Clears the value of `limit`. Subsequent reads from it will return its default value.
   public mutating func clearLimit() {self._limit = nil}
 
   /// Explicit fetch mode for history pagination/windowing.
   public var mode: GetChatHistoryMode {
-    get {return _mode ?? .historyModeUnspecified}
+    get {_mode ?? .historyModeUnspecified}
     set {_mode = newValue}
   }
   /// Returns true if `mode` has been explicitly set.
-  public var hasMode: Bool {return self._mode != nil}
+  public var hasMode: Bool {self._mode != nil}
   /// Clears the value of `mode`. Subsequent reads from it will return its default value.
   public mutating func clearMode() {self._mode = nil}
 
   /// Around mode anchor message ID.
   public var anchorID: Int64 {
-    get {return _anchorID ?? 0}
+    get {_anchorID ?? 0}
     set {_anchorID = newValue}
   }
   /// Returns true if `anchorID` has been explicitly set.
-  public var hasAnchorID: Bool {return self._anchorID != nil}
+  public var hasAnchorID: Bool {self._anchorID != nil}
   /// Clears the value of `anchorID`. Subsequent reads from it will return its default value.
   public mutating func clearAnchorID() {self._anchorID = nil}
 
   /// Older mode cursor (messages with ID < before_id).
   public var beforeID: Int64 {
-    get {return _beforeID ?? 0}
+    get {_beforeID ?? 0}
     set {_beforeID = newValue}
   }
   /// Returns true if `beforeID` has been explicitly set.
-  public var hasBeforeID: Bool {return self._beforeID != nil}
+  public var hasBeforeID: Bool {self._beforeID != nil}
   /// Clears the value of `beforeID`. Subsequent reads from it will return its default value.
   public mutating func clearBeforeID() {self._beforeID = nil}
 
   /// Newer mode cursor (messages with ID > after_id).
   public var afterID: Int64 {
-    get {return _afterID ?? 0}
+    get {_afterID ?? 0}
     set {_afterID = newValue}
   }
   /// Returns true if `afterID` has been explicitly set.
-  public var hasAfterID: Bool {return self._afterID != nil}
+  public var hasAfterID: Bool {self._afterID != nil}
   /// Clears the value of `afterID`. Subsequent reads from it will return its default value.
   public mutating func clearAfterID() {self._afterID = nil}
 
   /// Around mode count for messages older than anchor.
   public var beforeLimit: Int32 {
-    get {return _beforeLimit ?? 0}
+    get {_beforeLimit ?? 0}
     set {_beforeLimit = newValue}
   }
   /// Returns true if `beforeLimit` has been explicitly set.
-  public var hasBeforeLimit: Bool {return self._beforeLimit != nil}
+  public var hasBeforeLimit: Bool {self._beforeLimit != nil}
   /// Clears the value of `beforeLimit`. Subsequent reads from it will return its default value.
   public mutating func clearBeforeLimit() {self._beforeLimit = nil}
 
   /// Around mode count for messages newer than anchor.
   public var afterLimit: Int32 {
-    get {return _afterLimit ?? 0}
+    get {_afterLimit ?? 0}
     set {_afterLimit = newValue}
   }
   /// Returns true if `afterLimit` has been explicitly set.
-  public var hasAfterLimit: Bool {return self._afterLimit != nil}
+  public var hasAfterLimit: Bool {self._afterLimit != nil}
   /// Clears the value of `afterLimit`. Subsequent reads from it will return its default value.
   public mutating func clearAfterLimit() {self._afterLimit = nil}
 
   /// Around mode include anchor row in response.
   public var includeAnchor: Bool {
-    get {return _includeAnchor ?? false}
+    get {_includeAnchor ?? false}
     set {_includeAnchor = newValue}
   }
   /// Returns true if `includeAnchor` has been explicitly set.
-  public var hasIncludeAnchor: Bool {return self._includeAnchor != nil}
+  public var hasIncludeAnchor: Bool {self._includeAnchor != nil}
   /// Clears the value of `includeAnchor`. Subsequent reads from it will return its default value.
   public mutating func clearIncludeAnchor() {self._includeAnchor = nil}
 
@@ -8306,7 +8438,7 @@ public struct GetChatHistoryInput: Sendable {
   fileprivate var _includeAnchor: Bool? = nil
 }
 
-public struct GetChatHistoryResult: Sendable {
+public nonisolated struct GetChatHistoryResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8318,17 +8450,17 @@ public struct GetChatHistoryResult: Sendable {
   public init() {}
 }
 
-public struct GetMessagesInput: Sendable {
+public nonisolated struct GetMessagesInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -8342,7 +8474,7 @@ public struct GetMessagesInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct GetMessagesResult: Sendable {
+public nonisolated struct GetMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8354,17 +8486,17 @@ public struct GetMessagesResult: Sendable {
   public init() {}
 }
 
-public struct SearchMessagesInput: Sendable {
+public nonisolated struct SearchMessagesInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -8374,31 +8506,31 @@ public struct SearchMessagesInput: Sendable {
 
   /// Max number of results to return
   public var limit: Int32 {
-    get {return _limit ?? 0}
+    get {_limit ?? 0}
     set {_limit = newValue}
   }
   /// Returns true if `limit` has been explicitly set.
-  public var hasLimit: Bool {return self._limit != nil}
+  public var hasLimit: Bool {self._limit != nil}
   /// Clears the value of `limit`. Subsequent reads from it will return its default value.
   public mutating func clearLimit() {self._limit = nil}
 
   /// ID of the message to start from
   public var offsetID: Int64 {
-    get {return _offsetID ?? 0}
+    get {_offsetID ?? 0}
     set {_offsetID = newValue}
   }
   /// Returns true if `offsetID` has been explicitly set.
-  public var hasOffsetID: Bool {return self._offsetID != nil}
+  public var hasOffsetID: Bool {self._offsetID != nil}
   /// Clears the value of `offsetID`. Subsequent reads from it will return its default value.
   public mutating func clearOffsetID() {self._offsetID = nil}
 
   /// Optional filter for media/doc messages
   public var filter: SearchMessagesFilter {
-    get {return _filter ?? .filterUnspecified}
+    get {_filter ?? .filterUnspecified}
     set {_filter = newValue}
   }
   /// Returns true if `filter` has been explicitly set.
-  public var hasFilter: Bool {return self._filter != nil}
+  public var hasFilter: Bool {self._filter != nil}
   /// Clears the value of `filter`. Subsequent reads from it will return its default value.
   public mutating func clearFilter() {self._filter = nil}
 
@@ -8412,7 +8544,7 @@ public struct SearchMessagesInput: Sendable {
   fileprivate var _filter: SearchMessagesFilter? = nil
 }
 
-public struct SearchMessagesResult: Sendable {
+public nonisolated struct SearchMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8424,26 +8556,26 @@ public struct SearchMessagesResult: Sendable {
   public init() {}
 }
 
-public struct InputChatParticipant: Sendable {
+public nonisolated struct InputChatParticipant: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var userID: Int64 {
-    get {return _userID ?? 0}
+    get {_userID ?? 0}
     set {_userID = newValue}
   }
   /// Returns true if `userID` has been explicitly set.
-  public var hasUserID: Bool {return self._userID != nil}
+  public var hasUserID: Bool {self._userID != nil}
   /// Clears the value of `userID`. Subsequent reads from it will return its default value.
   public mutating func clearUserID() {self._userID = nil}
 
   public var groupID: Int64 {
-    get {return _groupID ?? 0}
+    get {_groupID ?? 0}
     set {_groupID = newValue}
   }
   /// Returns true if `groupID` has been explicitly set.
-  public var hasGroupID: Bool {return self._groupID != nil}
+  public var hasGroupID: Bool {self._groupID != nil}
   /// Clears the value of `groupID`. Subsequent reads from it will return its default value.
   public mutating func clearGroupID() {self._groupID = nil}
 
@@ -8455,7 +8587,7 @@ public struct InputChatParticipant: Sendable {
   fileprivate var _groupID: Int64? = nil
 }
 
-public struct ReserveChatIdsInput: Sendable {
+public nonisolated struct ReserveChatIdsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8467,7 +8599,7 @@ public struct ReserveChatIdsInput: Sendable {
   public init() {}
 }
 
-public struct ReservedChatId: Sendable {
+public nonisolated struct ReservedChatId: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8481,7 +8613,7 @@ public struct ReservedChatId: Sendable {
   public init() {}
 }
 
-public struct ReserveChatIdsResult: Sendable {
+public nonisolated struct ReserveChatIdsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8493,48 +8625,48 @@ public struct ReserveChatIdsResult: Sendable {
   public init() {}
 }
 
-public struct CreateChatInput: Sendable {
+public nonisolated struct CreateChatInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Optional explicit title. Omit or send empty to create an untitled thread.
   public var title: String {
-    get {return _title ?? String()}
+    get {_title ?? String()}
     set {_title = newValue}
   }
   /// Returns true if `title` has been explicitly set.
-  public var hasTitle: Bool {return self._title != nil}
+  public var hasTitle: Bool {self._title != nil}
   /// Clears the value of `title`. Subsequent reads from it will return its default value.
   public mutating func clearTitle() {self._title = nil}
 
   /// Parent space ID
   public var spaceID: Int64 {
-    get {return _spaceID ?? 0}
+    get {_spaceID ?? 0}
     set {_spaceID = newValue}
   }
   /// Returns true if `spaceID` has been explicitly set.
-  public var hasSpaceID: Bool {return self._spaceID != nil}
+  public var hasSpaceID: Bool {self._spaceID != nil}
   /// Clears the value of `spaceID`. Subsequent reads from it will return its default value.
   public mutating func clearSpaceID() {self._spaceID = nil}
 
   /// Optional description of the thread
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
   /// Emoji to show as the icon, can be null
   public var emoji: String {
-    get {return _emoji ?? String()}
+    get {_emoji ?? String()}
     set {_emoji = newValue}
   }
   /// Returns true if `emoji` has been explicitly set.
-  public var hasEmoji: Bool {return self._emoji != nil}
+  public var hasEmoji: Bool {self._emoji != nil}
   /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
   public mutating func clearEmoji() {self._emoji = nil}
 
@@ -8546,11 +8678,11 @@ public struct CreateChatInput: Sendable {
 
   /// Optional previously reserved chat id to claim during creation.
   public var reservedChatID: Int64 {
-    get {return _reservedChatID ?? 0}
+    get {_reservedChatID ?? 0}
     set {_reservedChatID = newValue}
   }
   /// Returns true if `reservedChatID` has been explicitly set.
-  public var hasReservedChatID: Bool {return self._reservedChatID != nil}
+  public var hasReservedChatID: Bool {self._reservedChatID != nil}
   /// Clears the value of `reservedChatID`. Subsequent reads from it will return its default value.
   public mutating func clearReservedChatID() {self._reservedChatID = nil}
 
@@ -8565,26 +8697,26 @@ public struct CreateChatInput: Sendable {
   fileprivate var _reservedChatID: Int64? = nil
 }
 
-public struct CreateChatResult: @unchecked Sendable {
+public nonisolated struct CreateChatResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
@@ -8595,7 +8727,7 @@ public struct CreateChatResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct CreateSubthreadInput: Sendable {
+public nonisolated struct CreateSubthreadInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8605,41 +8737,41 @@ public struct CreateSubthreadInput: Sendable {
 
   /// Optional parent message anchor. When set, this subthread is also a reply thread.
   public var parentMessageID: Int64 {
-    get {return _parentMessageID ?? 0}
+    get {_parentMessageID ?? 0}
     set {_parentMessageID = newValue}
   }
   /// Returns true if `parentMessageID` has been explicitly set.
-  public var hasParentMessageID: Bool {return self._parentMessageID != nil}
+  public var hasParentMessageID: Bool {self._parentMessageID != nil}
   /// Clears the value of `parentMessageID`. Subsequent reads from it will return its default value.
   public mutating func clearParentMessageID() {self._parentMessageID = nil}
 
   /// Optional explicit title. Defaults to a reply-derived title when omitted.
   public var title: String {
-    get {return _title ?? String()}
+    get {_title ?? String()}
     set {_title = newValue}
   }
   /// Returns true if `title` has been explicitly set.
-  public var hasTitle: Bool {return self._title != nil}
+  public var hasTitle: Bool {self._title != nil}
   /// Clears the value of `title`. Subsequent reads from it will return its default value.
   public mutating func clearTitle() {self._title = nil}
 
   /// Optional explicit description.
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
   /// Optional explicit emoji.
   public var emoji: String {
-    get {return _emoji ?? String()}
+    get {_emoji ?? String()}
     set {_emoji = newValue}
   }
   /// Returns true if `emoji` has been explicitly set.
-  public var hasEmoji: Bool {return self._emoji != nil}
+  public var hasEmoji: Bool {self._emoji != nil}
   /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
   public mutating func clearEmoji() {self._emoji = nil}
 
@@ -8656,35 +8788,35 @@ public struct CreateSubthreadInput: Sendable {
   fileprivate var _emoji: String? = nil
 }
 
-public struct CreateSubthreadResult: @unchecked Sendable {
+public nonisolated struct CreateSubthreadResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
   public var anchorMessage: Message {
-    get {return _storage._anchorMessage ?? Message()}
+    get {_storage._anchorMessage ?? Message()}
     set {_uniqueStorage()._anchorMessage = newValue}
   }
   /// Returns true if `anchorMessage` has been explicitly set.
-  public var hasAnchorMessage: Bool {return _storage._anchorMessage != nil}
+  public var hasAnchorMessage: Bool {_storage._anchorMessage != nil}
   /// Clears the value of `anchorMessage`. Subsequent reads from it will return its default value.
   public mutating func clearAnchorMessage() {_uniqueStorage()._anchorMessage = nil}
 
@@ -8695,7 +8827,7 @@ public struct CreateSubthreadResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct GetSpaceMembersInput: Sendable {
+public nonisolated struct GetSpaceMembersInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8707,7 +8839,7 @@ public struct GetSpaceMembersInput: Sendable {
   public init() {}
 }
 
-public struct GetSpaceMembersResult: Sendable {
+public nonisolated struct GetSpaceMembersResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8721,7 +8853,7 @@ public struct GetSpaceMembersResult: Sendable {
   public init() {}
 }
 
-public struct GetUserGroupsInput: Sendable {
+public nonisolated struct GetUserGroupsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8733,7 +8865,7 @@ public struct GetUserGroupsInput: Sendable {
   public init() {}
 }
 
-public struct GetUserGroupsResult: Sendable {
+public nonisolated struct GetUserGroupsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8747,7 +8879,7 @@ public struct GetUserGroupsResult: Sendable {
   public init() {}
 }
 
-public struct CreateUserGroupInput: Sendable {
+public nonisolated struct CreateUserGroupInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8757,11 +8889,11 @@ public struct CreateUserGroupInput: Sendable {
   public var name: String = String()
 
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
@@ -8774,17 +8906,17 @@ public struct CreateUserGroupInput: Sendable {
   fileprivate var _description_p: String? = nil
 }
 
-public struct CreateUserGroupResult: Sendable {
+public nonisolated struct CreateUserGroupResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var group: UserGroup {
-    get {return _group ?? UserGroup()}
+    get {_group ?? UserGroup()}
     set {_group = newValue}
   }
   /// Returns true if `group` has been explicitly set.
-  public var hasGroup: Bool {return self._group != nil}
+  public var hasGroup: Bool {self._group != nil}
   /// Clears the value of `group`. Subsequent reads from it will return its default value.
   public mutating func clearGroup() {self._group = nil}
 
@@ -8795,7 +8927,7 @@ public struct CreateUserGroupResult: Sendable {
   fileprivate var _group: UserGroup? = nil
 }
 
-public struct UpdateUserGroupInput: Sendable {
+public nonisolated struct UpdateUserGroupInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8805,11 +8937,11 @@ public struct UpdateUserGroupInput: Sendable {
   public var name: String = String()
 
   public var description_p: String {
-    get {return _description_p ?? String()}
+    get {_description_p ?? String()}
     set {_description_p = newValue}
   }
   /// Returns true if `description_p` has been explicitly set.
-  public var hasDescription_p: Bool {return self._description_p != nil}
+  public var hasDescription_p: Bool {self._description_p != nil}
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
@@ -8822,17 +8954,17 @@ public struct UpdateUserGroupInput: Sendable {
   fileprivate var _description_p: String? = nil
 }
 
-public struct UpdateUserGroupResult: Sendable {
+public nonisolated struct UpdateUserGroupResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var group: UserGroup {
-    get {return _group ?? UserGroup()}
+    get {_group ?? UserGroup()}
     set {_group = newValue}
   }
   /// Returns true if `group` has been explicitly set.
-  public var hasGroup: Bool {return self._group != nil}
+  public var hasGroup: Bool {self._group != nil}
   /// Clears the value of `group`. Subsequent reads from it will return its default value.
   public mutating func clearGroup() {self._group = nil}
 
@@ -8843,7 +8975,7 @@ public struct UpdateUserGroupResult: Sendable {
   fileprivate var _group: UserGroup? = nil
 }
 
-public struct DeleteUserGroupInput: Sendable {
+public nonisolated struct DeleteUserGroupInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8855,7 +8987,7 @@ public struct DeleteUserGroupInput: Sendable {
   public init() {}
 }
 
-public struct DeleteUserGroupResult: Sendable {
+public nonisolated struct DeleteUserGroupResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -8867,26 +8999,26 @@ public struct DeleteUserGroupResult: Sendable {
 
 //// ------------------------------
 /// Updates Subsystem
-public struct Update: @unchecked Sendable {
+public nonisolated struct Update: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var seq: Int32 {
-    get {return _storage._seq ?? 0}
+    get {_storage._seq ?? 0}
     set {_uniqueStorage()._seq = newValue}
   }
   /// Returns true if `seq` has been explicitly set.
-  public var hasSeq: Bool {return _storage._seq != nil}
+  public var hasSeq: Bool {_storage._seq != nil}
   /// Clears the value of `seq`. Subsequent reads from it will return its default value.
   public mutating func clearSeq() {_uniqueStorage()._seq = nil}
 
   public var date: Int64 {
-    get {return _storage._date ?? 0}
+    get {_storage._date ?? 0}
     set {_uniqueStorage()._date = newValue}
   }
   /// Returns true if `date` has been explicitly set.
-  public var hasDate: Bool {return _storage._date != nil}
+  public var hasDate: Bool {_storage._date != nil}
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
   public mutating func clearDate() {_uniqueStorage()._date = nil}
 
@@ -9217,9 +9349,17 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .participantGroupDelete(newValue)}
   }
 
+  public var spaceSettings: UpdateSpaceSettings {
+    get {
+      if case .spaceSettings(let v)? = _storage._update {return v}
+      return UpdateSpaceSettings()
+    }
+    set {_uniqueStorage()._update = .spaceSettings(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Update: Equatable, Sendable {
+  public nonisolated enum OneOf_Update: Equatable, Sendable {
     /// this
     case newMessage(UpdateNewMessage)
     /// this
@@ -9269,6 +9409,7 @@ public struct Update: @unchecked Sendable {
     case updatedUser(UpdateUpdatedUser)
     case participantGroupAdd(UpdateChatParticipantGroupAdd)
     case participantGroupDelete(UpdateChatParticipantGroupDelete)
+    case spaceSettings(UpdateSpaceSettings)
 
   }
 
@@ -9277,7 +9418,7 @@ public struct Update: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct UpdateSpaceHasNewUpdates: Sendable {
+public nonisolated struct UpdateSpaceHasNewUpdates: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9294,7 +9435,7 @@ public struct UpdateSpaceHasNewUpdates: Sendable {
 }
 
 /// Update when a chat has new updates and client should fetch them
-public struct UpdateChatHasNewUpdates: Sendable {
+public nonisolated struct UpdateChatHasNewUpdates: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9304,11 +9445,11 @@ public struct UpdateChatHasNewUpdates: Sendable {
 
   /// Peer ID of the chat
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -9322,7 +9463,7 @@ public struct UpdateChatHasNewUpdates: Sendable {
   fileprivate var _peerID: Peer? = nil
 }
 
-public struct UpdateChatSkipPts: Sendable {
+public nonisolated struct UpdateChatSkipPts: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9335,7 +9476,7 @@ public struct UpdateChatSkipPts: Sendable {
 }
 
 /// Update when chat visibility changes (public/private)
-public struct UpdateChatVisibility: Sendable {
+public nonisolated struct UpdateChatVisibility: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9350,7 +9491,7 @@ public struct UpdateChatVisibility: Sendable {
 }
 
 /// Update when chat title or emoji changes
-public struct UpdateChatInfo: Sendable {
+public nonisolated struct UpdateChatInfo: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9358,29 +9499,29 @@ public struct UpdateChatInfo: Sendable {
   public var chatID: Int64 = 0
 
   public var title: String {
-    get {return _title ?? String()}
+    get {_title ?? String()}
     set {_title = newValue}
   }
   /// Returns true if `title` has been explicitly set.
-  public var hasTitle: Bool {return self._title != nil}
+  public var hasTitle: Bool {self._title != nil}
   /// Clears the value of `title`. Subsequent reads from it will return its default value.
   public mutating func clearTitle() {self._title = nil}
 
   public var emoji: String {
-    get {return _emoji ?? String()}
+    get {_emoji ?? String()}
     set {_emoji = newValue}
   }
   /// Returns true if `emoji` has been explicitly set.
-  public var hasEmoji: Bool {return self._emoji != nil}
+  public var hasEmoji: Bool {self._emoji != nil}
   /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
   public mutating func clearEmoji() {self._emoji = nil}
 
   public var untitled: Bool {
-    get {return _untitled ?? false}
+    get {_untitled ?? false}
     set {_untitled = newValue}
   }
   /// Returns true if `untitled` has been explicitly set.
-  public var hasUntitled: Bool {return self._untitled != nil}
+  public var hasUntitled: Bool {self._untitled != nil}
   /// Clears the value of `untitled`. Subsequent reads from it will return its default value.
   public mutating func clearUntitled() {self._untitled = nil}
 
@@ -9394,18 +9535,18 @@ public struct UpdateChatInfo: Sendable {
 }
 
 /// Update when pinned messages change for a chat
-public struct UpdatePinnedMessages: Sendable {
+public nonisolated struct UpdatePinnedMessages: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID of the chat
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -9426,37 +9567,37 @@ public struct UpdatePinnedMessages: Sendable {
 /// - moving across spaces
 /// - moving public threads out of a space (would likely convert members to participants)
 /// - allowing external participants in space threads
-public struct UpdateChatMoved: Sendable {
+public nonisolated struct UpdateChatMoved: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Updated chat record (includes new space_id if moved into a space).
   public var chat: Chat {
-    get {return _chat ?? Chat()}
+    get {_chat ?? Chat()}
     set {_chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return self._chat != nil}
+  public var hasChat: Bool {self._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {self._chat = nil}
 
   /// Optional old/new space IDs for convenience. new_space_id is unset when moved to home.
   public var oldSpaceID: Int64 {
-    get {return _oldSpaceID ?? 0}
+    get {_oldSpaceID ?? 0}
     set {_oldSpaceID = newValue}
   }
   /// Returns true if `oldSpaceID` has been explicitly set.
-  public var hasOldSpaceID: Bool {return self._oldSpaceID != nil}
+  public var hasOldSpaceID: Bool {self._oldSpaceID != nil}
   /// Clears the value of `oldSpaceID`. Subsequent reads from it will return its default value.
   public mutating func clearOldSpaceID() {self._oldSpaceID = nil}
 
   public var newSpaceID: Int64 {
-    get {return _newSpaceID ?? 0}
+    get {_newSpaceID ?? 0}
     set {_newSpaceID = newValue}
   }
   /// Returns true if `newSpaceID` has been explicitly set.
-  public var hasNewSpaceID: Bool {return self._newSpaceID != nil}
+  public var hasNewSpaceID: Bool {self._newSpaceID != nil}
   /// Clears the value of `newSpaceID`. Subsequent reads from it will return its default value.
   public mutating func clearNewSpaceID() {self._newSpaceID = nil}
 
@@ -9469,18 +9610,18 @@ public struct UpdateChatMoved: Sendable {
   fileprivate var _newSpaceID: Int64? = nil
 }
 
-public struct UpdateNewMessageNotification: Sendable {
+public nonisolated struct UpdateNewMessageNotification: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Message that triggered the notification
   public var message: Message {
-    get {return _message ?? Message()}
+    get {_message ?? Message()}
     set {_message = newValue}
   }
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return self._message != nil}
+  public var hasMessage: Bool {self._message != nil}
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
 
@@ -9489,7 +9630,7 @@ public struct UpdateNewMessageNotification: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Reason: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Reason: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unspecified // = 0
     case mention // = 1
@@ -9532,17 +9673,17 @@ public struct UpdateNewMessageNotification: Sendable {
   fileprivate var _message: Message? = nil
 }
 
-public struct UpdateUserSettings: Sendable {
+public nonisolated struct UpdateUserSettings: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var settings: UserSettings {
-    get {return _settings ?? UserSettings()}
+    get {_settings ?? UserSettings()}
     set {_settings = newValue}
   }
   /// Returns true if `settings` has been explicitly set.
-  public var hasSettings: Bool {return self._settings != nil}
+  public var hasSettings: Bool {self._settings != nil}
   /// Clears the value of `settings`. Subsequent reads from it will return its default value.
   public mutating func clearSettings() {self._settings = nil}
 
@@ -9553,18 +9694,41 @@ public struct UpdateUserSettings: Sendable {
   fileprivate var _settings: UserSettings? = nil
 }
 
+public nonisolated struct UpdateSpaceSettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var settings: SpaceSettings {
+    get {_settings ?? SpaceSettings()}
+    set {_settings = newValue}
+  }
+  /// Returns true if `settings` has been explicitly set.
+  public var hasSettings: Bool {self._settings != nil}
+  /// Clears the value of `settings`. Subsequent reads from it will return its default value.
+  public mutating func clearSettings() {self._settings = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _settings: SpaceSettings? = nil
+}
+
 /// Update when a user's profile/account fields change.
-public struct UpdateUpdatedUser: Sendable {
+public nonisolated struct UpdateUpdatedUser: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var user: User {
-    get {return _user ?? User()}
+    get {_user ?? User()}
     set {_user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return self._user != nil}
+  public var hasUser: Bool {self._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {self._user = nil}
 
@@ -9576,26 +9740,26 @@ public struct UpdateUpdatedUser: Sendable {
 }
 
 /// Update when a new space member is added
-public struct UpdateSpaceMemberAdd: Sendable {
+public nonisolated struct UpdateSpaceMemberAdd: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var member: Member {
-    get {return _member ?? Member()}
+    get {_member ?? Member()}
     set {_member = newValue}
   }
   /// Returns true if `member` has been explicitly set.
-  public var hasMember: Bool {return self._member != nil}
+  public var hasMember: Bool {self._member != nil}
   /// Clears the value of `member`. Subsequent reads from it will return its default value.
   public mutating func clearMember() {self._member = nil}
 
   public var user: User {
-    get {return _user ?? User()}
+    get {_user ?? User()}
     set {_user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return self._user != nil}
+  public var hasUser: Bool {self._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {self._user = nil}
 
@@ -9608,7 +9772,7 @@ public struct UpdateSpaceMemberAdd: Sendable {
 }
 
 /// Update when a space member is removed
-public struct UpdateSpaceMemberDelete: Sendable {
+public nonisolated struct UpdateSpaceMemberDelete: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9625,17 +9789,17 @@ public struct UpdateSpaceMemberDelete: Sendable {
 }
 
 /// Update when a space member's access/role changes
-public struct UpdateSpaceMemberUpdate: Sendable {
+public nonisolated struct UpdateSpaceMemberUpdate: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var member: Member {
-    get {return _member ?? Member()}
+    get {_member ?? Member()}
     set {_member = newValue}
   }
   /// Returns true if `member` has been explicitly set.
-  public var hasMember: Bool {return self._member != nil}
+  public var hasMember: Bool {self._member != nil}
   /// Clears the value of `member`. Subsequent reads from it will return its default value.
   public mutating func clearMember() {self._member = nil}
 
@@ -9647,26 +9811,26 @@ public struct UpdateSpaceMemberUpdate: Sendable {
 }
 
 /// Update when we joined a space
-public struct UpdateJoinSpace: Sendable {
+public nonisolated struct UpdateJoinSpace: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var space: Space {
-    get {return _space ?? Space()}
+    get {_space ?? Space()}
     set {_space = newValue}
   }
   /// Returns true if `space` has been explicitly set.
-  public var hasSpace: Bool {return self._space != nil}
+  public var hasSpace: Bool {self._space != nil}
   /// Clears the value of `space`. Subsequent reads from it will return its default value.
   public mutating func clearSpace() {self._space = nil}
 
   public var member: Member {
-    get {return _member ?? Member()}
+    get {_member ?? Member()}
     set {_member = newValue}
   }
   /// Returns true if `member` has been explicitly set.
-  public var hasMember: Bool {return self._member != nil}
+  public var hasMember: Bool {self._member != nil}
   /// Clears the value of `member`. Subsequent reads from it will return its default value.
   public mutating func clearMember() {self._member = nil}
 
@@ -9679,18 +9843,18 @@ public struct UpdateJoinSpace: Sendable {
 }
 
 /// Update when we read up to a certain message ID
-public struct UpdateReadMaxId: Sendable {
+public nonisolated struct UpdateReadMaxId: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -9708,18 +9872,18 @@ public struct UpdateReadMaxId: Sendable {
 }
 
 /// Update when a dialog is marked as unread
-public struct UpdateMarkAsUnread: Sendable {
+public nonisolated struct UpdateMarkAsUnread: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID of the dialog that was marked as unread
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -9734,18 +9898,18 @@ public struct UpdateMarkAsUnread: Sendable {
 }
 
 /// Update when a dialog is archived or unarchived
-public struct UpdateDialogArchived: Sendable {
+public nonisolated struct UpdateDialogArchived: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID of the dialog that changed
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -9760,28 +9924,28 @@ public struct UpdateDialogArchived: Sendable {
 }
 
 /// Update when per-chat notification settings change
-public struct UpdateDialogNotificationSettings: Sendable {
+public nonisolated struct UpdateDialogNotificationSettings: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID of the dialog that changed
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// If unset, chat follows global notification settings
   public var notificationSettings: DialogNotificationSettings {
-    get {return _notificationSettings ?? DialogNotificationSettings()}
+    get {_notificationSettings ?? DialogNotificationSettings()}
     set {_notificationSettings = newValue}
   }
   /// Returns true if `notificationSettings` has been explicitly set.
-  public var hasNotificationSettings: Bool {return self._notificationSettings != nil}
+  public var hasNotificationSettings: Bool {self._notificationSettings != nil}
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
@@ -9794,28 +9958,28 @@ public struct UpdateDialogNotificationSettings: Sendable {
 }
 
 /// Update when reply-thread follow mode changes.
-public struct UpdateDialogFollowMode: Sendable {
+public nonisolated struct UpdateDialogFollowMode: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID of the dialog that changed.
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   /// If unset, the reply thread uses default relevance mode.
   public var followMode: DialogFollowMode {
-    get {return _followMode ?? .unspecified}
+    get {_followMode ?? .unspecified}
     set {_followMode = newValue}
   }
   /// Returns true if `followMode` has been explicitly set.
-  public var hasFollowMode: Bool {return self._followMode != nil}
+  public var hasFollowMode: Bool {self._followMode != nil}
   /// Clears the value of `followMode`. Subsequent reads from it will return its default value.
   public mutating func clearFollowMode() {self._followMode = nil}
 
@@ -9828,28 +9992,28 @@ public struct UpdateDialogFollowMode: Sendable {
 }
 
 /// Update when a new chat is created either in space or a private chat
-public struct UpdateNewChat: Sendable {
+public nonisolated struct UpdateNewChat: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Chat
   public var chat: Chat {
-    get {return _chat ?? Chat()}
+    get {_chat ?? Chat()}
     set {_chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return self._chat != nil}
+  public var hasChat: Bool {self._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {self._chat = nil}
 
   /// If private chat
   public var user: User {
-    get {return _user ?? User()}
+    get {_user ?? User()}
     set {_user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return self._user != nil}
+  public var hasUser: Bool {self._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {self._user = nil}
 
@@ -9862,35 +10026,35 @@ public struct UpdateNewChat: Sendable {
 }
 
 /// Update when a chat becomes chat-list-visible for a specific user.
-public struct UpdateChatOpen: @unchecked Sendable {
+public nonisolated struct UpdateChatOpen: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
   public var user: User {
-    get {return _storage._user ?? User()}
+    get {_storage._user ?? User()}
     set {_uniqueStorage()._user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return _storage._user != nil}
+  public var hasUser: Bool {_storage._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {_uniqueStorage()._user = nil}
 
@@ -9901,7 +10065,7 @@ public struct UpdateChatOpen: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct UpdateMessageActionInvoked: @unchecked Sendable {
+public nonisolated struct UpdateMessageActionInvoked: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9923,7 +10087,7 @@ public struct UpdateMessageActionInvoked: @unchecked Sendable {
   public init() {}
 }
 
-public struct UpdateMessageActionAnswered: Sendable {
+public nonisolated struct UpdateMessageActionAnswered: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -9931,11 +10095,11 @@ public struct UpdateMessageActionAnswered: Sendable {
   public var interactionID: Int64 = 0
 
   public var ui: MessageActionResponseUi {
-    get {return _ui ?? MessageActionResponseUi()}
+    get {_ui ?? MessageActionResponseUi()}
     set {_ui = newValue}
   }
   /// Returns true if `ui` has been explicitly set.
-  public var hasUi: Bool {return self._ui != nil}
+  public var hasUi: Bool {self._ui != nil}
   /// Clears the value of `ui`. Subsequent reads from it will return its default value.
   public mutating func clearUi() {self._ui = nil}
 
@@ -9947,18 +10111,18 @@ public struct UpdateMessageActionAnswered: Sendable {
 }
 
 /// Update when a chat is deleted
-public struct UpdateDeleteChat: Sendable {
+public nonisolated struct UpdateDeleteChat: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Peer ID
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -9970,17 +10134,17 @@ public struct UpdateDeleteChat: Sendable {
 }
 
 /// Update when a new message is created
-public struct UpdateNewMessage: Sendable {
+public nonisolated struct UpdateNewMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var message: Message {
-    get {return _message ?? Message()}
+    get {_message ?? Message()}
     set {_message = newValue}
   }
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return self._message != nil}
+  public var hasMessage: Bool {self._message != nil}
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
 
@@ -9992,17 +10156,17 @@ public struct UpdateNewMessage: Sendable {
 }
 
 /// Update when a message is edited
-public struct UpdateEditMessage: Sendable {
+public nonisolated struct UpdateEditMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var message: Message {
-    get {return _message ?? Message()}
+    get {_message ?? Message()}
     set {_message = newValue}
   }
   /// Returns true if `message` has been explicitly set.
-  public var hasMessage: Bool {return self._message != nil}
+  public var hasMessage: Bool {self._message != nil}
   /// Clears the value of `message`. Subsequent reads from it will return its default value.
   public mutating func clearMessage() {self._message = nil}
 
@@ -10014,7 +10178,7 @@ public struct UpdateEditMessage: Sendable {
 }
 
 /// Update when messages are deleted
-public struct UpdateDeleteMessages: Sendable {
+public nonisolated struct UpdateDeleteMessages: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10024,11 +10188,11 @@ public struct UpdateDeleteMessages: Sendable {
 
   /// Peer ID
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -10039,7 +10203,7 @@ public struct UpdateDeleteMessages: Sendable {
   fileprivate var _peerID: Peer? = nil
 }
 
-public struct UpdateClearChatHistory: Sendable {
+public nonisolated struct UpdateClearChatHistory: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10066,11 +10230,11 @@ public struct UpdateClearChatHistory: Sendable {
   /// If unset, all local messages for the chat should be removed.
   /// If set, remove messages with date older than this Unix timestamp.
   public var beforeDate: Int64 {
-    get {return _beforeDate ?? 0}
+    get {_beforeDate ?? 0}
     set {_beforeDate = newValue}
   }
   /// Returns true if `beforeDate` has been explicitly set.
-  public var hasBeforeDate: Bool {return self._beforeDate != nil}
+  public var hasBeforeDate: Bool {self._beforeDate != nil}
   /// Clears the value of `beforeDate`. Subsequent reads from it will return its default value.
   public mutating func clearBeforeDate() {self._beforeDate = nil}
 
@@ -10089,7 +10253,7 @@ public struct UpdateClearChatHistory: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Exactly one target is set: a single chat/DM peer, or every chat/thread in a space.
-  public enum OneOf_Target: Equatable, Sendable {
+  public nonisolated enum OneOf_Target: Equatable, Sendable {
     case peerID(Peer)
     case spaceID(Int64)
 
@@ -10100,7 +10264,7 @@ public struct UpdateClearChatHistory: Sendable {
   fileprivate var _beforeDate: Int64? = nil
 }
 
-public struct UpdateBotPresence: Sendable {
+public nonisolated struct UpdateBotPresence: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10108,29 +10272,29 @@ public struct UpdateBotPresence: Sendable {
   public var botUserID: Int64 = 0
 
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
   public var state: BotPresenceState {
-    get {return _state ?? BotPresenceState()}
+    get {_state ?? BotPresenceState()}
     set {_state = newValue}
   }
   /// Returns true if `state` has been explicitly set.
-  public var hasState: Bool {return self._state != nil}
+  public var hasState: Bool {self._state != nil}
   /// Clears the value of `state`. Subsequent reads from it will return its default value.
   public mutating func clearState() {self._state = nil}
 
   public var avatar: BotAvatar {
-    get {return _avatar ?? BotAvatar()}
+    get {_avatar ?? BotAvatar()}
     set {_avatar = newValue}
   }
   /// Returns true if `avatar` has been explicitly set.
-  public var hasAvatar: Bool {return self._avatar != nil}
+  public var hasAvatar: Bool {self._avatar != nil}
   /// Clears the value of `avatar`. Subsequent reads from it will return its default value.
   public mutating func clearAvatar() {self._avatar = nil}
 
@@ -10146,7 +10310,7 @@ public struct UpdateBotPresence: Sendable {
 }
 
 /// Update when a message ID is updated after sending
-public struct UpdateMessageId: Sendable {
+public nonisolated struct UpdateMessageId: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10162,7 +10326,7 @@ public struct UpdateMessageId: Sendable {
 
 /// Update when a user starts or stops composing a message for typing, uploading
 /// a photo, etc
-public struct UpdateComposeAction: Sendable {
+public nonisolated struct UpdateComposeAction: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10172,11 +10336,11 @@ public struct UpdateComposeAction: Sendable {
 
   /// Peer ID of the peer user is composing the message to
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -10185,7 +10349,7 @@ public struct UpdateComposeAction: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum ComposeAction: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum ComposeAction: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case none // = 0
     case typing // = 1
@@ -10240,28 +10404,28 @@ public struct UpdateComposeAction: Sendable {
   fileprivate var _peerID: Peer? = nil
 }
 
-public struct UpdateMessageAttachment: Sendable {
+public nonisolated struct UpdateMessageAttachment: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var attachment: MessageAttachment {
-    get {return _attachment ?? MessageAttachment()}
+    get {_attachment ?? MessageAttachment()}
     set {_attachment = newValue}
   }
   /// Returns true if `attachment` has been explicitly set.
-  public var hasAttachment: Bool {return self._attachment != nil}
+  public var hasAttachment: Bool {self._attachment != nil}
   /// Clears the value of `attachment`. Subsequent reads from it will return its default value.
   public mutating func clearAttachment() {self._attachment = nil}
 
   public var messageID: Int64 = 0
 
   public var peerID: Peer {
-    get {return _peerID ?? Peer()}
+    get {_peerID ?? Peer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -10275,17 +10439,17 @@ public struct UpdateMessageAttachment: Sendable {
   fileprivate var _peerID: Peer? = nil
 }
 
-public struct UpdateReaction: Sendable {
+public nonisolated struct UpdateReaction: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var reaction: Reaction {
-    get {return _reaction ?? Reaction()}
+    get {_reaction ?? Reaction()}
     set {_reaction = newValue}
   }
   /// Returns true if `reaction` has been explicitly set.
-  public var hasReaction: Bool {return self._reaction != nil}
+  public var hasReaction: Bool {self._reaction != nil}
   /// Clears the value of `reaction`. Subsequent reads from it will return its default value.
   public mutating func clearReaction() {self._reaction = nil}
 
@@ -10296,7 +10460,7 @@ public struct UpdateReaction: Sendable {
   fileprivate var _reaction: Reaction? = nil
 }
 
-public struct UpdateDeleteReaction: Sendable {
+public nonisolated struct UpdateDeleteReaction: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10314,7 +10478,7 @@ public struct UpdateDeleteReaction: Sendable {
   public init() {}
 }
 
-public struct UpdateUserStatus: Sendable {
+public nonisolated struct UpdateUserStatus: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10322,11 +10486,11 @@ public struct UpdateUserStatus: Sendable {
   public var userID: Int64 = 0
 
   public var status: UserStatus {
-    get {return _status ?? UserStatus()}
+    get {_status ?? UserStatus()}
     set {_status = newValue}
   }
   /// Returns true if `status` has been explicitly set.
-  public var hasStatus: Bool {return self._status != nil}
+  public var hasStatus: Bool {self._status != nil}
   /// Clears the value of `status`. Subsequent reads from it will return its default value.
   public mutating func clearStatus() {self._status = nil}
 
@@ -10337,7 +10501,7 @@ public struct UpdateUserStatus: Sendable {
   fileprivate var _status: UserStatus? = nil
 }
 
-public struct ChatParticipant: Sendable {
+public nonisolated struct ChatParticipant: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10351,7 +10515,7 @@ public struct ChatParticipant: Sendable {
   public init() {}
 }
 
-public struct ChatParticipantGroup: Sendable {
+public nonisolated struct ChatParticipantGroup: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10365,7 +10529,7 @@ public struct ChatParticipantGroup: Sendable {
   public init() {}
 }
 
-public struct UpdateChatParticipantAdd: Sendable {
+public nonisolated struct UpdateChatParticipantAdd: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10373,11 +10537,11 @@ public struct UpdateChatParticipantAdd: Sendable {
   public var chatID: Int64 = 0
 
   public var participant: ChatParticipant {
-    get {return _participant ?? ChatParticipant()}
+    get {_participant ?? ChatParticipant()}
     set {_participant = newValue}
   }
   /// Returns true if `participant` has been explicitly set.
-  public var hasParticipant: Bool {return self._participant != nil}
+  public var hasParticipant: Bool {self._participant != nil}
   /// Clears the value of `participant`. Subsequent reads from it will return its default value.
   public mutating func clearParticipant() {self._participant = nil}
 
@@ -10388,7 +10552,7 @@ public struct UpdateChatParticipantAdd: Sendable {
   fileprivate var _participant: ChatParticipant? = nil
 }
 
-public struct UpdateChatParticipantDelete: Sendable {
+public nonisolated struct UpdateChatParticipantDelete: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10402,7 +10566,7 @@ public struct UpdateChatParticipantDelete: Sendable {
   public init() {}
 }
 
-public struct UpdateChatParticipantGroupAdd: Sendable {
+public nonisolated struct UpdateChatParticipantGroupAdd: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10410,11 +10574,11 @@ public struct UpdateChatParticipantGroupAdd: Sendable {
   public var chatID: Int64 = 0
 
   public var groupParticipant: ChatParticipantGroup {
-    get {return _groupParticipant ?? ChatParticipantGroup()}
+    get {_groupParticipant ?? ChatParticipantGroup()}
     set {_groupParticipant = newValue}
   }
   /// Returns true if `groupParticipant` has been explicitly set.
-  public var hasGroupParticipant: Bool {return self._groupParticipant != nil}
+  public var hasGroupParticipant: Bool {self._groupParticipant != nil}
   /// Clears the value of `groupParticipant`. Subsequent reads from it will return its default value.
   public mutating func clearGroupParticipant() {self._groupParticipant = nil}
 
@@ -10425,7 +10589,7 @@ public struct UpdateChatParticipantGroupAdd: Sendable {
   fileprivate var _groupParticipant: ChatParticipantGroup? = nil
 }
 
-public struct UpdateChatParticipantGroupDelete: Sendable {
+public nonisolated struct UpdateChatParticipantGroupDelete: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10439,7 +10603,7 @@ public struct UpdateChatParticipantGroupDelete: Sendable {
   public init() {}
 }
 
-public struct UserStatus: Sendable {
+public nonisolated struct UserStatus: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10447,17 +10611,17 @@ public struct UserStatus: Sendable {
   public var online: UserStatus.Status = .unknown
 
   public var lastOnline: LastOnline {
-    get {return _lastOnline ?? LastOnline()}
+    get {_lastOnline ?? LastOnline()}
     set {_lastOnline = newValue}
   }
   /// Returns true if `lastOnline` has been explicitly set.
-  public var hasLastOnline: Bool {return self._lastOnline != nil}
+  public var hasLastOnline: Bool {self._lastOnline != nil}
   /// Clears the value of `lastOnline`. Subsequent reads from it will return its default value.
   public mutating func clearLastOnline() {self._lastOnline = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum Status: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public nonisolated enum Status: SwiftProtobuf.Enum, Swift.CaseIterable {
     public typealias RawValue = Int
     case unknown // = 0
     case online // = 1
@@ -10500,18 +10664,18 @@ public struct UserStatus: Sendable {
   fileprivate var _lastOnline: LastOnline? = nil
 }
 
-public struct LastOnline: Sendable {
+public nonisolated struct LastOnline: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   /// Date of the last online if exact last online is permitted by the user
   public var date: Int64 {
-    get {return _date ?? 0}
+    get {_date ?? 0}
     set {_date = newValue}
   }
   /// Returns true if `date` has been explicitly set.
-  public var hasDate: Bool {return self._date != nil}
+  public var hasDate: Bool {self._date != nil}
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
   public mutating func clearDate() {self._date = nil}
 
@@ -10522,17 +10686,17 @@ public struct LastOnline: Sendable {
   fileprivate var _date: Int64? = nil
 }
 
-public struct DeleteChatInput: Sendable {
+public nonisolated struct DeleteChatInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -10543,7 +10707,7 @@ public struct DeleteChatInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct DeleteChatResult: Sendable {
+public nonisolated struct DeleteChatResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10553,7 +10717,7 @@ public struct DeleteChatResult: Sendable {
   public init() {}
 }
 
-public struct SpaceMemberOptions: Sendable {
+public nonisolated struct SpaceMemberOptions: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10565,7 +10729,7 @@ public struct SpaceMemberOptions: Sendable {
   public init() {}
 }
 
-public struct SpaceAdminOptions: Sendable {
+public nonisolated struct SpaceAdminOptions: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10575,7 +10739,7 @@ public struct SpaceAdminOptions: Sendable {
   public init() {}
 }
 
-public struct SpaceMemberRole: Sendable {
+public nonisolated struct SpaceMemberRole: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10600,7 +10764,7 @@ public struct SpaceMemberRole: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Role: Equatable, Sendable {
+  public nonisolated enum OneOf_Role: Equatable, Sendable {
     case member(SpaceMemberOptions)
     case admin(SpaceAdminOptions)
 
@@ -10609,7 +10773,7 @@ public struct SpaceMemberRole: Sendable {
   public init() {}
 }
 
-public struct InviteToSpaceInput: Sendable {
+public nonisolated struct InviteToSpaceInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10618,11 +10782,11 @@ public struct InviteToSpaceInput: Sendable {
   public var spaceID: Int64 = 0
 
   public var role: SpaceMemberRole {
-    get {return _role ?? SpaceMemberRole()}
+    get {_role ?? SpaceMemberRole()}
     set {_role = newValue}
   }
   /// Returns true if `role` has been explicitly set.
-  public var hasRole: Bool {return self._role != nil}
+  public var hasRole: Bool {self._role != nil}
   /// Clears the value of `role`. Subsequent reads from it will return its default value.
   public mutating func clearRole() {self._role = nil}
 
@@ -10657,7 +10821,7 @@ public struct InviteToSpaceInput: Sendable {
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
-  public enum OneOf_Via: Equatable, Sendable {
+  public nonisolated enum OneOf_Via: Equatable, Sendable {
     /// ID of the user to invite
     case userID(Int64)
     /// Email of the user to invite
@@ -10672,44 +10836,44 @@ public struct InviteToSpaceInput: Sendable {
   fileprivate var _role: SpaceMemberRole? = nil
 }
 
-public struct InviteToSpaceResult: @unchecked Sendable {
+public nonisolated struct InviteToSpaceResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var user: User {
-    get {return _storage._user ?? User()}
+    get {_storage._user ?? User()}
     set {_uniqueStorage()._user = newValue}
   }
   /// Returns true if `user` has been explicitly set.
-  public var hasUser: Bool {return _storage._user != nil}
+  public var hasUser: Bool {_storage._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {_uniqueStorage()._user = nil}
 
   public var member: Member {
-    get {return _storage._member ?? Member()}
+    get {_storage._member ?? Member()}
     set {_uniqueStorage()._member = newValue}
   }
   /// Returns true if `member` has been explicitly set.
-  public var hasMember: Bool {return _storage._member != nil}
+  public var hasMember: Bool {_storage._member != nil}
   /// Clears the value of `member`. Subsequent reads from it will return its default value.
   public mutating func clearMember() {_uniqueStorage()._member = nil}
 
   public var chat: Chat {
-    get {return _storage._chat ?? Chat()}
+    get {_storage._chat ?? Chat()}
     set {_uniqueStorage()._chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return _storage._chat != nil}
+  public var hasChat: Bool {_storage._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   public var dialog: Dialog {
-    get {return _storage._dialog ?? Dialog()}
+    get {_storage._dialog ?? Dialog()}
     set {_uniqueStorage()._dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {return _storage._dialog != nil}
+  public var hasDialog: Bool {_storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
 
@@ -10720,7 +10884,7 @@ public struct InviteToSpaceResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct GetChatParticipantsInput: Sendable {
+public nonisolated struct GetChatParticipantsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10732,7 +10896,7 @@ public struct GetChatParticipantsInput: Sendable {
   public init() {}
 }
 
-public struct GetChatParticipantsResult: Sendable {
+public nonisolated struct GetChatParticipantsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10750,7 +10914,7 @@ public struct GetChatParticipantsResult: Sendable {
   public init() {}
 }
 
-public struct AddChatParticipantInput: Sendable {
+public nonisolated struct AddChatParticipantInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10758,20 +10922,20 @@ public struct AddChatParticipantInput: Sendable {
   public var chatID: Int64 = 0
 
   public var userID: Int64 {
-    get {return _userID ?? 0}
+    get {_userID ?? 0}
     set {_userID = newValue}
   }
   /// Returns true if `userID` has been explicitly set.
-  public var hasUserID: Bool {return self._userID != nil}
+  public var hasUserID: Bool {self._userID != nil}
   /// Clears the value of `userID`. Subsequent reads from it will return its default value.
   public mutating func clearUserID() {self._userID = nil}
 
   public var groupID: Int64 {
-    get {return _groupID ?? 0}
+    get {_groupID ?? 0}
     set {_groupID = newValue}
   }
   /// Returns true if `groupID` has been explicitly set.
-  public var hasGroupID: Bool {return self._groupID != nil}
+  public var hasGroupID: Bool {self._groupID != nil}
   /// Clears the value of `groupID`. Subsequent reads from it will return its default value.
   public mutating func clearGroupID() {self._groupID = nil}
 
@@ -10783,35 +10947,35 @@ public struct AddChatParticipantInput: Sendable {
   fileprivate var _groupID: Int64? = nil
 }
 
-public struct AddChatParticipantResult: Sendable {
+public nonisolated struct AddChatParticipantResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var participant: ChatParticipant {
-    get {return _participant ?? ChatParticipant()}
+    get {_participant ?? ChatParticipant()}
     set {_participant = newValue}
   }
   /// Returns true if `participant` has been explicitly set.
-  public var hasParticipant: Bool {return self._participant != nil}
+  public var hasParticipant: Bool {self._participant != nil}
   /// Clears the value of `participant`. Subsequent reads from it will return its default value.
   public mutating func clearParticipant() {self._participant = nil}
 
   public var groupParticipant: ChatParticipantGroup {
-    get {return _groupParticipant ?? ChatParticipantGroup()}
+    get {_groupParticipant ?? ChatParticipantGroup()}
     set {_groupParticipant = newValue}
   }
   /// Returns true if `groupParticipant` has been explicitly set.
-  public var hasGroupParticipant: Bool {return self._groupParticipant != nil}
+  public var hasGroupParticipant: Bool {self._groupParticipant != nil}
   /// Clears the value of `groupParticipant`. Subsequent reads from it will return its default value.
   public mutating func clearGroupParticipant() {self._groupParticipant = nil}
 
   public var group: UserGroup {
-    get {return _group ?? UserGroup()}
+    get {_group ?? UserGroup()}
     set {_group = newValue}
   }
   /// Returns true if `group` has been explicitly set.
-  public var hasGroup: Bool {return self._group != nil}
+  public var hasGroup: Bool {self._group != nil}
   /// Clears the value of `group`. Subsequent reads from it will return its default value.
   public mutating func clearGroup() {self._group = nil}
 
@@ -10824,7 +10988,7 @@ public struct AddChatParticipantResult: Sendable {
   fileprivate var _group: UserGroup? = nil
 }
 
-public struct RemoveChatParticipantInput: Sendable {
+public nonisolated struct RemoveChatParticipantInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10832,20 +10996,20 @@ public struct RemoveChatParticipantInput: Sendable {
   public var chatID: Int64 = 0
 
   public var userID: Int64 {
-    get {return _userID ?? 0}
+    get {_userID ?? 0}
     set {_userID = newValue}
   }
   /// Returns true if `userID` has been explicitly set.
-  public var hasUserID: Bool {return self._userID != nil}
+  public var hasUserID: Bool {self._userID != nil}
   /// Clears the value of `userID`. Subsequent reads from it will return its default value.
   public mutating func clearUserID() {self._userID = nil}
 
   public var groupID: Int64 {
-    get {return _groupID ?? 0}
+    get {_groupID ?? 0}
     set {_groupID = newValue}
   }
   /// Returns true if `groupID` has been explicitly set.
-  public var hasGroupID: Bool {return self._groupID != nil}
+  public var hasGroupID: Bool {self._groupID != nil}
   /// Clears the value of `groupID`. Subsequent reads from it will return its default value.
   public mutating func clearGroupID() {self._groupID = nil}
 
@@ -10857,7 +11021,7 @@ public struct RemoveChatParticipantInput: Sendable {
   fileprivate var _groupID: Int64? = nil
 }
 
-public struct RemoveChatParticipantResult: Sendable {
+public nonisolated struct RemoveChatParticipantResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10867,7 +11031,7 @@ public struct RemoveChatParticipantResult: Sendable {
   public init() {}
 }
 
-public struct UpdateChatVisibilityInput: Sendable {
+public nonisolated struct UpdateChatVisibilityInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10883,17 +11047,17 @@ public struct UpdateChatVisibilityInput: Sendable {
   public init() {}
 }
 
-public struct UpdateChatVisibilityResult: Sendable {
+public nonisolated struct UpdateChatVisibilityResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _chat ?? Chat()}
+    get {_chat ?? Chat()}
     set {_chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return self._chat != nil}
+  public var hasChat: Bool {self._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {self._chat = nil}
 
@@ -10904,7 +11068,7 @@ public struct UpdateChatVisibilityResult: Sendable {
   fileprivate var _chat: Chat? = nil
 }
 
-public struct UpdateChatInfoInput: Sendable {
+public nonisolated struct UpdateChatInfoInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10912,20 +11076,20 @@ public struct UpdateChatInfoInput: Sendable {
   public var chatID: Int64 = 0
 
   public var title: String {
-    get {return _title ?? String()}
+    get {_title ?? String()}
     set {_title = newValue}
   }
   /// Returns true if `title` has been explicitly set.
-  public var hasTitle: Bool {return self._title != nil}
+  public var hasTitle: Bool {self._title != nil}
   /// Clears the value of `title`. Subsequent reads from it will return its default value.
   public mutating func clearTitle() {self._title = nil}
 
   public var emoji: String {
-    get {return _emoji ?? String()}
+    get {_emoji ?? String()}
     set {_emoji = newValue}
   }
   /// Returns true if `emoji` has been explicitly set.
-  public var hasEmoji: Bool {return self._emoji != nil}
+  public var hasEmoji: Bool {self._emoji != nil}
   /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
   public mutating func clearEmoji() {self._emoji = nil}
 
@@ -10937,17 +11101,17 @@ public struct UpdateChatInfoInput: Sendable {
   fileprivate var _emoji: String? = nil
 }
 
-public struct UpdateChatInfoResult: Sendable {
+public nonisolated struct UpdateChatInfoResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _chat ?? Chat()}
+    get {_chat ?? Chat()}
     set {_chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return self._chat != nil}
+  public var hasChat: Bool {self._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {self._chat = nil}
 
@@ -10960,7 +11124,7 @@ public struct UpdateChatInfoResult: Sendable {
 
 /// Move a private thread between home (space_id unset) and a space (space_id set).
 /// v1 does NOT support cross-space moves or public threads.
-public struct MoveThreadInput: Sendable {
+public nonisolated struct MoveThreadInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -10969,11 +11133,11 @@ public struct MoveThreadInput: Sendable {
 
   /// Target space. If unset, moves to home.
   public var spaceID: Int64 {
-    get {return _spaceID ?? 0}
+    get {_spaceID ?? 0}
     set {_spaceID = newValue}
   }
   /// Returns true if `spaceID` has been explicitly set.
-  public var hasSpaceID: Bool {return self._spaceID != nil}
+  public var hasSpaceID: Bool {self._spaceID != nil}
   /// Clears the value of `spaceID`. Subsequent reads from it will return its default value.
   public mutating func clearSpaceID() {self._spaceID = nil}
 
@@ -10984,17 +11148,17 @@ public struct MoveThreadInput: Sendable {
   fileprivate var _spaceID: Int64? = nil
 }
 
-public struct MoveThreadResult: Sendable {
+public nonisolated struct MoveThreadResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {return _chat ?? Chat()}
+    get {_chat ?? Chat()}
     set {_chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {return self._chat != nil}
+  public var hasChat: Bool {self._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
   public mutating func clearChat() {self._chat = nil}
 
@@ -11006,17 +11170,17 @@ public struct MoveThreadResult: Sendable {
 }
 
 /// Pin or unpin a message for everyone
-public struct PinMessageInput: Sendable {
+public nonisolated struct PinMessageInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peerID: InputPeer {
-    get {return _peerID ?? InputPeer()}
+    get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
   }
   /// Returns true if `peerID` has been explicitly set.
-  public var hasPeerID: Bool {return self._peerID != nil}
+  public var hasPeerID: Bool {self._peerID != nil}
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
@@ -11031,7 +11195,7 @@ public struct PinMessageInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct PinMessageResult: Sendable {
+public nonisolated struct PinMessageResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -11044,7 +11208,7 @@ public struct PinMessageResult: Sendable {
 }
 
 /// Apple only types
-public struct DraftMessage: Sendable {
+public nonisolated struct DraftMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -11052,11 +11216,11 @@ public struct DraftMessage: Sendable {
   public var text: String = String()
 
   public var entities: MessageEntities {
-    get {return _entities ?? MessageEntities()}
+    get {_entities ?? MessageEntities()}
     set {_entities = newValue}
   }
   /// Returns true if `entities` has been explicitly set.
-  public var hasEntities: Bool {return self._entities != nil}
+  public var hasEntities: Bool {self._entities != nil}
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {self._entities = nil}
 
@@ -11069,147 +11233,37 @@ public struct DraftMessage: Sendable {
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
-extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "DIALOG_FOLLOW_MODE_UNSPECIFIED"),
-    1: .same(proto: "FOLLOWING"),
-  ]
+nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DIALOG_FOLLOW_MODE_UNSPECIFIED\0\u{1}FOLLOWING\0")
 }
 
-extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "MODE_UNSPECIFIED"),
-    1: .same(proto: "MODE_SILENT"),
-  ]
+nonisolated extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MODE_UNSPECIFIED\0\u{1}MODE_SILENT\0")
 }
 
-extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "UNSPECIFIED"),
-    1: .same(proto: "GET_ME"),
-    2: .same(proto: "SEND_MESSAGE"),
-    3: .same(proto: "GET_PEER_PHOTO"),
-    4: .same(proto: "DELETE_MESSAGES"),
-    5: .same(proto: "GET_CHAT_HISTORY"),
-    6: .same(proto: "ADD_REACTION"),
-    7: .same(proto: "DELETE_REACTION"),
-    8: .same(proto: "EDIT_MESSAGE"),
-    9: .same(proto: "CREATE_CHAT"),
-    10: .same(proto: "GET_SPACE_MEMBERS"),
-    11: .same(proto: "DELETE_CHAT"),
-    12: .same(proto: "INVITE_TO_SPACE"),
-    13: .same(proto: "GET_CHAT_PARTICIPANTS"),
-    14: .same(proto: "ADD_CHAT_PARTICIPANT"),
-    15: .same(proto: "REMOVE_CHAT_PARTICIPANT"),
-    16: .same(proto: "TRANSLATE_MESSAGES"),
-    17: .same(proto: "GET_CHATS"),
-    18: .same(proto: "UPDATE_USER_SETTINGS"),
-    19: .same(proto: "GET_USER_SETTINGS"),
-    20: .same(proto: "SEND_COMPOSE_ACTION"),
-    21: .same(proto: "CREATE_BOT"),
-    22: .same(proto: "DELETE_MEMBER"),
-    23: .same(proto: "MARK_AS_UNREAD"),
-    24: .same(proto: "GET_UPDATES_STATE"),
-    25: .same(proto: "GET_CHAT"),
-    26: .same(proto: "GET_UPDATES"),
-    27: .same(proto: "UPDATE_MEMBER_ACCESS"),
-    28: .same(proto: "SEARCH_MESSAGES"),
-    29: .same(proto: "FORWARD_MESSAGES"),
-    30: .same(proto: "UPDATE_CHAT_VISIBILITY"),
-    31: .same(proto: "PIN_MESSAGE"),
-    32: .same(proto: "UPDATE_CHAT_INFO"),
-    33: .same(proto: "LIST_BOTS"),
-    34: .same(proto: "REVEAL_BOT_TOKEN"),
-    35: .same(proto: "MOVE_THREAD"),
-    36: .same(proto: "ROTATE_BOT_TOKEN"),
-    37: .same(proto: "UPDATE_BOT_PROFILE"),
-    38: .same(proto: "GET_MESSAGES"),
-    39: .same(proto: "UPDATE_DIALOG_NOTIFICATION_SETTINGS"),
-    40: .same(proto: "READ_MESSAGES"),
-    41: .same(proto: "UPDATE_PUSH_NOTIFICATION_DETAILS"),
-    42: .same(proto: "CREATE_SUBTHREAD"),
-    43: .same(proto: "GET_BOT_COMMANDS"),
-    44: .same(proto: "SET_BOT_COMMANDS"),
-    45: .same(proto: "GET_PEER_BOT_COMMANDS"),
-    46: .same(proto: "SHOW_IN_CHAT_LIST"),
-    47: .same(proto: "RESERVE_CHAT_IDS"),
-    48: .same(proto: "INVOKE_MESSAGE_ACTION"),
-    49: .same(proto: "ANSWER_MESSAGE_ACTION"),
-    50: .same(proto: "REVOKE_SESSION"),
-    51: .same(proto: "UPDATE_DIALOG_OPEN"),
-    52: .same(proto: "UPDATE_DIALOG_ORDER"),
-    53: .same(proto: "CLEAR_CHAT_HISTORY"),
-    54: .same(proto: "DELETE_BOT"),
-    55: .same(proto: "DELETE_MESSAGE_ATTACHMENT"),
-    56: .same(proto: "SET_BOT_AVATAR"),
-    57: .same(proto: "CLEAR_BOT_AVATAR"),
-    58: .same(proto: "GET_BOT_PRESENCE"),
-    59: .same(proto: "SET_BOT_PRESENCE_STATE"),
-    60: .same(proto: "UPDATE_DIALOG_FOLLOW_MODE"),
-    61: .same(proto: "GET_SESSIONS"),
-    62: .same(proto: "CHECK_USERNAME"),
-    63: .same(proto: "CHANGE_USERNAME"),
-    64: .same(proto: "UPDATE_PROFILE"),
-    65: .same(proto: "GET_SPACE_URL_PREVIEW_EXCLUSIONS"),
-    66: .same(proto: "ADD_SPACE_URL_PREVIEW_EXCLUSION"),
-    67: .same(proto: "REMOVE_SPACE_URL_PREVIEW_EXCLUSION"),
-    68: .same(proto: "GET_USER_GROUPS"),
-    69: .same(proto: "CREATE_USER_GROUP"),
-    70: .same(proto: "UPDATE_USER_GROUP"),
-    71: .same(proto: "DELETE_USER_GROUP"),
-  ]
+nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}UPDATE_PUSH_NOTIFICATION_DETAILS\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0")
 }
 
-extension UsernameAvailability: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "USERNAME_AVAILABILITY_UNSPECIFIED"),
-    1: .same(proto: "USERNAME_AVAILABLE"),
-    2: .same(proto: "USERNAME_CURRENT"),
-    3: .same(proto: "USERNAME_TAKEN"),
-    4: .same(proto: "USERNAME_RESERVED"),
-    5: .same(proto: "USERNAME_INVALID"),
-  ]
+nonisolated extension UsernameAvailability: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0USERNAME_AVAILABILITY_UNSPECIFIED\0\u{1}USERNAME_AVAILABLE\0\u{1}USERNAME_CURRENT\0\u{1}USERNAME_TAKEN\0\u{1}USERNAME_RESERVED\0\u{1}USERNAME_INVALID\0")
 }
 
-extension PushNotificationProvider: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED"),
-    1: .same(proto: "PUSH_NOTIFICATION_PROVIDER_APNS"),
-    2: .same(proto: "PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID"),
-  ]
+nonisolated extension PushNotificationProvider: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED\0\u{1}PUSH_NOTIFICATION_PROVIDER_APNS\0\u{1}PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID\0")
 }
 
-extension GetChatHistoryMode: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "HISTORY_MODE_UNSPECIFIED"),
-    1: .same(proto: "HISTORY_MODE_LATEST"),
-    2: .same(proto: "HISTORY_MODE_OLDER"),
-    3: .same(proto: "HISTORY_MODE_NEWER"),
-    4: .same(proto: "HISTORY_MODE_AROUND"),
-  ]
+nonisolated extension GetChatHistoryMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0HISTORY_MODE_UNSPECIFIED\0\u{1}HISTORY_MODE_LATEST\0\u{1}HISTORY_MODE_OLDER\0\u{1}HISTORY_MODE_NEWER\0\u{1}HISTORY_MODE_AROUND\0")
 }
 
-extension SearchMessagesFilter: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "FILTER_UNSPECIFIED"),
-    1: .same(proto: "FILTER_PHOTOS"),
-    2: .same(proto: "FILTER_VIDEOS"),
-    3: .same(proto: "FILTER_PHOTO_VIDEO"),
-    4: .same(proto: "FILTER_DOCUMENTS"),
-    5: .same(proto: "FILTER_LINKS"),
-  ]
+nonisolated extension SearchMessagesFilter: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0FILTER_UNSPECIFIED\0\u{1}FILTER_PHOTOS\0\u{1}FILTER_VIDEOS\0\u{1}FILTER_PHOTO_VIDEO\0\u{1}FILTER_DOCUMENTS\0\u{1}FILTER_LINKS\0")
 }
 
-extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ClientMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "seq"),
-    4: .standard(proto: "connection_init"),
-    5: .standard(proto: "rpc_call"),
-    6: .same(proto: "ack"),
-    7: .same(proto: "ping"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}seq\0\u{4}\u{2}connection_init\0\u{3}rpc_call\0\u{1}ack\0\u{1}ping\0\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11318,15 +11372,9 @@ extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ConnectionInit"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "token"),
-    2: .standard(proto: "build_number"),
-    3: .same(proto: "layer"),
-    4: .standard(proto: "client_version"),
-    5: .standard(proto: "os_version"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0\u{3}build_number\0\u{1}layer\0\u{3}client_version\0\u{3}os_version\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11378,18 +11426,9 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ServerProtocolMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    4: .standard(proto: "connection_open"),
-    5: .standard(proto: "rpc_result"),
-    6: .standard(proto: "rpc_error"),
-    7: .same(proto: "message"),
-    8: .same(proto: "ack"),
-    9: .same(proto: "pong"),
-    10: .standard(proto: "connection_error"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{4}\u{3}connection_open\0\u{3}rpc_result\0\u{3}rpc_error\0\u{1}message\0\u{1}ack\0\u{1}pong\0\u{3}connection_error\0\u{c}\u{2}\u{1}\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11544,11 +11583,9 @@ extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ServerMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    4: .same(proto: "update"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{4}update\0\u{c}\u{1}\u{1}\u{c}\u{2}\u{1}\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11592,11 +11629,9 @@ extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension UpdatesPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdatesPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdatesPayload"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11624,11 +11659,9 @@ extension UpdatesPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension Ack: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Ack: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Ack"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "msg_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}msg_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11656,7 +11689,7 @@ extension Ack: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, 
   }
 }
 
-extension ConnectionOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ConnectionOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ConnectionOpen"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -11675,11 +11708,9 @@ extension ConnectionOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension ConnectionError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ConnectionError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ConnectionError"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "reason"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reason\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11707,20 +11738,13 @@ extension ConnectionError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension ConnectionError.Reason: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "REASON_UNSPECIFIED"),
-    1: .same(proto: "UNAUTHORIZED"),
-    2: .same(proto: "INVALID_AUTH"),
-    3: .same(proto: "SESSION_REVOKED"),
-  ]
+nonisolated extension ConnectionError.Reason: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0REASON_UNSPECIFIED\0\u{1}UNAUTHORIZED\0\u{1}INVALID_AUTH\0\u{1}SESSION_REVOKED\0")
 }
 
-extension Ping: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Ping: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Ping"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "nonce"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}nonce\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11748,11 +11772,9 @@ extension Ping: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
   }
 }
 
-extension Pong: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Pong: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Pong"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "nonce"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}nonce\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11780,13 +11802,9 @@ extension Pong: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
   }
 }
 
-extension InputPeer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputPeer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputPeer"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    2: .same(proto: "self"),
-    3: .same(proto: "chat"),
-    4: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{2}self\0\u{1}chat\0\u{1}user\0\u{c}\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11868,7 +11886,7 @@ extension InputPeer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
   }
 }
 
-extension InputPeerSelf: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputPeerSelf: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputPeerSelf"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -11887,11 +11905,9 @@ extension InputPeerSelf: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension InputPeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputPeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputPeerChat"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11919,11 +11935,9 @@ extension InputPeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension InputPeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputPeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputPeerUser"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -11951,12 +11965,9 @@ extension InputPeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension Peer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Peer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Peer"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    2: .same(proto: "chat"),
-    3: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{2}chat\0\u{1}user\0\u{c}\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12021,11 +12032,9 @@ extension Peer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
   }
 }
 
-extension PeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PeerChat"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12053,11 +12062,9 @@ extension PeerChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
   }
 }
 
-extension PeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PeerUser"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12085,15 +12092,9 @@ extension PeerUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
   }
 }
 
-extension BotAvatar: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension BotAvatar: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BotAvatar"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "kind"),
-    2: .standard(proto: "display_name"),
-    3: .same(proto: "description"),
-    4: .standard(proto: "cdn_url"),
-    5: .standard(proto: "file_unique_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{3}display_name\0\u{1}description\0\u{3}cdn_url\0\u{3}file_unique_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12145,19 +12146,13 @@ extension BotAvatar: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
   }
 }
 
-extension BotAvatar.Kind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "KIND_UNSPECIFIED"),
-    1: .same(proto: "CODEX_ATLAS"),
-  ]
+nonisolated extension BotAvatar.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_UNSPECIFIED\0\u{1}CODEX_ATLAS\0")
 }
 
-extension BotPresenceState: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension BotPresenceState: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BotPresenceState"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "kind"),
-    2: .same(proto: "comment"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}comment\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12194,39 +12189,13 @@ extension BotPresenceState: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension BotPresenceState.Kind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "KIND_UNSPECIFIED"),
-    1: .same(proto: "HIDDEN"),
-    2: .same(proto: "IDLE"),
-    3: .same(proto: "HAPPY"),
-    4: .same(proto: "WAVING"),
-    5: .same(proto: "JUMPING"),
-    6: .same(proto: "FAILED"),
-    7: .same(proto: "WAITING"),
-    8: .same(proto: "RUNNING"),
-    9: .same(proto: "REVIEW"),
-  ]
+nonisolated extension BotPresenceState.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_UNSPECIFIED\0\u{1}HIDDEN\0\u{1}IDLE\0\u{1}HAPPY\0\u{1}WAVING\0\u{1}JUMPING\0\u{1}FAILED\0\u{1}WAITING\0\u{1}RUNNING\0\u{1}REVIEW\0")
 }
 
-extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "User"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "first_name"),
-    3: .standard(proto: "last_name"),
-    4: .same(proto: "username"),
-    5: .standard(proto: "phone_number"),
-    6: .same(proto: "email"),
-    7: .same(proto: "min"),
-    8: .same(proto: "status"),
-    9: .standard(proto: "profile_photo"),
-    11: .standard(proto: "pending_setup"),
-    12: .standard(proto: "time_zone"),
-    13: .same(proto: "bot"),
-    14: .standard(proto: "bot_avatar"),
-    15: .same(proto: "bio"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}first_name\0\u{3}last_name\0\u{1}username\0\u{3}phone_number\0\u{1}email\0\u{1}min\0\u{1}status\0\u{3}profile_photo\0\u{4}\u{2}pending_setup\0\u{3}time_zone\0\u{1}bot\0\u{3}bot_avatar\0\u{1}bio\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -12244,15 +12213,11 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     var _botAvatar: BotAvatar? = nil
     var _bio: String? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -12389,14 +12354,9 @@ extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
   }
 }
 
-extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UserProfilePhoto"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "photo_id"),
-    2: .standard(proto: "stripped_thumb"),
-    3: .standard(proto: "cdn_url"),
-    4: .standard(proto: "file_unique_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}photo_id\0\u{3}stripped_thumb\0\u{3}cdn_url\0\u{3}file_unique_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12443,26 +12403,9 @@ extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Dialog"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "peer"),
-    2: .standard(proto: "space_id"),
-    3: .same(proto: "archived"),
-    4: .same(proto: "pinned"),
-    5: .standard(proto: "read_max_id"),
-    6: .standard(proto: "unread_count"),
-    7: .standard(proto: "chat_id"),
-    8: .standard(proto: "unread_mark"),
-    9: .standard(proto: "notification_settings"),
-    10: .standard(proto: "sidebar_visible"),
-    13: .standard(proto: "chat_list_hidden"),
-    11: .same(proto: "open"),
-    12: .standard(proto: "opened_date"),
-    14: .same(proto: "order"),
-    15: .standard(proto: "pinned_order"),
-    16: .standard(proto: "follow_mode"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}peer\0\u{3}space_id\0\u{1}archived\0\u{1}pinned\0\u{3}read_max_id\0\u{3}unread_count\0\u{3}chat_id\0\u{3}unread_mark\0\u{3}notification_settings\0\u{3}sidebar_visible\0\u{1}open\0\u{3}opened_date\0\u{3}chat_list_hidden\0\u{1}order\0\u{3}pinned_order\0\u{3}follow_mode\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12569,24 +12512,9 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
   }
 }
 
-extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Chat"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "title"),
-    3: .standard(proto: "space_id"),
-    4: .same(proto: "description"),
-    5: .same(proto: "emoji"),
-    6: .standard(proto: "is_public"),
-    7: .standard(proto: "last_msg_id"),
-    8: .standard(proto: "peer_id"),
-    9: .same(proto: "date"),
-    10: .standard(proto: "created_by"),
-    11: .standard(proto: "parent_chat_id"),
-    12: .standard(proto: "parent_message_id"),
-    13: .same(proto: "untitled"),
-    14: .same(proto: "number"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}title\0\u{3}space_id\0\u{1}description\0\u{1}emoji\0\u{3}is_public\0\u{3}last_msg_id\0\u{3}peer_id\0\u{1}date\0\u{3}created_by\0\u{3}parent_chat_id\0\u{3}parent_message_id\0\u{1}untitled\0\u{1}number\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12683,14 +12611,9 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
   }
 }
 
-extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageReplies"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "reply_count"),
-    3: .standard(proto: "has_unread"),
-    4: .standard(proto: "recent_replier_user_ids"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}reply_count\0\u{3}has_unread\0\u{3}recent_replier_user_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12733,11 +12656,9 @@ extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension MessageActions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageActions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActions"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "rows"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rows\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12765,11 +12686,9 @@ extension MessageActions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension MessageActionRow: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageActionRow: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActionRow"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "actions"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}actions\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12797,14 +12716,9 @@ extension MessageActionRow: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension MessageAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAction"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "action_id"),
-    2: .same(proto: "text"),
-    3: .same(proto: "callback"),
-    4: .standard(proto: "copy_text"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}action_id\0\u{1}text\0\u{1}callback\0\u{3}copy_text\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12879,11 +12793,9 @@ extension MessageAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension MessageActionCallback: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageActionCallback: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActionCallback"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "data"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}data\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12911,11 +12823,9 @@ extension MessageActionCallback: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension MessageActionCopyText: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageActionCopyText: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActionCopyText"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "text"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12943,11 +12853,9 @@ extension MessageActionCopyText: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension MessageActionResponseUi: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageActionResponseUi: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActionResponseUi"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "toast"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}toast\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12991,11 +12899,9 @@ extension MessageActionResponseUi: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension MessageActionToast: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageActionToast: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActionToast"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "text"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13023,12 +12929,9 @@ extension MessageActionToast: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension MessageService: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageService: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageService"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "thread_backlink"),
-    2: .standard(proto: "pinned_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}thread_backlink\0\u{3}pinned_message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13093,12 +12996,9 @@ extension MessageService: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension MessageServiceThreadBacklink: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageServiceThreadBacklink: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageServiceThreadBacklink"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "source_chat_id"),
-    2: .standard(proto: "source_title"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}source_chat_id\0\u{3}source_title\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13135,11 +13035,9 @@ extension MessageServiceThreadBacklink: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
-extension MessageServicePinnedMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageServicePinnedMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageServicePinnedMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "message_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13171,33 +13069,9 @@ extension MessageServicePinnedMessage: SwiftProtobuf.Message, SwiftProtobuf._Mes
   }
 }
 
-extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "from_id"),
-    3: .standard(proto: "peer_id"),
-    4: .standard(proto: "chat_id"),
-    5: .same(proto: "message"),
-    6: .same(proto: "out"),
-    7: .same(proto: "date"),
-    8: .same(proto: "mentioned"),
-    9: .standard(proto: "reply_to_msg_id"),
-    10: .same(proto: "media"),
-    11: .standard(proto: "edit_date"),
-    12: .standard(proto: "grouped_id"),
-    13: .same(proto: "attachments"),
-    14: .same(proto: "reactions"),
-    15: .standard(proto: "is_sticker"),
-    6000: .standard(proto: "has_link"),
-    16: .same(proto: "entities"),
-    17: .standard(proto: "send_mode"),
-    18: .standard(proto: "fwd_from"),
-    19: .same(proto: "replies"),
-    20: .same(proto: "actions"),
-    21: .same(proto: "rev"),
-    22: .standard(proto: "service_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{4}Z]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -13224,15 +13098,11 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _rev: Int64? = nil
     var _serviceMessage: MessageService? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -13423,13 +13293,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
   }
 }
 
-extension MessageFwdHeader: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageFwdHeader: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageFwdHeader"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "from_peer_id"),
-    2: .standard(proto: "from_id"),
-    3: .standard(proto: "from_message_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}from_peer_id\0\u{3}from_id\0\u{3}from_message_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13471,11 +13337,9 @@ extension MessageFwdHeader: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension MessageEntities: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntities: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageEntities"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "entities"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}entities\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13503,19 +13367,9 @@ extension MessageEntities: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageEntity"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "type"),
-    2: .same(proto: "offset"),
-    3: .same(proto: "length"),
-    4: .same(proto: "mention"),
-    5: .standard(proto: "text_url"),
-    6: .same(proto: "pre"),
-    7: .same(proto: "thread"),
-    8: .standard(proto: "thread_title"),
-    9: .standard(proto: "group_mention"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}offset\0\u{1}length\0\u{1}mention\0\u{3}text_url\0\u{1}pre\0\u{1}thread\0\u{3}thread_title\0\u{3}group_mention\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13663,31 +13517,13 @@ extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension MessageEntity.TypeEnum: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "TYPE_UNSPECIFIED"),
-    1: .same(proto: "TYPE_MENTION"),
-    2: .same(proto: "TYPE_URL"),
-    3: .same(proto: "TYPE_TEXT_URL"),
-    4: .same(proto: "TYPE_EMAIL"),
-    5: .same(proto: "TYPE_BOLD"),
-    6: .same(proto: "TYPE_ITALIC"),
-    7: .same(proto: "TYPE_USERNAME_MENTION"),
-    8: .same(proto: "TYPE_CODE"),
-    9: .same(proto: "TYPE_PRE"),
-    10: .same(proto: "TYPE_PHONE_NUMBER"),
-    11: .same(proto: "TYPE_THREAD"),
-    12: .same(proto: "TYPE_THREAD_TITLE"),
-    13: .same(proto: "TYPE_BOT_COMMAND"),
-    14: .same(proto: "TYPE_GROUP_MENTION"),
-  ]
+nonisolated extension MessageEntity.TypeEnum: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TYPE_UNSPECIFIED\0\u{1}TYPE_MENTION\0\u{1}TYPE_URL\0\u{1}TYPE_TEXT_URL\0\u{1}TYPE_EMAIL\0\u{1}TYPE_BOLD\0\u{1}TYPE_ITALIC\0\u{1}TYPE_USERNAME_MENTION\0\u{1}TYPE_CODE\0\u{1}TYPE_PRE\0\u{1}TYPE_PHONE_NUMBER\0\u{1}TYPE_THREAD\0\u{1}TYPE_THREAD_TITLE\0\u{1}TYPE_BOT_COMMAND\0\u{1}TYPE_GROUP_MENTION\0")
 }
 
-extension MessageEntity.MessageEntityMention: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntity.MessageEntityMention: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityMention"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13715,11 +13551,9 @@ extension MessageEntity.MessageEntityMention: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
-extension MessageEntity.MessageEntityGroupMention: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntity.MessageEntityGroupMention: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityGroupMention"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "group_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}group_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13747,11 +13581,9 @@ extension MessageEntity.MessageEntityGroupMention: SwiftProtobuf.Message, SwiftP
   }
 }
 
-extension MessageEntity.MessageEntityTextUrl: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntity.MessageEntityTextUrl: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityTextUrl"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "url"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}url\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13779,11 +13611,9 @@ extension MessageEntity.MessageEntityTextUrl: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
-extension MessageEntity.MessageEntityPre: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntity.MessageEntityPre: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityPre"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "language"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}language\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13811,11 +13641,9 @@ extension MessageEntity.MessageEntityPre: SwiftProtobuf.Message, SwiftProtobuf._
   }
 }
 
-extension MessageEntity.MessageEntityThread: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntity.MessageEntityThread: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityThread"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13843,12 +13671,9 @@ extension MessageEntity.MessageEntityThread: SwiftProtobuf.Message, SwiftProtobu
   }
 }
 
-extension MessageEntity.MessageEntityThreadTitle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageEntity.MessageEntityThreadTitle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityThreadTitle"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .same(proto: "title"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{1}title\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13881,11 +13706,9 @@ extension MessageEntity.MessageEntityThreadTitle: SwiftProtobuf.Message, SwiftPr
   }
 }
 
-extension MessageReactions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageReactions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageReactions"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "reactions"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reactions\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13913,15 +13736,9 @@ extension MessageReactions: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension Reaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Reaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Reaction"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "emoji"),
-    2: .standard(proto: "user_id"),
-    3: .standard(proto: "message_id"),
-    4: .standard(proto: "chat_id"),
-    5: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}emoji\0\u{3}user_id\0\u{3}message_id\0\u{3}chat_id\0\u{1}date\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -13969,16 +13786,9 @@ extension Reaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
   }
 }
 
-extension Member: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Member: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Member"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "space_id"),
-    3: .standard(proto: "user_id"),
-    4: .same(proto: "role"),
-    5: .same(proto: "date"),
-    6: .standard(proto: "can_access_public_chats"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}space_id\0\u{3}user_id\0\u{1}role\0\u{1}date\0\u{3}can_access_public_chats\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14035,23 +13845,13 @@ extension Member: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
   }
 }
 
-extension Member.Role: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "OWNER"),
-    1: .same(proto: "ADMIN"),
-    2: .same(proto: "MEMBER"),
-  ]
+nonisolated extension Member.Role: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0OWNER\0\u{1}ADMIN\0\u{1}MEMBER\0")
 }
 
-extension Space: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Space: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Space"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "name"),
-    3: .same(proto: "creator"),
-    4: .same(proto: "date"),
-    5: .standard(proto: "is_public"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}name\0\u{1}creator\0\u{1}date\0\u{3}is_public\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14103,18 +13903,9 @@ extension Space: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
   }
 }
 
-extension UserGroup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UserGroup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UserGroup"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "space_id"),
-    3: .same(proto: "name"),
-    4: .same(proto: "description"),
-    5: .standard(proto: "member_count"),
-    6: .standard(proto: "user_ids"),
-    7: .standard(proto: "current_user_is_member"),
-    8: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}space_id\0\u{1}name\0\u{1}description\0\u{3}member_count\0\u{3}user_ids\0\u{3}current_user_is_member\0\u{1}date\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14181,13 +13972,9 @@ extension UserGroup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
   }
 }
 
-extension AddReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AddReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AddReactionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "emoji"),
-    2: .standard(proto: "message_id"),
-    3: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}emoji\0\u{3}message_id\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14229,11 +14016,9 @@ extension AddReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension AddReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AddReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AddReactionResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14261,13 +14046,9 @@ extension AddReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension DeleteReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteReactionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "emoji"),
-    2: .standard(proto: "peer_id"),
-    3: .standard(proto: "message_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}emoji\0\u{3}peer_id\0\u{3}message_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14309,11 +14090,9 @@ extension DeleteReactionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension DeleteReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteReactionResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14341,11 +14120,9 @@ extension DeleteReactionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachments"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "attachments"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}attachments\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14373,13 +14150,9 @@ extension MessageAttachments: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachment"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    4: .same(proto: "id"),
-    2: .standard(proto: "external_task"),
-    3: .standard(proto: "url_preview"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{4}\u{2}external_task\0\u{3}url_preview\0\u{1}id\0\u{c}\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14449,24 +14222,9 @@ extension MessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UrlPreview"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "url"),
-    3: .standard(proto: "site_name"),
-    4: .same(proto: "title"),
-    5: .same(proto: "description"),
-    6: .same(proto: "photo"),
-    7: .same(proto: "duration"),
-    8: .standard(proto: "media_type"),
-    9: .standard(proto: "display_url"),
-    10: .same(proto: "provider"),
-    11: .same(proto: "author"),
-    12: .same(proto: "media"),
-    13: .same(proto: "layout"),
-    14: .standard(proto: "author_photo"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}url\0\u{3}site_name\0\u{1}title\0\u{1}description\0\u{1}photo\0\u{1}duration\0\u{3}media_type\0\u{3}display_url\0\u{1}provider\0\u{1}author\0\u{1}media\0\u{1}layout\0\u{3}author_photo\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -14484,15 +14242,11 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     var _layout: UrlPreviewLayout? = nil
     var _authorPhoto: Photo? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -14629,26 +14383,13 @@ extension UrlPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 }
 
-extension UrlPreview.MediaType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "MEDIA_TYPE_UNSPECIFIED"),
-    1: .same(proto: "MEDIA_TYPE_ARTICLE"),
-    2: .same(proto: "MEDIA_TYPE_IMAGE"),
-    3: .same(proto: "MEDIA_TYPE_VIDEO"),
-    4: .same(proto: "MEDIA_TYPE_DOCUMENT"),
-    5: .same(proto: "MEDIA_TYPE_EMBED"),
-  ]
+nonisolated extension UrlPreview.MediaType: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_TYPE_UNSPECIFIED\0\u{1}MEDIA_TYPE_ARTICLE\0\u{1}MEDIA_TYPE_IMAGE\0\u{1}MEDIA_TYPE_VIDEO\0\u{1}MEDIA_TYPE_DOCUMENT\0\u{1}MEDIA_TYPE_EMBED\0")
 }
 
-extension UrlPreviewMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UrlPreviewMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UrlPreviewMedia"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "photo"),
-    2: .same(proto: "video"),
-    3: .same(proto: "document"),
-    4: .standard(proto: "external_video"),
-    5: .same(proto: "embed"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}photo\0\u{1}video\0\u{1}document\0\u{3}external_video\0\u{1}embed\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14764,15 +14505,9 @@ extension UrlPreviewMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension UrlPreviewExternalVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UrlPreviewExternalVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UrlPreviewExternalVideo"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "url"),
-    2: .standard(proto: "mime_type"),
-    3: .same(proto: "w"),
-    4: .same(proto: "h"),
-    5: .same(proto: "duration"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}url\0\u{3}mime_type\0\u{1}w\0\u{1}h\0\u{1}duration\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14824,15 +14559,9 @@ extension UrlPreviewExternalVideo: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UrlPreviewEmbed: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UrlPreviewEmbed: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UrlPreviewEmbed"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "url"),
-    2: .same(proto: "type"),
-    3: .same(proto: "w"),
-    4: .same(proto: "h"),
-    5: .same(proto: "duration"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}url\0\u{1}type\0\u{1}w\0\u{1}h\0\u{1}duration\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14884,12 +14613,9 @@ extension UrlPreviewEmbed: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension UrlPreviewLayout: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UrlPreviewLayout: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UrlPreviewLayout"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "has_large_media"),
-    2: .standard(proto: "show_large_media"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}has_large_media\0\u{3}show_large_media\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14922,19 +14648,9 @@ extension UrlPreviewLayout: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension MessageAttachmentExternalTask: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageAttachmentExternalTask: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAttachmentExternalTask"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "task_id"),
-    3: .same(proto: "application"),
-    4: .same(proto: "title"),
-    5: .same(proto: "status"),
-    6: .standard(proto: "assigned_user_id"),
-    7: .same(proto: "url"),
-    8: .same(proto: "number"),
-    9: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}task_id\0\u{1}application\0\u{1}title\0\u{1}status\0\u{3}assigned_user_id\0\u{1}url\0\u{1}number\0\u{1}date\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15002,26 +14718,13 @@ extension MessageAttachmentExternalTask: SwiftProtobuf.Message, SwiftProtobuf._M
   }
 }
 
-extension MessageAttachmentExternalTask.Status: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "STATUS_UNSPECIFIED"),
-    1: .same(proto: "STATUS_BACKLOG"),
-    2: .same(proto: "STATUS_TODO"),
-    3: .same(proto: "STATUS_IN_PROGRESS"),
-    4: .same(proto: "STATUS_DONE"),
-    5: .same(proto: "STATUS_CANCELLED"),
-  ]
+nonisolated extension MessageAttachmentExternalTask.Status: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0STATUS_UNSPECIFIED\0\u{1}STATUS_BACKLOG\0\u{1}STATUS_TODO\0\u{1}STATUS_IN_PROGRESS\0\u{1}STATUS_DONE\0\u{1}STATUS_CANCELLED\0")
 }
 
-extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageMedia"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "photo"),
-    2: .same(proto: "video"),
-    3: .same(proto: "document"),
-    4: .same(proto: "nudge"),
-    5: .same(proto: "voice"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}photo\0\u{1}video\0\u{1}document\0\u{1}nudge\0\u{1}voice\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15137,11 +14840,9 @@ extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension MessagePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessagePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessagePhoto"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "photo"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}photo\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15173,11 +14874,9 @@ extension MessagePhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension MessageVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageVideo"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "video"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}video\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15209,11 +14908,9 @@ extension MessageVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension MessageDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageDocument"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "document"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}document\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15245,11 +14942,9 @@ extension MessageDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension MessageVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageVoice"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "voice"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}voice\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15281,7 +14976,7 @@ extension MessageVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension MessageNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageNudge"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -15300,18 +14995,9 @@ extension MessageNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Video"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "date"),
-    3: .same(proto: "w"),
-    4: .same(proto: "h"),
-    5: .same(proto: "duration"),
-    6: .same(proto: "size"),
-    7: .same(proto: "photo"),
-    8: .standard(proto: "cdn_url"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}date\0\u{1}w\0\u{1}h\0\u{1}duration\0\u{1}size\0\u{1}photo\0\u{3}cdn_url\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15378,17 +15064,9 @@ extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
   }
 }
 
-extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Document"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "file_name"),
-    3: .standard(proto: "mime_type"),
-    4: .same(proto: "size"),
-    5: .standard(proto: "cdn_url"),
-    6: .same(proto: "date"),
-    7: .same(proto: "photo"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}file_name\0\u{3}mime_type\0\u{1}size\0\u{3}cdn_url\0\u{1}date\0\u{1}photo\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15450,17 +15128,9 @@ extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
   }
 }
 
-extension Voice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Voice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Voice"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "date"),
-    3: .same(proto: "duration"),
-    4: .same(proto: "size"),
-    5: .standard(proto: "mime_type"),
-    6: .standard(proto: "cdn_url"),
-    7: .same(proto: "waveform"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}date\0\u{1}duration\0\u{1}size\0\u{3}mime_type\0\u{3}cdn_url\0\u{1}waveform\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15522,15 +15192,9 @@ extension Voice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
   }
 }
 
-extension Photo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Photo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Photo"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "date"),
-    3: .same(proto: "sizes"),
-    4: .same(proto: "format"),
-    100: .standard(proto: "file_unique_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}date\0\u{1}sizes\0\u{1}format\0\u{4}`\u{1}file_unique_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15582,24 +15246,13 @@ extension Photo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase
   }
 }
 
-extension Photo.Format: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "FORMAT_UNSPECIFIED"),
-    1: .same(proto: "FORMAT_JPEG"),
-    2: .same(proto: "FORMAT_PNG"),
-  ]
+nonisolated extension Photo.Format: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0FORMAT_UNSPECIFIED\0\u{1}FORMAT_JPEG\0\u{1}FORMAT_PNG\0")
 }
 
-extension PhotoSize: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PhotoSize: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PhotoSize"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "type"),
-    2: .same(proto: "w"),
-    3: .same(proto: "h"),
-    4: .same(proto: "size"),
-    5: .same(proto: "bytes"),
-    6: .standard(proto: "cdn_url"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}w\0\u{1}h\0\u{1}size\0\u{1}bytes\0\u{3}cdn_url\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15656,14 +15309,9 @@ extension PhotoSize: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
   }
 }
 
-extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcError"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "req_msg_id"),
-    2: .standard(proto: "error_code"),
-    3: .same(proto: "message"),
-    4: .same(proto: "code"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{3}error_code\0\u{1}message\0\u{1}code\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15706,105 +15354,13 @@ extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
   }
 }
 
-extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "UNKNOWN"),
-    1: .same(proto: "BAD_REQUEST"),
-    2: .same(proto: "UNAUTHENTICATED"),
-    3: .same(proto: "RATE_LIMIT"),
-    4: .same(proto: "INTERNAL_ERROR"),
-    5: .same(proto: "PEER_ID_INVALID"),
-    6: .same(proto: "MESSAGE_ID_INVALID"),
-    7: .same(proto: "USER_ID_INVALID"),
-    8: .same(proto: "USER_ALREADY_MEMBER"),
-    9: .same(proto: "SPACE_ID_INVALID"),
-    10: .same(proto: "CHAT_ID_INVALID"),
-    11: .same(proto: "EMAIL_INVALID"),
-    12: .same(proto: "PHONE_NUMBER_INVALID"),
-    13: .same(proto: "SPACE_ADMIN_REQUIRED"),
-    14: .same(proto: "SPACE_OWNER_REQUIRED"),
-    15: .same(proto: "USERNAME_INVALID"),
-    16: .same(proto: "USERNAME_TAKEN"),
-    17: .same(proto: "FIRST_NAME_INVALID"),
-  ]
+nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNKNOWN\0\u{1}BAD_REQUEST\0\u{1}UNAUTHENTICATED\0\u{1}RATE_LIMIT\0\u{1}INTERNAL_ERROR\0\u{1}PEER_ID_INVALID\0\u{1}MESSAGE_ID_INVALID\0\u{1}USER_ID_INVALID\0\u{1}USER_ALREADY_MEMBER\0\u{1}SPACE_ID_INVALID\0\u{1}CHAT_ID_INVALID\0\u{1}EMAIL_INVALID\0\u{1}PHONE_NUMBER_INVALID\0\u{1}SPACE_ADMIN_REQUIRED\0\u{1}SPACE_OWNER_REQUIRED\0\u{1}USERNAME_INVALID\0\u{1}USERNAME_TAKEN\0\u{1}FIRST_NAME_INVALID\0")
 }
 
-extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "method"),
-    2: .same(proto: "getMe"),
-    3: .same(proto: "getPeerPhoto"),
-    4: .same(proto: "deleteMessages"),
-    5: .same(proto: "sendMessage"),
-    6: .same(proto: "getChatHistory"),
-    7: .same(proto: "addReaction"),
-    8: .same(proto: "deleteReaction"),
-    9: .same(proto: "editMessage"),
-    10: .same(proto: "createChat"),
-    11: .same(proto: "getSpaceMembers"),
-    12: .same(proto: "deleteChat"),
-    13: .same(proto: "inviteToSpace"),
-    14: .same(proto: "getChatParticipants"),
-    15: .same(proto: "addChatParticipant"),
-    16: .same(proto: "removeChatParticipant"),
-    17: .same(proto: "translateMessages"),
-    18: .same(proto: "getChats"),
-    19: .same(proto: "updateUserSettings"),
-    20: .same(proto: "getUserSettings"),
-    21: .same(proto: "sendComposeAction"),
-    22: .same(proto: "createBot"),
-    23: .same(proto: "deleteMember"),
-    24: .same(proto: "markAsUnread"),
-    25: .same(proto: "getUpdatesState"),
-    26: .same(proto: "getChat"),
-    27: .same(proto: "getUpdates"),
-    28: .same(proto: "updateMemberAccess"),
-    29: .same(proto: "searchMessages"),
-    30: .same(proto: "forwardMessages"),
-    31: .same(proto: "updateChatVisibility"),
-    32: .same(proto: "pinMessage"),
-    33: .same(proto: "updateChatInfo"),
-    34: .same(proto: "listBots"),
-    35: .same(proto: "revealBotToken"),
-    36: .same(proto: "moveThread"),
-    37: .same(proto: "rotateBotToken"),
-    38: .same(proto: "updateBotProfile"),
-    39: .same(proto: "getMessages"),
-    40: .same(proto: "updateDialogNotificationSettings"),
-    41: .same(proto: "readMessages"),
-    42: .same(proto: "updatePushNotificationDetails"),
-    43: .same(proto: "createSubthread"),
-    44: .same(proto: "getBotCommands"),
-    45: .same(proto: "setBotCommands"),
-    46: .same(proto: "getPeerBotCommands"),
-    47: .same(proto: "showInChatList"),
-    48: .same(proto: "reserveChatIds"),
-    49: .same(proto: "invokeMessageAction"),
-    50: .same(proto: "answerMessageAction"),
-    51: .same(proto: "revokeSession"),
-    52: .same(proto: "updateDialogOpen"),
-    53: .same(proto: "updateDialogOrder"),
-    54: .same(proto: "clearChatHistory"),
-    55: .same(proto: "deleteBot"),
-    56: .same(proto: "deleteMessageAttachment"),
-    57: .same(proto: "setBotAvatar"),
-    58: .same(proto: "clearBotAvatar"),
-    59: .same(proto: "getBotPresence"),
-    60: .same(proto: "setBotPresenceState"),
-    61: .same(proto: "updateDialogFollowMode"),
-    62: .same(proto: "getSessions"),
-    63: .same(proto: "checkUsername"),
-    64: .same(proto: "changeUsername"),
-    65: .same(proto: "updateProfile"),
-    66: .same(proto: "getSpaceUrlPreviewExclusions"),
-    67: .same(proto: "addSpaceUrlPreviewExclusion"),
-    68: .same(proto: "removeSpaceUrlPreviewExclusion"),
-    69: .same(proto: "getUserGroups"),
-    70: .same(proto: "createUserGroup"),
-    71: .same(proto: "updateUserGroup"),
-    72: .same(proto: "deleteUserGroup"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -16736,6 +16292,32 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .deleteUserGroup(v)
         }
       }()
+      case 73: try {
+        var v: GetSpaceSettingsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getSpaceSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getSpaceSettings(v)
+        }
+      }()
+      case 74: try {
+        var v: ToggleSpaceGridInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .toggleSpaceGrid(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .toggleSpaceGrid(v)
+        }
+      }()
       default: break
       }
     }
@@ -17034,6 +16616,14 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .deleteUserGroup(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 72)
     }()
+    case .getSpaceSettings?: try {
+      guard case .getSpaceSettings(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 73)
+    }()
+    case .toggleSpaceGrid?: try {
+      guard case .toggleSpaceGrid(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 74)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -17047,82 +16637,9 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
   }
 }
 
-extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "req_msg_id"),
-    2: .same(proto: "getMe"),
-    3: .same(proto: "getPeerPhoto"),
-    4: .same(proto: "deleteMessages"),
-    5: .same(proto: "sendMessage"),
-    6: .same(proto: "getChatHistory"),
-    7: .same(proto: "addReaction"),
-    8: .same(proto: "deleteReaction"),
-    9: .same(proto: "editMessage"),
-    10: .same(proto: "createChat"),
-    11: .same(proto: "getSpaceMembers"),
-    12: .same(proto: "deleteChat"),
-    13: .same(proto: "inviteToSpace"),
-    14: .same(proto: "getChatParticipants"),
-    15: .same(proto: "addChatParticipant"),
-    16: .same(proto: "removeChatParticipant"),
-    17: .same(proto: "translateMessages"),
-    18: .same(proto: "getChats"),
-    19: .same(proto: "updateUserSettings"),
-    20: .same(proto: "getUserSettings"),
-    21: .same(proto: "sendComposeAction"),
-    22: .same(proto: "createBot"),
-    23: .same(proto: "deleteMember"),
-    24: .same(proto: "markAsUnread"),
-    25: .same(proto: "getUpdatesState"),
-    26: .same(proto: "getChat"),
-    27: .same(proto: "getUpdates"),
-    28: .same(proto: "updateMemberAccess"),
-    29: .same(proto: "searchMessages"),
-    30: .same(proto: "forwardMessages"),
-    31: .same(proto: "updateChatVisibility"),
-    32: .same(proto: "pinMessage"),
-    33: .same(proto: "updateChatInfo"),
-    34: .same(proto: "listBots"),
-    35: .same(proto: "revealBotToken"),
-    36: .same(proto: "moveThread"),
-    37: .same(proto: "rotateBotToken"),
-    38: .same(proto: "updateBotProfile"),
-    39: .same(proto: "getMessages"),
-    40: .same(proto: "updateDialogNotificationSettings"),
-    41: .same(proto: "readMessages"),
-    42: .same(proto: "updatePushNotificationDetails"),
-    43: .same(proto: "createSubthread"),
-    44: .same(proto: "getBotCommands"),
-    45: .same(proto: "setBotCommands"),
-    46: .same(proto: "getPeerBotCommands"),
-    47: .same(proto: "showInChatList"),
-    48: .same(proto: "reserveChatIds"),
-    49: .same(proto: "invokeMessageAction"),
-    50: .same(proto: "answerMessageAction"),
-    51: .same(proto: "revokeSession"),
-    52: .same(proto: "updateDialogOpen"),
-    53: .same(proto: "updateDialogOrder"),
-    54: .same(proto: "clearChatHistory"),
-    55: .same(proto: "deleteBot"),
-    56: .same(proto: "deleteMessageAttachment"),
-    57: .same(proto: "setBotAvatar"),
-    58: .same(proto: "clearBotAvatar"),
-    59: .same(proto: "getBotPresence"),
-    60: .same(proto: "setBotPresenceState"),
-    61: .same(proto: "updateDialogFollowMode"),
-    62: .same(proto: "getSessions"),
-    63: .same(proto: "checkUsername"),
-    64: .same(proto: "changeUsername"),
-    65: .same(proto: "updateProfile"),
-    66: .same(proto: "getSpaceUrlPreviewExclusions"),
-    67: .same(proto: "addSpaceUrlPreviewExclusion"),
-    68: .same(proto: "removeSpaceUrlPreviewExclusion"),
-    69: .same(proto: "getUserGroups"),
-    70: .same(proto: "createUserGroup"),
-    71: .same(proto: "updateUserGroup"),
-    72: .same(proto: "deleteUserGroup"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18054,6 +17571,32 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           self.result = .deleteUserGroup(v)
         }
       }()
+      case 73: try {
+        var v: GetSpaceSettingsResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .getSpaceSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .getSpaceSettings(v)
+        }
+      }()
+      case 74: try {
+        var v: ToggleSpaceGridResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .toggleSpaceGrid(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .toggleSpaceGrid(v)
+        }
+      }()
       default: break
       }
     }
@@ -18352,6 +17895,14 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       guard case .deleteUserGroup(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 72)
     }()
+    case .getSpaceSettings?: try {
+      guard case .getSpaceSettings(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 73)
+    }()
+    case .toggleSpaceGrid?: try {
+      guard case .toggleSpaceGrid(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 74)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -18365,13 +17916,9 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
   }
 }
 
-extension UpdateBucket: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateBucket: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBucket"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "user"),
-    2: .same(proto: "space"),
-    3: .same(proto: "chat"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}user\0\u{1}space\0\u{1}chat\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18453,7 +18000,7 @@ extension UpdateBucket: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension UpdateBucketUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateBucketUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBucketUser"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -18472,11 +18019,9 @@ extension UpdateBucketUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension UpdateBucketSpace: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateBucketSpace: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBucketSpace"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18504,11 +18049,9 @@ extension UpdateBucketSpace: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension UpdateBucketChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateBucketChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBucketChat"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18540,15 +18083,9 @@ extension UpdateBucketChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bucket"),
-    2: .standard(proto: "start_seq"),
-    3: .standard(proto: "total_limit"),
-    4: .standard(proto: "seq_end"),
-    5: .same(proto: "limit"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bucket\0\u{3}start_seq\0\u{3}total_limit\0\u{3}seq_end\0\u{1}limit\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18600,14 +18137,9 @@ extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSidecars"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "users"),
-    2: .same(proto: "chats"),
-    3: .same(proto: "dialogs"),
-    4: .same(proto: "spaces"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}users\0\u{1}chats\0\u{1}dialogs\0\u{1}spaces\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18650,16 +18182,9 @@ extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-    2: .same(proto: "seq"),
-    3: .same(proto: "date"),
-    4: .same(proto: "final"),
-    5: .standard(proto: "result_type"),
-    6: .same(proto: "sidecars"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0\u{1}seq\0\u{1}date\0\u{1}final\0\u{3}result_type\0\u{1}sidecars\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18716,21 +18241,13 @@ extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension GetUpdatesResult.ResultType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "RESULT_TYPE_UNSPECIFIED"),
-    1: .same(proto: "RESULT_TYPE_EMPTY"),
-    2: .same(proto: "RESULT_TYPE_SLICE"),
-    3: .same(proto: "RESULT_TYPE_TOO_LONG"),
-  ]
+nonisolated extension GetUpdatesResult.ResultType: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0RESULT_TYPE_UNSPECIFIED\0\u{1}RESULT_TYPE_EMPTY\0\u{1}RESULT_TYPE_SLICE\0\u{1}RESULT_TYPE_TOO_LONG\0")
 }
 
-extension DeleteMemberInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteMemberInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteMemberInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .standard(proto: "user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18763,11 +18280,9 @@ extension DeleteMemberInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension DeleteMemberResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteMemberResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteMemberResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18795,13 +18310,9 @@ extension DeleteMemberResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension UpdateMemberAccessInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateMemberAccessInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMemberAccessInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .standard(proto: "user_id"),
-    3: .same(proto: "role"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}user_id\0\u{1}role\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18843,11 +18354,9 @@ extension UpdateMemberAccessInput: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UpdateMemberAccessResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateMemberAccessResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMemberAccessResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18875,16 +18384,182 @@ extension UpdateMemberAccessResult: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension SpaceUrlPreviewExclusion: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SpaceSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SpaceSettings"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}grid_enabled\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.gridEnabled) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    if self.gridEnabled != false {
+      try visitor.visitSingularBoolField(value: self.gridEnabled, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SpaceSettings, rhs: SpaceSettings) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.gridEnabled != rhs.gridEnabled {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetSpaceSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpaceSettingsInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpaceSettingsInput, rhs: GetSpaceSettingsInput) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetSpaceSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpaceSettingsResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}settings\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._settings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._settings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpaceSettingsResult, rhs: GetSpaceSettingsResult) -> Bool {
+    if lhs._settings != rhs._settings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ToggleSpaceGridInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ToggleSpaceGridInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{1}enabled\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.enabled) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    if self.enabled != false {
+      try visitor.visitSingularBoolField(value: self.enabled, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ToggleSpaceGridInput, rhs: ToggleSpaceGridInput) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.enabled != rhs.enabled {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ToggleSpaceGridResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ToggleSpaceGridResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}settings\0\u{1}updates\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._settings) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._settings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ToggleSpaceGridResult, rhs: ToggleSpaceGridResult) -> Bool {
+    if lhs._settings != rhs._settings {return false}
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SpaceUrlPreviewExclusion: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SpaceUrlPreviewExclusion"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "space_id"),
-    3: .same(proto: "host"),
-    4: .standard(proto: "path_prefix"),
-    5: .standard(proto: "created_by"),
-    6: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}space_id\0\u{1}host\0\u{3}path_prefix\0\u{3}created_by\0\u{1}date\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18941,11 +18616,9 @@ extension SpaceUrlPreviewExclusion: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension GetSpaceUrlPreviewExclusionsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetSpaceUrlPreviewExclusionsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSpaceUrlPreviewExclusionsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18973,11 +18646,9 @@ extension GetSpaceUrlPreviewExclusionsInput: SwiftProtobuf.Message, SwiftProtobu
   }
 }
 
-extension GetSpaceUrlPreviewExclusionsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetSpaceUrlPreviewExclusionsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSpaceUrlPreviewExclusionsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "exclusions"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}exclusions\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19005,15 +18676,9 @@ extension GetSpaceUrlPreviewExclusionsResult: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
-extension AddSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AddSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AddSpaceUrlPreviewExclusionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .same(proto: "host"),
-    3: .standard(proto: "path_prefix"),
-    4: .standard(proto: "peer_id"),
-    5: .standard(proto: "message_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{1}host\0\u{3}path_prefix\0\u{3}peer_id\0\u{3}message_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19065,12 +18730,9 @@ extension AddSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProtobuf
   }
 }
 
-extension AddSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AddSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AddSpaceUrlPreviewExclusionResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "exclusion"),
-    2: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}exclusion\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19107,12 +18769,9 @@ extension AddSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProtobu
   }
 }
 
-extension RemoveSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RemoveSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RemoveSpaceUrlPreviewExclusionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .standard(proto: "exclusion_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}exclusion_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19145,7 +18804,7 @@ extension RemoveSpaceUrlPreviewExclusionInput: SwiftProtobuf.Message, SwiftProto
   }
 }
 
-extension RemoveSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RemoveSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RemoveSpaceUrlPreviewExclusionResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -19164,11 +18823,9 @@ extension RemoveSpaceUrlPreviewExclusionResult: SwiftProtobuf.Message, SwiftProt
   }
 }
 
-extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesStateInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    2: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{2}date\0\u{c}\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19196,12 +18853,9 @@ extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesStateResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "date"),
-    2: .standard(proto: "updates_found"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}date\0\u{3}updates_found\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19238,11 +18892,9 @@ extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19274,14 +18926,9 @@ extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .same(proto: "dialog"),
-    3: .standard(proto: "pinned_message_ids"),
-    4: .standard(proto: "anchor_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0\u{3}pinned_message_ids\0\u{3}anchor_message\0")
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
@@ -19289,15 +18936,11 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     var _pinnedMessageIds: [Int64] = []
     var _anchorMessage: Message? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -19374,11 +19017,9 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension ShowInChatListInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ShowInChatListInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ShowInChatListInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19410,26 +19051,19 @@ extension ShowInChatListInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension ShowInChatListResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ShowInChatListResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ShowInChatListResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .same(proto: "dialog"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0")
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -19494,13 +19128,9 @@ extension ShowInChatListResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogOpenInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .same(proto: "open"),
-    3: .same(proto: "order"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}open\0\u{1}order\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19542,14 +19172,9 @@ extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogOpenResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .same(proto: "dialog"),
-    3: .same(proto: "user"),
-    4: .standard(proto: "deleted_chat"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0\u{1}user\0\u{3}deleted_chat\0")
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
@@ -19557,15 +19182,11 @@ extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
     var _user: User? = nil
     var _deletedChat: Bool? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -19642,14 +19263,9 @@ extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension UpdateDialogOrderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogOrderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogOrderInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .same(proto: "order"),
-    3: .standard(proto: "pinned_order"),
-    4: .same(proto: "pinned"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}order\0\u{3}pinned_order\0\u{1}pinned\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19696,28 +19312,20 @@ extension UpdateDialogOrderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension UpdateDialogOrderResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogOrderResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogOrderResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .same(proto: "dialog"),
-    3: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0\u{1}user\0")
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
     var _user: User? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -19788,12 +19396,9 @@ extension UpdateDialogOrderResult: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UpdateDialogFollowModeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogFollowModeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogFollowModeInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "follow_mode"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}follow_mode\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19830,11 +19435,9 @@ extension UpdateDialogFollowModeInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
   }
 }
 
-extension UpdateDialogFollowModeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogFollowModeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogFollowModeResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19862,11 +19465,9 @@ extension UpdateDialogFollowModeResult: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
-extension MarkAsUnreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MarkAsUnreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MarkAsUnreadInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19898,11 +19499,9 @@ extension MarkAsUnreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension MarkAsUnreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MarkAsUnreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MarkAsUnreadResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19930,12 +19529,9 @@ extension MarkAsUnreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension ReadMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ReadMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ReadMessagesInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "max_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}max_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19972,11 +19568,9 @@ extension ReadMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension ReadMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ReadMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ReadMessagesResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20004,13 +19598,9 @@ extension ReadMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension CreateBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateBotInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "name"),
-    2: .same(proto: "username"),
-    3: .standard(proto: "add_to_space"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}username\0\u{3}add_to_space\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20052,12 +19642,9 @@ extension CreateBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension CreateBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateBotResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bot"),
-    2: .same(proto: "token"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bot\0\u{1}token\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20094,7 +19681,7 @@ extension CreateBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension ListBotsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ListBotsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ListBotsInput"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -20113,11 +19700,9 @@ extension ListBotsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension ListBotsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ListBotsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ListBotsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bots"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bots\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20145,11 +19730,9 @@ extension ListBotsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension DeleteBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteBotInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20177,11 +19760,9 @@ extension DeleteBotInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension DeleteBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteBotResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20209,13 +19790,9 @@ extension DeleteBotResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension DeleteMessageAttachmentInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteMessageAttachmentInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteMessageAttachmentInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "message_id"),
-    3: .standard(proto: "attachment_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_id\0\u{3}attachment_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20257,11 +19834,9 @@ extension DeleteMessageAttachmentInput: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
-extension DeleteMessageAttachmentResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteMessageAttachmentResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteMessageAttachmentResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20289,11 +19864,9 @@ extension DeleteMessageAttachmentResult: SwiftProtobuf.Message, SwiftProtobuf._M
   }
 }
 
-extension RevokeSessionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RevokeSessionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RevokeSessionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "session_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}session_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20321,12 +19894,9 @@ extension RevokeSessionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension RevokeSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RevokeSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RevokeSessionResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "revoked"),
-    2: .standard(proto: "already_revoked"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}revoked\0\u{3}already_revoked\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20359,7 +19929,7 @@ extension RevokeSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension GetSessionsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetSessionsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSessionsInput"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -20378,22 +19948,9 @@ extension GetSessionsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension AccountSession: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AccountSession: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AccountSession"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .standard(proto: "client_type"),
-    3: .standard(proto: "client_version"),
-    4: .standard(proto: "os_version"),
-    5: .standard(proto: "device_name"),
-    6: .same(proto: "city"),
-    7: .same(proto: "country"),
-    8: .same(proto: "timezone"),
-    9: .standard(proto: "created_at"),
-    10: .standard(proto: "last_active_at"),
-    11: .same(proto: "active"),
-    12: .same(proto: "current"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}client_type\0\u{3}client_version\0\u{3}os_version\0\u{3}device_name\0\u{1}city\0\u{1}country\0\u{1}timezone\0\u{3}created_at\0\u{3}last_active_at\0\u{1}active\0\u{1}current\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20480,11 +20037,9 @@ extension AccountSession: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension GetSessionsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetSessionsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSessionsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "sessions"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}sessions\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20512,11 +20067,9 @@ extension GetSessionsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension CheckUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CheckUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CheckUsernameInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "username"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}username\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20544,12 +20097,9 @@ extension CheckUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension CheckUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CheckUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CheckUsernameResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "username"),
-    2: .same(proto: "availability"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}username\0\u{1}availability\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20582,11 +20132,9 @@ extension CheckUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension ChangeUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ChangeUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ChangeUsernameInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "username"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}username\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20614,12 +20162,9 @@ extension ChangeUsernameInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension ChangeUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ChangeUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ChangeUsernameResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "user"),
-    2: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}user\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20656,13 +20201,9 @@ extension ChangeUsernameResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateProfileInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "first_name"),
-    2: .standard(proto: "last_name"),
-    3: .same(proto: "bio"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}first_name\0\u{3}last_name\0\u{1}bio\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20704,12 +20245,9 @@ extension UpdateProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension UpdateProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateProfileResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "user"),
-    2: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}user\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20746,13 +20284,9 @@ extension UpdateProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension BotCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension BotCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BotCommand"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "command"),
-    2: .same(proto: "description"),
-    3: .standard(proto: "sort_order"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}command\0\u{1}description\0\u{3}sort_order\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20794,12 +20328,9 @@ extension BotCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 }
 
-extension PeerBotCommands: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PeerBotCommands: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PeerBotCommands"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bot"),
-    2: .same(proto: "commands"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bot\0\u{1}commands\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20836,11 +20367,9 @@ extension PeerBotCommands: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension GetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetBotCommandsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20868,11 +20397,9 @@ extension GetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension GetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetBotCommandsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "commands"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}commands\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20900,12 +20427,9 @@ extension GetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension SetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SetBotCommandsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-    2: .same(proto: "commands"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{1}commands\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20938,11 +20462,9 @@ extension SetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension SetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SetBotCommandsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "commands"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}commands\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20970,11 +20492,9 @@ extension SetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension GetPeerBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetPeerBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetPeerBotCommandsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21006,11 +20526,9 @@ extension GetPeerBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension GetPeerBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetPeerBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetPeerBotCommandsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bots"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bots\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21038,11 +20556,9 @@ extension GetPeerBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension RevealBotTokenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RevealBotTokenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RevealBotTokenInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21070,11 +20586,9 @@ extension RevealBotTokenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension RevealBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RevealBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RevealBotTokenResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "token"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21102,11 +20616,9 @@ extension RevealBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension RotateBotTokenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RotateBotTokenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RotateBotTokenInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21134,11 +20646,9 @@ extension RotateBotTokenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension RotateBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RotateBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RotateBotTokenResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "token"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21166,13 +20676,9 @@ extension RotateBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBotProfileInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-    2: .same(proto: "name"),
-    3: .standard(proto: "photo_file_unique_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{1}name\0\u{3}photo_file_unique_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21214,11 +20720,9 @@ extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension UpdateBotProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateBotProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBotProfileResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bot"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bot\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21250,15 +20754,9 @@ extension UpdateBotProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension SetBotAvatarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SetBotAvatarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SetBotAvatarInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-    2: .same(proto: "kind"),
-    3: .standard(proto: "display_name"),
-    4: .same(proto: "description"),
-    5: .standard(proto: "file_unique_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{1}kind\0\u{3}display_name\0\u{1}description\0\u{3}file_unique_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21310,11 +20808,9 @@ extension SetBotAvatarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension SetBotAvatarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SetBotAvatarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SetBotAvatarResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bot"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bot\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21346,11 +20842,9 @@ extension SetBotAvatarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension ClearBotAvatarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ClearBotAvatarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ClearBotAvatarInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21378,11 +20872,9 @@ extension ClearBotAvatarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension ClearBotAvatarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ClearBotAvatarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ClearBotAvatarResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "bot"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bot\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21414,11 +20906,9 @@ extension ClearBotAvatarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension GetBotPresenceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetBotPresenceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetBotPresenceInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21450,14 +20940,9 @@ extension GetBotPresenceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension GetBotPresenceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetBotPresenceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetBotPresenceResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-    2: .same(proto: "avatar"),
-    3: .same(proto: "state"),
-    4: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{1}avatar\0\u{1}state\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21504,12 +20989,9 @@ extension GetBotPresenceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension SetBotPresenceStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SetBotPresenceStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SetBotPresenceStateInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .same(proto: "state"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}state\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21546,7 +21028,7 @@ extension SetBotPresenceStateInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension SetBotPresenceStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SetBotPresenceStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SetBotPresenceStateResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -21565,7 +21047,7 @@ extension SetBotPresenceStateResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
   }
 }
 
-extension GetUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUserSettingsInput"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -21584,11 +21066,9 @@ extension GetUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension GetUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUserSettingsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_settings"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21620,11 +21100,9 @@ extension GetUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UserSettings"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "notification_settings"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}notification_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21656,16 +21134,9 @@ extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
   }
 }
 
-extension NotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension NotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "NotificationSettings"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "mode"),
-    2: .same(proto: "silent"),
-    3: .standard(proto: "zen_mode_requires_mention"),
-    4: .standard(proto: "zen_mode_uses_default_rules"),
-    5: .standard(proto: "zen_mode_custom_rules"),
-    6: .standard(proto: "disable_dm_notifications"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}mode\0\u{1}silent\0\u{3}zen_mode_requires_mention\0\u{3}zen_mode_uses_default_rules\0\u{3}zen_mode_custom_rules\0\u{3}disable_dm_notifications\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21722,22 +21193,13 @@ extension NotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension NotificationSettings.Mode: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "MODE_UNSPECIFIED"),
-    1: .same(proto: "MODE_ALL"),
-    2: .same(proto: "MODE_NONE"),
-    3: .same(proto: "MODE_MENTIONS"),
-    4: .same(proto: "MODE_IMPORTANT_ONLY"),
-    5: .same(proto: "MODE_ONLY_MENTIONS"),
-  ]
+nonisolated extension NotificationSettings.Mode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MODE_UNSPECIFIED\0\u{1}MODE_ALL\0\u{1}MODE_NONE\0\u{1}MODE_MENTIONS\0\u{1}MODE_IMPORTANT_ONLY\0\u{1}MODE_ONLY_MENTIONS\0")
 }
 
-extension DialogNotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DialogNotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DialogNotificationSettings"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "mode"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}mode\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21769,20 +21231,13 @@ extension DialogNotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
-extension DialogNotificationSettings.Mode: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "MODE_UNSPECIFIED"),
-    1: .same(proto: "MODE_ALL"),
-    2: .same(proto: "MODE_MENTIONS"),
-    3: .same(proto: "MODE_NONE"),
-  ]
+nonisolated extension DialogNotificationSettings.Mode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MODE_UNSPECIFIED\0\u{1}MODE_ALL\0\u{1}MODE_MENTIONS\0\u{1}MODE_NONE\0")
 }
 
-extension UpdateUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUserSettingsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_settings"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21814,11 +21269,9 @@ extension UpdateUserSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UpdateUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUserSettingsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21846,12 +21299,9 @@ extension UpdateUserSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension UpdateDialogNotificationSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogNotificationSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogNotificationSettingsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "notification_settings"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}notification_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21888,11 +21338,9 @@ extension UpdateDialogNotificationSettingsInput: SwiftProtobuf.Message, SwiftPro
   }
 }
 
-extension UpdateDialogNotificationSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogNotificationSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogNotificationSettingsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21920,12 +21368,9 @@ extension UpdateDialogNotificationSettingsResult: SwiftProtobuf.Message, SwiftPr
   }
 }
 
-extension SendComposeActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SendComposeActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SendComposeActionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .same(proto: "action"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}action\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -21962,7 +21407,7 @@ extension SendComposeActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension SendComposeActionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SendComposeActionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SendComposeActionResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -21981,13 +21426,9 @@ extension SendComposeActionResult: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension PushContentEncryptionKey: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PushContentEncryptionKey: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PushContentEncryptionKey"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "public_key"),
-    2: .standard(proto: "key_id"),
-    3: .same(proto: "algorithm"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}public_key\0\u{3}key_id\0\u{1}algorithm\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22029,18 +21470,13 @@ extension PushContentEncryptionKey: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension PushContentEncryptionKey.Algorithm: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "ALGORITHM_UNSPECIFIED"),
-    1: .same(proto: "ALGORITHM_X25519_HKDF_SHA256_AES256_GCM"),
-  ]
+nonisolated extension PushContentEncryptionKey.Algorithm: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ALGORITHM_UNSPECIFIED\0\u{1}ALGORITHM_X25519_HKDF_SHA256_AES256_GCM\0")
 }
 
-extension ApnsNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ApnsNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ApnsNotificationMethod"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "device_token"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_token\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22068,11 +21504,9 @@ extension ApnsNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension ExpoAndroidNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ExpoAndroidNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ExpoAndroidNotificationMethod"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "expo_push_token"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}expo_push_token\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22100,13 +21534,9 @@ extension ExpoAndroidNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._M
   }
 }
 
-extension PushNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PushNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PushNotificationMethod"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "provider"),
-    2: .same(proto: "apns"),
-    3: .standard(proto: "expo_android"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}provider\0\u{1}apns\0\u{3}expo_android\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22176,14 +21606,9 @@ extension PushNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension UpdatePushNotificationDetailsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdatePushNotificationDetailsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdatePushNotificationDetailsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "apple_push_token"),
-    2: .standard(proto: "push_content_encryption_key"),
-    3: .standard(proto: "push_content_version"),
-    4: .standard(proto: "notification_method"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}apple_push_token\0\u{3}push_content_encryption_key\0\u{3}push_content_version\0\u{3}notification_method\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22230,7 +21655,7 @@ extension UpdatePushNotificationDetailsInput: SwiftProtobuf.Message, SwiftProtob
   }
 }
 
-extension UpdatePushNotificationDetailsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdatePushNotificationDetailsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdatePushNotificationDetailsResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -22249,7 +21674,7 @@ extension UpdatePushNotificationDetailsResult: SwiftProtobuf.Message, SwiftProto
   }
 }
 
-extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsInput"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -22268,15 +21693,9 @@ extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "dialogs"),
-    2: .same(proto: "chats"),
-    3: .same(proto: "spaces"),
-    4: .same(proto: "users"),
-    5: .same(proto: "messages"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22324,13 +21743,9 @@ extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension TranslateMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension TranslateMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "TranslateMessagesInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "message_ids"),
-    4: .same(proto: "language"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_ids\0\u{2}\u{2}language\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22372,11 +21787,9 @@ extension TranslateMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension TranslateMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension TranslateMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "TranslateMessagesResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "translations"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}translations\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22404,16 +21817,9 @@ extension TranslateMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageTranslation"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "message_id"),
-    2: .same(proto: "language"),
-    3: .same(proto: "translation"),
-    4: .same(proto: "date"),
-    5: .same(proto: "entities"),
-    6: .standard(proto: "msg_rev"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{1}language\0\u{1}translation\0\u{1}date\0\u{1}entities\0\u{3}msg_rev\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22470,7 +21876,7 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension GetMeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetMeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetMeInput"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -22489,11 +21895,9 @@ extension GetMeInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 }
 
-extension GetMeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetMeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetMeResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}user\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22525,12 +21929,9 @@ extension GetMeResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementati
   }
 }
 
-extension GetPeerPhotoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetPeerPhotoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetPeerPhotoInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "photo_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}photo_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22567,11 +21968,9 @@ extension GetPeerPhotoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension GetPeerPhotoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetPeerPhotoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetPeerPhotoResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "photo"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}photo\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22603,12 +22002,9 @@ extension GetPeerPhotoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension DeleteMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteMessagesInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "message_ids"),
-    2: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_ids\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22645,11 +22041,9 @@ extension DeleteMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension DeleteMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteMessagesResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22677,14 +22071,9 @@ extension DeleteMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension ClearChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ClearChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ClearChatHistoryInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    4: .standard(proto: "space_id"),
-    2: .standard(proto: "keep_last_days"),
-    3: .standard(proto: "delete_reply_threads"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}keep_last_days\0\u{3}delete_reply_threads\0\u{3}space_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22749,11 +22138,9 @@ extension ClearChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension ClearChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ClearChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ClearChatHistoryResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22781,16 +22168,9 @@ extension ClearChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "EditMessageInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "message_id"),
-    2: .standard(proto: "peer_id"),
-    3: .same(proto: "text"),
-    7: .same(proto: "entities"),
-    8: .standard(proto: "parse_markdown"),
-    9: .same(proto: "actions"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}peer_id\0\u{1}text\0\u{2}\u{4}entities\0\u{3}parse_markdown\0\u{1}actions\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22847,11 +22227,9 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension EditMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension EditMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "EditMessageResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -22879,15 +22257,9 @@ extension EditMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputMedia"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "photo"),
-    2: .same(proto: "video"),
-    3: .same(proto: "document"),
-    4: .same(proto: "nudge"),
-    5: .same(proto: "voice"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}photo\0\u{1}video\0\u{1}document\0\u{1}nudge\0\u{1}voice\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23003,11 +22375,9 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 }
 
-extension InputMediaPhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputMediaPhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputMediaPhoto"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "photo_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}photo_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23035,11 +22405,9 @@ extension InputMediaPhoto: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension InputMediaVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputMediaVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputMediaVideo"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "video_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}video_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23067,11 +22435,9 @@ extension InputMediaVideo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension InputMediaDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputMediaDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputMediaDocument"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "document_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}document_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23099,11 +22465,9 @@ extension InputMediaDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension InputMediaVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputMediaVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputMediaVoice"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "voice_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}voice_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23131,7 +22495,7 @@ extension InputMediaVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension InputMediaNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputMediaNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputMediaNudge"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -23150,22 +22514,9 @@ extension InputMediaNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SendMessageInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .same(proto: "message"),
-    3: .standard(proto: "reply_to_msg_id"),
-    4: .standard(proto: "random_id"),
-    5: .same(proto: "media"),
-    1000: .standard(proto: "temporary_send_date"),
-    6: .standard(proto: "is_sticker"),
-    6000: .standard(proto: "has_link"),
-    7: .same(proto: "entities"),
-    8: .standard(proto: "parse_markdown"),
-    9: .standard(proto: "send_mode"),
-    10: .same(proto: "actions"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}message\0\u{3}reply_to_msg_id\0\u{3}random_id\0\u{1}media\0\u{3}is_sticker\0\u{1}entities\0\u{3}parse_markdown\0\u{3}send_mode\0\u{1}actions\0\u{4}^\u{f}temporary_send_date\0\u{4}HN\u{1}has_link\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23252,11 +22603,9 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension SendMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SendMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SendMessageResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    2: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{2}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23284,13 +22633,9 @@ extension SendMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension InvokeMessageActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InvokeMessageActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InvokeMessageActionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "message_id"),
-    3: .standard(proto: "action_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_id\0\u{3}action_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23332,11 +22677,9 @@ extension InvokeMessageActionInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension InvokeMessageActionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InvokeMessageActionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InvokeMessageActionResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "interaction_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}interaction_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23364,12 +22707,9 @@ extension InvokeMessageActionResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
   }
 }
 
-extension AnswerMessageActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AnswerMessageActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AnswerMessageActionInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "interaction_id"),
-    2: .same(proto: "ui"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}interaction_id\0\u{1}ui\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23406,7 +22746,7 @@ extension AnswerMessageActionInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension AnswerMessageActionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AnswerMessageActionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AnswerMessageActionResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -23425,14 +22765,9 @@ extension AnswerMessageActionResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
   }
 }
 
-extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ForwardMessagesInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "from_peer_id"),
-    2: .standard(proto: "message_ids"),
-    3: .standard(proto: "to_peer_id"),
-    4: .standard(proto: "share_forward_header"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}from_peer_id\0\u{3}message_ids\0\u{3}to_peer_id\0\u{3}share_forward_header\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23479,11 +22814,9 @@ extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension ForwardMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ForwardMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ForwardMessagesResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23511,20 +22844,9 @@ extension ForwardMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatHistoryInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "offset_id"),
-    3: .same(proto: "limit"),
-    4: .same(proto: "mode"),
-    5: .standard(proto: "anchor_id"),
-    6: .standard(proto: "before_id"),
-    7: .standard(proto: "after_id"),
-    8: .standard(proto: "before_limit"),
-    9: .standard(proto: "after_limit"),
-    10: .standard(proto: "include_anchor"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}offset_id\0\u{1}limit\0\u{1}mode\0\u{3}anchor_id\0\u{3}before_id\0\u{3}after_id\0\u{3}before_limit\0\u{3}after_limit\0\u{3}include_anchor\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23601,11 +22923,9 @@ extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatHistoryResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "messages"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23633,12 +22953,9 @@ extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension GetMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetMessagesInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "message_ids"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23675,11 +22992,9 @@ extension GetMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension GetMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetMessagesResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "messages"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23707,15 +23022,9 @@ extension GetMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SearchMessagesInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .same(proto: "queries"),
-    3: .same(proto: "limit"),
-    4: .standard(proto: "offset_id"),
-    5: .same(proto: "filter"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}queries\0\u{1}limit\0\u{3}offset_id\0\u{1}filter\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23767,11 +23076,9 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SearchMessagesResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "messages"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23799,12 +23106,9 @@ extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension InputChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InputChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InputChatParticipant"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_id"),
-    2: .standard(proto: "group_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0\u{3}group_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23841,11 +23145,9 @@ extension InputChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension ReserveChatIdsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ReserveChatIdsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ReserveChatIdsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "count"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}count\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23873,12 +23175,9 @@ extension ReserveChatIdsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension ReservedChatId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ReservedChatId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ReservedChatId"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "expires_at"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}expires_at\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23911,11 +23210,9 @@ extension ReservedChatId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension ReserveChatIdsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ReserveChatIdsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ReserveChatIdsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "reservations"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reservations\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23943,17 +23240,9 @@ extension ReserveChatIdsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateChatInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "title"),
-    2: .standard(proto: "space_id"),
-    3: .same(proto: "description"),
-    4: .same(proto: "emoji"),
-    5: .standard(proto: "is_public"),
-    6: .same(proto: "participants"),
-    7: .standard(proto: "reserved_chat_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{3}space_id\0\u{1}description\0\u{1}emoji\0\u{3}is_public\0\u{1}participants\0\u{3}reserved_chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24015,26 +23304,19 @@ extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension CreateChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateChatResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .same(proto: "dialog"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0")
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -24099,16 +23381,9 @@ extension CreateChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateSubthreadInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "parent_chat_id"),
-    2: .standard(proto: "parent_message_id"),
-    3: .same(proto: "title"),
-    4: .same(proto: "description"),
-    5: .same(proto: "emoji"),
-    6: .same(proto: "participants"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}parent_chat_id\0\u{3}parent_message_id\0\u{1}title\0\u{1}description\0\u{1}emoji\0\u{1}participants\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24165,28 +23440,20 @@ extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension CreateSubthreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateSubthreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateSubthreadResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .same(proto: "dialog"),
-    3: .standard(proto: "anchor_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0\u{3}anchor_message\0")
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
     var _anchorMessage: Message? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -24257,11 +23524,9 @@ extension CreateSubthreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension GetSpaceMembersInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetSpaceMembersInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSpaceMembersInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24289,12 +23554,9 @@ extension GetSpaceMembersInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension GetSpaceMembersResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetSpaceMembersResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSpaceMembersResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "members"),
-    2: .same(proto: "users"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}members\0\u{1}users\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24327,11 +23589,9 @@ extension GetSpaceMembersResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension GetUserGroupsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUserGroupsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUserGroupsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24359,12 +23619,9 @@ extension GetUserGroupsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension GetUserGroupsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetUserGroupsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUserGroupsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "groups"),
-    2: .same(proto: "users"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}groups\0\u{1}users\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24397,14 +23654,9 @@ extension GetUserGroupsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension CreateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUserGroupInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .same(proto: "name"),
-    3: .same(proto: "description"),
-    4: .standard(proto: "user_ids"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{1}name\0\u{1}description\0\u{3}user_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24451,11 +23703,9 @@ extension CreateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension CreateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension CreateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUserGroupResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "group"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}group\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24487,14 +23737,9 @@ extension CreateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension UpdateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUserGroupInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "group_id"),
-    2: .same(proto: "name"),
-    3: .same(proto: "description"),
-    4: .standard(proto: "user_ids"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}group_id\0\u{1}name\0\u{1}description\0\u{3}user_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24541,11 +23786,9 @@ extension UpdateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUserGroupResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "group"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}group\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24577,11 +23820,9 @@ extension UpdateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension DeleteUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteUserGroupInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "group_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}group_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24609,7 +23850,7 @@ extension DeleteUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension DeleteUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteUserGroupResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -24628,66 +23869,20 @@ extension DeleteUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
   }
 }
 
-extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Update"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "seq"),
-    2: .same(proto: "date"),
-    4: .standard(proto: "new_message"),
-    5: .standard(proto: "edit_message"),
-    6: .standard(proto: "update_message_id"),
-    7: .standard(proto: "delete_messages"),
-    8: .standard(proto: "update_compose_action"),
-    9: .standard(proto: "update_user_status"),
-    10: .standard(proto: "message_attachment"),
-    11: .standard(proto: "update_reaction"),
-    12: .standard(proto: "delete_reaction"),
-    13: .standard(proto: "participant_add"),
-    14: .standard(proto: "participant_delete"),
-    15: .standard(proto: "new_chat"),
-    16: .standard(proto: "delete_chat"),
-    17: .standard(proto: "space_member_add"),
-    18: .standard(proto: "space_member_delete"),
-    19: .standard(proto: "join_space"),
-    20: .standard(proto: "update_read_max_id"),
-    21: .standard(proto: "update_user_settings"),
-    22: .standard(proto: "new_message_notification"),
-    23: .standard(proto: "mark_as_unread"),
-    24: .standard(proto: "chat_skip_pts"),
-    25: .standard(proto: "chat_has_new_updates"),
-    26: .standard(proto: "space_has_new_updates"),
-    27: .standard(proto: "space_member_update"),
-    28: .standard(proto: "chat_visibility"),
-    29: .standard(proto: "dialog_archived"),
-    30: .standard(proto: "chat_info"),
-    31: .standard(proto: "pinned_messages"),
-    32: .standard(proto: "chat_moved"),
-    33: .standard(proto: "dialog_notification_settings"),
-    34: .standard(proto: "chat_open"),
-    35: .standard(proto: "message_action_invoked"),
-    36: .standard(proto: "message_action_answered"),
-    37: .standard(proto: "clear_chat_history"),
-    38: .standard(proto: "bot_presence"),
-    39: .standard(proto: "dialog_follow_mode"),
-    40: .standard(proto: "updated_user"),
-    41: .standard(proto: "participant_group_add"),
-    42: .standard(proto: "participant_group_delete"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}date\0\u{4}\u{2}new_message\0\u{3}edit_message\0\u{3}update_message_id\0\u{3}delete_messages\0\u{3}update_compose_action\0\u{3}update_user_status\0\u{3}message_attachment\0\u{3}update_reaction\0\u{3}delete_reaction\0\u{3}participant_add\0\u{3}participant_delete\0\u{3}new_chat\0\u{3}delete_chat\0\u{3}space_member_add\0\u{3}space_member_delete\0\u{3}join_space\0\u{3}update_read_max_id\0\u{3}update_user_settings\0\u{3}new_message_notification\0\u{3}mark_as_unread\0\u{3}chat_skip_pts\0\u{3}chat_has_new_updates\0\u{3}space_has_new_updates\0\u{3}space_member_update\0\u{3}chat_visibility\0\u{3}dialog_archived\0\u{3}chat_info\0\u{3}pinned_messages\0\u{3}chat_moved\0\u{3}dialog_notification_settings\0\u{3}chat_open\0\u{3}message_action_invoked\0\u{3}message_action_answered\0\u{3}clear_chat_history\0\u{3}bot_presence\0\u{3}dialog_follow_mode\0\u{3}updated_user\0\u{3}participant_group_add\0\u{3}participant_group_delete\0\u{3}space_settings\0\u{c}\u{3}\u{1}")
 
   fileprivate class _StorageClass {
     var _seq: Int32? = nil
     var _date: Int64? = nil
     var _update: Update.OneOf_Update?
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -25222,6 +24417,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .participantGroupDelete(v)
           }
         }()
+        case 43: try {
+          var v: UpdateSpaceSettings?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .spaceSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .spaceSettings(v)
+          }
+        }()
         default: break
         }
       }
@@ -25397,6 +24605,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
         guard case .participantGroupDelete(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
       }()
+      case .spaceSettings?: try {
+        guard case .spaceSettings(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 43)
+      }()
       case nil: break
       }
     }
@@ -25420,12 +24632,9 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
   }
 }
 
-extension UpdateSpaceHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateSpaceHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSpaceHasNewUpdates"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .standard(proto: "update_seq"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}update_seq\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25458,13 +24667,9 @@ extension UpdateSpaceHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatHasNewUpdates"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    3: .standard(proto: "peer_id"),
-    2: .standard(proto: "update_seq"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}update_seq\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25506,11 +24711,9 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatSkipPts"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25538,12 +24741,9 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension UpdateChatVisibility: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatVisibility: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatVisibility"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "is_public"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}is_public\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25576,14 +24776,9 @@ extension UpdateChatVisibility: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatInfo"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .same(proto: "title"),
-    3: .same(proto: "emoji"),
-    4: .same(proto: "untitled"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}title\0\u{1}emoji\0\u{1}untitled\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25630,12 +24825,9 @@ extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdatePinnedMessages"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "message_ids"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25672,13 +24864,9 @@ extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatMoved"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .standard(proto: "old_space_id"),
-    3: .standard(proto: "new_space_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{3}old_space_id\0\u{3}new_space_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25720,12 +24908,9 @@ extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateNewMessageNotification"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "message"),
-    2: .same(proto: "reason"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0\u{1}reason\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25762,19 +24947,13 @@ extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
-extension UpdateNewMessageNotification.Reason: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "REASON_UNSPECIFIED"),
-    1: .same(proto: "REASON_MENTION"),
-    2: .same(proto: "REASON_IMPORTANT"),
-  ]
+nonisolated extension UpdateNewMessageNotification.Reason: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0REASON_UNSPECIFIED\0\u{1}REASON_MENTION\0\u{1}REASON_IMPORTANT\0")
 }
 
-extension UpdateUserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateUserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUserSettings"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "settings"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25806,11 +24985,48 @@ extension UpdateUserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension UpdateUpdatedUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateSpaceSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateSpaceSettings"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{1}settings\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._settings) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    try { if let v = self._settings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateSpaceSettings, rhs: UpdateSpaceSettings) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs._settings != rhs._settings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UpdateUpdatedUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUpdatedUser"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}user\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25842,12 +25058,9 @@ extension UpdateUpdatedUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension UpdateSpaceMemberAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateSpaceMemberAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSpaceMemberAdd"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "member"),
-    2: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}member\0\u{1}user\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25884,12 +25097,9 @@ extension UpdateSpaceMemberAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSpaceMemberDelete"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    2: .standard(proto: "user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25922,11 +25132,9 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UpdateSpaceMemberUpdate: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateSpaceMemberUpdate: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSpaceMemberUpdate"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "member"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}member\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -25958,12 +25166,9 @@ extension UpdateSpaceMemberUpdate: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UpdateJoinSpace: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateJoinSpace: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateJoinSpace"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "space"),
-    2: .same(proto: "member"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}space\0\u{1}member\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26000,13 +25205,9 @@ extension UpdateJoinSpace: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension UpdateReadMaxId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateReadMaxId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateReadMaxId"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    3: .standard(proto: "read_max_id"),
-    4: .standard(proto: "unread_count"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{4}\u{2}read_max_id\0\u{3}unread_count\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26048,12 +25249,9 @@ extension UpdateReadMaxId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension UpdateMarkAsUnread: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateMarkAsUnread: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMarkAsUnread"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "unread_mark"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}unread_mark\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26090,12 +25288,9 @@ extension UpdateMarkAsUnread: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension UpdateDialogArchived: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogArchived: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogArchived"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .same(proto: "archived"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}archived\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26132,12 +25327,9 @@ extension UpdateDialogArchived: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateDialogNotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogNotificationSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogNotificationSettings"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "notification_settings"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}notification_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26174,12 +25366,9 @@ extension UpdateDialogNotificationSettings: SwiftProtobuf.Message, SwiftProtobuf
   }
 }
 
-extension UpdateDialogFollowMode: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDialogFollowMode: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogFollowMode"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "follow_mode"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}follow_mode\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26216,12 +25405,9 @@ extension UpdateDialogFollowMode: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension UpdateNewChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateNewChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateNewChat"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    3: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{2}\u{2}user\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26258,28 +25444,20 @@ extension UpdateNewChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension UpdateChatOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatOpen"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-    2: .same(proto: "dialog"),
-    3: .same(proto: "user"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0\u{1}user\0")
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
     var _user: User? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -26350,16 +25528,9 @@ extension UpdateChatOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMessageActionInvoked"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "interaction_id"),
-    2: .standard(proto: "chat_id"),
-    3: .standard(proto: "message_id"),
-    4: .standard(proto: "actor_user_id"),
-    5: .standard(proto: "action_id"),
-    6: .same(proto: "data"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}interaction_id\0\u{3}chat_id\0\u{3}message_id\0\u{3}actor_user_id\0\u{3}action_id\0\u{1}data\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26412,12 +25583,9 @@ extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
-extension UpdateMessageActionAnswered: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateMessageActionAnswered: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMessageActionAnswered"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "interaction_id"),
-    2: .same(proto: "ui"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}interaction_id\0\u{1}ui\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26454,11 +25622,9 @@ extension UpdateMessageActionAnswered: SwiftProtobuf.Message, SwiftProtobuf._Mes
   }
 }
 
-extension UpdateDeleteChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDeleteChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDeleteChat"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26490,11 +25656,9 @@ extension UpdateDeleteChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateNewMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26526,11 +25690,9 @@ extension UpdateNewMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateEditMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26562,12 +25724,9 @@ extension UpdateEditMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDeleteMessages"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "message_ids"),
-    2: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_ids\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26604,17 +25763,9 @@ extension UpdateDeleteMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateClearChatHistory: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateClearChatHistory: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateClearChatHistory"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    4: .standard(proto: "space_id"),
-    2: .standard(proto: "before_date"),
-    3: .standard(proto: "delete_reply_threads"),
-    5: .standard(proto: "deleted_chat_ids"),
-    6: .standard(proto: "orphaned_chat_ids"),
-    7: .standard(proto: "detached_chat_ids"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}before_date\0\u{3}delete_reply_threads\0\u{3}space_id\0\u{3}deleted_chat_ids\0\u{3}orphaned_chat_ids\0\u{3}detached_chat_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26694,15 +25845,9 @@ extension UpdateClearChatHistory: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 }
 
-extension UpdateBotPresence: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateBotPresence: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateBotPresence"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "bot_user_id"),
-    2: .standard(proto: "peer_id"),
-    3: .same(proto: "state"),
-    4: .same(proto: "avatar"),
-    5: .standard(proto: "avatar_changed"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}peer_id\0\u{1}state\0\u{1}avatar\0\u{3}avatar_changed\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26754,12 +25899,9 @@ extension UpdateBotPresence: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension UpdateMessageId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateMessageId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMessageId"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "message_id"),
-    2: .standard(proto: "random_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}random_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26792,13 +25934,9 @@ extension UpdateMessageId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension UpdateComposeAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateComposeAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateComposeAction"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_id"),
-    2: .standard(proto: "peer_id"),
-    3: .same(proto: "action"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0\u{3}peer_id\0\u{1}action\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26840,25 +25978,13 @@ extension UpdateComposeAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension UpdateComposeAction.ComposeAction: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "NONE"),
-    1: .same(proto: "TYPING"),
-    2: .same(proto: "UPLOADING_PHOTO"),
-    3: .same(proto: "UPLOADING_DOCUMENT"),
-    4: .same(proto: "UPLOADING_VIDEO"),
-    5: .same(proto: "RECORDING_VOICE"),
-  ]
+nonisolated extension UpdateComposeAction.ComposeAction: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NONE\0\u{1}TYPING\0\u{1}UPLOADING_PHOTO\0\u{1}UPLOADING_DOCUMENT\0\u{1}UPLOADING_VIDEO\0\u{1}RECORDING_VOICE\0")
 }
 
-extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMessageAttachment"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "attachment"),
-    2: .standard(proto: "message_id"),
-    3: .standard(proto: "peer_id"),
-    50: .standard(proto: "chat_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}attachment\0\u{3}message_id\0\u{3}peer_id\0\u{4}/chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26905,11 +26031,9 @@ extension UpdateMessageAttachment: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension UpdateReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateReaction"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "reaction"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reaction\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26941,14 +26065,9 @@ extension UpdateReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 }
 
-extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDeleteReaction"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "emoji"),
-    2: .standard(proto: "chat_id"),
-    3: .standard(proto: "message_id"),
-    4: .standard(proto: "user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}emoji\0\u{3}chat_id\0\u{3}message_id\0\u{3}user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26991,12 +26110,9 @@ extension UpdateDeleteReaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateUserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateUserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUserStatus"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_id"),
-    2: .same(proto: "status"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0\u{1}status\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27033,12 +26149,9 @@ extension UpdateUserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension ChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ChatParticipant"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "user_id"),
-    2: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0\u{1}date\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27071,12 +26184,9 @@ extension ChatParticipant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension ChatParticipantGroup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension ChatParticipantGroup: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ChatParticipantGroup"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "group_id"),
-    2: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}group_id\0\u{1}date\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27109,12 +26219,9 @@ extension ChatParticipantGroup: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension UpdateChatParticipantAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatParticipantAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatParticipantAdd"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .same(proto: "participant"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}participant\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27151,12 +26258,9 @@ extension UpdateChatParticipantAdd: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension UpdateChatParticipantDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatParticipantDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatParticipantDelete"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "user_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}user_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27189,12 +26293,9 @@ extension UpdateChatParticipantDelete: SwiftProtobuf.Message, SwiftProtobuf._Mes
   }
 }
 
-extension UpdateChatParticipantGroupAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatParticipantGroupAdd: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatParticipantGroupAdd"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "group_participant"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}group_participant\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27231,12 +26332,9 @@ extension UpdateChatParticipantGroupAdd: SwiftProtobuf.Message, SwiftProtobuf._M
   }
 }
 
-extension UpdateChatParticipantGroupDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatParticipantGroupDelete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatParticipantGroupDelete"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "group_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}group_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27269,12 +26367,9 @@ extension UpdateChatParticipantGroupDelete: SwiftProtobuf.Message, SwiftProtobuf
   }
 }
 
-extension UserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UserStatus"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "online"),
-    2: .standard(proto: "last_online"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}online\0\u{3}last_online\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27311,19 +26406,13 @@ extension UserStatus: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 }
 
-extension UserStatus.Status: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    0: .same(proto: "UNKNOWN"),
-    1: .same(proto: "ONLINE"),
-    2: .same(proto: "OFFLINE"),
-  ]
+nonisolated extension UserStatus.Status: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNKNOWN\0\u{1}ONLINE\0\u{1}OFFLINE\0")
 }
 
-extension LastOnline: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension LastOnline: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "LastOnline"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "date"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}date\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27355,11 +26444,9 @@ extension LastOnline: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
   }
 }
 
-extension DeleteChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteChatInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27391,7 +26478,7 @@ extension DeleteChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension DeleteChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DeleteChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DeleteChatResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -27410,11 +26497,9 @@ extension DeleteChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension SpaceMemberOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SpaceMemberOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SpaceMemberOptions"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "can_access_public_chats"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}can_access_public_chats\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27442,7 +26527,7 @@ extension SpaceMemberOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension SpaceAdminOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SpaceAdminOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SpaceAdminOptions"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -27461,12 +26546,9 @@ extension SpaceAdminOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension SpaceMemberRole: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension SpaceMemberRole: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SpaceMemberRole"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "member"),
-    2: .same(proto: "admin"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}member\0\u{1}admin\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27531,15 +26613,9 @@ extension SpaceMemberRole: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InviteToSpaceInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "space_id"),
-    6: .same(proto: "role"),
-    3: .standard(proto: "user_id"),
-    4: .same(proto: "email"),
-    5: .standard(proto: "phone_number"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{4}\u{2}user_id\0\u{1}email\0\u{3}phone_number\0\u{1}role\0\u{c}\u{2}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27616,14 +26692,9 @@ extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension InviteToSpaceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension InviteToSpaceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InviteToSpaceResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "user"),
-    2: .same(proto: "member"),
-    3: .same(proto: "chat"),
-    4: .same(proto: "dialog"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}user\0\u{1}member\0\u{1}chat\0\u{1}dialog\0")
 
   fileprivate class _StorageClass {
     var _user: User? = nil
@@ -27631,15 +26702,11 @@ extension InviteToSpaceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
 
-    #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
       // This will force a copy to be made of this reference when the first mutation occurs;
       // hence, it is safe to mark this as `nonisolated(unsafe)`.
       static nonisolated(unsafe) let defaultInstance = _StorageClass()
-    #else
-      static let defaultInstance = _StorageClass()
-    #endif
 
     private init() {}
 
@@ -27716,11 +26783,9 @@ extension InviteToSpaceResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension GetChatParticipantsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatParticipantsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatParticipantsInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27748,14 +26813,9 @@ extension GetChatParticipantsInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension GetChatParticipantsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension GetChatParticipantsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatParticipantsResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "participants"),
-    2: .same(proto: "users"),
-    3: .standard(proto: "group_participants"),
-    4: .same(proto: "groups"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}participants\0\u{1}users\0\u{3}group_participants\0\u{1}groups\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27798,13 +26858,9 @@ extension GetChatParticipantsResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
   }
 }
 
-extension AddChatParticipantInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AddChatParticipantInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AddChatParticipantInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "user_id"),
-    3: .standard(proto: "group_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}user_id\0\u{3}group_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27846,13 +26902,9 @@ extension AddChatParticipantInput: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 }
 
-extension AddChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension AddChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AddChatParticipantResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "participant"),
-    2: .standard(proto: "group_participant"),
-    3: .same(proto: "group"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}participant\0\u{3}group_participant\0\u{1}group\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27894,13 +26946,9 @@ extension AddChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._Messag
   }
 }
 
-extension RemoveChatParticipantInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RemoveChatParticipantInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RemoveChatParticipantInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "user_id"),
-    3: .standard(proto: "group_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}user_id\0\u{3}group_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -27942,7 +26990,7 @@ extension RemoveChatParticipantInput: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
-extension RemoveChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension RemoveChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RemoveChatParticipantResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
 
@@ -27961,13 +27009,9 @@ extension RemoveChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._Mes
   }
 }
 
-extension UpdateChatVisibilityInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatVisibilityInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatVisibilityInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "is_public"),
-    3: .same(proto: "participants"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}is_public\0\u{1}participants\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28005,11 +27049,9 @@ extension UpdateChatVisibilityInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
   }
 }
 
-extension UpdateChatVisibilityResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatVisibilityResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatVisibilityResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28041,13 +27083,9 @@ extension UpdateChatVisibilityResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
-extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatInfoInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .same(proto: "title"),
-    3: .same(proto: "emoji"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}title\0\u{1}emoji\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28089,11 +27127,9 @@ extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   }
 }
 
-extension UpdateChatInfoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension UpdateChatInfoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateChatInfoResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28125,12 +27161,9 @@ extension UpdateChatInfoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 }
 
-extension MoveThreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MoveThreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MoveThreadInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "chat_id"),
-    2: .standard(proto: "space_id"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{3}space_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28167,11 +27200,9 @@ extension MoveThreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension MoveThreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension MoveThreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MoveThreadResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "chat"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28203,13 +27234,9 @@ extension MoveThreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension PinMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PinMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PinMessageInput"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "peer_id"),
-    2: .standard(proto: "message_id"),
-    3: .same(proto: "unpin"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_id\0\u{1}unpin\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28251,11 +27278,9 @@ extension PinMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
-extension PinMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension PinMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PinMessageResult"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "updates"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28283,12 +27308,9 @@ extension PinMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
-extension DraftMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension DraftMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DraftMessage"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "text"),
-    2: .same(proto: "entities"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}entities\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {

@@ -900,6 +900,20 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     }
   }
 
+  if (payload.oneofKind === "spaceSettings") {
+    return {
+      seq,
+      date,
+      update: {
+        oneofKind: "spaceSettings",
+        spaceSettings: {
+          spaceId: payload.spaceSettings.settings?.spaceId ?? BigInt(update.entityId),
+          settings: payload.spaceSettings.settings,
+        },
+      },
+    }
+  }
+
   log.warn("Unhandled space update", { type: payload.oneofKind })
   return null
 }

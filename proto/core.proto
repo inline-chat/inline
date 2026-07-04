@@ -981,6 +981,8 @@ enum Method {
   CREATE_USER_GROUP = 69;
   UPDATE_USER_GROUP = 70;
   DELETE_USER_GROUP = 71;
+  GET_SPACE_SETTINGS = 72;
+  TOGGLE_SPACE_GRID = 73;
 }
 
 message RpcCall {
@@ -1057,6 +1059,8 @@ message RpcCall {
     CreateUserGroupInput createUserGroup = 70;
     UpdateUserGroupInput updateUserGroup = 71;
     DeleteUserGroupInput deleteUserGroup = 72;
+    GetSpaceSettingsInput getSpaceSettings = 73;
+    ToggleSpaceGridInput toggleSpaceGrid = 74;
   }
 }
 
@@ -1135,6 +1139,8 @@ message RpcResult {
     CreateUserGroupResult createUserGroup = 70;
     UpdateUserGroupResult updateUserGroup = 71;
     DeleteUserGroupResult deleteUserGroup = 72;
+    GetSpaceSettingsResult getSpaceSettings = 73;
+    ToggleSpaceGridResult toggleSpaceGrid = 74;
   }
 }
 
@@ -1230,6 +1236,29 @@ message UpdateMemberAccessInput {
 }
 
 message UpdateMemberAccessResult { repeated Update updates = 1; }
+
+message SpaceSettings {
+  int64 space_id = 1;
+  bool grid_enabled = 2;
+}
+
+message GetSpaceSettingsInput {
+  int64 space_id = 1;
+}
+
+message GetSpaceSettingsResult {
+  SpaceSettings settings = 1;
+}
+
+message ToggleSpaceGridInput {
+  int64 space_id = 1;
+  bool enabled = 2;
+}
+
+message ToggleSpaceGridResult {
+  SpaceSettings settings = 1;
+  repeated Update updates = 2;
+}
 
 message SpaceUrlPreviewExclusion {
   int64 id = 1;
@@ -2133,6 +2162,7 @@ message Update {
     UpdateUpdatedUser updated_user = 40;
     UpdateChatParticipantGroupAdd participant_group_add = 41;
     UpdateChatParticipantGroupDelete participant_group_delete = 42;
+    UpdateSpaceSettings space_settings = 43;
   }
 }
 
@@ -2212,6 +2242,11 @@ message UpdateNewMessageNotification {
 }
 
 message UpdateUserSettings { UserSettings settings = 1; }
+
+message UpdateSpaceSettings {
+  int64 space_id = 1;
+  SpaceSettings settings = 2;
+}
 
 // Update when a user's profile/account fields change.
 message UpdateUpdatedUser { User user = 1; }

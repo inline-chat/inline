@@ -8,7 +8,11 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -16,49 +20,49 @@ import SwiftProtobuf
 // incompatible with the version of SwiftProtobuf to which you are linking.
 // Please ensure that you are building against the same version of the API
 // that was used to generate this file.
-fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
+fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
   struct _2: SwiftProtobuf.ProtobufAPIVersion_2 {}
   typealias Version = _2
 }
 
-public struct Client_MessageContentPayload: Sendable {
+public nonisolated struct Client_MessageContentPayload: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var voice: Client_MessageVoiceContent {
-    get {return _voice ?? Client_MessageVoiceContent()}
+    get {_voice ?? Client_MessageVoiceContent()}
     set {_voice = newValue}
   }
   /// Returns true if `voice` has been explicitly set.
-  public var hasVoice: Bool {return self._voice != nil}
+  public var hasVoice: Bool {self._voice != nil}
   /// Clears the value of `voice`. Subsequent reads from it will return its default value.
   public mutating func clearVoice() {self._voice = nil}
 
   public var actions: MessageActions {
-    get {return _actions ?? MessageActions()}
+    get {_actions ?? MessageActions()}
     set {_actions = newValue}
   }
   /// Returns true if `actions` has been explicitly set.
-  public var hasActions: Bool {return self._actions != nil}
+  public var hasActions: Bool {self._actions != nil}
   /// Clears the value of `actions`. Subsequent reads from it will return its default value.
   public mutating func clearActions() {self._actions = nil}
 
   public var replies: MessageReplies {
-    get {return _replies ?? MessageReplies()}
+    get {_replies ?? MessageReplies()}
     set {_replies = newValue}
   }
   /// Returns true if `replies` has been explicitly set.
-  public var hasReplies: Bool {return self._replies != nil}
+  public var hasReplies: Bool {self._replies != nil}
   /// Clears the value of `replies`. Subsequent reads from it will return its default value.
   public mutating func clearReplies() {self._replies = nil}
 
   public var serviceMessage: MessageService {
-    get {return _serviceMessage ?? MessageService()}
+    get {_serviceMessage ?? MessageService()}
     set {_serviceMessage = newValue}
   }
   /// Returns true if `serviceMessage` has been explicitly set.
-  public var hasServiceMessage: Bool {return self._serviceMessage != nil}
+  public var hasServiceMessage: Bool {self._serviceMessage != nil}
   /// Clears the value of `serviceMessage`. Subsequent reads from it will return its default value.
   public mutating func clearServiceMessage() {self._serviceMessage = nil}
 
@@ -72,7 +76,7 @@ public struct Client_MessageContentPayload: Sendable {
   fileprivate var _serviceMessage: MessageService? = nil
 }
 
-public struct Client_MessageVoiceContent: @unchecked Sendable {
+public nonisolated struct Client_MessageVoiceContent: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -98,7 +102,7 @@ public struct Client_MessageVoiceContent: @unchecked Sendable {
   public init() {}
 }
 
-public struct Client_Transaction: Sendable {
+public nonisolated struct Client_Transaction: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -108,11 +112,11 @@ public struct Client_Transaction: Sendable {
   public var date: Int64 = 0
 
   public var call: RpcCall {
-    get {return _call ?? RpcCall()}
+    get {_call ?? RpcCall()}
     set {_call = newValue}
   }
   /// Returns true if `call` has been explicitly set.
-  public var hasCall: Bool {return self._call != nil}
+  public var hasCall: Bool {self._call != nil}
   /// Clears the value of `call`. Subsequent reads from it will return its default value.
   public mutating func clearCall() {self._call = nil}
 
@@ -125,16 +129,11 @@ public struct Client_Transaction: Sendable {
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
-fileprivate let _protobuf_package = "client"
+fileprivate nonisolated let _protobuf_package = "client"
 
-extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MessageContentPayload"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "voice"),
-    2: .same(proto: "actions"),
-    3: .same(proto: "replies"),
-    4: .standard(proto: "service_message"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}voice\0\u{1}actions\0\u{1}replies\0\u{3}service_message\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -181,18 +180,9 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
   }
 }
 
-extension Client_MessageVoiceContent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Client_MessageVoiceContent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MessageVoiceContent"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .standard(proto: "voice_id"),
-    2: .same(proto: "duration"),
-    3: .same(proto: "waveform"),
-    4: .standard(proto: "mime_type"),
-    5: .standard(proto: "cdn_url"),
-    6: .standard(proto: "local_relative_path"),
-    7: .same(proto: "size"),
-    8: .same(proto: "transcription"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}voice_id\0\u{1}duration\0\u{1}waveform\0\u{3}mime_type\0\u{3}cdn_url\0\u{3}local_relative_path\0\u{1}size\0\u{1}transcription\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -255,13 +245,9 @@ extension Client_MessageVoiceContent: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
-extension Client_Transaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+nonisolated extension Client_Transaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Transaction"
-  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
-    1: .same(proto: "id"),
-    2: .same(proto: "date"),
-    3: .same(proto: "call"),
-  ]
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}date\0\u{1}call\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
