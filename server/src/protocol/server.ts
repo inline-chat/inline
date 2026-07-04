@@ -18,6 +18,7 @@ import { DialogFollowMode } from "@inline-chat/protocol/core";
 import { DialogNotificationSettings } from "@inline-chat/protocol/core";
 import { Space } from "@inline-chat/protocol/core";
 import { Peer } from "@inline-chat/protocol/core";
+import { SpaceSettings } from "@inline-chat/protocol/core";
 import { User } from "@inline-chat/protocol/core";
 import { Member } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
@@ -129,6 +130,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerSpaceUpdateClearHistory space_clear_history = 28;
          */
         spaceClearHistory: ServerSpaceUpdateClearHistory;
+    } | {
+        oneofKind: "spaceSettings";
+        /**
+         * @generated from protobuf field: server.ServerSpaceUpdateSettings space_settings = 38;
+         */
+        spaceSettings: ServerSpaceUpdateSettings;
     } | {
         oneofKind: "userSpaceMemberDelete";
         /**
@@ -593,6 +600,17 @@ export interface ServerSpaceUpdateClearHistory {
      */
     detachedChatIds: bigint[];
 }
+/**
+ * Update for a space when its settings change.
+ *
+ * @generated from protobuf message server.ServerSpaceUpdateSettings
+ */
+export interface ServerSpaceUpdateSettings {
+    /**
+     * @generated from protobuf field: SpaceSettings settings = 1;
+     */
+    settings?: SpaceSettings;
+}
 // ------------------------------------------------------------
 // User bucket updates
 // ------------------------------------------------------------
@@ -776,6 +794,19 @@ export interface ServerUserUpdateUser {
 // ------------------------------------------------------------
 
 /**
+ * @generated from protobuf message server.StoredSpaceSettings
+ */
+export interface StoredSpaceSettings {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: optional bool grid_enabled = 2;
+     */
+    gridEnabled?: boolean;
+}
+/**
  * @generated from protobuf message server.SystemMessage
  */
 export interface SystemMessage {
@@ -910,6 +941,7 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 12, name: "space_member_update", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberUpdate },
             { no: 19, name: "space_member_add", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberAdd },
             { no: 28, name: "space_clear_history", kind: "message", oneof: "update", T: () => ServerSpaceUpdateClearHistory },
+            { no: 38, name: "space_settings", kind: "message", oneof: "update", T: () => ServerSpaceUpdateSettings },
             { no: 10, name: "user_space_member_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateSpaceMemberDelete },
             { no: 11, name: "user_chat_participant_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantDelete },
             { no: 31, name: "user_chat_participant_add", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantAdd },
@@ -1039,6 +1071,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                     message.update = {
                         oneofKind: "spaceClearHistory",
                         spaceClearHistory: ServerSpaceUpdateClearHistory.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceClearHistory)
+                    };
+                    break;
+                case /* server.ServerSpaceUpdateSettings space_settings */ 38:
+                    message.update = {
+                        oneofKind: "spaceSettings",
+                        spaceSettings: ServerSpaceUpdateSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceSettings)
                     };
                     break;
                 case /* server.ServerUserUpdateSpaceMemberDelete user_space_member_delete */ 10:
@@ -1218,6 +1256,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerSpaceUpdateClearHistory space_clear_history = 28; */
         if (message.update.oneofKind === "spaceClearHistory")
             ServerSpaceUpdateClearHistory.internalBinaryWrite(message.update.spaceClearHistory, writer.tag(28, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerSpaceUpdateSettings space_settings = 38; */
+        if (message.update.oneofKind === "spaceSettings")
+            ServerSpaceUpdateSettings.internalBinaryWrite(message.update.spaceSettings, writer.tag(38, WireType.LengthDelimited).fork(), options).join();
         /* server.ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10; */
         if (message.update.oneofKind === "userSpaceMemberDelete")
             ServerUserUpdateSpaceMemberDelete.internalBinaryWrite(message.update.userSpaceMemberDelete, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
@@ -2448,6 +2489,52 @@ class ServerSpaceUpdateClearHistory$Type extends MessageType<ServerSpaceUpdateCl
  */
 export const ServerSpaceUpdateClearHistory = new ServerSpaceUpdateClearHistory$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ServerSpaceUpdateSettings$Type extends MessageType<ServerSpaceUpdateSettings> {
+    constructor() {
+        super("server.ServerSpaceUpdateSettings", [
+            { no: 1, name: "settings", kind: "message", T: () => SpaceSettings }
+        ]);
+    }
+    create(value?: PartialMessage<ServerSpaceUpdateSettings>): ServerSpaceUpdateSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ServerSpaceUpdateSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerSpaceUpdateSettings): ServerSpaceUpdateSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* SpaceSettings settings */ 1:
+                    message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerSpaceUpdateSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* SpaceSettings settings = 1; */
+        if (message.settings)
+            SpaceSettings.internalBinaryWrite(message.settings, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerSpaceUpdateSettings
+ */
+export const ServerSpaceUpdateSettings = new ServerSpaceUpdateSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateSpaceMemberDelete$Type extends MessageType<ServerUserUpdateSpaceMemberDelete> {
     constructor() {
         super("server.ServerUserUpdateSpaceMemberDelete", [
@@ -3079,6 +3166,60 @@ class ServerUserUpdateUser$Type extends MessageType<ServerUserUpdateUser> {
  * @generated MessageType for protobuf message server.ServerUserUpdateUser
  */
 export const ServerUserUpdateUser = new ServerUserUpdateUser$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StoredSpaceSettings$Type extends MessageType<StoredSpaceSettings> {
+    constructor() {
+        super("server.StoredSpaceSettings", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "grid_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<StoredSpaceSettings>): StoredSpaceSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<StoredSpaceSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StoredSpaceSettings): StoredSpaceSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* optional bool grid_enabled */ 2:
+                    message.gridEnabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StoredSpaceSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* optional bool grid_enabled = 2; */
+        if (message.gridEnabled !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.gridEnabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.StoredSpaceSettings
+ */
+export const StoredSpaceSettings = new StoredSpaceSettings$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SystemMessage$Type extends MessageType<SystemMessage> {
     constructor() {

@@ -26,6 +26,7 @@ export const relations = defineRelations(
     members: schema.members,
     translations: schema.translations,
     userSettings: schema.userSettings,
+    spaceSettings: schema.spaceSettings,
     updates: schema.updates,
     botCommands: schema.botCommands,
     spaceUrlPreviewExclusions: schema.spaceUrlPreviewExclusions,
@@ -216,7 +217,19 @@ export const relations = defineRelations(
       }),
       members: r.many.members(),
       chats: r.many.chats(),
+      settings: r.one.spaceSettings({
+        from: r.spaces.id,
+        to: r.spaceSettings.spaceId,
+        optional: true,
+      }),
       urlPreviewExclusions: r.many.spaceUrlPreviewExclusions(),
+    },
+
+    spaceSettings: {
+      space: r.one.spaces({
+        from: r.spaceSettings.spaceId,
+        to: r.spaces.id,
+      }),
     },
 
     spaceUrlPreviewExclusions: {

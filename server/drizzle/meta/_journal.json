@@ -624,6 +624,13 @@
       "when": 1782742084970,
       "tag": "0088_user-groups",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1783107351786,
+      "tag": "0089_add_space_settings",
+      "breakpoints": true
     }
   ]
 }

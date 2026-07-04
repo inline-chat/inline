@@ -14,6 +14,7 @@ import { getSpaceMembers } from "./space.getSpaceMembers"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
 import { updateMemberAccess } from "./space.updateMemberAccess"
+import { getSpaceSettings, toggleSpaceGrid } from "./space.settings"
 import {
   addSpaceUrlPreviewExclusion,
   getSpaceUrlPreviewExclusions,
@@ -96,6 +97,8 @@ export const Functions = {
     inviteToSpace: inviteToSpace,
     deleteMember: deleteMember,
     updateMemberAccess: updateMemberAccess,
+    getSettings: getSpaceSettings,
+    toggleGrid: toggleSpaceGrid,
     getUrlPreviewExclusions: getSpaceUrlPreviewExclusions,
     addUrlPreviewExclusion: addSpaceUrlPreviewExclusion,
     removeUrlPreviewExclusion: removeSpaceUrlPreviewExclusion,

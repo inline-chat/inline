@@ -29,6 +29,7 @@ message ServerUpdate {
     ServerSpaceUpdateMemberUpdate space_member_update = 12;
     ServerSpaceUpdateMemberAdd space_member_add = 19;
     ServerSpaceUpdateClearHistory space_clear_history = 28;
+    ServerSpaceUpdateSettings space_settings = 38;
 
     // User bucket updates
     ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10;
@@ -198,6 +199,9 @@ message ServerSpaceUpdateClearHistory {
   repeated int64 detached_chat_ids = 6;
 }
 
+// Update for a space when its settings change.
+message ServerSpaceUpdateSettings { SpaceSettings settings = 1; }
+
 // ------------------------------------------------------------
 // User bucket updates
 // ------------------------------------------------------------
@@ -271,6 +275,11 @@ message ServerUserUpdateUser { User user = 1; }
 // ------------------------------------------------------------
 // Server-only stored payloads
 // ------------------------------------------------------------
+
+message StoredSpaceSettings {
+  int64 space_id = 1;
+  optional bool grid_enabled = 2;
+}
 
 message SystemMessage {
   oneof event {

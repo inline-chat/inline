@@ -72,6 +72,7 @@ import {
   getSpaceUrlPreviewExclusionsHandler,
   removeSpaceUrlPreviewExclusionHandler,
 } from "@in/server/realtime/handlers/space.urlPreviewExclusions"
+import { getSpaceSettingsHandler, toggleSpaceGridHandler } from "@in/server/realtime/handlers/space.settings"
 import {
   createUserGroupHandler,
   deleteUserGroupHandler,
@@ -239,6 +240,22 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
         handlerContext,
       )
       return { oneofKind: "removeSpaceUrlPreviewExclusion", removeSpaceUrlPreviewExclusion: result }
+    }
+
+    case Method.GET_SPACE_SETTINGS: {
+      if (call.input.oneofKind !== "getSpaceSettings") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getSpaceSettingsHandler(call.input.getSpaceSettings, handlerContext)
+      return { oneofKind: "getSpaceSettings", getSpaceSettings: result }
+    }
+
+    case Method.TOGGLE_SPACE_GRID: {
+      if (call.input.oneofKind !== "toggleSpaceGrid") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await toggleSpaceGridHandler(call.input.toggleSpaceGrid, handlerContext)
+      return { oneofKind: "toggleSpaceGrid", toggleSpaceGrid: result }
     }
 
     case Method.DELETE_CHAT: {
