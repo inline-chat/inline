@@ -48,7 +48,7 @@ let package = Package(
     .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", exact: "4.14.0"),
     .package(url: "https://github.com/inline-chat/GRDBQuery", from: "0.11.5"),
     .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.5.1"),
-    .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.2"),
+    .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.38.1"),
     .package(url: "https://github.com/Kuniwak/MultipartFormDataKit", from: "1.0.0"),
     .package(url: "https://github.com/kean/Get", from: "2.2.1"),
     .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),

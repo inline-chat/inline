@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="${ROOT_DIR}/.tools"
-SWIFTPB_VERSION="1.28.2"
+SWIFTPB_VERSION="1.38.1"
 SWIFTPB_DIR="${TOOLS_DIR}/swift-protobuf-${SWIFTPB_VERSION}"
 BIN_PATH="${TOOLS_DIR}/protoc-gen-swift"
 BIN_VERSION_PATH="${BIN_PATH}.version"
