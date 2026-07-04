@@ -166,7 +166,7 @@ async function collectTargets(options: Options): Promise<Target[]> {
     "apple/InlineIOSUI/.build-macos",
     "apple/InlineKit/.build",
     "apple/InlineKit/build",
-    "scripts/.tools/swift-protobuf-1.28.2/.build",
+    "scripts/.tools/swift-protobuf-1.38.1/.build",
     "cli/target",
     "cli/dist",
     "desktop/build",
