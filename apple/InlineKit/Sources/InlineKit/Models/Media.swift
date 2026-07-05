@@ -100,6 +100,8 @@ public struct Video: Codable, Sendable, Equatable, Hashable, Identifiable, Fetch
   public var thumbnailPhotoId: Int64?
   public var cdnUrl: String?
   public var localPath: String?
+  public var isAnimated: Bool = false
+  public var hasAudio: Bool? = nil
 
   public enum Columns {
     public static let id = Column(CodingKeys.id)
@@ -112,6 +114,8 @@ public struct Video: Codable, Sendable, Equatable, Hashable, Identifiable, Fetch
     public static let thumbnailPhotoId = Column(CodingKeys.thumbnailPhotoId)
     public static let cdnUrl = Column(CodingKeys.cdnUrl)
     public static let localPath = Column(CodingKeys.localPath)
+    public static let isAnimated = Column(CodingKeys.isAnimated)
+    public static let hasAudio = Column(CodingKeys.hasAudio)
   }
 }
 
@@ -232,7 +236,9 @@ public extension Video {
       duration: proto.duration > 0 ? Int(proto.duration) : nil,
       size: proto.size > 0 ? Int(proto.size) : nil,
       thumbnailPhotoId: localPhotoId,
-      cdnUrl: proto.cdnURL.isEmpty ? nil : proto.cdnURL
+      cdnUrl: proto.cdnURL.isEmpty ? nil : proto.cdnURL,
+      isAnimated: proto.hasIsAnimated ? proto.isAnimated : false,
+      hasAudio: proto.hasHasAudio_p ? proto.hasAudio_p : nil
     )
   }
 }
@@ -611,7 +617,9 @@ public extension Video {
         size: protoVideo.size > 0 ? Int(protoVideo.size) : nil,
         thumbnailPhotoId: thumbnailPhotoId ?? existingVideo.thumbnailPhotoId,
         cdnUrl: protoVideo.hasCdnURL ? protoVideo.cdnURL : nil,
-        localPath: existingVideo.localPath // Preserve local path
+        localPath: existingVideo.localPath, // Preserve local path
+        isAnimated: protoVideo.hasIsAnimated ? protoVideo.isAnimated : existingVideo.isAnimated,
+        hasAudio: protoVideo.hasHasAudio_p ? protoVideo.hasAudio_p : existingVideo.hasAudio
       )
 
       // Save the updated video

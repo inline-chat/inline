@@ -159,7 +159,9 @@ final class MediaHelpers: Sendable {
     duration: Int? = nil,
     size: Int? = nil,
     thumbnail: Photo? = nil,
-    localPath: String? = nil
+    localPath: String? = nil,
+    isAnimated: Bool = false,
+    hasAudio: Bool? = nil
   ) throws -> Video {
     try database.dbWriter.write { db in
       // Create a temporary negative ID
@@ -175,7 +177,9 @@ final class MediaHelpers: Sendable {
         size: size,
         thumbnailPhotoId: thumbnail?.id,
         cdnUrl: nil,
-        localPath: localPath
+        localPath: localPath,
+        isAnimated: isAnimated,
+        hasAudio: hasAudio
       )
       return try video.insertAndFetch(db)
     }

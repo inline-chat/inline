@@ -1,6 +1,7 @@
 import Auth
 import AVFoundation
 import Foundation
+import ImageIO
 import InlineKit
 import InlineProtocol
 import Logger
@@ -16,6 +17,7 @@ struct SharedFile: Identifiable {
   let mimeType: MIMEType
   let fileType: MessageFileType
   let fileSize: Int64?
+  let isAnimatedImage: Bool
 }
 
 /// Aggregated shared content from the extension.
@@ -225,6 +227,57 @@ class ShareState: ObservableObject {
   private nonisolated func isSupportedPhotoMimeType(_ mimeType: MIMEType) -> Bool {
     let lowercased = mimeType.text.lowercased()
     return lowercased == "image/jpeg" || lowercased == "image/png" || lowercased == "image/gif"
+  }
+
+  private nonisolated func isGIF(
+    suggestedName: String?,
+    typeIdentifier: String?,
+    mimeType: MIMEType?
+  ) -> Bool {
+    if let typeIdentifier,
+       let utType = UTType(typeIdentifier),
+       utType.conforms(to: .gif)
+    {
+      return true
+    }
+
+    if let suggestedName,
+       (suggestedName as NSString).pathExtension.lowercased() == "gif"
+    {
+      return true
+    }
+
+    return mimeType?.text.lowercased() == "image/gif"
+  }
+
+  private nonisolated func isAnimatedGIF(
+    at url: URL,
+    suggestedName: String?,
+    typeIdentifier: String?,
+    mimeType: MIMEType
+  ) -> Bool {
+    guard isGIF(suggestedName: suggestedName, typeIdentifier: typeIdentifier, mimeType: mimeType),
+          let source = CGImageSourceCreateWithURL(url as CFURL, nil)
+    else {
+      return false
+    }
+
+    return CGImageSourceGetCount(source) > 1
+  }
+
+  private nonisolated func isAnimatedGIF(
+    data: Data,
+    suggestedName: String?,
+    typeIdentifier: String?,
+    mimeType: MIMEType
+  ) -> Bool {
+    guard isGIF(suggestedName: suggestedName, typeIdentifier: typeIdentifier, mimeType: mimeType),
+          let source = CGImageSourceCreateWithData(data as CFData, nil)
+    else {
+      return false
+    }
+
+    return CGImageSourceGetCount(source) > 1
   }
 
   private nonisolated func preferredFileType(
@@ -441,7 +494,20 @@ class ShareState: ObservableObject {
         typeIdentifier: typeIdentifier
       )
       var resolvedFileType = fileType
-      if fileType == .photo &&
+      var isAnimatedImage = false
+      if fileType == .photo,
+         isAnimatedGIF(
+           at: tempURL,
+           suggestedName: fileName,
+           typeIdentifier: typeIdentifier,
+           mimeType: mimeType
+         )
+      {
+        resolvedFileType = .video
+        isAnimatedImage = true
+      }
+
+      if resolvedFileType == .photo &&
           (shouldTranscodePhotoToJpeg(
             suggestedName: fileName,
             typeIdentifier: typeIdentifier,
@@ -496,7 +562,8 @@ class ShareState: ObservableObject {
         fileName: fileName,
         mimeType: mimeType,
         fileType: resolvedFileType,
-        fileSize: fileSize.map { Int64($0) }
+        fileSize: fileSize.map { Int64($0) },
+        isAnimatedImage: isAnimatedImage
       ))
     } catch {
       log.error(tagged("Failed to prepare shared file"), error: error)
@@ -523,7 +590,20 @@ class ShareState: ObservableObject {
         typeIdentifier: typeIdentifier
       )
       var resolvedFileType = fileType
-      if fileType == .photo && mimeTypeOverride == nil &&
+      var isAnimatedImage = false
+      if fileType == .photo,
+         isAnimatedGIF(
+           data: data,
+           suggestedName: fileName,
+           typeIdentifier: typeIdentifier,
+           mimeType: resolvedMimeType
+         )
+      {
+        resolvedFileType = .video
+        isAnimatedImage = true
+      }
+
+      if resolvedFileType == .photo && mimeTypeOverride == nil &&
           (shouldTranscodePhotoToJpeg(
             suggestedName: fileName,
             typeIdentifier: typeIdentifier,
@@ -573,7 +653,8 @@ class ShareState: ObservableObject {
         fileName: fileName,
         mimeType: mimeType,
         fileType: resolvedFileType,
-        fileSize: Int64(data.count)
+        fileSize: Int64(data.count),
+        isAnimatedImage: isAnimatedImage
       ))
     } catch {
       log.error(tagged("Failed to write shared file"), error: error)
@@ -733,6 +814,7 @@ class ShareState: ObservableObject {
     let durationTime = try await asset.load(.duration)
     let seconds = CMTimeGetSeconds(durationTime)
     let duration = seconds.isFinite ? Int(seconds.rounded()) : 0
+    let audioTracks = try? await asset.loadTracks(withMediaType: .audio)
 
     guard width > 0, height > 0, duration > 0 else {
       throw NSError(
@@ -749,13 +831,25 @@ class ShareState: ObservableObject {
       height: height,
       duration: duration,
       thumbnail: thumbnailPayload?.data,
-      thumbnailMimeType: thumbnailPayload?.mimeType
+      thumbnailMimeType: thumbnailPayload?.mimeType,
+      hasAudio: audioTracks?.isEmpty == false
     )
   }
 
   private nonisolated func prepareVideoForUpload(
     _ file: SharedFile
-  ) async throws -> (url: URL, fileName: String, mimeType: MIMEType, fileSize: Int64, cleanup: (() -> Void)?) {
+  ) async throws -> (
+    url: URL,
+    fileName: String,
+    mimeType: MIMEType,
+    fileSize: Int64,
+    videoMetadata: ApiClient.VideoUploadMetadata?,
+    cleanup: (() -> Void)?
+  ) {
+    if file.isAnimatedImage {
+      return try await prepareAnimatedImageVideoForUpload(file)
+    }
+
     let needsMp4Transcode = file.url.pathExtension.lowercased() != "mp4"
     let options = VideoCompressionOptions.uploadDefault(forceTranscode: needsMp4Transcode)
     let originalFileSize = file.fileSize ?? fileSize(for: file.url) ?? 0
@@ -768,7 +862,7 @@ class ShareState: ObservableObject {
       let cleanup: (() -> Void)? = {
         _ = try? FileManager.default.removeItem(at: result.url)
       }
-      return (result.url, resolvedName, mimeType, result.fileSize, cleanup)
+      return (result.url, resolvedName, mimeType, result.fileSize, nil, cleanup)
     } catch VideoCompressionError.compressionNotNeeded, VideoCompressionError.compressionNotEffective {
       if needsMp4Transcode {
         throw NSError(
@@ -777,7 +871,7 @@ class ShareState: ObservableObject {
           userInfo: [NSLocalizedDescriptionKey: "Failed to convert video to MP4."]
         )
       }
-      return (file.url, file.fileName, file.mimeType, originalFileSize, nil)
+      return (file.url, file.fileName, file.mimeType, originalFileSize, nil, nil)
     } catch {
       if needsMp4Transcode {
         throw NSError(
@@ -786,8 +880,44 @@ class ShareState: ObservableObject {
           userInfo: [NSLocalizedDescriptionKey: "Failed to compress video for upload."]
         )
       }
-      return (file.url, file.fileName, file.mimeType, originalFileSize, nil)
+      return (file.url, file.fileName, file.mimeType, originalFileSize, nil, nil)
     }
+  }
+
+  private nonisolated func prepareAnimatedImageVideoForUpload(
+    _ file: SharedFile
+  ) async throws -> (
+    url: URL,
+    fileName: String,
+    mimeType: MIMEType,
+    fileSize: Int64,
+    videoMetadata: ApiClient.VideoUploadMetadata?,
+    cleanup: (() -> Void)?
+  ) {
+    let conversion = try await AnimatedImageVideoConverter.convertGIF(at: file.url)
+    let baseName = (file.fileName as NSString).deletingPathExtension
+    let resolvedName = baseName.isEmpty ? "animation.mp4" : "\(baseName).mp4"
+    let thumbnailData = conversion.thumbnail?.jpegData(compressionQuality: 0.7)
+    let metadata = ApiClient.VideoUploadMetadata(
+      width: conversion.width,
+      height: conversion.height,
+      duration: conversion.duration,
+      thumbnail: thumbnailData,
+      thumbnailMimeType: thumbnailData == nil ? nil : MIMEType(text: "image/jpeg"),
+      isAnimated: true,
+      hasAudio: false
+    )
+    let cleanup: (() -> Void)? = {
+      _ = try? FileManager.default.removeItem(at: conversion.url)
+    }
+    return (
+      conversion.url,
+      resolvedName,
+      MIMEType(text: "video/mp4"),
+      conversion.fileSize,
+      metadata,
+      cleanup
+    )
   }
 
   private nonisolated func fileSize(for url: URL) -> Int64? {
@@ -1331,7 +1461,12 @@ class ShareState: ObservableObject {
                   ]
                 )
               }
-              let videoMetadata = try await buildVideoMetadata(from: prepared.url)
+              let videoMetadata: ApiClient.VideoUploadMetadata
+              if let preparedMetadata = prepared.videoMetadata {
+                videoMetadata = preparedMetadata
+              } else {
+                videoMetadata = try await buildVideoMetadata(from: prepared.url)
+              }
               let videoData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
               uploadResult = try await apiClient.uploadFile(
                 type: .video,

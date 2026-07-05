@@ -390,6 +390,19 @@ public final class Drafts2: @unchecked Sendable {
   }
 
   @discardableResult
+  public func addAnimatedImage(
+    peer: Peer,
+    url: URL,
+    onComplete: Drafts2AttachmentCompletion? = nil
+  ) -> String {
+    startMaterialization(peer: peer, prefix: "pending_animated_image") {
+      .video(try await FileCache.saveAnimatedImageAsVideo(url: url))
+    } onComplete: { result in
+      onComplete?(result)
+    }
+  }
+
+  @discardableResult
   public func addFile(
     peer: Peer,
     url: URL,

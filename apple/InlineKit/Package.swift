@@ -40,6 +40,10 @@ let package = Package(
       name: "RealtimeV2",
       targets: ["RealtimeV2"]
     ),
+    .library(
+      name: "AnimatedMedia",
+      targets: ["AnimatedMedia"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
@@ -87,6 +91,7 @@ let package = Package(
         .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         "InlineConfig",
         "InlineProtocol",
+        "AnimatedMedia",
         "Logger",
         "Auth",
         "RealtimeV2",
@@ -96,6 +101,11 @@ let package = Package(
 
     .target(
       name: "InlineConfig",
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
+      name: "AnimatedMedia",
       swiftSettings: swiftSettings
     ),
 
@@ -146,6 +156,12 @@ let package = Package(
     .testTarget(
       name: "InlineKitTests",
       dependencies: ["InlineKit"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "AnimatedMediaTests",
+      dependencies: ["AnimatedMedia"],
       swiftSettings: swiftSettings
     ),
   ]

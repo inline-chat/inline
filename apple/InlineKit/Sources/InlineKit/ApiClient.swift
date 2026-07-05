@@ -799,13 +799,25 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     public let duration: Int
     public let thumbnail: Data?
     public let thumbnailMimeType: MIMEType?
+    public let isAnimated: Bool
+    public let hasAudio: Bool?
 
-    public init(width: Int, height: Int, duration: Int, thumbnail: Data?, thumbnailMimeType: MIMEType?) {
+    public init(
+      width: Int,
+      height: Int,
+      duration: Int,
+      thumbnail: Data?,
+      thumbnailMimeType: MIMEType?,
+      isAnimated: Bool = false,
+      hasAudio: Bool? = nil
+    ) {
       self.width = width
       self.height = height
       self.duration = duration
       self.thumbnail = thumbnail
       self.thumbnailMimeType = thumbnailMimeType
+      self.isAnimated = isAnimated
+      self.hasAudio = hasAudio
     }
   }
 
@@ -854,7 +866,17 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         (name: "width", filename: nil, mimeType: nil, data: "\(videoMetadata.width)".data(using: .utf8)!),
         (name: "height", filename: nil, mimeType: nil, data: "\(videoMetadata.height)".data(using: .utf8)!),
         (name: "duration", filename: nil, mimeType: nil, data: "\(videoMetadata.duration)".data(using: .utf8)!),
+        (name: "isAnimated", filename: nil, mimeType: nil, data: "\(videoMetadata.isAnimated)".data(using: .utf8)!),
       ])
+
+      if let hasAudio = videoMetadata.hasAudio {
+        fields.append((
+          name: "hasAudio",
+          filename: nil,
+          mimeType: nil,
+          data: "\(hasAudio)".data(using: .utf8)!
+        ))
+      }
 
       if let thumb = videoMetadata.thumbnail, let thumbMime = videoMetadata.thumbnailMimeType {
         let thumbFilename: String = {

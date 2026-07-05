@@ -1,9 +1,105 @@
+import AVFoundation
 import Combine
 import GRDB
 import InlineKit
 import InlineUI
 import Logger
 import UIKit
+
+private final class InlineAnimatedVideoPlayerView: UIView {
+  private var player: AVPlayer?
+  private var endObserver: NSObjectProtocol?
+  private var currentURL: URL?
+
+  override static var layerClass: AnyClass {
+    AVPlayerLayer.self
+  }
+
+  private var playerLayer: AVPlayerLayer {
+    guard let playerLayer = layer as? AVPlayerLayer else {
+      fatalError("InlineAnimatedVideoPlayerView must be backed by AVPlayerLayer")
+    }
+    return playerLayer
+  }
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    translatesAutoresizingMaskIntoConstraints = false
+    isUserInteractionEnabled = false
+    isHidden = true
+    playerLayer.videoGravity = .resizeAspectFill
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func play(url: URL) {
+    if currentURL == url, let player {
+      if let duration = player.currentItem?.duration,
+         duration.seconds.isFinite,
+         player.currentTime() >= duration {
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+      }
+      player.play()
+      return
+    }
+
+    stop()
+    currentURL = url
+
+    let item = AVPlayerItem(url: url)
+    let player = AVPlayer(playerItem: item)
+    player.isMuted = true
+    player.actionAtItemEnd = .pause
+    player.preventsDisplaySleepDuringVideoPlayback = false
+
+    endObserver = NotificationCenter.default.addObserver(
+      forName: .AVPlayerItemDidPlayToEndTime,
+      object: item,
+      queue: .main
+    ) { [weak self] _ in
+      self?.replayFromStart()
+    }
+
+    playerLayer.player = player
+    self.player = player
+    player.play()
+  }
+
+  func stop() {
+    if let endObserver {
+      NotificationCenter.default.removeObserver(endObserver)
+      self.endObserver = nil
+    }
+    player?.pause()
+    playerLayer.player = nil
+    player = nil
+    currentURL = nil
+  }
+
+  private func replayFromStart() {
+    guard window != nil, !isHidden else { return }
+    player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+      guard let self, self.window != nil, !self.isHidden else { return }
+      self.player?.play()
+    }
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window == nil {
+      player?.pause()
+    } else {
+      player?.play()
+    }
+  }
+
+  deinit {
+    stop()
+  }
+}
 
 final class NewVideoView: UIView {
   // MARK: - Properties
@@ -63,6 +159,8 @@ final class NewVideoView: UIView {
     view.photoContentMode = .aspectFill
     return view
   }()
+
+  private let animatedPlayerView = InlineAnimatedVideoPlayerView()
 
   private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
     let view = InlineTinyThumbnailBackgroundView()
@@ -162,6 +260,7 @@ final class NewVideoView: UIView {
   }
 
   deinit {
+    animatedPlayerView.stop()
     clearDownloadProgressBinding(resetState: true)
     clearUploadProgressBinding(resetState: true)
   }
@@ -170,6 +269,8 @@ final class NewVideoView: UIView {
     super.didMoveToSuperview()
 
     if superview == nil {
+      animatedPlayerView.stop()
+      animatedPlayerView.isHidden = true
       clearDownloadProgressBinding(resetState: false, resetActivity: false)
       clearUploadProgressBinding(resetState: false)
     } else {
@@ -180,7 +281,13 @@ final class NewVideoView: UIView {
       requestAutoDownloadIfNeeded()
       updateDurationLabel()
       updateOverlay()
+      updateAnimatedPlayback()
     }
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    updateAnimatedPlayback()
   }
 
   private func requestAutoDownloadIfNeeded() {
@@ -273,6 +380,7 @@ final class NewVideoView: UIView {
   private func setupViews() {
     addSubview(tinyThumbnailBackgroundView)
     addSubview(thumbnailView)
+    addSubview(animatedPlayerView)
     addSubview(highlightOverlay)
     addSubview(overlayBackground)
     overlayBackground.addSubview(overlayIconView)
@@ -285,6 +393,11 @@ final class NewVideoView: UIView {
       tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
       tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
       tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      animatedPlayerView.topAnchor.constraint(equalTo: topAnchor),
+      animatedPlayerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      animatedPlayerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      animatedPlayerView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       overlayBackground.centerXAnchor.constraint(equalTo: centerXAnchor),
       overlayBackground.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -322,6 +435,7 @@ final class NewVideoView: UIView {
     syncUploadProgressBinding()
     updateDurationLabel()
     updateOverlay()
+    updateAnimatedPlayback()
   }
 
   private func setupGestures() {
@@ -379,13 +493,12 @@ final class NewVideoView: UIView {
     updateTinyThumbnailBackground()
     syncUploadProgressBinding()
 
-    if
-      prev.videoInfo?.id == fullMessage.videoInfo?.id,
-      prev.videoInfo?.thumbnail?.bestPhotoSize()?.localPath
-        == fullMessage.videoInfo?.thumbnail?.bestPhotoSize()?.localPath
-    {
+    if prev.videoInfo?.id == fullMessage.videoInfo?.id,
+       prev.videoInfo?.thumbnail?.bestPhotoSize()?.localPath
+       == fullMessage.videoInfo?.thumbnail?.bestPhotoSize()?.localPath {
       updateOverlay()
       updateDurationLabel()
+      updateAnimatedPlayback()
       return
     }
 
@@ -396,6 +509,7 @@ final class NewVideoView: UIView {
     updateImage()
     updateDurationLabel()
     updateOverlay()
+    updateAnimatedPlayback()
   }
 
   // MARK: - Thumbnail Loading
@@ -406,6 +520,26 @@ final class NewVideoView: UIView {
 
   private func updateTinyThumbnailBackground() {
     tinyThumbnailBackgroundView.setPhoto(fullMessage.videoInfo?.thumbnail)
+  }
+
+  private var shouldPlayAnimatedInline: Bool {
+    fullMessage.videoInfo?.video.isAnimated == true
+  }
+
+  private func updateAnimatedPlayback() {
+    guard shouldPlayAnimatedInline,
+          superview != nil,
+          window != nil,
+          let local = videoLocalUrl(),
+          FileManager.default.fileExists(atPath: local.path)
+    else {
+      animatedPlayerView.stop()
+      animatedPlayerView.isHidden = true
+      return
+    }
+
+    animatedPlayerView.isHidden = false
+    animatedPlayerView.play(url: local)
   }
 
   // MARK: - Overlay
@@ -423,6 +557,7 @@ final class NewVideoView: UIView {
     let globalDownloadActive = fullMessage.videoInfo
       .map { FileDownloader.shared.isVideoDownloadActive(videoId: $0.id) } ?? false
     let downloading = !isVideoDownloaded && (isDownloading || globalDownloadActive)
+    let shouldHideAnimatedOverlay = shouldPlayAnimatedInline && isVideoDownloaded && !isUploading && !downloading
 
     if isUploading {
       let uploadProgress = max(0, min(uploadProgressSnapshot?.fractionCompleted ?? 0, 1))
@@ -463,7 +598,8 @@ final class NewVideoView: UIView {
       activeTransfer = nil
     }
 
-    overlayBackground.isHidden = false
+    overlayBackground.isHidden = shouldHideAnimatedOverlay
+    updateAnimatedPlayback()
   }
 
   private func updateDurationLabel() {
@@ -494,6 +630,11 @@ final class NewVideoView: UIView {
     if isDownloadInFlight(), let downloadProgressSnapshot = currentDownloadProgressSnapshot() {
       durationBadge.isHidden = false
       durationBadge.text = downloadProgressLabel(downloadProgressSnapshot)
+      return
+    }
+
+    if shouldPlayAnimatedInline {
+      durationBadge.isHidden = true
       return
     }
 
@@ -753,7 +894,8 @@ final class NewVideoView: UIView {
       return
     }
 
-    if uploadProgressLocalId == videoLocalId, (uploadProgressCancellable != nil || uploadProgressBindingTask != nil) {
+    if uploadProgressLocalId == videoLocalId,
+       uploadProgressCancellable != nil || uploadProgressBindingTask != nil {
       return
     }
 
@@ -843,12 +985,12 @@ final class NewVideoView: UIView {
     highlightOverlay.alpha = 0
     UIView.animate(withDuration: 0.18, animations: { [weak self] in
       self?.highlightOverlay.alpha = 1
-    }) { [weak self] _ in
+    }, completion: { [weak self] _ in
       guard let self else { return }
       UIView.animate(withDuration: 0.5, delay: 0.2, options: [], animations: {
         self.highlightOverlay.alpha = 0
       }, completion: nil)
-    }
+    })
   }
 
   func clearHighlight() {

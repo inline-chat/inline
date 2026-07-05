@@ -1572,6 +1572,10 @@ class GlassComposeAppKit: NSView {
     return ["mp4", "mov", "m4v", "avi", "mkv", "webm"].contains(ext)
   }
 
+  private func isAnimatedImageFile(_ url: URL) -> Bool {
+    url.pathExtension.lowercased() == "gif"
+  }
+
   private func loadThumbnail(from photoInfo: PhotoInfo?) -> NSImage? {
     guard let localPath = photoInfo?.bestPhotoSize()?.localPath else { return nil }
     let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
@@ -1584,6 +1588,14 @@ class GlassComposeAppKit: NSView {
     let pendingId = drafts2.addVideo(peer: peerId, url: url, thumbnail: thumbnail)
     pendingDraftVideoFallbackURLs[pendingId] = url
     attachments.addVideoView(thumbnail: thumbnail, videoURL: url, id: pendingId)
+    updateHeight(animate: true)
+  }
+
+  @MainActor
+  func addAnimatedImage(_ url: URL) async {
+    let thumbnail = NSImage(contentsOf: url)
+    let pendingId = drafts2.addAnimatedImage(peer: peerId, url: url)
+    attachments.addVideoView(thumbnail: thumbnail, videoURL: nil, id: pendingId)
     updateHeight(animate: true)
   }
 
@@ -2011,6 +2023,10 @@ extension GlassComposeAppKit {
       switch attachment {
         case let .image(image, url):
           handleImageDropOrPaste(image, url)
+        case let .animatedImage(url):
+          Task { [weak self] in
+            await self?.addAnimatedImage(url)
+          }
         case let .video(url, thumbnail):
           Task { [weak self] in
             await self?.addVideo(url, thumbnail: thumbnail)
@@ -2027,7 +2043,9 @@ extension GlassComposeAppKit {
     guard !voiceViewModel.isActive else { return }
 
     for url in urls {
-      if isVideoFile(url) {
+      if isAnimatedImageFile(url) {
+        Task { [weak self] in await self?.addAnimatedImage(url) }
+      } else if isVideoFile(url) {
         Task { [weak self] in await self?.addVideo(url) }
       } else {
         addFile(url)

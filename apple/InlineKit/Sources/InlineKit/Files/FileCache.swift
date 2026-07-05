@@ -1,3 +1,4 @@
+import AnimatedMedia
 import Foundation
 import InlineProtocol
 import Logger
@@ -387,6 +388,8 @@ public actor FileCache: Sendable {
     let durationTime = try await asset.load(.duration)
     guard durationTime.isValid else { throw FileCacheError.failedToSave }
     let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
+    let audioTracks = try? await asset.loadTracks(withMediaType: .audio)
+    let hasAudio = audioTracks?.isEmpty == false
 
     // Persist the video to app cache.
     // Keep cache-time work minimal for a faster compose/send path.
@@ -420,10 +423,59 @@ public actor FileCache: Sendable {
       duration: durationSeconds,
       size: fileSize,
       thumbnail: thumbnailInfo?.photo,
-      localPath: localPath
+      localPath: localPath,
+      isAnimated: false,
+      hasAudio: hasAudio
     )
 
     return VideoInfo(video: video, photoInfo: thumbnailInfo)
+  }
+
+  public static func saveAnimatedImageAsVideo(
+    url: URL,
+    options: AnimatedImageVideoConversionOptions = .uploadDefault
+  ) async throws -> InlineKit.VideoInfo {
+    let hasAccess = url.startAccessingSecurityScopedResource()
+    defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+
+    let conversion = try await AnimatedImageVideoConverter.convertGIF(at: url, options: options)
+    let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
+    let localPath = "\(UUID().uuidString).mp4"
+    let localUrl = directory.appendingPathComponent(localPath)
+
+    if FileManager.default.fileExists(atPath: localUrl.path) {
+      try FileManager.default.removeItem(at: localUrl)
+    }
+    try FileManager.default.moveItem(at: conversion.url, to: localUrl)
+
+    let thumbnailInfo: PhotoInfo? = if let thumbnail = conversion.thumbnail {
+      try? savePhoto(image: thumbnail, preferredFormat: .jpeg)
+    } else {
+      nil
+    }
+
+    let video = try MediaHelpers.shared.createLocalVideo(
+      width: conversion.width,
+      height: conversion.height,
+      duration: conversion.duration,
+      size: Int(conversion.fileSize),
+      thumbnail: thumbnailInfo?.photo,
+      localPath: localPath,
+      isAnimated: true,
+      hasAudio: false
+    )
+
+    return VideoInfo(video: video, photoInfo: thumbnailInfo)
+  }
+
+  public static func exportAnimatedVideoAsGIF(
+    url: URL,
+    options: AnimatedVideoGIFExportOptions = .saveDefault
+  ) async throws -> URL {
+    let hasAccess = url.startAccessingSecurityScopedResource()
+    defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+
+    return try await AnimatedVideoGIFExporter.exportGIF(fromVideoAt: url, options: options).url
   }
 
   public static func saveVoice(

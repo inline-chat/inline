@@ -4636,6 +4636,18 @@ extension MessageViewAppKit: NSMenuDelegate {
       saveItem.isEnabled = true
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Video")
       menu.addItem(saveItem)
+
+      if videoView.canSaveAsGIF {
+        let saveGIFItem = NSMenuItem(
+          title: "Save GIF",
+          action: #selector(videoView.saveGIF),
+          keyEquivalent: "g"
+        )
+        saveGIFItem.target = videoView
+        saveGIFItem.isEnabled = true
+        saveGIFItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save GIF")
+        menu.addItem(saveGIFItem)
+      }
     }
 
     // Add document actions

@@ -5,6 +5,7 @@ import Logger
 
 enum PasteboardAttachment {
   case image(NSImage, URL?)
+  case animatedImage(URL)
   case video(URL, thumbnail: NSImage?)
   case file(URL, thumbnail: NSImage?)
   case text(String)
@@ -142,9 +143,7 @@ class InlinePasteboard {
     if let imageType = preferredImageTypes.first(where: { types.contains($0) }) ??
       types.first(where: { isImageType($0) })
     {
-      if let imageData = item.data(forType: imageType),
-         let image = NSImage(data: imageData)
-      {
+      if let imageData = item.data(forType: imageType) {
         // Check if this is a file URL image vs raw image data
         var sourceURL: URL? = nil
         if types.contains(.fileURL),
@@ -152,6 +151,25 @@ class InlinePasteboard {
            let url = parseFileURL(urlString)
         {
           sourceURL = url
+        }
+
+        if isGIFType(imageType) {
+          do {
+            let url: URL
+            if let sourceURL {
+              url = sourceURL
+            } else {
+              url = try createTempFileURL(data: imageData, extension: "gif")
+            }
+            return ItemAttachmentResult(attachment: .animatedImage(url), failures: failures)
+          } catch {
+            Log.shared.error("Failed to write temp GIF for pasteboard", error: error)
+            return ItemAttachmentResult(attachment: nil, failures: failures)
+          }
+        }
+
+        guard let image = NSImage(data: imageData) else {
+          return ItemAttachmentResult(attachment: nil, failures: failures)
         }
 
         return ItemAttachmentResult(attachment: .image(image, sourceURL), failures: failures)
@@ -194,6 +212,10 @@ class InlinePasteboard {
     }
 
     // Check if it's an image file
+    if fileExtension == "gif" {
+      return ItemAttachmentResult(attachment: .animatedImage(url), failures: [])
+    }
+
     if isImageFileExtension(fileExtension) {
       if let image = NSImage(contentsOf: url) {
         return ItemAttachmentResult(attachment: .image(image, url), failures: [])
@@ -229,6 +251,11 @@ class InlinePasteboard {
     return imageTypes.contains(type.rawValue)
   }
 
+  private static func isGIFType(_ type: NSPasteboard.PasteboardType) -> Bool {
+    let gifTypes = ["public.gif", "com.compuserve.gif", "image/gif"]
+    return gifTypes.contains(type.rawValue)
+  }
+
   private static func isVideoFileExtension(_ ext: String) -> Bool {
     let videoExtensions = ["mp4", "mov", "avi", "mkv", "wmv", "flv", "webm", "m4v", "3gp"]
     return videoExtensions.contains(ext)
@@ -248,6 +275,9 @@ class InlinePasteboard {
       case "image/png": "png"
       case "public.jpeg": "jpg"
       case "image/jpeg": "jpg"
+      case "public.gif": "gif"
+      case "com.compuserve.gif": "gif"
+      case "image/gif": "gif"
       case "public.tiff": "tiff"
       default: "dat"
     }

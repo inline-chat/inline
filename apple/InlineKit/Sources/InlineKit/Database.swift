@@ -910,6 +910,19 @@ public extension AppDatabase {
       )
     }
 
+    migrator.registerMigration("animated video metadata") { db in
+      let columnNames = Set(try db.columns(in: "video").map(\.name))
+
+      try db.alter(table: "video") { t in
+        if !columnNames.contains("isAnimated") {
+          t.add(column: "isAnimated", .boolean).notNull().defaults(to: false)
+        }
+        if !columnNames.contains("hasAudio") {
+          t.add(column: "hasAudio", .boolean)
+        }
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

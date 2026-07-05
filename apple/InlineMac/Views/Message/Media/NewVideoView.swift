@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import GRDB
 import InlineKit
@@ -318,6 +319,98 @@ private final class VideoOverlayView: NSView {
   }
 }
 
+private final class InlineAnimatedVideoPlayerView: NSView {
+  private let playerLayer = AVPlayerLayer()
+  private var player: AVPlayer?
+  private var endObserver: NSObjectProtocol?
+  private var currentURL: URL?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    translatesAutoresizingMaskIntoConstraints = false
+    wantsLayer = true
+    layer?.masksToBounds = true
+    playerLayer.videoGravity = .resizeAspectFill
+    layer?.addSublayer(playerLayer)
+    isHidden = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layout() {
+    super.layout()
+    playerLayer.frame = bounds
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil {
+      player?.pause()
+    } else {
+      player?.play()
+    }
+  }
+
+  func play(url: URL) {
+    if currentURL == url, let player {
+      if let duration = player.currentItem?.duration,
+         duration.seconds.isFinite,
+         player.currentTime() >= duration {
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+      }
+      player.play()
+      return
+    }
+
+    stop()
+    currentURL = url
+
+    let item = AVPlayerItem(url: url)
+    let player = AVPlayer(playerItem: item)
+    player.isMuted = true
+    player.actionAtItemEnd = .pause
+    player.preventsDisplaySleepDuringVideoPlayback = false
+
+    endObserver = NotificationCenter.default.addObserver(
+      forName: .AVPlayerItemDidPlayToEndTime,
+      object: item,
+      queue: .main
+    ) { [weak self] _ in
+      self?.replayFromStart()
+    }
+
+    playerLayer.player = player
+    self.player = player
+    player.play()
+  }
+
+  func stop() {
+    if let endObserver {
+      NotificationCenter.default.removeObserver(endObserver)
+      self.endObserver = nil
+    }
+    player?.pause()
+    playerLayer.player = nil
+    player = nil
+    currentURL = nil
+  }
+
+  private func replayFromStart() {
+    guard window != nil, !isHidden else { return }
+    player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+      guard let self, self.window != nil, !self.isHidden else { return }
+      self.player?.play()
+    }
+  }
+
+  deinit {
+    stop()
+  }
+}
+
 final class NewVideoView: NSView {
   private let imageView: NSView = {
     let view = NSView()
@@ -332,6 +425,8 @@ final class NewVideoView: NSView {
     layer.contentsGravity = .resizeAspectFill
     return layer
   }()
+
+  private let animatedPlayerView = InlineAnimatedVideoPlayerView()
 
   private let backgroundView: BasicView = {
     let view = BasicView()
@@ -355,6 +450,7 @@ final class NewVideoView: NSView {
 
   private var currentImage: NSImage?
   private var currentImageKey: String?
+  private var imageLoadGeneration = 0
   private var isThumbnailLoading = false
   private var fullMessage: FullMessage
   private let roundsAllCorners: Bool
@@ -442,16 +538,15 @@ final class NewVideoView: NSView {
     updateTinyThumbnailBackground()
     syncUploadProgressBinding()
 
-    if
-      prev.videoInfo?.id == fullMessage.videoInfo?.id,
-      prev.videoInfo?.thumbnail?.bestPhotoSize()?.localPath
-      == fullMessage.videoInfo?.thumbnail?.bestPhotoSize()?.localPath
-    {
+    if prev.videoInfo?.id == fullMessage.videoInfo?.id,
+       prev.videoInfo?.thumbnail?.bestPhotoSize()?.localPath
+       == fullMessage.videoInfo?.thumbnail?.bestPhotoSize()?.localPath {
       // Even if the thumbnail is unchanged, refresh overlay to reflect download/upload state changes.
       refreshDownloadFlags()
       updateDurationLabel()
       updateOverlay()
       requestAutoDownloadIfNeeded()
+      updateAnimatedPlayback()
       return
     }
 
@@ -463,6 +558,7 @@ final class NewVideoView: NSView {
     updateDurationLabel()
     updateOverlay()
     requestAutoDownloadIfNeeded()
+    updateAnimatedPlayback()
   }
 
   func setIsScrolling(_ isScrolling: Bool) {
@@ -502,6 +598,14 @@ final class NewVideoView: NSView {
       overlayView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
+    addSubview(animatedPlayerView, positioned: .below, relativeTo: overlayView)
+    NSLayoutConstraint.activate([
+      animatedPlayerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      animatedPlayerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      animatedPlayerView.topAnchor.constraint(equalTo: topAnchor),
+      animatedPlayerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+
     addSubview(durationBadgeBackground)
     addSubview(durationBadge)
     NSLayoutConstraint.activate([
@@ -523,12 +627,13 @@ final class NewVideoView: NSView {
     syncUploadProgressBinding()
     updateDurationLabel()
     updateOverlay()
+    updateAnimatedPlayback()
   }
 
   private func addImageViewIfNeeded() {
     guard !haveAddedImageView else { return }
     haveAddedImageView = true
-    addSubview(imageView, positioned: .below, relativeTo: overlayView)
+    addSubview(imageView, positioned: .below, relativeTo: animatedPlayerView)
     imageView.layer?.addSublayer(imageLayer)
 
     NSLayoutConstraint.activate([
@@ -542,6 +647,9 @@ final class NewVideoView: NSView {
   // MARK: - Image loading
 
   private func updateImage() {
+    imageLoadGeneration += 1
+    let generation = imageLoadGeneration
+
     guard let thumb = fullMessage.videoInfo?.thumbnail,
           let size = thumb.bestPhotoSize()
     else {
@@ -556,10 +664,21 @@ final class NewVideoView: NSView {
       (size.localPath.flatMap { FileCache.getUrl(for: .photos, localPath: $0) }) ??
       (size.cdnUrl.flatMap { URL(string: $0) })
 
-    // Fast path: memory cache hit with stable key (avoids spinner/flicker)
-    if let cached = ImageCacheManager.shared.cachedImage(cacheKey: cacheKey) {
+    let targetSize = preferredThumbnailTargetSize(from: size)
+    let scale = backingScale
+    let preparedCacheKey = url.map {
+      ImageCacheManager.cacheKey(for: $0, cacheKey: cacheKey, targetSize: targetSize, scale: scale)
+    } ?? cacheKey
+
+    if let url,
+       let cached = ImageCacheManager.shared.cachedImage(
+         for: url,
+         cacheKey: cacheKey,
+         targetSize: targetSize,
+         scale: scale
+       ) {
       addImageViewIfNeeded()
-      setImage(cached, key: cacheKey)
+      setImage(cached, key: preparedCacheKey)
       updateOverlay()
       return
     }
@@ -584,31 +703,59 @@ final class NewVideoView: NSView {
     }
 
     // Avoid reload/flicker if we already set this image for this key
-    if currentImageKey == cacheKey {
+    if currentImageKey == preparedCacheKey {
       isThumbnailLoading = false
       updateOverlay()
       return
     }
 
-    let loadSync = true // prefer sync cache hit to avoid spinner flicker
     isThumbnailLoading = false
 
-    ImageCacheManager.shared.image(for: url, loadSync: loadSync, cacheKey: cacheKey) { [weak self] image in
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        self.isThumbnailLoading = false
-        self.updateOverlay()
-        guard let image else { return }
+    ImageCacheManager.shared.image(
+      for: url,
+      loadSync: false,
+      cacheKey: cacheKey,
+      targetSize: targetSize,
+      scale: scale
+    ) { [weak self] image in
+      guard let self else { return }
+      guard self.imageLoadGeneration == generation else { return }
 
-        self.addImageViewIfNeeded()
-        if loadSync {
-          self.setImage(image, key: cacheKey)
-          self.updateOverlay()
-        } else {
-          self.animateImageTransition(to: image, key: cacheKey)
-        }
+      self.isThumbnailLoading = false
+      self.updateOverlay()
+      guard let image else { return }
+
+      self.addImageViewIfNeeded()
+      if self.currentImage == nil {
+        self.animateImageTransition(to: image, key: preparedCacheKey)
+      } else {
+        self.setImage(image, key: preparedCacheKey)
+        self.updateOverlay()
       }
     }
+  }
+
+  private var backingScale: CGFloat {
+    window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+  }
+
+  private func preferredThumbnailTargetSize(from size: PhotoSize) -> CGSize {
+    if bounds.width > 0, bounds.height > 0 {
+      return bounds.size
+    }
+
+    guard let width = size.width,
+          let height = size.height
+    else {
+      return CGSize(width: 320, height: 320)
+    }
+
+    return MessageSizeCalculator.shared.calculatePhotoSize(
+      width: CGFloat(width),
+      height: CGFloat(height),
+      parentAvailableWidth: 320,
+      hasCaption: fullMessage.message.text?.isEmpty == false
+    )
   }
 
   private func updateTinyThumbnailBackground() {
@@ -656,8 +803,6 @@ final class NewVideoView: NSView {
   }
 
   fileprivate func imageLocalUrl() -> URL? {
- 
-
     guard let size = fullMessage.videoInfo?.thumbnail?.bestPhotoSize(),
           let localPath = size.localPath
     else { return nil }
@@ -673,10 +818,35 @@ final class NewVideoView: NSView {
     return nil
   }
 
-
   fileprivate func hasLocalVideoFile() -> Bool {
     guard let local = videoLocalUrl() else { return false }
     return FileManager.default.fileExists(atPath: local.path)
+  }
+
+  private var shouldPlayAnimatedInline: Bool {
+    fullMessage.videoInfo?.video.isAnimated == true
+  }
+
+  var canSaveAsGIF: Bool {
+    fullMessage.videoInfo?.video.isAnimated == true
+      && fullMessage.videoInfo?.video.hasAudio != true
+  }
+
+  private func updateAnimatedPlayback() {
+    guard shouldPlayAnimatedInline,
+          !isShowingPreview,
+          superview != nil,
+          window != nil,
+          let local = videoLocalUrl(),
+          FileManager.default.fileExists(atPath: local.path)
+    else {
+      animatedPlayerView.stop()
+      animatedPlayerView.isHidden = true
+      return
+    }
+
+    animatedPlayerView.isHidden = false
+    animatedPlayerView.play(url: local)
   }
 
   private func videoCdnUrl() -> URL? {
@@ -814,6 +984,12 @@ final class NewVideoView: NSView {
       return
     }
 
+    if shouldPlayAnimatedInline {
+      durationBadge.isHidden = true
+      durationBadgeBackground.isHidden = true
+      return
+    }
+
     guard let durationSeconds = fullMessage.videoInfo?.video.duration, durationSeconds > 0 else {
       durationBadge.isHidden = true
       durationBadgeBackground.isHidden = true
@@ -901,11 +1077,13 @@ final class NewVideoView: NSView {
       return
     }
 
-    let shouldHideOverlay = isShowingPreview
-    if overlayView.isHidden != shouldHideOverlay {
-      overlayView.isHidden = shouldHideOverlay
+    if isShowingPreview {
+      if !overlayView.isHidden {
+        overlayView.isHidden = true
+      }
+      updateAnimatedPlayback()
+      return
     }
-    guard !shouldHideOverlay else { return }
 
     let hasThumb = currentImage != nil
     let isVideoDownloaded = hasLocalVideoFile()
@@ -926,6 +1104,10 @@ final class NewVideoView: NSView {
     let downloading = (!isVideoDownloaded) && (isDownloading || globalDownloadActive)
     if downloading, let videoId = fullMessage.videoInfo?.id {
       bindDownloadProgressIfNeeded(videoId: videoId)
+    }
+    let shouldHideAnimatedOverlay = shouldPlayAnimatedInline && isVideoDownloaded && !isUploading && !downloading
+    if overlayView.isHidden != shouldHideAnimatedOverlay {
+      overlayView.isHidden = shouldHideAnimatedOverlay
     }
 
     overlayViewModel.update(
@@ -959,6 +1141,8 @@ final class NewVideoView: NSView {
     default:
       activeTransfer = nil
     }
+
+    updateAnimatedPlayback()
   }
 
   private func refreshDownloadFlags() {
@@ -1031,7 +1215,8 @@ final class NewVideoView: NSView {
       return
     }
 
-    if uploadProgressLocalId == videoLocalId, (uploadProgressCancellable != nil || uploadProgressBindingTask != nil) {
+    if uploadProgressLocalId == videoLocalId,
+       uploadProgressCancellable != nil || uploadProgressBindingTask != nil {
       return
     }
 
@@ -1182,6 +1367,7 @@ final class NewVideoView: NSView {
   }
 
   deinit {
+    animatedPlayerView.stop()
     clearDownloadProgressBinding(resetState: true)
     clearUploadProgressBinding(resetState: true)
   }
@@ -1190,6 +1376,8 @@ final class NewVideoView: NSView {
     super.viewDidMoveToSuperview()
 
     if superview == nil {
+      animatedPlayerView.stop()
+      animatedPlayerView.isHidden = true
       clearDownloadProgressBinding(resetState: false, resetActivity: false)
       clearUploadProgressBinding(resetState: false)
     } else {
@@ -1200,7 +1388,13 @@ final class NewVideoView: NSView {
       requestAutoDownloadIfNeeded()
       updateDurationLabel()
       updateOverlay()
+      updateAnimatedPlayback()
     }
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    updateAnimatedPlayback()
   }
 
   private func requestAutoDownloadIfNeeded() {
@@ -1521,6 +1715,49 @@ extension NewVideoView {
     }
   }
 
+  @objc func saveGIF() {
+    guard canSaveAsGIF else { return }
+    guard let window else { return }
+
+    let savePanel = NSSavePanel()
+    savePanel.allowedContentTypes = [UTType.gif]
+    savePanel.nameFieldStringValue = defaultGIFFileName()
+    savePanel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+
+    savePanel.beginSheetModal(for: window) { [weak self] response in
+      guard let self, response == .OK, let destinationURL = savePanel.url else { return }
+
+      if let local = self.videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
+        self.exportGIF(from: local, to: destinationURL)
+        return
+      }
+
+      let alert = NSAlert()
+      alert.messageText = "Download video to save as GIF?"
+      alert.informativeText = "The animated video needs to download before it can be converted."
+      alert.addButton(withTitle: "Download")
+      alert.addButton(withTitle: "Cancel")
+
+      alert.beginSheetModal(for: window) { [weak self] modalResponse in
+        guard let self else { return }
+        guard modalResponse == .alertFirstButtonReturn else { return }
+
+        self.ensureVideoAvailable { [weak self] result in
+          guard let self else { return }
+          switch result {
+          case let .success(localUrl):
+            self.exportGIF(from: localUrl, to: destinationURL)
+          case let .failure(error):
+            Log.shared.error("Failed to download animated video for GIF export", error: error)
+            Task { @MainActor in
+              ToastCenter.shared.showError("Failed to download video")
+            }
+          }
+        }
+      }
+    }
+  }
+
   private func copyVideo(from source: URL, to destinationURL: URL) {
     do {
       let fileManager = FileManager.default
@@ -1539,5 +1776,37 @@ extension NewVideoView {
         ToastCenter.shared.showError("Failed to save video")
       }
     }
+  }
+
+  private func exportGIF(from source: URL, to destinationURL: URL) {
+    Task {
+      do {
+        let exportedURL = try await FileCache.exportAnimatedVideoAsGIF(url: source)
+        defer { try? FileManager.default.removeItem(at: exportedURL) }
+
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: destinationURL.path) {
+          try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.copyItem(at: exportedURL, to: destinationURL)
+
+        await MainActor.run {
+          ToastCenter.shared.showSuccess("GIF saved")
+          NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+        }
+      } catch {
+        Log.shared.error("Failed to save GIF", error: error)
+        await MainActor.run {
+          ToastCenter.shared.showError("Failed to save GIF")
+        }
+      }
+    }
+  }
+
+  private func defaultGIFFileName() -> String {
+    let fallbackName = "animated_\(fullMessage.videoInfo?.id ?? fullMessage.message.id)"
+    let sourceName = fullMessage.file?.fileName ?? fallbackName
+    let baseName = (sourceName as NSString).deletingPathExtension
+    return "\(baseName.isEmpty ? fallbackName : baseName).gif"
   }
 }

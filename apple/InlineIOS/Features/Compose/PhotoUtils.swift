@@ -402,6 +402,22 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func handlePastedImage() {
+    if let gifData = UIPasteboard.general.data(forPasteboardType: UTType.gif.identifier) ??
+      UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif") ??
+      UIPasteboard.general.data(forPasteboardType: "image/gif")
+    {
+      let tempUrl = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("gif")
+      do {
+        try gifData.write(to: tempUrl)
+        addAnimatedImageAsVideo(tempUrl, removeSourceAfterProcessing: true)
+        return
+      } catch {
+        Log.shared.error("Failed to write pasted GIF data", error: error)
+      }
+    }
+
     guard let image = UIPasteboard.general.image else { return }
     addImages([image])
   }
@@ -488,6 +504,54 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
             self?.removePendingVideoAttachment(pendingId, animated: false)
           }
           self?.showVideoError(error)
+        }
+      }
+    }
+  }
+
+  func addAnimatedImageAsVideo(
+    _ url: URL,
+    removeSourceAfterProcessing: Bool = false,
+    dismissAttachmentPickerOnSuccess: Bool = true
+  ) {
+    let pendingId = addPendingVideoAttachment()
+    Task {
+      defer {
+        if removeSourceAfterProcessing {
+          try? FileManager.default.removeItem(at: url)
+        }
+      }
+
+      do {
+        let videoInfo = try await FileCache.saveAnimatedImageAsVideo(url: url)
+        let mediaItem = FileMediaItem.video(videoInfo)
+
+        await MainActor.run { [weak self] in
+          guard let self else { return }
+          let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
+          guard !isCanceled else { return }
+
+          let uniqueId = mediaItem.getItemUniqueId()
+          attachmentItems[uniqueId] = mediaItem
+          removePendingVideoAttachment(pendingId, animated: false)
+          handleAttachmentItemsChanged(animated: false)
+          if dismissAttachmentPickerOnSuccess {
+            dismissAttachmentPickerIfPresented(animated: true)
+          }
+        }
+      } catch AnimatedImageVideoConversionError.notAnimated {
+        await MainActor.run { [weak self] in
+          self?.removePendingVideoAttachment(pendingId, animated: false)
+        }
+        if let image = UIImage(contentsOfFile: url.path) {
+          await MainActor.run { [weak self] in
+            self?.addImages([image])
+          }
+        }
+      } catch {
+        Log.shared.error("Failed to save animated image as video", error: error)
+        await MainActor.run { [weak self] in
+          self?.removePendingVideoAttachment(pendingId, animated: false)
         }
       }
     }
@@ -702,7 +766,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
 
   private func handleLibraryPickerResults(_ results: [PHPickerResult], picker: PHPickerViewController) {
     var pendingVideoIdsByIndex: [Int: String] = [:]
-    for (index, result) in results.enumerated() where isVideoResult(result) {
+    for (index, result) in results.enumerated() where isVideoResult(result) || isGIFResult(result) {
       let pendingId = addPendingVideoAttachment()
       pendingVideoIdsByIndex[index] = pendingId
       requestPendingVideoThumbnail(for: result, pendingId: pendingId)
@@ -866,6 +930,9 @@ extension ComposeView: PHPickerViewControllerDelegate {
           return .video(item)
         }
       case .image:
+        if let item = await loadAnimatedImageVideoItem(from: result) {
+          return .video(item)
+        }
         if let image = await loadImageItem(from: result) {
           return .image(image)
         }
@@ -901,6 +968,10 @@ extension ComposeView: PHPickerViewControllerDelegate {
     }
 
     return pickerAssetMediaType(for: result) == .video
+  }
+
+  private func isGIFResult(_ result: PHPickerResult) -> Bool {
+    gifTypeIdentifier(for: result.itemProvider) != nil
   }
 
   private func requestPendingVideoThumbnail(for result: PHPickerResult, pendingId: String) {
@@ -957,6 +1028,116 @@ extension ComposeView: PHPickerViewControllerDelegate {
         continuation.resume(returning: object as? UIImage)
       }
     }
+  }
+
+  private func loadAnimatedImageVideoItem(from result: PHPickerResult) async -> FileMediaItem? {
+    let provider = result.itemProvider
+    guard let typeIdentifier = gifTypeIdentifier(for: provider) else { return nil }
+
+    if let item = await loadAnimatedImageVideoFileRepresentation(from: provider, typeIdentifier: typeIdentifier) {
+      return item
+    }
+
+    return await loadAnimatedImageVideoDataRepresentation(from: provider, typeIdentifier: typeIdentifier)
+  }
+
+  private func loadAnimatedImageVideoFileRepresentation(
+    from provider: NSItemProvider,
+    typeIdentifier: String
+  ) async -> FileMediaItem? {
+    await withCheckedContinuation { continuation in
+      provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+        if let error {
+          Log.shared.error("Failed to load GIF file from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        guard let url else {
+          continuation.resume(returning: nil)
+          return
+        }
+
+        let tempUrl = FileManager.default.temporaryDirectory
+          .appendingPathComponent(UUID().uuidString)
+          .appendingPathExtension("gif")
+
+        do {
+          try FileManager.default.copyItem(at: url, to: tempUrl)
+        } catch {
+          Log.shared.error("Failed to copy GIF file from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        Task {
+          defer { try? FileManager.default.removeItem(at: tempUrl) }
+          do {
+            let videoInfo = try await FileCache.saveAnimatedImageAsVideo(url: tempUrl)
+            continuation.resume(returning: .video(videoInfo))
+          } catch AnimatedImageVideoConversionError.notAnimated {
+            continuation.resume(returning: nil)
+          } catch {
+            Log.shared.error("Failed to convert GIF from picker", error: error)
+            continuation.resume(returning: nil)
+          }
+        }
+      }
+    }
+  }
+
+  private func loadAnimatedImageVideoDataRepresentation(
+    from provider: NSItemProvider,
+    typeIdentifier: String
+  ) async -> FileMediaItem? {
+    await withCheckedContinuation { continuation in
+      provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
+        if let error {
+          Log.shared.error("Failed to load GIF data from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        guard let data else {
+          continuation.resume(returning: nil)
+          return
+        }
+
+        let tempUrl = FileManager.default.temporaryDirectory
+          .appendingPathComponent(UUID().uuidString)
+          .appendingPathExtension("gif")
+
+        do {
+          try data.write(to: tempUrl)
+        } catch {
+          Log.shared.error("Failed to write GIF data from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        Task {
+          defer { try? FileManager.default.removeItem(at: tempUrl) }
+          do {
+            let videoInfo = try await FileCache.saveAnimatedImageAsVideo(url: tempUrl)
+            continuation.resume(returning: .video(videoInfo))
+          } catch AnimatedImageVideoConversionError.notAnimated {
+            continuation.resume(returning: nil)
+          } catch {
+            Log.shared.error("Failed to convert GIF data from picker", error: error)
+            continuation.resume(returning: nil)
+          }
+        }
+      }
+    }
+  }
+
+  private func gifTypeIdentifier(for provider: NSItemProvider) -> String? {
+    let candidates = [
+      UTType.gif.identifier,
+      "com.compuserve.gif",
+      "image/gif",
+    ]
+    return candidates.first { provider.hasItemConformingToTypeIdentifier($0) }
   }
 
   private func loadVideoItem(from result: PHPickerResult) async -> FileMediaItem? {

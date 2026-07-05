@@ -375,7 +375,9 @@ public actor FileUploader {
       height: height,
       duration: duration,
       thumbnail: thumbnailPayload?.0,
-      thumbnailMimeType: thumbnailPayload?.1
+      thumbnailMimeType: thumbnailPayload?.1,
+      isAnimated: resolvedVideoInfo.video.isAnimated,
+      hasAudio: resolvedVideoInfo.video.hasAudio
     )
 
     try startUpload(
@@ -782,7 +784,9 @@ public actor FileUploader {
         height: result.height,
         duration: result.duration,
         thumbnail: resolvedMetadata.thumbnail,
-        thumbnailMimeType: resolvedMetadata.thumbnailMimeType
+        thumbnailMimeType: resolvedMetadata.thumbnailMimeType,
+        isAnimated: resolvedMetadata.isAnimated,
+        hasAudio: resolvedMetadata.hasAudio
       )
       return PreparedVideoUploadPayload(
         url: result.url,
@@ -837,7 +841,9 @@ public actor FileUploader {
       height: height,
       duration: duration,
       thumbnail: fallback?.thumbnail,
-      thumbnailMimeType: fallback?.thumbnailMimeType
+      thumbnailMimeType: fallback?.thumbnailMimeType,
+      isAnimated: fallback?.isAnimated ?? false,
+      hasAudio: fallback?.hasAudio
     )
   }
 
