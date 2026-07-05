@@ -221,6 +221,8 @@ class ComposeNSTextView: NSTextView {
       switch attachment {
         case let .image(image, url):
           notifyDelegateAboutImage(image, url)
+        case let .animatedImage(url):
+          notifyDelegateAboutVideo(url)
         case let .video(url, _):
           notifyDelegateAboutVideo(url)
         case let .file(url, _):
@@ -881,6 +883,8 @@ class ComposeNSTextView: NSTextView {
       .tiff, .png, .html,
       NSPasteboard.PasteboardType("public.image"),
       NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("public.gif"),
+      NSPasteboard.PasteboardType("com.compuserve.gif"),
       NSPasteboard.PasteboardType("image/png"),
       NSPasteboard.PasteboardType("image/jpeg"),
       NSPasteboard.PasteboardType("image/gif"),

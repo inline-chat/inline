@@ -557,6 +557,8 @@ class ChatViewAppKit: NSViewController {
       switch attachment {
         case let .image(image, _):
           handleDroppedImage(image)
+        case let .animatedImage(url):
+          handleDroppedAnimatedImage(url)
         case let .video(url, _):
           handleDroppedVideo(url)
         case let .file(url, _):
@@ -584,6 +586,10 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func handleDroppedVideo(_ url: URL) {
+    compose?.handleFileDrop([url])
+  }
+
+  private func handleDroppedAnimatedImage(_ url: URL) {
     compose?.handleFileDrop([url])
   }
 
