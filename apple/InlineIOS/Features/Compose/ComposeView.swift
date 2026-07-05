@@ -855,7 +855,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   @objc func startVoiceRecordingTapped() {
     guard canStartVoiceRecording, let peerId else { return }
     dismissOverlay()
-    guard voiceViewModel.prepareToStart() else { return }
 
     Task { @MainActor [weak self] in
       guard let self else { return }
