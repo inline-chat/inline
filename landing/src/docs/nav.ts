@@ -1,3 +1,5 @@
+import { DOCS_NAV_GROUPS, DOCS_PAGES } from "~/docs/pages"
+
 export type DocsNavGroup = {
   title: string
   items: Array<{
@@ -6,39 +8,17 @@ export type DocsNavGroup = {
   }>
 }
 
-export const DOCS_NAV: DocsNavGroup[] = [
-  {
-    title: "Getting Started",
-    items: [
-      { title: "Welcome", to: "/docs" },
-      { title: "What's Inline", to: "/docs/whats-inline" },
-      { title: "Roadmap", to: "/docs/roadmap" },
-      { title: "Downloads", to: "/docs/downloads" },
-      { title: "CLI", to: "/docs/cli" },
-    ],
-  },
-  {
-    title: "Developers",
-    items: [
-      { title: "Overview", to: "/docs/developers" },
-      { title: "Realtime API", to: "/docs/realtime-api" },
-      { title: "Bot API", to: "/docs/bot-api" },
-      { title: "Creating a Bot", to: "/docs/creating-a-bot" },
-    ],
-  },
-  {
-    title: "Integrations",
-    items: [
-      { title: "MCP", to: "/docs/mcp" },
-      { title: "OpenClaw", to: "/docs/openclaw" },
-      { title: "Hermes Agent", to: "/docs/hermes" },
-    ],
-  },
-  {
-    title: "Policies",
-    items: [
-      { title: "Security", to: "/docs/security" },
-      { title: "Legal", to: "/legal" },
-    ],
-  },
-]
+export const DOCS_NAV: DocsNavGroup[] = DOCS_NAV_GROUPS.map((group) => ({
+  title: group.title,
+  items: DOCS_PAGES.filter((page) => page.navGroup === group.id).map((page) => ({
+    title: ("navTitle" in page ? page.navTitle : undefined) ?? page.title,
+    to: page.route,
+  })),
+})).map((group) =>
+  group.title === "Policies"
+    ? {
+        ...group,
+        items: [...group.items, { title: "Legal", to: "/legal" }],
+      }
+    : group,
+)

@@ -1,15 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DocsMarkdown } from "~/docs/DocsMarkdown"
-
-import whatsInline from "~/docs/content/whats-inline.md?raw"
+import { DocsPage, docsPageHead } from "~/docs/DocsPage"
 
 export const Route = createFileRoute("/docs/whats-inline")({
   component: WhatsInlineDocs,
-  head: () => ({
-    meta: [{ title: "What's Inline - Inline Docs" }],
-  }),
+  head: () => docsPageHead("whats-inline"),
 })
 
 function WhatsInlineDocs() {
-  return <DocsMarkdown markdown={whatsInline} className="page-content docs-content" />
+  return <DocsPage slug="whats-inline" />
 }

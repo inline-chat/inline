@@ -1,16 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DocsMarkdown } from "~/docs/DocsMarkdown"
-
-import security from "~/docs/content/security.md?raw"
+import { DocsPage, docsPageHead } from "~/docs/DocsPage"
 
 export const Route = createFileRoute("/docs/security")({
   component: SecurityDocs,
-  head: () => ({
-    meta: [{ title: "Security - Inline Docs" }],
-  }),
+  head: () => docsPageHead("security"),
 })
 
 function SecurityDocs() {
-  return <DocsMarkdown markdown={security} className="page-content docs-content" />
+  return <DocsPage slug="security" />
 }
-

@@ -137,12 +137,6 @@ Unsupported or intentionally limited:
 
 - Requires Hermes Agent `0.17.x` and Node.js `20` or newer.
 - Tokens are read from `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
-- Room controls are available through `INLINE_ALLOWED_CHATS`, `INLINE_FREE_RESPONSE_CHATS`, and `INLINE_STRICT_MENTION`. Parent chat ids also match Inline reply threads.
+- Room controls are available through `INLINE_ALLOWED_CHATS`, `INLINE_FREE_RESPONSE_CHATS`, and `INLINE_STRICT_MENTION`.
 - Top-level DM and group replies use Inline reply threads by default. Use `/threads on`, `/threads off`, or `/threads auto` in Inline to configure a chat, or set `INLINE_REPLY_THREADS=false` globally.
-- Thread-specific prompts and skill bindings are supported through `platforms.inline.channel_prompts` and `platforms.inline.channel_skill_bindings`; Inline checks the thread chat id first, then the parent chat id.
-- Set `platforms.inline.typing_indicator: false` if Inline rooms should stay visually quiet while Hermes is thinking.
-- Set `display.platforms.inline.tool_progress: off` to suppress tool-call progress messages. If you opt into progress, keep `display.platforms.inline.cleanup_progress: true` so successful runs do not leave progress bubbles behind.
-- Slash commands typed as text always work; the native `/` menu is synced on gateway connect and can be disabled with `INLINE_SYNC_COMMANDS=false` or `platforms.inline.sync_commands: false`.
-- `SESSION_REVOKED` means the token reached Inline realtime but is expired or revoked.
-- Missing-token diagnostics mean the Hermes gateway needs `INLINE_TOKEN`/`INLINE_BOT_TOKEN`, or `platforms.inline.token`/`inline.token` in config.
-- Source and package docs live in the [public Inline repo](https://github.com/inline-chat/inline/tree/main/hermes-agent).
+- Full adapter reference: [public Inline repo](https://github.com/inline-chat/inline/tree/main/hermes-agent).

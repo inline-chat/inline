@@ -1,15 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DocsMarkdown } from "~/docs/DocsMarkdown"
-
-import hermes from "~/docs/content/hermes.md?raw"
+import { DocsPage, docsPageHead } from "~/docs/DocsPage"
 
 export const Route = createFileRoute("/docs/hermes")({
   component: HermesDocs,
-  head: () => ({
-    meta: [{ title: "Hermes Agent - Inline Docs" }],
-  }),
+  head: () => docsPageHead("hermes"),
 })
 
 function HermesDocs() {
-  return <DocsMarkdown markdown={hermes} className="page-content docs-content" />
+  return <DocsPage slug="hermes" />
 }

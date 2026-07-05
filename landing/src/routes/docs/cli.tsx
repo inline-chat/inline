@@ -1,16 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DocsMarkdown } from "~/docs/DocsMarkdown"
-
-import cli from "~/docs/content/cli.md?raw"
+import { DocsPage, docsPageHead } from "~/docs/DocsPage"
 
 export const Route = createFileRoute("/docs/cli")({
   component: CliDocs,
-  head: () => ({
-    meta: [{ title: "CLI - Inline Docs" }],
-  }),
+  head: () => docsPageHead("cli"),
 })
 
 function CliDocs() {
-  return <DocsMarkdown markdown={cli} className="page-content docs-content" />
+  return <DocsPage slug="cli" />
 }
-

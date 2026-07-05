@@ -8,3 +8,8 @@
 # TanStack Router
 routeTree.gen.ts
 .tanstack
+
+# Docs Markdown is served from src/docs/content via server routes.
+/public/docs/
+/public/llms.txt
+/public/llms-full.txt

@@ -1,15 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DocsMarkdown } from "~/docs/DocsMarkdown"
-
-import openclaw from "~/docs/content/openclaw.md?raw"
+import { DocsPage, docsPageHead } from "~/docs/DocsPage"
 
 export const Route = createFileRoute("/docs/openclaw")({
   component: OpenClawDocs,
-  head: () => ({
-    meta: [{ title: "OpenClaw - Inline Docs" }],
-  }),
+  head: () => docsPageHead("openclaw"),
 })
 
 function OpenClawDocs() {
-  return <DocsMarkdown markdown={openclaw} className="page-content docs-content" />
+  return <DocsPage slug="openclaw" />
 }

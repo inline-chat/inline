@@ -16,6 +16,13 @@ Inline currently exposes two API entry points.
 
 See: [Realtime API](/docs/realtime-api)
 
+## SDKs
+
+- TypeScript SDK: use `@inline-chat/realtime-sdk` for Bun, Node.js, and JavaScript runtimes.
+- Rust SDK: use `inline-sdk` for Rust agents, bridges, CLIs, and cross-platform client foundations.
+
+See: [Rust SDK](/docs/rust-sdk)
+
 ## Quick Start
 
 - Method reference: [Bot API](/docs/bot-api)

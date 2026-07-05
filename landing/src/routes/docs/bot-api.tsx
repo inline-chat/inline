@@ -1,16 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DocsMarkdown } from "~/docs/DocsMarkdown"
-
-import botApi from "~/docs/content/bot-api.md?raw"
+import { DocsPage, docsPageHead } from "~/docs/DocsPage"
 
 export const Route = createFileRoute("/docs/bot-api")({
   component: BotApiDocs,
-  head: () => ({
-    meta: [{ title: "Bot API - Inline Docs" }],
-  }),
+  head: () => docsPageHead("bot-api"),
 })
 
 function BotApiDocs() {
-  return <DocsMarkdown markdown={botApi} className="page-content docs-content" />
+  return <DocsPage slug="bot-api" />
 }
-
