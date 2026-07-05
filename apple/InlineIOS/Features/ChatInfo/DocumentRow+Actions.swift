@@ -172,7 +172,7 @@ extension DocumentRow {
 
   // MARK: - Document State Management
 
-  func determineDocumentState(_ document: Document) -> DocumentState {
+  func determineDocumentState(_ document: InlineKit.Document) -> DocumentState {
     // Check if file exists locally using the computed documentURL property
     if documentURL != nil {
       return .locallyAvailable

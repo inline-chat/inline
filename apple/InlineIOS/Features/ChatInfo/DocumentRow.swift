@@ -28,7 +28,7 @@ struct DocumentRow: View {
   }
 
   var documentInfo: DocumentInfo { documentMessage.document }
-  var document: Document { documentInfo.document }
+  var document: InlineKit.Document { documentInfo.document }
   
   // MARK: - Computed Properties
   
