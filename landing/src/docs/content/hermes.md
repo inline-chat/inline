@@ -134,4 +134,4 @@ Unsupported or intentionally limited:
 - Slash commands typed as text always work; the native `/` menu is synced on gateway connect and can be disabled with `INLINE_SYNC_COMMANDS=false` or `platforms.inline.sync_commands: false`.
 - `SESSION_REVOKED` means the token reached Inline realtime but is expired or revoked.
 - Missing-token diagnostics mean the Hermes gateway needs `INLINE_TOKEN`/`INLINE_BOT_TOKEN`, or `platforms.inline.token`/`inline.token` in config.
-- Source and package docs live in the [public Inline repo](https://github.com/inline-chat/inline/tree/main/packages/hermes-agent).
+- Source and package docs live in the [public Inline repo](https://github.com/inline-chat/inline/tree/main/hermes-agent).
