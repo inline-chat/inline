@@ -16,14 +16,10 @@ public struct CreateChatView: View {
   @State private var chatTitle = ""
   @State private var selectedEmoji: String? = nil
   @State private var isPublic = true
-  @State private var showEmojiPicker = false
   @State private var selectedPeople: Set<Int64> = []
   @State private var showParticipantPicker = false
 
   @FocusState private var isTitleFocused: Bool
-
-  // Sample emoji collection
-  let emojis = ["👥", "💬", "🎯", "🛍️", "🛒", "💵", "🎧", "📚", "🍕", "📈", "⚙️", "🚧", "🏪", "🏡", "🎪", "🌴", "📁", "🤝", "🛖"]
 
   // Space view model
   @StateObject private var spaceViewModel: SpaceFullMembersViewModel
@@ -87,48 +83,35 @@ public struct CreateChatView: View {
     HStack {
       Text("Icon")
       Spacer()
-      Button(action: {
-        showEmojiPicker.toggle()
-      }) {
-        if let selectedEmoji {
-          Text(selectedEmoji)
-            .font(.title)
-            .frame(width: 28, height: 28)
-        } else {
-          Image(systemName: "message.fill")
-            .font(.body)
-            .frame(width: 28, height: 28)
-            .background(Circle().fill(Color.gray.opacity(0.2)))
-        }
-      }
-      .buttonStyle(PlainButtonStyle())
-      .popover(isPresented: $showEmojiPicker) {
-        emojiPickerView
-        #if os(iOS)
-        .presentationCompactAdaptation(.popover)
-        #endif
+      EmojiTextFieldPicker(
+        emoji: selectedEmojiBinding,
+        targetSize: CGSize(width: 28, height: 28),
+        accessibilityLabel: "Chat icon"
+      ) { emoji, _, _ in
+        iconPickerLabel(emoji)
       }
     }
   }
 
-  private var emojiPickerView: some View {
-    ScrollView {
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))]) {
-        ForEach(emojis, id: \.self) { emoji in
-          Button(action: {
-            selectedEmoji = emoji
-            showEmojiPicker = false
-          }) {
-            Text(emoji)
-              .font(.system(size: 24))
-              .padding(8)
-          }
-          .buttonStyle(PlainButtonStyle())
-        }
-      }
+  private var selectedEmojiBinding: Binding<String> {
+    Binding(
+      get: { selectedEmoji ?? "" },
+      set: { selectedEmoji = $0.isEmpty ? nil : $0 }
+    )
+  }
+
+  @ViewBuilder
+  private func iconPickerLabel(_ emoji: String) -> some View {
+    if !emoji.isEmpty {
+      Text(emoji)
+        .font(.title)
+        .frame(width: 28, height: 28)
+    } else {
+      Image(systemName: "message.fill")
+        .font(.body)
+        .frame(width: 28, height: 28)
+        .background(Circle().fill(Color.gray.opacity(0.2)))
     }
-    .padding()
-    .frame(minWidth: 200, minHeight: 200, maxHeight: 300)
   }
 
   private var visibilityPicker: some View {

@@ -10,16 +10,10 @@ struct RenameChatSheet: View {
   @StateObject private var fullChat: FullChatViewModel
   @State private var title: String = ""
   @State private var emoji: String = ""
-  @State private var showEmojiPicker = false
   @State private var isSaving = false
   @State private var didLoad = false
 
   @FocusState private var isTitleFocused: Bool
-
-  private let emojis = [
-    "👥", "💬", "🎯", "🛍️", "🛒", "💵", "🎧", "📚", "🍕", "📈",
-    "⚙️", "🚧", "🏪", "🏡", "🎪", "🌴", "📁", "🤝", "🛖",
-  ]
 
   init(peer: Peer) {
     self.peer = peer
@@ -35,25 +29,13 @@ struct RenameChatSheet: View {
       HStack {
         Text("Icon")
         Spacer()
-        Button(action: {
-          showEmojiPicker.toggle()
-        }) {
-          if !emoji.isEmpty {
-            Text(emoji)
-              .font(.title)
-              .frame(width: 28, height: 28)
-          } else {
-            Image(systemName: "message.fill")
-              .font(.body)
-              .frame(width: 28, height: 28)
-              .background(Circle().fill(Color.gray.opacity(0.2)))
-          }
+        EmojiTextFieldPicker(
+          emoji: $emoji,
+          targetSize: CGSize(width: 28, height: 28),
+          accessibilityLabel: "Chat icon"
+        ) { emoji, _, _ in
+          iconPickerLabel(emoji)
         }
-        .buttonStyle(PlainButtonStyle())
-        .popover(isPresented: $showEmojiPicker) {
-          emojiPickerView
-        }
-
       }
 
       TextField("Chat Title", text: $title)
@@ -90,39 +72,18 @@ struct RenameChatSheet: View {
     !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
-  private var emojiPickerView: some View {
-    VStack(spacing: 12) {
-      HStack {
-        Text("Emoji")
-          .font(.subheadline.weight(.semibold))
-        Spacer()
-        Button("Remove") {
-          emoji = ""
-          showEmojiPicker = false
-        }
-        .disabled(emoji.isEmpty)
-      }
-
-      Divider()
-
-      ScrollView {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))]) {
-          ForEach(emojis, id: \.self) { emoji in
-            Button(action: {
-              self.emoji = emoji
-              showEmojiPicker = false
-            }) {
-              Text(emoji)
-                .font(.system(size: 24))
-                .padding(8)
-            }
-            .buttonStyle(PlainButtonStyle())
-          }
-        }
-      }
+  @ViewBuilder
+  private func iconPickerLabel(_ emoji: String) -> some View {
+    if !emoji.isEmpty {
+      Text(emoji)
+        .font(.title)
+        .frame(width: 28, height: 28)
+    } else {
+      Image(systemName: "message.fill")
+        .font(.body)
+        .frame(width: 28, height: 28)
+        .background(Circle().fill(Color.gray.opacity(0.2)))
     }
-    .padding()
-    .frame(minWidth: 200, minHeight: 220, maxHeight: 320)
   }
 
   private func save() {
