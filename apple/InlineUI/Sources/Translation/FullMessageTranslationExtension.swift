@@ -9,19 +9,15 @@ public extension FullMessage {
 
   /// Translation text for the message, without falling back to the original text
   var translationText: String? {
-    if TranslationState.shared.isTranslationEnabled(for: peerId) {
-      currentTranslation?.translation
-    } else {
-      message.text ?? nil
-    }
+    guard TranslationState.shared.isTranslationEnabled(for: peerId) else { return nil }
+    return currentTranslation?.translation
   }
 
+  /// Translation entities for the message, without falling back to the original entities
   var translationEntities: MessageEntities? {
-    if TranslationState.shared.isTranslationEnabled(for: peerId) {
-      currentTranslation?.entities
-    } else {
-      message.entities
-    }
+    guard TranslationState.shared.isTranslationEnabled(for: peerId) else { return nil }
+    guard let currentTranslation else { return nil }
+    return currentTranslation.entities ?? MessageEntities()
   }
 
   var isTranslated: Bool {
