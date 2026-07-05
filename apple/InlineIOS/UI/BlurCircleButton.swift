@@ -3,11 +3,9 @@ import UIKit
 class BlurCircleButton: UIButton {
   lazy var blurView: UIVisualEffectView = {
     if #available(iOS 26.0, *) {
-      let glassEffect = UIGlassEffect()
-      let view = UIVisualEffectView()
-      UIView.animate {
-        view.effect = glassEffect
-      }
+      let glassEffect = UIGlassEffect(style: .regular)
+      glassEffect.isInteractive = true
+      let view = UIVisualEffectView(effect: glassEffect)
       view.translatesAutoresizingMaskIntoConstraints = false
 
       return view
