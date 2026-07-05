@@ -41,6 +41,10 @@ let package = Package(
       targets: ["RealtimeV2"]
     ),
     .library(
+      name: "InlineSearch",
+      targets: ["InlineSearch"]
+    ),
+    .library(
       name: "AnimatedMedia",
       targets: ["AnimatedMedia"]
     ),
@@ -153,9 +157,23 @@ let package = Package(
       swiftSettings: swiftSettings
     ),
 
+    .target(
+      name: "InlineSearch",
+      dependencies: [
+        "InlineKit",
+      ],
+      swiftSettings: swiftSettings
+    ),
+
     .testTarget(
       name: "InlineKitTests",
       dependencies: ["InlineKit"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineSearchTests",
+      dependencies: ["InlineSearch", "InlineKit"],
       swiftSettings: swiftSettings
     ),
 
