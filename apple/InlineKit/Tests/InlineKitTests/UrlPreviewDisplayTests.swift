@@ -130,6 +130,21 @@ struct UrlPreviewDisplayTests {
     #expect(display.subtitle == "example.com • A long descript...")
   }
 
+  @Test("keeps GitHub repository source and description")
+  func keepsGitHubRepositorySourceAndDescription() {
+    let preview = makePreview(
+      url: "https://github.com/modem-dev/hunk",
+      siteName: "GitHub",
+      title: "GitHub - modem-dev/hunk: Review-first terminal diff viewer for agentic coders",
+      description: "Review-first terminal diff viewer for agentic coders - modem-dev/hunk"
+    )
+    let display = preview.displayContent(maxDescriptionLength: 110)
+
+    #expect(display.source == "GitHub")
+    #expect(display.title == "GitHub - modem-dev/hunk: Review-first terminal diff viewer for agentic coders")
+    #expect(display.subtitle == "GitHub • Review-first terminal diff viewer for agentic coders - modem-dev/hunk")
+  }
+
   @Test("includes video duration in subtitle")
   func includesVideoDurationInSubtitle() {
     let preview = makePreview(
