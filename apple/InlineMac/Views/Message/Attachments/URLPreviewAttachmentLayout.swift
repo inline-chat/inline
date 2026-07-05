@@ -83,6 +83,7 @@ enum URLPreviewAttachmentLayout {
   static let compactDescriptionFont: NSFont = .systemFont(ofSize: 12)
   static let largeDescriptionFont: NSFont = Theme.messageTextFont
 
+  private static let compactTitleMeasurer = TextMeasurer(font: titleFont, lineBreakMode: .byTruncatingTail)
   private static let largeTitleMeasurer = TextMeasurer(font: titleFont)
   private static let compactDescriptionMeasurer = TextMeasurer(font: compactDescriptionFont, lineBreakMode: .byTruncatingTail)
   private static let authorMeasurer = TextMeasurer(font: authorFont, lineBreakMode: .byTruncatingTail)
@@ -135,7 +136,7 @@ enum URLPreviewAttachmentLayout {
     let imageFrame = compactImageFrame(for: fullAttachment, height: height)
     let textX = imageFrame.map { $0.x + $0.width + spacing } ?? (accentWidth + compactLeadingPadding)
     let textWidth = max(1, floor(width - textX - compactTrailingPadding))
-    let titleHeight = ceil(largeTitleMeasurer.measure(display?.title ?? "", width: textWidth).height)
+    let titleHeight = ceil(compactTitleMeasurer.measure(display?.title ?? "", width: textWidth).height)
     let descriptionHeight = display?.subtitle.map {
       ceil(compactDescriptionMeasurer.measure($0, width: textWidth).height)
     } ?? 0
