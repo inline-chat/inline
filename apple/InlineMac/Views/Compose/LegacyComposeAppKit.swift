@@ -1960,7 +1960,9 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       return true
     }
 
-    if let commandCompletionMenu, commandCompletionMenu.isVisible, commandCompletionMenu.selectCurrentItem() {
+    if let commandCompletionMenu,
+       commandCompletionMenu.isVisible,
+       commandCompletionMenu.selectCurrentItem(sendAfterInsertion: true) {
       return true
     }
 
@@ -2269,7 +2271,7 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     if commandCompletionMenu?.isVisible == true {
-      commandCompletionMenu?.selectCurrentItem()
+      commandCompletionMenu?.selectCurrentItem(sendAfterInsertion: false)
       return true
     }
 
@@ -2437,7 +2439,11 @@ extension LegacyComposeAppKit: MentionCompletionMenuDelegate {
 }
 
 extension LegacyComposeAppKit: CommandCompletionMenuDelegate {
-  func commandMenu(_ menu: CommandCompletionMenu, didSelectSuggestion suggestion: PeerBotCommandSuggestion) {
+  func commandMenu(
+    _ menu: CommandCompletionMenu,
+    didSelectSuggestion suggestion: PeerBotCommandSuggestion,
+    sendAfterInsertion: Bool
+  ) {
     guard let currentSlashCommandRange else { return }
 
     let currentAttributedText = textEditor.attributedString
@@ -2454,7 +2460,14 @@ extension LegacyComposeAppKit: CommandCompletionMenuDelegate {
     ignoreNextHeightChange = false
 
     hideCommandCompletion()
-    send()
+
+    if sendAfterInsertion {
+      send()
+    } else {
+      updateHeightIfNeeded(for: textEditor.textView)
+      updateSendButtonIfNeeded()
+      saveDraft()
+    }
   }
 
   func commandMenuDidRequestClose(_ menu: CommandCompletionMenu) {

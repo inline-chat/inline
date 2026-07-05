@@ -2,7 +2,11 @@ import AppKit
 import InlineKit
 
 protocol CommandCompletionMenuDelegate: AnyObject {
-  func commandMenu(_ menu: CommandCompletionMenu, didSelectSuggestion suggestion: PeerBotCommandSuggestion)
+  func commandMenu(
+    _ menu: CommandCompletionMenu,
+    didSelectSuggestion suggestion: PeerBotCommandSuggestion,
+    sendAfterInsertion: Bool
+  )
   func commandMenuDidRequestClose(_ menu: CommandCompletionMenu)
 }
 
@@ -146,9 +150,13 @@ final class CommandCompletionMenu: NSView {
   }
 
   @discardableResult
-  func selectCurrentItem() -> Bool {
+  func selectCurrentItem(sendAfterInsertion: Bool = true) -> Bool {
     guard selectedIndex >= 0, selectedIndex < suggestions.count else { return false }
-    delegate?.commandMenu(self, didSelectSuggestion: suggestions[selectedIndex])
+    delegate?.commandMenu(
+      self,
+      didSelectSuggestion: suggestions[selectedIndex],
+      sendAfterInsertion: sendAfterInsertion
+    )
     return true
   }
 
