@@ -2000,6 +2000,18 @@ export interface Video {
      * @generated from protobuf field: optional string cdn_url = 8;
      */
     cdnUrl?: string;
+    /**
+     * True for GIF-style animation media stored as video.
+     *
+     * @generated from protobuf field: optional bool is_animated = 9;
+     */
+    isAnimated?: boolean;
+    /**
+     * True when the encoded video has an audio track.
+     *
+     * @generated from protobuf field: optional bool has_audio = 10;
+     */
+    hasAudio?: boolean;
 }
 /**
  * @generated from protobuf message Document
@@ -11965,7 +11977,9 @@ class Video$Type extends MessageType<Video> {
             { no: 5, name: "duration", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 6, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 7, name: "photo", kind: "message", T: () => Photo },
-            { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "is_animated", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Video>): Video {
@@ -12009,6 +12023,12 @@ class Video$Type extends MessageType<Video> {
                 case /* optional string cdn_url */ 8:
                     message.cdnUrl = reader.string();
                     break;
+                case /* optional bool is_animated */ 9:
+                    message.isAnimated = reader.bool();
+                    break;
+                case /* optional bool has_audio */ 10:
+                    message.hasAudio = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12045,6 +12065,12 @@ class Video$Type extends MessageType<Video> {
         /* optional string cdn_url = 8; */
         if (message.cdnUrl !== undefined)
             writer.tag(8, WireType.LengthDelimited).string(message.cdnUrl);
+        /* optional bool is_animated = 9; */
+        if (message.isAnimated !== undefined)
+            writer.tag(9, WireType.Varint).bool(message.isAnimated);
+        /* optional bool has_audio = 10; */
+        if (message.hasAudio !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.hasAudio);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

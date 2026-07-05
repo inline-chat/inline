@@ -36,6 +36,8 @@ export const Input = Type.Object({
   width: Optional(Type.String()),
   height: Optional(Type.String()),
   duration: Optional(Type.String()),
+  isAnimated: Optional(Type.String()),
+  hasAudio: Optional(Type.String()),
   waveform: Optional(Type.String()),
 
   // For documents
@@ -63,6 +65,8 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
       input.type === FileTypes.VIDEO || input.type === FileTypes.VOICE
         ? parseOptionalInt("duration", input.duration, 0)
         : undefined
+    const isAnimated = input.type === FileTypes.VIDEO ? parseOptionalBool("isAnimated", input.isAnimated) : undefined
+    const hasAudio = input.type === FileTypes.VIDEO ? parseOptionalBool("hasAudio", input.hasAudio) : undefined
     const waveform = input.type === FileTypes.VOICE ? parseRequiredBase64("waveform", input.waveform) : undefined
 
     if (input.thumbnail?.size === 0) {
@@ -86,6 +90,17 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
         })
         throw uploadBadRequest("Video upload requires width, height, and duration")
       }
+      if (isAnimated === true && hasAudio === true) {
+        log.error("Invalid animated video metadata", { ...requestDiagnostics, isAnimated, hasAudio })
+        throw uploadBadRequest("Animated video uploads must be silent")
+      }
+    } else if (input.isAnimated !== undefined || input.hasAudio !== undefined) {
+      log.error("Video-only metadata was provided for non-video upload", {
+        ...requestDiagnostics,
+        hasIsAnimated: input.isAnimated !== undefined,
+        hasHasAudio: input.hasAudio !== undefined,
+      })
+      throw uploadBadRequest("Animated/audio video metadata is only valid for video uploads")
     }
 
     if (input.type === FileTypes.VOICE) {
@@ -120,6 +135,8 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
               height: height ?? 720,
               duration: duration ?? 0,
               photoId: uploadedThumbnailId ? BigInt(uploadedThumbnailId) : undefined,
+              isAnimated: isAnimated ?? false,
+              hasAudio,
             },
             { userId: context.currentUserId },
           )
@@ -222,6 +239,21 @@ function parseOptionalInt(name: string, value: string | undefined, min: number):
   }
 
   return parsed
+}
+
+function parseOptionalBool(name: string, value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined
+  const trimmed = value.trim().toLowerCase()
+  if (!trimmed) {
+    log.error("Invalid boolean upload metadata", { name, value, reason: "empty" })
+    throw uploadBadRequest(`Invalid ${name}: expected true or false`)
+  }
+
+  if (trimmed === "true" || trimmed === "1") return true
+  if (trimmed === "false" || trimmed === "0") return false
+
+  log.error("Invalid boolean upload metadata", { name, value })
+  throw uploadBadRequest(`Invalid ${name}: expected true or false`)
 }
 
 function parseRequiredBase64(name: string, value: string | undefined): Uint8Array | undefined {

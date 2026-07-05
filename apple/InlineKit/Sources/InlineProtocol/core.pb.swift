@@ -3506,12 +3506,34 @@ public nonisolated struct Video: Sendable {
   /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
   public mutating func clearCdnURL() {self._cdnURL = nil}
 
+  /// True for GIF-style animation media stored as video.
+  public var isAnimated: Bool {
+    get {_isAnimated ?? false}
+    set {_isAnimated = newValue}
+  }
+  /// Returns true if `isAnimated` has been explicitly set.
+  public var hasIsAnimated: Bool {self._isAnimated != nil}
+  /// Clears the value of `isAnimated`. Subsequent reads from it will return its default value.
+  public mutating func clearIsAnimated() {self._isAnimated = nil}
+
+  /// True when the encoded video has an audio track.
+  public var hasAudio_p: Bool {
+    get {_hasAudio_p ?? false}
+    set {_hasAudio_p = newValue}
+  }
+  /// Returns true if `hasAudio_p` has been explicitly set.
+  public var hasHasAudio_p: Bool {self._hasAudio_p != nil}
+  /// Clears the value of `hasAudio_p`. Subsequent reads from it will return its default value.
+  public mutating func clearHasAudio_p() {self._hasAudio_p = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _photo: Photo? = nil
   fileprivate var _cdnURL: String? = nil
+  fileprivate var _isAnimated: Bool? = nil
+  fileprivate var _hasAudio_p: Bool? = nil
 }
 
 public nonisolated struct Document: Sendable {
@@ -14997,7 +15019,7 @@ nonisolated extension MessageNudge: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 nonisolated extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Video"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}date\0\u{1}w\0\u{1}h\0\u{1}duration\0\u{1}size\0\u{1}photo\0\u{3}cdn_url\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}date\0\u{1}w\0\u{1}h\0\u{1}duration\0\u{1}size\0\u{1}photo\0\u{3}cdn_url\0\u{3}is_animated\0\u{3}has_audio\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -15013,6 +15035,8 @@ nonisolated extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       case 6: try { try decoder.decodeSingularInt32Field(value: &self.size) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._photo) }()
       case 8: try { try decoder.decodeSingularStringField(value: &self._cdnURL) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self._isAnimated) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self._hasAudio_p) }()
       default: break
       }
     }
@@ -15047,6 +15071,12 @@ nonisolated extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     try { if let v = self._cdnURL {
       try visitor.visitSingularStringField(value: v, fieldNumber: 8)
     } }()
+    try { if let v = self._isAnimated {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 9)
+    } }()
+    try { if let v = self._hasAudio_p {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -15059,6 +15089,8 @@ nonisolated extension Video: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     if lhs.size != rhs.size {return false}
     if lhs._photo != rhs._photo {return false}
     if lhs._cdnURL != rhs._cdnURL {return false}
+    if lhs._isAnimated != rhs._isAnimated {return false}
+    if lhs._hasAudio_p != rhs._hasAudio_p {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

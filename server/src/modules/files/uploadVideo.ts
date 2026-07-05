@@ -12,6 +12,8 @@ interface VideoMetadata {
   height: number
   duration: number
   photoId?: bigint // Optional thumbnail photo ID
+  isAnimated?: boolean
+  hasAudio?: boolean
 }
 
 export async function uploadVideo(
@@ -58,6 +60,8 @@ export async function uploadVideo(
         height: metadata.height,
         duration: metadata.duration,
         photoId: inputMetadata.photoId,
+        isAnimated: inputMetadata.isAnimated ?? false,
+        hasAudio: inputMetadata.hasAudio,
         date: new Date(),
       })
       .returning()
@@ -75,6 +79,8 @@ export async function uploadVideo(
       height: inputMetadata.height,
       duration: inputMetadata.duration,
       hasThumbnailId: inputMetadata.photoId != null,
+      isAnimated: inputMetadata.isAnimated ?? false,
+      hasAudio: inputMetadata.hasAudio,
       fileName: file.name,
       fileSize: file.size,
       mimeType: file.type,

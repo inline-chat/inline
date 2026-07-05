@@ -14,6 +14,8 @@ export const encodeVideo = ({ video }: { video: DbFullVideo }) => {
     size: video.file.fileSize ?? 0,
     cdnUrl: video.file?.path ? getSignedUrl(video.file.path) ?? undefined : undefined,
     photo: video.photo ? encodePhoto({ photo: video.photo }) : undefined,
+    isAnimated: video.isAnimated ?? false,
+    hasAudio: video.hasAudio ?? undefined,
   }
 
   return proto

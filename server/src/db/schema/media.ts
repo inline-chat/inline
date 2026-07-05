@@ -106,6 +106,12 @@ export const videos = pgTable("videos", {
 
   // thumbnail for the video
   photoId: bigint("photo_id", { mode: "bigint" }).references(() => photos.id),
+
+  // GIF-style animation semantics for videos stored as MP4.
+  isAnimated: boolean("is_animated").notNull().default(false),
+
+  // Technical audio-track metadata. Null means unknown for legacy rows/uploads.
+  hasAudio: boolean("has_audio"),
 })
 
 export type DbVideo = typeof videos.$inferSelect

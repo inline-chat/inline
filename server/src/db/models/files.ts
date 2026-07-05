@@ -294,6 +294,8 @@ export async function cloneVideoById(videoId: number, newOwnerId: number): Promi
       width: video.width,
       height: video.height,
       duration: video.duration,
+      isAnimated: video.isAnimated,
+      hasAudio: video.hasAudio,
     })
     .returning()
 

@@ -631,6 +631,13 @@
       "when": 1783107351786,
       "tag": "0089_add_space_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1783251321016,
+      "tag": "0090_animated-video-metadata",
+      "breakpoints": true
     }
   ]
 }

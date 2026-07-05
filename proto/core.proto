@@ -777,6 +777,12 @@ message Video {
 
   // CDN URL
   optional string cdn_url = 8;
+
+  // True for GIF-style animation media stored as video.
+  optional bool is_animated = 9;
+
+  // True when the encoded video has an audio track.
+  optional bool has_audio = 10;
 }
 
 message Document {
