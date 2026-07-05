@@ -12,6 +12,61 @@
     "cli": {
       "name": "@inline-chat/cli",
     },
+    "hermes-agent": {
+      "name": "@inline-chat/hermes-agent-adapter",
+      "version": "0.0.1",
+      "bin": {
+        "inline-hermes": "dist/install.js",
+      },
+      "dependencies": {
+        "@inline-chat/realtime-sdk": "0.0.11",
+        "yaml": "2.9.0",
+      },
+      "devDependencies": {
+        "@types/node": "20.17.19",
+        "@vitest/coverage-v8": "4.0.16",
+        "typescript": "5.8.3",
+        "vitest": "4.0.16",
+      },
+    },
+    "mcp": {
+      "name": "@inline-chat/mcp",
+      "version": "0.0.1",
+      "dependencies": {
+        "@inline-chat/oauth-core": "workspace:*",
+        "@inline-chat/protocol": "workspace:*",
+        "@inline-chat/realtime-sdk": "workspace:*",
+        "@modelcontextprotocol/sdk": "^1.26.0",
+        "zod": "^4.3.6",
+      },
+      "devDependencies": {
+        "@types/node": "^20.11.30",
+        "@vitest/coverage-v8": "4.0.16",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.16",
+      },
+    },
+    "openclaw": {
+      "name": "@inline-openclaw/inline",
+      "version": "0.0.50",
+      "dependencies": {
+        "@inline-chat/realtime-sdk": "0.0.11",
+        "zod": "4.4.3",
+      },
+      "devDependencies": {
+        "@types/node": "20.17.19",
+        "@vitest/coverage-v8": "4.0.16",
+        "openclaw": "2026.6.11",
+        "typescript": "5.8.3",
+        "vitest": "4.0.16",
+      },
+      "peerDependencies": {
+        "openclaw": ">=2026.6.11",
+      },
+      "optionalPeers": [
+        "openclaw",
+      ],
+    },
     "packages/bot-api": {
       "name": "@inline-chat/bot-api",
       "version": "0.0.1",
@@ -33,40 +88,6 @@
         "typescript": "^5.8.3",
       },
     },
-    "packages/hermes-agent": {
-      "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.1",
-      "bin": {
-        "inline-hermes": "./dist/install.js",
-      },
-      "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.11",
-        "yaml": "2.9.0",
-      },
-      "devDependencies": {
-        "@types/node": "20.17.19",
-        "@vitest/coverage-v8": "4.0.16",
-        "typescript": "5.8.3",
-        "vitest": "4.0.16",
-      },
-    },
-    "packages/mcp": {
-      "name": "@inline-chat/mcp",
-      "version": "0.0.1",
-      "dependencies": {
-        "@inline-chat/oauth-core": "workspace:*",
-        "@inline-chat/protocol": "workspace:*",
-        "@inline-chat/realtime-sdk": "workspace:*",
-        "@modelcontextprotocol/sdk": "^1.26.0",
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/node": "^20.11.30",
-        "@vitest/coverage-v8": "4.0.16",
-        "typescript": "^5.8.3",
-        "vitest": "^4.0.16",
-      },
-    },
     "packages/oauth-core": {
       "name": "@inline-chat/oauth-core",
       "version": "0.0.1",
@@ -74,27 +95,6 @@
         "@types/node": "^20.11.30",
         "typescript": "^5.8.3",
       },
-    },
-    "packages/openclaw": {
-      "name": "@inline-openclaw/inline",
-      "version": "0.0.50",
-      "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.11",
-        "zod": "4.4.3",
-      },
-      "devDependencies": {
-        "@types/node": "20.17.19",
-        "@vitest/coverage-v8": "4.0.16",
-        "openclaw": "2026.6.11",
-        "typescript": "5.8.3",
-        "vitest": "4.0.16",
-      },
-      "peerDependencies": {
-        "openclaw": ">=2026.6.11",
-      },
-      "optionalPeers": [
-        "openclaw",
-      ],
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
@@ -106,7 +106,7 @@
         "typescript": "^5.8.3",
       },
     },
-    "packages/sdk": {
+    "sdk": {
       "name": "@inline-chat/realtime-sdk",
       "version": "0.0.11",
       "dependencies": {
@@ -230,17 +230,17 @@
 
     "@inline-chat/cli": ["@inline-chat/cli@workspace:cli"],
 
-    "@inline-chat/hermes-agent-adapter": ["@inline-chat/hermes-agent-adapter@workspace:packages/hermes-agent"],
+    "@inline-chat/hermes-agent-adapter": ["@inline-chat/hermes-agent-adapter@workspace:hermes-agent"],
 
-    "@inline-chat/mcp": ["@inline-chat/mcp@workspace:packages/mcp"],
+    "@inline-chat/mcp": ["@inline-chat/mcp@workspace:mcp"],
 
     "@inline-chat/oauth-core": ["@inline-chat/oauth-core@workspace:packages/oauth-core"],
 
     "@inline-chat/protocol": ["@inline-chat/protocol@workspace:packages/protocol"],
 
-    "@inline-chat/realtime-sdk": ["@inline-chat/realtime-sdk@workspace:packages/sdk"],
+    "@inline-chat/realtime-sdk": ["@inline-chat/realtime-sdk@workspace:sdk"],
 
-    "@inline-openclaw/inline": ["@inline-openclaw/inline@workspace:packages/openclaw"],
+    "@inline-openclaw/inline": ["@inline-openclaw/inline@workspace:openclaw"],
 
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 

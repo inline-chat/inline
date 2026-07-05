@@ -7,7 +7,7 @@ Inline MCP resource server (Bun runtime) with OAuth routed through the main API 
 From repo root:
 
 ```sh
-cd packages/mcp
+cd mcp
 bun run dev
 ```
 
@@ -16,7 +16,7 @@ bun run dev
 Build from the repository root:
 
 ```sh
-docker build -f packages/mcp/Dockerfile -t inline-mcp .
+docker build -f mcp/Dockerfile -t inline-mcp .
 docker run --rm -p 8791:8791 -e MCP_INTERNAL_SHARED_SECRET=<shared-secret> inline-mcp
 ```
 

@@ -1,7 +1,7 @@
 {
-  "name": "@inline-chat/realtime-sdk",
-  "version": "0.0.11",
-  "private": false,
+  "name": "@inline-chat/mcp",
+  "version": "0.0.1",
+  "private": true,
   "license": "Apache-2.0",
   "type": "module",
   "files": [
@@ -16,23 +16,23 @@
     }
   },
   "scripts": {
+    "dev": "bun --watch src/main.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
-    "test": "vitest run --coverage"
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore src vitest.config.ts",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@inline-chat/protocol": "^0.0.5",
-    "ws": "^8.18.3"
+    "@inline-chat/oauth-core": "workspace:*",
+    "@inline-chat/realtime-sdk": "workspace:*",
+    "@inline-chat/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
-    "@types/ws": "^8.5.12",
     "@vitest/coverage-v8": "4.0.16",
     "typescript": "^5.8.3",
     "vitest": "^4.0.16"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

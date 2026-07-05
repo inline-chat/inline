@@ -6,7 +6,7 @@ export default defineConfig({
     alias: {
       // During monorepo dev/tests, resolve SDK/protocol types from source.
       "@inline-chat/realtime-sdk": path.resolve(__dirname, "../sdk/src"),
-      "@inline-chat/protocol": path.resolve(__dirname, "../protocol/src"),
+      "@inline-chat/protocol": path.resolve(__dirname, "../packages/protocol/src"),
     },
   },
   test: {

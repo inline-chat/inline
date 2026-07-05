@@ -52,16 +52,16 @@ jobs:
         run: |
           bun run --cwd packages/protocol build
           bun run --cwd packages/oauth-core build
-          bun run --cwd packages/sdk build
+          bun run --cwd sdk build
 
       - name: Check MCP
-        run: bun run --cwd packages/mcp typecheck
+        run: bun run --cwd mcp typecheck
 
       - name: Build MCP
-        run: bun run --cwd packages/mcp build
+        run: bun run --cwd mcp build
 
       - name: Lint MCP
-        run: bun run --cwd packages/mcp lint
+        run: bun run --cwd mcp lint
 
       - name: Test MCP
-        run: bun run --cwd packages/mcp test
+        run: bun run --cwd mcp test

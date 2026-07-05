@@ -60,7 +60,7 @@ hermes plugins enable inline-platform
 For local development:
 
 ```sh
-cd packages/hermes-agent
+cd hermes-agent
 bun run build
 node dist/install.js install --link --hermes-home ~/.hermes
 cd ~/dev/hermes-agent
@@ -143,7 +143,7 @@ runtime files, verify the shipped `inline-hermes` binary, and print the final
 tarball contents without publishing.
 
 Maintainers should also run the manual live-test and publish checklist in
-[`packages/hermes-agent/RELEASE.md`](https://github.com/inline-chat/inline/blob/main/packages/hermes-agent/RELEASE.md).
+[`hermes-agent/RELEASE.md`](https://github.com/inline-chat/inline/blob/main/hermes-agent/RELEASE.md).
 
 ## Smoke Test
 

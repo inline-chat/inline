@@ -14,14 +14,14 @@
     "adapter",
     "realtime"
   ],
-  "homepage": "https://github.com/inline-chat/inline/tree/main/packages/hermes-agent#readme",
+  "homepage": "https://github.com/inline-chat/inline/tree/main/hermes-agent#readme",
   "bugs": {
     "url": "https://github.com/inline-chat/inline/issues"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/inline-chat/inline.git",
-    "directory": "packages/hermes-agent"
+    "directory": "hermes-agent"
   },
   "files": [
     "LICENSE",
@@ -49,7 +49,7 @@
   },
   "scripts": {
     "build": "mkdir -p plugin/inline/sidecar && bun build ./src/install.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle && bun build ./src/sidecar/index.ts --outdir plugin/inline/sidecar --entry-naming 'index.mjs' --target=node --format=esm --packages=bundle && tsc -p tsconfig.json --emitDeclarationOnly",
-    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src/install.ts src/sidecar/contract.ts src/sidecar/index.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts vitest.config.ts",
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore src/install.ts src/sidecar/contract.ts src/sidecar/index.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts vitest.config.ts",
     "pretest": "bun run build && rm -rf coverage",
     "prepack": "bun run build",
     "prepublishOnly": "bun run check",

@@ -9,11 +9,12 @@ Key paths:
 - `proto/` - synced public protobuf contract; do not hand-edit generated release artifacts.
 - `packages/protocol/` - synced generated TypeScript protocol package.
 - `packages/bot-api-types/` - synced Bot API types package.
-- `packages/sdk/` - canonical realtime SDK source.
+- `sdk/` - canonical realtime SDK source.
 - `packages/bot-api/` - canonical Bot API client source.
 - `packages/oauth-core/` - canonical shared OAuth helpers.
-- `packages/mcp/` - canonical MCP package.
-- `packages/openclaw/` - canonical OpenClaw plugin.
+- `mcp/` - canonical MCP package.
+- `openclaw/` - canonical OpenClaw plugin.
+- `hermes-agent/` - canonical Hermes Agent adapter.
 - `cli/` - canonical Inline CLI source.
 
 ## Working Rules

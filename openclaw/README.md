@@ -65,7 +65,7 @@ After updating, verify that `openclaw plugins list` shows `inline`, `openclaw ch
 From a local checkout (dev):
 
 ```sh
-cd /path/to/inline/packages/openclaw
+cd /path/to/inline/openclaw
 bun run build
 npm pack --ignore-scripts --pack-destination /tmp
 openclaw plugins install --force npm-pack:/tmp/inline-openclaw-inline-<version>.tgz

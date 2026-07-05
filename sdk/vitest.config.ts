@@ -5,7 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // During monorepo dev/tests, resolve protocol types from source.
-      "@inline-chat/protocol": path.resolve(__dirname, "../protocol/src"),
+      "@inline-chat/protocol": path.resolve(__dirname, "../packages/protocol/src"),
     },
   },
   test: {

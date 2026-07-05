@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts ./src/setup-entry.ts ./src/setup-plugin-api.ts ./src/configured-state.ts ./src/secret-contract-api.ts ./src/channel-plugin-api.ts ./src/inline/approval-handler.runtime.ts ./src/runtime-setter-api.ts ./src/account-inspect-api.ts ./src/runtime-register-api.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
-    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore src vitest.config.ts",
     "prepack": "bun run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage",
@@ -87,7 +87,7 @@
     "install": {
       "clawhubSpec": "clawhub:@inline-openclaw/inline",
       "npmSpec": "@inline-openclaw/inline",
-      "localPath": "packages/openclaw",
+      "localPath": "openclaw",
       "defaultChoice": "clawhub",
       "minHostVersion": ">=2026.6.11"
     },

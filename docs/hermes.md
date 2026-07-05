@@ -132,4 +132,4 @@ Unsupported or intentionally limited:
 - Thread-specific prompts and skill bindings are supported through `platforms.inline.channel_prompts` and `platforms.inline.channel_skill_bindings`; Inline checks the thread chat id first, then the parent chat id. See the package README for examples.
 - Set `display.platforms.inline.tool_progress: off` to suppress tool-call progress messages. If you opt into progress, keep `display.platforms.inline.cleanup_progress: true` so successful runs do not leave progress bubbles behind.
 
-Full package docs: [`packages/hermes-agent/README.md`](../packages/hermes-agent/README.md).
+Full package docs: [`hermes-agent/README.md`](../hermes-agent/README.md).

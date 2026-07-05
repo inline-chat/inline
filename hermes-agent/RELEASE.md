@@ -13,7 +13,7 @@ Use this checklist before publishing `@inline-chat/hermes-agent-adapter`.
 ## Automated Preflight
 
 ```sh
-cd packages/hermes-agent
+cd hermes-agent
 bun run release:preflight
 ```
 
@@ -40,7 +40,7 @@ Expected tarball shape:
 Install from the locally packed tarball:
 
 ```sh
-cd packages/hermes-agent
+cd hermes-agent
 VERSION="$(node -p "require('./package.json').version")"
 mkdir -p .tmp/manual-pack
 npm pack --pack-destination .tmp/manual-pack
@@ -87,7 +87,7 @@ Manual behavior checks:
 After manual live testing passes and npm auth is active:
 
 ```sh
-cd packages/hermes-agent
+cd hermes-agent
 npm whoami
 bun run release:preflight
 npm publish --access public --otp="<otp>"

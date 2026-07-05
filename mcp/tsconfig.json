@@ -16,14 +16,14 @@
     "verbatimModuleSyntax": true,
     "baseUrl": ".",
     "paths": {
-      "@inline-chat/oauth-core": ["../oauth-core/src/index.ts"],
-      "@inline-chat/oauth-core/*": ["../oauth-core/src/*"]
+      "@inline-chat/oauth-core": ["../packages/oauth-core/src/index.ts"],
+      "@inline-chat/oauth-core/*": ["../packages/oauth-core/src/*"]
     }
   },
   "include": ["src"],
   "references": [
     {
-      "path": "../oauth-core"
+      "path": "../packages/oauth-core"
     }
   ]
 }

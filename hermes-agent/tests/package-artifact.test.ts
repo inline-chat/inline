@@ -62,7 +62,7 @@ describe("packed artifact", () => {
     }
     expect(pkg.bin?.["inline-hermes"]).toBe("dist/install.js")
     expect(pkg.engines?.node).toBe(">=20")
-    expect(pkg.repository?.directory).toBe("packages/hermes-agent")
+    expect(pkg.repository?.directory).toBe("hermes-agent")
     expect(pkg.scripts?.prepublishOnly).toBe("bun run check")
     expect(pkg.scripts?.["release:preflight"]).toBe("npm publish --dry-run --access public")
     expect(pkg.inlineHermes).toMatchObject({
@@ -86,7 +86,7 @@ describe("packed artifact", () => {
     expect(readme).toContain("inline-hermes test-send --to chat:123 --text \"Inline Hermes test\"")
     expect(readme).not.toContain("INLINE_TOKEN=<token> inline-hermes test-send")
     expect(readme).toContain("inline-hermes install --force")
-    expect(readme).toContain("packages/hermes-agent/RELEASE.md")
+    expect(readme).toContain("hermes-agent/RELEASE.md")
 
     const release = await readFile(path.join(packageRoot, "RELEASE.md"), "utf8")
     expect(release).toContain("## Manual Live Test")
