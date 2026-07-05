@@ -92,6 +92,10 @@ class MessageListAppKit: NSViewController {
   private var avatarOverlayNeedsRaise = false
   private var lastAvatarOverlayVisibleRange: NSRange?
   private var lastAvatarOverlayVisibleRect: CGRect?
+  private var messageHoverTrackingArea: NSTrackingArea?
+  private var hoveredMessageStableId: Int64?
+  private weak var hoveredMessageCell: MessageTableCell?
+  private var messageHoverRefreshScheduled = false
   private var isDisposed = false
   private weak var observedToolbar: NSToolbar?
   private var toolbarDisplayModeObservation: NSKeyValueObservation?
@@ -492,6 +496,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScrollObserver()
+    setupMessageHoverTracking()
     hideScrollbars() // until initial scroll is done
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -1243,8 +1248,10 @@ class MessageListAppKit: NSViewController {
 
     chatRows.loadLatestWindow()
     rebuildRowItems()
+    clearHoveredMessage()
     tableView.reloadData()
     pruneMessageSelection()
+    scheduleMessageHoverRefresh()
 
     DispatchQueue.main.async { [weak self] in
       self?.scrollToBottom(animated: animated)
@@ -1335,6 +1342,137 @@ class MessageListAppKit: NSViewController {
     )
   }
 
+  private func setupMessageHoverTracking() {
+    guard messageRenderStyle == .minimal, messageHoverTrackingArea == nil else { return }
+
+    let trackingArea = NSTrackingArea(
+      rect: .zero,
+      options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    )
+    tableView.addTrackingArea(trackingArea)
+    messageHoverTrackingArea = trackingArea
+  }
+
+  private func removeMessageHoverTracking() {
+    if let messageHoverTrackingArea {
+      tableView.removeTrackingArea(messageHoverTrackingArea)
+      self.messageHoverTrackingArea = nil
+    }
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    updateHoveredMessage(from: event)
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    super.mouseMoved(with: event)
+    updateHoveredMessage(from: event)
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    clearHoveredMessage()
+  }
+
+  private func refreshMessageHoverAfterGeometryChange() {
+    guard messageRenderStyle == .minimal else { return }
+
+    guard scrollState == .idle, !isUserScrolling else {
+      clearHoveredMessage()
+      return
+    }
+
+    scheduleMessageHoverRefresh()
+  }
+
+  private func scheduleMessageHoverRefresh() {
+    guard messageRenderStyle == .minimal, !messageHoverRefreshScheduled else { return }
+
+    messageHoverRefreshScheduled = true
+    DispatchQueue.main.async(qos: .userInteractive) { [weak self] in
+      guard let self else { return }
+      self.messageHoverRefreshScheduled = false
+      self.updateHoveredMessageFromCurrentMouseLocation(force: true)
+    }
+  }
+
+  private func updateHoveredMessage(from event: NSEvent) {
+    guard messageRenderStyle == .minimal else { return }
+    guard scrollState == .idle, !isUserScrolling else {
+      clearHoveredMessage()
+      return
+    }
+
+    let point = tableView.convert(event.locationInWindow, from: nil)
+    updateHoveredMessage(at: point)
+  }
+
+  private func updateHoveredMessageFromCurrentMouseLocation(force: Bool = false) {
+    guard messageRenderStyle == .minimal else { return }
+    guard scrollState == .idle, !isUserScrolling else {
+      clearHoveredMessage()
+      return
+    }
+    guard let window = tableView.window else {
+      clearHoveredMessage()
+      return
+    }
+
+    let point = tableView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    updateHoveredMessage(at: point, force: force)
+  }
+
+  private func updateHoveredMessage(at point: NSPoint, force: Bool = false) {
+    guard let target = messageHoverTarget(at: point) else {
+      setHoveredMessage(stableId: nil, cell: nil, force: force)
+      return
+    }
+
+    setHoveredMessage(stableId: target.stableId, cell: target.cell, force: force)
+  }
+
+  private func messageHoverTarget(at point: NSPoint) -> (stableId: Int64, cell: MessageTableCell)? {
+    guard tableView.visibleRect.contains(point) else { return nil }
+
+    let row = tableView.row(at: point)
+    guard row >= 0, row < tableView.numberOfRows else { return nil }
+    guard let stableId = messageStableId(forRow: row) else { return nil }
+    guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
+      return nil
+    }
+    guard cell.containsMessageHoverPoint(point, from: tableView) else { return nil }
+
+    return (stableId, cell)
+  }
+
+  private func setHoveredMessage(stableId: Int64?, cell: MessageTableCell?, force: Bool = false) {
+    guard force || hoveredMessageStableId != stableId || hoveredMessageCell !== cell else { return }
+
+    let previousCell = hoveredMessageCell
+    hoveredMessageStableId = stableId
+    hoveredMessageCell = cell
+
+    if previousCell !== cell {
+      previousCell?.setMessageHoverState(false)
+    }
+    cell?.setMessageHoverState(true)
+  }
+
+  private func clearHoveredMessage() {
+    setHoveredMessage(stableId: nil, cell: nil)
+  }
+
+  private func shouldHoverMessageCell(_ cell: MessageTableCell, stableId: Int64) -> Bool {
+    guard messageRenderStyle == .minimal, hoveredMessageStableId == stableId else { return false }
+    guard let window = tableView.window else { return false }
+
+    let point = tableView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    return cell.containsMessageHoverPoint(point, from: tableView)
+  }
+
   private var scrollState: MessageListScrollState = .idle {
     didSet {
       NotificationCenter.default.post(
@@ -1349,6 +1487,7 @@ class MessageListAppKit: NSViewController {
     log.trace("scroll wheel began")
     isUserScrolling = true
     scrollState = .scrolling
+    clearHoveredMessage()
   }
 
   @objc private func scrollWheelEnded() {
@@ -1358,6 +1497,7 @@ class MessageListAppKit: NSViewController {
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
       self?.updateUnreadIfNeeded()
+      self?.scheduleMessageHoverRefresh()
     }
   }
 
@@ -1410,6 +1550,7 @@ class MessageListAppKit: NSViewController {
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
     scheduleAvatarOverlaySync(force: false)
+    refreshMessageHoverAfterGeometryChange()
 
     throttle(.milliseconds(32), identifier: "chat.scrollViewBoundsChanged", by: .mainActor, option: .default) { [
       weak self
@@ -1496,6 +1637,7 @@ class MessageListAppKit: NSViewController {
   @objc func scrollViewFrameChanged(notification: Notification) {
     updateMessageViewColors()
     scheduleAvatarOverlaySync()
+    refreshMessageHoverAfterGeometryChange()
 
     if suppressResizeScrollMaintenance {
       return
@@ -1612,6 +1754,7 @@ class MessageListAppKit: NSViewController {
     #endif
     defer {
       scheduleAvatarOverlaySync()
+      refreshMessageHoverAfterGeometryChange()
     }
 
     observeToolbarDisplayModeIfNeeded()
@@ -1688,6 +1831,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidDisappear() {
     super.viewDidDisappear()
     log.trace("viewDidDisappear() called")
+    clearHoveredMessage()
   }
 
   override func viewWillLayout() {
@@ -1722,6 +1866,7 @@ class MessageListAppKit: NSViewController {
     NSAnimationContext.endGrouping()
     CATransaction.commit()
     syncAvatarOverlayAfterTableLayout()
+    refreshMessageHoverAfterGeometryChange()
   }
 
   private var wasLastResizeAboveLimit = false
@@ -1902,10 +2047,12 @@ class MessageListAppKit: NSViewController {
 
         switch rowUpdate {
           case let .insert(inserted) where !inserted.isEmpty:
+            clearHoveredMessage()
             tableView.beginUpdates()
             tableView.insertRows(at: inserted, withAnimation: .none)
             tableView.endUpdates()
             syncAvatarOverlayAfterTableLayout()
+            scheduleMessageHoverRefresh()
             didInsertRows = true
             return true
 
@@ -1914,14 +2061,18 @@ class MessageListAppKit: NSViewController {
             return false
 
           case .reloadAll:
+            clearHoveredMessage()
             tableView.reloadData()
             syncAvatarOverlayAfterTableLayout()
+            scheduleMessageHoverRefresh()
             didInsertRows = true
             return true
 
           case .remove(_), .reloadRows(_), .insert(_):
+            clearHoveredMessage()
             tableView.reloadData()
             syncAvatarOverlayAfterTableLayout()
+            scheduleMessageHoverRefresh()
             didInsertRows = true
             return true
         }
@@ -1964,9 +2115,11 @@ class MessageListAppKit: NSViewController {
       )
     }
     rebuildRowItems()
+    clearHoveredMessage()
     tableView.reloadData()
     pruneMessageSelection()
     syncAvatarOverlayAfterTableLayout()
+    scheduleMessageHoverRefresh()
   }
 
   func applyUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
@@ -1984,6 +2137,7 @@ class MessageListAppKit: NSViewController {
       if !didSyncAvatarOverlayForUpdate {
         scheduleAvatarOverlaySync()
       }
+      scheduleMessageHoverRefresh()
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
       span.end(
         "type=\(updateLabel) rows_before=\(beforeRows) rows_after=\(tableView.numberOfRows) messages_before=\(beforeMessages) messages_after=\(messages.count) duration_ms=\(durationMs)"
@@ -2012,6 +2166,9 @@ class MessageListAppKit: NSViewController {
       !isUserScrolling // to prevent jitter when user is scrolling
     let rowUpdate = chatRows.apply(update)
     pruneMessageSelection()
+    if rowUpdate != .none {
+      clearHoveredMessage()
+    }
 
     func syncUpdateAvatarOverlayAfterTableLayout(on controller: MessageListAppKit, animate: Bool = false) {
       didSyncAvatarOverlayForUpdate = true
@@ -2345,6 +2502,7 @@ class MessageListAppKit: NSViewController {
     NSAnimationContext.endGrouping()
     CATransaction.commit()
     syncAvatarOverlayAfterTableLayout()
+    refreshMessageHoverAfterGeometryChange()
   }
 
   private func updateHeightsForRows(at indexSet: IndexSet, width: CGFloat? = nil) {
@@ -2429,6 +2587,7 @@ class MessageListAppKit: NSViewController {
 
     tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
     tableView.noteHeightOfRows(withIndexesChanged: rows)
+    refreshMessageHoverAfterGeometryChange()
   }
 
   private func canGroupRows(_ earlierRow: Int, _ laterRow: Int) -> Bool {
@@ -2913,6 +3072,11 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     cell.setScrollState(scrollState)
     cell.configure(with: message, props: props, animate: animateUpdates)
+    let shouldHover = shouldHoverMessageCell(cell, stableId: stableId)
+    cell.setMessageHoverState(shouldHover)
+    if shouldHover {
+      setHoveredMessage(stableId: stableId, cell: cell, force: true)
+    }
     if usesAvatarOverlay {
       avatarOverlayNeedsRaise = true
     }
@@ -3087,8 +3251,10 @@ extension MessageListAppKit {
         if loadedAroundTarget {
           log.trace("Loaded local around-target window for message \(msgId), reason=\(reason.rawValue)")
           rebuildRowItems()
+          clearHoveredMessage()
           tableView.reloadData()
           pruneMessageSelection()
+          scheduleMessageHoverRefresh()
 
           DispatchQueue.main.async { [weak self] in
             self?.scrollToMsgAndHighlight(
@@ -3328,6 +3494,8 @@ extension MessageListAppKit {
     observedToolbar = nil
     avatarOverlaySyncInProgress = false
     avatarOverlaySyncPending = false
+    clearHoveredMessage()
+    removeMessageHoverTracking()
     if usesAvatarOverlay {
       avatarOverlayView.clearAvatars()
     }

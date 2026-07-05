@@ -7,11 +7,19 @@ protocol MessageTableRenderableView: AnyObject {
   func updateSize(props: MessageViewProps)
   func reflectBoundsChange(fraction: CGFloat)
   func setScrollState(_ state: MessageListScrollState)
+  func setListHoverState(_ isHovered: Bool)
+  func containsListHoverPoint(_ point: NSPoint, from coordinateView: NSView) -> Bool
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem?
   func reset()
 }
 
 extension MessageTableRenderableView where Self: NSView {
+  func setListHoverState(_: Bool) {}
+
+  func containsListHoverPoint(_: NSPoint, from _: NSView) -> Bool {
+    false
+  }
+
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
     nil
   }
@@ -204,6 +212,14 @@ class MessageTableCell: NSView {
 
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
     messageView?.avatarOverlayItem(in: coordinateView)
+  }
+
+  func setMessageHoverState(_ isHovered: Bool) {
+    messageView?.setListHoverState(isHovered)
+  }
+
+  func containsMessageHoverPoint(_ point: NSPoint, from coordinateView: NSView) -> Bool {
+    messageView?.containsListHoverPoint(point, from: coordinateView) ?? false
   }
 
   private var scrollState: MessageListScrollState = .idle

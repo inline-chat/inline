@@ -972,11 +972,6 @@ class MinimalMessageViewAppKit: NSView {
 
   // MARK: - Lifecycle
 
-  override func layout() {
-    super.layout()
-    syncHoverStateWithCurrentMouseLocation()
-  }
-
   override func viewDidMoveToSuperview() {
     super.viewDidMoveToSuperview()
 
@@ -1003,7 +998,6 @@ class MinimalMessageViewAppKit: NSView {
   // MARK: - Setup
 
   deinit {
-    removeHoverTrackingArea()
     NotificationCenter.default.removeObserver(self)
     if let observer = notificationObserver {
       NotificationCenter.default.removeObserver(observer)
@@ -1084,7 +1078,6 @@ class MinimalMessageViewAppKit: NSView {
     setupMessageText()
     setupContextMenu()
     setupGestureRecognizers()
-    addHoverTrackingArea()
 
     // Setup translation state observation
     setupTranslationStateObservation()
@@ -2963,10 +2956,6 @@ class MinimalMessageViewAppKit: NSView {
 
     if window == nil {
       updateHoverState(false)
-      removeHoverTrackingArea()
-    } else {
-      updateTrackingAreas()
-      syncHoverStateWithCurrentMouseLocation()
     }
 
     // Experimental in build 66
@@ -3795,7 +3784,6 @@ class MinimalMessageViewAppKit: NSView {
     }
   }
 
-  private var hoverTrackingArea: NSTrackingArea?
   private func setupScrollStateObserver() {
     notificationObserver = NotificationCenter.default.addObserver(
       forName: .messageListScrollStateDidChange,
@@ -4224,6 +4212,15 @@ extension MinimalMessageViewAppKit {
     handleScrollStateChange(state)
   }
 
+  func setListHoverState(_ isHovered: Bool) {
+    updateHoverState(isHovered)
+  }
+
+  func containsListHoverPoint(_ point: NSPoint, from coordinateView: NSView) -> Bool {
+    let localPoint = convert(point, from: coordinateView)
+    return hoverBackgroundView.frame.contains(localPoint)
+  }
+
   private func handleScrollStateChange(_ state: MessageListScrollState) {
     scrollState = state
     switch state {
@@ -4231,7 +4228,7 @@ extension MinimalMessageViewAppKit {
         // Clear hover state
         updateHoverState(false)
       case .idle:
-        syncHoverStateWithCurrentMouseLocation()
+        break
     }
   }
 
@@ -4254,70 +4251,6 @@ extension MinimalMessageViewAppKit {
     guard isMouseInside != isHovered else { return }
     isMouseInside = isHovered
     updateHoverChrome()
-  }
-
-  private func updateHoverState(with event: NSEvent?) {
-    guard scrollState == .idle else {
-      updateHoverState(false)
-      return
-    }
-    guard let point = hoverPoint(from: event) else {
-      updateHoverState(false)
-      return
-    }
-
-    updateHoverState(hoverBackgroundView.frame.contains(point))
-  }
-
-  private func hoverPoint(from event: NSEvent?) -> NSPoint? {
-    if let event {
-      return convert(event.locationInWindow, from: nil)
-    }
-    guard let window else { return nil }
-    return convert(window.mouseLocationOutsideOfEventStream, from: nil)
-  }
-
-  private func syncHoverStateWithCurrentMouseLocation() {
-    updateHoverState(with: nil)
-  }
-
-  func removeHoverTrackingArea() {
-    if let hoverTrackingArea {
-      removeTrackingArea(hoverTrackingArea)
-    }
-    hoverTrackingArea = nil
-  }
-
-  func addHoverTrackingArea() {
-    removeHoverTrackingArea()
-    guard window != nil else { return }
-    hoverTrackingArea = NSTrackingArea(
-      rect: bounds,
-      options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
-      owner: self,
-      userInfo: nil
-    )
-    addTrackingArea(hoverTrackingArea!)
-  }
-
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    addHoverTrackingArea()
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-    updateHoverState(with: event)
-  }
-
-  override func mouseMoved(with event: NSEvent) {
-    super.mouseMoved(with: event)
-    updateHoverState(with: event)
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    updateHoverState(false)
   }
 }
 
