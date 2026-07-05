@@ -431,6 +431,7 @@ struct AllChatsItem: Identifiable, Equatable {
   let unread: Bool
   let unreadCount: Int
   let unreadMark: Bool
+  let prominentUnreadIndicator: Bool
   let pinned: Bool
   let archived: Bool
   let chatListHidden: Bool
@@ -454,6 +455,7 @@ struct AllChatsItem: Identifiable, Equatable {
     unreadCount = max(chat.dialog.unreadCount ?? 0, 0)
     unreadMark = chat.dialog.unreadMark == true
     unread = unreadCount > 0 || unreadMark
+    prominentUnreadIndicator = Self.hasProminentUnreadIndicator(chat)
     pinned = chat.dialog.pinned == true
     archived = chat.dialog.archived == true
     chatListHidden = chat.dialog.chatListHidden == true
@@ -510,6 +512,18 @@ struct AllChatsItem: Identifiable, Equatable {
     guard name.isEmpty == false else { return nil }
 
     return AllChatsPreviewSender(name: name, peer: .user(senderInfo))
+  }
+
+  private static func hasProminentUnreadIndicator(_ item: HomeChatItem) -> Bool {
+    if item.dialog.peerUserId != nil {
+      return true
+    }
+
+    if item.dialog.isFollowingThread {
+      return true
+    }
+
+    return item.chat?.type == .privateChat
   }
 
   private static func draftText(for dialog: Dialog) -> String? {
@@ -823,7 +837,8 @@ private struct ChatListRow: View {
     if item.unread {
       AllChatsUnreadIndicator(
         unreadCount: item.unreadCount,
-        hasUnreadMark: item.unreadMark
+        hasUnreadMark: item.unreadMark,
+        prominent: item.prominentUnreadIndicator
       )
       .layoutPriority(1)
     }
@@ -1046,18 +1061,20 @@ private struct AllChatsPreviewLine: View {
 private struct AllChatsUnreadIndicator: View {
   let unreadCount: Int
   let hasUnreadMark: Bool
+  let prominent: Bool
 
   var body: some View {
     if unreadCount > 0 {
-      AllChatsUnreadBadge(count: unreadCount)
+      AllChatsUnreadBadge(count: unreadCount, prominent: prominent)
     } else if hasUnreadMark {
-      AllChatsUnreadMark()
+      AllChatsUnreadMark(prominent: prominent)
     }
   }
 }
 
 private struct AllChatsUnreadBadge: View {
   let count: Int
+  let prominent: Bool
 
   private static let height: CGFloat = 16
 
@@ -1066,7 +1083,7 @@ private struct AllChatsUnreadBadge: View {
   var body: some View {
     Text(String(count))
       .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-      .foregroundStyle(Color.primary.opacity(0.76))
+      .foregroundStyle(prominent ? Color.white : Color.primary.opacity(0.76))
       .lineLimit(1)
       .padding(.horizontal, 5)
       .frame(minWidth: Self.height)
@@ -1076,17 +1093,31 @@ private struct AllChatsUnreadBadge: View {
   }
 
   private var backgroundColor: Color {
-    colorScheme == .dark ? .white.opacity(0.16) : .black.opacity(0.09)
+    if prominent {
+      return .accentColor
+    }
+
+    if colorScheme == .dark {
+      return .white.opacity(0.16)
+    }
+
+    return .black.opacity(0.09)
   }
 }
 
 private struct AllChatsUnreadMark: View {
+  let prominent: Bool
+
   @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     Circle()
-      .fill(colorScheme == .dark ? .white.opacity(0.36) : .black.opacity(0.28))
+      .fill(prominent ? Color.accentColor : mutedColor)
       .frame(width: 7, height: 7)
+  }
+
+  private var mutedColor: Color {
+    colorScheme == .dark ? .white.opacity(0.36) : .black.opacity(0.28)
   }
 }
 

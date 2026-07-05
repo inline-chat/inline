@@ -96,14 +96,14 @@ struct SidebarChatItemView: Equatable, View {
     }
 
     if item.unread {
-      return .unread
+      return .unread(item.prominentUnreadDot)
     }
 
     return nil
   }
 
   private var previewAccessory: SidebarChatItemAccessory? {
-    item.unread && showsPreview ? .unread : nil
+    item.unread && showsPreview ? .unread(item.prominentUnreadDot) : nil
   }
 
   static func == (lhs: SidebarChatItemView, rhs: SidebarChatItemView) -> Bool {
@@ -144,6 +144,7 @@ struct SidebarChatItemView: Equatable, View {
     .frame(height: rowHeight)
     .animation(.smoothSnappy, value: size)
     .animation(.smoothSnappy, value: item.unread)
+    .animation(.smoothSnappy, value: item.prominentUnreadDot)
     .animation(.smoothSnappy, value: item.pinned)
     // Inner paddings
     .padding(.horizontal, Self.innerPaddingHorizontal)
@@ -264,10 +265,17 @@ struct SidebarChatItemView: Equatable, View {
     }
   }
 
-  private var unreadDot: some View {
-    Circle()
-      .fill(Color.accentColor)
-      .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
+  @ViewBuilder
+  private func unreadDot(prominent: Bool) -> some View {
+    if prominent {
+      Circle()
+        .fill(Color.accentColor)
+        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
+    } else {
+      Circle()
+        .fill(.secondary)
+        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
+    }
   }
 
   @ViewBuilder
@@ -328,8 +336,8 @@ struct SidebarChatItemView: Equatable, View {
   private func accessoryView(_ accessory: SidebarChatItemAccessory) -> some View {
     Group {
       switch accessory {
-        case .unread:
-          unreadDot
+      case let .unread(prominent):
+        unreadDot(prominent: prominent)
       }
     }
     .frame(width: Self.trailingAccessoryWidth, alignment: .center)
@@ -493,7 +501,7 @@ struct SidebarChatItemView: Equatable, View {
 }
 
 private enum SidebarChatItemAccessory {
-  case unread
+  case unread(Bool)
 }
 
 private struct SidebarOpenInteractionModifier: ViewModifier {

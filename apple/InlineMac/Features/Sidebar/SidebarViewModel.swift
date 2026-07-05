@@ -22,6 +22,7 @@ final class SidebarViewModel {
     let parentTitle: String?
     let preview: String
     let unread: Bool
+    let prominentUnreadDot: Bool
     let pinned: Bool
     let archived: Bool
     let open: Bool
@@ -40,6 +41,7 @@ final class SidebarViewModel {
       parentTitle = listItem.parentTitle
       preview = listItem.sidebarBasePreviewText
       unread = listItem.hasUnread
+      prominentUnreadDot = listItem.hasProminentUnreadDot
       pinned = listItem.dialog?.pinned == true
       archived = listItem.dialog?.archived == true
       open = listItem.dialog?.open == true
@@ -553,5 +555,23 @@ final class SidebarViewModel {
       ?? item.chat?.date
       ?? item.member?.date
       ?? Date.distantPast
+  }
+}
+
+private extension ChatListItem {
+  var hasProminentUnreadDot: Bool {
+    isDirectMessage || dialog?.isFollowingThread == true
+  }
+
+  var isDirectMessage: Bool {
+    if dialog?.peerUserId != nil {
+      return true
+    }
+
+    if case .user? = peerId {
+      return true
+    }
+
+    return chat?.type == .privateChat
   }
 }

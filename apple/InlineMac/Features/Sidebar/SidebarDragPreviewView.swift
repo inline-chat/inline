@@ -45,7 +45,7 @@ struct SidebarDragPreviewView: View {
               .frame(maxWidth: .infinity, alignment: .leading)
 
             if item.unread {
-              unreadDot
+              unreadDot(prominent: item.prominentUnreadDot)
             }
           }
         }
@@ -81,7 +81,7 @@ struct SidebarDragPreviewView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
 
       if item.unread && showsPreview == false {
-        unreadDot
+        unreadDot(prominent: item.prominentUnreadDot)
       }
     }
   }
@@ -107,10 +107,17 @@ struct SidebarDragPreviewView: View {
     }
   }
 
-  private var unreadDot: some View {
-    Circle()
-      .fill(Color.accentColor)
-      .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
+  @ViewBuilder
+  private func unreadDot(prominent: Bool) -> some View {
+    if prominent {
+      Circle()
+        .fill(Color.accentColor)
+        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
+    } else {
+      Circle()
+        .fill(.secondary)
+        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
+    }
   }
 
   private var backgroundColor: Color {
