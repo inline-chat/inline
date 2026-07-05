@@ -13,13 +13,18 @@ struct ChatRouteView: View {
 
   @ObservedObject private var botPresenceController = BotPresenceController.shared
   @ObservedObject private var settings = AppSettings.shared
-  @StateObject private var followModel = ChatToolbarFollowModel()
   @State private var chatToolbarState = ChatToolbarState()
+  @State private var toolbarDialog: Dialog?
   @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
 
   private var fallbackTitle: String {
     peer.isThread ? "Chat" : "Direct Message"
+  }
+
+  private var followPresentation: ChatToolbarFollowPresentation? {
+    guard peer.isThread else { return nil }
+    return ChatToolbarFollowPresentation(isFollowing: toolbarDialog?.isFollowingThread == true)
   }
 
   var body: some View {
@@ -55,7 +60,10 @@ struct ChatRouteView: View {
             peerId: peer,
             preparedPayload: preparedPayload,
             dependencies: dependencies,
-            toolbarState: chatToolbarState
+            toolbarState: chatToolbarState,
+            onDialogChange: { dialog in
+              toolbarDialog = dialog
+            }
           )
         },
         dismantle: { controller in
@@ -83,23 +91,26 @@ struct ChatRouteView: View {
           }
         }
 
-        if followModel.observedPeer == peer, followModel.state.isReplyThread {
+        if let followPresentation {
           CommandBarAction(
-            followModel.state.title,
-            systemImage: followModel.state.systemImage,
+            followPresentation.title,
+            systemImage: followPresentation.systemImage,
             id: "follow",
-            keywords: ["follow", "unfollow", "thread", "replies", "sidebar"],
+            keywords: ["follow", "unfollow", "thread", "messages", "sidebar"],
             typeLabel: "Chat",
             priority: 20
           ) {
-            followModel.toggle()
+            ChatToolbarFollowButton.toggleFollowMode(
+              peer: peer,
+              isFollowing: followPresentation.isFollowing
+            )
           }
         }
       }
       .onChange(of: peer.toString(), initial: true) { oldPeer, newPeer in
-        followModel.update(peer: peer, db: dependencies.database)
         navigationTitle = fallbackTitle
         if oldPeer != newPeer {
+          toolbarDialog = nil
           chatToolbarState.dismissPresentation()
           nudgePopoverPresented = false
         }
@@ -184,9 +195,12 @@ struct ChatRouteView: View {
           .id(peer.id)
         }
 
-        if peer.isThread {
+        if let followPresentation {
           ToolbarItem {
-            ChatToolbarFollowButton(peer: peer, model: followModel)
+            ChatToolbarFollowButton(
+              peer: peer,
+              isFollowing: followPresentation.isFollowing
+            )
             .id("follow-\(peer.toString())")
           }
         }

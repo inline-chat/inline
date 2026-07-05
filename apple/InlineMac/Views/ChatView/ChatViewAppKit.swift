@@ -17,6 +17,7 @@ class ChatViewAppKit: NSViewController {
   let peerId: Peer
   let dependencies: AppDependencies
   private let toolbarState: ChatToolbarState?
+  private let onDialogChange: (@MainActor (Dialog?) -> Void)?
   private var viewModel: FullChatViewModel
   private let preparedPayload: PreparedChatPayload?
 
@@ -58,11 +59,13 @@ class ChatViewAppKit: NSViewController {
     chat: Chat? = nil,
     preparedPayload: PreparedChatPayload? = nil,
     dependencies: AppDependencies,
-    toolbarState: ChatToolbarState? = nil
+    toolbarState: ChatToolbarState? = nil,
+    onDialogChange: (@MainActor (Dialog?) -> Void)? = nil
   ) {
     self.peerId = peerId
     self.dependencies = dependencies
     self.toolbarState = toolbarState
+    self.onDialogChange = onDialogChange
     self.preparedPayload = preparedPayload
     viewModel = FullChatViewModel(
       db: dependencies.database,
@@ -73,6 +76,7 @@ class ChatViewAppKit: NSViewController {
     state = .initial(viewModel.chat)
     super.init(nibName: nil, bundle: nil)
 
+    updateDialog(from: viewModel.chatItem)
     observeChatItem()
 
     if preparedPayload == nil {
@@ -261,11 +265,21 @@ class ChatViewAppKit: NSViewController {
       .sink { [weak self] item in
         Task { @MainActor [weak self] in
           guard let self, !isDisposed else { return }
+          updateDialog(from: item)
           compose?.setPeerUser(item?.user)
           guard let chat = item?.chat else { return }
           showLoadedChat(chat)
         }
       }
+  }
+
+  private func updateDialog(from item: SpaceChatItem?) {
+    guard let onDialogChange else { return }
+    let dialog = item?.dialog
+    Task { @MainActor [weak self] in
+      guard let self, !isDisposed else { return }
+      onDialogChange(dialog)
+    }
   }
 
   private func showLoadedChat(_ chat: Chat) {
