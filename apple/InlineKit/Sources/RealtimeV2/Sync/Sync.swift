@@ -859,6 +859,10 @@ actor Sync {
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .participantDelete(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
+      case let .participantGroupAdd(payload):
+        .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
+      case let .participantGroupDelete(payload):
+        .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .chatVisibility(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .chatInfo(payload):
@@ -965,6 +969,7 @@ actor BucketActor {
   private var pendingSidecarChatIds = Set<Int64>()
   private var pendingSidecarDialogKeys = Set<String>()
   private var pendingSidecarSpaceIds = Set<Int64>()
+  private var pendingSidecarUserGroupIds = Set<Int64>()
 
   /// Buffer for out-of-order realtime updates. We only apply contiguous seqs starting at (seq + 1).
   private var bufferedRealtimeUpdates: [Int64: InlineProtocol.Update] = [:]
@@ -994,6 +999,10 @@ actor BucketActor {
       case .spaceMemberDelete:
         true
       case .participantDelete:
+        true
+      case .participantGroupAdd:
+        true
+      case .participantGroupDelete:
         true
       case .chatVisibility:
         true
@@ -1157,7 +1166,8 @@ actor BucketActor {
         "failed": result.failedCount,
       ]
     )
-    let toleratedFailure = result.failedCount > 0 &&
+    let toleratedFailure = canTolerateRealtimeApplyFailure(contiguous) &&
+      result.failedCount > 0 &&
       (result.appliedCount > 0 || contiguous.count == 1)
     guard result.succeeded || toleratedFailure else {
       PerformanceTrace.breadcrumb(
@@ -1217,6 +1227,18 @@ actor BucketActor {
     date = nextDate
     let maxAppliedDate = maxUpdateDate(in: contiguous)
     await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "realtime:\(key)")
+    return true
+  }
+
+  private func canTolerateRealtimeApplyFailure(_ updates: [InlineProtocol.Update]) -> Bool {
+    for update in updates {
+      switch update.update {
+        case .participantAdd, .participantGroupAdd:
+          return false
+        default:
+          continue
+      }
+    }
     return true
   }
 
@@ -1811,7 +1833,8 @@ actor BucketActor {
     !pendingSidecars.users.isEmpty ||
       !pendingSidecars.chats.isEmpty ||
       !pendingSidecars.dialogs.isEmpty ||
-      !pendingSidecars.spaces.isEmpty
+      !pendingSidecars.spaces.isEmpty ||
+      !pendingSidecars.userGroups.isEmpty
   }
 
   private func clearPendingCatchupBatch() {
@@ -1821,6 +1844,7 @@ actor BucketActor {
     pendingSidecarChatIds.removeAll()
     pendingSidecarDialogKeys.removeAll()
     pendingSidecarSpaceIds.removeAll()
+    pendingSidecarUserGroupIds.removeAll()
   }
 
   private func mergeSidecars(_ sidecars: InlineProtocol.UpdateSidecars) {
@@ -1834,6 +1858,10 @@ actor BucketActor {
 
     for space in sidecars.spaces where pendingSidecarSpaceIds.insert(space.id).inserted {
       pendingSidecars.spaces.append(space)
+    }
+
+    for userGroup in sidecars.userGroups where pendingSidecarUserGroupIds.insert(userGroup.id).inserted {
+      pendingSidecars.userGroups.append(userGroup)
     }
 
     for dialog in sidecars.dialogs {

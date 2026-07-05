@@ -1,5 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { getUpdates } from "@in/server/functions/updates.getUpdates"
+import { addChatParticipant } from "@in/server/functions/messages.addChatParticipant"
+import { createUserGroup, updateUserGroup } from "@in/server/modules/userGroups"
 import { testUtils, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import { updates, UpdateBucket } from "../../db/schema/updates"
@@ -226,6 +228,75 @@ describe("getUpdates", () => {
     expect(result.final).toBe(true)
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
     expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantDelete"])
+  })
+
+  test("includes chat and group sidecars for user-bucket group grants", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Group Grant Sidecars", [
+      "group-sidecar-owner@example.com",
+      "group-sidecar-old@example.com",
+      "group-sidecar-new@example.com",
+    ])
+    const [owner, oldMember, newMember] = users
+    if (!space || !owner || !oldMember || !newMember) {
+      throw new Error("Failed to create group sidecar fixtures")
+    }
+
+    await db
+      .update(members)
+      .set({ role: "owner" })
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, owner.id)))
+
+    const createdGroup = await createUserGroup(
+      {
+        spaceId: space.id,
+        name: "Reviewers",
+        userIds: [oldMember.id],
+      },
+      { currentUserId: owner.id } as any,
+    )
+    const groupId = Number(createdGroup.group.id)
+
+    const chat = await testUtils.createChat(space.id, "Private Review Thread", "thread", false, owner.id)
+    if (!chat) {
+      throw new Error("Failed to create private group thread")
+    }
+    await testUtils.addParticipant(chat.id, owner.id)
+    await addChatParticipant({ chatId: chat.id, groupId }, { currentUserId: owner.id } as any)
+
+    await updateUserGroup(
+      {
+        groupId,
+        name: "Reviewers",
+        userIds: [oldMember.id, newMember.id],
+      },
+      { currentUserId: owner.id } as any,
+    )
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 10,
+      },
+      { currentUserId: newMember.id } as any,
+    )
+
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantGroupAdd"])
+    expect(result.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(chat.id)
+    expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).toContain(space.id)
+
+    const groupSidecar = result.sidecars?.userGroups.find((group) => Number(group.id) === groupId)
+    expect(groupSidecar).toBeDefined()
+    expect(groupSidecar?.currentUserIsMember).toBe(true)
+    expect(groupSidecar?.userIds.map(Number).sort((a, b) => a - b)).toEqual(
+      [oldMember.id, newMember.id].sort((a, b) => a - b),
+    )
+
+    const sidecarUserIds = new Set(result.sidecars?.users.map((user) => Number(user.id)) ?? [])
+    expect(sidecarUserIds.has(oldMember.id)).toBe(true)
+    expect(sidecarUserIds.has(newMember.id)).toBe(true)
   })
 
   test("sanitizes public space member add updates for regular members", async () => {

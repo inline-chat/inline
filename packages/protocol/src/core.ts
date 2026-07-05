@@ -3321,6 +3321,10 @@ export interface UpdateSidecars {
      * @generated from protobuf field: repeated Space spaces = 4;
      */
     spaces: Space[];
+    /**
+     * @generated from protobuf field: repeated UserGroup user_groups = 5;
+     */
+    userGroups: UserGroup[];
 }
 /**
  * @generated from protobuf message GetUpdatesResult
@@ -14331,7 +14335,8 @@ class UpdateSidecars$Type extends MessageType<UpdateSidecars> {
             { no: 1, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
             { no: 2, name: "chats", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Chat },
             { no: 3, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog },
-            { no: 4, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space }
+            { no: 4, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
+            { no: 5, name: "user_groups", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => UserGroup }
         ]);
     }
     create(value?: PartialMessage<UpdateSidecars>): UpdateSidecars {
@@ -14340,6 +14345,7 @@ class UpdateSidecars$Type extends MessageType<UpdateSidecars> {
         message.chats = [];
         message.dialogs = [];
         message.spaces = [];
+        message.userGroups = [];
         if (value !== undefined)
             reflectionMergePartial<UpdateSidecars>(this, message, value);
         return message;
@@ -14360,6 +14366,9 @@ class UpdateSidecars$Type extends MessageType<UpdateSidecars> {
                     break;
                 case /* repeated Space spaces */ 4:
                     message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated UserGroup user_groups */ 5:
+                    message.userGroups.push(UserGroup.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -14385,6 +14394,9 @@ class UpdateSidecars$Type extends MessageType<UpdateSidecars> {
         /* repeated Space spaces = 4; */
         for (let i = 0; i < message.spaces.length; i++)
             Space.internalBinaryWrite(message.spaces[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* repeated UserGroup user_groups = 5; */
+        for (let i = 0; i < message.userGroups.length; i++)
+            UserGroup.internalBinaryWrite(message.userGroups[i], writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

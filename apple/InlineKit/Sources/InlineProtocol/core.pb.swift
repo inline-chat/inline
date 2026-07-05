@@ -5348,6 +5348,8 @@ public nonisolated struct UpdateSidecars: Sendable {
 
   public var spaces: [Space] = []
 
+  public var userGroups: [UserGroup] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -18171,7 +18173,7 @@ nonisolated extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateSidecars"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}users\0\u{1}chats\0\u{1}dialogs\0\u{1}spaces\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}users\0\u{1}chats\0\u{1}dialogs\0\u{1}spaces\0\u{3}user_groups\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18183,6 +18185,7 @@ nonisolated extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 2: try { try decoder.decodeRepeatedMessageField(value: &self.chats) }()
       case 3: try { try decoder.decodeRepeatedMessageField(value: &self.dialogs) }()
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.spaces) }()
+      case 5: try { try decoder.decodeRepeatedMessageField(value: &self.userGroups) }()
       default: break
       }
     }
@@ -18201,6 +18204,9 @@ nonisolated extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.spaces.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.spaces, fieldNumber: 4)
     }
+    if !self.userGroups.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.userGroups, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -18209,6 +18215,7 @@ nonisolated extension UpdateSidecars: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.chats != rhs.chats {return false}
     if lhs.dialogs != rhs.dialogs {return false}
     if lhs.spaces != rhs.spaces {return false}
+    if lhs.userGroups != rhs.userGroups {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -167,13 +167,19 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
   const final = latestSeq <= pageSeq
   const sidecarsStartedAt = performance.now()
-  const sidecars = descriptor.scope === "chat"
-    ? await Sync.buildChatSidecarsForUpdates({
-        chatId: descriptor.chatId,
-        updates,
-        userId: context.currentUserId,
-      })
-    : undefined
+  const sidecars =
+    descriptor.scope === "chat"
+      ? await Sync.buildChatSidecarsForUpdates({
+          chatId: descriptor.chatId,
+          updates,
+          userId: context.currentUserId,
+        })
+      : descriptor.scope === "user"
+        ? await Sync.buildUserSidecarsForUpdates({
+            updates,
+            userId: context.currentUserId,
+          })
+        : undefined
   const sidecarsMs = elapsedMs(sidecarsStartedAt)
 
   let resultType = updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE
@@ -255,7 +261,8 @@ const hasSidecars = (sidecars: GetUpdatesResult["sidecars"]): boolean => {
     sidecars.users.length > 0 ||
     sidecars.chats.length > 0 ||
     sidecars.dialogs.length > 0 ||
-    sidecars.spaces.length > 0
+    sidecars.spaces.length > 0 ||
+    sidecars.userGroups.length > 0
   )
 }
 

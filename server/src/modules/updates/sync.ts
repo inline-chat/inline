@@ -7,6 +7,7 @@ import type {
   Update,
   UpdateSidecars,
   User,
+  UserGroup as ProtocolUserGroup,
   Dialog,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
@@ -14,12 +15,24 @@ import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateBoxInput, type DecryptedUpdate } from "@in/server/db/models/updates"
-import { UpdateBucket, chats, dialogs, messageAttachments, spaces, type DbUpdate } from "@in/server/db/schema"
+import {
+  UpdateBucket,
+  chats,
+  dialogs,
+  members,
+  messageAttachments,
+  spaces,
+  userGroupMembers,
+  userGroups,
+  userNotDeleted,
+  users as usersTable,
+  type DbUpdate,
+} from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, eq, inArray } from "drizzle-orm"
+import { and, asc, eq, inArray } from "drizzle-orm"
 import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 
 const log = new Log("Sync", LogLevel.DEBUG)
@@ -28,6 +41,7 @@ export const Sync = {
   getUpdates: getUpdates,
   processChatUpdates: processChatUpdates,
   buildChatSidecarsForUpdates: buildChatSidecarsForUpdates,
+  buildUserSidecarsForUpdates: buildUserSidecarsForUpdates,
   inflateSpaceUpdates: inflateSpaceUpdates,
   inflateUserUpdates: inflateUserUpdates,
 }
@@ -556,6 +570,7 @@ const emptySidecars = (): UpdateSidecars => ({
   chats: [],
   dialogs: [],
   spaces: [],
+  userGroups: [],
 })
 
 type ChatSidecarsForUpdatesInput = {
@@ -569,9 +584,11 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
   const chatMap = new Map<string, ProtocolChat>()
   const dialogMap = new Map<string, Dialog>()
   const spaceMap = new Map<string, ProtocolSpace>()
+  const userGroupMap = new Map<string, ProtocolUserGroup>()
   const userIds = new Set<number>()
   const chatIds = new Set<number>()
   const spaceIds = new Set<number>()
+  const groupIds = new Set<number>()
 
   if (input.updates.length === 0) {
     return emptySidecars()
@@ -602,9 +619,21 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
         collectProtocolChatSidecarRefs(update.update.chatMoved.chat, { chatIds, userIds, spaceIds })
         break
 
+      case "participantGroupAdd":
+        addSafeId(groupIds, update.update.participantGroupAdd.groupParticipant?.groupId)
+        break
+
       default:
         break
     }
+  }
+
+  const groupSidecars = await getSidecarUserGroups(groupIds, input.userId)
+  for (const group of groupSidecars.groups) {
+    userGroupMap.set(String(group.id), group)
+  }
+  for (const userId of groupSidecars.userIds) {
+    userIds.add(userId)
   }
 
   const chatRows = await getSidecarChats(primaryChat, chatIds)
@@ -653,6 +682,101 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
     chats: Array.from(chatMap.values()),
     dialogs: Array.from(dialogMap.values()),
     spaces: Array.from(spaceMap.values()),
+    userGroups: Array.from(userGroupMap.values()),
+  }
+}
+
+type UserSidecarsForUpdatesInput = {
+  updates: Update[]
+  userId: number
+}
+
+async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): Promise<UpdateSidecars> {
+  const users = new Map<string, User>()
+  const chatMap = new Map<string, ProtocolChat>()
+  const dialogMap = new Map<string, Dialog>()
+  const spaceMap = new Map<string, ProtocolSpace>()
+  const userGroupMap = new Map<string, ProtocolUserGroup>()
+  const userIds = new Set<number>()
+  const chatIds = new Set<number>()
+  const spaceIds = new Set<number>()
+  const groupIds = new Set<number>()
+
+  if (input.updates.length === 0) {
+    return emptySidecars()
+  }
+
+  for (const update of input.updates) {
+    switch (update.update.oneofKind) {
+      case "participantAdd":
+        addSafeId(chatIds, update.update.participantAdd.chatId)
+        break
+
+      case "participantGroupAdd":
+        addSafeId(chatIds, update.update.participantGroupAdd.chatId)
+        addSafeId(groupIds, update.update.participantGroupAdd.groupParticipant?.groupId)
+        break
+
+      default:
+        break
+    }
+  }
+
+  const groupSidecars = await getSidecarUserGroups(groupIds, input.userId)
+  for (const group of groupSidecars.groups) {
+    userGroupMap.set(String(group.id), group)
+  }
+  for (const userId of groupSidecars.userIds) {
+    userIds.add(userId)
+  }
+
+  const chatRows = await getSidecarChats(undefined, chatIds)
+  for (const chat of chatRows) {
+    collectChatSidecarRefs(chat, input.userId, { chatIds, userIds, spaceIds })
+    const encoded = Encoders.chat(chat, { encodingForUserId: input.userId })
+    chatMap.set(String(encoded.id), encoded)
+  }
+
+  const sidecarChatIds = chatRows.map((chat) => chat.id)
+  if (sidecarChatIds.length > 0) {
+    const dialogRows = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.userId, input.userId), inArray(dialogs.chatId, sidecarChatIds)))
+    const unreadCounts = await DialogsModel.getBatchUnreadCounts({
+      userId: input.userId,
+      chatIds: dialogRows.map((dialog) => dialog.chatId),
+    })
+    const unreadCountByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount]))
+
+    for (const dialog of dialogRows) {
+      const encoded = Encoders.dialog(dialog, { unreadCount: unreadCountByChatId.get(dialog.chatId) ?? 0 })
+      dialogMap.set(String(encoded.chatId), encoded)
+    }
+  }
+
+  if (userIds.size > 0) {
+    const rows = await UsersModel.getUsersWithPhotos(Array.from(userIds))
+    for (const row of rows) {
+      const encoded = Encoders.user({ user: row.user, photoFile: row.photoFile, min: true })
+      users.set(String(encoded.id), encoded)
+    }
+  }
+
+  if (spaceIds.size > 0) {
+    const rows = await db.select().from(spaces).where(inArray(spaces.id, Array.from(spaceIds)))
+    for (const row of rows) {
+      const encoded = Encoders.space(row, { encodingForUserId: input.userId })
+      spaceMap.set(String(encoded.id), encoded)
+    }
+  }
+
+  return {
+    users: Array.from(users.values()),
+    chats: Array.from(chatMap.values()),
+    dialogs: Array.from(dialogMap.values()),
+    spaces: Array.from(spaceMap.values()),
+    userGroups: Array.from(userGroupMap.values()),
   }
 }
 
@@ -745,6 +869,61 @@ function addSafeId(ids: Set<number>, id: bigint | number | undefined) {
   if (Number.isSafeInteger(value) && value > 0) {
     ids.add(value)
   }
+}
+
+async function getSidecarUserGroups(
+  groupIds: Set<number>,
+  currentUserId: number,
+): Promise<{ groups: ProtocolUserGroup[]; userIds: Set<number> }> {
+  const ids = Array.from(groupIds).filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (ids.length === 0) {
+    return { groups: [], userIds: new Set() }
+  }
+
+  const groupRows = await db.select().from(userGroups).where(inArray(userGroups.id, ids)).orderBy(asc(userGroups.name))
+  if (groupRows.length === 0) {
+    return { groups: [], userIds: new Set() }
+  }
+
+  const memberRows = await db
+    .select({
+      groupId: userGroupMembers.groupId,
+      userId: userGroupMembers.userId,
+    })
+    .from(userGroups)
+    .innerJoin(userGroupMembers, eq(userGroups.id, userGroupMembers.groupId))
+    .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
+    .innerJoin(usersTable, eq(usersTable.id, userGroupMembers.userId))
+    .where(and(inArray(userGroups.id, groupRows.map((group) => group.id)), userNotDeleted()))
+    .orderBy(asc(userGroupMembers.userId))
+
+  const userIdsByGroupId = new Map<number, number[]>()
+  const userIds = new Set<number>()
+  for (const row of memberRows) {
+    userIds.add(row.userId)
+    const groupUserIds = userIdsByGroupId.get(row.groupId)
+    if (groupUserIds) {
+      groupUserIds.push(row.userId)
+    } else {
+      userIdsByGroupId.set(row.groupId, [row.userId])
+    }
+  }
+
+  const groups = groupRows.map((group): ProtocolUserGroup => {
+    const groupUserIds = userIdsByGroupId.get(group.id) ?? []
+    return {
+      id: BigInt(group.id),
+      spaceId: BigInt(group.spaceId),
+      name: group.name,
+      description: group.description ?? undefined,
+      memberCount: groupUserIds.length,
+      userIds: groupUserIds.map((id) => BigInt(id)),
+      currentUserIsMember: groupUserIds.includes(currentUserId),
+      date: encodeDateStrict(group.date),
+    }
+  })
+
+  return { groups, userIds }
 }
 
 async function getSidecarChats(

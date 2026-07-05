@@ -576,8 +576,6 @@ function pushMembershipAccessUpdates(updates: MembershipAccessUpdate[]): void {
     const update: Update =
       item.payload.kind === "add"
         ? {
-            seq: item.update.seq,
-            date: encodeDateStrict(item.update.date),
             update: {
               oneofKind: "participantGroupAdd",
               participantGroupAdd: {
@@ -587,8 +585,6 @@ function pushMembershipAccessUpdates(updates: MembershipAccessUpdate[]): void {
             },
           }
         : {
-            seq: item.update.seq,
-            date: encodeDateStrict(item.update.date),
             update: {
               oneofKind: "participantGroupDelete",
               participantGroupDelete: {

@@ -1188,6 +1188,7 @@ message UpdateSidecars {
   repeated Chat chats = 2;
   repeated Dialog dialogs = 3;
   repeated Space spaces = 4;
+  repeated UserGroup user_groups = 5;
 }
 
 message GetUpdatesResult {

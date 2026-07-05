@@ -227,11 +227,11 @@ public actor UpdatesEngine: Sendable {
             let sidecarSpan = PerformanceTrace.begin(
               "UpdateApplySidecars",
               category: .updates,
-              "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count)"
+              "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count) user_groups=\(sidecars.userGroups.count)"
             )
             defer {
               sidecarSpan.end(
-                "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count)"
+                "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count) user_groups=\(sidecars.userGroups.count)"
               )
             }
             try self.apply(sidecars: sidecars, db: db)
@@ -437,6 +437,10 @@ public actor UpdatesEngine: Sendable {
       try space.save(db)
     }
 
+    for userGroup in sidecars.userGroups {
+      try UserGroup.save(db, from: userGroup)
+    }
+
     for var chat in try preparedSidecarChats(sidecars.chats, db: db) {
       try chat.saveWithValidLastMsg(db)
     }
@@ -486,7 +490,11 @@ public actor UpdatesEngine: Sendable {
 // MARK: Extensions
 
 private func hasSidecars(_ sidecars: InlineProtocol.UpdateSidecars) -> Bool {
-  !sidecars.users.isEmpty || !sidecars.chats.isEmpty || !sidecars.dialogs.isEmpty || !sidecars.spaces.isEmpty
+  !sidecars.users.isEmpty ||
+    !sidecars.chats.isEmpty ||
+    !sidecars.dialogs.isEmpty ||
+    !sidecars.spaces.isEmpty ||
+    !sidecars.userGroups.isEmpty
 }
 
 func preparedSidecarChats(_ protoChats: [InlineProtocol.Chat], db: Database) throws -> [Chat] {
@@ -545,7 +553,7 @@ private extension UpdateApplySource {
 
 private extension InlineProtocol.UpdateSidecars {
   var traceCount: Int {
-    users.count + chats.count + dialogs.count + spaces.count
+    users.count + chats.count + dialogs.count + spaces.count + userGroups.count
   }
 }
 
@@ -557,6 +565,61 @@ func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
   try DbBucketState
     .filter(DbBucketState.Columns.bucketType == 1 && DbBucketState.Columns.entityId == -chatId)
     .deleteAll(db)
+}
+
+private func deleteLocalChatData(_ db: Database, chatId: Int64) throws {
+  try Message.filter(Column("chatId") == chatId).deleteAll(db)
+  try Dialog.filter(Column("chatId") == chatId).deleteAll(db)
+  try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
+  try Chat.filter(Column("id") == chatId).deleteAll(db)
+  try deleteChatSyncBucket(db, chatId: chatId)
+
+  Task.detached {
+    NotificationCenter.default.post(
+      name: Notification.Name("chatDeletedNotification"),
+      object: nil,
+      userInfo: ["chatId": chatId]
+    )
+  }
+}
+
+private func deleteLocalPrivateThreadIfCurrentUserLostAccess(_ db: Database, chatId: Int64) throws {
+  guard let chat = try Chat.fetchOne(db, id: chatId) else { return }
+  guard chat.type == .thread, chat.isPublic != true else { return }
+  guard try !currentUserHasLocalAccess(db, chatId: chatId) else { return }
+
+  try deleteLocalChatData(db, chatId: chatId)
+}
+
+private func currentUserHasLocalAccess(_ db: Database, chatId: Int64) throws -> Bool {
+  let currentUserId = Auth.shared.getCurrentUserId()
+
+  let directGrantCount = try ChatParticipant
+    .filter(ChatParticipant.Columns.chatId == chatId)
+    .filter(ChatParticipant.Columns.userId == currentUserId)
+    .fetchCount(db)
+  if directGrantCount > 0 {
+    return true
+  }
+
+  let remainingGroupIds = try ChatParticipantGroup
+    .filter(ChatParticipantGroup.Columns.chatId == chatId)
+    .fetchAll(db)
+    .map(\.groupId)
+  guard !remainingGroupIds.isEmpty else { return false }
+
+  let memberGrantCount = try UserGroupMember
+    .filter(remainingGroupIds.contains(UserGroupMember.Columns.groupId))
+    .filter(UserGroupMember.Columns.userId == currentUserId)
+    .fetchCount(db)
+  if memberGrantCount > 0 {
+    return true
+  }
+
+  return try UserGroup
+    .filter(remainingGroupIds.contains(UserGroup.Columns.id))
+    .filter(UserGroup.Columns.currentUserIsMember == true)
+    .fetchCount(db) > 0
 }
 
 extension InlineProtocol.UpdateDeleteChat {
@@ -1172,19 +1235,7 @@ extension InlineProtocol.UpdateChatParticipantDelete {
     try ChatParticipant.filter(Column("chatId") == chatID).filter(Column("userId") == userID).deleteAll(db)
 
     if userID == Auth.shared.getCurrentUserId() {
-      try Message.filter(Column("chatId") == chatID).deleteAll(db)
-      try Dialog.filter(Column("peerThreadId") == chatID).deleteAll(db)
-      try Chat.filter(Column("id") == chatID).deleteAll(db)
-      try deleteChatSyncBucket(db, chatId: chatID)
-
-      // Post notification to pop chat route
-      Task.detached {
-        NotificationCenter.default.post(
-          name: Notification.Name("chatDeletedNotification"),
-          object: nil,
-          userInfo: ["chatId": chatID]
-        )
-      }
+      try deleteLocalChatData(db, chatId: chatID)
     }
   }
 }
@@ -1206,6 +1257,8 @@ extension InlineProtocol.UpdateChatParticipantGroupDelete {
       .filter(ChatParticipantGroup.Columns.chatId == chatID)
       .filter(ChatParticipantGroup.Columns.groupId == groupID)
       .deleteAll(db)
+
+    try deleteLocalPrivateThreadIfCurrentUserLostAccess(db, chatId: chatID)
   }
 }
 
