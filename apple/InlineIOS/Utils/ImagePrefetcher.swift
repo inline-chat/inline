@@ -1,5 +1,6 @@
 import InlineKit
 import InlineProtocol
+import InlineUI
 import Logger
 import Nuke
 import NukeExtensions
@@ -39,6 +40,8 @@ actor ImagePrefetcher {
     /// Prefetch images for a collection of messages
     /// - Parameter messages: Array of messages that may contain images to prefetch
     func prefetchImages(for messages: [FullMessage]) async {
+        prepareThumbnails(for: messages)
+
         let messagesToPrefetch = messages.filter { $0.photoInfo != nil }
         
         guard !messagesToPrefetch.isEmpty else { return }
@@ -52,6 +55,16 @@ actor ImagePrefetcher {
         
         for message in limitedMessages {
             await prefetchImage(for: message)
+        }
+    }
+
+    /// Prepare lightweight stripped thumbnails used as first-frame placeholders.
+    /// The actual render work is queued off the main thread by InlineUI.
+    func prepareThumbnails(for messages: [FullMessage]) {
+        let limitedMessages = Array(messages.prefix(maxConcurrentPrefetches * 2))
+
+        for message in limitedMessages {
+            prewarmTinyThumbnails(for: message)
         }
     }
     
@@ -191,12 +204,30 @@ actor ImagePrefetcher {
     private func removePrefetchTask(for photoId: Int64) async {
         prefetchTasks.removeValue(forKey: photoId)
     }
+
+    private func prewarmTinyThumbnails(for message: FullMessage) {
+        if message.message.isSticker != true {
+            InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.photoInfo)
+        }
+
+        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.videoInfo?.thumbnail)
+        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.documentInfo?.thumbnail)
+        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.repliedToMessage?.photoInfo)
+        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.repliedToMessage?.videoInfo?.thumbnail)
+
+        for attachment in message.attachments {
+            InlineTinyThumbnailPrewarmer.prewarm(photoInfo: attachment.photoInfo)
+            InlineTinyThumbnailPrewarmer.prewarm(photoInfo: attachment.authorPhotoInfo)
+        }
+    }
     
     /// Prefetch images in batches to reduce the number of tasks
     /// - Parameters:
     ///   - messages: Array of messages to prefetch
     ///   - batchSize: Size of each batch
     func prefetchImagesInBatches(for messages: [FullMessage], batchSize: Int = 4) async {
+        prepareThumbnails(for: messages)
+
         // Filter messages that need prefetching
         let messagesToPrefetch = messages.filter { message in
             guard let photoInfo = message.photoInfo else { return false }

@@ -718,7 +718,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
     // Get messages on main actor, then move heavy work to background
     let messagesToPrefetch: [FullMessage] = indexPaths.compactMap { indexPath in
       coordinator.message(at: indexPath)
-    }.filter { $0.photoInfo != nil }
+    }
 
     if !messagesToPrefetch.isEmpty {
       // Move only the image prefetching to background thread
@@ -799,6 +799,8 @@ private extension MessagesCollectionView {
     private var pendingAppearingItems: Set<MessageListItem> = []
     private var sendAnimationListTransaction = SendMessageAnimationListTransaction()
     private weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
+    private var mediaWarmupTask: Task<Void, Never>?
+    private let mediaWarmupLookaheadRows = 16
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
@@ -1821,6 +1823,8 @@ private extension MessagesCollectionView {
       remoteOlderTask = nil
       threadAnchorFetchTask?.cancel()
       threadAnchorFetchTask = nil
+      mediaWarmupTask?.cancel()
+      mediaWarmupTask = nil
       viewModel.dispose()
       cancellables.forEach { $0.cancel() }
       cancellables.removeAll()
@@ -2257,6 +2261,7 @@ private extension MessagesCollectionView {
           ]
         )
         self.syncAvatarOverlay(animate: false)
+        self.scheduleMediaWarmupForVisibleAndNearby(reason: "snapshot")
         (self.currentCollectionView?.collectionViewLayout as? AnimatedCompositionalLayout)?
           .clearSendAnimationAppearingItemSuppression()
         completion?()
@@ -2303,6 +2308,59 @@ private extension MessagesCollectionView {
       SendMessageAnimationDiagnostics.debug(
         "layout suppress-appearing count=\(suppressedIndexPaths.count) items=\(sendTargetItems.count)"
       )
+    }
+
+    private func scheduleMediaWarmupForVisibleAndNearby(reason _: String) {
+      mediaWarmupTask?.cancel()
+      mediaWarmupTask = Task { @MainActor [weak self] in
+        await Task.yield()
+        guard !Task.isCancelled, let self else { return }
+
+        let indexPaths = self.mediaWarmupIndexPathsAroundVisible()
+        guard !indexPaths.isEmpty else { return }
+
+        let messages = indexPaths.compactMap { self.message(at: $0) }
+        guard !messages.isEmpty else { return }
+
+        await ImagePrefetcher.shared.prepareThumbnails(for: messages)
+      }
+    }
+
+    private func mediaWarmupIndexPathsAroundVisible() -> [IndexPath] {
+      guard let collectionView = currentCollectionView else { return [] }
+      let visibleIndexPaths = collectionView.indexPathsForVisibleItems
+
+      if visibleIndexPaths.isEmpty {
+        guard let section = listSection(at: 0) else { return [] }
+        let upperBound = min(section.items.count, mediaWarmupLookaheadRows)
+        return (0 ..< upperBound).map { IndexPath(item: $0, section: 0) }
+      }
+
+      var indexPaths = Set<IndexPath>()
+      let groupedBySection = Dictionary(grouping: visibleIndexPaths, by: \.section)
+
+      for (sectionIndex, sectionVisibleIndexPaths) in groupedBySection {
+        guard let section = listSection(at: sectionIndex) else { continue }
+        let visibleItems = sectionVisibleIndexPaths.map(\.item)
+        guard let minVisibleItem = visibleItems.min(),
+              let maxVisibleItem = visibleItems.max()
+        else { continue }
+
+        let lowerBound = max(0, minVisibleItem - 2)
+        let upperBound = min(section.items.count - 1, maxVisibleItem + mediaWarmupLookaheadRows)
+        guard lowerBound <= upperBound else { continue }
+
+        for item in lowerBound ... upperBound {
+          indexPaths.insert(IndexPath(item: item, section: sectionIndex))
+        }
+      }
+
+      return indexPaths.sorted {
+        if $0.section != $1.section {
+          return $0.section < $1.section
+        }
+        return $0.item < $1.item
+      }
     }
 
     private func groupBoundaryItems(
@@ -3658,12 +3716,14 @@ private extension MessagesCollectionView {
       isUserDragging = false
       if !decelerate {
         scheduleHideDateSeparators()
+        scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_drag_end")
       }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
       isUserScrollInEffect = false
       scheduleHideDateSeparators()
+      scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_deceleration_end")
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
