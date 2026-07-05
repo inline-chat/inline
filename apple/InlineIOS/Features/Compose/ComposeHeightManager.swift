@@ -51,9 +51,10 @@ extension ComposeView {
     ))
 
     let contentHeight = size.height
+    let inputHeight = textView.isHidden ? Self.minHeight : textViewHeightByContentHeight(contentHeight)
     let embedHeight = embedContainerHeightConstraint?.constant ?? 0
     let attachmentHeight = attachmentContainerHeightConstraint?.constant ?? 0
-    let newHeight = textViewHeightByContentHeight(contentHeight) + embedHeight + attachmentHeight
+    let newHeight = inputHeight + embedHeight + attachmentHeight
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
 
     composeHeightConstraint.constant = newHeight

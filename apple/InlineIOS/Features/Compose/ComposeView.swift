@@ -166,24 +166,28 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var attachmentScrollView = makeAttachmentScrollView()
   lazy var attachmentStackView = makeAttachmentStackView()
   private lazy var voiceViewModel = ComposeVoiceRecordingViewModel()
-  private lazy var voiceInputHostingController = UIHostingController(rootView: ComposeVoiceInputView(
-    viewModel: voiceViewModel,
-    onStop: { [weak self] in
-      self?.stopVoiceRecording()
-    },
-    onPlay: { [weak self] in
-      self?.toggleVoicePlayback()
-    },
-    onDiscard: { [weak self] in
-      self?.discardVoiceRecordingTapped()
-    },
-    onSend: { [weak self] in
-      self?.sendVoiceRecording(sendMode: nil)
-    },
-    onSendSilently: { [weak self] in
-      self?.sendVoiceRecording(sendMode: .modeSilent)
-    }
-  ))
+  private lazy var voiceInputHostingController: UIHostingController<ComposeVoiceInputView> = {
+    let controller = UIHostingController(rootView: ComposeVoiceInputView(
+      viewModel: voiceViewModel,
+      onStop: { [weak self] in
+        self?.stopVoiceRecording()
+      },
+      onPlay: { [weak self] in
+        self?.toggleVoicePlayback()
+      },
+      onDiscard: { [weak self] in
+        self?.discardVoiceRecordingTapped()
+      },
+      onSend: { [weak self] in
+        self?.sendVoiceRecording(sendMode: nil)
+      },
+      onSendSilently: { [weak self] in
+        self?.sendVoiceRecording(sendMode: .modeSilent)
+      }
+    ))
+    controller.safeAreaRegions = []
+    return controller
+  }()
   private lazy var voiceInputView: UIView = {
     let view = voiceInputHostingController.view!
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -501,7 +505,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
       voiceInputView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
       voiceInputView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
-      voiceInputView.topAnchor.constraint(equalTo: composeContent.topAnchor),
+      voiceInputView.topAnchor.constraint(equalTo: attachmentScrollView.bottomAnchor),
       voiceInputView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor),
     ])
   }
