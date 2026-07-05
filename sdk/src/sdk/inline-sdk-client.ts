@@ -27,6 +27,7 @@ import type {
   InlineSdkAnswerMessageActionParams,
   InlineSdkClearChatHistoryParams,
   InlineSdkClientOptions,
+  InlineSdkChatInfo,
   InlineInboundEvent,
   InlineSdkGetMessagesParams,
   InlineSdkInvokeMessageActionParams,
@@ -237,7 +238,7 @@ export class InlineSdkClient {
     return { userId: result.getMe.user.id }
   }
 
-  async getChat(params: { chatId: InlineIdLike }): Promise<{ chatId: bigint; peer?: Peer; title: string }> {
+  async getChat(params: { chatId: InlineIdLike }): Promise<InlineSdkChatInfo> {
     const peerId = InputPeer.create({
       type: { oneofKind: "chat", chat: { chatId: asInlineId(params.chatId, "chatId") } },
     })
@@ -249,7 +250,17 @@ export class InlineSdkClient {
 
     const chat = result.getChat.chat
     if (!chat) throw new Error("getChat: missing chat")
-    return { chatId: chat.id, peer: chat.peerId, title: chat.title }
+    return {
+      chatId: chat.id,
+      title: chat.title,
+      ...(chat.peerId != null ? { peer: chat.peerId } : {}),
+      ...(chat.spaceId != null ? { spaceId: chat.spaceId } : {}),
+      ...(chat.parentChatId != null ? { parentChatId: chat.parentChatId } : {}),
+      ...(chat.parentMessageId != null ? { parentMessageId: chat.parentMessageId } : {}),
+      ...(chat.isPublic != null ? { isPublic: chat.isPublic } : {}),
+      ...(chat.untitled != null ? { untitled: chat.untitled } : {}),
+      ...(chat.number != null ? { number: chat.number } : {}),
+    }
   }
 
   async getMessages(params: InlineSdkGetMessagesParams): Promise<{ messages: Message[] }> {

@@ -1,4 +1,4 @@
-import { ClientMessage, type ConnectionInit, ServerProtocolMessage } from "@inline-chat/protocol/core"
+import { ClientMessage, ConnectionError_Reason, type ConnectionInit, ServerProtocolMessage } from "@inline-chat/protocol/core"
 import type { Method, RpcCall, RpcError, RpcResult } from "@inline-chat/protocol/core"
 import { AsyncChannel } from "../utils/async-channel.js"
 import { PingPongService } from "./ping-pong.js"
@@ -441,7 +441,10 @@ function summarizeError(error: unknown): string {
 
 function describeConnectionError(error: unknown): string {
   const value = typeof error === "object" && error !== null ? (error as Record<string, unknown>) : null
+  const reason = typeof value?.reason === "number" ? value.reason : null
+  const reasonName = reason == null ? null : (ConnectionError_Reason[reason] ?? `UNKNOWN_REASON_${reason}`)
   const code = typeof value?.code === "number" ? value.code : null
-  const message = typeof value?.message === "string" && value.message.trim() ? value.message.trim() : "unknown"
-  return `server connection error${code != null ? ` (code=${code})` : ""}: ${message}`
+  const message = typeof value?.message === "string" && value.message.trim() ? value.message.trim() : (reasonName ?? "unknown")
+  const suffix = reasonName != null ? ` (${reasonName})` : (code != null ? ` (code=${code})` : "")
+  return `server connection error${suffix}: ${message}`
 }

@@ -30,6 +30,18 @@ export type InlineSdkClientOptions = {
   fetch?: typeof fetch
 }
 
+export type InlineSdkChatInfo = {
+  chatId: InlineId
+  title: string
+  peer?: Peer
+  spaceId?: InlineId
+  parentChatId?: InlineId
+  parentMessageId?: InlineId
+  isPublic?: boolean
+  untitled?: boolean
+  number?: number
+}
+
 export type InlineSdkSendMessageMedia =
   | { kind: "photo"; photoId: InlineIdLike }
   | { kind: "video"; videoId: InlineIdLike }

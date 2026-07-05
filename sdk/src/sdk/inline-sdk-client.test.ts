@@ -234,7 +234,14 @@ describe("InlineSdkClient", () => {
             result: {
               oneofKind: "getChat",
               getChat: {
-                chat: { id: 7n, title: "Test thread" },
+                chat: {
+                  id: 7n,
+                  title: "Test thread",
+                  parentChatId: 3n,
+                  parentMessageId: 99n,
+                  number: 12,
+                  untitled: true,
+                },
                 pinnedMessageIds: [],
               },
             },
@@ -243,7 +250,14 @@ describe("InlineSdkClient", () => {
       }),
     )
 
-    await expect(p).resolves.toEqual({ chatId: 7n, peer: undefined, title: "Test thread" })
+    await expect(p).resolves.toEqual({
+      chatId: 7n,
+      parentChatId: 3n,
+      parentMessageId: 99n,
+      number: 12,
+      title: "Test thread",
+      untitled: true,
+    })
     await client.close()
   })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
+import { ConnectionError_Reason, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
 import { ProtocolClient, ProtocolClientError } from "./protocol-client.js"
 import { MockTransport } from "./mock-transport.js"
 import { AsyncChannel } from "../utils/async-channel.js"
@@ -505,8 +505,16 @@ describe("ProtocolClient", () => {
     // Trigger failure handling.
     await transport.events.send({
       type: "message",
-      message: ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionError", connectionError: { code: 500, message: "nope" } } }),
+      message: ServerProtocolMessage.create({
+        id: 1n,
+        body: {
+          oneofKind: "connectionError",
+          connectionError: { reason: ConnectionError_Reason.INVALID_AUTH },
+        },
+      }),
     })
+    await flushMicrotasks()
+    expect(client.getDiagnostics().lastFailureReason).toBe("server connection error (INVALID_AUTH): INVALID_AUTH")
 
     // attemptNo=1 => delay ~0.6s
     await vi.advanceTimersByTimeAsync(600)
