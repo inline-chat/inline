@@ -1919,8 +1919,9 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
+    let entities = fullMessage.translationEntities ?? fullMessage.message.entities
     let cacheKey = [
-      "\(fullMessage.message.entities)",
+      "\(entities)",
       "\(message.stableId)",
       fullMessage.displayText ?? "",
       MessageRichTextRenderer.cacheKey(for: outgoing),
@@ -1929,8 +1930,6 @@ class UIMessageView: UIView {
     updateBubbleShape()
 
     guard let text = fullMessage.displayText else { return }
-
-    let entities = fullMessage.translationEntities ?? fullMessage.message.entities
 
     /// Use cache if available
     if let cachedString = Self.attributedCache.object(forKey: NSString(string: cacheKey)) {

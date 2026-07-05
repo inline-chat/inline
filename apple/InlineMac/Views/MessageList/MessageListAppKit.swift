@@ -2126,6 +2126,7 @@ class MessageListAppKit: NSViewController {
                 context.duration = animationDuration
                 tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
                 tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+                updateHeightsForRows(at: rowsToReload)
                 syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
                 if shouldScroll { scrollToBottom(animated: true) }
               } completionHandler: { [weak self] in
@@ -2134,6 +2135,7 @@ class MessageListAppKit: NSViewController {
             } else {
               tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
               tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+              updateHeightsForRows(at: rowsToReload)
               syncUpdateAvatarOverlayAfterTableLayout(on: self)
               if shouldScroll { scrollToBottom(animated: true) }
               isPerformingUpdate = false

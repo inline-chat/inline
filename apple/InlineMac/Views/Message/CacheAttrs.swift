@@ -32,13 +32,16 @@ class CacheAttrs {
   }
 
   func getKey(_ message: FullMessage, renderStyle: MessageRenderStyle = .bubble, styleKey: String = "") -> CacheKey {
-    CacheKey(
+    let displayText = message.displayText ?? ""
+    let displayEntities = message.translationEntities ?? message.message.entities
+
+    return CacheKey(
       // TODO: Optimize
       isTranslated: message.translationText != nil,
-      textCount: message.displayText?.count ?? 0,
-      textHash: message.message.text?.hashValue ?? 0,
+      textCount: displayText.count,
+      textHash: displayText.hashValue,
       stableId: message.message.stableId,
-      entitiesHash: message.message.entities?.hashValue ?? 0,
+      entitiesHash: displayEntities?.hashValue ?? 0,
       renderStyle: renderStyle,
       styleKey: styleKey
     )

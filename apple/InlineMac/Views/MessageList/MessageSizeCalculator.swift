@@ -266,7 +266,8 @@ class MessageSizeCalculator {
 
     // let text = fullMessage.message.text ?? emptyFallback
     let text = fullMessage.displayText ?? emptyFallback
-    let minTextSize = minTextWidthForSingleLine.object(forKey: text as NSString) as? CGSize
+    let cacheKey = singleLineTextCacheKey(for: fullMessage, text: text)
+    let minTextSize = minTextWidthForSingleLine.object(forKey: cacheKey) as? CGSize
 
     // This is just text size, we need to take bubble paddings into account as well
     // we can probably refactor this to be more maintainable
@@ -274,6 +275,11 @@ class MessageSizeCalculator {
       return minTextSize.width
     }
     return nil
+  }
+
+  private func singleLineTextCacheKey(for message: FullMessage, text: String) -> NSString {
+    let entities = message.translationEntities ?? message.message.entities
+    return NSString(string: "\(text.count)_\(text.hashValue)_\(entities?.hashValue ?? 0)")
   }
 
   func isSingleLine(_ fullMessage: FullMessage, availableWidth: CGFloat) -> Bool {
@@ -659,9 +665,10 @@ class MessageSizeCalculator {
   }
 
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
+    let entities = message.translationEntities ?? message.message.entities
     // Hash-based approach is faster than string concatenation
     let hashValue =
-      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(message.message.entities?.entities.count ?? 0)_\(actionRowsSignature(for: message))"
+      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(entities?.hashValue ?? 0)_\(actionRowsSignature(for: message))"
     return NSString(string: "\(hashValue)")
   }
 
@@ -725,6 +732,7 @@ class MessageSizeCalculator {
 
     let hasText = message.message.text != nil
     let text = message.displayText ?? emptyFallback
+    let entities = message.translationEntities ?? message.message.entities
     let hasMedia = message.hasMedia
     let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
@@ -781,7 +789,7 @@ class MessageSizeCalculator {
     } else {
       let processed = ProcessEntities.toAttributedString(
         text: text,
-        entities: message.message.entities,
+        entities: entities,
         configuration: .init(
           font: font,
           boldWeight: .semibold,
@@ -931,7 +939,7 @@ class MessageSizeCalculator {
     } else {
       // remove from single line cache. possibly logic can be improved
       // FIXME: Optimize this line, it's hit too often with the whole text
-      minTextWidthForSingleLine.removeObject(forKey: text as NSString)
+      minTextWidthForSingleLine.removeObject(forKey: singleLineTextCacheKey(for: message, text: text))
     }
 
     if hasText, textSize == nil {
@@ -943,7 +951,7 @@ class MessageSizeCalculator {
         isSingleLine = true
         minTextWidthForSingleLine.setObject(
           NSValue(size: textSize_),
-          forKey: text as NSString
+          forKey: singleLineTextCacheKey(for: message, text: text)
         )
       }
     }
@@ -1515,6 +1523,7 @@ class MessageSizeCalculator {
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     let hasText = message.message.text != nil
     let text = message.displayText ?? emptyFallback
+    let entities = message.translationEntities ?? message.message.entities
     let hasMedia = message.hasMedia
     let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
@@ -1551,7 +1560,7 @@ class MessageSizeCalculator {
     } else {
       let processed = ProcessEntities.toAttributedString(
         text: text,
-        entities: message.message.entities,
+        entities: entities,
         configuration: .init(
           font: font,
           boldWeight: .semibold,
