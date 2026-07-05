@@ -234,7 +234,7 @@ from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
 
-base_extra = {"token": "fake"}
+base_extra = {"token": "fake", "context_history_limit": 0}
 assert validate_config(PlatformConfig(token="top-level-token"))
 token_only = InlineAdapter(PlatformConfig(token="top-level-token"))
 assert token_only._token == "top-level-token"
@@ -333,6 +333,9 @@ assert ctx.tool["toolset"] == "inline"
 assert ctx.tool["schema"]["name"] == "inline"
 assert "get_history" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "create_thread" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "search_messages" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "add_reaction" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "pin_message" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert ctx.tool["check_fn"]()
 
 tool_calls = []
@@ -363,6 +366,40 @@ def fake_inline_sidecar(path, body):
         }]}}
     if path == "/send":
         return {"ok": True, "result": {"messageId": "9001"}}
+    if path == "/search":
+        return {"ok": True, "result": {"messages": [{
+            "id": "8802",
+            "chatId": body["target"]["chatId"],
+            "fromId": "u2",
+            "message": f"found {body['query']}",
+        }]}}
+    if path == "/reaction":
+        return {"ok": True, "result": {
+            "messageId": body["messageId"],
+            "emoji": body["emoji"],
+            "removed": bool(body.get("remove")),
+        }}
+    if path == "/reactions":
+        return {"ok": True, "result": {
+            "message": {
+                "id": body["messageId"],
+                "chatId": body["target"]["chatId"],
+                "fromId": "u1",
+                "message": "reacted message",
+            },
+            "reactions": {"reactions": [{"emoji": "ok", "userId": "u2"}]},
+        }}
+    if path == "/pin":
+        return {"ok": True, "result": {
+            "messageId": body["messageId"],
+            "unpinned": bool(body.get("unpin")),
+        }}
+    if path == "/pins":
+        return {"ok": True, "result": {
+            "chatId": body["target"]["chatId"],
+            "pinnedMessageIds": ["8801"],
+            "anchorMessage": {"id": "8801", "chatId": body["target"]["chatId"], "message": "pinned"},
+        }}
     if path == "/create-subthread":
         return {"ok": True, "result": {"chatId": "321", "chat": {"id": "321", "title": "Spec"}}}
     return {"ok": True, "result": {}}
@@ -404,6 +441,87 @@ try:
         "replyToMsgId": "7",
         "sendMode": "silent",
     })
+
+    search_result = json.loads(ctx.tool["handler"]({
+        "action": "search_messages",
+        "chat_id": "chat:10",
+        "query": "deploy blockers",
+        "limit": 2,
+        "offset_id": "msg:6",
+    }))
+    assert search_result["result"]["count"] == 1
+    assert search_result["result"]["messages"][0]["text"] == "found deploy blockers"
+    assert tool_calls[-1] == ("/search", {
+        "target": {"chatId": "10"},
+        "query": "deploy blockers",
+        "limit": 2,
+        "offsetId": "6",
+    })
+
+    reaction_result = json.loads(ctx.tool["handler"]({
+        "action": "add_reaction",
+        "chat_id": "chat:10",
+        "message_id": "msg:5",
+        "emoji": "ok",
+    }))
+    assert reaction_result["result"] == {"messageId": "5", "emoji": "ok", "removed": False}
+    assert tool_calls[-1] == ("/reaction", {
+        "target": {"chatId": "10"},
+        "messageId": "5",
+        "emoji": "ok",
+    })
+
+    remove_reaction_result = json.loads(ctx.tool["handler"]({
+        "action": "remove_reaction",
+        "chat_id": "chat:10",
+        "message_id": "msg:5",
+        "emoji": "ok",
+    }))
+    assert remove_reaction_result["result"] == {"messageId": "5", "emoji": "ok", "removed": True}
+    assert tool_calls[-1] == ("/reaction", {
+        "target": {"chatId": "10"},
+        "messageId": "5",
+        "emoji": "ok",
+        "remove": True,
+    })
+
+    reactions_result = json.loads(ctx.tool["handler"]({
+        "action": "get_reactions",
+        "chat_id": "chat:10",
+        "message_id": "msg:5",
+    }))
+    assert reactions_result["result"]["message"]["text"] == "reacted message"
+    assert reactions_result["result"]["reactions"]["reactions"][0]["emoji"] == "ok"
+
+    pin_result = json.loads(ctx.tool["handler"]({
+        "action": "pin_message",
+        "chat_id": "chat:10",
+        "message_id": "msg:5",
+    }))
+    assert pin_result["result"] == {"messageId": "5", "unpinned": False}
+    assert tool_calls[-1] == ("/pin", {
+        "target": {"chatId": "10"},
+        "messageId": "5",
+    })
+
+    unpin_result = json.loads(ctx.tool["handler"]({
+        "action": "unpin_message",
+        "chat_id": "chat:10",
+        "message_id": "msg:5",
+    }))
+    assert unpin_result["result"] == {"messageId": "5", "unpinned": True}
+    assert tool_calls[-1] == ("/pin", {
+        "target": {"chatId": "10"},
+        "messageId": "5",
+        "unpin": True,
+    })
+
+    pins_result = json.loads(ctx.tool["handler"]({
+        "action": "list_pins",
+        "chat_id": "thread:10",
+    }))
+    assert pins_result["result"]["pinnedMessageIds"] == ["8801"]
+    assert pins_result["result"]["anchorMessage"]["text"] == "pinned"
 
     thread_result = json.loads(ctx.tool["handler"]({
         "action": "create_thread",
@@ -478,6 +596,11 @@ seeded = _apply_yaml_config(
         "allowed_chats": ["10", "thread:99"],
         "free_response_chats": "99",
         "reply_threads": False,
+        "context_backfill": "selective",
+        "thread_context_limit": 30,
+        "reply_context_limit": 10,
+        "observed_context_limit": 20,
+        "observe_unmentioned_messages": True,
         "typing_indicator": False,
         "gateway_restart_notification": False,
         "sync_commands": False,
@@ -499,6 +622,11 @@ assert seeded["strict_mention"] is True
 assert seeded["allowed_chats"] == ["10", "thread:99"]
 assert seeded["free_response_chats"] == "99"
 assert seeded["reply_threads"] is False
+assert seeded["context_backfill"] == "selective"
+assert seeded["thread_context_limit"] == 30
+assert seeded["reply_context_limit"] == 10
+assert seeded["observed_context_limit"] == 20
+assert seeded["observe_unmentioned_messages"] is True
 assert seeded["typing_indicator"] is False
 assert seeded["gateway_restart_notification"] is False
 assert seeded["sync_commands"] is False
@@ -561,6 +689,32 @@ for bad_port in ["0", "-1", "70000", "abc"]:
         assert "INLINE_SIDECAR_PORT must be an integer from 1 to 65535" in str(exc)
 custom_command_limit = InlineAdapter(PlatformConfig(extra={**base_extra, "command_limit": "42"}))
 assert custom_command_limit._command_limit == 42
+custom_context_limit = InlineAdapter(PlatformConfig(extra={**base_extra, "context_history_limit": "3"}))
+assert custom_context_limit._context_backfill == "always"
+assert custom_context_limit._thread_context_limit == 3
+default_context = InlineAdapter(PlatformConfig(extra={"token": "fake"}))
+assert default_context._context_backfill == "selective"
+assert default_context._thread_context_limit == 30
+assert default_context._reply_context_limit == 10
+assert default_context._observed_context_limit == 20
+assert default_context._observe_unmentioned_messages is True
+selective_context = InlineAdapter(PlatformConfig(extra={
+    **base_extra,
+    "context_backfill": "selective",
+    "thread_context_limit": "40",
+    "reply_context_limit": "12",
+    "observed_context_limit": "25",
+    "observe_unmentioned_messages": True,
+}))
+assert selective_context._context_backfill == "selective"
+assert selective_context._thread_context_limit == 40
+assert selective_context._reply_context_limit == 12
+assert selective_context._observed_context_limit == 25
+assert selective_context._observe_unmentioned_messages is True
+disabled_observed_context = InlineAdapter(PlatformConfig(extra={**base_extra, "observe_unmentioned_messages": False}))
+assert disabled_observed_context._observe_unmentioned_messages is False
+off_context = InlineAdapter(PlatformConfig(extra={**base_extra, "context_backfill": "off"}))
+assert off_context._context_backfill == "off"
 default_reply_threads = InlineAdapter(PlatformConfig(extra=base_extra))
 assert default_reply_threads._reply_threads is True
 disabled_reply_threads = InlineAdapter(PlatformConfig(extra={**base_extra, "reply_threads": "off"}))
@@ -573,6 +727,29 @@ for bad_limit in ["0", "-1", "101", "abc"]:
         raise AssertionError("expected invalid command limit to fail")
     except ValueError as exc:
         assert "INLINE_COMMAND_LIMIT must be an integer from 1 to 100" in str(exc)
+for bad_limit in ["-1", "21", "abc"]:
+    try:
+        InlineAdapter(PlatformConfig(extra={**base_extra, "context_history_limit": bad_limit}))
+        raise AssertionError("expected invalid context history limit to fail")
+    except ValueError as exc:
+        assert "INLINE_CONTEXT_HISTORY_LIMIT must be an integer from 0 to 20" in str(exc)
+for bad_mode in ["wide-open", "sometimes"]:
+    try:
+        InlineAdapter(PlatformConfig(extra={**base_extra, "context_backfill": bad_mode}))
+        raise AssertionError("expected invalid context backfill mode to fail")
+    except ValueError as exc:
+        assert "INLINE_CONTEXT_BACKFILL must be one of off, selective, or always" in str(exc)
+for key, label, too_high in [
+    ("thread_context_limit", "INLINE_THREAD_CONTEXT_LIMIT", "101"),
+    ("reply_context_limit", "INLINE_REPLY_CONTEXT_LIMIT", "51"),
+    ("observed_context_limit", "INLINE_OBSERVED_CONTEXT_LIMIT", "101"),
+]:
+    for bad_limit in ["-1", too_high, "abc"]:
+        try:
+            InlineAdapter(PlatformConfig(extra={**base_extra, key: bad_limit}))
+            raise AssertionError(f"expected invalid {key} to fail")
+        except ValueError as exc:
+            assert f"{label} must be an integer" in str(exc)
 timeout_adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "connect_timeout_ms": 1234}))
 assert timeout_adapter._connect_timeout_ms == 1234
 for key, label in [
@@ -752,13 +929,16 @@ async def assert_reply_thread_chat_metadata():
         events.append(event)
 
     async def fake_get_chat_info(chat_id):
-        assert chat_id == "456"
-        return {
-            "chatId": "456",
-            "title": "Incident reply thread",
-            "parentChatId": "123",
-            "parentMessageId": "9001",
-        }
+        if chat_id == "456":
+            return {
+                "chatId": "456",
+                "title": "Incident reply thread",
+                "parentChatId": "123",
+                "parentMessageId": "9001",
+            }
+        if chat_id == "123":
+            return {"chatId": "123", "title": "Parent room"}
+        raise AssertionError(f"unexpected chat info {chat_id}")
 
     adapter.handle_message = fake_handle_message
     adapter._get_chat_info = fake_get_chat_info
@@ -1033,11 +1213,225 @@ async def assert_inline_entity_context():
     assert "user:u1" in events[0].channel_prompt
     assert '[@user:u1](inline://user?id=u1)' in events[0].channel_prompt
     assert '[this chat](inline://chat?id=10)' in events[0].channel_prompt
-    assert "If an [Inline message entities] block is present" in events[0].channel_prompt
+    assert "Inline entity metadata maps visible text to IDs" in events[0].channel_prompt
     assert "Alice" not in events[0].channel_prompt
     assert "https://example.com/docs" not in events[0].channel_prompt
 
 asyncio.run(assert_inline_entity_context())
+
+async def assert_inline_thread_context_history():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": False,
+        "reply_threads": False,
+        "context_backfill": "selective",
+        "thread_context_limit": 2,
+    }))
+    events = []
+    calls = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    async def fake_get_chat_info(chat_id):
+        if chat_id == "456":
+            return {
+                "chatId": "456",
+                "title": "Incident thread",
+                "parentChatId": "123",
+                "parentMessageId": "9001",
+            }
+        if chat_id == "123":
+            return {"chatId": "123", "title": "Parent room"}
+        return {"chatId": chat_id, "title": f"Chat {chat_id}"}
+
+    async def fake_sidecar_call(path, body):
+        calls.append((path, body))
+        if path == "/messages":
+            return {"ok": True, "result": {"messages": [{
+                "id": "9001",
+                "chatId": "123",
+                "fromId": "u2",
+                "message": "Original incident report",
+                "date": "120",
+            }]}}
+        if path == "/history":
+            return {"ok": True, "result": {"messages": [
+                {"id": "9002", "chatId": "456", "fromId": "u1", "message": "current", "date": "130"},
+                {"id": "9000", "chatId": "456", "fromId": "u3", "message": "Earlier analysis", "date": "121"},
+                {"id": "8999", "chatId": "456", "fromId": "u4", "message": "Needs deploy follow-up", "date": "119"},
+                {"id": "8998", "chatId": "456", "fromId": "u5", "message": "too old", "date": "118"},
+            ]}}
+        raise AssertionError(f"unexpected sidecar path {path}")
+
+    adapter.handle_message = fake_handle_message
+    adapter._get_chat_info = fake_get_chat_info
+    adapter._sidecar_call = fake_sidecar_call
+    await adapter._dispatch_message({
+        "seq": 16,
+        "chatId": "456",
+        "message": {
+            "id": "9002",
+            "chatId": "456",
+            "fromId": "u1",
+            "message": "what did we decide?",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+
+    assert len(events) == 1
+    assert events[0].source.thread_id == "456"
+    assert events[0].source.parent_chat_id == "123"
+    context = events[0].channel_context
+    assert "[Inline thread context]" in context
+    assert "chat: 456 (Incident thread)" in context
+    assert "parent_chat: 123 (Parent room)" in context
+    assert "parent_message: 9001" in context
+    assert "[Inline parent message]" in context
+    assert "message:9001 user:u2: Original incident report" in context
+    assert "[Inline recent history]" in context
+    assert "message:9000 user:u3: Earlier analysis" in context
+    assert "message:8999 user:u4: Needs deploy follow-up" in context
+    assert "message:9002" not in context
+    assert "message:8998" not in context
+    assert calls == [
+        ("/messages", {"target": {"chatId": "123"}, "messageIds": ["9001"]}),
+        ("/history", {"target": {"chatId": "456"}, "limit": 3}),
+    ]
+
+    await adapter._dispatch_message({
+        "seq": 17,
+        "chatId": "456",
+        "message": {
+            "id": "9003",
+            "chatId": "456",
+            "fromId": "u1",
+            "message": "follow-up in the same thread",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+
+    assert len(events) == 2
+    assert "[Inline parent message]" in events[1].channel_context
+    assert "[Inline recent history]" not in events[1].channel_context
+    assert calls == [
+        ("/messages", {"target": {"chatId": "123"}, "messageIds": ["9001"]}),
+        ("/history", {"target": {"chatId": "456"}, "limit": 3}),
+        ("/messages", {"target": {"chatId": "123"}, "messageIds": ["9001"]}),
+    ]
+
+asyncio.run(assert_inline_thread_context_history())
+
+async def assert_inline_reply_context_window():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": False,
+        "reply_threads": False,
+        "context_backfill": "selective",
+        "reply_context_limit": 3,
+    }))
+    events = []
+    calls = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    async def fake_fetch_message(chat_id, message_id):
+        assert chat_id == "10"
+        assert message_id == "50"
+        return {"id": "50", "chatId": "10", "fromId": "u2", "message": "Can we ship this?"}
+
+    async def fake_get_chat_info(chat_id):
+        return {}
+
+    async def fake_sidecar_call(path, body):
+        calls.append((path, body))
+        if path == "/history":
+            return {"ok": True, "result": {"messages": [
+                {"id": "51", "chatId": "10", "fromId": "u1", "message": "Hermes: answer?", "date": "130"},
+                {"id": "50", "chatId": "10", "fromId": "u2", "message": "Can we ship this?", "date": "129"},
+                {"id": "49", "chatId": "10", "fromId": "u3", "message": "Only after QA signs off", "date": "128"},
+            ]}}
+        raise AssertionError(f"unexpected sidecar path {path}")
+
+    adapter.handle_message = fake_handle_message
+    adapter._get_chat_info = fake_get_chat_info
+    adapter._fetch_message = fake_fetch_message
+    adapter._sidecar_call = fake_sidecar_call
+    await adapter._dispatch_message({
+        "seq": 17,
+        "chatId": "10",
+        "message": {
+            "id": "51",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "replying here",
+            "replyToMsgId": "50",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+
+    assert len(events) == 1
+    context = events[0].channel_context
+    assert "[Inline context around replied-to message]" in context
+    assert "message:50 user:u2: Can we ship this?" in context
+    assert "message:49 user:u3: Only after QA signs off" in context
+    assert "message:51" not in context
+    assert calls == [("/history", {
+        "target": {"chatId": "10"},
+        "limit": 4,
+        "anchorId": "50",
+        "includeAnchor": True,
+    })]
+
+asyncio.run(assert_inline_reply_context_window())
+
+async def assert_observed_context_buffer():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": True,
+        "reply_threads": False,
+        "context_backfill": "off",
+        "observe_unmentioned_messages": True,
+        "observed_context_limit": 2,
+    }))
+    events = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    adapter.handle_message = fake_handle_message
+    await adapter._dispatch_message({
+        "seq": 18,
+        "chatId": "10",
+        "message": {
+            "id": "60",
+            "chatId": "10",
+            "fromId": "u2",
+            "message": "QA found one blocker",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+    await adapter._dispatch_message({
+        "seq": 19,
+        "chatId": "10",
+        "message": {
+            "id": "61",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "Hermes: what changed?",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+
+    assert len(events) == 1
+    assert events[0].text == "what changed?"
+    assert "[Inline observed context]" in events[0].channel_context
+    assert "message:60 user:u2: QA found one blocker" in events[0].channel_context
+    assert "Inline observed context contains recent group messages" in events[0].channel_prompt
+    assert adapter._observed_context == {}
+
+asyncio.run(assert_observed_context_buffer())
 
 async def assert_reply_thread_slash_command():
     with tempfile.TemporaryDirectory() as tmp:
@@ -1177,8 +1571,11 @@ async def assert_group_room_controls():
     assert len(await run(thread_allowed, thread_msg)) == 1
 
     async def child_thread_info(chat_id):
-        assert chat_id == "456"
-        return {"chatId": "456", "title": "Child thread", "parentChatId": "10"}
+        if chat_id == "456":
+            return {"chatId": "456", "title": "Child thread", "parentChatId": "10"}
+        if chat_id == "10":
+            return {"chatId": "10", "title": "Parent room"}
+        raise AssertionError(f"unexpected chat info {chat_id}")
 
     parent_allowed = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": False, "allowed_chats": "10"}))
     parent_allowed._get_chat_info = child_thread_info

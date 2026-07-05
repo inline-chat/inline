@@ -78,9 +78,13 @@ describe("packed artifact", () => {
 
     const manifest = await readFile(path.join(packageRoot, "plugin/inline/plugin.yaml"), "utf8")
     expect(manifest).toContain("INLINE_BOT_TOKEN, platforms.inline.token, inline.token, and simple ${ENV_NAME} config references are also accepted")
+    expect(manifest).toContain("INLINE_CONTEXT_BACKFILL")
+    expect(manifest).toContain("INLINE_OBSERVE_UNMENTIONED_MESSAGES")
     expect(manifest).toContain("prompt: \"Inline token\"")
 
     const readme = await readFile(path.join(packageRoot, "README.md"), "utf8")
+    expect(readme).toContain("https://inline.chat/docs/creating-a-bot")
+    expect(readme).toContain("## Coding Agent Setup Prompt")
     expect(readme).toContain("## Update Or Reinstall")
     expect(readme).toContain("export INLINE_TOKEN=\"<token>\"")
     expect(readme).toContain("inline-hermes test-send --to chat:123 --text \"Inline Hermes test\"")
@@ -90,6 +94,7 @@ describe("packed artifact", () => {
 
     const release = await readFile(path.join(packageRoot, "RELEASE.md"), "utf8")
     expect(release).toContain("## Manual Live Test")
+    expect(release).toContain("https://inline.chat/docs/creating-a-bot")
     expect(release).toContain("VERSION=\"$(node -p \"require('./package.json').version\")\"")
     expect(release).toContain("mkdir -p .tmp/manual-pack")
     expect(release).toContain("inline-chat-hermes-agent-adapter-${VERSION}.tgz")
@@ -147,7 +152,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.1")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.2")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

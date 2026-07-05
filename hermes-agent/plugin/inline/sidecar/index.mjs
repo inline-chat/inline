@@ -24275,6 +24275,21 @@ async function handleRequest(req, res) {
     case "/history":
       await endpointHistory(res, body);
       return;
+    case "/search":
+      await endpointSearch(res, body);
+      return;
+    case "/reaction":
+      await endpointReaction(res, body);
+      return;
+    case "/reactions":
+      await endpointReactions(res, body);
+      return;
+    case "/pin":
+      await endpointPin(res, body);
+      return;
+    case "/pins":
+      await endpointPins(res, body);
+      return;
     case "/create-subthread":
       await endpointCreateSubthread(res, body);
       return;
@@ -24441,19 +24456,27 @@ async function endpointChat(res, body) {
     });
     return;
   }
-  const chat = await client.getChat({ chatId: target.chatId });
+  const snapshot = await getRawChatSnapshot(target.chatId);
+  const chat = snapshot.chat;
   writeJson(res, 200, {
     ok: true,
     result: {
-      chatId: chat.chatId.toString(),
-      title: chat.title,
-      ...chat.peer != null ? { peer: safeJson(chat.peer) } : {},
+      chatId: chat.id?.toString() ?? target.chatId.toString(),
+      title: chat.title ?? "",
+      ...chat.peerId != null ? { peer: safeJson(chat.peerId) } : {},
       ...chat.spaceId != null ? { spaceId: chat.spaceId.toString() } : {},
       ...chat.parentChatId != null ? { parentChatId: chat.parentChatId.toString() } : {},
       ...chat.parentMessageId != null ? { parentMessageId: chat.parentMessageId.toString() } : {},
+      ...chat.description != null ? { description: chat.description } : {},
+      ...chat.emoji != null ? { emoji: chat.emoji } : {},
       ...chat.isPublic != null ? { isPublic: chat.isPublic } : {},
+      ...chat.lastMsgId != null ? { lastMsgId: chat.lastMsgId.toString() } : {},
+      ...chat.date != null ? { date: chat.date.toString() } : {},
+      ...chat.createdBy != null ? { createdBy: chat.createdBy.toString() } : {},
       ...chat.untitled != null ? { untitled: chat.untitled } : {},
       ...chat.number != null ? { number: chat.number } : {},
+      pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
+      ...snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {},
       chat: safeJson(chat)
     }
   });
@@ -24482,6 +24505,100 @@ async function endpointHistory(res, body) {
   const history = result;
   writeJson(res, 200, { ok: true, result: { messages: safeJson(history.getChatHistory?.messages ?? []) } });
 }
+async function endpointSearch(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const query = readRequiredString(record, "query").trim();
+  if (!query)
+    throw new SidecarError("search requires query", "bad_format");
+  const limit = clampResultLimit(readOptionalNumber(record, "limit") ?? 20, 100);
+  const offsetId = readOptionalString(record, "offsetId");
+  const result = await client.invokeUncheckedRaw(Method.SEARCH_MESSAGES, {
+    oneofKind: "searchMessages",
+    searchMessages: {
+      peerId: inputPeerFromTarget(target),
+      queries: [query],
+      limit,
+      ...offsetId ? { offsetId: BigInt(offsetId) } : {}
+    }
+  });
+  const typed = result;
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(typed.searchMessages?.messages ?? []) } });
+}
+async function endpointReaction(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredString(record, "messageId");
+  const emoji = readRequiredString(record, "emoji").trim();
+  if (!emoji)
+    throw new SidecarError("reaction requires emoji", "bad_format");
+  const remove = readOptionalBoolean(record, "remove") ?? false;
+  if (remove) {
+    await client.invokeUncheckedRaw(Method.DELETE_REACTION, {
+      oneofKind: "deleteReaction",
+      deleteReaction: {
+        emoji,
+        peerId: inputPeerFromTarget(target),
+        messageId: BigInt(messageId)
+      }
+    });
+  } else {
+    await client.invokeUncheckedRaw(Method.ADD_REACTION, {
+      oneofKind: "addReaction",
+      addReaction: {
+        emoji,
+        messageId: BigInt(messageId),
+        peerId: inputPeerFromTarget(target)
+      }
+    });
+  }
+  writeJson(res, 200, { ok: true, result: { messageId, emoji, removed: remove } });
+}
+async function endpointReactions(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredString(record, "messageId");
+  const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds: [BigInt(messageId)] }) : await client.getMessages({ userId: target.userId, messageIds: [BigInt(messageId)] });
+  const message = result.messages[0] ?? null;
+  writeJson(res, 200, {
+    ok: true,
+    result: {
+      message: safeJson(message),
+      reactions: safeJson(reactionsFromMessage(message))
+    }
+  });
+}
+async function endpointPin(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredString(record, "messageId");
+  const unpin = readOptionalBoolean(record, "unpin") ?? false;
+  await client.invokeUncheckedRaw(Method.PIN_MESSAGE, {
+    oneofKind: "pinMessage",
+    pinMessage: {
+      peerId: inputPeerFromTarget(target),
+      messageId: BigInt(messageId),
+      unpin
+    }
+  });
+  writeJson(res, 200, { ok: true, result: { messageId, unpinned: unpin } });
+}
+async function endpointPins(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  if ("userId" in target) {
+    throw new SidecarError("pins requires a chat target", "bad_format");
+  }
+  const snapshot = await getRawChatSnapshot(target.chatId);
+  writeJson(res, 200, {
+    ok: true,
+    result: {
+      chatId: target.chatId.toString(),
+      pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
+      ...snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {}
+    }
+  });
+}
 async function endpointCreateSubthread(res, body) {
   const record = asRecord(body);
   const parentChatId = readRequiredString(record, "parentChatId");
@@ -24509,6 +24626,32 @@ async function endpointCreateSubthread(res, body) {
       chatId: subthread?.id?.toString() ?? null
     }
   });
+}
+async function getRawChatSnapshot(chatId) {
+  const result = await client.invoke(Method.GET_CHAT, {
+    oneofKind: "getChat",
+    getChat: GetChatInput.create({ peerId: inputPeerFromTarget({ chatId }) })
+  });
+  const typed = result;
+  const chat = typed.getChat?.chat;
+  if (!chat)
+    throw new SidecarError("chat not found", "not_found");
+  return {
+    chat,
+    pinnedMessageIds: typed.getChat?.pinnedMessageIds ?? [],
+    ...typed.getChat?.anchorMessage != null ? { anchorMessage: typed.getChat.anchorMessage } : {}
+  };
+}
+function reactionsFromMessage(message) {
+  if (!message || typeof message !== "object" || !("reactions" in message))
+    return null;
+  return message.reactions ?? null;
+}
+function clampResultLimit(value, max) {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new SidecarError("limit must be a positive integer", "bad_format");
+  }
+  return Math.min(value, max);
 }
 async function endpointAnswerAction(res, body) {
   const record = asRecord(body);
@@ -24638,7 +24781,16 @@ class MockInlineClient {
         chatId: "chatId" in params ? BigInt(params.chatId) : undefined,
         peerId: "chatId" in params ? { type: { oneofKind: "chat", chat: { chatId: BigInt(params.chatId) } } } : { type: { oneofKind: "user", user: { userId: BigInt(params.userId) } } },
         message: `mock message ${id.toString()}`,
-        date: 123n
+        date: 123n,
+        reactions: {
+          reactions: [{
+            emoji: "ok",
+            userId: 222n,
+            messageId: BigInt(id),
+            chatId: "chatId" in params ? BigInt(params.chatId) : 0n,
+            date: 125n
+          }]
+        }
       }))
     };
   }
@@ -24673,6 +24825,34 @@ class MockInlineClient {
   }
   async invoke(method, input) {
     this.record(`invoke:${methodName(method)}`, input);
+    if (method === Method.GET_CHAT) {
+      const inputRecord = asOptionalRecord(input);
+      const getChat = asOptionalRecord(inputRecord?.getChat);
+      const chatId = chatIdFromInputPeer(getChat?.peerId) ?? 123n;
+      const chat = chatId === 456n ? {
+        id: chatId,
+        title: "Mock reply thread 456",
+        parentChatId: 123n,
+        parentMessageId: 9001n,
+        untitled: true
+      } : {
+        id: chatId,
+        title: `Mock chat ${chatId.toString()}`
+      };
+      return {
+        getChat: {
+          chat,
+          pinnedMessageIds: [8801n],
+          anchorMessage: {
+            id: 8801n,
+            fromId: 111n,
+            chatId,
+            message: "mock pinned message",
+            date: 126n
+          }
+        }
+      };
+    }
     if (method === Method.GET_CHAT_HISTORY) {
       return {
         getChatHistory: {
@@ -24702,6 +24882,35 @@ class MockInlineClient {
         }
       };
     }
+    if (method === Method.SEARCH_MESSAGES) {
+      const inputRecord = asOptionalRecord(input);
+      const searchMessages = asOptionalRecord(inputRecord?.searchMessages);
+      const peerId = searchMessages?.peerId;
+      const chatId = chatIdFromInputPeer(peerId) ?? 123n;
+      const queries = Array.isArray(searchMessages?.queries) ? searchMessages.queries : [];
+      return {
+        oneofKind: "searchMessages",
+        searchMessages: {
+          messages: [{
+            id: 8802n,
+            fromId: 111n,
+            chatId,
+            peerId,
+            message: `mock search ${String(queries[0] ?? "")}`.trim(),
+            date: 127n
+          }]
+        }
+      };
+    }
+    if (method === Method.ADD_REACTION) {
+      return { oneofKind: "addReaction", addReaction: { updates: [] } };
+    }
+    if (method === Method.DELETE_REACTION) {
+      return { oneofKind: "deleteReaction", deleteReaction: { updates: [] } };
+    }
+    if (method === Method.PIN_MESSAGE) {
+      return { oneofKind: "pinMessage", pinMessage: { updates: [] } };
+    }
     return { oneofKind: undefined };
   }
   record(method, params) {
@@ -24716,6 +24925,21 @@ function binarySize(value) {
   if (value instanceof Blob)
     return value.size;
   return null;
+}
+function chatIdFromInputPeer(peer) {
+  const inputPeer = asOptionalRecord(peer);
+  const type = asOptionalRecord(inputPeer?.type);
+  if (type?.oneofKind !== "chat")
+    return null;
+  const chat = asOptionalRecord(type.chat);
+  const chatId = chat?.chatId;
+  if (chatId == null)
+    return null;
+  try {
+    return BigInt(String(chatId));
+  } catch {
+    return null;
+  }
 }
 function methodName(method) {
   return Method[method] ?? String(method);

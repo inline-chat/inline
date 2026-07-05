@@ -34,6 +34,7 @@ Expected tarball shape:
 - `plugin/inline/cli.py`
 - `plugin/inline/plugin.yaml`
 - `plugin/inline/sidecar/index.mjs`
+- `plugin/inline/tools.py`
 
 ## Manual Live Test
 
@@ -64,6 +65,9 @@ export INLINE_TOKEN="<valid Inline bot/user token>"
 inline-hermes test-send --to chat:<chat_id> --text "Inline Hermes manual test" --json
 hermes send --to inline:<chat_id> "Hello from Hermes"
 ```
+
+Need a bot token first? Use the Inline bot creation guide:
+https://inline.chat/docs/creating-a-bot
 
 Do not paste tokens into issue comments, PR comments, or logs. Use
 `platforms.inline.token: ${INLINE_TOKEN}` if the Hermes gateway reads tokens

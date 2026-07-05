@@ -243,6 +243,8 @@ describe("sidecar runtime", () => {
       expect(resultOf(chat.body)).toMatchObject({
         chatId: "123",
         title: "Mock chat 123",
+        pinnedMessageIds: ["8801"],
+        anchorMessage: expect.objectContaining({ id: "8801", message: "mock pinned message" }),
       })
 
       const replyThread = await post(port, "/chat", { target: { chatId: "456" } }, auth)
@@ -253,6 +255,7 @@ describe("sidecar runtime", () => {
         parentChatId: "123",
         parentMessageId: "9001",
         untitled: true,
+        pinnedMessageIds: ["8801"],
       })
 
       const messages = await post(port, "/messages", {
@@ -272,6 +275,68 @@ describe("sidecar runtime", () => {
       expect(resultOf(history.body).messages).toEqual([
         expect.objectContaining({ id: "8801", message: "mock history" }),
       ])
+
+      const search = await post(port, "/search", {
+        target: { chatId: "123" },
+        query: "deploy",
+        limit: 2,
+        offsetId: "8801",
+      }, auth)
+      expect(search.status).toBe(200)
+      expect(resultOf(search.body).messages).toEqual([
+        expect.objectContaining({ id: "8802", message: "mock search deploy" }),
+      ])
+
+      const addReaction = await post(port, "/reaction", {
+        target: { chatId: "123" },
+        messageId: "9001",
+        emoji: "ok",
+      }, auth)
+      expect(addReaction.status).toBe(200)
+      expect(resultOf(addReaction.body)).toMatchObject({ messageId: "9001", emoji: "ok", removed: false })
+
+      const removeReaction = await post(port, "/reaction", {
+        target: { chatId: "123" },
+        messageId: "9001",
+        emoji: "ok",
+        remove: true,
+      }, auth)
+      expect(removeReaction.status).toBe(200)
+      expect(resultOf(removeReaction.body)).toMatchObject({ messageId: "9001", emoji: "ok", removed: true })
+
+      const reactions = await post(port, "/reactions", {
+        target: { chatId: "123" },
+        messageId: "9001",
+      }, auth)
+      expect(reactions.status).toBe(200)
+      expect(resultOf(reactions.body).reactions).toMatchObject({
+        reactions: [expect.objectContaining({ emoji: "ok", userId: "222" })],
+      })
+
+      const pin = await post(port, "/pin", {
+        target: { chatId: "123" },
+        messageId: "9001",
+      }, auth)
+      expect(pin.status).toBe(200)
+      expect(resultOf(pin.body)).toMatchObject({ messageId: "9001", unpinned: false })
+
+      const unpin = await post(port, "/pin", {
+        target: { chatId: "123" },
+        messageId: "9001",
+        unpin: true,
+      }, auth)
+      expect(unpin.status).toBe(200)
+      expect(resultOf(unpin.body)).toMatchObject({ messageId: "9001", unpinned: true })
+
+      const pins = await post(port, "/pins", {
+        target: { chatId: "123" },
+      }, auth)
+      expect(pins.status).toBe(200)
+      expect(resultOf(pins.body)).toMatchObject({
+        chatId: "123",
+        pinnedMessageIds: ["8801"],
+        anchorMessage: expect.objectContaining({ id: "8801" }),
+      })
 
       const subthread = await post(port, "/create-subthread", {
         parentChatId: "123",
@@ -294,8 +359,13 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("getChat")
       expect(callsJson).toContain("getMessages")
       expect(callsJson).toContain("answerMessageAction")
-      expect(callsJson).toContain("invoke:")
-      expect(callsJson).toContain("invokeUncheckedRaw:")
+      expect(callsJson).toContain("invoke:GET_CHAT")
+      expect(callsJson).toContain("invoke:GET_CHAT_HISTORY")
+      expect(callsJson).toContain("invokeUncheckedRaw:SEARCH_MESSAGES")
+      expect(callsJson).toContain("invokeUncheckedRaw:ADD_REACTION")
+      expect(callsJson).toContain("invokeUncheckedRaw:DELETE_REACTION")
+      expect(callsJson).toContain("invokeUncheckedRaw:PIN_MESSAGE")
+      expect(callsJson).toContain("invokeUncheckedRaw:CREATE_SUBTHREAD")
     } finally {
       await post(port, "/shutdown", {}, auth).catch(() => undefined)
       sidecar.kill("SIGTERM")

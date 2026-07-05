@@ -1,7 +1,7 @@
 name: inline-platform
 label: Inline
 kind: platform
-version: 0.0.1
+version: 0.0.2
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
   Hermes Python platform plugin and supervises a local Node sidecar that uses
@@ -79,8 +79,32 @@ optional_env:
     prompt: "Free-response Inline chat ids"
     password: false
   - name: INLINE_REPLY_THREADS
-    description: "Create/use Inline reply threads for top-level group replies by default (true/false, default true)"
+    description: "Create/use Inline reply threads for top-level DM and group replies by default (true/false, default true)"
     prompt: "Reply in Inline threads by default? (true/false)"
+    password: false
+  - name: INLINE_CONTEXT_BACKFILL
+    description: "Automatic context mode: selective, off, or always (default selective)"
+    prompt: "Inline context backfill mode"
+    password: false
+  - name: INLINE_THREAD_CONTEXT_LIMIT
+    description: "Maximum messages for selective thread or mention-gap context, 0-100 (default 30)"
+    prompt: "Thread context limit"
+    password: false
+  - name: INLINE_REPLY_CONTEXT_LIMIT
+    description: "Maximum messages around a replied-to message, 0-50 (default 10)"
+    prompt: "Reply context limit"
+    password: false
+  - name: INLINE_OBSERVED_CONTEXT_LIMIT
+    description: "Maximum unmentioned group messages kept for observed context, 0-100 (default 20)"
+    prompt: "Observed context limit"
+    password: false
+  - name: INLINE_OBSERVE_UNMENTIONED_MESSAGES
+    description: "Buffer unmentioned group messages that pass policy but do not wake the bot (true/false, default true)"
+    prompt: "Observe unmentioned group context? (true/false)"
+    password: false
+  - name: INLINE_CONTEXT_HISTORY_LIMIT
+    description: "Legacy compatibility shortcut: 0 disables automatic history, 1-20 restores always-on recent history"
+    prompt: "Legacy context history limit"
     password: false
   - name: INLINE_SYSTEM_EVENTS
     description: "Deliver Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages (true/false, default false)"

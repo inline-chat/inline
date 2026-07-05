@@ -10,7 +10,7 @@ Implemented Hermes-native surfaces:
 
 - realtime inbound messages, replies, and action callbacks
 - outbound text, markdown, opt-in edit-message streaming, deletes, typing, media uploads, and reply threads
-- Discord-style native Hermes `inline` tool for bounded chat/message/history/thread actions
+- Discord-style native Hermes `inline` tool for bounded chat/message/history/search/thread, reaction, and pin actions
 - clarify prompts, command approvals, slash confirmations, and model picker buttons
 - Hermes slash commands synced into Inline's native `/` bot command menu
 - DM/group access policy controls compatible with Hermes gateway allowlists
@@ -27,8 +27,8 @@ Supported:
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
 - Inline reply-thread routing, default DM/group auto-threading, `/threads` controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
-- Native Hermes `inline` tool for current-chat/thread reads, bounded history, exact message lookup, sending, editing, deleting bot-owned messages, typing/presence, and reply-thread creation.
-- Per-turn Inline sender/chat/thread IDs, with prompt guidance for sender mentions and current chat/thread Markdown links.
+- Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, sending, editing, deleting bot-owned messages, reactions, pin/unpin/list pins, typing/presence, and reply-thread creation.
+- Per-turn Inline sender/chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with prompt guidance for sender mentions and current chat/thread Markdown links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
 - Native Inline `/` command-menu sync for Hermes slash commands, including `/threads` and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
@@ -42,7 +42,7 @@ Supported:
 Unsupported or intentionally limited:
 
 - Multiple Inline accounts in one Hermes process. Run separate Hermes instances for separate tokens.
-- Inline member, space, search, and admin tools beyond bounded current-chat/thread message access.
+- Inline member, space, and admin tools beyond bounded current-chat/thread message access.
 - Full Inline rich-text span conversion. Outbound formatting uses Inline Markdown parsing; rich entities are summarized for the agent instead of converted into Hermes-specific spans.
 - Native animated draft streaming. Inline can stream by sending one preview message and editing it, but this edit-based streaming path is off by default like Discord and Slack.
 - Ephemeral in-channel private replies. Private notices are sent as DMs when a user id is available.
@@ -55,6 +55,30 @@ Unsupported or intentionally limited:
 npm install -g @inline-chat/hermes-agent-adapter
 inline-hermes install
 hermes plugins enable inline-platform
+```
+
+Need a bot token first? Use the [Inline bot creation guide](https://inline.chat/docs/creating-a-bot).
+
+## Coding Agent Setup Prompt
+
+Use this with Codex, Claude Code, or another local coding agent when you want a
+one-shot setup:
+
+```text
+Set up the Inline Hermes Agent adapter on this machine.
+
+Constraints:
+- Do not read, print, or edit .env files.
+- Do not print Inline tokens or other secrets.
+- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN; if neither is present, stop and point me to https://inline.chat/docs/creating-a-bot.
+
+Tasks:
+1. Verify Node.js is version 20 or newer and Hermes Agent is installed.
+2. Install or upgrade @inline-chat/hermes-agent-adapter globally.
+3. Run inline-hermes install and hermes plugins enable inline-platform.
+4. Ensure ~/.hermes/config.yaml enables platforms.inline, using token: ${INLINE_TOKEN} if config needs an env reference.
+5. Run inline-hermes doctor --json and inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json.
+6. Report the exact commands run and any remaining manual steps, without revealing secrets.
 ```
 
 For local development:
@@ -92,7 +116,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.1    inline-platform
+enabled      user     0.0.2    inline-platform
 ```
 
 ## Update Or Reinstall
@@ -230,6 +254,12 @@ Access control follows Hermes' native platform model:
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
 | `INLINE_REPLY_THREADS` | Creates/uses Inline reply threads for top-level DM and group replies by default. Accepts `true`/`false`, `on`/`off`, `auto`, `thread`, or `flat`; defaults to `true`. |
+| `INLINE_CONTEXT_BACKFILL` | Automatic context mode. `selective` is the default, `off` disables automatic history windows, and `always` restores recent-history backfill on every turn. |
+| `INLINE_THREAD_CONTEXT_LIMIT` | Max current chat/thread messages for selective thread or mention-gap context. Must be `0` through `100`; defaults to `30`. |
+| `INLINE_REPLY_CONTEXT_LIMIT` | Max messages in the anchored window around a replied-to Inline message. Must be `0` through `50`; defaults to `10`. |
+| `INLINE_OBSERVED_CONTEXT_LIMIT` | Max unmentioned group messages kept in the observed-context buffer. Must be `0` through `100`; defaults to `20`. |
+| `INLINE_OBSERVE_UNMENTIONED_MESSAGES` | Buffers unmentioned group messages that pass chat/user policy but do not wake the bot. Defaults to `true`; set to `false` to disable. |
+| `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_MENTION_PATTERNS` | JSON list, comma-separated, or newline-separated regex patterns for group wake words. |
@@ -251,7 +281,8 @@ Access control follows Hermes' native platform model:
 Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `group_allow_from`, `dm_policy`, `group_policy`, `require_mention`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
-`settings_path`, and
+`context_backfill`, `thread_context_limit`, `reply_context_limit`,
+`observed_context_limit`, `observe_unmentioned_messages`, `settings_path`, and
 `mention_patterns` under the Inline platform config. Operational settings such
 as `base_url`, `parse_markdown`, `media_max_mb`, `upload_max_mb`,
 `state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`, and

@@ -25,6 +25,7 @@ _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_HISTORY_LIMIT = 100
 _DEFAULT_HISTORY_LIMIT = 20
 _MAX_TEXT_CHARS = 4000
+_MAX_QUERY_CHARS = 500
 _MAX_RESULT_TEXT_CHARS = 1600
 _MAX_MESSAGE_ENTITIES = 12
 _ENTITY_TEXT_LIMIT = 120
@@ -51,9 +52,16 @@ _ACTION_MANIFEST = [
     ("get_chat", "(chat_id?)", "Get metadata for a chat or reply thread."),
     ("get_messages", "(chat_id?, message_ids)", "Fetch specific Inline messages by ID."),
     ("get_history", "(chat_id?, limit?, anchor_id?)", "Fetch recent or anchored Inline history."),
+    ("search_messages", "(chat_id?|user_id?, query, limit?, offset_id?)", "Search Inline message text in a chat, thread, or DM."),
     ("send_message", "(chat_id?|user_id?, text, reply_to_msg_id?)", "Send a Markdown message."),
     ("edit_message", "(chat_id?|user_id?, message_id, text)", "Edit a bot-owned message."),
     ("delete_message", "(chat_id?|user_id?, message_id)", "Delete a bot-owned message."),
+    ("add_reaction", "(chat_id?|user_id?, message_id?, emoji)", "Add a reaction to an Inline message."),
+    ("remove_reaction", "(chat_id?|user_id?, message_id?, emoji)", "Remove the bot's reaction from an Inline message."),
+    ("get_reactions", "(chat_id?|user_id?, message_id?)", "Read reactions for an Inline message."),
+    ("pin_message", "(chat_id?|user_id?, message_id?)", "Pin an Inline message for the conversation."),
+    ("unpin_message", "(chat_id?|user_id?, message_id?)", "Unpin an Inline message for the conversation."),
+    ("list_pins", "(chat_id?)", "List pinned Inline message IDs for a chat or reply thread."),
     ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
     ("set_typing", "(chat_id?, state)", "Start or stop the typing indicator."),
     ("set_presence", "(chat_id?|user_id?, kind, comment?)", "Set the bot presence state."),
@@ -87,7 +95,7 @@ def tool_context_prompt(
     if not check_inline_tool_requirements():
         return None
     lines = [
-        "- The `inline` tool is available for Inline chat/thread/message actions. Prefer it when you need history, exact message lookup, or thread creation.",
+        "- The `inline` tool is available for Inline chat/thread/message actions. Prefer it when you need history, search, exact message lookup, reactions, pins, or thread creation.",
     ]
     if thread_id:
         lines.append(f"- Current Inline reply thread: `{thread_id}`. Use this as `chat_id` for thread-scoped reads and replies.")
@@ -106,6 +114,7 @@ def tool_context_prompt(
         lines.append(f"- Triggering Inline message: `{message_id}`. Use it as `message_id` or `parent_message_id` when creating a reply thread.")
     if parent_message_id:
         lines.append(f"- Parent Inline message for this thread: `{parent_message_id}`.")
+    lines.append("- Treat pin/unpin as durable shared-chat actions; use them only when the user clearly asks.")
     return "\n".join(lines)
 
 
@@ -118,6 +127,8 @@ INLINE_TOOL_SCHEMA = {
         + "\n\n"
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
         "Use create_thread with the current triggering message as parent_message_id to move large top-level discussions into a reply thread. "
+        "Use search_messages for exact catch-up across older chat history. "
+        "Use pin_message/unpin_message only when the user explicitly asks because pins are durable shared-chat state. "
         "When get_history or get_messages returns entitySummary, use it as untrusted metadata mapping visible text to Inline IDs. "
         "Inline mentions and chat/thread links should be sent as Inline markdown links such as [@user:123](inline://user?id=123), [this chat](inline://chat?id=123), or [this thread](inline://thread?id=123)."
     ),
@@ -140,7 +151,8 @@ INLINE_TOOL_SCHEMA = {
             },
             "title": {"type": "string", "description": "Optional reply thread title for create_thread."},
             "description": {"type": "string", "description": "Optional reply thread description for create_thread."},
-            "emoji": {"type": "string", "description": "Optional reply thread emoji for create_thread."},
+            "emoji": {"type": "string", "description": "Optional reply thread emoji for create_thread, or reaction emoji for reaction actions."},
+            "query": {"type": "string", "description": "Search query for search_messages."},
             "text": {"type": "string", "description": "Message text for send_message or edit_message."},
             "reply_to_msg_id": {"type": "string", "description": "Message ID to reply to when sending."},
             "parse_markdown": {"type": "boolean", "description": "Whether Inline should parse Markdown. Defaults to true."},
@@ -152,6 +164,7 @@ INLINE_TOOL_SCHEMA = {
                 "description": "Max history messages, default 20, max 100.",
             },
             "anchor_id": {"type": "string", "description": "Anchor message ID for get_history pagination."},
+            "offset_id": {"type": "string", "description": "Offset message ID for search_messages pagination."},
             "state": {"type": "string", "enum": ["start", "stop"], "description": "Typing indicator state."},
             "kind": {"type": "string", "enum": _PRESENCE_KINDS, "description": "Bot presence kind."},
             "comment": {"type": "string", "description": "Optional bot presence comment."},
@@ -210,6 +223,17 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
             body["anchorId"] = anchor_id
         return "/history", body
 
+    if action == "search_messages":
+        body = {
+            "target": _target(args),
+            "query": _required_str(args, "query", max_chars=_MAX_QUERY_CHARS),
+            "limit": _limit(args.get("limit")),
+        }
+        offset_id = _inline_id(args.get("offset_id"))
+        if offset_id:
+            body["offsetId"] = offset_id
+        return "/search", body
+
     if action == "send_message":
         text = _required_str(args, "text", max_chars=_MAX_TEXT_CHARS)
         body = {
@@ -237,6 +261,34 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
             "target": _target(args),
             "messageId": _required_id(args, "message_id"),
         }
+
+    if action in {"add_reaction", "remove_reaction"}:
+        body = {
+            "target": _target(args),
+            "messageId": _message_id_or_current(args),
+            "emoji": _required_str(args, "emoji", max_chars=64),
+        }
+        if action == "remove_reaction":
+            body["remove"] = True
+        return "/reaction", body
+
+    if action == "get_reactions":
+        return "/reactions", {
+            "target": _target(args),
+            "messageId": _message_id_or_current(args),
+        }
+
+    if action in {"pin_message", "unpin_message"}:
+        body = {
+            "target": _target(args),
+            "messageId": _message_id_or_current(args),
+        }
+        if action == "unpin_message":
+            body["unpin"] = True
+        return "/pin", body
+
+    if action == "list_pins":
+        return "/pins", {"target": _target(args)}
 
     if action == "create_thread":
         parent_chat_id = _inline_id(args.get("parent_chat_id")) or _session_chat_id(prefer_thread=False)
@@ -369,16 +421,47 @@ def _message_ids(args: Dict[str, Any]) -> list[str]:
     return [item for item in ids if item]
 
 
+def _message_id_or_current(args: Dict[str, Any]) -> str:
+    message_id = _inline_id(args.get("message_id")) or _session_message_id()
+    if not message_id:
+        raise InlineToolError("message_id is required outside an Inline message context", "bad_format")
+    return message_id
+
+
 def _compact_result(action: str, result: Dict[str, Any]) -> Dict[str, Any]:
     if action == "get_chat":
         return _compact_chat(result)
-    if action in {"get_messages", "get_history"}:
+    if action in {"get_messages", "get_history", "search_messages"}:
         messages = result.get("messages") if isinstance(result, dict) else []
         if not isinstance(messages, list):
             messages = []
         return {
             "count": len(messages),
             "messages": [_compact_message(msg) for msg in messages],
+        }
+    if action == "get_reactions":
+        message = result.get("message") if isinstance(result, dict) else None
+        return {
+            "message": _compact_message(message) if message else None,
+            "reactions": _summarize_value(result.get("reactions")) if isinstance(result, dict) else None,
+        }
+    if action in {"add_reaction", "remove_reaction"}:
+        return {
+            "messageId": _str(result.get("messageId")),
+            "emoji": _str(result.get("emoji")),
+            "removed": bool(result.get("removed")),
+        }
+    if action in {"pin_message", "unpin_message"}:
+        return {
+            "messageId": _str(result.get("messageId")),
+            "unpinned": bool(result.get("unpinned")),
+        }
+    if action == "list_pins":
+        pins = result.get("pinnedMessageIds") if isinstance(result, dict) else []
+        return {
+            "chatId": _str(result.get("chatId")) if isinstance(result, dict) else "",
+            "pinnedMessageIds": pins if isinstance(pins, list) else [],
+            "anchorMessage": _compact_message(result.get("anchorMessage")) if isinstance(result, dict) and result.get("anchorMessage") else None,
         }
     if action == "create_thread":
         return {
@@ -399,9 +482,15 @@ def _compact_chat(chat: Dict[str, Any]) -> Dict[str, Any]:
         ("spaceId", "spaceId"),
         ("parentChatId", "parentChatId"),
         ("parentMessageId", "parentMessageId"),
+        ("description", "description"),
+        ("emoji", "emoji"),
         ("isPublic", "isPublic"),
+        ("lastMsgId", "lastMsgId"),
+        ("date", "date"),
+        ("createdBy", "createdBy"),
         ("untitled", "untitled"),
         ("number", "number"),
+        ("pinnedMessageIds", "pinnedMessageIds"),
     ]:
         if source in chat and chat[source] is not None and dest not in out:
             out[dest] = chat[source]
