@@ -27,6 +27,7 @@ final class NewPhotoView: NSView {
   }()
 
   private var currentImage: NSImage?
+  private var imageLoadGeneration = 0
 
   // Add a separate background view for more reliable background coloring
   private let backgroundView: BasicView = {
@@ -204,19 +205,34 @@ final class NewPhotoView: NSView {
   }
 
   private func updateImage() {
-    if let url = imageLocalUrl() {
-      let loadSync = shouldLoadSync()
-      let isMemoryCached = ImageCacheManager.shared.cachedImage(cacheKey: url.absoluteString) != nil
+    imageLoadGeneration += 1
+    let generation = imageLoadGeneration
 
-      ImageCacheManager.shared.image(for: url, loadSync: loadSync) { [weak self] image in
-        guard let self, let image else {
-          self?.hideLoadingView()
+    if let url = imageLocalUrl() {
+      let targetSize = preferredImageTargetSize()
+      let scale = backingScale
+      let isMemoryCached = ImageCacheManager.shared.cachedImage(
+        for: url,
+        targetSize: targetSize,
+        scale: scale
+      ) != nil
+
+      ImageCacheManager.shared.image(
+        for: url,
+        loadSync: shouldLoadSync(),
+        targetSize: targetSize,
+        scale: scale
+      ) { [weak self] image in
+        guard let self else { return }
+        guard self.imageLoadGeneration == generation else { return }
+        guard let image else {
+          self.hideLoadingView()
           return
         }
 
         addImageView()
 
-        if !loadSync, !isMemoryCached, shouldFadeImageIn {
+        if !isMemoryCached, shouldFadeImageIn {
           animateImageTransition(to: image)
         } else {
           setImage(image)
@@ -236,6 +252,30 @@ final class NewPhotoView: NSView {
       showLoadingView()
       return
     }
+  }
+
+  private var backingScale: CGFloat {
+    window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+  }
+
+  private func preferredImageTargetSize() -> CGSize {
+    if bounds.width > 0, bounds.height > 0 {
+      return bounds.size
+    }
+
+    guard let photoSize = fullMessage.photoInfo?.bestPhotoSize(),
+          let width = photoSize.width,
+          let height = photoSize.height
+    else {
+      return CGSize(width: 320, height: 320)
+    }
+
+    return MessageSizeCalculator.shared.calculatePhotoSize(
+      width: CGFloat(width),
+      height: CGFloat(height),
+      parentAvailableWidth: 320,
+      hasCaption: fullMessage.message.text?.isEmpty == false
+    )
   }
 
   private var shouldFadeImageIn: Bool {

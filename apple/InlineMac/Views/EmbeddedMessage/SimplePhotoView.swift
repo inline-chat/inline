@@ -50,6 +50,7 @@ final class SimplePhotoView: NSView {
   private var heightConstraint: NSLayoutConstraint?
   private var relatedMessage: Message?
   private var overlaySymbol: String?
+  private var imageLoadGeneration = 0
 
   init(
     photoInfo: PhotoInfo,
@@ -121,6 +122,9 @@ final class SimplePhotoView: NSView {
   }
 
   private func updateImage() {
+    imageLoadGeneration += 1
+    let generation = imageLoadGeneration
+
     guard let url = imageLocalUrl() else {
       if let photoInfo {
         Task.detached { [weak self] in
@@ -131,10 +135,24 @@ final class SimplePhotoView: NSView {
       return
     }
 
-    let isMemoryCached = ImageCacheManager.shared.cachedImage(cacheKey: url.absoluteString) != nil
-    ImageCacheManager.shared.image(for: url, loadSync: true) { [weak self] image in
-      guard let self, let image else {
-        self?.hideLoadingView()
+    let targetSize = preferredImageTargetSize()
+    let scale = backingScale
+    let isMemoryCached = ImageCacheManager.shared.cachedImage(
+      for: url,
+      targetSize: targetSize,
+      scale: scale
+    ) != nil
+
+    ImageCacheManager.shared.image(
+      for: url,
+      loadSync: false,
+      targetSize: targetSize,
+      scale: scale
+    ) { [weak self] image in
+      guard let self else { return }
+      guard self.imageLoadGeneration == generation else { return }
+      guard let image else {
+        self.hideLoadingView()
         return
       }
 
@@ -145,6 +163,26 @@ final class SimplePhotoView: NSView {
         hideLoadingView()
       }
     }
+  }
+
+  private var backingScale: CGFloat {
+    window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+  }
+
+  private func preferredImageTargetSize() -> CGSize {
+    if bounds.width > 0, bounds.height > 0 {
+      return bounds.size
+    }
+
+    if let width = widthConstraint?.constant,
+       let height = heightConstraint?.constant,
+       width > 0,
+       height > 0
+    {
+      return CGSize(width: width, height: height)
+    }
+
+    return CGSize(width: 96, height: 96)
   }
 
   private func updateTinyThumbnailBackground() {

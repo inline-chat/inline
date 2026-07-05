@@ -85,6 +85,7 @@ class MessageListAppKit: NSViewController {
   private var remoteOlderTask: Task<Void, Never>?
   private var loadBatchTask: Task<Void, Never>?
   private var heightPrecalcTask: Task<Void, Never>?
+  private var mediaWarmupTask: Task<Void, Never>?
   private var readAllTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
   private var avatarOverlaySyncInProgress = false
@@ -99,6 +100,7 @@ class MessageListAppKit: NSViewController {
   private var isDisposed = false
   private weak var observedToolbar: NSToolbar?
   private var toolbarDisplayModeObservation: NSKeyValueObservation?
+  private let mediaWarmupLookaheadRows = 16
 
   // Translation system
   private let translationViewModel: TranslationViewModel
@@ -1497,6 +1499,7 @@ class MessageListAppKit: NSViewController {
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
       self?.updateUnreadIfNeeded()
+      self?.scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_idle")
       self?.scheduleMessageHoverRefresh()
     }
   }
@@ -2052,6 +2055,7 @@ class MessageListAppKit: NSViewController {
             tableView.insertRows(at: inserted, withAnimation: .none)
             tableView.endUpdates()
             syncAvatarOverlayAfterTableLayout()
+            scheduleMediaWarmupForVisibleAndNearby(reason: "local_batch_insert")
             scheduleMessageHoverRefresh()
             didInsertRows = true
             return true
@@ -2064,6 +2068,7 @@ class MessageListAppKit: NSViewController {
             clearHoveredMessage()
             tableView.reloadData()
             syncAvatarOverlayAfterTableLayout()
+            scheduleMediaWarmupForVisibleAndNearby(reason: "local_batch_reload")
             scheduleMessageHoverRefresh()
             didInsertRows = true
             return true
@@ -2072,6 +2077,7 @@ class MessageListAppKit: NSViewController {
             clearHoveredMessage()
             tableView.reloadData()
             syncAvatarOverlayAfterTableLayout()
+            scheduleMediaWarmupForVisibleAndNearby(reason: "local_batch_fallback")
             scheduleMessageHoverRefresh()
             didInsertRows = true
             return true
@@ -2119,6 +2125,7 @@ class MessageListAppKit: NSViewController {
     tableView.reloadData()
     pruneMessageSelection()
     syncAvatarOverlayAfterTableLayout()
+    scheduleMediaWarmupForVisibleAndNearby(reason: "initial")
     scheduleMessageHoverRefresh()
   }
 
@@ -2137,6 +2144,7 @@ class MessageListAppKit: NSViewController {
       if !didSyncAvatarOverlayForUpdate {
         scheduleAvatarOverlaySync()
       }
+      scheduleMediaWarmupForVisibleAndNearby(reason: "update_\(updateLabel)")
       scheduleMessageHoverRefresh()
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
       span.end(
@@ -2626,6 +2634,163 @@ class MessageListAppKit: NSViewController {
         let _ = calculateSize(for: message, with: props, tableWidth: width_)
       }
     }
+  }
+
+  private func scheduleMediaWarmupForVisibleAndNearby(reason: String) {
+    guard isViewLoaded, !isDisposed else { return }
+
+    mediaWarmupTask?.cancel()
+    mediaWarmupTask = Task { @MainActor [weak self] in
+      await Task.yield()
+      guard let self, !Task.isCancelled, !self.isDisposed else { return }
+
+      let rows = self.mediaWarmupRowsAroundVisible()
+      guard !rows.isEmpty else { return }
+      self.prewarmMediaForRows(rows, reason: reason)
+    }
+  }
+
+  private func mediaWarmupRowsAroundVisible() -> IndexSet {
+    let rowCount = tableView.numberOfRows
+    guard rowCount > 0 else { return [] }
+
+    let visibleRange = tableView.rows(in: tableView.visibleRect)
+    guard visibleRange.location != NSNotFound, visibleRange.length > 0 else {
+      let end = min(rowCount, mediaWarmupLookaheadRows)
+      return IndexSet(integersIn: 0 ..< end)
+    }
+
+    let start = max(0, visibleRange.location - 2)
+    let end = min(rowCount, visibleRange.location + visibleRange.length + mediaWarmupLookaheadRows)
+    guard start < end else { return [] }
+    return IndexSet(integersIn: start ..< end)
+  }
+
+  private func prewarmMediaForRows(_ rows: IndexSet, reason _: String) {
+    guard let width = measurementWidth() else { return }
+    let scale = mediaWarmupScale
+
+    for row in rows {
+      guard !isDisposed else { return }
+      guard let message = message(forRow: row) else { continue }
+
+      let props = messageProps(for: row)
+      let (_, _, _, layoutPlan) = calculateSize(
+        for: message,
+        with: props,
+        tableWidth: width
+      )
+
+      prewarmMedia(in: message, layout: layoutPlan, scale: scale)
+    }
+  }
+
+  private var mediaWarmupScale: CGFloat {
+    scrollView.window?.backingScaleFactor
+      ?? view.window?.backingScaleFactor
+      ?? NSScreen.main?.backingScaleFactor
+      ?? 2
+  }
+
+  private func prewarmMedia(
+    in fullMessage: FullMessage,
+    layout: MessageSizeCalculator.LayoutPlans,
+    scale: CGFloat
+  ) {
+    let hasCaption = fullMessage.message.text?.isEmpty == false
+
+    if let photoInfo = fullMessage.photoInfo {
+      if fullMessage.message.isSticker != true {
+        InlineTinyThumbnailBackgroundView.prewarm(photoInfo: photoInfo)
+      }
+      prewarmPhotoDisplay(
+        photoInfo,
+        cacheKey: nil,
+        targetSize: layout.photo?.size,
+        hasCaption: hasCaption,
+        scale: scale
+      )
+    }
+
+    if let videoInfo = fullMessage.videoInfo {
+      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: videoInfo.thumbnail)
+
+      if let thumbnail = videoInfo.thumbnail {
+        let videoId = videoInfo.video.id ?? thumbnail.id
+        prewarmPhotoDisplay(
+          thumbnail,
+          cacheKey: "video-thumb-\(videoId)",
+          targetSize: layout.video?.size,
+          hasCaption: hasCaption,
+          scale: scale
+        )
+      }
+    }
+
+    if let repliedToMessage = fullMessage.repliedToMessage {
+      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: repliedToMessage.photoInfo)
+      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: repliedToMessage.videoInfo?.thumbnail)
+    }
+
+    for attachment in fullMessage.attachments {
+      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: attachment.photoInfo)
+      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: attachment.authorPhotoInfo)
+    }
+  }
+
+  private func prewarmPhotoDisplay(
+    _ photoInfo: PhotoInfo?,
+    cacheKey: String?,
+    targetSize: CGSize?,
+    hasCaption: Bool,
+    scale: CGFloat
+  ) {
+    guard let photoSize = photoInfo?.bestPhotoSize(),
+          let localPath = photoSize.localPath,
+          !localPath.isEmpty
+    else {
+      return
+    }
+
+    let url = FileCache.getUrl(for: .photos, localPath: localPath)
+    let resolvedTargetSize = mediaTargetSize(
+      preferred: targetSize,
+      photoSize: photoSize,
+      hasCaption: hasCaption
+    )
+
+    ImageCacheManager.shared.prewarm(
+      for: url,
+      cacheKey: cacheKey,
+      targetSize: resolvedTargetSize,
+      scale: scale
+    )
+  }
+
+  private func mediaTargetSize(
+    preferred: CGSize?,
+    photoSize: PhotoSize,
+    hasCaption: Bool
+  ) -> CGSize {
+    if let preferred,
+       preferred.width > 0,
+       preferred.height > 0
+    {
+      return preferred
+    }
+
+    guard let width = photoSize.width,
+          let height = photoSize.height
+    else {
+      return CGSize(width: 320, height: 320)
+    }
+
+    return sizeCalculator.calculatePhotoSize(
+      width: CGFloat(width),
+      height: CGFloat(height),
+      parentAvailableWidth: 320,
+      hasCaption: hasCaption
+    )
   }
 
   private func message(forRow row: Int) -> FullMessage? {
@@ -3485,6 +3650,8 @@ extension MessageListAppKit {
     loadBatchTask = nil
     heightPrecalcTask?.cancel()
     heightPrecalcTask = nil
+    mediaWarmupTask?.cancel()
+    mediaWarmupTask = nil
     readAllTask?.cancel()
     readAllTask = nil
     deferredTranslationTask?.cancel()
