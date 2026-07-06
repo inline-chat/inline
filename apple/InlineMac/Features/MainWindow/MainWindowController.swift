@@ -335,6 +335,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
 private enum MainWindowSceneOptions {
   static let defaultContentSize = NSSize(width: 860, height: 640)
-  static let minSizeWithSidebar = NSSize(width: 600, height: 400)
+  static let minSizeWithSidebar = NSSize(width: 500, height: 300)
   static let minSizeWithoutSidebar = NSSize(width: 300, height: 300)
 }
