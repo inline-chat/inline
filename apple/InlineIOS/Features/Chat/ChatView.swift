@@ -18,6 +18,7 @@ struct ChatView: View {
   @State private var attemptedUntitledCleanupOnExit = false
   @State private var activeChatToken: MessagesPublisher.ActiveChatToken?
   @State private var isVisible = false
+  @State private var userGroupMentionTarget: UserGroupMentionTarget?
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -178,6 +179,19 @@ struct ChatView: View {
           }
         }
       }
+    }
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: .userGroupMentionTapped)
+    ) { notification in
+      guard var target = notification.userInfo?["target"] as? UserGroupMentionTarget else { return }
+      if target.spaceId == nil {
+        target.spaceId = contextSpaceId ?? fullChatViewModel.chat?.spaceId
+      }
+      userGroupMentionTarget = target
+    }
+    .sheet(item: $userGroupMentionTarget) { target in
+      UserGroupMembersSheet(target: target)
     }
     .onReceive(
       NotificationCenter.default

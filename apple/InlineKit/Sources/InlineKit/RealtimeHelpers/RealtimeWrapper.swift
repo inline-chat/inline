@@ -405,7 +405,21 @@ public extension Realtime {
     }
 
     try await db.dbWriter.write { db in
-      ChatParticipant.save(db, from: result.participant, chatId: addInput.chatID)
+      for user in result.users {
+        _ = try User.save(db, user: user)
+      }
+
+      if result.hasParticipant {
+        ChatParticipant.save(db, from: result.participant, chatId: addInput.chatID)
+      }
+
+      if result.hasGroup {
+        try UserGroup.save(db, from: result.group)
+      }
+
+      if result.hasGroupParticipant {
+        try ChatParticipantGroup.save(db, from: result.groupParticipant, chatId: addInput.chatID)
+      }
     }
   }
 

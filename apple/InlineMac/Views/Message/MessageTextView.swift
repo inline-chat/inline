@@ -368,6 +368,7 @@ class MessageTextView: NSTextView {
     let fullRange = NSRange(location: 0, length: textStorage.length)
     let keys: [NSAttributedString.Key] = [
       .mentionUserId,
+      .mentionGroupId,
       .threadLink,
       .botCommand,
       .emailAddress,

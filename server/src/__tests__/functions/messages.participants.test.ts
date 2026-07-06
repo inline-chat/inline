@@ -193,6 +193,7 @@ describe("space thread participant management", () => {
       makeFunctionContext(creator.id),
     )
     const groupId = Number(createdGroup.group.id)
+    expect(createdGroup.users.map((user) => Number(user.id))).toEqual([member.id])
 
     const chat = await testUtils.createChat(space.id, "Private Group Thread", "thread", false, creator.id)
     if (!chat) throw new Error("Chat not created")
@@ -205,6 +206,7 @@ describe("space thread participant management", () => {
     const added = await addChatParticipant({ chatId: chat.id, groupId }, makeFunctionContext(creator.id))
     expect(Number(added.groupParticipant?.groupId)).toBe(groupId)
     expect(added.group?.name).toBe("Eng")
+    expect(added.users?.map((user) => Number(user.id))).toEqual([member.id])
 
     await expect(AccessGuards.ensureChatAccess(chat, member.id)).resolves.toBeUndefined()
     await expect(AccessGuards.ensureChatAccess(chat, outsider.id)).rejects.toMatchObject({
@@ -214,6 +216,7 @@ describe("space thread participant management", () => {
     const participants = await getChatParticipants({ chatId: chat.id }, makeFunctionContext(creator.id))
     expect(participants.groupParticipants.map((group) => Number(group.groupId))).toContain(groupId)
     expect(participants.groups.map((group) => group.name)).toContain("Eng")
+    expect(participants.users.map((user) => Number(user.id))).toContain(member.id)
 
     await removeChatParticipant({ chatId: chat.id, groupId }, makeFunctionContext(creator.id))
     await expect(AccessGuards.ensureChatAccess(chat, member.id)).rejects.toMatchObject({
@@ -288,7 +291,7 @@ describe("space thread participant management", () => {
       code: RealtimeRpcError.Code.PEER_ID_INVALID,
     })
 
-    await updateUserGroup(
+    const updatedGroup = await updateUserGroup(
       {
         groupId,
         name: "Support",
@@ -296,6 +299,7 @@ describe("space thread participant management", () => {
       },
       makeFunctionContext(creator.id),
     )
+    expect(updatedGroup.users.map((user) => Number(user.id))).toEqual([newMember.id])
 
     await expect(AccessGuards.ensureChatAccess(chat, oldMember.id)).rejects.toMatchObject({
       code: RealtimeRpcError.Code.PEER_ID_INVALID,

@@ -1524,6 +1524,17 @@ class UIMessageView: UIView {
         }
       }
 
+      if !foundMention,
+         let groupId = attributedText.attribute(.mentionGroupId, at: characterIndex, effectiveRange: nil) as? Int64
+      {
+        NotificationCenter.default.post(
+          name: .userGroupMentionTapped,
+          object: nil,
+          userInfo: ["target": UserGroupMentionTarget(groupId: groupId, spaceId: spaceId)]
+        )
+        return
+      }
+
       // If not a mention, check for links
       if !foundMention {
         if let threadTarget = attributedText

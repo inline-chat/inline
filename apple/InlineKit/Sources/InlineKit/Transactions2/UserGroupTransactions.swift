@@ -101,6 +101,10 @@ public struct CreateUserGroupTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
+        for user in response.users {
+          _ = try User.save(db, user: user)
+        }
+
         try UserGroup.save(db, from: response.group)
       }
     } catch {
@@ -150,6 +154,10 @@ public struct UpdateUserGroupTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
+        for user in response.users {
+          _ = try User.save(db, user: user)
+        }
+
         try UserGroup.save(db, from: response.group)
       }
     } catch {

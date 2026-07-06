@@ -1278,6 +1278,18 @@ class MessageViewAppKit: NSView {
         return true
       }
 
+      if let groupId = attributedString.attribute(.mentionGroupId, at: characterIndex, effectiveRange: nil) as? Int64 {
+        NotificationCenter.default.post(
+          name: .userGroupMentionTapped,
+          object: nil,
+          userInfo: ["target": UserGroupMentionTarget(groupId: groupId, spaceId: messageSpaceId())]
+        )
+        MessageGestureTrace.debug(
+          "MessageView.handleTextEntityClick messageId=\(message.messageId) action=openGroupMention groupId=\(groupId) range=\(MessageGestureTrace.range(range))"
+        )
+        return true
+      }
+
       if let threadTarget = attributedString.attribute(.threadLink, at: characterIndex, effectiveRange: nil)
         as? ThreadLinkTarget
       {

@@ -8944,6 +8944,8 @@ public nonisolated struct CreateUserGroupResult: Sendable {
   /// Clears the value of `group`. Subsequent reads from it will return its default value.
   public mutating func clearGroup() {self._group = nil}
 
+  public var users: [User] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8991,6 +8993,8 @@ public nonisolated struct UpdateUserGroupResult: Sendable {
   public var hasGroup: Bool {self._group != nil}
   /// Clears the value of `group`. Subsequent reads from it will return its default value.
   public mutating func clearGroup() {self._group = nil}
+
+  public var users: [User] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -11002,6 +11006,8 @@ public nonisolated struct AddChatParticipantResult: Sendable {
   public var hasGroup: Bool {self._group != nil}
   /// Clears the value of `group`. Subsequent reads from it will return its default value.
   public mutating func clearGroup() {self._group = nil}
+
+  public var users: [User] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -23744,7 +23750,7 @@ nonisolated extension CreateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension CreateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUserGroupResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}group\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}group\0\u{1}users\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23753,6 +23759,7 @@ nonisolated extension CreateUserGroupResult: SwiftProtobuf.Message, SwiftProtobu
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._group) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       default: break
       }
     }
@@ -23766,11 +23773,15 @@ nonisolated extension CreateUserGroupResult: SwiftProtobuf.Message, SwiftProtobu
     try { if let v = self._group {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    if !self.users.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.users, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: CreateUserGroupResult, rhs: CreateUserGroupResult) -> Bool {
     if lhs._group != rhs._group {return false}
+    if lhs.users != rhs.users {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -23827,7 +23838,7 @@ nonisolated extension UpdateUserGroupInput: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension UpdateUserGroupResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateUserGroupResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}group\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}group\0\u{1}users\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23836,6 +23847,7 @@ nonisolated extension UpdateUserGroupResult: SwiftProtobuf.Message, SwiftProtobu
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._group) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       default: break
       }
     }
@@ -23849,11 +23861,15 @@ nonisolated extension UpdateUserGroupResult: SwiftProtobuf.Message, SwiftProtobu
     try { if let v = self._group {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    if !self.users.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.users, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateUserGroupResult, rhs: UpdateUserGroupResult) -> Bool {
     if lhs._group != rhs._group {return false}
+    if lhs.users != rhs.users {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -26943,7 +26959,7 @@ nonisolated extension AddChatParticipantInput: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension AddChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AddChatParticipantResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}participant\0\u{3}group_participant\0\u{1}group\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}participant\0\u{3}group_participant\0\u{1}group\0\u{1}users\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26954,6 +26970,7 @@ nonisolated extension AddChatParticipantResult: SwiftProtobuf.Message, SwiftProt
       case 1: try { try decoder.decodeSingularMessageField(value: &self._participant) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._groupParticipant) }()
       case 3: try { try decoder.decodeSingularMessageField(value: &self._group) }()
+      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       default: break
       }
     }
@@ -26973,6 +26990,9 @@ nonisolated extension AddChatParticipantResult: SwiftProtobuf.Message, SwiftProt
     try { if let v = self._group {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     } }()
+    if !self.users.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.users, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -26980,6 +27000,7 @@ nonisolated extension AddChatParticipantResult: SwiftProtobuf.Message, SwiftProt
     if lhs._participant != rhs._participant {return false}
     if lhs._groupParticipant != rhs._groupParticipant {return false}
     if lhs._group != rhs._group {return false}
+    if lhs.users != rhs.users {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

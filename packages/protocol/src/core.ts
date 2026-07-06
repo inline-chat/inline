@@ -5739,6 +5739,10 @@ export interface CreateUserGroupResult {
      * @generated from protobuf field: UserGroup group = 1;
      */
     group?: UserGroup;
+    /**
+     * @generated from protobuf field: repeated User users = 2;
+     */
+    users: User[];
 }
 /**
  * @generated from protobuf message UpdateUserGroupInput
@@ -5769,6 +5773,10 @@ export interface UpdateUserGroupResult {
      * @generated from protobuf field: UserGroup group = 1;
      */
     group?: UserGroup;
+    /**
+     * @generated from protobuf field: repeated User users = 2;
+     */
+    users: User[];
 }
 /**
  * @generated from protobuf message DeleteUserGroupInput
@@ -7063,6 +7071,10 @@ export interface AddChatParticipantResult {
      * @generated from protobuf field: optional UserGroup group = 3;
      */
     group?: UserGroup;
+    /**
+     * @generated from protobuf field: repeated User users = 4;
+     */
+    users: User[];
 }
 /**
  * @generated from protobuf message RemoveChatParticipantInput
@@ -22489,11 +22501,13 @@ export const CreateUserGroupInput = new CreateUserGroupInput$Type();
 class CreateUserGroupResult$Type extends MessageType<CreateUserGroupResult> {
     constructor() {
         super("CreateUserGroupResult", [
-            { no: 1, name: "group", kind: "message", T: () => UserGroup }
+            { no: 1, name: "group", kind: "message", T: () => UserGroup },
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
         ]);
     }
     create(value?: PartialMessage<CreateUserGroupResult>): CreateUserGroupResult {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.users = [];
         if (value !== undefined)
             reflectionMergePartial<CreateUserGroupResult>(this, message, value);
         return message;
@@ -22505,6 +22519,9 @@ class CreateUserGroupResult$Type extends MessageType<CreateUserGroupResult> {
             switch (fieldNo) {
                 case /* UserGroup group */ 1:
                     message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+                    break;
+                case /* repeated User users */ 2:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -22521,6 +22538,9 @@ class CreateUserGroupResult$Type extends MessageType<CreateUserGroupResult> {
         /* UserGroup group = 1; */
         if (message.group)
             UserGroup.internalBinaryWrite(message.group, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 2; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22613,11 +22633,13 @@ export const UpdateUserGroupInput = new UpdateUserGroupInput$Type();
 class UpdateUserGroupResult$Type extends MessageType<UpdateUserGroupResult> {
     constructor() {
         super("UpdateUserGroupResult", [
-            { no: 1, name: "group", kind: "message", T: () => UserGroup }
+            { no: 1, name: "group", kind: "message", T: () => UserGroup },
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
         ]);
     }
     create(value?: PartialMessage<UpdateUserGroupResult>): UpdateUserGroupResult {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.users = [];
         if (value !== undefined)
             reflectionMergePartial<UpdateUserGroupResult>(this, message, value);
         return message;
@@ -22629,6 +22651,9 @@ class UpdateUserGroupResult$Type extends MessageType<UpdateUserGroupResult> {
             switch (fieldNo) {
                 case /* UserGroup group */ 1:
                     message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+                    break;
+                case /* repeated User users */ 2:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -22645,6 +22670,9 @@ class UpdateUserGroupResult$Type extends MessageType<UpdateUserGroupResult> {
         /* UserGroup group = 1; */
         if (message.group)
             UserGroup.internalBinaryWrite(message.group, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 2; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26251,11 +26279,13 @@ class AddChatParticipantResult$Type extends MessageType<AddChatParticipantResult
         super("AddChatParticipantResult", [
             { no: 1, name: "participant", kind: "message", T: () => ChatParticipant },
             { no: 2, name: "group_participant", kind: "message", T: () => ChatParticipantGroup },
-            { no: 3, name: "group", kind: "message", T: () => UserGroup }
+            { no: 3, name: "group", kind: "message", T: () => UserGroup },
+            { no: 4, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
         ]);
     }
     create(value?: PartialMessage<AddChatParticipantResult>): AddChatParticipantResult {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.users = [];
         if (value !== undefined)
             reflectionMergePartial<AddChatParticipantResult>(this, message, value);
         return message;
@@ -26273,6 +26303,9 @@ class AddChatParticipantResult$Type extends MessageType<AddChatParticipantResult
                     break;
                 case /* optional UserGroup group */ 3:
                     message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+                    break;
+                case /* repeated User users */ 4:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -26295,6 +26328,9 @@ class AddChatParticipantResult$Type extends MessageType<AddChatParticipantResult
         /* optional UserGroup group = 3; */
         if (message.group)
             UserGroup.internalBinaryWrite(message.group, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 4; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

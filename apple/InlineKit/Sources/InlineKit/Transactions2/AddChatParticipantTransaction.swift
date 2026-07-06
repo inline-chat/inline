@@ -60,6 +60,10 @@ public struct AddChatParticipantTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
+        for user in response.users {
+          _ = try User.save(db, user: user)
+        }
+
         if response.hasParticipant {
           ChatParticipant.save(db, from: response.participant, chatId: context.chatID)
         }

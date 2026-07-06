@@ -3,7 +3,7 @@ import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { chatParticipantGroups } from "@in/server/db/schema/userGroups"
 import { Log } from "@in/server/utils/log"
 import { and, eq } from "drizzle-orm"
-import { ChatParticipant, ChatParticipantGroup, Update, UserGroup } from "@inline-chat/protocol/core"
+import { ChatParticipant, ChatParticipantGroup, Update, User, UserGroup } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -24,13 +24,14 @@ import {
   encodeChatParticipantGroup,
   ensureGroupCanParticipateInChat,
   loadActiveGroupMemberIds,
-  loadGroupsByIds,
+  loadGroupsByIdsWithUsers,
 } from "@in/server/modules/userGroups"
 
 type AddChatParticipantOutput = {
   participant?: ChatParticipant
   groupParticipant?: ChatParticipantGroup
   group?: UserGroup
+  users: User[]
 }
 
 export async function addChatParticipant(
@@ -166,7 +167,7 @@ export async function addChatParticipant(
       })
     }
 
-    return { participant: result.participant }
+    return { participant: result.participant, users: [] }
   } catch (error) {
     Log.shared.error(`Failed to add participant to chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {
@@ -266,7 +267,8 @@ async function addChatParticipantGroup(
     },
   )
 
-  const [group] = await loadGroupsByIds([input.groupId], context.currentUserId)
+  const sidecars = await loadGroupsByIdsWithUsers([input.groupId], context.currentUserId)
+  const [group] = sidecars.groups
 
   if (result.update) {
     await pushGroupUpdates({
@@ -280,6 +282,7 @@ async function addChatParticipantGroup(
   return {
     groupParticipant: result.groupParticipant,
     group,
+    users: sidecars.users,
   }
 }
 

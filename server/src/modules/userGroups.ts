@@ -94,7 +94,7 @@ export async function getUserGroups(
 export async function createUserGroup(
   input: { spaceId: number; name: string; description?: string; userIds: number[] },
   context: FunctionContext,
-): Promise<{ group: UserGroup }> {
+): Promise<{ group: UserGroup; users: User[] }> {
   try {
     const privacy = await getSpacePrivacyContext(input.spaceId, context.currentUserId)
     if (!privacy.canManageMembers) {
@@ -135,6 +135,7 @@ export async function createUserGroup(
 
     return {
       group: encodeUserGroup({ group, userIds: values.userIds }, context.currentUserId),
+      users: await loadProtocolUsers(values.userIds),
     }
   } catch (error) {
     throw normalizeGroupError(error, "Failed to create user group")
@@ -144,7 +145,7 @@ export async function createUserGroup(
 export async function updateUserGroup(
   input: { groupId: number; name: string; description?: string; userIds: number[] },
   context: FunctionContext,
-): Promise<{ group: UserGroup }> {
+): Promise<{ group: UserGroup; users: User[] }> {
   try {
     const existing = await loadGroup(input.groupId)
     const privacy = await getSpacePrivacyContext(existing.spaceId, context.currentUserId)
@@ -204,6 +205,7 @@ export async function updateUserGroup(
 
     return {
       group: encodeUserGroup({ group: result.group, userIds: values.userIds }, context.currentUserId),
+      users: await loadProtocolUsers(values.userIds),
     }
   } catch (error) {
     throw normalizeGroupError(error, "Failed to update user group")
@@ -251,9 +253,16 @@ export async function loadChatParticipantGroups(chatId: number): Promise<GroupWi
 }
 
 export async function loadGroupsByIds(groupIds: number[], currentUserId: number): Promise<UserGroup[]> {
+  return (await loadGroupsByIdsWithUsers(groupIds, currentUserId)).groups
+}
+
+export async function loadGroupsByIdsWithUsers(
+  groupIds: number[],
+  currentUserId: number,
+): Promise<{ groups: UserGroup[]; users: User[] }> {
   const uniqueIds = uniquePositiveIds(groupIds)
   if (uniqueIds.length === 0) {
-    return []
+    return { groups: [], users: [] }
   }
 
   const groups = await db
@@ -262,7 +271,11 @@ export async function loadGroupsByIds(groupIds: number[], currentUserId: number)
     .where(inArray(userGroups.id, uniqueIds))
     .orderBy(asc(userGroups.name))
 
-  return (await loadGroupsWithMembers(groups)).map((group) => encodeUserGroup(group, currentUserId))
+  const groupsWithMembers = await loadGroupsWithMembers(groups)
+  return {
+    groups: groupsWithMembers.map((group) => encodeUserGroup(group, currentUserId)),
+    users: await loadProtocolUsers(groupsWithMembers.flatMap((group) => group.userIds)),
+  }
 }
 
 export async function loadActiveGroupMemberIds(groupId: number): Promise<number[]> {
@@ -364,7 +377,7 @@ async function loadSpaceGroupsForUser(
   return loadGroupsWithMembers(groups.filter((group) => visibleGroupIds?.has(group.id) === true))
 }
 
-async function loadProtocolUsers(userIds: number[]): Promise<User[]> {
+export async function loadProtocolUsers(userIds: number[]): Promise<User[]> {
   const ids = uniquePositiveIds(userIds)
   if (ids.length === 0) {
     return []

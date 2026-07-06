@@ -398,10 +398,16 @@ public class ProcessEntities {
 
         case .groupMention:
           if case let .groupMention(groupMention) = entity.entity {
-            attributedString.addAttributes([
+            var attributes: [NSAttributedString.Key: Any] = [
               .mentionGroupId: groupMention.groupID,
               .foregroundColor: configuration.linkColor,
-            ], range: range)
+            ]
+
+            #if os(macOS)
+            attributes[.cursor] = NSCursor.pointingHand
+            #endif
+
+            attributedString.addAttributes(attributes, range: range)
           }
 
         case .thread:

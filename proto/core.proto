@@ -2162,7 +2162,10 @@ message CreateUserGroupInput {
   repeated int64 user_ids = 4;
 }
 
-message CreateUserGroupResult { UserGroup group = 1; }
+message CreateUserGroupResult {
+  UserGroup group = 1;
+  repeated User users = 2;
+}
 
 message UpdateUserGroupInput {
   int64 group_id = 1;
@@ -2171,7 +2174,10 @@ message UpdateUserGroupInput {
   repeated int64 user_ids = 4;
 }
 
-message UpdateUserGroupResult { UserGroup group = 1; }
+message UpdateUserGroupResult {
+  UserGroup group = 1;
+  repeated User users = 2;
+}
 
 message DeleteUserGroupInput { int64 group_id = 1; }
 
@@ -2632,6 +2638,7 @@ message AddChatParticipantResult {
   optional ChatParticipant participant = 1;
   optional ChatParticipantGroup group_participant = 2;
   optional UserGroup group = 3;
+  repeated User users = 4;
 }
 
 message RemoveChatParticipantInput {

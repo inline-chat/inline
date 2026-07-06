@@ -8,7 +8,12 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Encoders } from "../realtime/encoders/encoders"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { encodeChatParticipantGroup, encodeUserGroup, loadChatParticipantGroups } from "@in/server/modules/userGroups"
+import {
+  encodeChatParticipantGroup,
+  encodeUserGroup,
+  loadChatParticipantGroups,
+  loadProtocolUsers,
+} from "@in/server/modules/userGroups"
 
 export async function getChatParticipants(
   input: {
@@ -59,20 +64,24 @@ export async function getChatParticipants(
       }
     }
 
+    const directUsers = participants
+      .map((participant) => {
+        if (!participant.user) return null
+
+        return Encoders.user({
+          user: participant.user,
+          photoFile: participant.user.photoFile ?? undefined,
+          min: true,
+        })
+      })
+      .filter((user) => user !== null)
+
+    const groupUsers = await loadProtocolUsers(groups.flatMap((group) => group.userIds))
+
     return {
       participants: participants.map((participant) => Encoders.chatParticipant(participant)),
       groupParticipants: participantGroups.map((group) => encodeChatParticipantGroup(group)),
-      users: participants
-        .map((participant) => {
-          if (!participant.user) return null
-
-          return Encoders.user({
-            user: participant.user,
-            photoFile: participant.user.photoFile ?? undefined,
-            min: true,
-          })
-        })
-        .filter((user) => user !== null),
+      users: mergeProtocolUsers(directUsers, groupUsers),
       groups: groups.map((group) => encodeUserGroup(group, context.currentUserId)),
     }
   } catch (error) {
@@ -82,4 +91,12 @@ export async function getChatParticipants(
     }
     throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to get chat participants", 500)
   }
+}
+
+function mergeProtocolUsers(...userLists: User[][]): User[] {
+  const usersById = new Map<bigint, User>()
+  for (const user of userLists.flat()) {
+    usersById.set(user.id, user)
+  }
+  return [...usersById.values()]
 }

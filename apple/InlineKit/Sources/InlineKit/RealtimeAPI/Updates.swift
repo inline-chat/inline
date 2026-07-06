@@ -1235,7 +1235,7 @@ extension InlineProtocol.UpdateChatParticipantDelete {
     try ChatParticipant.filter(Column("chatId") == chatID).filter(Column("userId") == userID).deleteAll(db)
 
     if userID == Auth.shared.getCurrentUserId() {
-      try deleteLocalChatData(db, chatId: chatID)
+      try deleteLocalPrivateThreadIfCurrentUserLostAccess(db, chatId: chatID)
     }
   }
 }

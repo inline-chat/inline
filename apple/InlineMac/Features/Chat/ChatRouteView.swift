@@ -17,6 +17,7 @@ struct ChatRouteView: View {
   @State private var toolbarDialog: Dialog?
   @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
+  @State private var userGroupMentionTarget: UserGroupMentionTarget?
 
   private var fallbackTitle: String {
     peer.isThread ? "Chat" : "Direct Message"
@@ -131,6 +132,19 @@ struct ChatRouteView: View {
       }
       .onDisappear {
         BotPresenceController.shared.clearContext(peer: peer)
+      }
+      .onReceive(
+        NotificationCenter.default
+          .publisher(for: .userGroupMentionTapped)
+      ) { notification in
+        guard var target = notification.userInfo?["target"] as? UserGroupMentionTarget else { return }
+        if target.spaceId == nil {
+          target.spaceId = nav.selectedSpaceId
+        }
+        userGroupMentionTarget = target
+      }
+      .sheet(item: $userGroupMentionTarget) { target in
+        UserGroupMembersSheet(target: target)
       }
       .toolbar {
         let mainItem =
