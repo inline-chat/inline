@@ -9,6 +9,8 @@ import { clearChatHistoryHandler } from "@in/server/realtime/handlers/messages.c
 import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
 import { getMessages } from "@in/server/realtime/handlers/messages.getMessages"
+import { getThreadReferences } from "@in/server/realtime/handlers/messages.getThreadReferences"
+import { getThreadSubthreads } from "@in/server/realtime/handlers/messages.getThreadSubthreads"
 import { getChat } from "@in/server/realtime/handlers/messages.getChat"
 import { searchMessages } from "@in/server/realtime/handlers/messages.searchMessages"
 import { addReaction } from "./messages.addReactions"
@@ -141,6 +143,22 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await getMessages(call.input.getMessages, handlerContext)
       return { oneofKind: "getMessages", getMessages: result }
+    }
+
+    case Method.GET_THREAD_REFERENCES: {
+      if (call.input.oneofKind !== "getThreadReferences") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getThreadReferences(call.input.getThreadReferences, handlerContext)
+      return { oneofKind: "getThreadReferences", getThreadReferences: result }
+    }
+
+    case Method.GET_THREAD_SUBTHREADS: {
+      if (call.input.oneofKind !== "getThreadSubthreads") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getThreadSubthreads(call.input.getThreadSubthreads, handlerContext)
+      return { oneofKind: "getThreadSubthreads", getThreadSubthreads: result }
     }
 
     case Method.SEARCH_MESSAGES: {

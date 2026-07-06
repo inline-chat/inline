@@ -3,7 +3,7 @@ import { db, schema } from "@in/server/db"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import type { DbChat, DbThreadGraphLink, DbUser } from "@in/server/db/schema"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { getBacklinks, getOutlinks } from "./queries"
+import { getBacklinks, getOutlinks, getReferences, getSubthreads } from "./queries"
 
 setupTestLifecycle()
 
@@ -65,6 +65,48 @@ describe("thread graph queries", () => {
     expect(secondPage.nextBeforeId).toBeNull()
   })
 
+  it("includes parent backlinks in references while subthreads remains children", async () => {
+    const user = await testUtils.createUser("graph-split@example.com")
+    const parent = await createHomeThread("Graph parent", user, [user])
+    const source = await createHomeThread("Graph source", user, [user])
+    const child = await createHomeThread("Graph child", user, [user])
+
+    const reference = await insertGraphLink({
+      key: "thread-link:split",
+      kind: "thread_link",
+      scopeId: user.id,
+      fromChatId: source.id,
+      toChatId: parent.id,
+    })
+    const subthread = await insertGraphLink({
+      key: "reply-thread:split",
+      kind: "reply_thread",
+      scopeId: user.id,
+      fromChatId: parent.id,
+      toChatId: child.id,
+    })
+    const childReference = await insertGraphLink({
+      key: "thread-link:split:child",
+      kind: "thread_link",
+      scopeId: user.id,
+      fromChatId: source.id,
+      toChatId: child.id,
+    })
+
+    const references = await getReferences({ chatId: parent.id, currentUserId: user.id })
+    expect(references.links.map((row) => row.id)).toEqual([reference.id])
+    expect(references.relatedChats.map((chat) => chat.id)).toEqual([source.id])
+
+    const childReferences = await getReferences({ chatId: child.id, currentUserId: user.id })
+    expect(childReferences.links.map((row) => row.id)).toEqual([childReference.id, subthread.id])
+    expect(childReferences.links.map((row) => row.kind)).toEqual(["thread_link", "reply_thread"])
+    expect(childReferences.relatedChats.map((chat) => chat.id)).toEqual([source.id, parent.id])
+
+    const subthreads = await getSubthreads({ chatId: parent.id, currentUserId: user.id })
+    expect(subthreads.links.map((row) => row.id)).toEqual([subthread.id])
+    expect(subthreads.relatedChats.map((chat) => chat.id)).toEqual([child.id])
+  })
+
   it("filters graph rows whose other endpoint is inaccessible", async () => {
     const viewer = await testUtils.createUser("graph-viewer@example.com")
     const other = await testUtils.createUser("graph-other@example.com")
@@ -117,6 +159,7 @@ async function createHomeThread(title: string, owner: DbUser, participants: DbUs
 
 async function insertGraphLink(input: {
   key: string
+  kind?: "thread_link" | "reply_thread"
   scopeId: number
   fromChatId: number
   toChatId: number
@@ -125,7 +168,7 @@ async function insertGraphLink(input: {
     .insert(schema.threadGraphLinks)
     .values({
       dedupeKey: input.key,
-      kind: "thread_link",
+      kind: input.kind ?? "thread_link",
       scopeType: "user",
       scopeId: input.scopeId,
       fromChatId: input.fromChatId,

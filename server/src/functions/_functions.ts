@@ -5,6 +5,7 @@ import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { getChatHistory } from "@in/server/functions/messages.getChatHistory"
 import { getChat } from "@in/server/functions/messages.getChat"
 import { getMessages } from "@in/server/functions/messages.getMessages"
+import { getThreadReferences, getThreadSubthreads } from "@in/server/functions/messages.getThreadReferences"
 import { searchMessages } from "@in/server/functions/messages.searchMessages"
 import { addReaction } from "./messages.addReaction"
 import { deleteReaction } from "./messages.deleteReaction"
@@ -65,6 +66,8 @@ export const Functions = {
     sendMessage: sendMessage,
     getChatHistory: getChatHistory,
     getMessages: getMessages,
+    getThreadReferences: getThreadReferences,
+    getThreadSubthreads: getThreadSubthreads,
     searchMessages: searchMessages,
     getChat: getChat,
     addReaction: addReaction,

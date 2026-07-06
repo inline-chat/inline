@@ -11,12 +11,15 @@ const FETCH_MULTIPLIER = 3
 const MAX_SCAN = 500
 
 type GraphDirection = "backlinks" | "outlinks"
+type GraphKind = DbThreadGraphLink["kind"]
+type GraphKindFilter = GraphKind | GraphKind[]
 
 export type ThreadGraphLinkListInput = {
   chatId: number
   currentUserId: number
   limit?: number
   beforeId?: bigint
+  kind?: GraphKindFilter
 }
 
 export type ThreadGraphLinkListResult = {
@@ -31,6 +34,14 @@ export async function getBacklinks(input: ThreadGraphLinkListInput): Promise<Thr
 
 export async function getOutlinks(input: ThreadGraphLinkListInput): Promise<ThreadGraphLinkListResult> {
   return listThreadGraphLinks(input, "outlinks")
+}
+
+export async function getReferences(input: Omit<ThreadGraphLinkListInput, "kind">): Promise<ThreadGraphLinkListResult> {
+  return listThreadGraphLinks({ ...input, kind: ["thread_link", "reply_thread"] }, "backlinks")
+}
+
+export async function getSubthreads(input: Omit<ThreadGraphLinkListInput, "kind">): Promise<ThreadGraphLinkListResult> {
+  return listThreadGraphLinks({ ...input, kind: "reply_thread" }, "outlinks")
 }
 
 async function listThreadGraphLinks(
@@ -57,6 +68,7 @@ async function listThreadGraphLinks(
     const batch = await fetchLinkBatch({
       chatId: input.chatId,
       direction,
+      kind: input.kind,
       beforeId,
       limit: nextBatchLimit(limit, scanned),
     })
@@ -110,11 +122,18 @@ async function listThreadGraphLinks(
 async function fetchLinkBatch(input: {
   chatId: number
   direction: GraphDirection
+  kind?: GraphKindFilter
   beforeId?: bigint
   limit: number
 }): Promise<DbThreadGraphLink[]> {
   const endpointColumn = input.direction === "backlinks" ? threadGraphLinks.toChatId : threadGraphLinks.fromChatId
   const filters = [eq(endpointColumn, input.chatId), isNull(threadGraphLinks.deletedAt)]
+
+  if (Array.isArray(input.kind)) {
+    filters.push(inArray(threadGraphLinks.kind, input.kind))
+  } else if (input.kind !== undefined) {
+    filters.push(eq(threadGraphLinks.kind, input.kind))
+  }
 
   if (input.beforeId !== undefined) {
     filters.push(lt(threadGraphLinks.id, input.beforeId))

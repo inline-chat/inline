@@ -2758,6 +2758,18 @@ export interface RpcCall {
          */
         toggleSpaceGrid: ToggleSpaceGridInput;
     } | {
+        oneofKind: "getThreadReferences";
+        /**
+         * @generated from protobuf field: GetThreadReferencesInput getThreadReferences = 75;
+         */
+        getThreadReferences: GetThreadReferencesInput;
+    } | {
+        oneofKind: "getThreadSubthreads";
+        /**
+         * @generated from protobuf field: GetThreadSubthreadsInput getThreadSubthreads = 76;
+         */
+        getThreadSubthreads: GetThreadSubthreadsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3210,6 +3222,18 @@ export interface RpcResult {
          * @generated from protobuf field: ToggleSpaceGridResult toggleSpaceGrid = 74;
          */
         toggleSpaceGrid: ToggleSpaceGridResult;
+    } | {
+        oneofKind: "getThreadReferences";
+        /**
+         * @generated from protobuf field: GetThreadReferencesResult getThreadReferences = 75;
+         */
+        getThreadReferences: GetThreadReferencesResult;
+    } | {
+        oneofKind: "getThreadSubthreads";
+        /**
+         * @generated from protobuf field: GetThreadSubthreadsResult getThreadSubthreads = 76;
+         */
+        getThreadSubthreads: GetThreadSubthreadsResult;
     } | {
         oneofKind: undefined;
     };
@@ -5327,6 +5351,117 @@ export interface GetMessagesResult {
     messages: Message[];
 }
 /**
+ * @generated from protobuf message ThreadReferenceItem
+ */
+export interface ThreadReferenceItem {
+    /**
+     * Server graph edge ID. Use as pagination cursor and row identity.
+     *
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: ThreadReferenceKind kind = 2;
+     */
+    kind: ThreadReferenceKind;
+    /**
+     * @generated from protobuf field: int64 from_chat_id = 3;
+     */
+    fromChatId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 from_message_id = 4;
+     */
+    fromMessageId?: bigint;
+    /**
+     * @generated from protobuf field: int64 to_chat_id = 5;
+     */
+    toChatId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 date = 6;
+     */
+    date?: bigint;
+}
+/**
+ * @generated from protobuf message GetThreadReferencesInput
+ */
+export interface GetThreadReferencesInput {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 offset_id = 2;
+     */
+    offsetId?: bigint;
+    /**
+     * @generated from protobuf field: optional int32 limit = 3;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message GetThreadReferencesResult
+ */
+export interface GetThreadReferencesResult {
+    /**
+     * Incoming graph links pointing at chat_id, including parent reply threads.
+     *
+     * @generated from protobuf field: repeated ThreadReferenceItem items = 1;
+     */
+    items: ThreadReferenceItem[];
+    /**
+     * Sidecars for item endpoint chats.
+     *
+     * @generated from protobuf field: repeated Chat chats = 2;
+     */
+    chats: Chat[];
+    /**
+     * Current viewer dialogs for endpoint chats, including unread counts.
+     *
+     * @generated from protobuf field: repeated Dialog dialogs = 3;
+     */
+    dialogs: Dialog[];
+}
+/**
+ * @generated from protobuf message GetThreadSubthreadsInput
+ */
+export interface GetThreadSubthreadsInput {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 offset_id = 2;
+     */
+    offsetId?: bigint;
+    /**
+     * @generated from protobuf field: optional int32 limit = 3;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message GetThreadSubthreadsResult
+ */
+export interface GetThreadSubthreadsResult {
+    /**
+     * Structural child reply/subthreads rooted at chat_id.
+     *
+     * @generated from protobuf field: repeated ThreadReferenceItem items = 1;
+     */
+    items: ThreadReferenceItem[];
+    /**
+     * Sidecars for item endpoint chats.
+     *
+     * @generated from protobuf field: repeated Chat chats = 2;
+     */
+    chats: Chat[];
+    /**
+     * Current viewer dialogs for endpoint chats, including unread counts.
+     *
+     * @generated from protobuf field: repeated Dialog dialogs = 3;
+     */
+    dialogs: Dialog[];
+}
+/**
  * @generated from protobuf message SearchMessagesInput
  */
 export interface SearchMessagesInput {
@@ -7398,7 +7533,15 @@ export enum Method {
     /**
      * @generated from protobuf enum value: TOGGLE_SPACE_GRID = 73;
      */
-    TOGGLE_SPACE_GRID = 73
+    TOGGLE_SPACE_GRID = 73,
+    /**
+     * @generated from protobuf enum value: GET_THREAD_REFERENCES = 74;
+     */
+    GET_THREAD_REFERENCES = 74,
+    /**
+     * @generated from protobuf enum value: GET_THREAD_SUBTHREADS = 75;
+     */
+    GET_THREAD_SUBTHREADS = 75
 }
 /**
  * @generated from protobuf enum UsernameAvailability
@@ -7470,6 +7613,23 @@ export enum GetChatHistoryMode {
      * @generated from protobuf enum value: HISTORY_MODE_AROUND = 4;
      */
     HISTORY_MODE_AROUND = 4
+}
+/**
+ * @generated from protobuf enum ThreadReferenceKind
+ */
+export enum ThreadReferenceKind {
+    /**
+     * @generated from protobuf enum value: THREAD_REFERENCE_KIND_UNSPECIFIED = 0;
+     */
+    THREAD_REFERENCE_KIND_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: THREAD_LINK = 1;
+     */
+    THREAD_LINK = 1,
+    /**
+     * @generated from protobuf enum value: REPLY_THREAD = 2;
+     */
+    REPLY_THREAD = 2
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -12583,7 +12743,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 71, name: "updateUserGroup", kind: "message", oneof: "input", T: () => UpdateUserGroupInput },
             { no: 72, name: "deleteUserGroup", kind: "message", oneof: "input", T: () => DeleteUserGroupInput },
             { no: 73, name: "getSpaceSettings", kind: "message", oneof: "input", T: () => GetSpaceSettingsInput },
-            { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "input", T: () => ToggleSpaceGridInput }
+            { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "input", T: () => ToggleSpaceGridInput },
+            { no: 75, name: "getThreadReferences", kind: "message", oneof: "input", T: () => GetThreadReferencesInput },
+            { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "input", T: () => GetThreadSubthreadsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -13040,6 +13202,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         toggleSpaceGrid: ToggleSpaceGridInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).toggleSpaceGrid)
                     };
                     break;
+                case /* GetThreadReferencesInput getThreadReferences */ 75:
+                    message.input = {
+                        oneofKind: "getThreadReferences",
+                        getThreadReferences: GetThreadReferencesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getThreadReferences)
+                    };
+                    break;
+                case /* GetThreadSubthreadsInput getThreadSubthreads */ 76:
+                    message.input = {
+                        oneofKind: "getThreadSubthreads",
+                        getThreadSubthreads: GetThreadSubthreadsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getThreadSubthreads)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13274,6 +13448,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* ToggleSpaceGridInput toggleSpaceGrid = 74; */
         if (message.input.oneofKind === "toggleSpaceGrid")
             ToggleSpaceGridInput.internalBinaryWrite(message.input.toggleSpaceGrid, writer.tag(74, WireType.LengthDelimited).fork(), options).join();
+        /* GetThreadReferencesInput getThreadReferences = 75; */
+        if (message.input.oneofKind === "getThreadReferences")
+            GetThreadReferencesInput.internalBinaryWrite(message.input.getThreadReferences, writer.tag(75, WireType.LengthDelimited).fork(), options).join();
+        /* GetThreadSubthreadsInput getThreadSubthreads = 76; */
+        if (message.input.oneofKind === "getThreadSubthreads")
+            GetThreadSubthreadsInput.internalBinaryWrite(message.input.getThreadSubthreads, writer.tag(76, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13361,7 +13541,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 71, name: "updateUserGroup", kind: "message", oneof: "result", T: () => UpdateUserGroupResult },
             { no: 72, name: "deleteUserGroup", kind: "message", oneof: "result", T: () => DeleteUserGroupResult },
             { no: 73, name: "getSpaceSettings", kind: "message", oneof: "result", T: () => GetSpaceSettingsResult },
-            { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "result", T: () => ToggleSpaceGridResult }
+            { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "result", T: () => ToggleSpaceGridResult },
+            { no: 75, name: "getThreadReferences", kind: "message", oneof: "result", T: () => GetThreadReferencesResult },
+            { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "result", T: () => GetThreadSubthreadsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -13818,6 +14000,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         toggleSpaceGrid: ToggleSpaceGridResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).toggleSpaceGrid)
                     };
                     break;
+                case /* GetThreadReferencesResult getThreadReferences */ 75:
+                    message.result = {
+                        oneofKind: "getThreadReferences",
+                        getThreadReferences: GetThreadReferencesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getThreadReferences)
+                    };
+                    break;
+                case /* GetThreadSubthreadsResult getThreadSubthreads */ 76:
+                    message.result = {
+                        oneofKind: "getThreadSubthreads",
+                        getThreadSubthreads: GetThreadSubthreadsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getThreadSubthreads)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14052,6 +14246,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* ToggleSpaceGridResult toggleSpaceGrid = 74; */
         if (message.result.oneofKind === "toggleSpaceGrid")
             ToggleSpaceGridResult.internalBinaryWrite(message.result.toggleSpaceGrid, writer.tag(74, WireType.LengthDelimited).fork(), options).join();
+        /* GetThreadReferencesResult getThreadReferences = 75; */
+        if (message.result.oneofKind === "getThreadReferences")
+            GetThreadReferencesResult.internalBinaryWrite(message.result.getThreadReferences, writer.tag(75, WireType.LengthDelimited).fork(), options).join();
+        /* GetThreadSubthreadsResult getThreadSubthreads = 76; */
+        if (message.result.oneofKind === "getThreadSubthreads")
+            GetThreadSubthreadsResult.internalBinaryWrite(message.result.getThreadSubthreads, writer.tag(76, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21060,6 +21260,339 @@ class GetMessagesResult$Type extends MessageType<GetMessagesResult> {
  * @generated MessageType for protobuf message GetMessagesResult
  */
 export const GetMessagesResult = new GetMessagesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ThreadReferenceItem$Type extends MessageType<ThreadReferenceItem> {
+    constructor() {
+        super("ThreadReferenceItem", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "kind", kind: "enum", T: () => ["ThreadReferenceKind", ThreadReferenceKind] },
+            { no: 3, name: "from_chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "from_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "to_chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ThreadReferenceItem>): ThreadReferenceItem {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.kind = 0;
+        message.fromChatId = 0n;
+        message.toChatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ThreadReferenceItem>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ThreadReferenceItem): ThreadReferenceItem {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* ThreadReferenceKind kind */ 2:
+                    message.kind = reader.int32();
+                    break;
+                case /* int64 from_chat_id */ 3:
+                    message.fromChatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 from_message_id */ 4:
+                    message.fromMessageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 to_chat_id */ 5:
+                    message.toChatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 date */ 6:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ThreadReferenceItem, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* ThreadReferenceKind kind = 2; */
+        if (message.kind !== 0)
+            writer.tag(2, WireType.Varint).int32(message.kind);
+        /* int64 from_chat_id = 3; */
+        if (message.fromChatId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.fromChatId);
+        /* optional int64 from_message_id = 4; */
+        if (message.fromMessageId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.fromMessageId);
+        /* int64 to_chat_id = 5; */
+        if (message.toChatId !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.toChatId);
+        /* optional int64 date = 6; */
+        if (message.date !== undefined)
+            writer.tag(6, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ThreadReferenceItem
+ */
+export const ThreadReferenceItem = new ThreadReferenceItem$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetThreadReferencesInput$Type extends MessageType<GetThreadReferencesInput> {
+    constructor() {
+        super("GetThreadReferencesInput", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "offset_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetThreadReferencesInput>): GetThreadReferencesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetThreadReferencesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetThreadReferencesInput): GetThreadReferencesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 offset_id */ 2:
+                    message.offsetId = reader.int64().toBigInt();
+                    break;
+                case /* optional int32 limit */ 3:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetThreadReferencesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 offset_id = 2; */
+        if (message.offsetId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.offsetId);
+        /* optional int32 limit = 3; */
+        if (message.limit !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetThreadReferencesInput
+ */
+export const GetThreadReferencesInput = new GetThreadReferencesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetThreadReferencesResult$Type extends MessageType<GetThreadReferencesResult> {
+    constructor() {
+        super("GetThreadReferencesResult", [
+            { no: 1, name: "items", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ThreadReferenceItem },
+            { no: 2, name: "chats", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Chat },
+            { no: 3, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<GetThreadReferencesResult>): GetThreadReferencesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.items = [];
+        message.chats = [];
+        message.dialogs = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetThreadReferencesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetThreadReferencesResult): GetThreadReferencesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ThreadReferenceItem items */ 1:
+                    message.items.push(ThreadReferenceItem.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Chat chats */ 2:
+                    message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Dialog dialogs */ 3:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetThreadReferencesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ThreadReferenceItem items = 1; */
+        for (let i = 0; i < message.items.length; i++)
+            ThreadReferenceItem.internalBinaryWrite(message.items[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Chat chats = 2; */
+        for (let i = 0; i < message.chats.length; i++)
+            Chat.internalBinaryWrite(message.chats[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Dialog dialogs = 3; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetThreadReferencesResult
+ */
+export const GetThreadReferencesResult = new GetThreadReferencesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetThreadSubthreadsInput$Type extends MessageType<GetThreadSubthreadsInput> {
+    constructor() {
+        super("GetThreadSubthreadsInput", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "offset_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetThreadSubthreadsInput>): GetThreadSubthreadsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetThreadSubthreadsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetThreadSubthreadsInput): GetThreadSubthreadsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 offset_id */ 2:
+                    message.offsetId = reader.int64().toBigInt();
+                    break;
+                case /* optional int32 limit */ 3:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetThreadSubthreadsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 offset_id = 2; */
+        if (message.offsetId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.offsetId);
+        /* optional int32 limit = 3; */
+        if (message.limit !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetThreadSubthreadsInput
+ */
+export const GetThreadSubthreadsInput = new GetThreadSubthreadsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetThreadSubthreadsResult$Type extends MessageType<GetThreadSubthreadsResult> {
+    constructor() {
+        super("GetThreadSubthreadsResult", [
+            { no: 1, name: "items", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ThreadReferenceItem },
+            { no: 2, name: "chats", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Chat },
+            { no: 3, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<GetThreadSubthreadsResult>): GetThreadSubthreadsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.items = [];
+        message.chats = [];
+        message.dialogs = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetThreadSubthreadsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetThreadSubthreadsResult): GetThreadSubthreadsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ThreadReferenceItem items */ 1:
+                    message.items.push(ThreadReferenceItem.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Chat chats */ 2:
+                    message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Dialog dialogs */ 3:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetThreadSubthreadsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ThreadReferenceItem items = 1; */
+        for (let i = 0; i < message.items.length; i++)
+            ThreadReferenceItem.internalBinaryWrite(message.items[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Chat chats = 2; */
+        for (let i = 0; i < message.chats.length; i++)
+            Chat.internalBinaryWrite(message.chats[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Dialog dialogs = 3; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetThreadSubthreadsResult
+ */
+export const GetThreadSubthreadsResult = new GetThreadSubthreadsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
     constructor() {
