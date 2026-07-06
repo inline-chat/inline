@@ -15,6 +15,8 @@ stop=1
 open_app=1
 verify=1
 verbose=0
+stream_logs=${STREAM_LOGS:-1}
+live_log_filter=${LIVE_LOG_FILTER:-}
 settings_file=$(mktemp)
 
 cleanup() {
@@ -33,6 +35,10 @@ Options:
   --no-stop         Do not stop an already-running Inline Debug process
   --no-open         Build and resolve the app path, but do not launch it
   --no-verify       Do not verify that the process is running after launch
+  --logs            Stream Inline-owned unified logs after launch (default)
+  --no-logs         Launch and exit without streaming Inline-owned unified logs
+  --live-log-filter <regex>
+                    Filter only live terminal log output; saved LOG_PATH stays complete
   --verbose         Show full command output
   -h, --help        Show help
 
@@ -43,6 +49,8 @@ Environment:
   DESTINATION       xcodebuild destination (default: platform=macOS)
   APP_NAME          Process/app name (default: Inline Debug)
   LOG_PATH          Non-verbose command log path (default: .tmp/macos-debug-<timestamp>.log)
+  STREAM_LOGS       Stream Inline-owned unified logs after launch (default: 1)
+  LIVE_LOG_FILTER   Optional regex for live terminal output only
 EOF
 }
 
@@ -65,6 +73,22 @@ while [[ $# -gt 0 ]]; do
       verify=0
       shift
       ;;
+    --logs)
+      stream_logs=1
+      shift
+      ;;
+    --no-logs)
+      stream_logs=0
+      shift
+      ;;
+    --live-log-filter)
+      if [[ $# -lt 2 ]]; then
+        echo "--live-log-filter requires a regex argument" >&2
+        exit 1
+      fi
+      live_log_filter="$2"
+      shift 2
+      ;;
     --verbose)
       verbose=1
       shift
@@ -80,6 +104,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${stream_logs}" != "1" ]]; then
+  stream_logs=0
+fi
 
 if [[ "${verbose}" != "1" ]]; then
   mkdir -p "$(dirname "${LOG_PATH}")"
@@ -122,6 +150,48 @@ run_cmd() {
     echo "${desc} failed. Log: ${LOG_PATH}" >&2
     tail -n 120 "${LOG_PATH}" >&2 || true
     return 1
+  fi
+}
+
+stream_cmd() {
+  local desc="$1"
+  shift
+
+  if [[ "${verbose}" == "1" ]]; then
+    echo "${desc}..."
+    "$@"
+    return
+  fi
+
+  {
+    echo
+    echo "### ${desc}"
+    printf '$'
+    printf ' %q' "$@"
+    echo
+  } >>"${LOG_PATH}"
+
+  echo "${desc}..."
+  echo "Streaming app logs. Press Ctrl-C to stop the stream; the app keeps running."
+  if [[ -n "${live_log_filter}" ]]; then
+    echo "Live log filter: ${live_log_filter}"
+    echo "Full unfiltered log: ${LOG_PATH}"
+  fi
+
+  set +e
+  if [[ -n "${live_log_filter}" ]]; then
+    "$@" 2>&1 | tee -a "${LOG_PATH}" | awk -v pattern="${live_log_filter}" '$0 ~ pattern { print; fflush(); }'
+    local command_ec=${PIPESTATUS[0]}
+  else
+    "$@" 2>&1 | tee -a "${LOG_PATH}"
+    local command_ec=${PIPESTATUS[0]}
+  fi
+  set -e
+
+  if [[ "${command_ec}" -ne 0 ]]; then
+    echo "${desc} failed with exit code ${command_ec}. Log: ${LOG_PATH}" >&2
+    tail -n 120 "${LOG_PATH}" >&2 || true
+    return "${command_ec}"
   fi
 }
 
@@ -321,6 +391,21 @@ open_debug_app() {
   return 1
 }
 
+stream_app_logs() {
+  local predicate
+
+  if [[ -z "${bundle_id:-}" ]]; then
+    echo "Could not resolve bundle id for app log streaming." >&2
+    return 1
+  fi
+
+  predicate="process == \"${APP_NAME}\" AND (subsystem == \"${bundle_id}\" OR subsystem == \"InlineMac\")"
+
+  stream_cmd \
+    "Stream logs for ${APP_NAME}" \
+    /usr/bin/log stream --style compact --level debug --predicate "${predicate}"
+}
+
 if [[ "${build}" == "1" ]]; then
   run_cmd "Build ${SCHEME} (${CONFIGURATION})" xcodebuild "${xcode_args[@]}" build
 fi
@@ -329,9 +414,10 @@ capture_cmd "Resolve macOS Debug app settings" "${settings_file}" xcodebuild "${
 
 products_dir="$(build_setting BUILT_PRODUCTS_DIR)"
 product_name="$(build_setting FULL_PRODUCT_NAME)"
+bundle_id="$(build_setting PRODUCT_BUNDLE_IDENTIFIER)"
 
-if [[ -z "${products_dir}" || -z "${product_name}" ]]; then
-  echo "Could not resolve Debug app path from xcodebuild settings." >&2
+if [[ -z "${products_dir}" || -z "${product_name}" || -z "${bundle_id}" ]]; then
+  echo "Could not resolve Debug app settings from xcodebuild." >&2
   exit 1
 fi
 
@@ -344,6 +430,7 @@ if [[ ! -d "${app_path}" ]]; then
 fi
 
 log "Debug app: ${app_path}"
+log "Bundle id: ${bundle_id}"
 
 if [[ "${open_app}" != "1" ]]; then
   exit 0
@@ -361,4 +448,8 @@ open_debug_app
 if [[ "${verify}" == "1" ]]; then
   pid="$(wait_until_running "${previous_pids}")"
   log "${APP_NAME} is running (pid ${pid})."
+fi
+
+if [[ "${stream_logs}" == "1" ]]; then
+  stream_app_logs
 fi
