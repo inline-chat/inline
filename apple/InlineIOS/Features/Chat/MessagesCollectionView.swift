@@ -3176,6 +3176,9 @@ private extension MessagesCollectionView {
       if message.isServiceMessage {
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
           guard let self else { return UIMenu(children: []) }
+          let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
+            ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
+          }
           let deleteAction = UIAction(
             title: "Delete",
             image: UIImage(systemName: "trash"),
@@ -3187,7 +3190,7 @@ private extension MessagesCollectionView {
               chatId: message.chatId
             )
           }
-          return UIMenu(children: [deleteAction])
+          return UIMenu(children: [replyAction, deleteAction])
         }
       }
 
