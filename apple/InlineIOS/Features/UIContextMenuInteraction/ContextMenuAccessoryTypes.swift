@@ -53,10 +53,10 @@ struct ContextMenuAccessoryConfiguration {
 }
 
 enum ContextMenuAccessoryLayout {
-  static let reactionPickerMaxWidth: CGFloat = 320
-  static let reactionPickerHorizontalMargin: CGFloat = 80
+  static let reactionPickerMaxWidth: CGFloat = 360
+  static let reactionPickerHorizontalMargin: CGFloat = 56
   static let reactionPickerHeight: CGFloat = 52
-  static let accessoryHostHeight: CGFloat = 70
+  static let accessoryHostHeight: CGFloat = 64
 
   static func reactionPickerWidth(for containerWidth: CGFloat) -> CGFloat {
     let fallbackWidth = UIScreen.main.bounds.width

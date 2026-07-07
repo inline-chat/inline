@@ -2864,17 +2864,40 @@ private extension MessagesCollectionView {
 
       let containerView = UIView()
       containerView.translatesAutoresizingMaskIntoConstraints = false
+      containerView.backgroundColor = .clear
 
-      let blurEffect = UIBlurEffect(style: .systemMaterial)
-      let blurView = UIVisualEffectView(effect: blurEffect)
-      blurView.translatesAutoresizingMaskIntoConstraints = false
-      containerView.addSubview(blurView)
+      let containerHeight: CGFloat
+      let horizontalGlassInset: CGFloat
+      let verticalGlassInset: CGFloat
+      if #available(iOS 26.0, *) {
+        containerHeight = ContextMenuAccessoryLayout.accessoryHostHeight
+        horizontalGlassInset = 0
+        verticalGlassInset = (ContextMenuAccessoryLayout.accessoryHostHeight - ContextMenuAccessoryLayout.reactionPickerHeight) / 2
+      } else {
+        containerHeight = ContextMenuAccessoryLayout.reactionPickerHeight
+        horizontalGlassInset = 0
+        verticalGlassInset = 0
+      }
+
+      let effectView: UIVisualEffectView
+      if #available(iOS 26.0, *) {
+        let glassEffect = UIGlassEffect(style: .regular)
+        glassEffect.isInteractive = true
+        effectView = UIVisualEffectView(effect: glassEffect)
+      } else {
+        effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+      }
+      effectView.translatesAutoresizingMaskIntoConstraints = false
+      effectView.layer.cornerRadius = ContextMenuAccessoryLayout.reactionPickerHeight / 2
+      effectView.layer.cornerCurve = .continuous
+      effectView.clipsToBounds = true
+      containerView.addSubview(effectView)
 
       let scrollView = UIScrollView()
       scrollView.translatesAutoresizingMaskIntoConstraints = false
       scrollView.showsHorizontalScrollIndicator = false
       scrollView.alwaysBounceHorizontal = true
-      blurView.contentView.addSubview(scrollView)
+      effectView.contentView.addSubview(scrollView)
 
       let stackView = UIStackView()
       stackView.axis = .horizontal
@@ -2890,28 +2913,26 @@ private extension MessagesCollectionView {
 
       NSLayoutConstraint.activate([
         containerView.widthAnchor.constraint(equalToConstant: preferredWidth),
-        containerView.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionPickerHeight),
+        containerView.heightAnchor.constraint(equalToConstant: containerHeight),
 
-        blurView.topAnchor.constraint(equalTo: containerView.topAnchor),
-        blurView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-        blurView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-        blurView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+        effectView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: verticalGlassInset),
+        effectView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: horizontalGlassInset),
+        effectView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -horizontalGlassInset),
+        effectView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -verticalGlassInset),
 
-        scrollView.topAnchor.constraint(equalTo: blurView.contentView.topAnchor),
-        scrollView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor),
-        scrollView.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor),
-        scrollView.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor),
+        scrollView.topAnchor.constraint(equalTo: effectView.contentView.topAnchor),
+        scrollView.leadingAnchor.constraint(equalTo: effectView.contentView.leadingAnchor),
+        scrollView.trailingAnchor.constraint(equalTo: effectView.contentView.trailingAnchor),
+        scrollView.bottomAnchor.constraint(equalTo: effectView.contentView.bottomAnchor),
 
         stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 7),
-        stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 8),
-        stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -8),
+        stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 4),
+        stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -4),
         stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -7),
         stackView.heightAnchor.constraint(equalToConstant: 38),
       ])
 
-      containerView.layer.cornerRadius = 24
-      containerView.layer.cornerCurve = .continuous
-      containerView.clipsToBounds = true
+      containerView.clipsToBounds = false
 
       return containerView
     }
