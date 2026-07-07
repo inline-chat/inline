@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/protocol",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": false,
   "license": "Apache-2.0",
   "type": "module",
@@ -25,9 +25,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "check": "bun run build && bun run typecheck && bun run lint && bun run test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
-    "test": "echo \"No tests yet for @inline-chat/protocol\""
+    "test": "echo \"No tests yet for @inline-chat/protocol\"",
+    "prepack": "bun run build",
+    "release:preflight": "npm publish --dry-run --access public"
   },
   "dependencies": {
     "@protobuf-ts/runtime": "^2.11.1"

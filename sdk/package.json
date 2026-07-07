@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/realtime-sdk",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "private": false,
   "license": "Apache-2.0",
   "type": "module",
@@ -25,7 +25,7 @@
     "release:preflight": "npm publish --dry-run --access public"
   },
   "dependencies": {
-    "@inline-chat/protocol": "^0.0.5",
+    "@inline-chat/protocol": "^0.0.6",
     "ws": "^8.18.3"
   },
   "devDependencies": {

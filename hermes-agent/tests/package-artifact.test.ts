@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const sdkRoot = path.resolve(packageRoot, "..", "sdk")
+const protocolRoot = path.resolve(packageRoot, "..", "packages", "protocol")
 const realNpmEnv = { ...process.env, npm_config_dry_run: "false" }
 
 type PackFile = {
@@ -137,7 +138,17 @@ describe("packed artifact", () => {
       expect(sdkPack.files.some((file) => file.path === "dist/index.js")).toBe(true)
       const sdkTarball = path.join(packDir, sdkPack.filename)
 
-      execFileSync("npm", ["install", "--global", "--prefix", prefix, sdkTarball, tarball], {
+      const protocolRaw = execFileSync("npm", ["pack", "--pack-destination", packDir, "--json", "--silent"], {
+        cwd: protocolRoot,
+        encoding: "utf8",
+        env: realNpmEnv,
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+      const protocolPack = parsePackOutput(protocolRaw)
+      expect(protocolPack.files.some((file) => file.path === "dist/core.js")).toBe(true)
+      const protocolTarball = path.join(packDir, protocolPack.filename)
+
+      execFileSync("npm", ["install", "--global", "--prefix", prefix, protocolTarball, sdkTarball, tarball], {
         cwd: packageRoot,
         encoding: "utf8",
         env: realNpmEnv,
@@ -163,7 +174,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.3")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.4")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

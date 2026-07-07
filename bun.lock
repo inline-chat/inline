@@ -14,12 +14,12 @@
     },
     "hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.3",
+      "version": "0.0.4",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.12",
+        "@inline-chat/realtime-sdk": "0.0.13",
         "yaml": "2.9.0",
       },
       "devDependencies": {
@@ -48,9 +48,9 @@
     },
     "openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.51",
+      "version": "0.0.52",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.12",
+        "@inline-chat/realtime-sdk": "0.0.13",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -98,7 +98,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.5",
+      "version": "0.0.6",
       "dependencies": {
         "@protobuf-ts/runtime": "^2.11.1",
       },
@@ -108,9 +108,9 @@
     },
     "sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.12",
+      "version": "0.0.13",
       "dependencies": {
-        "@inline-chat/protocol": "^0.0.5",
+        "@inline-chat/protocol": "^0.0.6",
         "ws": "^8.18.3",
       },
       "devDependencies": {

@@ -39,9 +39,10 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.51` | `>=2026.6.11` | `0.0.12` | Current | Adds follow-mode mention gating for eligible reply/fresh Inline threads. Publish the SDK first. |
+| `0.0.52` | `>=2026.6.11` | `0.0.13` | Current | Patch release for the SDK protocol dependency. Publish protocol and SDK first. |
+| `0.0.51` | `>=2026.6.11` | `0.0.12` | Superseded | Added follow-mode mention gating for eligible reply/fresh Inline threads. Prefer `0.0.52`. |
 | `0.0.50` | `>=2026.6.11` | `0.0.11` | Superseded | Supported line for current stable OpenClaw. Uses focused plugin SDK entrypoints and canonical ClawHub install metadata. |
-| `0.0.48` - `0.0.49` | `>=2026.6.11` | `0.0.11` | Superseded | Transitional 2026.6.11 compatibility releases. Prefer `0.0.51`; `0.0.49` fixed metadata shape but still used the non-canonical ClawHub spec. |
+| `0.0.48` - `0.0.49` | `>=2026.6.11` | `0.0.11` | Superseded | Transitional 2026.6.11 compatibility releases. Prefer `0.0.52`; `0.0.49` fixed metadata shape but still used the non-canonical ClawHub spec. |
 | `0.0.47` and earlier | `>=2026.5.18`, tested before the `2026.6.11` floor | `0.0.11` | Legacy | Use only when an older OpenClaw host cannot be upgraded yet. Keeps the previous broad SDK compatibility path. |
 
 From npm:
