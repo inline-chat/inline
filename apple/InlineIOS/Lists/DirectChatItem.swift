@@ -157,30 +157,13 @@ struct DirectChatItem: View {
   @ViewBuilder
   var lastMessage: some View {
     if showTypingIndicator {
+      let action = currentComposeAction()
       HStack(alignment: .center, spacing: 4) {
-        switch currentComposeAction() {
-          case .typing:
-            AnimatedDots(dotSize: 3, dotColor: .secondary)
-          case .uploadingPhoto:
-            UploadProgressIndicator(color: .secondary)
-              .frame(width: 14)
-          case .uploadingDocument:
-            UploadProgressIndicator(color: .secondary)
-              .frame(width: 14)
-          case .uploadingVideo:
-            UploadProgressIndicator(color: .secondary)
-              .frame(width: 14)
-          case .recordingVoice:
-            Image(systemName: "waveform")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-          case .none:
-            EmptyView()
-        }
+        composeActionIndicator(action)
 
-        Text(currentComposeAction()?.toHumanReadableForIOS() ?? "")
+        Text(action?.toHumanReadableForIOS() ?? "")
           .font(.callout)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(composeActionForegroundColor(action))
       }
 
     } else {
@@ -209,6 +192,42 @@ struct DirectChatItem: View {
 //      }
       lastMessage
         .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  @ViewBuilder
+  private func composeActionIndicator(_ action: ApiComposeAction?) -> some View {
+    switch action {
+    case .typing:
+      TypingActivityIndicator(color: .accentColor)
+    case .uploadingPhoto:
+      UploadProgressIndicator(color: .secondary)
+        .frame(width: 14)
+    case .uploadingDocument:
+      UploadProgressIndicator(color: .secondary)
+        .frame(width: 14)
+    case .uploadingVideo:
+      UploadProgressIndicator(color: .secondary)
+        .frame(width: 14)
+    case .recordingVoice:
+      VoiceRecordingActivityIndicator(
+        barWidth: 2.2,
+        spacing: 2.2,
+        minBarHeight: 4,
+        maxBarHeight: 11,
+        color: .accentColor
+      )
+    case .none:
+      EmptyView()
+    }
+  }
+
+  private func composeActionForegroundColor(_ action: ApiComposeAction?) -> Color {
+    switch action {
+    case .typing, .recordingVoice:
+      .accentColor
+    default:
+      .secondary
     }
   }
 }

@@ -147,11 +147,11 @@ struct ChatToolbarLeadingView: View {
 
   private func subtitleContent(_ subtitle: ChatSubtitle) -> some View {
     HStack(alignment: .center, spacing: 4) {
-      subtitle.animatedIndicator.padding(.top, 2)
+      subtitle.animatedIndicator
 
       Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(subtitle.foregroundColor)
         .lineLimit(1)
         .truncationMode(.tail)
         .allowsTightening(true)
@@ -333,28 +333,47 @@ enum ChatSubtitle {
     return false
   }
 
+  var foregroundColor: Color {
+    switch self {
+    case .typing:
+      .accentColor
+    case let .composeAction(action) where action == .recordingVoice:
+      .accentColor
+    default:
+      .secondary
+    }
+  }
+
   @ViewBuilder
   var animatedIndicator: some View {
     switch self {
-      case .typing:
-        AnimatedDots(dotSize: 3, dotColor: .secondary)
-      case let .composeAction(action):
-        switch action {
-          case .uploadingPhoto:
-            AnimatedPhotoUpload()
-          case .uploadingDocument:
-            AnimatedDocumentUpload()
-          case .uploadingVideo:
-            AnimatedVideoUpload()
-          default:
-            EmptyView()
-        }
-      case .parentThread:
-        Image(systemName: "arrowshape.turn.up.left")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+    case .typing:
+      TypingActivityIndicator(color: .accentColor)
+    case let .composeAction(action):
+      switch action {
+      case .uploadingPhoto:
+        AnimatedPhotoUpload()
+      case .uploadingDocument:
+        AnimatedDocumentUpload()
+      case .uploadingVideo:
+        AnimatedVideoUpload()
+      case .recordingVoice:
+        VoiceRecordingActivityIndicator(
+          barWidth: 2,
+          spacing: 2,
+          minBarHeight: 3,
+          maxBarHeight: 9,
+          color: .accentColor
+        )
       default:
         EmptyView()
+      }
+    case .parentThread:
+      Image(systemName: "arrowshape.turn.up.left")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    default:
+      EmptyView()
     }
   }
 }
@@ -391,11 +410,11 @@ struct ChatSubtitlePreview: View {
     VStack(spacing: 0) {
       Text("Chat").fontWeight(.medium)
       HStack(alignment: .center, spacing: 4) {
-        subtitle.animatedIndicator.padding(.top, 2)
+        subtitle.animatedIndicator
 
         Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(subtitle.foregroundColor)
       }
       .padding(.top, -2)
       .fixedSize()
@@ -418,6 +437,7 @@ struct ChatSubtitlePreview: View {
     ChatSubtitlePreview(subtitle: .composeAction(.uploadingPhoto))
     ChatSubtitlePreview(subtitle: .composeAction(.uploadingDocument))
     ChatSubtitlePreview(subtitle: .composeAction(.uploadingVideo))
+    ChatSubtitlePreview(subtitle: .composeAction(.recordingVoice))
 
     // Timezone
     ChatSubtitlePreview(subtitle: .timezone("America/New_York"))

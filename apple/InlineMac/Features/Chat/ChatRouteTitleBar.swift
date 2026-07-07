@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineUI
 import InlineMacUI
 import Observation
 import SwiftUI
@@ -43,8 +44,8 @@ struct ChatRouteTitleBar: View {
       VStack(alignment: .leading, spacing: 0) {
         titleView
 
-        if let subtitle = model.status.text {
-          statusText(subtitle)
+        if model.status.text != nil {
+          statusView(model.status)
         } else if let breadcrumb = model.breadcrumb {
           breadcrumbView(breadcrumb)
         }
@@ -201,18 +202,40 @@ struct ChatRouteTitleBar: View {
     .offset(x: -5)
   }
 
-  private func statusText(_ subtitle: String) -> some View {
-    Text(subtitle)
-      .font(.system(size: toolbarLayout.subtitleFontSize))
-      .foregroundStyle(model.status.isTyping ? Color.accentColor : Color.secondary)
-      .lineLimit(1)
-      .id("subtitle-\(model.status.isTyping)-\(subtitle)")
+  @ViewBuilder
+  private func statusView(_ status: ChatRouteToolbarTitleModel.Status) -> some View {
+    if let subtitle = status.text {
+      HStack(alignment: .center, spacing: 4) {
+        statusIndicator(status)
+
+        Text(subtitle)
+          .font(.system(size: toolbarLayout.subtitleFontSize))
+          .foregroundStyle(status.usesAccentColor ? Color.accentColor : Color.secondary)
+          .lineLimit(1)
+      }
+      .id("subtitle-\(status.usesAccentColor)-\(status.isRecordingVoice)-\(subtitle)")
       .transition(
         .asymmetric(
           insertion: .opacity.combined(with: .offset(y: -2)),
           removal: .opacity
         )
       )
+    }
+  }
+
+  @ViewBuilder
+  private func statusIndicator(_ status: ChatRouteToolbarTitleModel.Status) -> some View {
+    if status.isTyping {
+      TypingActivityIndicator(color: .accentColor)
+    } else if status.isRecordingVoice {
+      VoiceRecordingActivityIndicator(
+        barWidth: 2,
+        spacing: 2,
+        minBarHeight: 3,
+        maxBarHeight: 9,
+        color: .accentColor
+      )
+    }
   }
 
   private func handleAvatarClick() {

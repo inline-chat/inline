@@ -14,12 +14,13 @@ final class ChatRouteToolbarTitleModel {
     case none
     case text(String)
     case typing(String)
+    case recordingVoice(String)
 
     var text: String? {
       switch self {
       case .none:
         nil
-      case let .text(text), let .typing(text):
+      case let .text(text), let .typing(text), let .recordingVoice(text):
         text
       }
     }
@@ -29,6 +30,17 @@ final class ChatRouteToolbarTitleModel {
         return true
       }
       return false
+    }
+
+    var isRecordingVoice: Bool {
+      if case .recordingVoice = self {
+        return true
+      }
+      return false
+    }
+
+    var usesAccentColor: Bool {
+      isTyping || isRecordingVoice
     }
   }
 
@@ -322,10 +334,14 @@ final class ChatRouteToolbarTitleModel {
     }
 
     if let typingText = ComposeActions.shared.getTypingDisplayText(for: peer), !typingText.isEmpty {
-      return .typing(typingText)
+      return .typing(Self.textForAnimatedStatus(typingText))
     }
 
     if let action = ComposeActions.shared.getComposeAction(for: peer)?.action, action != .typing {
+      if action == .recordingVoice {
+        return .recordingVoice(Self.textForAnimatedStatus(action.toHumanReadable()))
+      }
+
       return .text(action.toHumanReadable())
     }
 
@@ -594,5 +610,13 @@ final class ChatRouteToolbarTitleModel {
     let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let first = trimmed.first else { return nil }
     return String(first)
+  }
+
+  private static func textForAnimatedStatus(_ text: String) -> String {
+    var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    while trimmed.hasSuffix(".") {
+      trimmed.removeLast()
+    }
+    return trimmed
   }
 }
