@@ -242,11 +242,12 @@ struct SidebarChatItemView: Equatable, View {
           )
         }
 
-        Button {
-          toggleArchive()
-        } label: {
-          Label(item.archived ? "Unarchive" : "Archive", systemImage: "archivebox")
-        }
+        // Note(mo): Having archive is confusing
+        // Button {
+        //   toggleArchive()
+        // } label: {
+        //   Label(item.archived ? "Unarchive" : "Archive", systemImage: "archivebox")
+        // }
 
         if let destructiveAction {
           Divider()
