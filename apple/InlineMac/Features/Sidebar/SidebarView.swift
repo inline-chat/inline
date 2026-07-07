@@ -17,6 +17,7 @@ struct SidebarView: View {
   @EnvironmentObject private var realtimeState: RealtimeState
   @EnvironmentObject private var updateInstallState: UpdateInstallState
   @ObservedObject private var settings = AppSettings.shared
+  private let audioPlayer = AudioPlaybackCenter.shared
   @State private var isHomeHovering = false
   @State private var isLocationHovering = false
   @State private var isArchiveVisible = false
@@ -478,6 +479,12 @@ struct SidebarView: View {
       //     .transition(.opacity)
       // }
 
+      if audioPlayer.item != nil {
+        AudioNowPlayingPill()
+          .padding(.horizontal, Theme.sidebarItemOuterSpacing + 4)
+          .transition(AudioNowPlayingPill.visibilityTransition)
+      }
+
       if updateInstallState.isReadyToInstall {
         installUpdateButton
           .transition(.opacity)
@@ -495,6 +502,7 @@ struct SidebarView: View {
       }
     }
     .animation(.smoothSnappy, value: sidebarConnectionState)
+    .animation(AudioNowPlayingPill.visibilityAnimation, value: audioPlayer.item)
     .animation(.smoothSnappy, value: updateInstallState.isReadyToInstall)
     .animation(SidebarUnreadBelowButton.visibilityAnimation, value: unreadBelowViewport)
   }
