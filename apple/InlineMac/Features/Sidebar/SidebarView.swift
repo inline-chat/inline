@@ -145,6 +145,9 @@ struct SidebarView: View {
     .onChange(of: settings.sidebarCleanupInterval, initial: true) { _, _ in
       refreshSidebarCleanup()
     }
+    .onChange(of: cleanupPreconditionSnapshot, initial: true) { _, _ in
+      refreshSidebarCleanup()
+    }
     .onChange(of: visibleItems.map(\.peerId)) { _, _ in
       pruneVisibleInboxItems()
       reconcileEphemeralChat()
@@ -718,6 +721,37 @@ struct SidebarView: View {
     cleanupOwnerID
   }
 
+  private var cleanupPreconditionSnapshot: SidebarCleanupPreconditionSnapshot {
+    SidebarCleanupPreconditionSnapshot(
+      connectionStateKey: cleanupConnectionStateKey,
+      hasFetchedServerState: dependencies?.session.hasFetchedSidebarChats == true,
+      isFetchingServerState: isFetchingSidebarServerState
+    )
+  }
+
+  private var sidebarCleanupPreconditions: SidebarCleanup.Preconditions {
+    SidebarCleanup.Preconditions(
+      hasFetchedServerState: dependencies?.session.hasFetchedSidebarChats == true,
+      isFetchingServerState: isFetchingSidebarServerState,
+      realtimeConnectionState: realtimeState.connectionState
+    )
+  }
+
+  private var isFetchingSidebarServerState: Bool {
+    dependencies?.session.isFetchingSidebarChats == true || fetchingDialogSpaceIds.isEmpty == false
+  }
+
+  private var cleanupConnectionStateKey: Int {
+    switch realtimeState.connectionState {
+    case .connecting:
+      return 0
+    case .updating:
+      return 1
+    case .connected:
+      return 2
+    }
+  }
+
   private func openChat(_ item: SidebarViewModel.Item) {
     SidebarCleanup.shared.markOpened(item.peerId)
 
@@ -1142,7 +1176,11 @@ struct SidebarView: View {
 
   private func refreshSidebarCleanup() {
     guard let dependencies else { return }
-    SidebarCleanup.shared.activate(owner: cleanupOwner, realtimeV2: dependencies.realtimeV2)
+    SidebarCleanup.shared.activate(
+      owner: cleanupOwner,
+      realtimeV2: dependencies.realtimeV2,
+      preconditions: sidebarCleanupPreconditions
+    )
   }
 
   private func deactivateSidebarCleanup() {
@@ -1259,6 +1297,12 @@ private enum SidebarTopBarMetrics {
 private struct SidebarUnreadBelowState: Equatable {
   let count: Int
   let targetID: ChatListItem.Identifier
+}
+
+private struct SidebarCleanupPreconditionSnapshot: Equatable {
+  let connectionStateKey: Int
+  let hasFetchedServerState: Bool
+  let isFetchingServerState: Bool
 }
 
 private struct SidebarInboxActionRow: View {

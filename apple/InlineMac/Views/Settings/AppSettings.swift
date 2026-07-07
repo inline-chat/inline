@@ -97,9 +97,12 @@ enum MacToolbarStyle: String, CaseIterable, Identifiable {
 
 enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   case twelveHours = "12h"
+  case twentyFourHours = "24h"
+  case twoDays = "2d"
+  case fiveDays = "5d"
   case never
 
-  static let defaultValue: Self = .twelveHours
+  static let defaultValue: Self = .twentyFourHours
 
   var id: String { rawValue }
 
@@ -107,6 +110,12 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
     switch self {
     case .twelveHours:
       return "12 hrs"
+    case .twentyFourHours:
+      return "24 hrs"
+    case .twoDays:
+      return "2 days"
+    case .fiveDays:
+      return "5 days"
     case .never:
       return "Off"
     }
@@ -116,6 +125,12 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
     switch self {
     case .twelveHours:
       return 12 * 60 * 60
+    case .twentyFourHours:
+      return 24 * 60 * 60
+    case .twoDays:
+      return 2 * 24 * 60 * 60
+    case .fiveDays:
+      return 5 * 24 * 60 * 60
     case .never:
       return nil
     }
@@ -124,7 +139,13 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   var detailText: String {
     switch self {
     case .twelveHours:
-      return "Close chats i haven't opened in 12 hrs."
+      return "Close chats i haven't opened or sent to in 12 hrs."
+    case .twentyFourHours:
+      return "Close chats i haven't opened or sent to in 24 hrs."
+    case .twoDays:
+      return "Close chats i haven't opened or sent to in 2 days."
+    case .fiveDays:
+      return "Close chats i haven't opened or sent to in 5 days."
     case .never:
       return "Don't close chats automatically."
     }

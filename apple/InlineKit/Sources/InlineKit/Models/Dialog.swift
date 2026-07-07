@@ -469,6 +469,20 @@ public extension Dialog {
     "(\"dialog\".\"chatListHidden\" IS NULL OR \"dialog\".\"chatListHidden\" = 0)"
   static let sidebarInboxVisibilitySQL =
     "(\(chatListVisibilitySQL) AND (\"dialog\".\"open\" = 1 OR \"dialog\".\"pinned\" = 1))"
+  /// SQL predicate for accent/prominent unread state. Queries must join `chat` as `"chat"`.
+  static let prominentUnreadSQL = """
+  (
+    "dialog"."peerUserId" IS NOT NULL
+    OR COALESCE("dialog"."followMode" = 'following', 0)
+    OR COALESCE("chat"."type" = 'private', 0)
+  )
+  """
+  static let unreadSQL = """
+  (
+    COALESCE("dialog"."unreadCount", 0) > 0
+    OR "dialog"."unreadMark" = 1
+  )
+  """
 
   static func nextSidebarOrder(_ db: Database) throws -> String {
     try nextOrder(

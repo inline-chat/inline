@@ -191,7 +191,7 @@ final class UnreadCountsModel {
       sql: """
       WITH "unreadDialogs" AS (
         SELECT
-          \(prominentUnreadSQL) AS "isProminent",
+          \(Dialog.prominentUnreadSQL) AS "isProminent",
           \(openInSidebarSQL) AS "isOpenInSidebar",
           \(sidebarScopeFilter.sql) AS "isInSidebarScope",
           \(outsideSelectedSpaceFilter.sql) AS "isOutsideSelectedSpace"
@@ -199,7 +199,7 @@ final class UnreadCountsModel {
         LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
         WHERE \(Dialog.chatListVisibilitySQL)
         AND ("dialog"."archived" IS NULL OR "dialog"."archived" = 0)
-        AND (COALESCE("dialog"."unreadCount", 0) > 0 OR "dialog"."unreadMark" = 1)
+        AND \(Dialog.unreadSQL)
       )
       SELECT
         COUNT(*) AS "unreadChatCount",
@@ -234,14 +234,6 @@ final class UnreadCountsModel {
       prominentUnreadOutsideSelectedSpaceCount: prominentUnreadOutsideSelectedSpaceCount
     )
   }
-
-  private nonisolated static let prominentUnreadSQL = """
-  (
-    "dialog"."peerUserId" IS NOT NULL
-    OR COALESCE("dialog"."followMode" = 'following', 0)
-    OR COALESCE("chat"."type" = 'private', 0)
-  )
-  """
 
   private nonisolated static let openInSidebarSQL = """
   (

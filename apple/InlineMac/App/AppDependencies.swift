@@ -211,6 +211,7 @@ extension AppDependencies {
 @Observable
 final class MainWindowSessionRefresher {
   private(set) var isFetchingSidebarChats = false
+  private(set) var hasFetchedSidebarChats = false
 
   @ObservationIgnored private var sidebarFetchCount = 0
   @ObservationIgnored private var didFetchInitialData = false
@@ -279,6 +280,7 @@ final class MainWindowSessionRefresher {
 
       do {
         try await realtime.send(.getChats())
+        self?.hasFetchedSidebarChats = true
       } catch is CancellationError {
         return
       } catch {
@@ -295,6 +297,7 @@ final class MainWindowSessionRefresher {
     chatsTask = nil
     sidebarFetchCount = 0
     isFetchingSidebarChats = false
+    hasFetchedSidebarChats = false
   }
 }
 
