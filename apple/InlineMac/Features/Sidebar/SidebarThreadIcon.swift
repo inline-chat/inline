@@ -1,93 +1,73 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct SidebarThreadIcon: View, Equatable {
   enum IconShape: Equatable {
+    case none
     case roundedSquare
     case circle
+
+    var threadIconShape: ThreadIconShape {
+      switch self {
+      case .none:
+        .none
+      case .roundedSquare:
+        .roundedSquare
+      case .circle:
+        .circle
+      }
+    }
   }
 
   let emoji: String?
   let isReplyThread: Bool
   var size: CGFloat = 20
-  var shape: IconShape = .roundedSquare
+  var shape: IconShape = .circle
 
-  let noBg: Bool = false
-
-  init(chat: Chat, size: CGFloat = 20, shape: IconShape = .roundedSquare) {
-    emoji = Self.normalizedEmoji(chat.emoji)
+  init(chat: Chat, size: CGFloat = 20, shape: IconShape = .circle) {
+    emoji = chat.emoji
     isReplyThread = chat.isReplyThread
     self.size = size
     self.shape = shape
   }
 
-  init(emoji: String?, isReplyThread: Bool = false, size: CGFloat = 20, shape: IconShape = .roundedSquare) {
-    self.emoji = Self.normalizedEmoji(emoji)
+  init(emoji: String?, isReplyThread: Bool = false, size: CGFloat = 20, shape: IconShape = .circle) {
+    self.emoji = emoji
     self.isReplyThread = isReplyThread
     self.size = size
     self.shape = shape
   }
 
   var body: some View {
-    background
-      .frame(width: size, height: size)
-      .overlay {
-        if let emoji {
-          Text(emoji)
-            .font(.system(size: emojiPointSize))
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-        } else {
-          Image(systemName: ThreadIconSymbol.name(isReplyThread: isReplyThread))
-            .font(.system(size: symbolPointSize, weight: .semibold))
-            .foregroundStyle(.secondary)
-        }
-      }
-      .fixedSize()
+    ThreadIconView(
+      ThreadIconDescriptor(
+        emoji: emoji,
+        isReplyThread: isReplyThread
+      ),
+      size: threadIconSize,
+      shape: shape.threadIconShape
+    )
   }
 
-  @ViewBuilder
-  private var background: some View {
-    if noBg {
-      Color.clear
-    } else {
-      switch shape {
-        case .roundedSquare:
-          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(.quinary)
-        case .circle:
-          Circle()
-            .fill(.quinary)
-      }
+  private var threadIconSize: ThreadIconSize {
+    if shape == .none || size <= 24 {
+      return .compact(size)
     }
-  }
-
-  private var cornerRadius: CGFloat {
-    size * 0.4
-  }
-
-  private var emojiPointSize: CGFloat {
-    size * (noBg ? 0.7 : 0.65)
-  }
-
-  private var symbolPointSize: CGFloat {
-    size * (noBg ? 0.55 : 0.5)
-  }
-
-  private static func normalizedEmoji(_ emoji: String?) -> String? {
-    guard let emoji else { return nil }
-    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+    if size >= 50 {
+      return .large(size)
+    }
+    return .regular(size)
   }
 }
 
 #Preview {
   HStack(spacing: 12) {
-    SidebarThreadIcon(emoji: "💬")
-    SidebarThreadIcon(emoji: nil)
+    SidebarThreadIcon(emoji: "💬", shape: .none)
+    SidebarThreadIcon(emoji: nil, shape: .none)
     SidebarThreadIcon(emoji: "🧠", size: 24)
     SidebarThreadIcon(emoji: "💬", size: 32, shape: .circle)
-    SidebarThreadIcon(emoji: nil, size: 32, shape: .circle)
+    SidebarThreadIcon(emoji: nil, size: 32, shape: .roundedSquare)
   }
   .padding()
 }

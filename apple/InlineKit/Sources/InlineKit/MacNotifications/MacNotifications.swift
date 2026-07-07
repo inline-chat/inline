@@ -132,25 +132,246 @@ extension MacNotifications {
       body = protocolMsg.stringRepresentationWithEmoji
     }
 
-    let avatarURL = await avatarBuilder.attachmentURL(for: user)
+    let imageURL = if chat?.type == .thread {
+      ThreadIconNotificationAttachmentRenderer.attachmentURL(for: chat)
+    } else {
+      await avatarBuilder.attachmentURL(for: user)
+    }
     let trimmedText = protocolMsg.hasMessage ? protocolMsg.message.trimmingCharacters(in: .whitespacesAndNewlines) : nil
     let isUrgentNudge = {
       guard case .nudge = protocolMsg.media.media else { return false }
       return trimmedText == Self.urgentNudgeText
     }()
+    var notificationUserInfo: [AnyHashable: Any] = [
+      "userId": protocolMsg.fromID,
+      "isThread": chat?.type == .thread,
+    ]
+    if let chat, chat.type == .thread {
+      notificationUserInfo["threadId"] = chat.id
+      notificationUserInfo["isReplyThread"] = chat.isReplyThread
+      if let emoji = chat.emoji {
+        notificationUserInfo["threadEmoji"] = emoji
+      }
+    }
 
     await showMessageNotification(
       title: title,
       subtitle: subtitle,
       body: body,
-      userInfo: [
-        // sender user ID
-        "userId": protocolMsg.fromID,
-        "isThread": chat?.type == .thread,
-        "threadId": chat?.id as Any,
-      ],
-      imageURL: avatarURL,
+      userInfo: notificationUserInfo,
+      imageURL: imageURL,
       forceSound: isUrgentNudge
+    )
+  }
+}
+
+// MARK: - Thread icon attachments
+
+private enum ThreadIconNotificationAttachmentRenderer {
+  private static let iconDiameter: CGFloat = 60
+  private static let log = Log.scoped("NotificationThreadIcon")
+
+  static func attachmentURL(for chat: Chat?) -> URL? {
+    guard let data = NotificationThreadIconRenderer.makePNGData(
+      emoji: chat?.emoji,
+      title: chat?.title ?? "Thread",
+      isReplyThread: chat?.isReplyThread == true,
+      size: CGSize(width: iconDiameter, height: iconDiameter)
+    ) else {
+      log.error("Failed to render thread notification icon")
+      return nil
+    }
+
+    let fileName = "notification-thread-icon-\(UUID().uuidString).png"
+    let fileURL = FileHelpers.getTrueTemporaryDirectory().appendingPathComponent(fileName)
+    do {
+      try data.write(to: fileURL, options: .atomic)
+      return fileURL
+    } catch {
+      log.error("Failed to write thread notification icon", error: error)
+      return nil
+    }
+  }
+}
+
+// Keep this mirror in sync with InlineUI/Sources/InlineUI/ThreadIconView.swift.
+// InlineKit cannot import InlineUI because InlineUI depends on InlineKit.
+private enum NotificationThreadIconRenderer {
+  private static let normalFallbackSymbol = "bubble.middle.bottom.fill"
+  private static let replyFallbackSymbol = "arrow.turn.down.right"
+
+  static func makePNGData(
+    emoji: String?,
+    title _: String,
+    isReplyThread: Bool,
+    size: CGSize
+  ) -> Data? {
+    let width = Int(size.width.rounded(.up))
+    let height = Int(size.height.rounded(.up))
+    guard let representation = NSBitmapImageRep(
+      bitmapDataPlanes: nil,
+      pixelsWide: width,
+      pixelsHigh: height,
+      bitsPerSample: 8,
+      samplesPerPixel: 4,
+      hasAlpha: true,
+      isPlanar: false,
+      colorSpaceName: .deviceRGB,
+      bytesPerRow: 0,
+      bitsPerPixel: 0
+    ) else {
+      return nil
+    }
+    representation.size = size
+
+    guard let graphicsContext = NSGraphicsContext(bitmapImageRep: representation) else {
+      return nil
+    }
+
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = graphicsContext
+    graphicsContext.imageInterpolation = .high
+
+    let bounds = CGRect(origin: .zero, size: size)
+    drawBackground(in: bounds)
+    let iconSize = min(size.width, size.height)
+    let ratios = contentRatios(for: iconSize)
+
+    if let emoji = normalizedEmoji(emoji) {
+      drawCenteredText(
+        emoji,
+        font: .systemFont(ofSize: iconSize * ratios.emoji, weight: .regular),
+        color: symbolColor(),
+        in: bounds
+      )
+    } else {
+      drawCenteredSymbol(
+        isReplyThread ? replyFallbackSymbol : normalFallbackSymbol,
+        pointSize: iconSize * ratios.symbol,
+        color: symbolColor(),
+        in: bounds
+      )
+    }
+
+    NSGraphicsContext.restoreGraphicsState()
+    return representation.representation(using: .png, properties: [:])
+  }
+
+  private static func normalizedEmoji(_ emoji: String?) -> String? {
+    guard let emoji else { return nil }
+    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let firstCharacter = trimmed.first else { return nil }
+    return String(firstCharacter)
+  }
+
+  private static func drawBackground(in bounds: CGRect) {
+    NSGraphicsContext.current?.cgContext.clear(bounds)
+    NSGraphicsContext.saveGraphicsState()
+    NSBezierPath(ovalIn: bounds).addClip()
+
+    if let gradient = NSGradient(colors: [
+      NSColor(calibratedWhite: 0.50, alpha: 0.96),
+      NSColor(calibratedWhite: 0.36, alpha: 0.96),
+    ]) {
+      gradient.draw(in: bounds, angle: -90)
+    } else {
+      NSColor(calibratedWhite: 0.43, alpha: 0.96).setFill()
+      NSBezierPath(rect: bounds).fill()
+    }
+
+    NSGraphicsContext.restoreGraphicsState()
+  }
+
+  private static func symbolColor() -> NSColor {
+    NSColor(calibratedWhite: 1, alpha: 0.94)
+  }
+
+  private static func contentRatios(for size: CGFloat) -> (emoji: CGFloat, symbol: CGFloat) {
+    switch size {
+    case ..<25:
+      return (0.66, 0.52)
+    case ..<37:
+      return (0.56, 0.44)
+    case ..<71:
+      return (0.46, 0.38)
+    default:
+      return (0.38, 0.32)
+    }
+  }
+
+  private static func drawCenteredText(
+    _ text: String,
+    font: NSFont,
+    color: NSColor,
+    in bounds: CGRect
+  ) {
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .center
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: font,
+      .foregroundColor: color,
+      .paragraphStyle: paragraph,
+    ]
+    let attr = NSAttributedString(string: text, attributes: attributes)
+    let measured = attr.boundingRect(
+      with: bounds.size,
+      options: [.usesLineFragmentOrigin, .usesFontLeading],
+      context: nil
+    )
+    let drawRect = CGRect(
+      x: bounds.midX - measured.width / 2,
+      y: bounds.midY - measured.height / 2,
+      width: measured.width,
+      height: measured.height
+    )
+    attr.draw(in: drawRect)
+  }
+
+  private static func drawCenteredSymbol(
+    _ symbolName: String,
+    pointSize: CGFloat,
+    color: NSColor,
+    in bounds: CGRect
+  ) {
+    guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else {
+      return
+    }
+    let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+    let configuredImage = image.withSymbolConfiguration(configuration) ?? image
+    let drawRect = aspectFitRect(
+      for: configuredImage.size,
+      in: bounds.insetBy(dx: bounds.width * 0.2, dy: bounds.height * 0.2)
+    )
+    tintedImage(configuredImage, color: color).draw(in: drawRect)
+  }
+
+  private static func tintedImage(_ image: NSImage, color: NSColor) -> NSImage {
+    let tinted = NSImage(size: image.size)
+    tinted.lockFocus()
+    image.draw(
+      in: CGRect(origin: .zero, size: image.size),
+      from: .zero,
+      operation: .sourceOver,
+      fraction: 1
+    )
+    color.setFill()
+    CGRect(origin: .zero, size: image.size).fill(using: .sourceIn)
+    tinted.unlockFocus()
+    return tinted
+  }
+
+  private static func aspectFitRect(for imageSize: CGSize, in bounds: CGRect) -> CGRect {
+    guard imageSize.width > 0, imageSize.height > 0 else {
+      return bounds
+    }
+
+    let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+    let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+    return CGRect(
+      x: bounds.midX - scaledSize.width / 2,
+      y: bounds.midY - scaledSize.height / 2,
+      width: scaledSize.width,
+      height: scaledSize.height
     )
   }
 }

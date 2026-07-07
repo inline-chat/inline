@@ -40,6 +40,7 @@ export type EncryptedSendMessagePushContent = {
   threadId: string
   messageId: string
   isThread: boolean
+  isReplyThread?: boolean
   threadEmoji?: string
 }
 

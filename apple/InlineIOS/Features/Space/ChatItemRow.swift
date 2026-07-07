@@ -11,14 +11,6 @@ struct ChatItemRow: View {
     (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
   }
 
-  private var chatProfileColors: [Color] {
-    let _ = colorScheme
-    return [
-      Color(.systemGray3).adjustLuminosity(by: 0.2),
-      Color(.systemGray5).adjustLuminosity(by: 0),
-    ]
-  }
-
   var body: some View {
     Button {
       router.push(.chat(peer: item.peerId))
@@ -29,33 +21,18 @@ struct ChatItemRow: View {
             .fill(hasUnread ? ColorManager.shared.swiftUIColor : .clear)
             .frame(width: 6, height: 6)
             .animation(.easeInOut(duration: 0.3), value: hasUnread)
-          Circle()
-            .fill(
-              LinearGradient(
-                colors: chatProfileColors,
-                startPoint: .top,
-                endPoint: .bottom
-              )
-            )
-            .frame(width: 32, height: 32)
-            .overlay {
-              Group {
-                if let emoji = item.chat?.emoji {
-                  Text(
-                    String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
-                      .replacingOccurrences(of: "\")", with: "")
-                  )
-                  .font(.callout)
-                } else {
-                  Text("#")
-                    .font(.callout)
-                }
-              }
-            }
+          ThreadIconView(
+            item.chat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(
+              emoji: nil,
+              title: "Chat",
+              accessibilityLabel: "Chat"
+            ),
+            size: .regular(32),
+            shape: .circle
+          )
         }
         Text(item.chat?.humanReadableTitle ?? "Chat")
           .font(.body)
-            
           .padding(.leading, 8)
       }
     }

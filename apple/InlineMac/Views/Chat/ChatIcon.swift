@@ -4,7 +4,7 @@ import SwiftUI
 
 enum ThreadIconSymbol {
   static func name(isReplyThread: Bool) -> String {
-    isReplyThread ? "arrow.turn.down.right" : "bubble.left.fill"
+    isReplyThread ? "arrow.turn.down.right" : "bubble.middle.bottom.fill"
   }
 }
 
@@ -15,19 +15,19 @@ struct ChatIcon: View {
 
     static func == (lhs: PeerType, rhs: PeerType) -> Bool {
       switch (lhs, rhs) {
-        case let (.chat(lhsChat), .chat(rhsChat)):
-          return lhsChat.id == rhsChat.id
-            && lhsChat.title == rhsChat.title
-            && lhsChat.emoji == rhsChat.emoji
-            && lhsChat.parentChatId == rhsChat.parentChatId
-            && lhsChat.parentMessageId == rhsChat.parentMessageId
+      case let (.chat(lhsChat), .chat(rhsChat)):
+        return lhsChat.id == rhsChat.id
+          && lhsChat.title == rhsChat.title
+          && lhsChat.emoji == rhsChat.emoji
+          && lhsChat.parentChatId == rhsChat.parentChatId
+          && lhsChat.parentMessageId == rhsChat.parentMessageId
 
-        case let (.user(lhsUserInfo), .user(rhsUserInfo)):
-          return userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
-            && profilePhotoId(lhsUserInfo) == profilePhotoId(rhsUserInfo)
+      case let (.user(lhsUserInfo), .user(rhsUserInfo)):
+        return userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
+          && profilePhotoId(lhsUserInfo) == profilePhotoId(rhsUserInfo)
 
-        default:
-          return false
+      default:
+        return false
       }
     }
 
@@ -60,15 +60,13 @@ struct ChatIcon: View {
 
   var body: some View {
     switch peer {
-      case let .chat(thread):
-        InitialsCircle(
-          name: thread.title ?? "",
-          size: size,
-          symbol: ThreadIconSymbol.name(isReplyThread: thread.isReplyThread),
-          symbolWeight: .medium,
-          emoji: thread.emoji,
-          backgroundOpacity: backgroundOpacity
-        )
+    case let .chat(thread):
+      SidebarThreadIcon(
+        emoji: thread.emoji,
+        isReplyThread: thread.isReplyThread,
+        size: size,
+        shape: .circle
+      )
 
       // raw icon
 //        HStack {
@@ -81,8 +79,8 @@ struct ChatIcon: View {
 //        .frame(width: size, height: size)
 //        .fixedSize()
 
-      case let .user(userInfo):
-        UserAvatar(userInfo: userInfo, size: size, backgroundOpacity: backgroundOpacity)
+    case let .user(userInfo):
+      UserAvatar(userInfo: userInfo, size: size, backgroundOpacity: backgroundOpacity)
     }
   }
 }

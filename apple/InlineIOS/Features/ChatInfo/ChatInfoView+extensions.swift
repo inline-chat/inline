@@ -196,24 +196,16 @@ extension ChatInfoView {
             Button {
               isEmojiPickerPresented.toggle()
             } label: {
-              Circle()
-                .fill(
-                  LinearGradient(
-                    colors: chatProfileColors,
-                    startPoint: .top,
-                    endPoint: .bottom
-                  )
-                )
-                .overlay {
-                  if !draftEmoji.isEmpty {
-                    Text(draftEmoji)
-                      .font(.system(size: 40))
-                  } else {
-                    Text("#")
-                      .font(.system(size: 40))
-                  }
-                }
-                .frame(width: 100, height: 100)
+              ThreadIconView(
+                ThreadIconDescriptor(
+                  emoji: draftEmoji,
+                  title: draftTitle,
+                  isReplyThread: currentChat?.isReplyThread == true,
+                  accessibilityLabel: draftTitle
+                ),
+                size: .large(100),
+                shape: .circle
+              )
             }
             .buttonStyle(.plain)
             .emojiPicker(
@@ -230,29 +222,15 @@ extension ChatInfoView {
               .focused($isTitleFocused)
           }
         } else {
-          Circle()
-            .fill(
-              LinearGradient(
-                colors: chatProfileColors,
-                startPoint: .top,
-                endPoint: .bottom
-              )
-            )
-            .overlay {
-              Group {
-                if let emoji = currentChat?.emoji {
-                  Text(
-                    String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
-                      .replacingOccurrences(of: "\")", with: "")
-                  )
-                  .font(.system(size: 40))
-                } else {
-                  Text("#")
-                    .font(.system(size: 40))
-                }
-              }
-            }
-            .frame(width: 100, height: 100)
+          ThreadIconView(
+            currentChat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(
+              emoji: nil,
+              title: chatTitle,
+              accessibilityLabel: chatTitle
+            ),
+            size: .large(100),
+            shape: .circle
+          )
 
           Text(chatTitle)
             .font(.title2)

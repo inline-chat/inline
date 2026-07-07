@@ -30,6 +30,7 @@ describe("pushContentEncryption", () => {
       threadId: "user:42",
       messageId: "99",
       isThread: false,
+      isReplyThread: true,
       threadEmoji: "chat",
     }
 

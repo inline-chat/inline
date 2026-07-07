@@ -42,8 +42,6 @@ struct ChatItemView: View {
     self.props = props
   }
 
-  @Environment(\.colorScheme) private var colorScheme
-
   var dialog: Dialog {
     props.dialog
   }
@@ -76,14 +74,6 @@ struct ChatItemView: View {
     props.dialog.pinned ?? false
   }
 
-  private var chatProfileColors: [Color] {
-    let _ = colorScheme
-    return [
-      Color(.systemGray3).adjustLuminosity(by: 0.2),
-      Color(.systemGray5).adjustLuminosity(by: 0),
-    ]
-  }
-
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(alignment: .top, spacing: 10) {
@@ -100,29 +90,16 @@ struct ChatItemView: View {
 
   @ViewBuilder
   var chatProfile: some View {
-    Circle()
-      .fill(
-        LinearGradient(
-          colors: chatProfileColors,
-          startPoint: .top,
-          endPoint: .bottom
-        )
-      )
+    ThreadIconView(
+      chat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(
+        emoji: nil,
+        title: "Chat",
+        accessibilityLabel: "Chat"
+      ),
+      size: .large(60),
+      shape: .circle
+    )
       .frame(width: 60, height: 60)
-      .overlay {
-        Group {
-          if let emoji = chat?.emoji {
-            Text(
-              String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
-                .replacingOccurrences(of: "\")", with: "")
-            )
-            .font(.largeTitle)
-          } else {
-            Text("#")
-              .font(.largeTitle)
-          }
-        }
-      }
       .overlay(alignment: .bottomTrailing) {
         if isPinned {
           if #available(iOS 26.0, *) {
@@ -166,7 +143,6 @@ struct ChatItemView: View {
   var title: some View {
     Text(chat?.humanReadableTitle ?? "")
       .font(.body)
-        
   }
 
   @ViewBuilder

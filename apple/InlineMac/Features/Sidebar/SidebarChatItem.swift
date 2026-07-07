@@ -352,7 +352,7 @@ struct SidebarChatItemView: Equatable, View {
       SidebarThreadIcon(
         chat: chat,
         size: iconSize,
-        shape: size == .compact ? .roundedSquare : .circle
+        shape: size == .compact ? .none : .circle
       )
     } else if let peer = item.peer {
       ChatIcon(peer: peer, size: iconSize)

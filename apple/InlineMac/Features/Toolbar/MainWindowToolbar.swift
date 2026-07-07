@@ -284,7 +284,7 @@ private enum NavHistoryMenuLabel {
 
     case let .thread(id):
       guard let chat = ObjectCache.shared.getCachedChat(id: id) else {
-        return "bubble.left.fill"
+        return "bubble.middle.bottom.fill"
       }
       return ThreadIconSymbol.name(isReplyThread: chat.isReplyThread)
     }

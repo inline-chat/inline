@@ -95,11 +95,6 @@ struct ChatToolbarLeadingView: View {
     ].joined(separator: ":")
   }
 
-  private var threadEmoji: String {
-    let emoji = fullChatViewModel.chat?.emoji?.trimmingCharacters(in: .whitespacesAndNewlines)
-    return emoji?.isEmpty == false ? emoji! : "#"
-  }
-
   private func currentComposeAction() -> ApiComposeAction? {
     composeActions.getComposeAction(for: peerId)?.action
   }
@@ -209,20 +204,12 @@ struct ChatToolbarLeadingView: View {
   var body: some View {
     HStack(spacing: 8) {
       if isThreadChat {
-        Circle()
-          .fill(
-            LinearGradient(
-              colors: chatProfileColors,
-              startPoint: .top,
-              endPoint: .bottom
-            )
-          )
-          .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
-          .overlay {
-            Text(threadEmoji)
-              .font(.title2)
-          }
-          .onTapGesture(perform: openChatInfo)
+        ThreadIconView(
+          fullChatViewModel.chat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(emoji: nil),
+          size: .regular(toolbarAvatarSize),
+          shape: .circle
+        )
+        .onTapGesture(perform: openChatInfo)
       } else {
         if let user = fullChatViewModel.peerUserInfo {
           UserAvatar(userInfo: user, size: toolbarAvatarSize)

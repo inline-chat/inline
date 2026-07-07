@@ -40,43 +40,6 @@ struct ChatListItem: View {
   static var tertiaryColor: some ShapeStyle { .tertiary }
   static var unreadCountColor: Color = .white
   static var unreadCircleColor: Color = .init(.systemGray2)
-  private static let threadAvatarLightTop = Color(
-    .sRGB,
-    red: 241 / 255,
-    green: 239 / 255,
-    blue: 239 / 255,
-    opacity: 0.5
-  )
-  private static let threadAvatarLightBottom = Color(
-    .sRGB,
-    red: 229 / 255,
-    green: 229 / 255,
-    blue: 229 / 255,
-    opacity: 0.5
-  )
-  private static let threadAvatarDarkTop = Color(
-    .sRGB,
-    red: 58 / 255,
-    green: 58 / 255,
-    blue: 58 / 255,
-    opacity: 0.5
-  )
-  private static let threadAvatarDarkBottom = Color(
-    .sRGB,
-    red: 44 / 255,
-    green: 44 / 255,
-    blue: 44 / 255,
-    opacity: 0.5
-  )
-  private static let threadAvatarSymbolForeground = Color(
-    .sRGB,
-    red: 0.35,
-    green: 0.35,
-    blue: 0.35,
-    opacity: 1
-  )
-
-  @Environment(\.colorScheme) private var colorScheme
 
   private var resolvedLastMessage: Message? { embeddedLastMessage?.message ?? lastMessage }
   private var resolvedLastMessageSender: UserInfo? {
@@ -103,22 +66,6 @@ struct ChatListItem: View {
 
   private var isPinned: Bool {
     dialog?.pinned == true
-  }
-
-  private var threadAvatarBackgroundGradient: LinearGradient {
-    let colors = colorScheme == .dark
-      ? [Self.threadAvatarDarkTop, Self.threadAvatarDarkBottom]
-      : [Self.threadAvatarLightTop, Self.threadAvatarLightBottom]
-
-    return LinearGradient(
-      colors: colors,
-      startPoint: .top,
-      endPoint: .bottom
-    )
-  }
-
-  private var threadAvatarBorderColor: Color {
-    colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06)
   }
 
   private var rowHeight: CGFloat {
@@ -205,23 +152,11 @@ struct ChatListItem: View {
     VStack(alignment: .leading, spacing: 0) {
       switch type {
         case let .chat(chat, _):
-          Circle()
-            .fill(threadAvatarBackgroundGradient)
-            .overlay(
-              Circle()
-                .stroke(threadAvatarBorderColor, lineWidth: 0.5)
-            )
-            .overlay {
-              if let emoji = normalizedEmoji(chat.emoji) {
-                Text(emoji)
-                  .font(.system(size: avatarSize * 0.55, weight: .regular))
-              } else {
-                Image(systemName: "number")
-                  .font(.system(size: avatarSize * 0.5, weight: .regular))
-                  .foregroundStyle(Self.threadAvatarSymbolForeground)
-              }
-            }
-            .frame(width: avatarSize, height: avatarSize)
+          ThreadIconView(
+            ThreadIconDescriptor(chat: chat),
+            size: threadIconSize,
+            shape: .circle
+          )
 
         case let .user(userInfo, _):
           UserAvatar(userInfo: userInfo, size: avatarSize)
@@ -230,10 +165,13 @@ struct ChatListItem: View {
     }
   }
 
-  private func normalizedEmoji(_ emoji: String?) -> String? {
-    guard let emoji else { return nil }
-    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+  private var threadIconSize: ThreadIconSize {
+    switch displayMode {
+    case .minimal:
+      return .regular(avatarSize)
+    case .twoLineLastMessage, .oneLineLastMessage:
+      return .large(avatarSize)
+    }
   }
 
   @ViewBuilder

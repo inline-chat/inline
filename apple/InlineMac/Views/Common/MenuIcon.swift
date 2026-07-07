@@ -148,8 +148,12 @@ enum MenuIcon {
     case let .user(userInfo):
       userFallbackIcon(userInfo: userInfo, size: size)
 
-    case .chat:
-      SidebarChatIcon(peer: peer, size: size)
+    case let .chat(chat):
+      ThreadIconView(
+        ThreadIconDescriptor(chat: chat),
+        size: .compact(size),
+        shape: .circle
+      )
     }
   }
 
