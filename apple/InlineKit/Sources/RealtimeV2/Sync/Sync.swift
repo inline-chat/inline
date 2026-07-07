@@ -276,6 +276,10 @@ actor Sync {
         log.error(
           "failed to apply \(result.failedCount) direct updates; skipping direct sync cursor advancement"
         )
+        if shouldFetchUserBucketAfterDirectApplyFailure(applyingUpdates) {
+          log.warning("direct participant grant update failed; fetching user bucket for sidecar-backed recovery")
+          fetchUserBucket()
+        }
       }
     }
 
@@ -731,6 +735,16 @@ actor Sync {
       maxDate = max(maxDate, update.date)
     }
     return maxDate
+  }
+
+  private func shouldFetchUserBucketAfterDirectApplyFailure(_ updates: [InlineProtocol.Update]) -> Bool {
+    for update in updates {
+      if case .participantAdd = update.update { return true }
+      if case .participantDelete = update.update { return true }
+      if case .participantGroupAdd = update.update { return true }
+      if case .participantGroupDelete = update.update { return true }
+    }
+    return false
   }
 
   private func getBucketSnapshots() async -> [SyncBucketSnapshot] {
