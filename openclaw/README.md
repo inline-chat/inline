@@ -39,11 +39,11 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.53` | `>=2026.6.11` | `0.0.13` | Current | Clears recovered Inline WebSocket errors from channel status after reconnect. |
+| `0.0.54` | `>=2026.6.11` | `0.0.13` | Current | Keeps recovered WebSocket and best-effort cursor warnings out of healthy channel status. |
+| `0.0.53` | `>=2026.6.11` | `0.0.13` | Stable | Clears recovered Inline WebSocket errors from channel status after reconnect. |
 | `0.0.52` | `>=2026.6.11` | `0.0.13` | Stable | Patch release for the SDK protocol dependency. |
 | `0.0.51` | `>=2026.6.11` | `0.0.12` | Stable | Added follow-mode mention gating for eligible reply/fresh Inline threads. |
 | `0.0.50` | `>=2026.6.11` | `0.0.11` | Stable | Supported line for current stable OpenClaw. Uses focused plugin SDK entrypoints and canonical ClawHub install metadata. |
-| `0.0.48` - `0.0.49` | `>=2026.6.11` | `0.0.11` | Stable | Transitional 2026.6.11 compatibility releases. `0.0.49` fixed metadata shape but still used the non-canonical ClawHub spec. |
 
 From npm:
 

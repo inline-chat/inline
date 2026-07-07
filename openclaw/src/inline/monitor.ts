@@ -704,6 +704,10 @@ function isRecoverableInlineConnectionError(line: string): boolean {
   return /^(WebSocket (?:closed|error|reconnect scheduled)|Protocol reconnect scheduled|Ping timeout, reconnecting|Failed to send RPC request; waiting for reconnect)/.test(line)
 }
 
+function isNonStickyInlineSdkWarning(line: string): boolean {
+  return line.startsWith("GET_UPDATES_STATE failed (continuing without date cursor)")
+}
+
 function isInlineConnectionRecovered(diagnostics: unknown): boolean {
   const snapshot = diagnostics as InlineDiagnosticsSnapshot
   const protocol = snapshot.protocol
@@ -2992,6 +2996,9 @@ export async function monitorInlineProvider(params: {
       log?.warn(line)
       if (isRecoverableInlineConnectionError(line)) {
         recoverableConnectionError = line
+      } else if (isNonStickyInlineSdkWarning(line)) {
+        pushDiagnostics()
+        return
       } else {
         recoverableConnectionError = null
       }

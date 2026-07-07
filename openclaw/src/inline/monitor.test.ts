@@ -1210,6 +1210,58 @@ describe("inline/monitor", () => {
     }
   })
 
+  it("does not publish best-effort cursor initialization warnings as lastError", async () => {
+    const statusPatches: Array<Record<string, unknown>> = []
+    const warningMessage = "GET_UPDATES_STATE failed (continuing without date cursor)"
+    let sdkLogger: {
+      warn?: (msg: string, meta?: unknown) => void
+    } | null = null
+
+    const harness = await setupMonitorHarness({
+      events: [],
+      chats: {},
+      captureSdkLogger: (logger) => {
+        sdkLogger = logger
+      },
+      getDiagnostics: () => ({
+        protocol: {
+          state: "open",
+          ping: {
+            pendingCount: 0,
+          },
+          transport: {
+            state: "connected",
+            socketReadyState: 1,
+          },
+        },
+      }),
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statusSink: (patch: Record<string, unknown>) => {
+        statusPatches.push(patch)
+      },
+    })
+
+    expect(sdkLogger?.warn).toBeTypeOf("function")
+    sdkLogger?.warn?.(warningMessage, new Error("timeout"))
+
+    expect(statusPatches).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lastError: expect.stringContaining(warningMessage),
+        }),
+      ]),
+    )
+
+    await handle.stop()
+  })
+
   it("surfaces startup getMe failures with operation context and closes the client", async () => {
     const statusPatches: Array<Record<string, unknown>> = []
     const getMeError = new Error("Internal server error")
