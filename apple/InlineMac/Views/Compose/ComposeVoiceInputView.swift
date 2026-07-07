@@ -33,7 +33,7 @@ struct ComposeVoiceInputView: View {
       switch viewModel.phase {
       case .recording:
         recordingIndicator
-        waveform(progress: 1)
+        waveform(progress: 0)
         durationLabel
         iconButton("stop.fill", title: "Stop recording", action: onPause)
 

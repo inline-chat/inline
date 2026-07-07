@@ -107,17 +107,10 @@ public struct AudioWaveformView: View {
         barWidth: barWidth,
         barSpacing: barSpacing
       )
-      let targetCount = switch motion {
-      case .fixed:
-        barCount
-      case .recordingReel:
-        max(samples.count, barCount)
-      }
       let bars = Self.normalizedBars(
         from: samples,
-        targetCount: targetCount,
-        shortSamplesMode: shortSamplesMode,
-        normalizationMode: Self.normalizationMode(for: motion)
+        targetCount: barCount,
+        shortSamplesMode: shortSamplesMode
       )
       let contentWidth = Self.contentWidth(
         barCount: bars.count,
@@ -152,15 +145,18 @@ public struct AudioWaveformView: View {
         ))
 
       case .recordingReel:
-        AudioWaveformReel(
+        AudioWaveformRecordingMotion(
           bars: bars,
+          filledCount: progressIndex,
           foreground: foreground,
+          background: background,
+          contentWidth: contentWidth,
+          horizontalAlignment: horizontalAlignment,
           barWidth: barWidth,
           barSpacing: barSpacing,
           minBarHeight: minBarHeight,
           verticalAlignment: verticalAlignment
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
   }
@@ -179,8 +175,7 @@ public struct AudioWaveformView: View {
   private static func normalizedBars(
     from samples: [UInt8],
     targetCount: Int,
-    shortSamplesMode: ShortSamplesMode,
-    normalizationMode: NormalizationMode
+    shortSamplesMode: ShortSamplesMode
   ) -> [CGFloat] {
     let count = max(targetCount, 1)
     guard !samples.isEmpty else {
@@ -188,13 +183,6 @@ public struct AudioWaveformView: View {
     }
 
     let reduced = reduce(samples: samples, targetCount: count, shortSamplesMode: shortSamplesMode)
-    switch normalizationMode {
-      case .balanced:
-        break
-      case .recording:
-        return reduced.map(normalizedRecordingBar)
-    }
-
     let minSample = CGFloat(reduced.min() ?? 0)
     let maxSample = CGFloat(reduced.max() ?? 0)
     let spread = max(maxSample - minSample, 1)
@@ -232,11 +220,6 @@ public struct AudioWaveformView: View {
     Array(repeating: 0.12, count: count)
   }
 
-  private static func normalizedRecordingBar(from sample: UInt8) -> CGFloat {
-    let value = CGFloat(sample) / 255
-    return normalizedBar(from: min(value * 1.55, 1))
-  }
-
   private static func normalizedBar(from value: CGFloat) -> CGFloat {
     let curved = CGFloat(pow(Double(min(max(value, 0), 1)), 0.72))
     return min(1, max(0.12, 0.12 + curved * 0.88))
@@ -253,26 +236,13 @@ public struct AudioWaveformView: View {
     alignment: HorizontalBarsAlignment
   ) -> CGFloat {
     switch alignment {
-      case .leading:
-        0
-      case .center:
-        max((containerWidth - contentWidth) / 2, 0)
+    case .leading:
+      0
+    case .center:
+      max((containerWidth - contentWidth) / 2, 0)
     }
   }
 
-  private static func normalizationMode(for motion: Motion) -> NormalizationMode {
-    switch motion {
-      case .fixed:
-        .balanced
-      case .recordingReel:
-        .recording
-    }
-  }
-
-  private enum NormalizationMode {
-    case balanced
-    case recording
-  }
 }
 
 @MainActor
@@ -327,9 +297,13 @@ private struct AudioWaveformBars: View {
 }
 
 @MainActor
-private struct AudioWaveformReel: View {
+private struct AudioWaveformRecordingMotion: View {
   let bars: [CGFloat]
+  let filledCount: Int
   let foreground: Color
+  let background: Color
+  let contentWidth: CGFloat
+  let horizontalAlignment: AudioWaveformView.HorizontalBarsAlignment
   let barWidth: CGFloat
   let barSpacing: CGFloat
   let minBarHeight: CGFloat
@@ -338,41 +312,28 @@ private struct AudioWaveformReel: View {
   @State private var xOffset: CGFloat = 0
 
   var body: some View {
-    Canvas { context, size in
-      drawBars(size: size, context: &context)
-    }
-    .mask {
-      AudioWaveformEdgeFade(fadeWidth: Self.fadeWidth)
-    }
-    .onChange(of: bars) { oldValue, newValue in
-      let shift = Self.shiftCount(from: oldValue, to: newValue)
-      guard shift > 0 else { return }
-      advanceReel(by: shift)
-    }
-  }
-
-  private func drawBars(size: CGSize, context: inout GraphicsContext) {
-    guard !bars.isEmpty, size.width > 0, size.height > 0 else { return }
-
-    let contentWidth = CGFloat(bars.count) * barWidth + CGFloat(max(bars.count - 1, 0)) * barSpacing
-    let startX = size.width - contentWidth + xOffset
-
-    for index in bars.indices {
-      let height = max(minBarHeight, size.height * bars[index])
-      let x = startX + CGFloat(index) * (barWidth + barSpacing)
-      let y = yPosition(for: height, containerHeight: size.height)
-      let rect = CGRect(x: x, y: y, width: barWidth, height: height)
-      let path = SwiftUI.Path(roundedRect: rect, cornerRadius: barWidth / 2)
-      context.fill(path, with: .color(foreground))
-    }
-  }
-
-  private func yPosition(for height: CGFloat, containerHeight: CGFloat) -> CGFloat {
-    switch verticalAlignment {
-    case .center:
-      (containerHeight - height) / 2
-    case .bottom:
-      containerHeight - height
+    GeometryReader { geometry in
+      AudioWaveformBars(
+        bars: bars,
+        filledCount: filledCount,
+        foreground: foreground,
+        background: background,
+        barWidth: barWidth,
+        barSpacing: barSpacing,
+        minBarHeight: minBarHeight,
+        verticalAlignment: verticalAlignment
+      )
+      .frame(width: contentWidth, height: geometry.size.height, alignment: verticalAlignment.frameAlignment)
+      .offset(x: xOffset)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: horizontalAlignment.frameAlignment)
+      .mask {
+        AudioWaveformEdgeFade(leadingFadeWidth: Self.fadeWidth, trailingFadeWidth: 0)
+      }
+      .onChange(of: bars) { oldValue, newValue in
+        let shift = Self.shiftCount(from: oldValue, to: newValue)
+        guard shift > 0 else { return }
+        advanceReel(by: shift)
+      }
     }
   }
 
@@ -403,11 +364,14 @@ private struct AudioWaveformReel: View {
 }
 
 private struct AudioWaveformEdgeFade: View {
-  let fadeWidth: CGFloat
+  let leadingFadeWidth: CGFloat
+  let trailingFadeWidth: CGFloat
 
   var body: some View {
     GeometryReader { geometry in
-      let width = min(fadeWidth, geometry.size.width / 2)
+      let maxFadeWidth = geometry.size.width / 2
+      let leadingWidth = min(leadingFadeWidth, maxFadeWidth)
+      let trailingWidth = min(trailingFadeWidth, maxFadeWidth)
 
       HStack(spacing: 0) {
         LinearGradient(
@@ -415,17 +379,19 @@ private struct AudioWaveformEdgeFade: View {
           startPoint: .leading,
           endPoint: .trailing
         )
-        .frame(width: width)
+        .frame(width: leadingWidth)
 
         Rectangle()
           .fill(.black)
 
-        LinearGradient(
-          colors: [.black, .clear],
-          startPoint: .leading,
-          endPoint: .trailing
-        )
-        .frame(width: width)
+        if trailingWidth > 0 {
+          LinearGradient(
+            colors: [.black, .clear],
+            startPoint: .leading,
+            endPoint: .trailing
+          )
+          .frame(width: trailingWidth)
+        }
       }
     }
   }
@@ -457,10 +423,10 @@ private struct WaveformSeekModifier: ViewModifier {
 private extension AudioWaveformView.HorizontalBarsAlignment {
   var frameAlignment: Alignment {
     switch self {
-      case .leading:
-        .leading
-      case .center:
-        .center
+    case .leading:
+      .leading
+    case .center:
+      .center
     }
   }
 }
@@ -468,19 +434,19 @@ private extension AudioWaveformView.HorizontalBarsAlignment {
 private extension AudioWaveformView.VerticalBarsAlignment {
   var stackAlignment: VerticalAlignment {
     switch self {
-      case .center:
-        .center
-      case .bottom:
-        .bottom
+    case .center:
+      .center
+    case .bottom:
+      .bottom
     }
   }
 
   var frameAlignment: Alignment {
     switch self {
-      case .center:
-        .center
-      case .bottom:
-        .bottom
+    case .center:
+      .center
+    case .bottom:
+      .bottom
     }
   }
 }
