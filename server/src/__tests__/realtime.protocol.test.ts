@@ -162,6 +162,32 @@ describe("realtime protocol safety", () => {
     await wsClosed(ws)
   })
 
+  it("returns unauthorized connectionError when connectionInit token belongs to a deleted user", async () => {
+    const ws = await openRealtimeSocket()
+    const user = await testUtils.createUser("realtime-deleted-auth@test.com")
+    const { token } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
+
+    await db.update(users).set({ deleted: true }).where(eq(users.id, user.id))
+
+    wsSendClientProtocolMessage(ws, {
+      id: 12n,
+      seq: 1,
+      body: {
+        oneofKind: "connectionInit",
+        connectionInit: {
+          token,
+        },
+      },
+    })
+
+    const message = await wsServerProtocolMessage(ws)
+    expect(message.body.oneofKind).toBe("connectionError")
+    if (message.body.oneofKind === "connectionError") {
+      expect(message.body.connectionError.reason).toBe(ConnectionError_Reason.UNAUTHORIZED)
+    }
+    await wsClosed(ws)
+  })
+
   it("returns connectionOpen for valid connectionInit token", async () => {
     const { ws } = await authenticateSocket()
     await wsClosed(ws)

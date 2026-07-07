@@ -1,6 +1,7 @@
 import { connectionManager } from "@in/server/ws/connections"
 import {
   ClientMessage,
+  ConnectionError_Reason,
   Method,
   RpcError_Code,
   RpcResult,
@@ -13,7 +14,7 @@ import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionIn
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
-import { getConnectionReasonFromAuthError } from "@in/server/controllers/plugins"
+import { getAuthTokenErrorDetails, getConnectionReasonFromAuthError } from "@in/server/controllers/plugins"
 
 const log = new Log("realtime")
 
@@ -55,6 +56,43 @@ const shouldLogUnsupportedRpcMethodWarning = (key: string): boolean => {
   }
   unsupportedRpcMethodLogKeys.add(key)
   return true
+}
+
+const connectionReasonName = (reason: ConnectionError_Reason): string => {
+  return ConnectionError_Reason[reason] ?? `UNKNOWN_CONNECTION_REASON_${reason}`
+}
+
+const cleanLogValue = (value: string | null | undefined): string | undefined => {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  return trimmed.length > 200 ? `${trimmed.slice(0, 200)}...` : trimmed
+}
+
+const connectionInitRejectionMetadata = (
+  message: ClientMessage,
+  rootContext: RootContext,
+  error: unknown,
+  reason: ConnectionError_Reason,
+): Record<string, unknown> => {
+  const init = message.body.oneofKind === "connectionInit" ? message.body.connectionInit : undefined
+  const inlineError = error instanceof InlineError ? error : undefined
+
+  return {
+    event: "realtime.connection_init.rejected",
+    connectionId: rootContext.connectionId,
+    messageId: message.id.toString(),
+    seq: message.seq,
+    ...rootContext.requestMetadata,
+    layer: init?.layer,
+    buildNumber: init?.buildNumber,
+    clientVersion: cleanLogValue(init?.clientVersion),
+    osVersion: cleanLogValue(init?.osVersion),
+    apiError: inlineError?.type,
+    errorCode: inlineError?.code,
+    connectionReason: connectionReasonName(reason),
+    connectionReasonCode: reason,
+    ...getAuthTokenErrorDetails(error),
+  }
 }
 
 // Cache for lazily-loaded RPC handler to avoid circular import and per-call dynamic import cost
@@ -127,8 +165,14 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
             log.error("connectionInit received after already authenticated")
           }
         } catch (e) {
-          log.error("error handling message in connectionInit", e)
           const reason = getConnectionReasonFromAuthError(e)
+          const authDetails = getAuthTokenErrorDetails(e)
+          const metadata = connectionInitRejectionMetadata(message, rootContext, e, reason)
+          if (authDetails) {
+            log.warn("realtime connectionInit rejected", metadata)
+          } else {
+            log.error("error handling message in connectionInit", e, metadata)
+          }
           sendRaw({
             id: message.id,
             body: { oneofKind: "connectionError", connectionError: { reason } },

@@ -4,9 +4,17 @@ import type { ElysiaWS } from "elysia/ws"
 
 export type Ws = ElysiaWS<ServerWebSocket<any>>
 
+export type RealtimeRequestMetadata = {
+  ip?: string
+  userAgent?: string
+  origin?: string
+  host?: string
+}
+
 export type RootContext = {
   ws: Ws
   connectionId: string
+  requestMetadata?: RealtimeRequestMetadata
 }
 
 export type HandlerContext = {
