@@ -154,6 +154,22 @@ final class UnreadCountsModel {
   }
 
   private func apply(_ snapshot: UnreadCountsSnapshot) {
+    let previous = UnreadCountsSnapshot(
+      unreadChatCount: unreadChatCount,
+      prominentUnreadChatCount: prominentUnreadChatCount,
+      scopedUnopenedProminentUnreadCount: scopedUnopenedProminentUnreadCount,
+      scopedUnopenedOtherUnreadCount: scopedUnopenedOtherUnreadCount,
+      prominentUnreadOutsideSelectedSpaceCount: prominentUnreadOutsideSelectedSpaceCount
+    )
+    let prominentChanged = previous.prominentUnreadChatCount != snapshot.prominentUnreadChatCount
+    let scopedProminentChanged = previous.scopedUnopenedProminentUnreadCount !=
+      snapshot.scopedUnopenedProminentUnreadCount
+    if prominentChanged || scopedProminentChanged {
+      log.info(
+        "[UnreadDiag] unread_counts prominent=\(previous.prominentUnreadChatCount)->\(snapshot.prominentUnreadChatCount) unreadChats=\(previous.unreadChatCount)->\(snapshot.unreadChatCount) scopedProminent=\(previous.scopedUnopenedProminentUnreadCount)->\(snapshot.scopedUnopenedProminentUnreadCount)"
+      )
+    }
+
     unreadChatCount = snapshot.unreadChatCount
     prominentUnreadChatCount = snapshot.prominentUnreadChatCount
     scopedUnopenedProminentUnreadCount = snapshot.scopedUnopenedProminentUnreadCount

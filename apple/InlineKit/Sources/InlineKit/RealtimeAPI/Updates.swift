@@ -685,15 +685,32 @@ extension InlineProtocol.UpdateNewMessage {
     // before updates, and those sidecars already include server-computed unread
     // totals for delivered messages; applying this local delta too would double
     // count missed messages.
-    if incrementUnreadCount,
-       !hadMessage,
-       msg.out == false,
-       var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
-      let readInboxMaxId = dialog.readInboxMaxId ?? 0
-      if msg.messageId > readInboxMaxId {
-        dialog.unreadCount = (dialog.unreadCount ?? 0) + 1
-        try dialog.update(db)
+    if msg.out == false {
+      let dialogBefore = try? Dialog.get(peerId: msg.peerId).fetchOne(db)
+      var didIncrement = false
+      var reason = "not_newer_than_read_max"
+
+      if !incrementUnreadCount {
+        reason = "increment_disabled"
+      } else if hadMessage {
+        reason = "duplicate_message"
+      } else if var dialog = dialogBefore {
+        let readInboxMaxId = dialog.readInboxMaxId ?? 0
+        if msg.messageId > readInboxMaxId {
+          dialog.unreadCount = (dialog.unreadCount ?? 0) + 1
+          try dialog.update(db)
+          didIncrement = true
+          reason = "incremented"
+        }
+      } else {
+        reason = "missing_dialog"
       }
+
+      let unreadBefore = dialogBefore.flatMap(\.unreadCount).map(String.init) ?? "nil"
+      let readMax = dialogBefore.flatMap(\.readInboxMaxId).map(String.init) ?? "nil"
+      Log.shared.info(
+        "[UnreadDiag] incoming_message peer=\(msg.peerId) chatId=\(msg.chatId) msgId=\(msg.messageId) hadExisting=\(hadMessage) increment=\(didIncrement) reason=\(reason) unreadBefore=\(unreadBefore) readMax=\(readMax)"
+      )
     }
 
     #if os(macOS)

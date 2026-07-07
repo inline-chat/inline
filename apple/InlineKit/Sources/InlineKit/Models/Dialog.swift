@@ -1,6 +1,9 @@
 import Foundation
 import GRDB
 import InlineProtocol
+import Logger
+
+private let unreadDiagnosticsLog = Log.scoped("UnreadDiagnostics")
 
 public struct ApiDialog: Codable, Hashable, Sendable {
   public var peerId: Peer
@@ -370,6 +373,7 @@ public extension ApiDialog {
       try dialog.save(db, onConflict: .replace)
     }
 
+    Dialog.logUnreadDropFromServer(before: existing, after: dialog)
     return dialog
   }
 }
@@ -411,6 +415,7 @@ public extension InlineProtocol.Dialog {
         newDialog.followMode = existing.followMode
       }
       try newDialog.save(db, onConflict: .replace)
+      Dialog.logUnreadDropFromServer(before: existing, after: newDialog)
       return newDialog
     } else {
       var newDialog = Dialog(from: self)
@@ -422,6 +427,24 @@ public extension InlineProtocol.Dialog {
 }
 
 private extension Dialog {
+  static func logUnreadDropFromServer(before: Dialog?, after: Dialog) {
+    guard let before else { return }
+
+    let beforeUnread = before.unreadCount ?? 0
+    let afterUnread = after.unreadCount ?? 0
+    let unreadDropped = afterUnread < beforeUnread
+    let markCleared = before.unreadMark == true && after.unreadMark != true
+    guard unreadDropped || markCleared else { return }
+
+    let beforeReadMax = before.readInboxMaxId.map(String.init) ?? "nil"
+    let afterReadMax = after.readInboxMaxId.map(String.init) ?? "nil"
+    let beforeMark = before.unreadMark.map(String.init) ?? "nil"
+    let afterMark = after.unreadMark.map(String.init) ?? "nil"
+    unreadDiagnosticsLog.info(
+      "[UnreadDiag] server_dialog_unread_drop peer=\(after.id) unread=\(beforeUnread)->\(afterUnread) readMax=\(beforeReadMax)->\(afterReadMax) mark=\(beforeMark)->\(afterMark) open=\(before.open)->\(after.open)"
+    )
+  }
+
   mutating func clearMissingOptionalReferences(_ db: Database) throws {
     if let spaceId, try Space.fetchOne(db, id: spaceId) == nil {
       self.spaceId = nil

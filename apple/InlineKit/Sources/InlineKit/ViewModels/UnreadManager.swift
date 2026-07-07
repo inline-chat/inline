@@ -109,6 +109,7 @@ public final class UnreadManager: Sendable {
       if shouldWriteLocal {
         do {
           try await db.dbWriter.write { db in
+            let before = try Dialog.fetchOne(db, id: localDialogId)
             let hasUnread = (Column("unreadCount") > 0) || (Column("unreadMark") == true)
             try Dialog
               .filter(id: localDialogId)
@@ -117,6 +118,16 @@ public final class UnreadManager: Sendable {
                 Column("unreadCount").set(to: 0),
                 Column("unreadMark").set(to: false)
               ])
+            let after = try Dialog.fetchOne(db, id: localDialogId)
+            let beforeUnread = before?.unreadCount ?? 0
+            let afterUnread = after?.unreadCount ?? 0
+            if beforeUnread != afterUnread || before?.unreadMark != after?.unreadMark {
+              let beforeMark = before?.unreadMark.map(String.init) ?? "nil"
+              let afterMark = after?.unreadMark.map(String.init) ?? "nil"
+              log.info(
+                "[UnreadDiag] read_all_local peer=\(peerId) chatId=\(chatId) dialogId=\(localDialogId) unread=\(beforeUnread)->\(afterUnread) mark=\(beforeMark)->\(afterMark) remote=\(shouldSendRemote)"
+              )
+            }
           }
         } catch {
           log.error("Failed to update local DB with unread count", error: error)
