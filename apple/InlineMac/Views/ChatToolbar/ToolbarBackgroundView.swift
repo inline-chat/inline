@@ -14,13 +14,26 @@ private enum ToolbarBackgroundMaterial {
   static let darkSeparatorAlpha: CGFloat = 0.05
 }
 
+enum ToolbarBackgroundSeparatorEdge {
+  case top
+  case bottom
+  case none
+}
+
 class ToolbarBackgroundView: NSView {
+  private let separatorEdge: ToolbarBackgroundSeparatorEdge
   private let backgroundView: NSView
   private let materialView: ToolbarBackgroundMaterialView?
   private let separatorView = NSView()
   private var separatorHeightConstraint: NSLayoutConstraint?
 
-  init(dependencies _: AppDependencies) {
+  convenience init(dependencies _: AppDependencies) {
+    self.init()
+  }
+
+  init(separatorEdge: ToolbarBackgroundSeparatorEdge = .bottom) {
+    self.separatorEdge = separatorEdge
+
     if #available(macOS 27.0, *) {
       let view = ToolbarBackgroundMaterialView()
       backgroundView = view
@@ -83,16 +96,28 @@ class ToolbarBackgroundView: NSView {
   }
 
   private func setupSeparatorView() {
+    guard separatorEdge != .none else { return }
+
     separatorView.translatesAutoresizingMaskIntoConstraints = false
     separatorView.wantsLayer = true
     addSubview(separatorView)
 
     let heightConstraint = separatorView.heightAnchor.constraint(equalToConstant: 1)
     separatorHeightConstraint = heightConstraint
+    let edgeConstraint: NSLayoutConstraint
+    switch separatorEdge {
+      case .top:
+        edgeConstraint = separatorView.topAnchor.constraint(equalTo: topAnchor)
+      case .bottom:
+        edgeConstraint = separatorView.bottomAnchor.constraint(equalTo: bottomAnchor)
+      case .none:
+        edgeConstraint = separatorView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    }
+
     NSLayoutConstraint.activate([
       separatorView.leadingAnchor.constraint(equalTo: leadingAnchor),
       separatorView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      separatorView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      edgeConstraint,
       heightConstraint,
     ])
 

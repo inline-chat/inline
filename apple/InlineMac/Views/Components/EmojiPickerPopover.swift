@@ -711,13 +711,19 @@ private final class EmojiPickerSearchField: NSSearchField {
   }
 }
 
+private enum EmojiPickerSeparatorEdge {
+  case top
+  case bottom
+  case none
+}
+
 private final class EmojiPickerAccessoryBarView: NSView {
   let contentView = NSView()
-  private let separatorEdge: ToolbarBackgroundSeparatorEdge
+  private let separatorEdge: EmojiPickerSeparatorEdge
   private let separatorView = NSView()
   private var separatorHeightConstraint: NSLayoutConstraint?
 
-  init(separatorEdge: ToolbarBackgroundSeparatorEdge) {
+  init(separatorEdge: EmojiPickerSeparatorEdge) {
     self.separatorEdge = separatorEdge
     super.init(frame: .zero)
     setupView()
