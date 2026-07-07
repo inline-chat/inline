@@ -35,6 +35,7 @@ export class WebSocketTransport implements Transport {
   private lastReconnectDelayMs: number | null = null
   private lastReconnectCause: string | null = null
   private reconnectCount = 0
+  private reconnectScheduling = false
 
   constructor(options: WebSocketTransportOptions) {
     this.url = options.url
@@ -67,33 +68,39 @@ export class WebSocketTransport implements Transport {
   async reconnect(options?: TransportReconnectOptions) {
     const skipDelay = options?.skipDelay ?? false
 
-    // A single socket failure often emits both `error` and `close`. Once a
-    // reconnect timer exists, keep the first scheduled retry and ignore
-    // duplicate reschedules from the same disconnect cycle.
-    if (this.state === "connecting" && this.reconnectionTimer) {
+    // A single socket failure often emits both `error` and `close`. Claim the
+    // scheduling slot before awaiting so concurrent handlers cannot both queue
+    // reconnect timers for the same disconnect cycle.
+    if (this.state === "connecting" && (this.reconnectionTimer || this.reconnectScheduling)) {
       return
     }
 
-    await this.setConnecting()
-    this.cleanUpPreviousConnection()
+    this.reconnectScheduling = true
+    try {
+      await this.setConnecting()
+      if (this.state === "idle" || this.reconnectionTimer) return
+      this.cleanUpPreviousConnection()
 
-    this.connectionAttemptNo = (this.connectionAttemptNo + 1) >>> 0
-    const delaySeconds = this.getReconnectionDelaySeconds(this.connectionAttemptNo)
-    const delayMs = Math.round(delaySeconds * 1000)
-    const cause = options?.cause?.trim() || "unspecified"
-    this.lastReconnectScheduledAt = Date.now()
-    this.lastReconnectDelayMs = delayMs
-    this.lastReconnectCause = cause
-    this.reconnectCount += 1
-    this.log.warn?.(
-      `WebSocket reconnect scheduled (attempt=${this.connectionAttemptNo}, delayMs=${delayMs}, cause=${cause})`,
-    )
+      this.connectionAttemptNo = (this.connectionAttemptNo + 1) >>> 0
+      const delaySeconds = this.getReconnectionDelaySeconds(this.connectionAttemptNo)
+      const delayMs = Math.round(delaySeconds * 1000)
+      const cause = options?.cause?.trim() || "unspecified"
+      this.lastReconnectScheduledAt = Date.now()
+      this.lastReconnectDelayMs = delayMs
+      this.lastReconnectCause = cause
+      this.reconnectCount += 1
+      this.log.warn?.(
+        `WebSocket reconnect scheduled (attempt=${this.connectionAttemptNo}, delayMs=${delayMs}, cause=${cause})`,
+      )
 
-    this.reconnectionTimer = setTimeout(() => {
-      this.reconnectionTimer = null
-      if (this.state === "idle" || this.state === "connected") return
-      void this.openConnection()
-    }, skipDelay ? 0 : delaySeconds * 1000)
+      this.reconnectionTimer = setTimeout(() => {
+        this.reconnectionTimer = null
+        if (this.state === "idle" || this.state === "connected") return
+        void this.openConnection()
+      }, skipDelay ? 0 : delaySeconds * 1000)
+    } finally {
+      this.reconnectScheduling = false
+    }
   }
 
   private cleanUpPreviousConnection() {

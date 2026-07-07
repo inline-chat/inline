@@ -250,6 +250,7 @@ describe("WebSocketTransport", () => {
     sock.__error(new Error("boom"))
     sock.__close(1006, "bye")
     await Promise.resolve()
+    await Promise.resolve()
 
     const diagnostics = transport.getDiagnostics()
     expect(diagnostics.reconnectCount).toBe(1)
