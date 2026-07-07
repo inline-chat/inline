@@ -1,27 +1,11 @@
 import Auth
 import GRDB
 import InlineKit
+import InlineSearch
 import InlineUI
 import Logger
 import SwiftUI
 import UIKit
-
-enum SearchResult: Identifiable, Hashable {
-  case localUser(User)
-  case localThread(ThreadInfo)
-  case globalUser(ApiUser)
-
-  var id: String {
-    switch self {
-      case let .localUser(user):
-        "local_user_\(user.id)"
-      case let .localThread(threadInfo):
-        "local_thread_\(threadInfo.chat.id)"
-      case let .globalUser(user):
-        "global_user_\(user.id)"
-    }
-  }
-}
 
 struct HomeView: View {
   // MARK: - Environment
@@ -45,11 +29,7 @@ struct HomeView: View {
   // MARK: - State
 
   @State private var text = ""
-  @State private var globalSearchResults: [ApiUser] = []
-  @State private var isSearchingState = false
-
-  // Initialize local search with database from environment
-  @State private var localSearch: HomeSearchViewModel?
+  @State private var searchModel: InlineSearchViewModel?
 
   @State private var spacesPath: [Navigation.Destination] = []
 
@@ -58,59 +38,12 @@ struct HomeView: View {
     return HomeViewModel.sortChats(visibleChats)
   }
 
-  var localSearchResults: [SearchResult] {
-    guard let localResults = localSearch?.results else { return [] }
-
-    var results: [SearchResult] = []
-    for result in localResults {
-      switch result {
-        case let .user(user):
-          results.append(.localUser(user))
-        case let .thread(threadInfo):
-          results.append(.localThread(threadInfo))
-      }
-    }
-
-    // Sort local results by relevance to query
-    return results.sorted { result1, result2 in
-      let score1 = calculateRelevanceScore(for: result1, query: text)
-      let score2 = calculateRelevanceScore(for: result2, query: text)
-      return score1 > score2
-    }
-  }
-
-  var mixedAndSortedSearchResults: [SearchResult] {
-    var results: [SearchResult] = []
-
-    // Add local results, separating users and threads
-    if let localResults = localSearch?.results {
-      for result in localResults {
-        switch result {
-          case let .user(user):
-            results.append(.localUser(user))
-          case let .thread(threadInfo):
-            results.append(.localThread(threadInfo))
-        }
-      }
-    }
-
-    // Add global results
-    results.append(contentsOf: globalSearchResults.map { .globalUser($0) })
-
-    // Sort by relevance to query
-    return results.sorted { result1, result2 in
-      let score1 = calculateRelevanceScore(for: result1, query: text)
-      let score2 = calculateRelevanceScore(for: result2, query: text)
-      return score1 > score2
-    }
-  }
-
   var body: some View {
     homeContent
       .background(Color(.systemBackground))
       .searchable(text: $text, prompt: "Find")
       .onChange(of: text) { _, newValue in
-        searchUsers(query: newValue)
+        searchHome(query: newValue)
       }
       .toolbar {
         HomeToolbarContent()
@@ -121,6 +54,8 @@ struct HomeView: View {
         // initalFetch()
       }
       .onAppear {
+        ensureSearchModel()
+        searchHome(query: text)
         initalFetch()
       }
       .navigationTitle("Chats")
@@ -176,67 +111,50 @@ struct HomeView: View {
         .overlay {
           SearchedView(
             textIsEmpty: text.isEmpty,
-            isSearchResultsEmpty: globalSearchResults.isEmpty && (localSearch?.results.count ?? 0) == 0
+            isSearchResultsEmpty: (searchModel?.hasResults ?? false) == false
           )
         }
       }
     }
   }
 
-  private func searchUsers(query: String) {
-    guard !query.isEmpty else {
-      globalSearchResults = []
-      isSearchingState = false
-      // Clear local search results as well
-      if localSearch == nil {
-        localSearch = HomeSearchViewModel(db: database)
-      }
-      localSearch?.search(query: "")
+  @discardableResult
+  private func ensureSearchModel() -> InlineSearchViewModel {
+    if let searchModel {
+      return searchModel
+    }
+
+    let model = InlineSearchViewModel(
+      db: database,
+      scope: homeSearchScope,
+      limits: InlineSearchLimits(
+        chatLimit: 24,
+        messageBatchSize: 20,
+        globalUserLimit: 20,
+        globalDebounceNanoseconds: 220_000_000
+      )
+    )
+    searchModel = model
+    return model
+  }
+
+  private func searchHome(query: String) {
+    let model = ensureSearchModel()
+    guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+      model.clear()
       return
     }
 
-    // Always perform local search immediately for any character (like macOS)
-    if localSearch == nil {
-      localSearch = HomeSearchViewModel(db: database)
-    }
-    localSearch?.search(query: query)
+    model.search(query, scope: homeSearchScope)
+  }
 
-    // Only perform global search for queries with 2 or more characters (like macOS)
-    guard query.count >= 2 else {
-      globalSearchResults = []
-      isSearchingState = false
-      return
-    }
-
-    isSearchingState = true
-
-    Task {
-      do {
-        let result = try await api.searchContacts(query: query)
-
-        // Save users to database like macOS
-        try await database.dbWriter.write { db in
-          for apiUser in result.users {
-            try apiUser.saveFull(db)
-          }
-        }
-
-        // Store the API users directly for use in navigation
-        await MainActor.run {
-          globalSearchResults = result.users
-        }
-
-        await MainActor.run {
-          isSearchingState = false
-        }
-      } catch {
-        Log.shared.error("Error searching users", error: error)
-        await MainActor.run {
-          globalSearchResults = []
-          isSearchingState = false
-        }
-      }
-    }
+  private var homeSearchScope: InlineSearchScope {
+    InlineSearchScope(
+      includeArchived: false,
+      includeSpaceChatsInHome: true,
+      includeGlobalUsers: true,
+      messageSort: .relevance
+    )
   }
 
   private func initalFetch() {
@@ -264,79 +182,30 @@ struct HomeView: View {
   }
 
   private var searchResultsView: some View {
-    List {
-      if !localSearchResults.isEmpty {
-        ForEach(localSearchResults) { (result: SearchResult) in
-          searchResultRow(for: result)
-        }
-      }
-
-      if !globalSearchResults.isEmpty {
-        Section("Global Search") {
-          ForEach(globalSearchResults.map { .globalUser($0) }) { (result: SearchResult) in
-            searchResultRow(for: result)
-          }
-        }
-      }
-    }
-    .listStyle(.plain)
-  }
-
-  private func searchResultRow(for result: SearchResult) -> some View {
-    Button {
-      handleSearchResult(result)
-    } label: {
-      HStack(alignment: .center, spacing: 9) {
-        // Avatar
-        switch result {
-          case let .localUser(user):
-            UserAvatar(user: user, size: 34)
-          case let .localThread(threadInfo):
-            InitialsCircle(
-              name: threadInfo.chat.humanReadableTitle ?? "Group Chat",
-              size: 34,
-              symbol: "number",
-              symbolWeight: .medium,
-              emoji: threadInfo.chat.emoji
-            )
-          case let .globalUser(apiUser):
-            UserAvatar(apiUser: apiUser, size: 34)
-        }
-
-        // Content
-        VStack(alignment: .leading, spacing: 0) {
-          Text(getDisplayName(for: result))
-            .font(.body)
-              
-            .lineLimit(1)
-
-          if let subtitle = getSubtitle(for: result) {
-            Text(subtitle)
-              .font(.caption)
-                
-              .lineLimit(1)
-          }
-        }
-
-        Spacer()
-      }
-    }
-    .buttonStyle(.plain)
-    .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
-  }
-
-  private func navigateToUser(_ userId: Int64) {
-    Task {
-      do {
-        let peer = try await dataManager.createPrivateChat(userId: userId)
-        router.push(.chat(peer: peer))
-      } catch {
-        Log.shared.error("Failed to create chat", error: error)
+    Group {
+      if let searchModel {
+        InlineSearchResultsList(
+          model: searchModel,
+          openChat: openSearchChat,
+          openMessage: openSearchMessage,
+          openGlobalUser: openSearchGlobalUser
+        )
+      } else {
+        ProgressView()
       }
     }
   }
 
-  private func navigateToApiUser(_ apiUser: ApiUser) {
+  private func openSearchChat(_ result: InlineSearchChatResult) {
+    router.push(.chat(peer: result.peer))
+  }
+
+  private func openSearchMessage(_ result: LocalMessageSearchResult) {
+    router.push(.chat(peer: result.peer))
+  }
+
+  private func openSearchGlobalUser(_ result: InlineSearchGlobalUserResult) {
+    let apiUser = result.user
     Task {
       do {
         try await dataManager.createPrivateChatWithOptimistic(user: apiUser)
@@ -345,99 +214,6 @@ struct HomeView: View {
         Log.shared.error("Failed to open a private chat with \(apiUser.anyName)", error: error)
       }
     }
-  }
-
-  private func handleSearchResult(_ result: SearchResult) {
-    switch result {
-      case let .localUser(user):
-        router.push(.chat(peer: .user(id: user.id)))
-      case let .localThread(threadInfo):
-        router.push(.chat(peer: .thread(id: threadInfo.chat.id)))
-      case let .globalUser(apiUser):
-        navigateToApiUser(apiUser)
-    }
-  }
-
-  private func getDisplayName(for result: SearchResult) -> String {
-    switch result {
-      case let .localUser(user):
-        "\(user.firstName ?? "") \(user.lastName ?? "")".trimmingCharacters(in: .whitespaces)
-      case let .localThread(threadInfo):
-        threadInfo.chat.humanReadableTitle ?? "Group Chat"
-      case let .globalUser(apiUser):
-        "\(apiUser.firstName ?? "") \(apiUser.lastName ?? "")".trimmingCharacters(in: .whitespaces)
-    }
-  }
-
-  private func getSubtitle(for result: SearchResult) -> String? {
-    switch result {
-      case let .localUser(user):
-        user.username.map { "@\($0)" }
-      case let .localThread(threadInfo):
-        threadInfo.space?.name ?? "Group Chat"
-      case let .globalUser(apiUser):
-        apiUser.username.map { "@\($0)" }
-    }
-  }
-
-  private func calculateRelevanceScore(for result: SearchResult, query: String) -> Int {
-    let queryLower = query.lowercased()
-    var score = 0
-
-    switch result {
-      case let .localUser(user):
-        let fullName = "\(user.firstName ?? "") \(user.lastName ?? "")".lowercased()
-        let username = user.username?.lowercased() ?? ""
-
-        // Exact matches get highest score
-        if fullName == queryLower || username == queryLower {
-          score += 100
-        }
-        // Starts with query gets high score
-        else if fullName.hasPrefix(queryLower) || username.hasPrefix(queryLower) {
-          score += 50
-        }
-        // Contains query gets medium score
-        else if fullName.contains(queryLower) || username.contains(queryLower) {
-          score += 25
-        }
-
-        // Local results get a small boost for being cached
-        score += 5
-
-      case let .localThread(threadInfo):
-        let title = threadInfo.chat.humanReadableTitle?.lowercased() ?? ""
-
-        if title == queryLower {
-          score += 100
-        } else if title.hasPrefix(queryLower) {
-          score += 50
-        } else if title.contains(queryLower) {
-          score += 25
-        }
-
-        // Local results get a small boost
-        score += 5
-
-      case let .globalUser(apiUser):
-        let fullName = "\(apiUser.firstName ?? "") \(apiUser.lastName ?? "")".lowercased()
-        let username = apiUser.username?.lowercased() ?? ""
-
-        // Exact matches get highest score
-        if fullName == queryLower || username == queryLower {
-          score += 100
-        }
-        // Starts with query gets high score
-        else if fullName.hasPrefix(queryLower) || username.hasPrefix(queryLower) {
-          score += 50
-        }
-        // Contains query gets medium score
-        else if fullName.contains(queryLower) || username.contains(queryLower) {
-          score += 25
-        }
-    }
-
-    return score
   }
 }
 
@@ -461,13 +237,11 @@ struct SearchedView: View {
         VStack(spacing: 4) {
           Text("🔍")
             .font(.largeTitle)
-              
             .padding(.bottom, 14)
           Text("Search for chats and people")
             .font(.headline)
-              
+
           Text("Type to find existing chats or search for people to start new conversations")
-              
             .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 45)

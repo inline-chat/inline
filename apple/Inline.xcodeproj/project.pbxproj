@@ -54,6 +54,7 @@
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
+		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 /* End PBXBuildFile section */
 
@@ -243,6 +244,7 @@
 				B7E8E0E42EBA637100EA23B8 /* ContextMenuAccessoryStructs in Frameworks */,
 				CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */,
 				C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */,
+				D4B53A112F1C000100000001 /* InlineSearch in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C37F34402D5A4D4800D7D7CC /* MCEmojiPicker in Frameworks */,
@@ -417,6 +419,7 @@
 				C3E6D5CA2CAE82B00048D2D8 /* GRDB */,
 				C35092C92CAEA7DB00AE3E23 /* Sentry */,
 				C38C905D2CB9431900B78B8A /* InlineKit */,
+				D4B53A102F1C000100000001 /* InlineSearch */,
 				C35EC8212CC2A24A0067979B /* InlineKit */,
 				C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */,
 				C3CC99182CCE9AF7007F7F77 /* InlineUI */,
@@ -1872,6 +1875,10 @@
 		D4ACD0022F1B000000000001 /* MacDevtools */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MacDevtools;
+		};
+		D4B53A102F1C000100000001 /* InlineSearch */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineSearch;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
