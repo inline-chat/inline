@@ -564,7 +564,7 @@ final class SidebarViewModel {
 
 private extension ChatListItem {
   var hasProminentUnreadDot: Bool {
-    isDirectMessage || dialog?.isFollowingThread == true
+    isDirectMessage || dialog?.isFollowingReplyThread == true
   }
 
   var isDirectMessage: Bool {

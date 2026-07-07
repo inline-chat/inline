@@ -522,7 +522,7 @@ struct AllChatsItem: Identifiable, Equatable {
       return true
     }
 
-    if item.dialog.isFollowingThread {
+    if item.dialog.isFollowingReplyThread {
       return true
     }
 

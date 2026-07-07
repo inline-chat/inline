@@ -21,6 +21,7 @@ public struct AppDependencies {
   let database = AppDatabase.shared
   let data = DataManager(database: AppDatabase.shared)
   let session = MainWindowSessionRefresher()
+  let unreadCounts = UnreadCountsModel.shared
   let userSettings = INUserSettings.current
 
   // Per window
@@ -60,6 +61,7 @@ extension View {
       .environment(\.keyMonitor, deps.keyMonitor)
       .environment(\.appBridge, deps.appBridge)
       .environment(\.dependencies, deps)
+      .environment(deps.unreadCounts)
       .environment(deps.nav2)
 
     if let rootData = deps.rootData {

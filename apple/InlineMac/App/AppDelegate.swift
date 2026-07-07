@@ -21,7 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var didHandleInitialActivation = false
 
   @MainActor private let appBridge = AppBridge(app: NSApp)
-  @MainActor private let dockBadgeService = DockBadgeService()
+  @MainActor private lazy var dockBadgeService = DockBadgeService(unreadCounts: dependencies.unreadCounts)
 
   // Common Dependencies
   @MainActor private(set) lazy var dependencies: AppDependencies = {
@@ -81,6 +81,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 #endif
     Task { @MainActor in
+      self.dependencies.unreadCounts.start()
       self.dockBadgeService.start()
     }
     // Register for URL events

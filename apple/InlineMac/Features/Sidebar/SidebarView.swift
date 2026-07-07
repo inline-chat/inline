@@ -13,6 +13,7 @@ struct SidebarView: View {
   @Environment(\.realtime) private var realtime
   @Environment(\.appearsActive) private var appearsActive
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(UnreadCountsModel.self) private var unreadCounts
   @EnvironmentObject private var realtimeState: RealtimeState
   @EnvironmentObject private var updateInstallState: UpdateInstallState
   @ObservedObject private var settings = AppSettings.shared
@@ -119,6 +120,7 @@ struct SidebarView: View {
       if oldSpaceId != spaceId {
         resetInboxVisibility()
       }
+      syncUnreadCountsScope(spaceId: spaceId)
       syncSource(spaceId: spaceId)
       refreshEphemeralChatScope(selectedPeer)
       refreshSpaceIfNeeded(spaceId)
@@ -135,6 +137,7 @@ struct SidebarView: View {
       refreshSidebarCleanup()
     }
     .onChange(of: settings.includeSpaceChatsInHomeSidebar, initial: true) { _, includeSpaceChats in
+      syncUnreadCountsScope(spaceId: nav.selectedSpaceId, includeSpaceChatsInHome: includeSpaceChats)
       viewModel.setIncludeSpaceChatsInHome(includeSpaceChats)
       refreshEphemeralChatScope(selectedPeer)
     }
@@ -149,6 +152,8 @@ struct SidebarView: View {
       validateSelectedSpace()
     }
     .onAppear {
+      unreadCounts.start()
+      syncUnreadCountsScope(spaceId: nav.selectedSpaceId)
       legacyApiState = realtime.apiState
       handleRealtimeConnectionStateChange(realtimeState.connectionState)
       refreshSidebarCleanup()
@@ -180,12 +185,13 @@ struct SidebarView: View {
 
   private var allChatsRow: some View {
     SidebarInboxActionRow(
-      title: "Chats",
+      title: "All Chats",
       systemImage: "text.bubble",
       selected: nav.currentRoute == .allChats || nav.currentRoute == .archivedChats,
       titleDimmed: sidebarTitlesDimmed,
       size: settings.showSidebarMessagePreview ? .large : .compact,
-      trailingCount: viewModel.todayUnreadCount,
+      prominentUnreadCount: unreadCounts.scopedUnopenedProminentUnreadCount,
+      nonProminentUnreadCount: unreadCounts.scopedUnopenedOtherUnreadCount,
       action: openAllChats
     )
     .padding(.bottom, SidebarSeparatorRow.totalHeight)
@@ -357,8 +363,16 @@ struct SidebarView: View {
     }
     .buttonStyle(.plain)
     .background(SidebarTopBarHoverBackground(isHovering: isHomeHovering))
+    .overlay(alignment: .topTrailing) {
+      if unreadCounts.prominentUnreadOutsideSelectedSpaceCount > 0 {
+        UnreadDotBadge(prominent: true, size: 6)
+          .padding(.top, 7)
+          .padding(.trailing, 7)
+      }
+    }
     .help("Home")
     .accessibilityLabel("Home")
+    .accessibilityValue(homeButtonAccessibilityValue)
     .onHover { isHomeHovering = $0 }
   }
 
@@ -651,6 +665,11 @@ struct SidebarView: View {
 
   private var isTopBarSeparatorHidden: Bool {
     isHomeHovering || isLocationHovering
+  }
+
+  private var homeButtonAccessibilityValue: Text {
+    guard unreadCounts.prominentUnreadOutsideSelectedSpaceCount > 0 else { return Text("") }
+    return Text("Prominent unread chats outside this space")
   }
 
   private var shouldShowEmptyState: Bool {
@@ -1132,6 +1151,20 @@ struct SidebarView: View {
     }
   }
 
+  private func syncUnreadCountsScope(spaceId: Int64?) {
+    syncUnreadCountsScope(
+      spaceId: spaceId,
+      includeSpaceChatsInHome: settings.includeSpaceChatsInHomeSidebar
+    )
+  }
+
+  private func syncUnreadCountsScope(spaceId: Int64?, includeSpaceChatsInHome: Bool) {
+    unreadCounts.setSidebarScope(
+      spaceId: spaceId,
+      includeSpaceChatsInHome: includeSpaceChatsInHome
+    )
+  }
+
   private func validateSelectedSpace() {
     guard let spaceId = nav.selectedSpaceId else { return }
     guard viewModel.hasSpace(id: spaceId) == false else { return }
@@ -1184,6 +1217,7 @@ struct SidebarView: View {
 #Preview {
   SidebarView()
     .environment(SidebarViewModel(db: .populated()))
+    .environment(UnreadCountsModel(database: .populated()))
     .environmentObject(RealtimeState())
     .environmentObject(UpdateInstallState())
     .frame(width: 280, height: 480)
@@ -1225,7 +1259,8 @@ private struct SidebarInboxActionRow: View {
   let selected: Bool
   let titleDimmed: Bool
   let size: SidebarItemSize
-  let trailingCount: Int
+  let prominentUnreadCount: Int
+  let nonProminentUnreadCount: Int
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -1267,12 +1302,13 @@ private struct SidebarInboxActionRow: View {
           .lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .leading)
 
-        if trailingCount > 0 {
-          Text(String(trailingCount))
-            .font(.system(size: 11, weight: .medium).monospacedDigit())
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
+        if nonProminentUnreadCount > 0 {
+          SidebarNonProminentUnreadCount(count: nonProminentUnreadCount)
+            .padding(.leading, 6)
+        }
+
+        if prominentUnreadCount > 0 {
+          SidebarProminentUnreadBadge(count: prominentUnreadCount)
             .padding(.leading, 6)
         }
       }
@@ -1285,6 +1321,7 @@ private struct SidebarInboxActionRow: View {
     .buttonStyle(.plain)
     .help(title)
     .accessibilityLabel(title)
+    .accessibilityValue(unreadAccessibilityValue)
     .accessibilityAddTraits(.isButton)
     .accessibilityAddTraits(selected ? .isSelected : [])
     .onHover { isHovered = $0 }
@@ -1316,6 +1353,60 @@ private struct SidebarInboxActionRow: View {
     } else {
       .clear
     }
+  }
+
+  private var unreadAccessibilityValue: Text {
+    let prominentText = unreadAccessibilityDescription(
+      count: prominentUnreadCount,
+      singularLabel: "prominent unread chat"
+    )
+    let nonProminentText = unreadAccessibilityDescription(
+      count: nonProminentUnreadCount,
+      singularLabel: "other unread chat"
+    )
+    let parts = [prominentText, nonProminentText].compactMap { $0 }
+
+    guard parts.isEmpty == false else { return Text("") }
+    return Text("\(parts.joined(separator: " and ")) not in sidebar")
+  }
+
+  private func unreadAccessibilityDescription(count: Int, singularLabel: String) -> String? {
+    guard count > 0 else { return nil }
+    return "\(count) \(singularLabel)\(count == 1 ? "" : "s")"
+  }
+}
+
+private struct SidebarNonProminentUnreadCount: View, Equatable {
+  let count: Int
+
+  var body: some View {
+    Text(String(count))
+      .font(.system(size: 11, weight: .medium).monospacedDigit())
+      .foregroundStyle(.tertiary)
+      .lineLimit(1)
+      .contentTransition(.numericText())
+      .fixedSize(horizontal: true, vertical: false)
+      .accessibilityHidden(true)
+  }
+}
+
+private struct SidebarProminentUnreadBadge: View, Equatable {
+  let count: Int
+
+  private static let height: CGFloat = 16
+
+  var body: some View {
+    Text(String(count))
+      .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+      .foregroundStyle(Color.white)
+      .lineLimit(1)
+      .contentTransition(.numericText())
+      .padding(.horizontal, 5)
+      .frame(minWidth: Self.height)
+      .frame(height: Self.height)
+      .fixedSize(horizontal: true, vertical: false)
+      .background(Capsule().fill(Color.accentColor))
+      .accessibilityHidden(true)
   }
 }
 

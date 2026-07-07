@@ -1,30 +1,29 @@
 import Auth
 import Combine
-import InlineKit
+import Observation
 
 /// The single owner of macOS Dock badge behavior.
 ///
 /// Keep all Dock badge changes centralized here to avoid scattered `NSApplication.shared.dockTile` writes.
-/// Today we only badge unread DMs, but future badge sources (mentions, all unread, etc.) should be added
-/// as additional observations in this service.
 @MainActor
 final class DockBadgeService {
   private let auth: Auth
   private let appSettings: AppSettings
-  private let database: AppDatabase
+  private let unreadCounts: UnreadCountsModel
   private let dockBadgeController = DockBadgeController()
 
   private var cancellables = Set<AnyCancellable>()
-  private var unreadDMCountCancellable: AnyCancellable?
+  private var unreadCountsObservationActive = false
+  private var unreadCountsObservationGeneration = 0
 
   init(
     auth: Auth = .shared,
     appSettings: AppSettings = .shared,
-    database: AppDatabase = .shared
+    unreadCounts: UnreadCountsModel
   ) {
     self.auth = auth
     self.appSettings = appSettings
-    self.database = database
+    self.unreadCounts = unreadCounts
   }
 
   func start() {
@@ -32,7 +31,7 @@ final class DockBadgeService {
     auth.$isLoggedIn
       .removeDuplicates()
       .sink { [weak self] _ in
-        self?.refreshUnreadDMBadging(applyImmediately: true)
+        self?.refreshUnreadBadging(applyImmediately: true)
       }
       .store(in: &cancellables)
 
@@ -40,44 +39,67 @@ final class DockBadgeService {
       .removeDuplicates()
       .sink { [weak self] enabled in
         // When re-enabled, apply the current count immediately (no debounce) so the badge appears right away.
-        self?.refreshUnreadDMBadging(applyImmediately: enabled)
+        self?.refreshUnreadBadging(applyImmediately: enabled)
       }
       .store(in: &cancellables)
 
-    refreshUnreadDMBadging(applyImmediately: true)
+    refreshUnreadBadging(applyImmediately: true)
   }
 
   func prepareForTermination() {
     cancellables.removeAll()
-    unreadDMCountCancellable?.cancel()
-    unreadDMCountCancellable = nil
-    dockBadgeController.setUnreadDMCount(0, debounceIncreases: false)
+    cancelUnreadCountObservation()
+    dockBadgeController.setUnreadCount(0, debounceIncreases: false)
   }
 
-  // MARK: - Unread DMs
+  // MARK: - Unread chats
 
-  private func refreshUnreadDMBadging(applyImmediately: Bool) {
+  private func refreshUnreadBadging(applyImmediately: Bool) {
     let shouldObserve = auth.isLoggedIn && appSettings.showDockBadgeUnreadDMs
 
     if !shouldObserve {
-      unreadDMCountCancellable?.cancel()
-      unreadDMCountCancellable = nil
-      dockBadgeController.setUnreadDMCount(0, debounceIncreases: false)
+      cancelUnreadCountObservation()
+      dockBadgeController.setUnreadCount(0, debounceIncreases: false)
       return
     }
+
+    unreadCounts.start()
 
     if applyImmediately {
-      let currentCount = UnreadDMCount.current(db: database)
-      dockBadgeController.setUnreadDMCount(currentCount, debounceIncreases: false)
+      applyDockBadgeCount(debounceIncreases: false)
     }
 
-    if unreadDMCountCancellable != nil {
-      return
-    }
+    observeUnreadCountsIfNeeded()
+  }
 
-    unreadDMCountCancellable = UnreadDMCount.publisher(db: database)
-      .sink { [weak self] count in
-        self?.dockBadgeController.setUnreadDMCount(count, debounceIncreases: true)
+  private func observeUnreadCountsIfNeeded() {
+    guard unreadCountsObservationActive == false else { return }
+
+    unreadCountsObservationActive = true
+    let observationGeneration = unreadCountsObservationGeneration
+
+    withObservationTracking {
+      _ = unreadCounts.prominentUnreadChatCount
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        guard unreadCountsObservationGeneration == observationGeneration else { return }
+        unreadCountsObservationActive = false
+        applyDockBadgeCount(debounceIncreases: true)
+        observeUnreadCountsIfNeeded()
       }
+    }
+  }
+
+  private func cancelUnreadCountObservation() {
+    unreadCountsObservationGeneration += 1
+    unreadCountsObservationActive = false
+  }
+
+  private func applyDockBadgeCount(debounceIncreases: Bool) {
+    dockBadgeController.setUnreadCount(
+      unreadCounts.prominentUnreadChatCount,
+      debounceIncreases: debounceIncreases
+    )
   }
 }

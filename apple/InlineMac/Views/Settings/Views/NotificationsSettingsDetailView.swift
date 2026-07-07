@@ -7,7 +7,7 @@ struct NotificationsSettingsDetailView: View {
   var body: some View {
     Form {
       Section("Badges") {
-        Toggle("Show Dock badge for unread DMs", isOn: $appSettings.showDockBadgeUnreadDMs)
+        Toggle("Show dock badge for important unread chats", isOn: $appSettings.showDockBadgeUnreadDMs)
 
         Picker("Unread badge style", selection: $appSettings.unreadBadgeStyle) {
           Text("Dot").tag(UnreadBadgeStyle.dot)

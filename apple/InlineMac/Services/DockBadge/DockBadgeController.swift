@@ -6,7 +6,7 @@ final class DockBadgeController {
   private var pendingIncreaseTask: Task<Void, Never>?
   private var increaseGeneration: UInt64 = 0
 
-  func setUnreadDMCount(_ count: Int, debounceIncreases: Bool = true) {
+  func setUnreadCount(_ count: Int, debounceIncreases: Bool = true) {
     if !debounceIncreases {
       increaseGeneration &+= 1
       pendingIncreaseTask?.cancel()
