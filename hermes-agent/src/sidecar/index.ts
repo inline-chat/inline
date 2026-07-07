@@ -16,6 +16,7 @@ import {
   MessageActionRow,
   MessageActions,
   MessageActionToast,
+  isInlineFollowModeMentionGateEligible,
   type InlineSdkClientOptions,
   type InlineSdkGetMessagesParams,
   type InlineSdkSendMessageParams,
@@ -74,6 +75,11 @@ type RawChat = {
   createdBy?: bigint | number | string | null
   untitled?: boolean | null
   number?: number | null
+}
+
+type RawDialog = {
+  followMode?: bigint | number | string | null
+  follow_mode?: bigint | number | string | null
 }
 
 if (!token || !sidecarToken) {
@@ -445,6 +451,7 @@ async function endpointChat(res: ServerResponse, body: unknown) {
   }
   const snapshot = await getRawChatSnapshot(target.chatId)
   const chat = snapshot.chat
+  const followModeMentionEligible = isInlineFollowModeMentionGateEligible(chat)
   writeJson(res, 200, {
     ok: true,
     result: {
@@ -462,6 +469,9 @@ async function endpointChat(res: ServerResponse, body: unknown) {
       ...(chat.createdBy != null ? { createdBy: chat.createdBy.toString() } : {}),
       ...(chat.untitled != null ? { untitled: chat.untitled } : {}),
       ...(chat.number != null ? { number: chat.number } : {}),
+      ...(snapshot.dialog != null ? { dialog: safeJson(snapshot.dialog) } : {}),
+      ...(snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {}),
+      followModeMentionEligible,
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
       ...(snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {}),
       chat: safeJson(chat),
@@ -632,6 +642,8 @@ async function endpointCreateSubthread(res: ServerResponse, body: unknown) {
 
 async function getRawChatSnapshot(chatId: bigint): Promise<{
   chat: RawChat
+  dialog?: RawDialog
+  dialogFollowMode?: bigint | number | string
   pinnedMessageIds: unknown[]
   anchorMessage?: unknown
 }> {
@@ -642,14 +654,19 @@ async function getRawChatSnapshot(chatId: bigint): Promise<{
   const typed = result as {
     getChat?: {
       chat?: RawChat
+      dialog?: RawDialog
       pinnedMessageIds?: unknown[]
       anchorMessage?: unknown
     }
   }
   const chat = typed.getChat?.chat
   if (!chat) throw new SidecarError("chat not found", "not_found")
+  const dialog = typed.getChat?.dialog
+  const dialogFollowMode = dialog?.followMode ?? dialog?.follow_mode ?? undefined
   return {
     chat,
+    ...(dialog != null ? { dialog } : {}),
+    ...(dialogFollowMode != null ? { dialogFollowMode } : {}),
     pinnedMessageIds: typed.getChat?.pinnedMessageIds ?? [],
     ...(typed.getChat?.anchorMessage != null ? { anchorMessage: typed.getChat.anchorMessage } : {}),
   }
@@ -693,6 +710,8 @@ type SidecarClient = {
     spaceId?: bigint
     parentChatId?: bigint
     parentMessageId?: bigint
+    lastMsgId?: bigint
+    dialogFollowMode?: bigint | number | string
     isPublic?: boolean
     untitled?: boolean
     number?: number
@@ -815,6 +834,8 @@ class MockInlineClient implements SidecarClient {
     title: string
     parentChatId?: bigint
     parentMessageId?: bigint
+    lastMsgId?: bigint
+    dialogFollowMode?: bigint | number | string
     untitled?: boolean
   }> {
     this.record("getChat", params)
@@ -824,6 +845,8 @@ class MockInlineClient implements SidecarClient {
         title: "Mock reply thread 456",
         parentChatId: 123n,
         parentMessageId: 9001n,
+        lastMsgId: 9002n,
+        dialogFollowMode: 1,
         untitled: true,
       }
     }
@@ -899,6 +922,7 @@ class MockInlineClient implements SidecarClient {
             title: "Mock reply thread 456",
             parentChatId: 123n,
             parentMessageId: 9001n,
+            lastMsgId: 9002n,
             untitled: true,
           }
         : {
@@ -908,6 +932,7 @@ class MockInlineClient implements SidecarClient {
       return {
         getChat: {
           chat,
+          dialog: { chatId, followMode: chatId === 456n ? 1 : 0 },
           pinnedMessageIds: [8801n],
           anchorMessage: {
             id: 8801n,

@@ -161,7 +161,8 @@ def _http_post(url, body, headers):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=3) as response:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=3) as response:
             return HttpxResponse(response.status, response.read().decode("utf8"))
     except urllib.error.HTTPError as exc:
         return HttpxResponse(exc.code, exc.read().decode("utf8"))
@@ -311,6 +312,7 @@ assert inline_display["cleanup_progress"] is True
 assert inline_display["streaming"] is False
 assert inline_display["interim_assistant_messages"] is False
 assert ctx.platform["name"] == "inline"
+assert ctx.platform["emoji"] == "💬"
 assert ctx.platform["label"] == "Inline"
 assert ctx.platform["required_env"] == ["INLINE_TOKEN"]
 assert ctx.platform["cron_deliver_env_var"] == "INLINE_HOME_CHANNEL"
@@ -322,7 +324,7 @@ assert "inline.token" in ctx.platform["install_hint"]
 assert len(ctx.commands) == 1
 assert ctx.commands[0]["name"] == "threads"
 assert ctx.commands[0]["description"] == "Configure Inline reply-thread routing"
-assert ctx.commands[0]["args_hint"] == "[status|on|off|auto]"
+assert ctx.commands[0]["args_hint"] == "[status|on|off|auto|reset]"
 thread_fallback = ctx.commands[0]["handler"]("off")
 assert "/threads off" in thread_fallback
 assert "inside the target Inline DM or group chat" in thread_fallback
@@ -330,7 +332,18 @@ assert "restart the Hermes gateway" in thread_fallback
 assert ctx.cli["name"] == "inline"
 assert ctx.tool["name"] == "inline"
 assert ctx.tool["toolset"] == "inline"
+assert ctx.tool["emoji"] == "💬"
+assert "participate" not in ctx.tool["description"]
 assert ctx.tool["schema"]["name"] == "inline"
+assert "send_message" not in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "send_message" not in ctx.tool["schema"]["description"]
+assert "set_typing" not in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "set_presence" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "reply_to_msg_id" not in ctx.tool["schema"]["parameters"]["properties"]
+assert "send_mode" not in ctx.tool["schema"]["parameters"]["properties"]
+assert "state" not in ctx.tool["schema"]["parameters"]["properties"]
+assert ctx.tool["schema"]["parameters"]["properties"]["kind"]["description"] == "Bot avatar presence/status kind."
+assert ctx.tool["schema"]["parameters"]["properties"]["comment"]["description"] == "Optional bot avatar presence/status message."
 assert "get_history" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "create_thread" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "search_messages" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
@@ -433,13 +446,31 @@ try:
         "parse_markdown": False,
         "send_mode": "silent",
     }))
-    assert send_result["result"]["messageId"] == "9001"
-    assert tool_calls[-1] == ("/send", {
-        "target": {"userId": "42"},
-        "text": "hello",
-        "parseMarkdown": False,
-        "replyToMsgId": "7",
-        "sendMode": "silent",
+    assert send_result["error"].startswith("inline: unknown action send_message")
+    assert "send_message" not in send_result["allowed_actions"]
+    assert "opt_in_env" not in send_result
+    assert tool_calls[-1][0] == "/history"
+
+    typing_result = json.loads(ctx.tool["handler"]({
+        "action": "set_typing",
+        "chat_id": "chat:10",
+        "state": "start",
+    }))
+    assert typing_result["error"].startswith("inline: unknown action set_typing")
+    assert "set_typing" not in typing_result["allowed_actions"]
+    assert tool_calls[-1][0] == "/history"
+
+    presence_result = json.loads(ctx.tool["handler"]({
+        "action": "set_presence",
+        "chat_id": "chat:10",
+        "kind": "running",
+        "comment": "reading",
+    }))
+    assert presence_result["success"] is True
+    assert tool_calls[-1] == ("/presence", {
+        "target": {"chatId": "10"},
+        "kind": "running",
+        "comment": "reading",
     })
 
     search_result = json.loads(ctx.tool["handler"]({
@@ -716,11 +747,13 @@ assert disabled_observed_context._observe_unmentioned_messages is False
 off_context = InlineAdapter(PlatformConfig(extra={**base_extra, "context_backfill": "off"}))
 assert off_context._context_backfill == "off"
 default_reply_threads = InlineAdapter(PlatformConfig(extra=base_extra))
-assert default_reply_threads._reply_threads is True
+assert default_reply_threads._reply_thread_mode == "auto"
 disabled_reply_threads = InlineAdapter(PlatformConfig(extra={**base_extra, "reply_threads": "off"}))
-assert disabled_reply_threads._reply_threads is False
+assert disabled_reply_threads._reply_thread_mode == "off"
 enabled_reply_threads = InlineAdapter(PlatformConfig(extra={**base_extra, "reply_threads": "auto"}))
-assert enabled_reply_threads._reply_threads is True
+assert enabled_reply_threads._reply_thread_mode == "auto"
+forced_reply_threads = InlineAdapter(PlatformConfig(extra={**base_extra, "reply_threads": "on"}))
+assert forced_reply_threads._reply_thread_mode == "on"
 for bad_limit in ["0", "-1", "101", "abc"]:
     try:
         InlineAdapter(PlatformConfig(extra={**base_extra, "command_limit": bad_limit}))
@@ -968,9 +1001,49 @@ async def assert_reply_thread_chat_metadata():
 
 asyncio.run(assert_reply_thread_chat_metadata())
 
-async def assert_default_reply_thread_creation():
+async def assert_default_auto_reply_threads_keep_fresh_parent_messages_flat():
     adapter = InlineAdapter(PlatformConfig(extra={
         **base_extra,
+        "require_mention": False,
+    }))
+    events = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    async def fake_get_chat_info(chat_id):
+        assert chat_id == "10"
+        return {"chatId": "10", "title": "New thread", "lastMsgId": "1"}
+
+    async def fake_sidecar_call(path, body):
+        raise AssertionError(f"default auto mode should not create a reply thread for fresh message: {path} {body}")
+
+    adapter.handle_message = fake_handle_message
+    adapter._get_chat_info = fake_get_chat_info
+    adapter._sidecar_call = fake_sidecar_call
+    await adapter._dispatch_message({
+        "seq": 9,
+        "chatId": "10",
+        "message": {
+            "id": "1",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "hey bro",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+
+    assert len(events) == 1
+    assert events[0].source.chat_id == "10"
+    assert events[0].source.thread_id is None
+    assert "thread_id" not in events[0].metadata["inline"]
+
+asyncio.run(assert_default_auto_reply_threads_keep_fresh_parent_messages_flat())
+
+async def assert_forced_reply_thread_creation():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "reply_threads": "on",
         "require_mention": False,
         "channel_prompts": {"99": "Thread prompt", "10": "Parent prompt"},
         "channel_skill_bindings": [{"id": "99", "skill": "thread-skill"}],
@@ -991,6 +1064,8 @@ async def assert_default_reply_thread_creation():
             return {"ok": True, "result": {"chatId": "99"}}
         if path == "/send":
             return {"ok": True, "result": {"messageId": f"sent-{len(calls)}"}}
+        if path == "/typing":
+            return {"ok": True, "result": {}}
         raise AssertionError(f"unexpected sidecar path {path}")
 
     async def fake_fetch_message(chat_id, msg_id):
@@ -1034,10 +1109,28 @@ async def assert_default_reply_thread_creation():
     assert events[0].reply_to_text == "parent quote"
     assert events[0].auto_skill == ["thread-skill"]
 
+    await adapter.send_typing("10", metadata={"thread_id": "99"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "start"})
+
     trigger_reply = await adapter.send("10", "agent reply", reply_to="7", metadata={"thread_id": "99"})
     assert trigger_reply.success is True
     assert calls[-1][1]["target"] == {"chatId": "99"}
     assert "replyToMsgId" not in calls[-1][1]
+
+    await adapter.stop_typing("10", metadata={"thread_id": "99"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "stop"})
+
+    await adapter.send_typing("10", metadata={"thread_id": "99"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
+    await adapter.stop_typing("10", metadata={"thread_id": "99"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
+
+    reused_thread = await adapter._create_reply_thread("10", "7", "please investigate the incident", "6")
+    assert reused_thread == "99"
+    await adapter.send_typing("10", metadata={"thread_id": "99"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
+    await adapter.stop_typing("10", metadata={"thread_id": "99"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
 
     quote_reply = await adapter.send("10", "agent reply", reply_to="6", metadata={"thread_id": "99"})
     assert quote_reply.success is True
@@ -1047,7 +1140,7 @@ async def assert_default_reply_thread_creation():
     assert in_thread_reply.success is True
     assert calls[-1][1]["replyToMsgId"] == "sent-2"
 
-asyncio.run(assert_default_reply_thread_creation())
+asyncio.run(assert_forced_reply_thread_creation())
 
 async def assert_default_dm_reply_thread_creation():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
@@ -1442,10 +1535,19 @@ async def assert_reply_thread_slash_command():
             "require_mention": True,
         }))
         sends = []
+        edits = []
+        answers = []
 
-        async def fake_send(chat_id, content, reply_to=None, metadata=None):
-            sends.append((chat_id, content, reply_to, metadata))
+        async def fake_send(chat_id, content, reply_to=None, metadata=None, actions=None):
+            sends.append((chat_id, content, reply_to, metadata, actions))
             return SendResult(success=True, message_id=f"sent-{len(sends)}")
+
+        async def fake_edit_action_message(event, text, actions=None):
+            edits.append((event, text, actions))
+            return SendResult(success=True, message_id=str(event.get("messageId") or "edited"))
+
+        async def fake_answer_action(interaction_id, toast):
+            answers.append((interaction_id, toast))
 
         async def fake_handle_message(event):
             raise AssertionError("thread slash command should not reach Hermes handler")
@@ -1455,9 +1557,17 @@ async def assert_reply_thread_slash_command():
                 return {"chatId": "99", "title": "Child thread", "parentChatId": "10"}
             return {"chatId": chat_id, "title": f"Chat {chat_id}"}
 
+        async def fake_fetch_message(chat_id, message_id):
+            if chat_id == "20":
+                return {"peerId": {"type": {"oneofKind": "user", "user": {"userId": chat_id}}}}
+            return {"peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}}}
+
         adapter.send = fake_send
+        adapter._edit_action_message = fake_edit_action_message
+        adapter._answer_action = fake_answer_action
         adapter.handle_message = fake_handle_message
         adapter._get_chat_info = fake_get_chat_info
+        adapter._fetch_message = fake_fetch_message
 
         await adapter._dispatch_message({
             "seq": 13,
@@ -1470,13 +1580,70 @@ async def assert_reply_thread_slash_command():
                 "peerId": {"peer": {"oneofKind": "chat"}},
             },
         })
-        assert adapter._reply_threads_for_chat("10") is False
+        assert adapter._reply_thread_mode_for_chat("10") == "off"
         assert sends[-1][0] == "10"
         assert sends[-1][2] == "cmd-1"
         assert sends[-1][3] is None
+        assert sends[-1][4]["rows"][0]["actions"][0]["text"] == "Auto"
+        assert sends[-1][4]["rows"][0]["actions"][1]["text"] == "On"
+        assert sends[-1][4]["rows"][0]["actions"][2]["text"] == "Off"
+        assert sends[-1][4]["rows"][1]["actions"][0]["text"] == "Reset"
         assert "off for this chat" in sends[-1][1]
         saved = json.loads(settings_path.read_text())
-        assert saved["reply_threads"] == {"10": False}
+        assert saved["reply_threads"] == {"10": "off"}
+
+        auto_action = sends[-1][4]["rows"][0]["actions"][0]["id"]
+        assert auto_action.startswith("th:")
+        assert await adapter._handle_action({
+            "chatId": "10",
+            "messageId": "sent-1",
+            "interactionId": "thread-action-1",
+            "actorUserId": "1600",
+            "actionId": auto_action,
+        })
+        assert adapter._reply_thread_mode_for_chat("10") == "auto"
+        assert "Inline reply threads updated: auto for this chat (chat override)." in edits[-1][1]
+        assert "Use Auto, On, Off, or Reset." not in edits[-1][1]
+        assert edits[-1][2] == {"rows": []}
+        assert answers[-1] == ("thread-action-1", "Reply threads: auto")
+        saved = json.loads(settings_path.read_text())
+        assert saved["reply_threads"] == {"10": "auto"}
+
+        await adapter._dispatch_message({
+            "seq": 131,
+            "chatId": "10",
+            "message": {
+                "id": "cmd-1-status",
+                "chatId": "10",
+                "fromId": "u1",
+                "message": "/threads",
+                "peerId": {"peer": {"oneofKind": "chat"}},
+            },
+        })
+        assert "auto for this chat (chat override)" in sends[-1][1]
+        reset_action = sends[-1][4]["rows"][1]["actions"][0]["id"]
+        assert await adapter._handle_action({
+            "chatId": "10",
+            "messageId": "sent-2",
+            "interactionId": "thread-action-2",
+            "actorUserId": "1600",
+            "actionId": reset_action,
+        })
+        assert adapter._reply_thread_mode_for_chat("10") == "auto"
+        assert "Inline reply threads updated: auto for this chat (global default)." in edits[-1][1]
+        assert "Use Auto, On, Off, or Reset." not in edits[-1][1]
+        assert edits[-1][2] == {"rows": []}
+        saved = json.loads(settings_path.read_text())
+        assert saved["reply_threads"] == {}
+
+        assert await adapter._handle_action({
+            "chatId": "10",
+            "messageId": "sent-1",
+            "interactionId": "thread-action-expired",
+            "actorUserId": "1600",
+            "actionId": "th:missing:on",
+        })
+        assert answers[-1] == ("thread-action-expired", "Thread controls expired")
 
         await adapter._dispatch_message({
             "seq": 14,
@@ -1489,11 +1656,30 @@ async def assert_reply_thread_slash_command():
                 "peerId": {"peer": {"oneofKind": "chat"}},
             },
         })
-        assert adapter._reply_threads_for_chat("10") is True
+        assert adapter._reply_thread_mode_for_chat("10") == "auto"
         assert sends[-1][0] == "99"
         assert sends[-1][2] == "cmd-2"
         assert sends[-1][3] == {"thread_id": "99"}
-        assert "on for this chat (default)" in sends[-1][1]
+        assert "auto for this chat (chat override)" in sends[-1][1]
+        saved = json.loads(settings_path.read_text())
+        assert saved["reply_threads"] == {"10": "auto"}
+
+        await adapter._dispatch_message({
+            "seq": 141,
+            "chatId": "99",
+            "message": {
+                "id": "cmd-2-reset",
+                "chatId": "99",
+                "fromId": "u1",
+                "message": "/threads reset",
+                "peerId": {"peer": {"oneofKind": "chat"}},
+            },
+        })
+        assert adapter._reply_thread_mode_for_chat("10") == "auto"
+        assert sends[-1][0] == "99"
+        assert sends[-1][2] == "cmd-2-reset"
+        assert sends[-1][3] == {"thread_id": "99"}
+        assert "auto for this chat (global default)" in sends[-1][1]
         saved = json.loads(settings_path.read_text())
         assert saved["reply_threads"] == {}
 
@@ -1508,7 +1694,7 @@ async def assert_reply_thread_slash_command():
                 "peerId": {"peer": {"oneofKind": "user"}},
             },
         })
-        assert adapter._reply_threads_for_chat("20") is False
+        assert adapter._reply_thread_mode_for_chat("20") == "off"
         assert sends[-1][0] == "20"
         assert sends[-1][2] == "cmd-3"
         assert sends[-1][3] is None
@@ -1527,11 +1713,30 @@ async def assert_reply_thread_slash_command():
                 "peerId": {"peer": {"oneofKind": "user"}},
             },
         })
-        assert adapter._reply_threads_for_chat("20") is True
+        assert adapter._reply_thread_mode_for_chat("20") == "auto"
         assert sends[-1][0] == "20"
         assert sends[-1][2] == "cmd-4"
         assert sends[-1][3] is None
-        assert "on for this chat (default)" in sends[-1][1]
+        assert "auto for this chat (chat override)" in sends[-1][1]
+        saved = json.loads(settings_path.read_text())
+        assert saved["reply_threads"] == {"20": "auto"}
+
+        await adapter._dispatch_message({
+            "seq": 17,
+            "chatId": "20",
+            "message": {
+                "id": "cmd-5",
+                "chatId": "20",
+                "fromId": "u1",
+                "message": "/threads default",
+                "peerId": {"peer": {"oneofKind": "user"}},
+            },
+        })
+        assert adapter._reply_thread_mode_for_chat("20") == "auto"
+        assert sends[-1][0] == "20"
+        assert sends[-1][2] == "cmd-5"
+        assert sends[-1][3] is None
+        assert "auto for this chat (global default)" in sends[-1][1]
         saved = json.loads(settings_path.read_text())
         assert saved["reply_threads"] == {}
 
@@ -1586,6 +1791,36 @@ async def assert_group_room_controls():
 
     free = InlineAdapter(PlatformConfig(extra={**base_extra, "free_response_chats": "10"}))
     assert len(await run(free, base_msg)) == 1
+
+    async def followed_info(chat_id):
+        return {
+            "chatId": chat_id,
+            "title": f"Followed {chat_id}",
+            "dialogFollowMode": "1",
+            "followModeMentionEligible": True,
+        }
+
+    followed = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": True}))
+    followed._get_chat_info = followed_info
+    followed_events = await run(followed, base_msg)
+    assert len(followed_events) == 1
+    assert followed_events[0].source.chat_id == "10"
+
+    async def followed_large_info(chat_id):
+        return {
+            "chatId": chat_id,
+            "title": f"Large followed {chat_id}",
+            "dialogFollowMode": "1",
+            "followModeMentionEligible": False,
+        }
+
+    followed_large = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": True}))
+    followed_large._get_chat_info = followed_large_info
+    assert await run(followed_large, base_msg) == []
+
+    strict_followed = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": True, "strict_mention": True}))
+    strict_followed._get_chat_info = followed_info
+    assert await run(strict_followed, base_msg) == []
 
     strict = InlineAdapter(PlatformConfig(extra={**base_extra, "strict_mention": True}))
     strict._me_id = "bot"
@@ -2303,6 +2538,38 @@ async def assert_adapter_sidecar_loopback():
         assert adapter._sidecar_proc is None
 
 asyncio.run(assert_adapter_sidecar_loopback())
+
+async def assert_connect_does_not_block_on_command_sync():
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "sync_commands": True}))
+    sync_started = asyncio.Event()
+    sync_released = asyncio.Event()
+
+    async def fake_start_sidecar():
+        adapter._me_id = "999"
+
+    async def fake_inbound_loop():
+        await asyncio.sleep(30)
+
+    async def fake_sync_bot_commands():
+        sync_started.set()
+        await sync_released.wait()
+
+    adapter._start_sidecar = fake_start_sidecar
+    adapter._inbound_loop = fake_inbound_loop
+    adapter._sync_bot_commands = fake_sync_bot_commands
+
+    connected = await adapter.connect()
+    assert connected is True
+    assert adapter.connected is True
+    assert adapter._command_sync_task is not None
+    await asyncio.wait_for(sync_started.wait(), timeout=1)
+
+    await adapter.disconnect()
+    assert adapter._command_sync_task is None
+    assert adapter._inbound_task is None
+    assert adapter.connected is False
+
+asyncio.run(assert_connect_does_not_block_on_command_sync())
 
 async def assert_disconnect_cleans_after_inbound_cancel():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))

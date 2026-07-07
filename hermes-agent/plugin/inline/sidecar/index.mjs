@@ -22160,6 +22160,7 @@ class WebSocketTransport {
   lastReconnectDelayMs = null;
   lastReconnectCause = null;
   reconnectCount = 0;
+  reconnectScheduling = false;
   constructor(options) {
     this.url = options.url;
     this.log = options.logger ?? {};
@@ -22187,26 +22188,33 @@ class WebSocketTransport {
   }
   async reconnect(options) {
     const skipDelay = options?.skipDelay ?? false;
-    if (this.state === "connecting" && this.reconnectionTimer) {
+    if (this.state === "connecting" && (this.reconnectionTimer || this.reconnectScheduling)) {
       return;
     }
-    await this.setConnecting();
-    this.cleanUpPreviousConnection();
-    this.connectionAttemptNo = this.connectionAttemptNo + 1 >>> 0;
-    const delaySeconds = this.getReconnectionDelaySeconds(this.connectionAttemptNo);
-    const delayMs = Math.round(delaySeconds * 1000);
-    const cause = options?.cause?.trim() || "unspecified";
-    this.lastReconnectScheduledAt = Date.now();
-    this.lastReconnectDelayMs = delayMs;
-    this.lastReconnectCause = cause;
-    this.reconnectCount += 1;
-    this.log.warn?.(`WebSocket reconnect scheduled (attempt=${this.connectionAttemptNo}, delayMs=${delayMs}, cause=${cause})`);
-    this.reconnectionTimer = setTimeout(() => {
-      this.reconnectionTimer = null;
-      if (this.state === "idle" || this.state === "connected")
+    this.reconnectScheduling = true;
+    try {
+      await this.setConnecting();
+      if (this.state === "idle" || this.reconnectionTimer)
         return;
-      this.openConnection();
-    }, skipDelay ? 0 : delaySeconds * 1000);
+      this.cleanUpPreviousConnection();
+      this.connectionAttemptNo = this.connectionAttemptNo + 1 >>> 0;
+      const delaySeconds = this.getReconnectionDelaySeconds(this.connectionAttemptNo);
+      const delayMs = Math.round(delaySeconds * 1000);
+      const cause = options?.cause?.trim() || "unspecified";
+      this.lastReconnectScheduledAt = Date.now();
+      this.lastReconnectDelayMs = delayMs;
+      this.lastReconnectCause = cause;
+      this.reconnectCount += 1;
+      this.log.warn?.(`WebSocket reconnect scheduled (attempt=${this.connectionAttemptNo}, delayMs=${delayMs}, cause=${cause})`);
+      this.reconnectionTimer = setTimeout(() => {
+        this.reconnectionTimer = null;
+        if (this.state === "idle" || this.state === "connected")
+          return;
+        this.openConnection();
+      }, skipDelay ? 0 : delaySeconds * 1000);
+    } finally {
+      this.reconnectScheduling = false;
+    }
   }
   cleanUpPreviousConnection() {
     if (this.reconnectionTimer) {
@@ -22676,6 +22684,7 @@ class InlineSdkClient {
     const chat = result.getChat.chat;
     if (!chat)
       throw new Error("getChat: missing chat");
+    const dialogFollowMode = result.getChat.dialog?.followMode;
     return {
       chatId: chat.id,
       title: chat.title,
@@ -22683,6 +22692,8 @@ class InlineSdkClient {
       ...chat.spaceId != null ? { spaceId: chat.spaceId } : {},
       ...chat.parentChatId != null ? { parentChatId: chat.parentChatId } : {},
       ...chat.parentMessageId != null ? { parentMessageId: chat.parentMessageId } : {},
+      ...chat.lastMsgId != null ? { lastMsgId: chat.lastMsgId } : {},
+      ...dialogFollowMode != null ? { dialogFollowMode } : {},
       ...chat.isPublic != null ? { isPublic: chat.isPublic } : {},
       ...chat.untitled != null ? { untitled: chat.untitled } : {},
       ...chat.number != null ? { number: chat.number } : {}
@@ -23799,6 +23810,36 @@ var resolveUploadFileUrl = (baseUrl) => {
   return url;
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
+// ../sdk/dist/sdk/thread-mention-gating.js
+var INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT = 50;
+function isInlineReplyThreadForMentionGate(chat) {
+  return parsePositiveInteger(chat.parentMessageId) != null;
+}
+function isInlineFreshThreadForMentionGate(lastMsgId, limit = INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT) {
+  const normalized = parsePositiveInteger(lastMsgId);
+  return normalized != null && normalized < BigInt(limit);
+}
+function isInlineFollowModeMentionGateEligible(chat) {
+  if (isInlineReplyThreadForMentionGate(chat)) {
+    return true;
+  }
+  return isInlineFreshThreadForMentionGate(chat.lastMsgId);
+}
+function parsePositiveInteger(value) {
+  if (value == null)
+    return null;
+  if (typeof value === "bigint")
+    return value > 0n ? value : null;
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value <= 0)
+      return null;
+    return BigInt(value);
+  }
+  const text = value.trim();
+  if (!/^[1-9]\d*$/.test(text))
+    return null;
+  return BigInt(text);
+}
 // ../sdk/dist/state/json-file-state-store.js
 import { readFile, rename, writeFile } from "node:fs/promises";
 
@@ -24458,6 +24499,7 @@ async function endpointChat(res, body) {
   }
   const snapshot = await getRawChatSnapshot(target.chatId);
   const chat = snapshot.chat;
+  const followModeMentionEligible = isInlineFollowModeMentionGateEligible(chat);
   writeJson(res, 200, {
     ok: true,
     result: {
@@ -24475,6 +24517,9 @@ async function endpointChat(res, body) {
       ...chat.createdBy != null ? { createdBy: chat.createdBy.toString() } : {},
       ...chat.untitled != null ? { untitled: chat.untitled } : {},
       ...chat.number != null ? { number: chat.number } : {},
+      ...snapshot.dialog != null ? { dialog: safeJson(snapshot.dialog) } : {},
+      ...snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {},
+      followModeMentionEligible,
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
       ...snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {},
       chat: safeJson(chat)
@@ -24636,8 +24681,12 @@ async function getRawChatSnapshot(chatId) {
   const chat = typed.getChat?.chat;
   if (!chat)
     throw new SidecarError("chat not found", "not_found");
+  const dialog = typed.getChat?.dialog;
+  const dialogFollowMode = dialog?.followMode ?? dialog?.follow_mode ?? undefined;
   return {
     chat,
+    ...dialog != null ? { dialog } : {},
+    ...dialogFollowMode != null ? { dialogFollowMode } : {},
     pinnedMessageIds: typed.getChat?.pinnedMessageIds ?? [],
     ...typed.getChat?.anchorMessage != null ? { anchorMessage: typed.getChat.anchorMessage } : {}
   };
@@ -24767,6 +24816,8 @@ class MockInlineClient {
         title: "Mock reply thread 456",
         parentChatId: 123n,
         parentMessageId: 9001n,
+        lastMsgId: 9002n,
+        dialogFollowMode: 1,
         untitled: true
       };
     }
@@ -24834,6 +24885,7 @@ class MockInlineClient {
         title: "Mock reply thread 456",
         parentChatId: 123n,
         parentMessageId: 9001n,
+        lastMsgId: 9002n,
         untitled: true
       } : {
         id: chatId,
@@ -24842,6 +24894,7 @@ class MockInlineClient {
       return {
         getChat: {
           chat,
+          dialog: { chatId, followMode: chatId === 456n ? 1 : 0 },
           pinnedMessageIds: [8801n],
           anchorMessage: {
             id: 8801n,

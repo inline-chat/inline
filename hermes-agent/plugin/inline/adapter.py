@@ -78,12 +78,34 @@ _INLINE_COMMAND_LIMIT = 100
 _INLINE_COMMAND_DESCRIPTION_LIMIT = 256
 _INLINE_COMMAND_RETRY_RATIO = 0.8
 _INLINE_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
+_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 _INLINE_THREADS_COMMAND_DESCRIPTION = "Configure Inline reply-thread routing"
-_INLINE_THREADS_COMMAND_ARGS = "[status|on|off|auto]"
+_INLINE_THREADS_COMMAND_ARGS = "[status|on|off|auto|reset]"
+_INLINE_THREADS_ACTION_PREFIX = "th:"
+_INLINE_THREADS_ACTION_TTL_SECONDS = 15 * 60
 _INLINE_LOCAL_COMMANDS = (
     ("threads", _INLINE_THREADS_COMMAND_DESCRIPTION),
 )
 _INLINE_THREAD_COMMAND_RE = re.compile(r"^/(?:thread|threads)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.IGNORECASE)
+_INLINE_REPLY_THREAD_NEGATION_RE = re.compile(
+    r"\b(?:do\s+not|don't|dont|please\s+don't|please\s+dont|no\s+need\s+to)\s+"
+    r"(?:create|start|open|make|use|move|take|reply|respond|answer|send|thread)\b[^.!?\n]*\bthread\b|"
+    r"\b(?:reply|respond|answer|keep)\s+(?:here|in\s+the\s+main\s+chat|in\s+main\s+chat|"
+    r"in\s+the\s+parent\s+chat|in\s+parent\s+chat)\b",
+    re.IGNORECASE,
+)
+_INLINE_REPLY_THREAD_INTENT_RE = re.compile(
+    r"\b(?:reply|respond|answer|send)\s+(?:in|inside|into|to)\s+(?:a\s+)?"
+    r"(?:(?:new|child|reply)\s+)?thread\b|"
+    r"\b(?:create|start|open|make|use)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|"
+    r"\bkeep\s+(?:(?:this|it|the\s+answer|the\s+reply|the\s+response)\s+)?"
+    r"(?:in|inside|into)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|"
+    r"\b(?:move|take)\s+(?:(?:this|it|the\s+answer|the\s+reply|the\s+response)\s+)?"
+    r"(?:to|into)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|"
+    r"\bthread\s+(?:this|the\s+answer|the\s+reply|the\s+response)\b|"
+    r"\b(?:threaded\s+(?:reply|response)|(?:reply|respond|answer)\s+threaded)\b",
+    re.IGNORECASE,
+)
 _INLINE_SETTINGS_VERSION = 1
 _INLINE_ENTITY_LIMIT = 12
 _INLINE_ENTITY_TEXT_LIMIT = 120
@@ -165,14 +187,16 @@ def _install_inline_display_defaults() -> None:
         logger.debug("[inline] failed to install display defaults", exc_info=True)
 
 
-def _thread_replies_enabled(value: Any, default: bool = True) -> bool:
+def _reply_thread_mode(value: Any, default: str = "auto") -> str:
     if value is None or str(value).strip() == "":
         return default
     text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on", "auto", "default", "always", "thread", "threads"}:
-        return True
-    if text in {"0", "false", "no", "off", "never", "flat", "channel"}:
-        return False
+    if text in {"auto", "default", "reset", "config"}:
+        return "auto"
+    if text in {"1", "true", "yes", "on", "always", "thread", "threads"}:
+        return "on"
+    if text in {"0", "false", "no", "off", "never", "flat", "channel", "main"}:
+        return "off"
     logger.warning("[inline] unknown reply_threads value %r; using %s", value, default)
     return default
 
@@ -655,9 +679,9 @@ class InlineAdapter(BasePlatformAdapter):
             else os.getenv("INLINE_OBSERVE_UNMENTIONED_MESSAGES"),
             True,
         )
-        self._reply_threads = _thread_replies_enabled(
+        self._reply_thread_mode = _reply_thread_mode(
             extra.get("reply_threads") if "reply_threads" in extra else os.getenv("INLINE_REPLY_THREADS"),
-            True,
+            "auto",
         )
 
         state_path = extra.get("state_path") or os.getenv("INLINE_STATE_PATH")
@@ -719,6 +743,7 @@ class InlineAdapter(BasePlatformAdapter):
 
         self._sidecar_proc: Optional[subprocess.Popen] = None
         self._sidecar_supervisor_task: Optional[asyncio.Task] = None
+        self._command_sync_task: Optional[asyncio.Task] = None
         self._inbound_task: Optional[asyncio.Task] = None
         self._inbound_running = False
         self._http_client: Optional[httpx.AsyncClient] = None
@@ -729,9 +754,13 @@ class InlineAdapter(BasePlatformAdapter):
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._model_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._thread_action_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._chat_info_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
         self._reply_thread_cache: "OrderedDict[str, str]" = OrderedDict()
         self._reply_thread_parent_reply_ids: "OrderedDict[str, set[str]]" = OrderedDict()
+        self._reply_thread_parent_typing_targets: "OrderedDict[str, str]" = OrderedDict()
+        self._visible_reply_thread_targets: "OrderedDict[str, None]" = OrderedDict()
+        self._active_typing_targets: Dict[str, Dict[str, str]] = {}
         self._observed_context: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
         self._context_backfill_seen: "OrderedDict[str, float]" = OrderedDict()
         self._reply_thread_overrides = self._load_reply_thread_overrides()
@@ -771,7 +800,7 @@ class InlineAdapter(BasePlatformAdapter):
             return False
         return True
 
-    def _load_reply_thread_overrides(self) -> Dict[str, bool]:
+    def _load_reply_thread_overrides(self) -> Dict[str, str]:
         if not self._settings_path_allowed():
             return {}
         try:
@@ -784,11 +813,17 @@ class InlineAdapter(BasePlatformAdapter):
         raw = data.get("reply_threads") if isinstance(data, dict) else None
         if not isinstance(raw, dict):
             return {}
-        overrides: Dict[str, bool] = {}
+        overrides: Dict[str, str] = {}
         for chat_id, enabled in raw.items():
             key = self._chat_key(chat_id)
-            if key and isinstance(enabled, bool):
-                overrides[key] = enabled
+            if not key:
+                continue
+            if isinstance(enabled, bool):
+                overrides[key] = "on" if enabled else "off"
+                continue
+            mode = _reply_thread_mode(enabled, "")
+            if mode:
+                overrides[key] = mode
         return overrides
 
     def _save_reply_thread_overrides(self) -> None:
@@ -806,21 +841,61 @@ class InlineAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning("[inline] failed to save Inline adapter settings: %s", exc)
 
-    def _reply_threads_for_chat(self, chat_id: str, parent_chat_id: Optional[str] = None) -> bool:
+    def _reply_thread_mode_for_chat(self, chat_id: str, parent_chat_id: Optional[str] = None) -> str:
         key = self._chat_key(parent_chat_id or chat_id)
         if key in self._reply_thread_overrides:
             return self._reply_thread_overrides[key]
-        return self._reply_threads
+        return self._reply_thread_mode
 
-    def _set_reply_threads_for_chat(self, chat_id: str, value: Optional[bool]) -> None:
+    def _reply_threads_for_chat(self, chat_id: str, parent_chat_id: Optional[str] = None) -> bool:
+        return self._reply_thread_mode_for_chat(chat_id, parent_chat_id) != "off"
+
+    def _set_reply_threads_for_chat(self, chat_id: str, value: Optional[str]) -> None:
         key = self._chat_key(chat_id)
         if not key:
             return
         if value is None:
             self._reply_thread_overrides.pop(key, None)
         else:
-            self._reply_thread_overrides[key] = value
+            self._reply_thread_overrides[key] = _reply_thread_mode(value, "auto")
         self._save_reply_thread_overrides()
+
+    @staticmethod
+    def _positive_int(value: Any) -> Optional[int]:
+        text = str(value or "").strip()
+        if not re.fullmatch(r"[1-9]\d*", text):
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _has_reply_thread_intent(text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", str(text or "").strip())
+        if not normalized:
+            return False
+        if _INLINE_REPLY_THREAD_NEGATION_RE.search(normalized):
+            return False
+        return bool(_INLINE_REPLY_THREAD_INTENT_RE.search(normalized))
+
+    def _should_create_reply_thread_for_message(
+        self,
+        *,
+        chat_id: str,
+        parent_chat_id: Optional[str],
+        msg_id: str,
+        text: str,
+    ) -> bool:
+        mode = self._reply_thread_mode_for_chat(chat_id, parent_chat_id)
+        if mode == "off":
+            return False
+        if mode == "on":
+            return True
+        if self._has_reply_thread_intent(text):
+            return True
+        message_id = self._positive_int(msg_id)
+        return message_id is not None and message_id >= _REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES
 
     @staticmethod
     def _id_allowed(entries: set[str], value: str) -> bool:
@@ -889,9 +964,88 @@ class InlineAdapter(BasePlatformAdapter):
             return "on"
         if action in {"off", "disable", "disabled", "false", "flat", "channel"}:
             return "off"
-        if action in {"auto", "default", "reset", "config"}:
+        if action in {"auto", "config"}:
             return "auto"
+        if action in {"reset", "default", "inherit", "clear"}:
+            return "reset"
         return "help"
+
+    def _reply_thread_status_body(self, target_chat_id: str, *, controls: bool = True, updated: bool = False) -> str:
+        mode = self._reply_thread_mode_for_chat(target_chat_id)
+        key = self._chat_key(target_chat_id)
+        has_override = key in self._reply_thread_overrides
+        scope = "chat override" if has_override else "global default"
+        if mode == "on":
+            behavior = "Top-level replies will start or reuse Inline reply threads."
+        elif mode == "auto":
+            behavior = (
+                "Top-level replies stay in the parent chat until "
+                f"message #{_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES} or an explicit thread request."
+            )
+        else:
+            behavior = "Top-level replies stay in the parent chat."
+        first_line = f"Inline reply threads are {mode} for this chat ({scope})."
+        if updated:
+            first_line = f"Inline reply threads updated: {mode} for this chat ({scope})."
+        footer = "Existing Inline reply threads are always preserved."
+        if controls:
+            footer = f"{footer} Use Auto, On, Off, or Reset."
+        return (
+            f"{first_line}\n"
+            f"{behavior}\n"
+            f"{footer}"
+        )
+
+    def _new_thread_action_session(self, *, display_chat_id: str, target_chat_id: str) -> str:
+        session_id = secrets.token_hex(6)
+        self._remember(self._thread_action_sessions, session_id, {
+            "created_at": time.time(),
+            "display_chat_id": self._chat_key(display_chat_id),
+            "target_chat_id": self._chat_key(target_chat_id),
+        })
+        return session_id
+
+    def _thread_action_state(self, session_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
+        state = self._thread_action_sessions.get(session_id)
+        if not state:
+            return None
+        created_at = float(state.get("created_at") or 0)
+        if created_at and time.time() - created_at > _INLINE_THREADS_ACTION_TTL_SECONDS:
+            self._thread_action_sessions.pop(session_id, None)
+            return None
+        display_chat_id = self._chat_key(state.get("display_chat_id"))
+        if display_chat_id and display_chat_id != self._chat_key(chat_id):
+            return None
+        return state
+
+    def _thread_status_actions(self, *, display_chat_id: str, target_chat_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+        if not session_id:
+            session_id = self._new_thread_action_session(display_chat_id=display_chat_id, target_chat_id=target_chat_id)
+        prefix = f"{_INLINE_THREADS_ACTION_PREFIX}{session_id}:"
+        rows = [{"actions": [
+            self._action(f"{prefix}auto", "Auto"),
+            self._action(f"{prefix}on", "On"),
+            self._action(f"{prefix}off", "Off"),
+        ]}]
+        if self._chat_key(target_chat_id) in self._reply_thread_overrides:
+            rows.append({"actions": [self._action(f"{prefix}reset", "Reset")]})
+        return {"rows": rows}
+
+    async def _send_thread_status(
+        self,
+        *,
+        chat_id: str,
+        target_chat_id: str,
+        reply_to: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+    ) -> SendResult:
+        return await self.send(
+            chat_id,
+            self._reply_thread_status_body(target_chat_id),
+            reply_to=reply_to,
+            metadata=metadata,
+            actions=self._thread_status_actions(display_chat_id=chat_id, target_chat_id=target_chat_id),
+        )
 
     async def _handle_thread_command(
         self,
@@ -910,31 +1064,24 @@ class InlineAdapter(BasePlatformAdapter):
         metadata = {"thread_id": thread_id} if thread_id else None
         target_chat_id = parent_chat_id or chat_id
         if action == "on":
-            self._set_reply_threads_for_chat(target_chat_id, True)
+            self._set_reply_threads_for_chat(target_chat_id, "on")
         elif action == "off":
-            self._set_reply_threads_for_chat(target_chat_id, False)
+            self._set_reply_threads_for_chat(target_chat_id, "off")
         elif action == "auto":
+            self._set_reply_threads_for_chat(target_chat_id, "auto")
+        elif action == "reset":
             self._set_reply_threads_for_chat(target_chat_id, None)
 
         if action == "help":
-            body = "Usage: /threads status, /threads on, /threads off, or /threads auto."
+            body = "Usage: /threads status, /threads auto, /threads on, /threads off, or /threads reset."
+            await self.send(chat_id, body, reply_to=msg_id, metadata=metadata)
         else:
-            enabled = self._reply_threads_for_chat(target_chat_id)
-            key = self._chat_key(target_chat_id)
-            has_override = key in self._reply_thread_overrides
-            scope = "chat override" if has_override else "default"
-            state = "on" if enabled else "off"
-            behavior = (
-                "Top-level replies will start or reuse Inline reply threads."
-                if enabled
-                else "Top-level replies stay in the parent chat."
+            await self._send_thread_status(
+                chat_id=chat_id,
+                target_chat_id=target_chat_id,
+                reply_to=msg_id,
+                metadata=metadata,
             )
-            body = (
-                f"Inline reply threads are {state} for this chat ({scope}).\n"
-                f"{behavior}\n"
-                "Existing Inline reply threads are always preserved. Use /threads on, /threads off, or /threads auto."
-            )
-        await self.send(chat_id, body, reply_to=msg_id, metadata=metadata)
         return True
 
     @property
@@ -953,7 +1100,7 @@ class InlineAdapter(BasePlatformAdapter):
         if node_error:
             self._set_fatal_error("NODE_UNSUPPORTED", node_error, retryable=False)
             return False
-        self._http_client = httpx.AsyncClient(timeout=30.0)
+        self._http_client = httpx.AsyncClient(timeout=30.0, trust_env=False)
         if self._autostart_sidecar:
             try:
                 await self._start_sidecar()
@@ -963,15 +1110,24 @@ class InlineAdapter(BasePlatformAdapter):
                 await self._http_client.aclose()
                 self._http_client = None
                 return False
-        await self._sync_bot_commands()
         self._inbound_running = True
         self._inbound_task = asyncio.get_event_loop().create_task(self._inbound_loop())
         self._mark_connected()
         logger.info("[inline] connected via sidecar on %s:%d", self._sidecar_bind, self._sidecar_port)
+        self._schedule_bot_command_sync()
         return True
 
     async def disconnect(self) -> None:
         self._inbound_running = False
+        if self._command_sync_task is not None:
+            self._command_sync_task.cancel()
+            try:
+                await self._command_sync_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            self._command_sync_task = None
         if self._inbound_task is not None:
             self._inbound_task.cancel()
             try:
@@ -999,7 +1155,7 @@ class InlineAdapter(BasePlatformAdapter):
         env["INLINE_SIDECAR_TOKEN"] = self._sidecar_token
         env["INLINE_STATE_PATH"] = str(self._state_path)
         env["INLINE_UPLOAD_MAX_MB"] = f"{self._upload_max_mb:g}"
-        env["INLINE_SIDECAR_WATCH_STDIN"] = "1"
+        env["INLINE_SIDECAR_WATCH_STDIN"] = "0" if env.get("INLINE_SIDECAR_TEST_MOCK") == "1" else "1"
 
         self._sidecar_proc = subprocess.Popen(
             [self._node_bin, str(_SIDECAR_ENTRY)],
@@ -1013,7 +1169,7 @@ class InlineAdapter(BasePlatformAdapter):
 
         deadline = time.time() + (self._connect_timeout_ms / 1000.0)
         last_error: Optional[Exception] = None
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
             while time.time() < deadline:
                 if self._sidecar_proc.poll() is not None:
                     raise RuntimeError(f"Inline sidecar exited with code {self._sidecar_proc.returncode}")
@@ -1092,6 +1248,24 @@ class InlineAdapter(BasePlatformAdapter):
             if self._sidecar_supervisor_task is not None:
                 self._sidecar_supervisor_task.cancel()
                 self._sidecar_supervisor_task = None
+
+    def _schedule_bot_command_sync(self) -> None:
+        if not self._sync_commands:
+            return
+        if self._command_sync_task is not None and not self._command_sync_task.done():
+            return
+        self._command_sync_task = asyncio.get_event_loop().create_task(self._run_bot_command_sync())
+
+    async def _run_bot_command_sync(self) -> None:
+        try:
+            await self._sync_bot_commands()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[inline] bot command sync failed: %s", exc)
+        finally:
+            if asyncio.current_task() is self._command_sync_task:
+                self._command_sync_task = None
 
     async def _sync_bot_commands(self) -> None:
         if not self._sync_commands:
@@ -1324,7 +1498,12 @@ class InlineAdapter(BasePlatformAdapter):
         if mention_gate_active:
             mentioned = bool(msg.get("mentioned")) or self._matches_mention(text)
             reply_wakes_thread = reply_to_is_own and not self._strict_mention
-            if not mentioned and not reply_wakes_thread:
+            follow_mode_wakes_thread = (
+                self._chat_follow_mode_following(chat_info)
+                and self._chat_follow_mode_mention_eligible(chat_info)
+                and not self._strict_mention
+            )
+            if not mentioned and not reply_wakes_thread and not follow_mode_wakes_thread:
                 self._remember_observed_context(chat_id, msg, text)
                 return
             if mentioned:
@@ -1334,7 +1513,12 @@ class InlineAdapter(BasePlatformAdapter):
         if (
             not edit
             and not thread_id
-            and self._reply_threads_for_chat(chat_id, parent_chat_id)
+            and self._should_create_reply_thread_for_message(
+                chat_id=chat_id,
+                parent_chat_id=parent_chat_id,
+                msg_id=msg_id,
+                text=text,
+            )
         ):
             created_thread_id = await self._create_reply_thread(chat_id, msg_id, text, reply_to_id)
             if created_thread_id:
@@ -2203,6 +2387,7 @@ class InlineAdapter(BasePlatformAdapter):
         if cached:
             self._reply_thread_cache.move_to_end(key)
             self._remember_reply_thread_parent_reply_ids(cached, msg_id, reply_to_id)
+            self._remember_reply_thread_parent_typing_target(cached, chat_id)
             return cached
         body = {
             "parentChatId": str(chat_id),
@@ -2222,6 +2407,7 @@ class InlineAdapter(BasePlatformAdapter):
             if len(self._reply_thread_cache) > _CHAT_INFO_CACHE_MAX_SIZE:
                 self._reply_thread_cache.popitem(last=False)
             self._remember_reply_thread_parent_reply_ids(thread_id, msg_id, reply_to_id)
+            self._remember_reply_thread_parent_typing_target(thread_id, chat_id)
         return thread_id
 
     def _remember_reply_thread_parent_reply_ids(self, thread_id: str, *message_ids: Optional[str]) -> None:
@@ -2234,6 +2420,27 @@ class InlineAdapter(BasePlatformAdapter):
         self._reply_thread_parent_reply_ids.move_to_end(key)
         if len(self._reply_thread_parent_reply_ids) > _CHAT_INFO_CACHE_MAX_SIZE:
             self._reply_thread_parent_reply_ids.popitem(last=False)
+
+    def _remember_reply_thread_parent_typing_target(self, thread_id: str, parent_chat_id: str) -> None:
+        thread_key = self._chat_key(thread_id)
+        parent_key = self._chat_key(parent_chat_id)
+        if not thread_key or not parent_key:
+            return
+        if thread_key in self._visible_reply_thread_targets:
+            return
+        self._reply_thread_parent_typing_targets[thread_key] = parent_key
+        self._reply_thread_parent_typing_targets.move_to_end(thread_key)
+        if len(self._reply_thread_parent_typing_targets) > _CHAT_INFO_CACHE_MAX_SIZE:
+            self._reply_thread_parent_typing_targets.popitem(last=False)
+
+    def _mark_reply_thread_visible(self, target: Dict[str, str]) -> None:
+        chat_id = self._chat_key(target.get("chatId"))
+        if chat_id:
+            self._reply_thread_parent_typing_targets.pop(chat_id, None)
+            self._visible_reply_thread_targets[chat_id] = None
+            self._visible_reply_thread_targets.move_to_end(chat_id)
+            if len(self._visible_reply_thread_targets) > _CHAT_INFO_CACHE_MAX_SIZE:
+                self._visible_reply_thread_targets.popitem(last=False)
 
     def _reply_to_for_target(self, reply_to: Optional[str], target: Dict[str, str]) -> Optional[str]:
         if not reply_to:
@@ -2276,6 +2483,34 @@ class InlineAdapter(BasePlatformAdapter):
             return None
         text = str(value).strip()
         return text or None
+
+    @staticmethod
+    def _chat_follow_mode_following(info: Dict[str, Any]) -> bool:
+        value = info.get("dialogFollowMode")
+        dialog = info.get("dialog")
+        if value is None and isinstance(dialog, dict):
+            value = dialog.get("followMode")
+        if value is None and isinstance(dialog, dict):
+            value = dialog.get("follow_mode")
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return value == 1
+        text = str(value).strip().lower()
+        return text in {"1", "following", "follow_mode_following", "dialog_following"}
+
+    @staticmethod
+    def _chat_follow_mode_mention_eligible(info: Dict[str, Any]) -> bool:
+        value = info.get("followModeMentionEligible")
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, int):
+            return value == 1
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _chat_title_from_info(info: Dict[str, Any]) -> Optional[str]:
@@ -2370,6 +2605,8 @@ class InlineAdapter(BasePlatformAdapter):
             if not await self._action_allowed(event):
                 return True
             return await self._handle_slash_action(action_id, chat_id, interaction_id)
+        if action_id.startswith(_INLINE_THREADS_ACTION_PREFIX):
+            return await self._handle_thread_action(event)
         return False
 
     async def _action_allowed(self, event: Dict[str, Any]) -> bool:
@@ -2497,6 +2734,65 @@ class InlineAdapter(BasePlatformAdapter):
         except Exception:
             logger.exception("[inline] slash confirm action failed")
             return True
+
+    async def _handle_thread_action(self, event: Dict[str, Any]) -> bool:
+        action_id = str(event.get("actionId") or "")
+        chat_id = str(event.get("chatId") or "")
+        interaction_id = str(event.get("interactionId") or "")
+        parts = action_id.split(":", 2)
+        if len(parts) != 3:
+            await self._answer_action(interaction_id, "Thread controls expired")
+            return True
+        _, session_id, choice = parts
+        if choice not in {"auto", "on", "off", "reset"}:
+            await self._answer_action(interaction_id, "Thread controls expired")
+            return True
+        state = self._thread_action_state(session_id, chat_id)
+        if not state:
+            await self._answer_action(interaction_id, "Thread controls expired")
+            return True
+        target_chat_id = self._chat_key(state.get("target_chat_id"))
+        if not target_chat_id:
+            await self._answer_action(interaction_id, "Thread controls expired")
+            return True
+        if not await self._thread_action_allowed(event, state):
+            return True
+        try:
+            if choice == "reset":
+                self._set_reply_threads_for_chat(target_chat_id, None)
+            else:
+                self._set_reply_threads_for_chat(target_chat_id, choice)
+            mode = self._reply_thread_mode_for_chat(target_chat_id)
+            await self._edit_action_message(
+                event,
+                self._reply_thread_status_body(target_chat_id, controls=False, updated=True),
+                {"rows": []},
+            )
+            self._thread_action_sessions.pop(session_id, None)
+            await self._answer_action(interaction_id, f"Reply threads: {mode}")
+            return True
+        except Exception:
+            logger.exception("[inline] thread action failed")
+            await self._answer_action(interaction_id, "Thread setting failed")
+            return True
+
+    async def _thread_action_allowed(self, event: Dict[str, Any], state: Dict[str, Any]) -> bool:
+        actor_id = str(event.get("actorUserId") or "").strip()
+        interaction_id = str(event.get("interactionId") or "")
+        chat_type = await self._action_chat_type(event)
+        if self._actor_authorized(chat_type, actor_id):
+            return True
+        display_chat_id = self._chat_key(state.get("display_chat_id"))
+        target_chat_id = self._chat_key(state.get("target_chat_id"))
+        if chat_type and actor_id and self._allowed(chat_type, actor_id):
+            if chat_type == "dm":
+                return True
+            thread_id = display_chat_id if target_chat_id and display_chat_id != target_chat_id else None
+            if self._chat_allowed(display_chat_id or str(event.get("chatId") or ""), thread_id, target_chat_id):
+                return True
+        await self._answer_action(interaction_id, "Not authorized")
+        logger.info("[inline] blocked thread action actor=%s chat_type=%s action=%s", actor_id or "unknown", chat_type or "unknown", event.get("actionId") or "")
+        return False
 
     @staticmethod
     def _is_model_picker_action(action_id: str) -> bool:
@@ -2699,7 +2995,14 @@ class InlineAdapter(BasePlatformAdapter):
         except Exception:
             logger.debug("[inline] answer action failed", exc_info=True)
 
-    async def send(self, chat_id: str, content: str, reply_to: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
+    async def send(
+        self,
+        chat_id: str,
+        content: str,
+        reply_to: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        actions: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
         target = self._target_for(chat_id, metadata)
         reply_to = self._reply_to_for_target(reply_to, target)
         parse_markdown = self._parse_markdown and not self._expects_edits(metadata)
@@ -2707,6 +3010,7 @@ class InlineAdapter(BasePlatformAdapter):
         message_ids: List[str] = []
         raw_responses: List[Any] = []
         last_result: Optional[SendResult] = None
+        marked_visible = False
         for index, chunk in enumerate(chunks):
             body: Dict[str, Any] = {
                 "target": target,
@@ -2715,9 +3019,14 @@ class InlineAdapter(BasePlatformAdapter):
             }
             if reply_to and index == 0:
                 body["replyToMsgId"] = str(reply_to)
+            if actions is not None and index == 0:
+                body["actions"] = actions
             last_result = await self._send_sidecar("/send", body)
             if not last_result.success:
                 return last_result
+            if not marked_visible:
+                self._mark_reply_thread_visible(target)
+                marked_visible = True
             if last_result.message_id:
                 message_ids.append(str(last_result.message_id))
             raw_responses.append(last_result.raw_response)
@@ -2752,13 +3061,17 @@ class InlineAdapter(BasePlatformAdapter):
             if finalize:
                 return await self._edit_overflow_split(chat_id, message_id, content, metadata=metadata)
             text = self.truncate_message(text, self.MAX_MESSAGE_LENGTH)[0]
+        target = self._target_for(chat_id, metadata)
         body = {
-            "target": self._target_for(chat_id, metadata),
+            "target": target,
             "messageId": str(message_id),
             "text": text,
             "parseMarkdown": parse_markdown,
         }
-        return await self._send_sidecar("/edit", body)
+        result = await self._send_sidecar("/edit", body)
+        if result.success:
+            self._mark_reply_thread_visible(target)
+        return result
 
     async def _edit_overflow_split(
         self,
@@ -2781,6 +3094,7 @@ class InlineAdapter(BasePlatformAdapter):
         })
         if not first_result.success:
             return first_result
+        self._mark_reply_thread_visible(target)
 
         continuation_ids: List[str] = []
         raw_responses: List[Any] = [first_result.raw_response]
@@ -2834,13 +3148,17 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def send_typing(self, chat_id: str, metadata=None) -> None:
         try:
-            await self._sidecar_call("/typing", {"target": self._target_for(chat_id, metadata), "state": "start"})
+            target = self._typing_target_for(chat_id, metadata)
+            await self._sidecar_call("/typing", {"target": target, "state": "start"})
+            self._active_typing_targets[self._typing_target_key(chat_id, metadata)] = target
         except Exception as exc:
             logger.debug("[inline] typing failed: %s", exc)
 
     async def stop_typing(self, chat_id: str, metadata: Optional[Dict[str, Any]] = None) -> None:
         try:
-            await self._sidecar_call("/typing", {"target": self._target_for(chat_id, metadata), "state": "stop"})
+            key = self._typing_target_key(chat_id, metadata)
+            target = self._active_typing_targets.pop(key, None) or self._typing_target_for(chat_id, metadata)
+            await self._sidecar_call("/typing", {"target": target, "state": "stop"})
         except Exception:
             pass
 
@@ -2902,7 +3220,10 @@ class InlineAdapter(BasePlatformAdapter):
         }
         if reply_to:
             body["replyToMsgId"] = reply_to
-        return await self._send_sidecar("/send-attachment", body)
+        result = await self._send_sidecar("/send-attachment", body)
+        if result.success:
+            self._mark_reply_thread_visible(target)
+        return result
 
     async def create_handoff_thread(self, parent_chat_id: str, name: str) -> Optional[str]:
         try:
@@ -3173,6 +3494,21 @@ class InlineAdapter(BasePlatformAdapter):
             return _target_from_chat_id(str(thread_id))
         return _target_from_chat_id(chat_id)
 
+    def _typing_target_key(self, chat_id: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        return f"{self._chat_key(chat_id)}:{self._chat_key((metadata or {}).get('thread_id'))}"
+
+    # First auto-created reply-thread turns need parent-chat typing. When Hermes
+    # is replying as the first message in a brand-new Inline reply thread, there
+    # is not yet a thread view for users to watch, so typing should remain on
+    # the parent message's chat until the assistant's first child-thread reply lands.
+    def _typing_target_for(self, chat_id: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+        thread_id = self._chat_key((metadata or {}).get("thread_id"))
+        chat_key = self._chat_key(chat_id)
+        parent_chat_id = self._reply_thread_parent_typing_targets.get(thread_id) if thread_id else None
+        if thread_id and parent_chat_id and chat_key == self._chat_key(parent_chat_id):
+            return _target_from_chat_id(parent_chat_id)
+        return self._target_for(chat_id, metadata)
+
     @staticmethod
     def _remember(mapping: OrderedDict, key: str, value: Any, limit: int = 512) -> None:
         if key in mapping:
@@ -3312,7 +3648,7 @@ def _standalone_attachment_kind(path: str, is_voice: bool, force_document: bool)
 def _inline_threads_command_handler(raw_args: str) -> str:
     text = f"/threads {str(raw_args or '').strip()}".strip()
     action = InlineAdapter._thread_command_action(text) or "help"
-    usage = "Usage: /threads status, /threads on, /threads off, or /threads auto."
+    usage = "Usage: /threads status, /threads auto, /threads on, /threads off, or /threads reset."
     if action == "help":
         return usage
     return (
@@ -3347,7 +3683,7 @@ def register(ctx) -> None:
         allowed_users_env="INLINE_ALLOWED_USERS",
         allow_all_env="INLINE_ALLOW_ALL_USERS",
         max_message_length=_MAX_MESSAGE_LENGTH,
-        emoji="I",
+        emoji="💬",
         pii_safe=False,
         allow_update_command=True,
         platform_hint=(

@@ -27,7 +27,7 @@ Supported:
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
 - Inline reply-thread routing, default DM/group auto-threading, `/threads` controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
-- Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, sending, editing, deleting bot-owned messages, reactions, pin/unpin/list pins, typing/presence, and reply-thread creation.
+- Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, and avatar presence/status.
 - Per-turn Inline sender/chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with prompt guidance for sender mentions and current chat/thread Markdown links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
@@ -116,7 +116,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.2    inline-platform
+enabled      user     0.0.3    inline-platform
 ```
 
 ## Update Or Reinstall
@@ -142,7 +142,7 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
   against Hermes Agent `0.17.0` from source commit `824f2279`.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
-- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.11` and is
+- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.12` and is
   bundled into the npm package, so Hermes startup does not run `npm install`.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
@@ -249,18 +249,18 @@ Access control follows Hermes' native platform model:
 | `INLINE_DM_POLICY=open|allowlist|disabled` | Controls direct-message intake. `allowlist` requires `INLINE_ALLOWED_USERS` or config `allow_from`. |
 | `INLINE_GROUP_POLICY=open|allowlist|disabled` | Controls group intake. `allowlist` requires `INLINE_GROUP_ALLOW_FROM`. |
 | `INLINE_GROUP_ALLOW_FROM` | Comma-separated Inline user ids allowed to invoke the bot from group chats. |
-| `INLINE_REQUIRE_MENTION` | Requires a mention or wake word in groups by default. Replies to the bot are accepted without the wake word. |
-| `INLINE_STRICT_MENTION` | Requires a mention or wake word on every group turn, including replies to the bot. Defaults to `false`. |
+| `INLINE_REQUIRE_MENTION` | Requires a mention or wake word in groups by default. Replies to the bot and followed eligible reply/fresh threads are accepted without the wake word. |
+| `INLINE_STRICT_MENTION` | Requires a mention or wake word on every group turn, including replies to the bot and followed threads. Defaults to `false`. |
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
-| `INLINE_REPLY_THREADS` | Creates/uses Inline reply threads for top-level DM and group replies by default. Accepts `true`/`false`, `on`/`off`, `auto`, `thread`, or `flat`; defaults to `true`. |
+| `INLINE_REPLY_THREADS` | Controls top-level reply-thread creation. `auto` creates child reply threads only for large parent chats (`messageId >= 50`) or explicit thread requests; `on` always creates; `off` stays flat. Defaults to `auto`. |
 | `INLINE_CONTEXT_BACKFILL` | Automatic context mode. `selective` is the default, `off` disables automatic history windows, and `always` restores recent-history backfill on every turn. |
 | `INLINE_THREAD_CONTEXT_LIMIT` | Max current chat/thread messages for selective thread or mention-gap context. Must be `0` through `100`; defaults to `30`. |
 | `INLINE_REPLY_CONTEXT_LIMIT` | Max messages in the anchored window around a replied-to Inline message. Must be `0` through `50`; defaults to `10`. |
 | `INLINE_OBSERVED_CONTEXT_LIMIT` | Max unmentioned group messages kept in the observed-context buffer. Must be `0` through `100`; defaults to `20`. |
 | `INLINE_OBSERVE_UNMENTIONED_MESSAGES` | Buffers unmentioned group messages that pass chat/user policy but do not wake the bot. Defaults to `true`; set to `false` to disable. |
 | `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
-| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
+| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On/Off buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_MENTION_PATTERNS` | JSON list, comma-separated, or newline-separated regex patterns for group wake words. |
 | `INLINE_PARSE_MARKDOWN` | Controls whether outbound Hermes Markdown is parsed by Inline. Defaults to `true`. |

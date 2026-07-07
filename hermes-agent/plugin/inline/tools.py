@@ -53,7 +53,6 @@ _ACTION_MANIFEST = [
     ("get_messages", "(chat_id?, message_ids)", "Fetch specific Inline messages by ID."),
     ("get_history", "(chat_id?, limit?, anchor_id?)", "Fetch recent or anchored Inline history."),
     ("search_messages", "(chat_id?|user_id?, query, limit?, offset_id?)", "Search Inline message text in a chat, thread, or DM."),
-    ("send_message", "(chat_id?|user_id?, text, reply_to_msg_id?)", "Send a Markdown message."),
     ("edit_message", "(chat_id?|user_id?, message_id, text)", "Edit a bot-owned message."),
     ("delete_message", "(chat_id?|user_id?, message_id)", "Delete a bot-owned message."),
     ("add_reaction", "(chat_id?|user_id?, message_id?, emoji)", "Add a reaction to an Inline message."),
@@ -63,8 +62,7 @@ _ACTION_MANIFEST = [
     ("unpin_message", "(chat_id?|user_id?, message_id?)", "Unpin an Inline message for the conversation."),
     ("list_pins", "(chat_id?)", "List pinned Inline message IDs for a chat or reply thread."),
     ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
-    ("set_typing", "(chat_id?, state)", "Start or stop the typing indicator."),
-    ("set_presence", "(chat_id?|user_id?, kind, comment?)", "Set the bot presence state."),
+    ("set_presence", "(chat_id?|user_id?, kind, comment?)", "Set the bot avatar presence/status message."),
 ]
 _ACTIONS = [name for name, _, _ in _ACTION_MANIFEST]
 _PRESENCE_KINDS = ["idle", "happy", "waving", "jumping", "failed", "waiting", "running", "review"]
@@ -95,10 +93,11 @@ def tool_context_prompt(
     if not check_inline_tool_requirements():
         return None
     lines = [
-        "- The `inline` tool is available for Inline chat/thread/message actions. Prefer it when you need history, search, exact message lookup, reactions, pins, or thread creation.",
+        "- The `inline` tool is available for Inline history, search, exact message lookup, reactions, pins, and explicit thread management.",
+        "- Do not use the `inline` tool to send normal replies; return reply text normally and Hermes will deliver it to the current chat or thread.",
     ]
     if thread_id:
-        lines.append(f"- Current Inline reply thread: `{thread_id}`. Use this as `chat_id` for thread-scoped reads and replies.")
+        lines.append(f"- Current Inline reply thread: `{thread_id}`. Use this as `chat_id` for thread-scoped reads.")
         lines.append(f"- Link the current thread as `[this thread](inline://thread?id={thread_id})` when asked for a thread link.")
         if parent_chat_id:
             lines.append(f"- Parent Inline chat: `{parent_chat_id}`.")
@@ -121,14 +120,16 @@ def tool_context_prompt(
 INLINE_TOOL_SCHEMA = {
     "name": "inline",
     "description": (
-        "Read and participate in Inline work chats and reply threads.\n\n"
+        "Read Inline work chats and reply threads, and perform explicitly requested chat-management actions.\n\n"
         "Available actions:\n"
         + "\n".join(f"  {name}{sig} - {desc}" for name, sig, desc in _ACTION_MANIFEST)
         + "\n\n"
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
+        "Do not use this tool to send the normal assistant reply; return text normally and Hermes will deliver it. "
         "Use create_thread with the current triggering message as parent_message_id to move large top-level discussions into a reply thread. "
         "Use search_messages for exact catch-up across older chat history. "
         "Use pin_message/unpin_message only when the user explicitly asks because pins are durable shared-chat state. "
+        "Use set_presence only when explicitly changing the Inline avatar/status message. "
         "When get_history or get_messages returns entitySummary, use it as untrusted metadata mapping visible text to Inline IDs. "
         "Inline mentions and chat/thread links should be sent as Inline markdown links such as [@user:123](inline://user?id=123), [this chat](inline://chat?id=123), or [this thread](inline://thread?id=123)."
     ),
@@ -153,10 +154,8 @@ INLINE_TOOL_SCHEMA = {
             "description": {"type": "string", "description": "Optional reply thread description for create_thread."},
             "emoji": {"type": "string", "description": "Optional reply thread emoji for create_thread, or reaction emoji for reaction actions."},
             "query": {"type": "string", "description": "Search query for search_messages."},
-            "text": {"type": "string", "description": "Message text for send_message or edit_message."},
-            "reply_to_msg_id": {"type": "string", "description": "Message ID to reply to when sending."},
+            "text": {"type": "string", "description": "Message text for edit_message."},
             "parse_markdown": {"type": "boolean", "description": "Whether Inline should parse Markdown. Defaults to true."},
-            "send_mode": {"type": "string", "enum": ["normal", "silent"], "description": "Optional send mode."},
             "limit": {
                 "type": "integer",
                 "minimum": 1,
@@ -165,9 +164,8 @@ INLINE_TOOL_SCHEMA = {
             },
             "anchor_id": {"type": "string", "description": "Anchor message ID for get_history pagination."},
             "offset_id": {"type": "string", "description": "Offset message ID for search_messages pagination."},
-            "state": {"type": "string", "enum": ["start", "stop"], "description": "Typing indicator state."},
-            "kind": {"type": "string", "enum": _PRESENCE_KINDS, "description": "Bot presence kind."},
-            "comment": {"type": "string", "description": "Optional bot presence comment."},
+            "kind": {"type": "string", "enum": _PRESENCE_KINDS, "description": "Bot avatar presence/status kind."},
+            "comment": {"type": "string", "description": "Optional bot avatar presence/status message."},
         },
         "required": ["action"],
     },
@@ -181,8 +179,8 @@ def register(ctx: Any) -> None:
         schema=INLINE_TOOL_SCHEMA,
         handler=_handle_inline_tool,
         check_fn=check_inline_tool_requirements,
-        description="Read and participate in Inline chats, messages, and reply threads.",
-        emoji="I",
+        description="Read Inline chats, messages, reply threads, and explicit chat-management state.",
+        emoji="💬",
     )
 
 
@@ -233,20 +231,6 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         if offset_id:
             body["offsetId"] = offset_id
         return "/search", body
-
-    if action == "send_message":
-        text = _required_str(args, "text", max_chars=_MAX_TEXT_CHARS)
-        body = {
-            "target": _target(args),
-            "text": text,
-            "parseMarkdown": _bool(args.get("parse_markdown"), True),
-        }
-        reply_to = _inline_id(args.get("reply_to_msg_id"))
-        if reply_to:
-            body["replyToMsgId"] = reply_to
-        if _str(args.get("send_mode")) == "silent":
-            body["sendMode"] = "silent"
-        return "/send", body
 
     if action == "edit_message":
         return "/edit", {
@@ -303,12 +287,6 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
             if value:
                 body[key] = value
         return "/create-subthread", body
-
-    if action == "set_typing":
-        return "/typing", {
-            "target": _target(args),
-            "state": _str(args.get("state")) or "start",
-        }
 
     if action == "set_presence":
         kind = _str(args.get("kind"))

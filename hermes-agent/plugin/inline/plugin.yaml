@@ -1,7 +1,7 @@
 name: inline-platform
 label: Inline
 kind: platform
-version: 0.0.2
+version: 0.0.3
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
   Hermes Python platform plugin and supervises a local Node sidecar that uses
@@ -63,11 +63,11 @@ optional_env:
     prompt: "Allowed group sender ids"
     password: false
   - name: INLINE_REQUIRE_MENTION
-    description: "Require a mention/wake word in group chats (default true)"
+    description: "Require a mention/wake word in group chats. Replies to the bot and followed eligible reply/fresh threads can continue without one unless strict mention is enabled (default true)."
     prompt: "Require group mention? (true/false)"
     password: false
   - name: INLINE_STRICT_MENTION
-    description: "Require an explicit mention/wake word on every group-chat turn, including replies to the bot (true/false, default false)"
+    description: "Require an explicit mention/wake word on every group-chat turn, including replies to the bot and followed threads (true/false, default false)"
     prompt: "Require every group turn to mention Hermes? (true/false)"
     password: false
   - name: INLINE_ALLOWED_CHATS
@@ -79,8 +79,8 @@ optional_env:
     prompt: "Free-response Inline chat ids"
     password: false
   - name: INLINE_REPLY_THREADS
-    description: "Create/use Inline reply threads for top-level DM and group replies by default (true/false, default true)"
-    prompt: "Reply in Inline threads by default? (true/false)"
+    description: "Reply-thread mode: auto, on, or off. Auto creates child reply threads only for large parent chats or explicit thread requests (default auto)."
+    prompt: "Reply-thread mode (auto/on/off)"
     password: false
   - name: INLINE_CONTEXT_BACKFILL
     description: "Automatic context mode: selective, off, or always (default selective)"

@@ -254,6 +254,10 @@ describe("sidecar runtime", () => {
         title: "Mock reply thread 456",
         parentChatId: "123",
         parentMessageId: "9001",
+        lastMsgId: "9002",
+        dialog: expect.objectContaining({ followMode: 1 }),
+        dialogFollowMode: "1",
+        followModeMentionEligible: true,
         untitled: true,
         pinnedMessageIds: ["8801"],
       })
