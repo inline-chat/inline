@@ -387,6 +387,8 @@ private extension RealtimeAPI {
     error: Error? = nil,
     data: [String: Any] = [:]
   ) {
+    guard SentrySDK.isEnabled else { return }
+
     var data = data
     data["stage"] = stage
     data["state"] = String(describing: state)

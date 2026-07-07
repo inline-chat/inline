@@ -90,6 +90,8 @@ public enum PerformanceTrace {
     level: BreadcrumbLevel = .info,
     data: [String: Any] = [:]
   ) {
+    guard SentrySDK.isEnabled else { return }
+
     let crumb = Breadcrumb(level: level.sentryLevel, category: category)
     crumb.message = message
     crumb.data = data

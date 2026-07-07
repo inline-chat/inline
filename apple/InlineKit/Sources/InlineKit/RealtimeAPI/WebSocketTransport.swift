@@ -991,6 +991,8 @@ private extension WebSocketTransport {
     httpStatus: Int? = nil,
     data: [String: Any] = [:]
   ) {
+    guard SentrySDK.isEnabled else { return }
+
     let crumb = Breadcrumb(level: level, category: "realtime.transport")
     crumb.message = message
     crumb.data = sentryData(
@@ -1011,6 +1013,8 @@ private extension WebSocketTransport {
     httpStatus: Int? = nil,
     data: [String: Any] = [:]
   ) async {
+    guard SentrySDK.isEnabled else { return }
+
     let sentryData = sentryData(
       origin: origin,
       error: error,

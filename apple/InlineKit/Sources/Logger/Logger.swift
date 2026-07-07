@@ -146,6 +146,8 @@ public final class SentryLogSink: LogSink, @unchecked Sendable {
   public init() {}
 
   public func write(_ event: LogEvent) {
+    guard SentrySDK.isEnabled else { return }
+
     let entry = event.entry
 
     if entry.level == .info {
@@ -343,6 +345,7 @@ private actor SentryReporter {
     _ error: Error,
     entry: LogEntry
   ) async {
+    guard SentrySDK.isEnabled else { return }
     guard shouldReport(error) else { return }
 
     await MainActor.run {
@@ -359,6 +362,8 @@ private actor SentryReporter {
   func reportMessage(
     _ entry: LogEntry
   ) async {
+    guard SentrySDK.isEnabled else { return }
+
     await MainActor.run {
       _ = SentrySDK.capture(message: entry.message) { sentryScope in
         sentryScope.setTag(value: entry.scope, key: "scope")

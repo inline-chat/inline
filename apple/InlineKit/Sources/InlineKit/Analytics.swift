@@ -83,6 +83,7 @@ public final class Analytics: Sendable {
 
   /// Identifies the user in Sentry by fetching the current user from the database
   public static func identify() async {
+    guard SentrySDK.isEnabled else { return }
     guard let userId = Auth.shared.getCurrentUserId() else { return }
 
     // Fetch current user from database
@@ -103,12 +104,16 @@ public final class Analytics: Sendable {
 
   /// Clears the user from Sentry
   public static func logout() {
-    SentrySDK.setUser(nil)
+    if SentrySDK.isEnabled {
+      SentrySDK.setUser(nil)
+    }
     log.trace("Analytics: logged out")
   }
 
   /// Identifies the user in Sentry
   public static func identify(userId: Int64, email: String?, name: String?, username: String?) {
+    guard SentrySDK.isEnabled else { return }
+
     let user = Sentry.User()
     user.userId = String(userId)
     user.email = email
