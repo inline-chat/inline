@@ -18,6 +18,8 @@ public enum TransactionTypeRegistry {
       case is CreateSubthreadTransaction: "create_subthread"
       case is ReserveChatIdsTransaction: "reserve_chat_ids"
       case is GetChatTransaction: "get_chat"
+      case is GetThreadReferencesTransaction: "get_thread_references"
+      case is GetThreadSubthreadsTransaction: "get_thread_subthreads"
       case is GetMeTransaction: "get_me"
       case is GetSpaceMembersTransaction: "get_space_members"
       case is GetUserGroupsTransaction: "get_user_groups"
@@ -79,6 +81,8 @@ public enum TransactionTypeRegistry {
       case "create_subthread": return try decoder.decode(CreateSubthreadTransaction.self, from: data)
       case "reserve_chat_ids": return try decoder.decode(ReserveChatIdsTransaction.self, from: data)
       case "get_chat": return try decoder.decode(GetChatTransaction.self, from: data)
+      case "get_thread_references": return try decoder.decode(GetThreadReferencesTransaction.self, from: data)
+      case "get_thread_subthreads": return try decoder.decode(GetThreadSubthreadsTransaction.self, from: data)
       case "get_me": return try decoder.decode(GetMeTransaction.self, from: data)
       case "get_space_members": return try decoder.decode(GetSpaceMembersTransaction.self, from: data)
       case "get_user_groups": return try decoder.decode(GetUserGroupsTransaction.self, from: data)
