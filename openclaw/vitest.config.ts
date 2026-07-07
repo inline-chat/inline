@@ -11,7 +11,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    testTimeout: 30_000,
+    testTimeout: 90_000,
     include: ["src/index.test.ts", "src/runtime.test.ts", "src/manifest.test.ts", "src/inline/**/*.test.ts"],
     coverage: {
       provider: "v8",

@@ -40,11 +40,11 @@ Notes:
 - For reply-driven group flows, set `channels.inline.replyToBotWithoutMention: true`.
 - Group mention requirement is off by default; set `channels.inline.requireMention: true` if you want strict mentions.
 - Inline uses OpenClaw's group-history default; set `channels.inline.historyLimit` to override it, or use `messages.groupChat.historyLimit` as a global fallback.
-- Inline reply threads are off by default. Enable `channels.inline.capabilities.replyThreads: true` if you want OpenClaw `threadId` to map to real Inline reply-thread chats.
-- `replyToId` is still a message reply id. Enabling `replyThreads` adds Inline reply-thread behavior; it does not replace ordinary message replies.
-- You can override the thread toggle per account with `channels.inline.accounts.<account>.capabilities.replyThreads`.
+- Inline reply-thread handling is available by default, so OpenClaw `threadId` can map to real Inline reply-thread chats.
+- `replyToId` is still a message reply id. Inline reply-thread behavior does not replace ordinary message replies.
+- Legacy `capabilities.replyThreads` settings are ignored; use `replyThreadMode` to control automatic routing.
 - In an Inline group, authorized users can run `/threadreply` to choose this chat's automatic reply-thread mode with buttons.
-- Bot-participated reply threads continue without an explicit mention by default, matching Slack, and recent participation is persisted so sparse follow-ups still route. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
+- Bot-participated reply threads and followed fresh Inline threads continue without an explicit mention by default, matching Slack. Reply threads also persist recent participation so sparse follow-ups still route. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
 - Reply-thread context defaults to nearby parent-chat messages, the anchor message, and child-thread history. Set `replyThreadParentHistoryLimit: 0` only when a chat should stay strictly thread-local.
 - Use `inline_parent_context` from a reply-thread session when the agent needs more complete parent-chat history than the automatic context window.
 - Inline current-message media is attached like native channels. Reply-thread anchor media is summarized as context and is not promoted to current-message media on every child-thread turn.
@@ -68,8 +68,6 @@ Example reply-thread toggle:
 ```yaml
 channels:
   inline:
-    capabilities:
-      replyThreads: true
     replyThreadRequireExplicitMention: false
     replyThreadParentHistoryLimit: 10
     groups:

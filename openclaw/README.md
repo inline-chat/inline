@@ -29,7 +29,7 @@ Reply-thread behavior:
 - `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
 - `thread-create` creates a top-level Inline thread when called with participants or `spaceId`, and creates a real Inline reply thread when called with a parent chat target or anchor. `thread-reply` sends into the child reply-thread chat id returned by reply-thread creation.
 - Inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`.
-- Bot-participated reply threads can continue without an explicit bot mention by default, matching Slack-style thread behavior.
+- Bot-participated reply threads and followed fresh Inline threads can continue without an explicit bot mention by default, matching Slack-style thread behavior.
 
 ## Install
 
@@ -39,8 +39,9 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.50` | `>=2026.6.11` | `0.0.11` | Current | Supported line for current stable OpenClaw. Uses focused plugin SDK entrypoints and canonical ClawHub install metadata. |
-| `0.0.48` - `0.0.49` | `>=2026.6.11` | `0.0.11` | Superseded | Transitional 2026.6.11 compatibility releases. Prefer `0.0.50`; `0.0.49` fixed metadata shape but still used the non-canonical ClawHub spec. |
+| `0.0.51` | `>=2026.6.11` | `0.0.12` | Current | Adds follow-mode mention gating for eligible reply/fresh Inline threads. Publish the SDK first. |
+| `0.0.50` | `>=2026.6.11` | `0.0.11` | Superseded | Supported line for current stable OpenClaw. Uses focused plugin SDK entrypoints and canonical ClawHub install metadata. |
+| `0.0.48` - `0.0.49` | `>=2026.6.11` | `0.0.11` | Superseded | Transitional 2026.6.11 compatibility releases. Prefer `0.0.51`; `0.0.49` fixed metadata shape but still used the non-canonical ClawHub spec. |
 | `0.0.47` and earlier | `>=2026.5.18`, tested before the `2026.6.11` floor | `0.0.11` | Legacy | Use only when an older OpenClaw host cannot be upgraded yet. Keeps the previous broad SDK compatibility path. |
 
 From npm:
@@ -203,7 +204,7 @@ Reply behavior summary:
 - Use `replyThreadMode: "main"` if you only want automatic parent-chat replies to stay in the parent chat.
 - Use `replyThreadMode: "thread"` plus `replyThreadAutoCreateMinMessages` when parent-chat bot turns should move into child reply threads anchored to the triggering parent messages.
 - In an Inline group, authorized users can run `/threadreply` to choose the chat's mode with buttons, or `/threadreply thread|main|auto|inherit|status`.
-- Bot-participated reply threads continue without `@bot` by default, including from persisted recent participation state. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
+- Bot-participated reply threads and followed fresh Inline threads continue without `@bot` by default. Reply threads also use persisted recent participation state as a fallback. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
 - `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.

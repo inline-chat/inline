@@ -177,6 +177,8 @@ type MonitorSetup = {
     peerUserId?: bigint
     parentChatId?: bigint
     parentMessageId?: bigint
+    lastMsgId?: bigint
+    dialogFollowMode?: number
   }>
   participants?: Record<string, Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>>
   directoryUsers?: Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>
@@ -367,6 +369,11 @@ async function waitForMockPromise(mock: ReturnType<typeof vi.fn>, callIndex = 0)
 
 async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness> {
   vi.resetModules()
+  const stateDir = path.join(
+    os.tmpdir(),
+    "openclaw-inline-tests",
+    `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  )
 
   const resolveMockModelRef = (cfg?: any) => {
     const raw = typeof cfg?.agents?.defaults?.model === "string" ? cfg.agents.defaults.model.trim() : ""
@@ -624,7 +631,11 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             title: info.title ?? `chat-${chatId}`,
             ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
             ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
+            ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
           },
+          ...(info.dialogFollowMode != null
+            ? { dialog: { chatId: BigInt(chatId), followMode: info.dialogFollowMode } }
+            : {}),
         },
       }
     }
@@ -768,6 +779,13 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }
     }
 
+    const positiveId = (value: unknown): bigint | null => {
+      if (typeof value === "bigint") return value > 0n ? value : null
+      if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return BigInt(value)
+      if (typeof value !== "string" || !/^[1-9]\d*$/.test(value.trim())) return null
+      return BigInt(value.trim())
+    }
+
     return {
       JsonFileStateStore: class {
         constructor(_path: string) {}
@@ -785,6 +803,18 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         INVOKE_MESSAGE_ACTION: 48,
         ANSWER_MESSAGE_ACTION: 49,
         SET_BOT_PRESENCE_STATE,
+      },
+      DialogFollowMode: {
+        DIALOG_FOLLOW_MODE_UNSPECIFIED: 0,
+        FOLLOWING: 1,
+      },
+      isInlineFollowModeMentionGateEligible: (chat: {
+        parentMessageId?: unknown
+        lastMsgId?: unknown
+      }) => {
+        if (positiveId(chat.parentMessageId) != null) return true
+        const lastMsgId = positiveId(chat.lastMsgId)
+        return lastMsgId != null && lastMsgId < 50n
       },
       BotPresenceState_Kind: {
         IDLE: BOT_PRESENCE_IDLE,
@@ -816,6 +846,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             peer: { type: { oneofKind: "chat", chat: { chatId } } },
             ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
             ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
+            ...(info.lastMsgId != null ? { lastMsgId: info.lastMsgId } : {}),
+            ...(info.dialogFollowMode != null ? { dialogFollowMode: info.dialogFollowMode } : {}),
           }
         })
         sendMessage = sendMessage
@@ -957,7 +989,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       mutateConfigFile,
     },
     state: {
-      resolveStateDir: () => path.join(os.tmpdir(), "openclaw-inline-tests"),
+      resolveStateDir: () => stateDir,
       ...(setup.openKeyedStore ? { openKeyedStore: setup.openKeyedStore } : {}),
     },
     media: {
@@ -1004,7 +1036,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         },
       },
       session: {
-        resolveStorePath: () => path.join(os.tmpdir(), "openclaw-inline-tests", "sessions.json"),
+        resolveStorePath: () => path.join(stateDir, "sessions.json"),
         readSessionUpdatedAt: () => null,
         recordInboundSession,
       },
@@ -2714,6 +2746,131 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("continues followed Inline threads without an explicit mention by default", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7200n,
+          message: {
+            id: 12n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "fresh followed thread follow-up",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7200": {
+          kind: "group",
+          title: "Fresh thread",
+          lastMsgId: 12n,
+          dialogFollowMode: 1,
+        },
+      },
+      historyByChat: {
+        "7200": [
+          {
+            id: 12n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "fresh followed thread follow-up",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "continuing",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SessionKey: "agent:main:inline:group:7200",
+          Body: "fresh followed thread follow-up",
+          WasMentioned: true,
+          ExplicitlyMentionedBot: false,
+          MentionSource: "implicit_thread",
+          ImplicitMentionKinds: ["follow_mode"],
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7200n,
+          text: "continuing",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not treat follow mode as an implicit mention in large non-reply threads", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7201n,
+          message: {
+            id: 75n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "large followed thread without mention",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7201": {
+          kind: "group",
+          title: "Large followed thread",
+          lastMsgId: 75n,
+          dialogFollowMode: 1,
+        },
+      },
+      historyByChat: {
+        "7201": [
+          {
+            id: 75n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "large followed thread without mention",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "should not send",
+      },
+    })
+
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("no mention"))
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    })
+
+    await handle.stop()
+  })
+
   it("can require explicit mentions inside reply threads by parent chat policy", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -2736,6 +2893,7 @@ describe("inline/monitor", () => {
           title: "Re: deploy plan",
           parentChatId: 7000n,
           parentMessageId: 5000n,
+          dialogFollowMode: 1,
         },
       },
       historyByChat: {

@@ -72,9 +72,11 @@ import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
 import {
   BotPresenceState_Kind,
+  DialogFollowMode,
   InlineSdkClient,
   JsonFileStateStore,
   Method,
+  isInlineFollowModeMentionGateEligible,
   type Message,
   type MessageActions,
   type MessageActionResponseUi,
@@ -212,6 +214,10 @@ type CachedChatInfo = {
   kind: "direct" | "group"
   title: string | null
   peerUserId?: bigint | null
+  parentChatId?: bigint | null
+  parentMessageId?: bigint | null
+  lastMsgId?: bigint | null
+  dialogFollowMode?: DialogFollowMode | null
 }
 
 type SenderProfile = {
@@ -963,6 +969,10 @@ async function resolveChatInfo(
     kind,
     title,
     ...(peerUserId != null ? { peerUserId } : {}),
+    ...(result.parentChatId != null ? { parentChatId: result.parentChatId } : {}),
+    ...(result.parentMessageId != null ? { parentMessageId: result.parentMessageId } : {}),
+    ...(result.lastMsgId != null ? { lastMsgId: result.lastMsgId } : {}),
+    ...(result.dialogFollowMode != null ? { dialogFollowMode: result.dialogFollowMode } : {}),
   }
   cache.set(chatId, info)
   return info
@@ -1199,6 +1209,19 @@ function collectInlineMentionedUserIds(
     ids.add(entity.userId)
   }
   return [...ids]
+}
+
+function isInlineDialogFollowing(followMode: unknown): boolean {
+  if (followMode == null || typeof followMode === "boolean") return false
+  if (typeof followMode === "number") return followMode === DialogFollowMode.FOLLOWING
+  if (typeof followMode === "bigint") return followMode === BigInt(DialogFollowMode.FOLLOWING)
+  const text = String(followMode).trim().toLowerCase()
+  return (
+    text === String(DialogFollowMode.FOLLOWING) ||
+    text === "following" ||
+    text === "follow_mode_following" ||
+    text === "dialog_following"
+  )
 }
 
 function resolveInlineMentionSource(params: {
@@ -3798,17 +3821,23 @@ export async function monitorInlineProvider(params: {
             meId,
           })
         : historyContext
-    const hasReplyThreadParticipation =
+    const followModeImplicitMention =
+      isGroup &&
+      !replyThreadRequireExplicitMention &&
+      isInlineDialogFollowing(chatInfo.dialogFollowMode) &&
+      isInlineFollowModeMentionGateEligible(chatInfo)
+    const historyReplyThreadImplicitMention =
       isGroup &&
       replyThreadContext != null &&
       !replyThreadRequireExplicitMention &&
+      !followModeImplicitMention &&
       (effectiveHistoryContext.hasBotMessage ||
         await hasInlineThreadParticipationWithPersistence({
           accountId: account.accountId,
           parentChatId: replyThreadContext.parentChatId,
           threadId: replyThreadContext.childChatId,
         }))
-    const replyThreadImplicitMention = hasReplyThreadParticipation
+    const replyThreadImplicitMention = followModeImplicitMention || historyReplyThreadImplicitMention
     const replyToBotImplicitMention =
       isGroup &&
       (account.config.replyToBotWithoutMention ?? false) &&
@@ -3841,7 +3870,8 @@ export async function monitorInlineProvider(params: {
       isGroup && implicitMention
         ? [
             ...(callbackActionEvent != null ? ["message_action"] : []),
-            ...(replyThreadImplicitMention ? ["reply_thread"] : []),
+            ...(followModeImplicitMention ? ["follow_mode"] : []),
+            ...(historyReplyThreadImplicitMention ? ["reply_thread"] : []),
             ...(replyToBotImplicitMention ? ["reply_to_bot"] : []),
           ]
         : []
