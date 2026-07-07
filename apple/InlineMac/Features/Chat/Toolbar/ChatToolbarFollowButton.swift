@@ -23,7 +23,7 @@ struct ChatToolbarFollowButton: View {
   // TODO: Move chat-level transactions like follow mode into a proper chat view model so they are centralized and easy to test.
   @MainActor
   static func toggleFollowMode(peer: Peer, isFollowing: Bool) {
-    let selection: DialogFollowModeSelection = isFollowing ? .relevance : .following
+    let selection: DialogFollowModeSelection = isFollowing ? .unfollowed : .following
 
     Task(priority: .userInitiated) {
       do {
@@ -44,8 +44,10 @@ struct ChatToolbarFollowButton: View {
     switch selection {
     case .following:
       "Following thread. New messages will appear in the sidebar."
-    case .relevance:
+    case .unfollowed:
       "Unfollowed thread. Mentions and replies can still bring it back."
+    case .relevance:
+      "Using relevance mode for this thread."
     }
   }
 }

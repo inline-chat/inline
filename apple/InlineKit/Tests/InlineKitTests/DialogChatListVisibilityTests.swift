@@ -350,8 +350,8 @@ struct DialogChatListVisibilityTests {
     }
   }
 
-  @Test("dialog follow mode update applies and clears")
-  func dialogFollowModeUpdateAppliesAndClears() throws {
+  @Test("dialog follow mode update applies and unfollows")
+  func dialogFollowModeUpdateAppliesAndUnfollows() throws {
     let dbQueue = try makeInMemoryDB()
 
     try dbQueue.write { db in
@@ -365,11 +365,29 @@ struct DialogChatListVisibilityTests {
       var saved = try #require(try Dialog.get(peerId: .thread(id: 23)).fetchOne(db))
       #expect(saved.followMode == .following)
 
-      var clear = InlineProtocol.UpdateDialogFollowMode()
-      clear.peerID = makeChatPeer(chatId: 23)
-      try clear.apply(db)
+      var unfollow = InlineProtocol.UpdateDialogFollowMode()
+      unfollow.peerID = makeChatPeer(chatId: 23)
+      unfollow.followMode = .unfollowed
+      try unfollow.apply(db)
 
       saved = try #require(try Dialog.get(peerId: .thread(id: 23)).fetchOne(db))
+      #expect(saved.followMode == .unfollowed)
+      #expect(saved.isUnfollowedThread)
+    }
+  }
+
+  @Test("dialog follow mode update can clear to relevance")
+  func dialogFollowModeUpdateCanClearToRelevance() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, chatId: 25, chatListHidden: true, followMode: .unfollowed)
+
+      var clear = InlineProtocol.UpdateDialogFollowMode()
+      clear.peerID = makeChatPeer(chatId: 25)
+      try clear.apply(db)
+
+      let saved = try #require(try Dialog.get(peerId: .thread(id: 25)).fetchOne(db))
       #expect(saved.followMode == nil)
     }
   }

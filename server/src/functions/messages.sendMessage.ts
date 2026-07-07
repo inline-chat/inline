@@ -66,11 +66,13 @@ import { VoiceTranscriptionModule } from "@in/server/modules/voiceTranscription"
 import {
   DIALOG_FOLLOWING,
   getFollowingDialogUserIds,
+  getUnfollowedDialogUserIds,
   setDialogFollowModeForUsers,
 } from "@in/server/modules/dialogFollow"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 import { resolveMentionedGroupUserIds } from "@in/server/modules/userGroups"
+import { resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
 
 type Input = {
   peerId: InputPeer
@@ -330,13 +332,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
-  if (isReplyThread(chat)) {
-    await autoFollowReplyThread({
-      chat,
-      currentUserId,
-      updateGroup,
-    })
-  }
+  await autoFollowThreadMessage({
+    chat,
+    currentUserId,
+    updateGroup,
+    newMessageId: newMessage.messageId,
+  })
 
   const sidebarOpenUserIds = await getSidebarOpenUserIds({
     chat,
@@ -355,6 +356,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
           chat,
           userIds: sidebarOpenUserIds,
           open: true,
+          showInChatList: true,
         })
 
     await emitChatListOpenUpdates({
@@ -575,7 +577,7 @@ const getSidebarOpenUserIds = async ({
     }
   }
 
-  if (isReplyThread(chat)) {
+  if (chat.type === "thread") {
     const followingUserIds = await getFollowingDialogUserIds({
       chatId: chat.id,
       userIds: Array.from(eligibleUserIds),
@@ -587,27 +589,49 @@ const getSidebarOpenUserIds = async ({
   return Array.from(openUserIds)
 }
 
-const autoFollowReplyThread = async ({
+const autoFollowThreadMessage = async ({
   chat,
   currentUserId,
   updateGroup,
+  newMessageId,
 }: {
   chat: DbChat
   currentUserId: number
   updateGroup: UpdateGroup
+  newMessageId: number
 }) => {
-  const followUserIds = new Set<number>([currentUserId])
   const eligibleUserIds = new Set(updateGroup.userIds)
-  const anchorSenderId = await getReplyThreadAnchorSenderId(chat)
-
-  if (anchorSenderId !== undefined && eligibleUserIds.has(anchorSenderId)) {
-    followUserIds.add(anchorSenderId)
+  const candidateUserIds = await resolveThreadAutoFollowUserIds({
+    chat,
+    currentUserId,
+    eligibleUserIds,
+    newMessageId,
+  })
+  if (candidateUserIds.length === 0) {
+    return
   }
 
-  await setDialogFollowModeForUsers({
+  const unfollowedUserIds = new Set(
+    await getUnfollowedDialogUserIds({
+      chatId: chat.id,
+      userIds: candidateUserIds,
+    }),
+  )
+  const followUserIds = candidateUserIds.filter((userId) => !unfollowedUserIds.has(userId))
+  if (followUserIds.length === 0) {
+    return
+  }
+
+  const { changedDialogs } = await setDialogFollowModeForUsers({
     chat,
-    userIds: Array.from(followUserIds),
+    userIds: followUserIds,
     followMode: DIALOG_FOLLOWING,
+    showInChatList: true,
+  })
+
+  await emitChatListOpenUpdates({
+    chat,
+    dialogs: changedDialogs.filter((dialog) => dialog.userId === currentUserId),
   })
 }
 

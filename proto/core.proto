@@ -206,8 +206,13 @@ message Dialog {
 }
 
 enum DialogFollowMode {
+  // Default relevance mode: mentions/replies and server heuristics may surface the thread.
   DIALOG_FOLLOW_MODE_UNSPECIFIED = 0;
+  // Explicitly follow the thread; normal thread activity should surface it.
   FOLLOWING = 1;
+  // Explicit opt-out; server auto-follow heuristics must not flip this back to following.
+  // Mentions/replies may still surface the thread through normal relevance behavior.
+  UNFOLLOWED = 2;
 }
 
 // A thread

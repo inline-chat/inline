@@ -658,6 +658,7 @@ describe("sendMessage", () => {
       .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, groupMember.id)))
       .limit(1)
 
+    expect(memberDialog?.chatListHidden).toBeNull()
     expect(memberDialog?.open).toBe(true)
     expect(memberDialog?.order).toBeTruthy()
 
@@ -771,7 +772,7 @@ describe("sendMessage", () => {
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, owner.id)))
       .limit(1)
 
-    expect(senderDialog?.chatListHidden).toBe(true)
+    expect(senderDialog?.chatListHidden).toBeNull()
     expect(senderDialog?.open).toBeNull()
     expect(senderDialog?.order).toBeNull()
     expect(senderDialog?.followMode).toBe("following")
@@ -788,6 +789,19 @@ describe("sendMessage", () => {
       .filter((update) => update.payload.update.oneofKind === "userChatOpen")
 
     expect(chatOpenUpdates).toHaveLength(1)
+
+    const senderUserUpdates = await db.query.updates.findMany({
+      where: {
+        bucket: UpdateBucket.User,
+        entityId: owner.id,
+      },
+    })
+
+    const senderChatListUpdates = senderUserUpdates
+      .map((update) => UpdatesModel.decrypt(update))
+      .filter((update) => update.payload.update.oneofKind === "userChatOpen")
+
+    expect(senderChatListUpdates).toHaveLength(1)
   })
 
   test("opens replied-to authors' reply-thread dialogs for the sidebar inbox", async () => {
@@ -869,7 +883,7 @@ describe("sendMessage", () => {
     ])
   })
 
-  test("keeps the sender's hidden reply-thread dialog hidden on outbound send", async () => {
+  test("shows the sender's hidden reply-thread dialog on outbound auto-follow", async () => {
     const owner = await testUtils.createUser(nextEmail("thread-hidden-owner"))
     const participant = await testUtils.createUser(nextEmail("thread-hidden-participant"))
 
@@ -922,7 +936,275 @@ describe("sendMessage", () => {
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, owner.id)))
       .limit(1)
 
+    expect(senderDialog?.chatListHidden).toBeNull()
+    expect(senderDialog?.open).toBeNull()
+    expect(senderDialog?.order).toBeNull()
+    expect(senderDialog?.followMode).toBe("following")
+  })
+
+  test("opens followed normal thread dialogs for the sidebar inbox", async () => {
+    const owner = await testUtils.createUser(nextEmail("normal-follow-owner"))
+    const follower = await testUtils.createUser(nextEmail("normal-follow-follower"))
+
+    const chat = await testUtils.createChat(null, "Normal Follow Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Thread chat not created")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, follower.id)
+
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: follower.id,
+      followMode: "following",
+      open: false,
+      order: null,
+      chatListHidden: true,
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        message: "normal followed activity",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [followerDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, follower.id)))
+      .limit(1)
+
+    expect(followerDialog?.followMode).toBe("following")
+    expect(followerDialog?.chatListHidden).toBeNull()
+    expect(followerDialog?.open).toBe(true)
+    expect(followerDialog?.order).toBeTruthy()
+    expect(followerDialog?.archived).toBe(false)
+  })
+
+  test("auto-follows senders in fresh normal threads", async () => {
+    const owner = await testUtils.createUser(nextEmail("fresh-normal-owner"))
+
+    const chat = await testUtils.createChat(null, "Fresh Normal Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Thread chat not created")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: owner.id,
+      chatListHidden: true,
+      open: null,
+      order: null,
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        message: "fresh normal start",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [senderDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, owner.id)))
+      .limit(1)
+
+    expect(senderDialog?.followMode).toBe("following")
+    expect(senderDialog?.chatListHidden).toBeNull()
+    expect(senderDialog?.open).toBeNull()
+
+    const userUpdates = await db.query.updates.findMany({
+      where: {
+        bucket: UpdateBucket.User,
+        entityId: owner.id,
+      },
+    })
+
+    const hasChatListUpdate = userUpdates
+      .map((update) => UpdatesModel.decrypt(update))
+      .some((update) => update.payload.update.oneofKind === "userChatOpen")
+
+    expect(hasChatListUpdate).toBe(true)
+  })
+
+  test("auto-follows senders through message 15 in normal threads", async () => {
+    const owner = await testUtils.createUser(nextEmail("fifteen-normal-owner"))
+
+    const chat = await testUtils.createChat(null, "Fifteen Normal Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Thread chat not created")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await db.insert(messages).values(
+      Array.from({ length: 14 }, (_, index) => ({
+        chatId: chat.id,
+        messageId: index + 1,
+        fromId: owner.id,
+        text: `existing ${index + 1}`,
+      })),
+    )
+    await db.update(chats).set({ lastMsgId: 14 }).where(eq(chats.id, chat.id))
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        message: "message fifteen",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [senderDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, owner.id)))
+      .limit(1)
+
+    expect(senderDialog?.followMode).toBe("following")
+    expect(senderDialog?.chatListHidden).toBeNull()
+  })
+
+  test("does not auto-follow senders at message 16 in normal threads", async () => {
+    const owner = await testUtils.createUser(nextEmail("large-normal-owner"))
+
+    const chat = await testUtils.createChat(null, "Large Normal Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Thread chat not created")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await db.insert(messages).values(
+      Array.from({ length: 15 }, (_, index) => ({
+        chatId: chat.id,
+        messageId: index + 1,
+        fromId: owner.id,
+        text: `existing ${index + 1}`,
+      })),
+    )
+    await db.update(chats).set({ lastMsgId: 15 }).where(eq(chats.id, chat.id))
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        message: "large normal continuation",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [senderDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, owner.id)))
+      .limit(1)
+
+    expect(senderDialog?.followMode ?? null).toBeNull()
+  })
+
+  test("does not auto-follow normal-thread senders who explicitly unfollowed", async () => {
+    const owner = await testUtils.createUser(nextEmail("unfollowed-normal-owner"))
+
+    const chat = await testUtils.createChat(null, "Unfollowed Normal Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Thread chat not created")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: owner.id,
+      followMode: "unfollowed",
+      chatListHidden: true,
+      open: null,
+      order: null,
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        message: "fresh normal opt out",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [senderDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, owner.id)))
+      .limit(1)
+
+    expect(senderDialog?.followMode).toBe("unfollowed")
     expect(senderDialog?.chatListHidden).toBe(true)
+  })
+
+  test("does not auto-follow reply-thread anchor authors who explicitly unfollowed", async () => {
+    const owner = await testUtils.createUser(nextEmail("unfollowed-reply-owner"))
+    const anchorAuthor = await testUtils.createUser(nextEmail("unfollowed-anchor-author"))
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, anchorAuthor.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: anchorAuthor.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: null,
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Child chat not created")
+
+    await db.insert(dialogs).values({
+      chatId: childChat.id,
+      userId: anchorAuthor.id,
+      followMode: "unfollowed",
+      chatListHidden: true,
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
+        },
+        message: "starting reply thread after anchor opt out",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [anchorAuthorDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, anchorAuthor.id)))
+      .limit(1)
+
+    expect(anchorAuthorDialog?.followMode).toBe("unfollowed")
+    expect(anchorAuthorDialog?.chatListHidden).toBe(true)
+
+    const [senderDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, owner.id)))
+      .limit(1)
+
     expect(senderDialog?.followMode).toBe("following")
   })
 })

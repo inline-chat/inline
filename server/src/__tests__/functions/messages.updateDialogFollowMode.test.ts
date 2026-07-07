@@ -68,16 +68,17 @@ describe("messages.updateDialogFollowMode", () => {
     expect(dialog?.archived).toBe(false)
 
     const order = dialog?.order
-    const clearResult = await updateDialogFollowMode(
+    const unfollowResult = await updateDialogFollowMode(
       {
         peerId: {
           type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
         },
+        followMode: DialogFollowMode.UNFOLLOWED,
       },
       testUtils.functionContext({ userId: participant.id, sessionId: 1 }),
     )
 
-    expect(clearResult.updates.map((update) => update.update.oneofKind)).toEqual(["dialogFollowMode"])
+    expect(unfollowResult.updates.map((update) => update.update.oneofKind)).toEqual(["dialogFollowMode"])
 
     ;[dialog] = await db
       .select()
@@ -85,18 +86,52 @@ describe("messages.updateDialogFollowMode", () => {
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, participant.id)))
       .limit(1)
 
-    expect(dialog?.followMode).toBeNull()
+    expect(dialog?.followMode).toBe("unfollowed")
     expect(dialog?.chatListHidden).toBeNull()
     expect(dialog?.open).toBe(true)
     expect(dialog?.order).toBe(order)
   })
 
-  test("rejects follow mode on non-reply threads", async () => {
+  test("manual follow opens and shows a normal thread dialog", async () => {
     const owner = await testUtils.createUser("follow-mode-plain-owner@example.com")
     const chat = await testUtils.createChat(null, "Plain Thread", "thread", false, owner.id)
     if (!chat) throw new Error("Thread chat not created")
 
     await testUtils.addParticipant(chat.id, owner.id)
+
+    const followResult = await updateDialogFollowMode(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+        },
+        followMode: DialogFollowMode.FOLLOWING,
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    expect(followResult.updates.map((update) => update.update.oneofKind)).toEqual([
+      "dialogFollowMode",
+      "chatOpen",
+    ])
+
+    const [dialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, owner.id)))
+      .limit(1)
+
+    expect(dialog?.followMode).toBe("following")
+    expect(dialog?.chatListHidden).toBeNull()
+    expect(dialog?.open).toBe(true)
+    expect(dialog?.order).toBeTruthy()
+    expect(dialog?.archived).toBe(false)
+  })
+
+  test("rejects follow mode on private chats", async () => {
+    const owner = await testUtils.createUser("follow-mode-dm-owner@example.com")
+    const other = await testUtils.createUser("follow-mode-dm-other@example.com")
+    const chat = await testUtils.createPrivateChat(owner, other)
+    if (!chat) throw new Error("Private chat not created")
 
     await expect(
       updateDialogFollowMode(

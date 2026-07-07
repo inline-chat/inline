@@ -18,10 +18,12 @@ extension InlineProtocol.DialogFollowMode: Codable {
 extension InlineProtocol.DialogFollowMode: DatabaseValueConvertible {
   public var databaseValue: DatabaseValue {
     switch self {
-      case .following:
-        return "following".databaseValue
-      case .unspecified, .UNRECOGNIZED(_):
-        return DatabaseValue.null
+    case .following:
+      return "following".databaseValue
+    case .unfollowed:
+      return "unfollowed".databaseValue
+    case .unspecified, .UNRECOGNIZED:
+      return DatabaseValue.null
     }
   }
 
@@ -31,10 +33,12 @@ extension InlineProtocol.DialogFollowMode: DatabaseValueConvertible {
     }
 
     switch value {
-      case "following":
-        return .following
-      default:
-        return nil
+    case "following":
+      return .following
+    case "unfollowed":
+      return .unfollowed
+    default:
+      return nil
     }
   }
 }

@@ -7225,13 +7225,24 @@ export interface DraftMessage {
  */
 export enum DialogFollowMode {
     /**
+     * Default relevance mode: mentions/replies and server heuristics may surface the thread.
+     *
      * @generated from protobuf enum value: DIALOG_FOLLOW_MODE_UNSPECIFIED = 0;
      */
     DIALOG_FOLLOW_MODE_UNSPECIFIED = 0,
     /**
+     * Explicitly follow the thread; normal thread activity should surface it.
+     *
      * @generated from protobuf enum value: FOLLOWING = 1;
      */
-    FOLLOWING = 1
+    FOLLOWING = 1,
+    /**
+     * Explicit opt-out; server auto-follow heuristics must not flip this back to following.
+     * Mentions/replies may still surface the thread through normal relevance behavior.
+     *
+     * @generated from protobuf enum value: UNFOLLOWED = 2;
+     */
+    UNFOLLOWED = 2
 }
 /**
  * @generated from protobuf enum MessageSendMode

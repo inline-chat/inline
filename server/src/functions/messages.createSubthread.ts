@@ -13,7 +13,11 @@ import {
   persistMessageRepliesUpdate,
   pushMessageRepliesUpdate,
 } from "@in/server/modules/subthreads"
-import { DIALOG_FOLLOWING, setDialogFollowModeForUsers } from "@in/server/modules/dialogFollow"
+import {
+  DIALOG_FOLLOWING,
+  getUnfollowedDialogUserIds,
+  setDialogFollowModeForUsers,
+} from "@in/server/modules/dialogFollow"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -185,9 +189,20 @@ async function autoFollowCreatedReplyThread(input: {
     userIds.add(input.anchorMessage.fromId)
   }
 
+  const unfollowedUserIds = new Set(
+    await getUnfollowedDialogUserIds({
+      chatId: input.chat.id,
+      userIds: Array.from(userIds),
+    }),
+  )
+  const followUserIds = Array.from(userIds).filter((userId) => !unfollowedUserIds.has(userId))
+  if (followUserIds.length === 0) {
+    return { dialogs: [] }
+  }
+
   const { dialogs } = await setDialogFollowModeForUsers({
     chat: input.chat,
-    userIds: Array.from(userIds),
+    userIds: followUserIds,
     followMode: DIALOG_FOLLOWING,
   })
 

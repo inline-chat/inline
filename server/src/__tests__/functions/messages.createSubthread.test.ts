@@ -124,6 +124,74 @@ describe("messages.createSubthread", () => {
     expect(parentMessages.messages[0]?.replies?.recentReplierUserIds).toEqual([])
   })
 
+  test("does not re-follow unfollowed anchor author when reusing existing reply thread", async () => {
+    const creator = await testUtils.createUser("subthread-reuse-creator@example.com")
+    const anchorAuthor = await testUtils.createUser("subthread-reuse-anchor-author@example.com")
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, creator.id)
+    await testUtils.addParticipant(parentChat.id, anchorAuthor.id)
+
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: anchorAuthor.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: creator.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) {
+      throw new Error("Child chat not created")
+    }
+
+    await db.insert(schema.dialogs).values({
+      chatId: childChat.id,
+      userId: anchorAuthor.id,
+      followMode: "unfollowed",
+      chatListHidden: true,
+    })
+
+    const result = await createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+        parentMessageId: 1n,
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    expect(result.chat.id).toBe(BigInt(childChat.id))
+
+    const childDialogs = await db
+      .select({
+        userId: schema.dialogs.userId,
+        followMode: schema.dialogs.followMode,
+      })
+      .from(schema.dialogs)
+      .where(eq(schema.dialogs.chatId, childChat.id))
+
+    expect(new Map(childDialogs.map((dialog) => [dialog.userId, dialog.followMode]))).toEqual(
+      new Map([
+        [creator.id, "following"],
+        [anchorAuthor.id, "unfollowed"],
+      ]),
+    )
+  })
+
   test("assigns the next space thread number to linked subthreads", async () => {
     const space = await testUtils.createSpace("Numbered Subthreads")
     if (!space) {

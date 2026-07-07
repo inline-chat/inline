@@ -11,8 +11,9 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { and, eq, inArray } from "drizzle-orm"
 
 export const DIALOG_FOLLOWING = "following" as const
+export const DIALOG_UNFOLLOWED = "unfollowed" as const
 
-export type DbDialogFollowMode = typeof DIALOG_FOLLOWING
+export type DbDialogFollowMode = typeof DIALOG_FOLLOWING | typeof DIALOG_UNFOLLOWED
 
 type ChatForFollow = Pick<
   DbChat,
@@ -20,24 +21,60 @@ type ChatForFollow = Pick<
 >
 
 export function encodeDialogFollowMode(followMode: DbDialog["followMode"]): DialogFollowMode | undefined {
-  return followMode === DIALOG_FOLLOWING ? DialogFollowMode.FOLLOWING : undefined
+  switch (followMode) {
+    case DIALOG_FOLLOWING:
+      return DialogFollowMode.FOLLOWING
+    case DIALOG_UNFOLLOWED:
+      return DialogFollowMode.UNFOLLOWED
+    default:
+      return undefined
+  }
 }
 
 export function decodeDialogFollowMode(followMode: DialogFollowMode | undefined): DbDialogFollowMode | null {
-  return followMode === DialogFollowMode.FOLLOWING ? DIALOG_FOLLOWING : null
+  switch (followMode) {
+    case DialogFollowMode.FOLLOWING:
+      return DIALOG_FOLLOWING
+    case DialogFollowMode.UNFOLLOWED:
+      return DIALOG_UNFOLLOWED
+    default:
+      return null
+  }
 }
 
 export function isValidDialogFollowMode(followMode: DialogFollowMode | undefined): boolean {
   return (
     followMode === undefined ||
     followMode === DialogFollowMode.DIALOG_FOLLOW_MODE_UNSPECIFIED ||
-    followMode === DialogFollowMode.FOLLOWING
+    followMode === DialogFollowMode.FOLLOWING ||
+    followMode === DialogFollowMode.UNFOLLOWED
   )
 }
 
 export async function getFollowingDialogUserIds(input: {
   chatId: number
   userIds: number[]
+}): Promise<number[]> {
+  return getDialogUserIdsByFollowMode({
+    ...input,
+    followMode: DIALOG_FOLLOWING,
+  })
+}
+
+export async function getUnfollowedDialogUserIds(input: {
+  chatId: number
+  userIds: number[]
+}): Promise<number[]> {
+  return getDialogUserIdsByFollowMode({
+    ...input,
+    followMode: DIALOG_UNFOLLOWED,
+  })
+}
+
+async function getDialogUserIdsByFollowMode(input: {
+  chatId: number
+  userIds: number[]
+  followMode: DbDialogFollowMode
 }): Promise<number[]> {
   const userIds = uniqueUserIds(input.userIds)
   if (userIds.length === 0) {
@@ -51,7 +88,7 @@ export async function getFollowingDialogUserIds(input: {
       and(
         eq(dialogs.chatId, input.chatId),
         inArray(dialogs.userId, userIds),
-        eq(dialogs.followMode, DIALOG_FOLLOWING),
+        eq(dialogs.followMode, input.followMode),
       ),
     )
 
@@ -64,6 +101,7 @@ export async function setDialogFollowModeForUsers(input: {
   followMode: DbDialogFollowMode | null
   skipSessionId?: number
   pushRealtime?: boolean
+  showInChatList?: boolean
 }): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[]; updates: { userId: number; update: Update }[] }> {
   const userIds = await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))
   if (userIds.length === 0) {
@@ -78,18 +116,31 @@ export async function setDialogFollowModeForUsers(input: {
 
     const existingUserIds = new Set(existingDialogs.map((dialog) => dialog.userId))
     const changedUserIds = new Set<number>()
+    const followModeChangedUserIds = new Set<number>()
+    const shouldShowInChatList = input.showInChatList === true && input.followMode === DIALOG_FOLLOWING
 
-    const updateUserIds = existingDialogs
+    const followModeUpdateUserIds = existingDialogs
       .filter((dialog) => dialog.followMode !== input.followMode)
       .map((dialog) => dialog.userId)
+    const visibilityUpdateUserIds =
+      shouldShowInChatList
+        ? existingDialogs
+            .filter((dialog) => dialog.chatListHidden === true)
+            .map((dialog) => dialog.userId)
+        : []
+    const updateUserIds = Array.from(new Set([...followModeUpdateUserIds, ...visibilityUpdateUserIds]))
 
     if (updateUserIds.length > 0) {
       await tx
         .update(dialogs)
-        .set({ followMode: input.followMode })
+        .set({
+          followMode: input.followMode,
+          ...(shouldShowInChatList ? { chatListHidden: null } : {}),
+        })
         .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, updateUserIds)))
 
       updateUserIds.forEach((userId) => changedUserIds.add(userId))
+      followModeUpdateUserIds.forEach((userId) => followModeChangedUserIds.add(userId))
     }
 
     const missingUserIds =
@@ -107,20 +158,24 @@ export async function setDialogFollowModeForUsers(input: {
             peerUserId: peerUserIdFor(input.chat, userId),
             spaceId: input.chat.spaceId ?? null,
             ...dialogOpenDefaultsForChat(input.chat),
-            ...chatListVisibilityFields(input.chat),
+            ...chatListVisibilityFields(input.chat, shouldShowInChatList),
             followMode: input.followMode,
           })),
         )
         .onConflictDoUpdate({
           target: [dialogs.chatId, dialogs.userId],
-          set: { followMode: input.followMode },
+          set: {
+            followMode: input.followMode,
+            ...(shouldShowInChatList ? { chatListHidden: null } : {}),
+          },
         })
 
       missingUserIds.forEach((userId) => changedUserIds.add(userId))
+      missingUserIds.forEach((userId) => followModeChangedUserIds.add(userId))
     }
 
-    if (changedUserIds.size > 0) {
-      await enqueueFollowModeUpdates(tx, input.chat, Array.from(changedUserIds), input.followMode)
+    if (followModeChangedUserIds.size > 0) {
+      await enqueueFollowModeUpdates(tx, input.chat, Array.from(followModeChangedUserIds), input.followMode)
     }
 
     const finalDialogs = await tx
@@ -131,10 +186,11 @@ export async function setDialogFollowModeForUsers(input: {
     return {
       dialogs: finalDialogs,
       changedDialogs: finalDialogs.filter((dialog) => changedUserIds.has(dialog.userId)),
+      followModeChangedDialogs: finalDialogs.filter((dialog) => followModeChangedUserIds.has(dialog.userId)),
     }
   })
 
-  const updates = result.changedDialogs.map((dialog) => ({
+  const updates = result.followModeChangedDialogs.map((dialog) => ({
     userId: dialog.userId,
     update: buildFollowModeUpdate(input.chat, dialog.userId, input.followMode),
   }))
@@ -145,7 +201,11 @@ export async function setDialogFollowModeForUsers(input: {
     })
   }
 
-  return { ...result, updates }
+  return {
+    dialogs: result.dialogs,
+    changedDialogs: result.changedDialogs,
+    updates,
+  }
 }
 
 async function enqueueFollowModeUpdates(
@@ -197,6 +257,13 @@ function peerUserIdFor(chat: ChatForFollow, userId: number): number | null {
   return chat.minUserId === userId ? chat.maxUserId : chat.minUserId
 }
 
-function chatListVisibilityFields(chat: ChatForFollow): Partial<Pick<DbNewDialog, "chatListHidden">> {
+function chatListVisibilityFields(
+  chat: ChatForFollow,
+  showInChatList: boolean,
+): Partial<Pick<DbNewDialog, "chatListHidden">> {
+  if (showInChatList) {
+    return { chatListHidden: null }
+  }
+
   return chat.parentChatId != null || chat.parentMessageId != null ? { chatListHidden: true } : {}
 }

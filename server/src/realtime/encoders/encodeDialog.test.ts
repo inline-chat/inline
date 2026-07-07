@@ -64,4 +64,9 @@ describe("encodeDialog", () => {
     const dialog = encode({ followMode: "following" })
     expect(dialog.followMode).toBe(DialogFollowMode.FOLLOWING)
   })
+
+  test("emits reply-thread unfollowed mode when set", () => {
+    const dialog = encode({ followMode: "unfollowed" })
+    expect(dialog.followMode).toBe(DialogFollowMode.UNFOLLOWED)
+  })
 })

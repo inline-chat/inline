@@ -7,13 +7,16 @@ import RealtimeV2
 public enum DialogFollowModeSelection: String, Codable, Sendable {
   case relevance
   case following
+  case unfollowed
 
   var protocolFollowMode: InlineProtocol.DialogFollowMode? {
     switch self {
-      case .relevance:
-        nil
-      case .following:
-        .following
+    case .relevance:
+      nil
+    case .following:
+      .following
+    case .unfollowed:
+      .unfollowed
     }
   }
 }

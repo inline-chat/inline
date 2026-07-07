@@ -13,9 +13,9 @@ import {
 import {
   emitChatListOpenUpdates,
   isLinkedSubthread,
-  isReplyThread,
   showAndOpenLinkedSubthreadDialogs,
 } from "@in/server/modules/subthreads"
+import { canUseThreadFollowMode } from "@in/server/modules/threadAutoFollow"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 
@@ -36,22 +36,23 @@ export const updateDialogFollowMode = async (input: Input, context: FunctionCont
   const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
-  if (!isReplyThread(chat)) {
+  if (!canUseThreadFollowMode(chat)) {
     throw RealtimeRpcError.BadRequest()
   }
 
   const followMode = decodeDialogFollowMode(input.followMode)
-  const { updates } = await setDialogFollowModeForUsers({
+  const { changedDialogs: followChangedDialogs, updates } = await setDialogFollowModeForUsers({
     chat,
     userIds: [context.currentUserId],
     followMode,
+    showInChatList: followMode === DIALOG_FOLLOWING,
     skipSessionId: context.currentSessionId,
   })
 
   const responseUpdates = updates.map(({ update }) => update)
 
   if (followMode === DIALOG_FOLLOWING) {
-    const { dialogs, changedDialogs } = isLinkedSubthread(chat)
+    const { dialogs, changedDialogs: openChangedDialogs } = isLinkedSubthread(chat)
       ? await showAndOpenLinkedSubthreadDialogs({
           chat,
           userIds: [context.currentUserId],
@@ -66,6 +67,12 @@ export const updateDialogFollowMode = async (input: Input, context: FunctionCont
     if (!dialog) {
       throw RealtimeRpcError.InternalError()
     }
+
+    const changedUserIds = new Set([
+      ...followChangedDialogs.map((changedDialog) => changedDialog.userId),
+      ...openChangedDialogs.map((changedDialog) => changedDialog.userId),
+    ])
+    const changedDialogs = dialogs.filter((candidate) => changedUserIds.has(candidate.userId))
 
     if (changedDialogs.length > 0) {
       await emitChatListOpenUpdates({

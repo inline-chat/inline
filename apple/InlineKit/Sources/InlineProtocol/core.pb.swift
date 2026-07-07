@@ -27,8 +27,16 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
 
 public nonisolated enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
+
+  /// Default relevance mode: mentions/replies and server heuristics may surface the thread.
   case unspecified // = 0
+
+  /// Explicitly follow the thread; normal thread activity should surface it.
   case following // = 1
+
+  /// Explicit opt-out; server auto-follow heuristics must not flip this back to following.
+  /// Mentions/replies may still surface the thread through normal relevance behavior.
+  case unfollowed // = 2
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -39,6 +47,7 @@ public nonisolated enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable
     switch rawValue {
     case 0: self = .unspecified
     case 1: self = .following
+    case 2: self = .unfollowed
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -47,6 +56,7 @@ public nonisolated enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable
     switch self {
     case .unspecified: return 0
     case .following: return 1
+    case .unfollowed: return 2
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -55,6 +65,7 @@ public nonisolated enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable
   public static let allCases: [DialogFollowMode] = [
     .unspecified,
     .following,
+    .unfollowed,
   ]
 
 }
@@ -11264,7 +11275,7 @@ public nonisolated struct DraftMessage: Sendable {
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DIALOG_FOLLOW_MODE_UNSPECIFIED\0\u{1}FOLLOWING\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DIALOG_FOLLOW_MODE_UNSPECIFIED\0\u{1}FOLLOWING\0\u{1}UNFOLLOWED\0")
 }
 
 nonisolated extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
