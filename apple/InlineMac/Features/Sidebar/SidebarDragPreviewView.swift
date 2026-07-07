@@ -14,6 +14,7 @@ struct SidebarDragPreviewView: View {
   private static let parentTitleFont: Font = .system(size: 10, weight: .regular)
   private static let subtitleFont: Font = .system(size: 11)
   private static let innerPaddingHorizontal = 6.0
+  private static let showsParentChatTitle = false
 
   private var isCompact: Bool {
     rowSize.height <= 32
@@ -24,7 +25,12 @@ struct SidebarDragPreviewView: View {
   }
 
   private var showsPreview: Bool {
-    !isCompact && item.preview.isEmpty == false && item.parentTitle == nil
+    !isCompact && item.preview.isEmpty == false && visibleParentTitle == nil
+  }
+
+  private var visibleParentTitle: String? {
+    guard Self.showsParentChatTitle else { return nil }
+    return item.parentTitle
   }
 
   var body: some View {
@@ -64,7 +70,7 @@ struct SidebarDragPreviewView: View {
   private var titleBlock: some View {
     HStack(alignment: .center, spacing: 8) {
       VStack(alignment: .leading, spacing: 0) {
-        if let parentTitle = item.parentTitle {
+        if let parentTitle = visibleParentTitle {
           Text(parentTitle)
             .font(Self.parentTitleFont)
             .foregroundStyle(.tertiary)
@@ -121,6 +127,6 @@ struct SidebarDragPreviewView: View {
   }
 
   private var rowTitleFont: Font {
-    item.parentTitle == nil ? Self.titleFont : Self.replyThreadTitleFont
+    visibleParentTitle == nil ? Self.titleFont : Self.replyThreadTitleFont
   }
 }

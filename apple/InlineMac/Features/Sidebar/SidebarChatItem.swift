@@ -39,6 +39,7 @@ struct SidebarChatItemView: Equatable, View {
   private static let trailingAccessoryMinWidth = 14.0
   private static let compactIconSize = 22.0
   private static let largeIconSize = 32.0
+  private static let showsParentChatTitle = false
 
   // Computed
   private var rowHeight: CGFloat {
@@ -87,7 +88,7 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsPreview: Bool {
-    size == .large && item.preview.isEmpty == false && item.parentTitle == nil
+    size == .large && item.preview.isEmpty == false && visibleParentTitle == nil
   }
 
   private var titleAccessory: SidebarChatItemAccessory? {
@@ -105,6 +106,11 @@ struct SidebarChatItemView: Equatable, View {
   private var previewAccessory: SidebarChatItemAccessory? {
     guard item.unread, showsPreview else { return nil }
     return .unread
+  }
+
+  private var visibleParentTitle: String? {
+    guard Self.showsParentChatTitle else { return nil }
+    return item.parentTitle
   }
 
   static func == (lhs: SidebarChatItemView, rhs: SidebarChatItemView) -> Bool {
@@ -288,7 +294,7 @@ struct SidebarChatItemView: Equatable, View {
   private var titleBlock: some View {
     HStack(alignment: .center, spacing: 8) {
       VStack(alignment: .leading, spacing: 0) {
-        if let parentTitle = item.parentTitle {
+        if let parentTitle = visibleParentTitle {
           parentTitleView(parentTitle)
         }
 
@@ -385,11 +391,11 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var rowTitleFont: Font {
-    item.parentTitle == nil ? Self.titleFont : Self.replyThreadTitleFont
+    visibleParentTitle == nil ? Self.titleFont : Self.replyThreadTitleFont
   }
 
   private var accessibilityTitle: String {
-    if let parentTitle = item.parentTitle {
+    if let parentTitle = visibleParentTitle {
       return "\(parentTitle), \(item.title)"
     }
     return item.title
