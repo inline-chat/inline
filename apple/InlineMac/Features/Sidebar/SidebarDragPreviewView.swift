@@ -5,6 +5,7 @@ import SwiftUI
 struct SidebarDragPreviewView: View {
   let item: SidebarViewModel.Item
   let rowSize: CGSize
+  let unreadBadgeStyle: UnreadBadgeStyle
 
   @Environment(\.colorScheme) private var colorScheme
 
@@ -13,7 +14,6 @@ struct SidebarDragPreviewView: View {
   private static let parentTitleFont: Font = .system(size: 10, weight: .regular)
   private static let subtitleFont: Font = .system(size: 11)
   private static let innerPaddingHorizontal = 6.0
-  private static let unreadDotSize = 6.0
 
   private var isCompact: Bool {
     rowSize.height <= 32
@@ -45,7 +45,7 @@ struct SidebarDragPreviewView: View {
               .frame(maxWidth: .infinity, alignment: .leading)
 
             if item.unread {
-              unreadDot(prominent: item.prominentUnreadDot)
+              unreadBadge
             }
           }
         }
@@ -81,7 +81,7 @@ struct SidebarDragPreviewView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
 
       if item.unread && showsPreview == false {
-        unreadDot(prominent: item.prominentUnreadDot)
+        unreadBadge
       }
     }
   }
@@ -107,17 +107,13 @@ struct SidebarDragPreviewView: View {
     }
   }
 
-  @ViewBuilder
-  private func unreadDot(prominent: Bool) -> some View {
-    if prominent {
-      Circle()
-        .fill(Color.accentColor)
-        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
-    } else {
-      Circle()
-        .fill(.secondary)
-        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
-    }
+  private var unreadBadge: some View {
+    UnreadBadge(
+      unreadCount: item.unreadCount,
+      hasUnreadMark: item.unreadMark,
+      prominent: item.prominentUnreadDot,
+      style: unreadBadgeStyle
+    )
   }
 
   private var backgroundColor: Color {

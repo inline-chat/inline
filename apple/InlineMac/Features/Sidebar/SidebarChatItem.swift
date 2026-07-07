@@ -13,6 +13,7 @@ struct SidebarChatItemView: Equatable, View {
   let selected: Bool
   var titleDimmed = false
   var size: SidebarItemSize = .large
+  var unreadBadgeStyle: UnreadBadgeStyle = .defaultValue
   var showsCloseButton = false
   var opensOnMouseDown = true
   var isTemporary = false
@@ -35,8 +36,7 @@ struct SidebarChatItemView: Equatable, View {
   private static let subtitleFont: Font = .system(size: 11)
   private static let innerPaddingHorizontal = 6.0
   private static let outerPaddingVertical = 0.0
-  private static let unreadDotSize = 6.0
-  private static let trailingAccessoryWidth = 14.0
+  private static let trailingAccessoryMinWidth = 14.0
   private static let compactIconSize = 22.0
   private static let largeIconSize = 32.0
 
@@ -96,14 +96,15 @@ struct SidebarChatItemView: Equatable, View {
     }
 
     if item.unread {
-      return .unread(item.prominentUnreadDot)
+      return .unread
     }
 
     return nil
   }
 
   private var previewAccessory: SidebarChatItemAccessory? {
-    item.unread && showsPreview ? .unread(item.prominentUnreadDot) : nil
+    guard item.unread, showsPreview else { return nil }
+    return .unread
   }
 
   static func == (lhs: SidebarChatItemView, rhs: SidebarChatItemView) -> Bool {
@@ -111,6 +112,7 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.selected == rhs.selected
       && lhs.titleDimmed == rhs.titleDimmed
       && lhs.size == rhs.size
+      && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.showsCloseButton == rhs.showsCloseButton
       && lhs.opensOnMouseDown == rhs.opensOnMouseDown
       && lhs.isTemporary == rhs.isTemporary
@@ -144,7 +146,10 @@ struct SidebarChatItemView: Equatable, View {
     .frame(height: rowHeight)
     .animation(.smoothSnappy, value: size)
     .animation(.smoothSnappy, value: item.unread)
+    .animation(.smoothSnappy, value: item.unreadCount)
+    .animation(.smoothSnappy, value: item.unreadMark)
     .animation(.smoothSnappy, value: item.prominentUnreadDot)
+    .animation(.smoothSnappy, value: unreadBadgeStyle)
     .animation(.smoothSnappy, value: item.pinned)
     // Inner paddings
     .padding(.horizontal, Self.innerPaddingHorizontal)
@@ -266,19 +271,6 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   @ViewBuilder
-  private func unreadDot(prominent: Bool) -> some View {
-    if prominent {
-      Circle()
-        .fill(Color.accentColor)
-        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
-    } else {
-      Circle()
-        .fill(.secondary)
-        .frame(width: Self.unreadDotSize, height: Self.unreadDotSize)
-    }
-  }
-
-  @ViewBuilder
   private var titleView: some View {
     let title = Text(item.title)
       .font(rowTitleFont)
@@ -332,15 +324,19 @@ struct SidebarChatItemView: Equatable, View {
     .onHover { isCloseHovered = $0 }
   }
 
-  @ViewBuilder
   private func accessoryView(_ accessory: SidebarChatItemAccessory) -> some View {
     Group {
       switch accessory {
-      case let .unread(prominent):
-        unreadDot(prominent: prominent)
+      case .unread:
+        UnreadBadge(
+          unreadCount: item.unreadCount,
+          hasUnreadMark: item.unreadMark,
+          prominent: item.prominentUnreadDot,
+          style: unreadBadgeStyle
+        )
       }
     }
-    .frame(width: Self.trailingAccessoryWidth, alignment: .center)
+    .frame(minWidth: Self.trailingAccessoryMinWidth, alignment: .center)
     .transition(.scale.combined(with: .opacity))
   }
 
@@ -501,7 +497,7 @@ struct SidebarChatItemView: Equatable, View {
 }
 
 private enum SidebarChatItemAccessory {
-  case unread(Bool)
+  case unread
 }
 
 private struct SidebarOpenInteractionModifier: ViewModifier {

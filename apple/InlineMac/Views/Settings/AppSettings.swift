@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import InlineKit
+import InlineMacUI
 import SwiftUI
 
 enum AutoUpdateChannel: String, CaseIterable, Identifiable {
@@ -176,6 +177,7 @@ final class AppSettings: ObservableObject {
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
+  static let unreadBadgeStyleKey = "unreadBadgeStyle"
 
   // MARK: - General Settings
 
@@ -287,6 +289,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var unreadBadgeStyle: UnreadBadgeStyle {
+    didSet {
+      UserDefaults.standard.set(unreadBadgeStyle.rawValue, forKey: Self.unreadBadgeStyleKey)
+    }
+  }
+
   // MARK: - Experimental Settings
 
   @Published var showMainTabStrip: Bool {
@@ -374,6 +382,12 @@ final class AppSettings: ObservableObject {
     }
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
+    if let storedUnreadBadgeStyle = UserDefaults.standard.string(forKey: Self.unreadBadgeStyleKey),
+       let badgeStyle = UnreadBadgeStyle(rawValue: storedUnreadBadgeStyle) {
+      unreadBadgeStyle = badgeStyle
+    } else {
+      unreadBadgeStyle = .defaultValue
+    }
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     sidebarAsInbox = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
     if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),

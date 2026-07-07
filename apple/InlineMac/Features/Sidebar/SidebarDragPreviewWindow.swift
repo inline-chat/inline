@@ -1,4 +1,5 @@
 import AppKit
+import InlineMacUI
 import SwiftUI
 
 @MainActor
@@ -73,7 +74,11 @@ final class SidebarDragPreviewWindow {
 
   private func preview(_ state: SidebarDragPreviewState) -> AnyView {
     AnyView(
-      SidebarDragPreviewView(item: state.item, rowSize: state.rowSize)
+      SidebarDragPreviewView(
+        item: state.item,
+        rowSize: state.rowSize,
+        unreadBadgeStyle: AppSettings.shared.unreadBadgeStyle
+      )
         .padding(Self.shadowPadding)
         .environment(\.colorScheme, state.colorScheme)
     )

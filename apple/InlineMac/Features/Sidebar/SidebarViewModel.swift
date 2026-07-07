@@ -22,6 +22,8 @@ final class SidebarViewModel {
     let parentTitle: String?
     let preview: String
     let unread: Bool
+    let unreadCount: Int
+    let unreadMark: Bool
     let prominentUnreadDot: Bool
     let pinned: Bool
     let archived: Bool
@@ -40,7 +42,9 @@ final class SidebarViewModel {
       title = listItem.displayTitle
       parentTitle = listItem.parentTitle
       preview = listItem.sidebarBasePreviewText
-      unread = listItem.hasUnread
+      unreadCount = max(listItem.dialog?.unreadCount ?? 0, 0)
+      unreadMark = listItem.dialog?.unreadMark == true
+      unread = unreadCount > 0 || unreadMark
       prominentUnreadDot = listItem.hasProminentUnreadDot
       pinned = listItem.dialog?.pinned == true
       archived = listItem.dialog?.archived == true

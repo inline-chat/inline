@@ -242,6 +242,7 @@ struct SidebarView: View {
         selected: isSelected,
         titleDimmed: sidebarTitlesDimmed,
         size: settings.showSidebarMessagePreview ? .large : .compact,
+        unreadBadgeStyle: settings.unreadBadgeStyle,
         showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
         opensOnMouseDown: true,
         isTemporary: isTemporary,

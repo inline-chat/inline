@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import GRDB
 import InlineKit
+import InlineMacUI
 import Logger
 import SwiftUI
 import Translation
@@ -10,6 +11,7 @@ struct AllChatsRouteView: View {
   @Environment(\.dependencies) private var dependencies
   @Environment(\.nav) private var nav
   @EnvironmentStateObject private var viewModel: AllChatsViewModel
+  @ObservedObject private var settings = AppSettings.shared
   @State private var rowLayout: AllChatsRowLayout = .twoLine
 
   private let filter: AllChatsFilter
@@ -93,6 +95,7 @@ struct AllChatsRouteView: View {
               selected: nav.currentRoute.selectedPeer == item.peerId,
               showsSpaceName: nav.selectedSpaceId == nil,
               layout: rowLayout,
+              unreadBadgeStyle: settings.unreadBadgeStyle,
               switchToSpace: openSpace,
               action: {
                 open(item)
@@ -613,6 +616,7 @@ private struct ChatListRow: View {
   let selected: Bool
   let showsSpaceName: Bool
   let layout: AllChatsRowLayout
+  let unreadBadgeStyle: UnreadBadgeStyle
   let switchToSpace: (Int64) -> Void
   let action: () -> Void
 
@@ -832,16 +836,14 @@ private struct ChatListRow: View {
     )
   }
 
-  @ViewBuilder
   private var unreadIndicator: some View {
-    if item.unread {
-      AllChatsUnreadIndicator(
-        unreadCount: item.unreadCount,
-        hasUnreadMark: item.unreadMark,
-        prominent: item.prominentUnreadIndicator
-      )
-      .layoutPriority(1)
-    }
+    UnreadBadge(
+      unreadCount: item.unread ? item.unreadCount : 0,
+      hasUnreadMark: item.unread && item.unreadMark,
+      prominent: item.prominentUnreadIndicator,
+      style: unreadBadgeStyle
+    )
+    .layoutPriority(1)
   }
 
   @ViewBuilder
@@ -1055,69 +1057,6 @@ private struct AllChatsPreviewLine: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-  }
-}
-
-private struct AllChatsUnreadIndicator: View {
-  let unreadCount: Int
-  let hasUnreadMark: Bool
-  let prominent: Bool
-
-  var body: some View {
-    if unreadCount > 0 {
-      AllChatsUnreadBadge(count: unreadCount, prominent: prominent)
-    } else if hasUnreadMark {
-      AllChatsUnreadMark(prominent: prominent)
-    }
-  }
-}
-
-private struct AllChatsUnreadBadge: View {
-  let count: Int
-  let prominent: Bool
-
-  private static let height: CGFloat = 16
-
-  @Environment(\.colorScheme) private var colorScheme
-
-  var body: some View {
-    Text(String(count))
-      .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-      .foregroundStyle(prominent ? Color.white : Color.primary.opacity(0.76))
-      .lineLimit(1)
-      .padding(.horizontal, 5)
-      .frame(minWidth: Self.height)
-      .frame(height: Self.height)
-      .fixedSize(horizontal: true, vertical: false)
-      .background(Capsule().fill(backgroundColor))
-  }
-
-  private var backgroundColor: Color {
-    if prominent {
-      return .accentColor
-    }
-
-    if colorScheme == .dark {
-      return .white.opacity(0.16)
-    }
-
-    return .black.opacity(0.09)
-  }
-}
-
-private struct AllChatsUnreadMark: View {
-  let prominent: Bool
-
-  @Environment(\.colorScheme) private var colorScheme
-
-  var body: some View {
-    Circle()
-      .fill(prominent ? Color.accentColor : mutedColor)
-      .frame(width: 7, height: 7)
-  }
-
-  private var mutedColor: Color {
-    colorScheme == .dark ? .white.opacity(0.36) : .black.opacity(0.28)
   }
 }
 
