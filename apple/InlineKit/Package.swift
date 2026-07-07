@@ -48,6 +48,10 @@ let package = Package(
       name: "AnimatedMedia",
       targets: ["AnimatedMedia"]
     ),
+    .library(
+      name: "InlineAudioPlayback",
+      targets: ["InlineAudioPlayback"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
@@ -96,6 +100,7 @@ let package = Package(
         "InlineConfig",
         "InlineProtocol",
         "AnimatedMedia",
+        "InlineAudioPlayback",
         "Logger",
         "Auth",
         "RealtimeV2",
@@ -110,6 +115,11 @@ let package = Package(
 
     .target(
       name: "AnimatedMedia",
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
+      name: "InlineAudioPlayback",
       swiftSettings: swiftSettings
     ),
 
@@ -180,6 +190,12 @@ let package = Package(
     .testTarget(
       name: "AnimatedMediaTests",
       dependencies: ["AnimatedMedia"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineAudioPlaybackTests",
+      dependencies: ["InlineAudioPlayback"],
       swiftSettings: swiftSettings
     ),
   ]

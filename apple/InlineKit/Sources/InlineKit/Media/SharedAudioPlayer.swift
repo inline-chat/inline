@@ -1,172 +1,166 @@
-import AVFoundation
 import Combine
 import Foundation
+import GRDB
+@_exported import InlineAudioPlayback
 import Logger
+import Observation
 
-public struct SharedAudioPlayerItem: Equatable, Sendable {
-  public enum Kind: String, Sendable {
-    case voice
-    case music
+public typealias SharedAudioPlayerItem = AudioPlaybackItem
+public typealias SharedAudioPlayerDisplay = AudioPlaybackDisplay
+public typealias SharedAudioPlayerOpenTarget = AudioPlaybackOpenTarget
+public typealias SharedAudioPlayerPresentation = AudioPlaybackPresentation
+public typealias SharedAudioPlayerState = AudioPlaybackState
+public typealias SharedAudioPlayerError = AudioPlaybackError
+
+public extension AudioPlaybackPeer {
+  init(_ peer: Peer) {
+    switch peer {
+    case let .user(id):
+      self = .user(id: id)
+    case let .thread(id):
+      self = .thread(id: id)
+    }
   }
 
-  public let kind: Kind
-  public let chatId: Int64
-  public let messageId: Int64
-  public let mediaId: Int64
-
-  public init(kind: Kind, chatId: Int64, messageId: Int64, mediaId: Int64) {
-    self.kind = kind
-    self.chatId = chatId
-    self.messageId = messageId
-    self.mediaId = mediaId
-  }
-}
-
-public struct SharedAudioPlayerState: Equatable, Sendable {
-  public var item: SharedAudioPlayerItem?
-  public var isPlaying: Bool
-  public var currentTime: TimeInterval
-  public var duration: TimeInterval
-
-  public init(
-    item: SharedAudioPlayerItem? = nil,
-    isPlaying: Bool = false,
-    currentTime: TimeInterval = 0,
-    duration: TimeInterval = 0
-  ) {
-    self.item = item
-    self.isPlaying = isPlaying
-    self.currentTime = currentTime
-    self.duration = duration
-  }
-}
-
-public enum SharedAudioPlayerError: LocalizedError {
-  case missingVoice
-  case missingLocalFile
-
-  public var errorDescription: String? {
+  var inlinePeer: Peer {
     switch self {
-    case .missingVoice:
-      "The selected message doesn't contain a playable voice payload."
-    case .missingLocalFile:
-      "The selected voice message isn't downloaded yet."
+    case let .user(id):
+      .user(id: id)
+    case let .thread(id):
+      .thread(id: id)
     }
   }
 }
 
+/// InlineKit facade over the reusable `InlineAudioPlayback` module.
+///
+/// This keeps existing voice-message call sites stable while the playback
+/// state, timing, speed, volume, and AVFoundation ownership live in the shared
+/// target for future iOS and generic document-audio reuse.
 @MainActor
-public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+public final class SharedAudioPlayer: ObservableObject {
   public static let shared = SharedAudioPlayer()
 
-  @Published public private(set) var state = SharedAudioPlayerState()
+  @Published public private(set) var state: SharedAudioPlayerState
 
+  private let center: AudioPlaybackCenter
   private let log = Log.scoped("SharedAudioPlayer")
-  private var audioPlayer: AVAudioPlayer?
-  private var progressTimer: Timer?
-  #if os(iOS)
-  private var audioSessionActive = false
-  #endif
 
-  override private init() {
-    super.init()
+  private init(center: AudioPlaybackCenter = .shared) {
+    self.center = center
+    state = center.state
+    observeCenter()
   }
 
-  public func toggleVoicePlayback(for message: Message, fileURLOverride: URL? = nil) throws {
+  public func toggleVoicePlayback(
+    for message: Message,
+    fileURLOverride: URL? = nil,
+    presentation: SharedAudioPlayerPresentation? = nil
+  ) throws {
     let item = try voiceItem(for: message)
 
     if state.item == item {
-      if state.isPlaying {
-        pause()
-      } else {
-        try resumeOrRestartVoicePlayback(for: message, fileURLOverride: fileURLOverride)
-      }
+      try toggleCurrentPlaybackThrowing()
       return
     }
 
-    try playVoice(for: message, fileURLOverride: fileURLOverride)
+    try playVoice(for: message, fileURLOverride: fileURLOverride, presentation: presentation)
   }
 
-  public func playVoice(for message: Message, fileURLOverride: URL? = nil) throws {
+  public func playVoice(
+    for message: Message,
+    fileURLOverride: URL? = nil,
+    presentation: SharedAudioPlayerPresentation? = nil
+  ) throws {
     let item = try voiceItem(for: message)
     let fileURL = try resolvedVoiceURL(for: message, fileURLOverride: fileURLOverride)
+    let presentation = presentation ?? voicePresentation(for: message)
 
-    stop()
-
-    #if os(iOS)
-    try configureAudioSessionIfNeeded()
-    #endif
-
-    let player = try AVAudioPlayer(contentsOf: fileURL)
-    player.delegate = self
-    player.prepareToPlay()
-    guard player.play() else {
-      throw SharedAudioPlayerError.missingLocalFile
-    }
-
-    audioPlayer = player
-    state = SharedAudioPlayerState(
-      item: item,
-      isPlaying: true,
-      currentTime: player.currentTime,
-      duration: player.duration
-    )
-    startProgressTimer()
+    try center.play(fileURL: fileURL, item: item, presentation: presentation)
+    syncStateFromCenter()
   }
 
-  public func prepareVoice(for message: Message, fileURLOverride: URL? = nil) throws {
+  public func prepareVoice(
+    for message: Message,
+    fileURLOverride: URL? = nil,
+    presentation: SharedAudioPlayerPresentation? = nil
+  ) throws {
     let item = try voiceItem(for: message)
-    if state.item == item, audioPlayer != nil {
+    if state.item == item {
       return
     }
 
     let fileURL = try resolvedVoiceURL(for: message, fileURLOverride: fileURLOverride)
-    stop()
+    let presentation = presentation ?? voicePresentation(for: message)
 
-    let player = try AVAudioPlayer(contentsOf: fileURL)
-    player.delegate = self
-    player.prepareToPlay()
+    try center.prepare(fileURL: fileURL, item: item, presentation: presentation)
+    syncStateFromCenter()
+  }
 
-    audioPlayer = player
-    state = SharedAudioPlayerState(
-      item: item,
-      isPlaying: false,
-      currentTime: player.currentTime,
-      duration: player.duration
-    )
+  public func playAudioFile(
+    fileURL: URL,
+    item: SharedAudioPlayerItem,
+    presentation: SharedAudioPlayerPresentation
+  ) throws {
+    try center.play(fileURL: fileURL, item: item, presentation: presentation)
+    syncStateFromCenter()
+  }
+
+  public func prepareAudioFile(
+    fileURL: URL,
+    item: SharedAudioPlayerItem,
+    presentation: SharedAudioPlayerPresentation
+  ) throws {
+    try center.prepare(fileURL: fileURL, item: item, presentation: presentation)
+    syncStateFromCenter()
   }
 
   public func pause() {
-    audioPlayer?.pause()
-    progressTimer?.invalidate()
-    progressTimer = nil
-    if let audioPlayer {
-      state.currentTime = audioPlayer.currentTime
-      state.duration = audioPlayer.duration
-    }
-    state.isPlaying = false
-    #if os(iOS)
-    deactivateAudioSessionIfNeeded()
-    #endif
+    center.pause()
+    syncStateFromCenter()
   }
 
   public func stop() {
-    progressTimer?.invalidate()
-    progressTimer = nil
-    audioPlayer?.stop()
-    audioPlayer = nil
-    state = SharedAudioPlayerState()
-    #if os(iOS)
-    deactivateAudioSessionIfNeeded()
-    #endif
+    center.close()
+    syncStateFromCenter()
   }
 
   public func seekVoice(to progress: Double, for message: Message) {
-    guard isCurrentVoice(message), let audioPlayer else { return }
-    let clampedProgress = min(max(progress, 0), 1)
-    audioPlayer.currentTime = audioPlayer.duration * clampedProgress
-    state.currentTime = audioPlayer.currentTime
-    state.duration = audioPlayer.duration
+    guard isCurrentVoice(message) else { return }
+    center.seek(to: progress)
+    syncStateFromCenter()
+  }
+
+  public func seekCurrent(to progress: Double) {
+    center.seek(to: progress)
+    syncStateFromCenter()
+  }
+
+  public func toggleCurrentPlayback() {
+    do {
+      try toggleCurrentPlaybackThrowing()
+    } catch {
+      log.error("Failed to toggle current audio", error: error)
+    }
+  }
+
+  public func resumeCurrentPlayback() throws {
+    try center.resume()
+    syncStateFromCenter()
+  }
+
+  public func setPlaybackRate(_ rate: Float) {
+    center.setPlaybackRate(rate)
+    syncStateFromCenter()
+  }
+
+  public func setVolume(_ volume: Float) {
+    center.setVolume(volume)
+    syncStateFromCenter()
+  }
+
+  public func previewVolume(_ volume: Float) {
+    center.previewVolume(volume)
   }
 
   public func isCurrentVoice(_ message: Message) -> Bool {
@@ -184,53 +178,93 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
     return min(max(state.currentTime / state.duration, 0), 1)
   }
 
-  public nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
-    let duration = player.duration
-
-    Task { @MainActor [weak self] in
-      guard let self else { return }
-      progressTimer?.invalidate()
-      progressTimer = nil
-
-      state.currentTime = duration
-      state.duration = duration
-      state.isPlaying = false
-      #if os(iOS)
-      deactivateAudioSessionIfNeeded()
-      #endif
+  private func toggleCurrentPlaybackThrowing() throws {
+    if state.isPlaying {
+      center.pause()
+    } else {
+      try center.resume()
     }
+    syncStateFromCenter()
   }
 
-  private func resumeOrRestartVoicePlayback(for message: Message, fileURLOverride: URL?) throws {
-    let item = try? voiceItem(for: message)
-    if let audioPlayer, let item, state.item == item {
-      #if os(iOS)
-      try configureAudioSessionIfNeeded()
-      #endif
-      if audioPlayer.play() {
-        state.isPlaying = true
-        startProgressTimer()
-        return
-      }
-    }
-
-    try playVoice(for: message, fileURLOverride: fileURLOverride)
+  private func syncStateFromCenter() {
+    state = center.state
   }
 
-  private func startProgressTimer() {
-    progressTimer?.invalidate()
-    progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+  private func observeCenter() {
+    withObservationTracking {
+      _ = center.state
+    } onChange: { [weak self] in
       Task { @MainActor [weak self] in
-        self?.syncPlaybackState()
+        guard let self else { return }
+        state = center.state
+        observeCenter()
       }
     }
   }
 
-  private func syncPlaybackState() {
-    guard let audioPlayer else { return }
-    state.currentTime = audioPlayer.currentTime
-    state.duration = audioPlayer.duration
-    state.isPlaying = audioPlayer.isPlaying
+  private func voicePresentation(for message: Message) -> SharedAudioPlayerPresentation {
+    let senderName = fetchUserDisplayName(id: message.fromId)
+    let title = senderName.map { "Voice message from \($0)" } ?? "Voice message"
+    let parentTitle = fetchPeerDisplayTitle(message.peerId)
+    let subtitle = formattedDuration(seconds: message.voiceContent?.duration)
+
+    return SharedAudioPlayerPresentation(
+      display: SharedAudioPlayerDisplay(
+        title: title,
+        parentTitle: parentTitle,
+        subtitle: subtitle
+      ),
+      openTarget: SharedAudioPlayerOpenTarget(
+        peer: AudioPlaybackPeer(message.peerId),
+        chatId: message.chatId,
+        messageId: message.messageId
+      )
+    )
+  }
+
+  private func fetchPeerDisplayTitle(_ peer: Peer) -> String? {
+    switch peer {
+    case let .user(id):
+      fetchUserDisplayName(id: id)
+    case let .thread(id):
+      fetchChatTitle(id: id)
+    }
+  }
+
+  private func fetchUserDisplayName(id: Int64) -> String? {
+    do {
+      return try AppDatabase.shared.dbWriter.read { db in
+        try User
+          .filter(Column("id") == id)
+          .fetchOne(db)?
+          .displayName
+      }
+    } catch {
+      log.error("Failed to fetch audio playback user title", error: error)
+      return nil
+    }
+  }
+
+  private func fetchChatTitle(id: Int64) -> String? {
+    do {
+      return try AppDatabase.shared.dbWriter.read { db in
+        try Chat
+          .filter(Column("id") == id)
+          .fetchOne(db)?
+          .humanReadableTitle
+      }
+    } catch {
+      log.error("Failed to fetch audio playback chat title", error: error)
+      return nil
+    }
+  }
+
+  private func formattedDuration(seconds: Int32?) -> String? {
+    guard let seconds, seconds > 0 else { return nil }
+    let minutes = Int(seconds) / 60
+    let remainder = Int(seconds) % 60
+    return String(format: "%d:%02d", minutes, remainder)
   }
 
   private func voiceItem(for message: Message) throws -> SharedAudioPlayerItem {
@@ -257,19 +291,4 @@ public final class SharedAudioPlayer: NSObject, ObservableObject, AVAudioPlayerD
 
     return localURL
   }
-
-  #if os(iOS)
-  private func configureAudioSessionIfNeeded() throws {
-    let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.playback, mode: .spokenAudio, options: [])
-    try session.setActive(true)
-    audioSessionActive = true
-  }
-
-  private func deactivateAudioSessionIfNeeded() {
-    guard audioSessionActive else { return }
-    audioSessionActive = false
-    try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-  }
-  #endif
 }
