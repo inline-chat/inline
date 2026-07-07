@@ -1,4 +1,5 @@
 import botApi from "./content/bot-api.md?raw"
+import changelog from "./content/changelog.md?raw"
 import cli from "./content/cli.md?raw"
 import creatingABot from "./content/creating-a-bot.md?raw"
 import developers from "./content/developers.md?raw"
@@ -60,6 +61,15 @@ export const DOCS_PAGES = [
     summary: "Current product roadmap status.",
     navGroup: "getting-started",
     markdown: roadmap,
+  },
+  {
+    slug: "changelog",
+    title: "What's New",
+    route: "/docs/changelog",
+    markdownPath: "/docs/changelog.md",
+    summary: "Release notes and exact app build links.",
+    navGroup: "getting-started",
+    markdown: changelog,
   },
   {
     slug: "downloads",

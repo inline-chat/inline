@@ -20,6 +20,9 @@ export const PageFooter = () => {
             <a href="/download" {...stylex.props(styles.link)}>
               Downloads
             </a>
+            <a href="/docs/changelog" {...stylex.props(styles.link)}>
+              What's New
+            </a>
             <a href="/docs" {...stylex.props(styles.link)}>
               Docs
             </a>
