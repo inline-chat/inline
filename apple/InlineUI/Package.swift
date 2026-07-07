@@ -22,6 +22,7 @@ let package = Package(
   products: [
     .library(name: "InlineUI", targets: ["InlineUI"]),
     .library(name: "EmojiAutocomplete", targets: ["EmojiAutocomplete"]),
+    .library(name: "ReactionPickerEmojis", targets: ["ReactionPickerEmojis"]),
     .library(name: "TextProcessing", targets: ["TextProcessing"]),
     .library(name: "Translation", targets: ["Translation"]),
     .library(name: "Invite", targets: ["Invite"]),
@@ -38,6 +39,7 @@ let package = Package(
       name: "InlineUI",
       dependencies: baseDependencies + [
         .product(name: "Kingfisher", package: "Kingfisher"),
+        "ReactionPickerEmojis",
       ],
       swiftSettings: swiftSettings
     ),
@@ -51,6 +53,12 @@ let package = Package(
 
     .target(
       name: "EmojiAutocomplete",
+      dependencies: [],
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
+      name: "ReactionPickerEmojis",
       dependencies: [],
       swiftSettings: swiftSettings
     ),
@@ -76,6 +84,12 @@ let package = Package(
     .testTarget(
       name: "InlineUITests",
       dependencies: ["InlineUI", "EmojiAutocomplete", "TextProcessing", "Translation"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "ReactionPickerEmojisTests",
+      dependencies: ["ReactionPickerEmojis"],
       swiftSettings: swiftSettings
     ),
   ]

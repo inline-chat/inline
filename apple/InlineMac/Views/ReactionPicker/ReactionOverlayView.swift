@@ -1,5 +1,6 @@
 import Auth
 import InlineKit
+import InlineUI
 import Logger
 import RealtimeV2
 import SwiftUI
@@ -12,28 +13,10 @@ struct ReactionOverlayView: View {
 
   private static let log = Log.scoped("ReactionOverlayView")
 
-  // Common emoji reactions - doubled the amount
-  static let defaultReactions = [
-    "🥹",
-    "❤️",
-    "🫡",
-    "👍",
-    "👎",
-    "💯",
-    "😂",
-    "✔️",
-    "🎉",
-    "🔥",
-    "👏",
-    "🙏",
-    "🤔",
-    "😮",
-    "😢",
-    "😡",
-  ]
-
   // State for hover and animation
   @State private var isHovered: [String: Bool] = [:]
+  @State private var suggestedReactions = ReactionPickerEmojiUsageStore.suggestedEmojis()
+  @State private var suggestionCounts = ReactionPickerEmojiUsageStore.usageCounts()
   @State private var appearScale: CGFloat = 0.5
   @State private var appearOpacity: Double = 0
   @State private var isEmojiPickerPresented = false
@@ -70,6 +53,8 @@ struct ReactionOverlayView: View {
             emoji: emoji,
             message: fullMessage.message
           ))
+          ReactionPickerEmojiUsageStore.recordPick(emoji)
+          reloadSuggestedReactions()
         }
       } catch {
         Self.log.error("Failed to update reaction", error: error)
@@ -91,10 +76,24 @@ struct ReactionOverlayView: View {
     handleReactionSelected(value)
   }
 
+  private func removeSuggestion(_ emoji: String) {
+    ReactionPickerEmojiUsageStore.removeSuggestion(emoji)
+
+    withAnimation(.smoothSnappy) {
+      reloadSuggestedReactions()
+    }
+  }
+
+  private func reloadSuggestedReactions() {
+    let counts = ReactionPickerEmojiUsageStore.usageCounts()
+    suggestionCounts = counts
+    suggestedReactions = ReactionPickerEmojis.suggestions(from: counts)
+  }
+
   var body: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       HStack(spacing: 2) {
-        ForEach(Self.defaultReactions, id: \.self) { emoji in
+        ForEach(suggestedReactions, id: \.self) { emoji in
           reactionButton(emoji)
         }
         moreReactionsButton
@@ -111,6 +110,7 @@ struct ReactionOverlayView: View {
     .scaleEffect(appearScale)
     .opacity(appearOpacity)
     .onAppear {
+      reloadSuggestedReactions()
       withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
         appearScale = 1.0
         appearOpacity = 1.0
@@ -148,6 +148,13 @@ struct ReactionOverlayView: View {
     .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isHovered[emoji])
     .onHover { hovering in
       isHovered[emoji] = hovering
+    }
+    .contextMenu {
+      if suggestionCounts[emoji, default: 0] > 0 {
+        Button("Remove from suggestions", role: .destructive) {
+          removeSuggestion(emoji)
+        }
+      }
     }
   }
 

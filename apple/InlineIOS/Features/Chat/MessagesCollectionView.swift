@@ -2855,24 +2855,7 @@ private extension MessagesCollectionView {
     private let maxCacheSize = 1_000
 
     func createReactionPickerView(for message: Message, at indexPath: IndexPath) -> UIView {
-      let reactions = [
-        "🥹",
-        "❤️",
-        "🫡",
-        "👍",
-        "👎",
-        "💯",
-        "😂",
-        "✔️",
-        "🎉",
-        "🔥",
-        "👏",
-        "🙏",
-        "🤔",
-        "😮",
-        "😢",
-        "😡",
-      ]
+      let reactions = ReactionPickerEmojiUsageStore.suggestedEmojis()
 
       let containerWidth = currentCollectionView?.window?.bounds.width
         ?? currentCollectionView?.bounds.width
@@ -3041,6 +3024,7 @@ private extension MessagesCollectionView {
           userId: Auth.shared.getCurrentUserId() ?? 0,
           peerId: message.peerId
         )))
+        ReactionPickerEmojiUsageStore.recordPick(emoji)
       }
     }
 
