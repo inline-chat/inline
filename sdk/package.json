@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/realtime-sdk",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "private": false,
   "license": "Apache-2.0",
   "type": "module",
@@ -17,9 +17,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "check": "bun run typecheck && bun run lint && bun run test && bun run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "bunx oxlint --ignore-path ../.oxlintignore src vitest.config.ts",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "prepack": "bun run build",
+    "release:preflight": "npm publish --dry-run --access public"
   },
   "dependencies": {
     "@inline-chat/protocol": "^0.0.5",
