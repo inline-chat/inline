@@ -250,6 +250,7 @@ export class InlineSdkClient {
 
     const chat = result.getChat.chat
     if (!chat) throw new Error("getChat: missing chat")
+    const dialogFollowMode = result.getChat.dialog?.followMode
     return {
       chatId: chat.id,
       title: chat.title,
@@ -257,6 +258,8 @@ export class InlineSdkClient {
       ...(chat.spaceId != null ? { spaceId: chat.spaceId } : {}),
       ...(chat.parentChatId != null ? { parentChatId: chat.parentChatId } : {}),
       ...(chat.parentMessageId != null ? { parentMessageId: chat.parentMessageId } : {}),
+      ...(chat.lastMsgId != null ? { lastMsgId: chat.lastMsgId } : {}),
+      ...(dialogFollowMode != null ? { dialogFollowMode } : {}),
       ...(chat.isPublic != null ? { isPublic: chat.isPublic } : {}),
       ...(chat.untitled != null ? { untitled: chat.untitled } : {}),
       ...(chat.number != null ? { number: chat.number } : {}),

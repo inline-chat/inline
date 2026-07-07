@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { GetUpdatesResult_ResultType, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
+import { DialogFollowMode, GetUpdatesResult_ResultType, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
 import { InlineSdkClient } from "./inline-sdk-client.js"
 import { MockTransport } from "../realtime/mock-transport.js"
 import type { InlineSdkState, InlineSdkStateStore } from "./types.js"
@@ -239,8 +239,13 @@ describe("InlineSdkClient", () => {
                   title: "Test thread",
                   parentChatId: 3n,
                   parentMessageId: 99n,
+                  lastMsgId: 100n,
                   number: 12,
                   untitled: true,
+                },
+                dialog: {
+                  chatId: 7n,
+                  followMode: DialogFollowMode.FOLLOWING,
                 },
                 pinnedMessageIds: [],
               },
@@ -254,6 +259,8 @@ describe("InlineSdkClient", () => {
       chatId: 7n,
       parentChatId: 3n,
       parentMessageId: 99n,
+      lastMsgId: 100n,
+      dialogFollowMode: DialogFollowMode.FOLLOWING,
       number: 12,
       title: "Test thread",
       untitled: true,

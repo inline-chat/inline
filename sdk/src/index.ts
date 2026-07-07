@@ -18,6 +18,16 @@ export type {
   RpcResultForMethod,
 } from "./sdk/types.js"
 export type { InlineSdkLogger } from "./sdk/logger.js"
+export {
+  INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT,
+  isInlineFollowModeMentionGateEligible,
+  isInlineFreshThreadForMentionGate,
+  isInlineReplyThreadForMentionGate,
+} from "./sdk/thread-mention-gating.js"
+export type {
+  InlineFollowModeMentionGateChat,
+  InlineMentionGateIdLike,
+} from "./sdk/thread-mention-gating.js"
 
 export { JsonFileStateStore } from "./state/json-file-state-store.js"
 export { serializeStateV1, deserializeStateV1 } from "./state/serde.js"

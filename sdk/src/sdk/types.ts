@@ -1,5 +1,6 @@
 import type {
   ChatParticipant,
+  DialogFollowMode,
   Message,
   MessageActionResponseUi,
   MessageActions,
@@ -37,6 +38,8 @@ export type InlineSdkChatInfo = {
   spaceId?: InlineId
   parentChatId?: InlineId
   parentMessageId?: InlineId
+  lastMsgId?: InlineId
+  dialogFollowMode?: DialogFollowMode
   isPublic?: boolean
   untitled?: boolean
   number?: number
