@@ -210,6 +210,19 @@ type StatusSink = (patch: {
   diagnostics?: unknown
 }) => void
 
+type InlineDiagnosticsSnapshot = {
+  protocol?: {
+    state?: unknown
+    ping?: {
+      pendingCount?: unknown
+    }
+    transport?: {
+      state?: unknown
+      socketReadyState?: unknown
+    } | null
+  } | null
+}
+
 type CachedChatInfo = {
   kind: "direct" | "group"
   title: string | null
@@ -685,6 +698,23 @@ function formatSdkLogLine(message: string, meta?: unknown): string {
   const detail = summarizeSdkMeta(meta)
   if (!detail) return message
   return `${message} ${detail}`
+}
+
+function isRecoverableInlineConnectionError(line: string): boolean {
+  return /^(WebSocket (?:closed|error|reconnect scheduled)|Protocol reconnect scheduled|Ping timeout, reconnecting|Failed to send RPC request; waiting for reconnect)/.test(line)
+}
+
+function isInlineConnectionRecovered(diagnostics: unknown): boolean {
+  const snapshot = diagnostics as InlineDiagnosticsSnapshot
+  const protocol = snapshot.protocol
+  if (protocol?.state !== "open") return false
+
+  const transport = protocol.transport
+  if (transport?.state != null && transport.state !== "connected") return false
+  if (transport?.socketReadyState != null && transport.socketReadyState !== 1) return false
+
+  const pendingCount = protocol.ping?.pendingCount
+  return typeof pendingCount !== "number" || pendingCount === 0
 }
 
 function formatInlineOperationError(operation: string, error: unknown): string {
@@ -2926,10 +2956,32 @@ export async function monitorInlineProvider(params: {
   await mkdir(path.dirname(statePath), { recursive: true })
 
   let client: InlineSdkClient | null = null
+  let currentLastError: string | null = null
+  let recoverableConnectionError: string | null = null
+  const publishStatus = (patch: Parameters<StatusSink>[0]) => {
+    if (Object.prototype.hasOwnProperty.call(patch, "lastError")) {
+      currentLastError = typeof patch.lastError === "string" ? patch.lastError : null
+      if (currentLastError == null) {
+        recoverableConnectionError = null
+      }
+    }
+    statusSink?.(patch)
+  }
   const pushDiagnostics = (patch?: Parameters<StatusSink>[0]) => {
-    statusSink?.({
-      ...patch,
-      ...(client ? { diagnostics: client.getDiagnostics() } : {}),
+    const diagnostics = client?.getDiagnostics()
+    const nextPatch = { ...patch }
+    if (
+      diagnostics &&
+      !Object.prototype.hasOwnProperty.call(nextPatch, "lastError") &&
+      currentLastError != null &&
+      currentLastError === recoverableConnectionError &&
+      isInlineConnectionRecovered(diagnostics)
+    ) {
+      nextPatch.lastError = null
+    }
+    publishStatus({
+      ...nextPatch,
+      ...(diagnostics ? { diagnostics } : {}),
     })
   }
   const sdkLog = {
@@ -2938,11 +2990,21 @@ export async function monitorInlineProvider(params: {
     warn: (msg: string, meta?: unknown) => {
       const line = formatSdkLogLine(msg, meta)
       log?.warn(line)
+      if (isRecoverableInlineConnectionError(line)) {
+        recoverableConnectionError = line
+      } else {
+        recoverableConnectionError = null
+      }
       pushDiagnostics({ lastError: line })
     },
     error: (msg: string, meta?: unknown) => {
       const line = formatSdkLogLine(msg, meta)
       log?.error(line)
+      if (isRecoverableInlineConnectionError(line)) {
+        recoverableConnectionError = line
+      } else {
+        recoverableConnectionError = null
+      }
       pushDiagnostics({ lastError: line })
     },
   }
@@ -3033,7 +3095,7 @@ export async function monitorInlineProvider(params: {
       hydratedParticipantChats.add(chatKey)
     })()
       .catch((err) => {
-        statusSink?.({ lastError: `getChatParticipants failed: ${String(err)}` })
+        publishStatus({ lastError: `getChatParticipants failed: ${String(err)}` })
       })
       .finally(() => {
         participantFetches.delete(chatKey)
@@ -3060,7 +3122,7 @@ export async function monitorInlineProvider(params: {
       cachedDirectoryUserProfilesHydrated = true
     })()
       .catch((err) => {
-        statusSink?.({ lastError: `getChats failed: ${String(err)}` })
+        publishStatus({ lastError: `getChats failed: ${String(err)}` })
       })
       .finally(() => {
         cachedDirectoryUserProfilesFetch = null
@@ -3080,7 +3142,7 @@ export async function monitorInlineProvider(params: {
       chatInfo = await resolveChatInfo(client, chatCache, params.chatId)
     } catch (err) {
       chatInfo = { kind: "group", title: null }
-      statusSink?.({ lastError: `getChat failed: ${String(err)}` })
+      publishStatus({ lastError: `getChat failed: ${String(err)}` })
     }
 
     const isGroup = chatInfo.kind !== "direct"
@@ -3092,7 +3154,7 @@ export async function monitorInlineProvider(params: {
       chatInfo,
       chatCache,
     }).catch((err) => {
-      statusSink?.({ lastError: `getChat (system event reply thread) failed: ${String(err)}` })
+      publishStatus({ lastError: `getChat (system event reply thread) failed: ${String(err)}` })
       return null
     })
     const effectiveChatId = replyThreadContext?.parentChatId ?? params.chatId
@@ -3234,7 +3296,7 @@ export async function monitorInlineProvider(params: {
     if (!messageIds.length) return
 
     const inboundAt = Date.now()
-    statusSink?.({
+    publishStatus({
       lastInboundAt: inboundAt,
       lastEventAt: inboundAt,
       ...createTransportActivityStatusPatch(inboundAt),
@@ -3272,7 +3334,7 @@ export async function monitorInlineProvider(params: {
     emoji: string
   }): Promise<void> => {
     const inboundAt = Date.now()
-    statusSink?.({
+    publishStatus({
       lastInboundAt: inboundAt,
       lastEventAt: inboundAt,
       ...createTransportActivityStatusPatch(inboundAt),
@@ -3324,7 +3386,7 @@ export async function monitorInlineProvider(params: {
     if (!participant || participant.userId !== meId) return
 
     const inboundAt = Date.now()
-    statusSink?.({
+    publishStatus({
       lastInboundAt: inboundAt,
       lastEventAt: inboundAt,
       ...createTransportActivityStatusPatch(inboundAt),
@@ -3343,7 +3405,7 @@ export async function monitorInlineProvider(params: {
       chatId: params.chatId,
       limit: 10,
     }).catch((err) => {
-      statusSink?.({ lastError: `getChatHistory (participant add) failed: ${String(err)}` })
+      publishStatus({ lastError: `getChatHistory (participant add) failed: ${String(err)}` })
       return null
     })
     const freshness = resolveInlineThreadFreshness({
@@ -3411,7 +3473,7 @@ export async function monitorInlineProvider(params: {
       meId,
       botMessageIdsByChat,
     }).catch((err) => {
-      statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
+      publishStatus({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
       return false
     })
   }
@@ -3439,7 +3501,7 @@ export async function monitorInlineProvider(params: {
     }
 
     const inboundAt = Date.now()
-    statusSink?.({
+    publishStatus({
       lastInboundAt: inboundAt,
       lastEventAt: inboundAt,
       ...createTransportActivityStatusPatch(inboundAt),
@@ -3451,7 +3513,7 @@ export async function monitorInlineProvider(params: {
     } catch (err) {
       // Default conservative behavior if metadata fetch fails.
       chatInfo = { kind: "group", title: null }
-      statusSink?.({ lastError: `getChat failed: ${String(err)}` })
+      publishStatus({ lastError: `getChat failed: ${String(err)}` })
     }
 
     const isGroup = chatInfo.kind !== "direct"
@@ -3469,7 +3531,7 @@ export async function monitorInlineProvider(params: {
       chatInfo,
       chatCache,
     }).catch((err) => {
-      statusSink?.({ lastError: `getChat (reply thread) failed: ${String(err)}` })
+      publishStatus({ lastError: `getChat (reply thread) failed: ${String(err)}` })
       return null
     })
     const effectiveChatId = replyThreadContext?.parentChatId ?? chatId
@@ -3738,7 +3800,7 @@ export async function monitorInlineProvider(params: {
                     code,
                   }),
                 })
-                statusSink?.({ lastOutboundAt: Date.now() })
+                publishStatus({ lastOutboundAt: Date.now() })
               } catch (err) {
                 runtime.error?.(`inline: pairing reply failed for ${senderId}: ${String(err)}`)
               }
@@ -3800,7 +3862,7 @@ export async function monitorInlineProvider(params: {
       historyLimit,
       botMessageIdsByChat,
     }).catch((err) => {
-      statusSink?.({ lastError: `getChatHistory failed: ${String(err)}` })
+      publishStatus({ lastError: `getChatHistory failed: ${String(err)}` })
       return {
         historyText: null,
         attachmentText: null,
@@ -3993,7 +4055,7 @@ export async function monitorInlineProvider(params: {
             })
             rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
           }
-          statusSink?.({ lastOutboundAt: Date.now() })
+          publishStatus({ lastOutboundAt: Date.now() })
         }
 
         await answerCallbackIfNeeded().catch((error) => {
@@ -4056,7 +4118,7 @@ export async function monitorInlineProvider(params: {
         })
         rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
       }
-      statusSink?.({ lastOutboundAt: Date.now() })
+      publishStatus({ lastOutboundAt: Date.now() })
       return
     }
 
@@ -4106,7 +4168,7 @@ export async function monitorInlineProvider(params: {
         })
         rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
       }
-      statusSink?.({ lastOutboundAt: Date.now() })
+      publishStatus({ lastOutboundAt: Date.now() })
       await answerCallbackIfNeeded().catch((error) => {
         runtime.error?.(`inline callback answer failed: ${String(error)}`)
       })
@@ -4229,7 +4291,7 @@ export async function monitorInlineProvider(params: {
         }
       }
 
-      statusSink?.({ lastOutboundAt: Date.now() })
+      publishStatus({ lastOutboundAt: Date.now() })
       await answerCallbackIfNeeded().catch((error) => {
         runtime.error?.(`inline callback answer failed: ${String(error)}`)
       })
@@ -4279,7 +4341,7 @@ export async function monitorInlineProvider(params: {
         parentMessageId: msg.id,
         agentId: route.agentId,
       }).catch((error) => {
-        statusSink?.({ lastError: `reply-thread route lookup failed: ${String(error)}` })
+        publishStatus({ lastError: `reply-thread route lookup failed: ${String(error)}` })
         runtime.error?.(`inline reply-thread route lookup failed: ${String(error)}`)
         return null
       })
@@ -4290,7 +4352,7 @@ export async function monitorInlineProvider(params: {
           chatCache,
           fallbackParentChatTitle: effectiveGroupTitle,
         }).catch((error) => {
-          statusSink?.({ lastError: `reply-thread route restore failed: ${String(error)}` })
+          publishStatus({ lastError: `reply-thread route restore failed: ${String(error)}` })
           runtime.error?.(`inline reply-thread route restore failed: ${String(error)}`)
           return null
         })
@@ -4303,7 +4365,7 @@ export async function monitorInlineProvider(params: {
         parentChatId: effectiveChatId,
         parentMessageId: msg.id,
       }).catch((error) => {
-        statusSink?.({ lastError: `createSubthread failed: ${String(error)}` })
+        publishStatus({ lastError: `createSubthread failed: ${String(error)}` })
         runtime.error?.(`inline create reply thread failed: ${String(error)}`)
         return null
       })
@@ -4377,7 +4439,7 @@ export async function monitorInlineProvider(params: {
         meId,
         botMessageIdsByChat,
       }).catch((err) => {
-        statusSink?.({ lastError: `getChatHistory (reply thread parent) failed: ${String(err)}` })
+        publishStatus({ lastError: `getChatHistory (reply thread parent) failed: ${String(err)}` })
         return null
       })
       if (parentHistoryContext) {
@@ -4729,7 +4791,7 @@ export async function monitorInlineProvider(params: {
             }
           }
           progressState.text = text
-          statusSink?.({ lastOutboundAt: Date.now() })
+          publishStatus({ lastOutboundAt: Date.now() })
         })
         .catch((error) => {
           runtime.error?.(`inline progress placeholder failed: ${String(error)}`)
@@ -4873,7 +4935,7 @@ export async function monitorInlineProvider(params: {
             }
           }
           editStreamState.accumulatedText = nextText
-          statusSink?.({ lastOutboundAt: Date.now() })
+          publishStatus({ lastOutboundAt: Date.now() })
         } catch (error) {
           editStreamState.failed = true
           runtime.error?.(`inline edit stream failed: ${String(error)}`)
@@ -5202,7 +5264,7 @@ export async function monitorInlineProvider(params: {
                   }
                   await updateStreamedMessage(outboundText, callbackEditActions)
                   delivered = true
-                  statusSink?.({ lastOutboundAt: Date.now() })
+                  publishStatus({ lastOutboundAt: Date.now() })
                   return
                 }
                 if (
@@ -5225,12 +5287,12 @@ export async function monitorInlineProvider(params: {
                   if (infoKind === "final") {
                     finalDeliveredForCurrentAssistantMessage = true
                   }
-                  statusSink?.({ lastOutboundAt: Date.now() })
+                  publishStatus({ lastOutboundAt: Date.now() })
                   return
                 }
                 if (!outboundText.trim()) return
                 await sendTextFallback(outboundText, true, true)
-                statusSink?.({ lastOutboundAt: Date.now() })
+                publishStatus({ lastOutboundAt: Date.now() })
                 return
               }
 
@@ -5274,7 +5336,7 @@ export async function monitorInlineProvider(params: {
                 }
               }
 
-              statusSink?.({ lastOutboundAt: Date.now() })
+              publishStatus({ lastOutboundAt: Date.now() })
             },
             onSkip: (_payload, info) => {
               if (info?.reason !== "silent") {
@@ -5316,7 +5378,7 @@ export async function monitorInlineProvider(params: {
           messageId: sent.messageId,
           replyThreadContext: deliveryReplyThreadContext,
         })
-        statusSink?.({ lastOutboundAt: Date.now() })
+        publishStatus({ lastOutboundAt: Date.now() })
       }
     } finally {
       await setParentThreadCreationTyping(false)
@@ -5401,7 +5463,7 @@ export async function monitorInlineProvider(params: {
           text: INLINE_DEBOUNCE_ERROR_FALLBACK,
         })
         .then(() => {
-          statusSink?.({ lastOutboundAt: Date.now() })
+          publishStatus({ lastOutboundAt: Date.now() })
         })
         .catch((sendErr) => {
           runtime.error?.(`inline debounce fallback send failed: ${String(sendErr)}`)
@@ -5426,7 +5488,7 @@ export async function monitorInlineProvider(params: {
       chatInfo = await resolveChatInfo(client, chatCache, entry.chatId)
     } catch (err) {
       chatInfo = { kind: "group", title: null }
-      statusSink?.({ lastError: `getChat failed: ${String(err)}` })
+      publishStatus({ lastError: `getChat failed: ${String(err)}` })
     }
 
     const isGroup = chatInfo.kind !== "direct"
@@ -5438,7 +5500,7 @@ export async function monitorInlineProvider(params: {
       chatInfo,
       chatCache,
     }).catch((err) => {
-      statusSink?.({ lastError: `getChat (abort reply thread) failed: ${String(err)}` })
+      publishStatus({ lastError: `getChat (abort reply thread) failed: ${String(err)}` })
       return null
     })
     const effectiveChatId = replyThreadContext?.parentChatId ?? entry.chatId
@@ -5550,7 +5612,7 @@ export async function monitorInlineProvider(params: {
       }
     } catch (error) {
       const message = String(error)
-      statusSink?.({ lastError: message })
+      publishStatus({ lastError: message })
       runtime.error?.(`inline ${label} failed: ${message}`)
       return
     }
@@ -5558,7 +5620,7 @@ export async function monitorInlineProvider(params: {
     const tracked = task
       .catch((error) => {
         const message = String(error)
-        statusSink?.({ lastError: message })
+        publishStatus({ lastError: message })
         runtime.error?.(`inline ${label} failed: ${message}`)
       })
       .finally(() => {
@@ -5887,7 +5949,7 @@ export async function monitorInlineProvider(params: {
         }
       }
     } catch (err) {
-      statusSink?.({ lastError: String(err) })
+      publishStatus({ lastError: String(err) })
       runtime.error?.(`inline monitor loop crashed: ${String(err)}`)
     }
   })()

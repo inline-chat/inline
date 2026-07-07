@@ -252,6 +252,13 @@ type MonitorSetup = {
     dispatcherOptions: any
     replyOptions: any
   }) => Promise<void> | void
+  captureSdkLogger?: (logger: {
+    debug?: (msg: string, meta?: unknown) => void
+    info?: (msg: string, meta?: unknown) => void
+    warn?: (msg: string, meta?: unknown) => void
+    error?: (msg: string, meta?: unknown) => void
+  }) => void
+  getDiagnostics?: () => unknown
   sendMessageDelayMs?: number
   runtimeConfig?: Record<string, unknown>
   createSubthreadError?: string
@@ -827,7 +834,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         REVIEW: BOT_PRESENCE_REVIEW,
       },
       InlineSdkClient: class {
-        constructor(_opts: unknown) {}
+        constructor(opts: any) {
+          setup.captureSdkLogger?.(opts.logger)
+        }
         connect = vi.fn(async () => {})
         getMe = vi.fn(async () => ({ userId: setup.me?.userId ?? 777n }))
         getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => {
@@ -856,7 +865,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         answerMessageAction = answerMessageAction
         invokeRaw = invokeRaw
         invokeUncheckedRaw = this.invokeRaw
-        getDiagnostics = vi.fn(() => ({
+        getDiagnostics = vi.fn(() => setup.getDiagnostics?.() ?? ({
           protocol: {
             state: "open",
             ping: {
@@ -1135,6 +1144,70 @@ describe("inline/monitor", () => {
     })
 
     await handle.stop()
+  })
+
+  it("clears recoverable websocket errors after diagnostics show recovery", async () => {
+    vi.useFakeTimers()
+    const statusPatches: Array<Record<string, unknown>> = []
+    const reconnectMessage =
+      "WebSocket reconnect scheduled (attempt=3, delayMs=2278, cause=socket-error:Error: connect ECONNREFUSED 127.0.0.1:8000 (code=ECONNREFUSED))"
+    let sdkLogger: {
+      warn?: (msg: string, meta?: unknown) => void
+    } | null = null
+
+    try {
+      const harness = await setupMonitorHarness({
+        events: [],
+        chats: {},
+        captureSdkLogger: (logger) => {
+          sdkLogger = logger
+        },
+        getDiagnostics: () => ({
+          protocol: {
+            state: "open",
+            ping: {
+              pendingCount: 0,
+              lastPongAt: Date.now(),
+            },
+            transport: {
+              state: "connected",
+              socketReadyState: 1,
+            },
+          },
+        }),
+      })
+
+      const handle = await harness.monitorInlineProvider({
+        cfg: {} as any,
+        account: buildAccount({ dmPolicy: "open" }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        statusSink: (patch: Record<string, unknown>) => {
+          statusPatches.push(patch)
+        },
+      })
+
+      expect(sdkLogger?.warn).toBeTypeOf("function")
+      sdkLogger?.warn?.(reconnectMessage)
+
+      const errorIndex = statusPatches.findIndex((patch) => patch.lastError === reconnectMessage)
+      expect(errorIndex).toBeGreaterThanOrEqual(0)
+
+      await vi.advanceTimersByTimeAsync(15_000)
+
+      expect(statusPatches.slice(errorIndex + 1)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            lastError: null,
+          }),
+        ]),
+      )
+
+      await handle.stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("surfaces startup getMe failures with operation context and closes the client", async () => {
