@@ -101,6 +101,11 @@ If you're building on top of Inline, start here:
 - [Realtime API](https://inline.chat/docs/realtime-api)
 - [CLI](cli/README.md)
 
+Rust crates in this repo:
+
+- [`inline-sdk`](crates/sdk/README.md): Rust SDK for API calls, uploads, client identity, and realtime RPC.
+- [`inline-protocol`](crates/protocol/README.md): generated Rust protocol types from `proto/core.proto`.
+
 ### Contributing
 
 - We are not accepting external code contributions at this time.

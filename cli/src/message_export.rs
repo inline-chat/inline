@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::media::best_photo_size;
 use crate::output::{self, JsonFormat, user_display_name};
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum MessageExportFormat {

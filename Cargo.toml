@@ -1,0 +1,58 @@
+[workspace]
+members = [
+  "cli",
+  "crates/client",
+  "crates/protocol",
+  "crates/sdk",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.5.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+repository = "https://github.com/inline-chat/inline"
+homepage = "https://inline.chat"
+
+[workspace.dependencies]
+axum = { version = "0.8.9", features = ["multipart", "ws"] }
+env_logger = "0.11.11"
+futures-util = "0.3.30"
+hostname = "0.4.0"
+log = "0.4.22"
+prost = "0.12.6"
+prost-build = "0.12.6"
+reqwest = { version = "0.12.12", default-features = false, features = [
+  "json",
+  "multipart",
+  "rustls-tls",
+  "stream",
+] }
+rusqlite = "0.40.1"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.135"
+thiserror = "1.0.69"
+tokio = { version = "1.43.0", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+tokio-tungstenite = { version = "0.21.0", features = [
+  "rustls-tls-native-roots",
+] }
+tower = { version = "0.5.3", features = ["util"] }
+url = "2.5.4"
+
+[profile.release]
+lto = "fat"
+strip = "symbols"
+codegen-units = 1
+
+[profile.ci-test]
+debug = 1
+inherits = "test"
+opt-level = 0

@@ -1,14 +1,13 @@
 use dialoguer::{Input, Select};
 use serde::Serialize;
 
-use crate::api::{ApiClient, ApiError};
 use crate::auth::AuthStore;
-use crate::client_info::{self, AuthMetadata};
 use crate::errors::CliError;
-use crate::protocol::proto;
-use crate::realtime::RealtimeClient;
+use crate::identity as client_info;
 use crate::state::LocalDb;
 use crate::{AuthLoginArgs, fetch_me, is_interactive_terminal, user_display_name};
+use inline_protocol::proto;
+use inline_sdk::api::{ApiClient, ApiError};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,7 +61,7 @@ pub(crate) async fn handle_login(
 
     let device_name = client_info::device_name();
     let device_id = auth_store.device_id()?;
-    let auth_metadata = AuthMetadata::cli(&device_id, device_name.as_deref());
+    let auth_metadata = client_info::auth_metadata(&device_id, device_name.as_deref());
 
     loop {
         let current = match contact.take() {
@@ -72,12 +71,12 @@ pub(crate) async fn handle_login(
 
         let email_challenge_token = match &current {
             Contact::Email(email) => {
-                api.send_email_code(email, auth_metadata)
+                api.send_email_code(email, &auth_metadata)
                     .await?
                     .challenge_token
             }
             Contact::Phone(phone) => {
-                api.send_sms_code(phone, auth_metadata).await?;
+                api.send_sms_code(phone, &auth_metadata).await?;
                 None
             }
         };
@@ -90,17 +89,18 @@ pub(crate) async fn handle_login(
                         email,
                         &code,
                         email_challenge_token.as_deref(),
-                        auth_metadata,
+                        &auth_metadata,
                     )
                     .await
                 }
-                Contact::Phone(phone) => api.verify_sms_code(phone, &code, auth_metadata).await,
+                Contact::Phone(phone) => api.verify_sms_code(phone, &code, &auth_metadata).await,
             };
 
             match result {
                 Ok(result) => {
                     auth_store.store_token(&result.token)?;
-                    let mut realtime = RealtimeClient::connect(realtime_url, &result.token).await?;
+                    let mut realtime =
+                        client_info::connect_realtime(realtime_url, &result.token).await?;
                     match fetch_me(&mut realtime).await {
                         Ok(me) => {
                             local_db.set_current_user(me.clone())?;
@@ -247,6 +247,9 @@ pub(crate) fn print_auth_user(user: &proto::User) {
 
 fn print_auth_error(error: &ApiError) {
     match error {
+        ApiError::InvalidBaseUrl { message, .. } => {
+            eprintln!("Invalid Inline API base URL: {message}");
+        }
         ApiError::Api {
             status,
             error,
@@ -279,6 +282,9 @@ fn print_auth_error(error: &ApiError) {
         }
         ApiError::Json(err) => {
             eprintln!("Could not decode server response while verifying code: {err}");
+        }
+        _ => {
+            eprintln!("Could not verify code: {error}");
         }
     }
 }

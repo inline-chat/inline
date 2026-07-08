@@ -1,0 +1,24 @@
+[package]
+name = "inline-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Generated public protocol types for Inline."
+readme = "README.md"
+build = "build.rs"
+keywords = ["inline", "chat", "protobuf", "protocol"]
+categories = ["api-bindings"]
+documentation = "https://docs.rs/inline-protocol"
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+prost.workspace = true
+serde.workspace = true
+
+[build-dependencies]
+prost-build.workspace = true

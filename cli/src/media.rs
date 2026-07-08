@@ -1,4 +1,4 @@
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 pub(crate) fn best_photo_size(
     photo: &proto::Photo,

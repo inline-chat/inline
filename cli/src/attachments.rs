@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, io};
 
-use crate::api::{UploadFileInput, UploadFileResult, UploadFileType, UploadVideoMetadata};
 use crate::errors::CliError;
 use crate::output::format_bytes;
-use crate::protocol::proto;
+use inline_protocol::proto;
+use inline_sdk::api::{UploadFileInput, UploadFileResult, UploadFileType, UploadVideoMetadata};
 
 pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
 
@@ -24,13 +24,18 @@ pub(crate) struct PreparedAttachment {
 
 impl PreparedAttachment {
     pub(crate) fn to_upload_input(&self) -> UploadFileInput {
-        UploadFileInput {
-            path: self.upload_path.clone(),
-            file_name: self.file_name.clone(),
-            mime_type: self.mime_type.clone(),
-            file_type: self.file_type.clone(),
-            video_metadata: self.video_metadata.clone(),
+        let mut input = UploadFileInput::new(
+            self.upload_path.clone(),
+            self.file_name.clone(),
+            self.file_type,
+        );
+        if let Some(mime_type) = self.mime_type.as_deref() {
+            input = input.with_mime_type(mime_type);
         }
+        if let Some(metadata) = self.video_metadata {
+            input = input.with_video_metadata(metadata);
+        }
+        input
     }
 }
 

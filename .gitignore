@@ -12,6 +12,7 @@ coverage/
 *.tsbuildinfo
 
 # Rust
+target/
 cli/target/
 cli/dist/
 

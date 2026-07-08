@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 #[derive(Debug, Error)]
 pub enum StateError {

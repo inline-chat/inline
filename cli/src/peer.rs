@@ -1,6 +1,7 @@
 use crate::errors::CliError;
-use crate::protocol::proto;
 use crate::validation::validate_positive_id_arg;
+use inline_protocol::proto;
+use inline_sdk::api::PeerId;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum PeerKey {
@@ -37,6 +38,26 @@ pub(crate) fn input_peer_from_args(
                     user_id,
                 })),
             })
+        }
+        (None, None) => Err(CliError::missing_peer().into()),
+    }
+}
+
+pub(crate) fn api_peer_from_args(
+    chat_id: Option<i64>,
+    user_id: Option<i64>,
+) -> Result<PeerId, Box<dyn std::error::Error>> {
+    match (chat_id, user_id) {
+        (Some(_), Some(_)) => {
+            Err(CliError::invalid_args("Provide only one of --chat-id or --user-id.").into())
+        }
+        (Some(chat_id), None) => {
+            let chat_id = validate_positive_id_arg("--chat-id", chat_id)?;
+            Ok(PeerId::thread(chat_id))
+        }
+        (None, Some(user_id)) => {
+            let user_id = validate_positive_id_arg("--user-id", user_id)?;
+            Ok(PeerId::user(user_id))
         }
         (None, None) => Err(CliError::missing_peer().into()),
     }
@@ -82,6 +103,31 @@ mod tests {
         assert!(cli_err.message.contains("--chat-id"));
 
         let err = input_peer_from_args(None, Some(-1)).unwrap_err();
+        let cli_err = err.downcast_ref::<CliError>().unwrap();
+        assert_eq!(cli_err.code, "invalid_args");
+        assert!(cli_err.message.contains("--user-id"));
+    }
+
+    #[test]
+    fn api_peer_from_chat_and_user_ids() {
+        assert_eq!(
+            api_peer_from_args(Some(123), None).unwrap(),
+            PeerId::thread(123)
+        );
+        assert_eq!(
+            api_peer_from_args(None, Some(456)).unwrap(),
+            PeerId::user(456)
+        );
+    }
+
+    #[test]
+    fn api_peer_rejects_non_positive_ids() {
+        let err = api_peer_from_args(Some(0), None).unwrap_err();
+        let cli_err = err.downcast_ref::<CliError>().unwrap();
+        assert_eq!(cli_err.code, "invalid_args");
+        assert!(cli_err.message.contains("--chat-id"));
+
+        let err = api_peer_from_args(None, Some(-1)).unwrap_err();
         let cli_err = err.downcast_ref::<CliError>().unwrap();
         assert_eq!(cli_err.code, "invalid_args");
         assert!(cli_err.message.contains("--user-id"));

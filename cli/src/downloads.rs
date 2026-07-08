@@ -3,10 +3,10 @@ use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
-use crate::client_info;
 use crate::errors::{CliError, HttpStatusCliError};
+use crate::identity as client_info;
 use crate::media::best_photo_size;
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 pub(crate) fn resolve_download_path(
     message: &proto::Message,

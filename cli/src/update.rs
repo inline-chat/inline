@@ -13,8 +13,8 @@ use tar::Archive;
 use thiserror::Error;
 use tokio::task::JoinHandle;
 
-use crate::client_info;
 use crate::config::Config;
+use crate::identity as client_info;
 use crate::state::{LocalDb, StateError};
 
 const UPDATE_CHECK_INTERVAL_SECS: i64 = 6 * 60 * 60;

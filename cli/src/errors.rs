@@ -2,8 +2,8 @@ use serde::Serialize;
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal};
 
-use crate::api::ApiError;
-use crate::realtime::RealtimeError;
+use inline_sdk::api::ApiError;
+use inline_sdk::realtime::RealtimeError;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -271,22 +271,6 @@ impl CliError {
         }
     }
 
-    pub(crate) fn unexpected_rpc_result(method: impl Into<String>) -> Self {
-        let method = method.into();
-        Self {
-            code: "unexpected_rpc_result",
-            message: format!("Unexpected RPC result for {method}"),
-            hint: Some(
-                "The realtime API returned a response variant that does not match the requested method. This usually means the CLI and server protocol versions are out of sync."
-                    .to_string(),
-            ),
-            examples: vec![
-                "inline update".to_string(),
-                "inline doctor --json".to_string(),
-            ],
-        }
-    }
-
     pub(crate) fn unexpected_api_response(
         context: impl Into<String>,
         detail: impl Into<String>,
@@ -510,6 +494,11 @@ fn json_cli_error_from_json_error(error: &serde_json::Error) -> JsonCliError {
 
 fn json_cli_error_from_api_error(error: &ApiError) -> JsonCliError {
     match error {
+        ApiError::InvalidBaseUrl { message, .. } => {
+            let mut payload = JsonCliError::new("invalid_api_base_url", message.clone());
+            payload.hint = Some("Set INLINE_API_BASE_URL to an http(s) API base URL.".to_string());
+            payload
+        }
         ApiError::Api {
             status,
             error,
@@ -550,11 +539,36 @@ fn json_cli_error_from_api_error(error: &ApiError) -> JsonCliError {
                 Some("The server response was not in the expected JSON shape.".to_string());
             payload
         }
+        ApiError::InvalidInput { message } => {
+            let mut payload = JsonCliError::new("invalid_api_input", message.clone());
+            payload.hint =
+                Some("Check command arguments and generated attachment metadata.".to_string());
+            payload
+        }
+        _ => {
+            let mut payload = JsonCliError::new("api_error", error.to_string());
+            payload.hint = Some("The Inline API request failed.".to_string());
+            payload
+        }
     }
 }
 
 fn json_cli_error_from_realtime_error(error: &RealtimeError) -> JsonCliError {
     match error {
+        RealtimeError::InvalidUrl { message, .. } => {
+            let mut payload = JsonCliError::new("invalid_realtime_url", message.clone());
+            payload.hint = Some("Set INLINE_REALTIME_URL to a ws(s) realtime URL.".to_string());
+            payload
+        }
+        RealtimeError::InvalidHeaderValue { field } => {
+            let mut payload = JsonCliError::new(
+                "invalid_realtime_client_identity",
+                format!("{field} contains characters that are invalid in realtime headers"),
+            );
+            payload.hint =
+                Some("Use a valid Inline client identity for realtime connections.".to_string());
+            payload
+        }
         RealtimeError::RpcError {
             code,
             error_code,
@@ -589,14 +603,31 @@ fn json_cli_error_from_realtime_error(error: &RealtimeError) -> JsonCliError {
             payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());
             payload
         }
+        RealtimeError::Timeout { .. } => {
+            let mut payload = JsonCliError::new("realtime_timeout", error.to_string());
+            payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());
+            payload
+        }
         RealtimeError::WebSocket(err) => {
             let mut payload = JsonCliError::new("websocket_error", err.to_string());
             payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());
             payload
         }
-        RealtimeError::Url(err) => JsonCliError::new("invalid_realtime_url", err.to_string()),
         RealtimeError::Protocol(err) => JsonCliError::new("protocol_decode_error", err.to_string()),
         RealtimeError::MissingResult => JsonCliError::new("missing_rpc_result", error.to_string()),
+        RealtimeError::UnexpectedResult { .. } => {
+            let mut payload = JsonCliError::new("unexpected_rpc_result", error.to_string());
+            payload.hint = Some(
+                "The realtime server returned a result shape that does not match the requested method."
+                    .to_string(),
+            );
+            payload
+        }
+        _ => {
+            let mut payload = JsonCliError::new("realtime_error", error.to_string());
+            payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());
+            payload
+        }
     }
 }
 
@@ -673,6 +704,102 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("INLINE_API_BASE_URL")
+        );
+    }
+
+    #[test]
+    fn invalid_api_base_urls_are_structured() {
+        let err = ApiError::InvalidBaseUrl {
+            url: "inline.test".to_string(),
+            message: "relative URL without a base".to_string(),
+        };
+        let payload = json_cli_error_from_error(&err);
+
+        assert_eq!(payload.code, "invalid_api_base_url");
+        assert_eq!(payload.message, "relative URL without a base");
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("INLINE_API_BASE_URL")
+        );
+    }
+
+    #[test]
+    fn invalid_realtime_urls_are_structured() {
+        let err = RealtimeError::InvalidUrl {
+            url: "inline.test".to_string(),
+            message: "relative URL without a base".to_string(),
+        };
+        let payload = json_cli_error_from_error(&err);
+
+        assert_eq!(payload.code, "invalid_realtime_url");
+        assert_eq!(payload.message, "relative URL without a base");
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("INLINE_REALTIME_URL")
+        );
+    }
+
+    #[test]
+    fn invalid_realtime_client_identity_is_structured() {
+        let err = RealtimeError::InvalidHeaderValue {
+            field: "client_type",
+        };
+        let payload = json_cli_error_from_error(&err);
+
+        assert_eq!(payload.code, "invalid_realtime_client_identity");
+        assert!(payload.message.contains("client_type"));
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("client identity")
+        );
+    }
+
+    #[test]
+    fn realtime_timeouts_are_structured() {
+        let err = RealtimeError::Timeout {
+            operation: "rpc",
+            timeout: std::time::Duration::from_secs(60),
+        };
+        let payload = json_cli_error_from_error(&err);
+
+        assert_eq!(payload.code, "realtime_timeout");
+        assert!(payload.message.contains("rpc"));
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("INLINE_REALTIME_URL")
+        );
+    }
+
+    #[test]
+    fn typed_realtime_result_mismatches_are_structured() {
+        let err = RealtimeError::UnexpectedResult {
+            method: "GET_CHATS",
+            expected: "GetChats",
+            actual: "GetMe",
+        };
+        let payload = json_cli_error_from_error(&err);
+
+        assert_eq!(payload.code, "unexpected_rpc_result");
+        assert!(payload.message.contains("GET_CHATS"));
+        assert!(payload.message.contains("GetChats"));
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("result shape")
         );
     }
 
@@ -829,24 +956,6 @@ mod tests {
 
         assert_eq!(payload.code, "io_error");
         assert!(payload.message.contains("wrapped no access"));
-    }
-
-    #[test]
-    fn unexpected_rpc_result_errors_are_structured() {
-        let err = CliError::unexpected_rpc_result("getChats");
-        assert_eq!(err.code, "unexpected_rpc_result");
-        assert!(err.message.contains("getChats"));
-        assert!(
-            err.hint
-                .as_deref()
-                .unwrap_or("")
-                .contains("protocol versions")
-        );
-        assert!(!err.examples.is_empty());
-
-        let payload = json_cli_error_from_error(&err);
-        assert_eq!(payload.code, "unexpected_rpc_result");
-        assert!(payload.message.contains("getChats"));
     }
 
     #[test]

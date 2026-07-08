@@ -35,7 +35,13 @@ fn collect_rerun_paths(proto_dir: &Path) -> Vec<PathBuf> {
 fn main() {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let proto_dir = manifest_dir.join("..").join("proto");
+    let packaged_proto_dir = manifest_dir.join("proto");
+    let repo_proto_dir = manifest_dir.join("..").join("..").join("proto");
+    let proto_dir = if packaged_proto_dir.join("core.proto").exists() {
+        packaged_proto_dir
+    } else {
+        repo_proto_dir
+    };
     let proto_dir = proto_dir.canonicalize().unwrap_or(proto_dir);
 
     for path in collect_rerun_paths(&proto_dir) {

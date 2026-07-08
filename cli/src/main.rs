@@ -1,14 +1,13 @@
-mod api;
 mod attachments;
 mod auth;
 mod auth_flow;
 mod chat_output;
-mod client_info;
 mod config;
 mod dates;
 mod doctor;
 mod downloads;
 mod errors;
+mod identity;
 mod media;
 mod message_export;
 mod message_output;
@@ -16,8 +15,6 @@ mod message_selectors;
 mod notifications;
 mod output;
 mod peer;
-mod protocol;
-mod realtime;
 mod state;
 mod update;
 mod validation;
@@ -35,7 +32,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use std::{env, fs, io};
 
-use crate::api::{ApiClient, CreateLinearIssueInput, CreateNotionTaskInput};
 use crate::attachments::{
     MAX_ATTACHMENT_BYTES, PreparedAttachment, input_media_from_upload, prepare_attachments,
 };
@@ -55,6 +51,7 @@ use crate::errors::{
     CliError, JsonCliError, JsonErrorEnvelope, human_cli_error_from_error,
     json_cli_error_from_error,
 };
+use crate::identity::connect_realtime;
 use crate::message_export::{
     ExportPeer, MessageExportBuildInput, MessageExportFormat, apply_media_local_paths,
     build_message_export_bundle, forward_source_key, infer_export_format, render_export,
@@ -72,9 +69,7 @@ use crate::output::{
     build_space_members_output, build_user_list, print_chat_details, print_message_detail,
     user_display_name, user_summary,
 };
-use crate::peer::input_peer_from_args;
-use crate::protocol::proto;
-use crate::realtime::RealtimeClient;
+use crate::peer::{api_peer_from_args, input_peer_from_args};
 use crate::state::LocalDb;
 use crate::validation::{
     normalize_search_queries, normalize_translation_language, parse_time_filters,
@@ -82,6 +77,11 @@ use crate::validation::{
     validate_message_limit, validate_optional_message_id_arg, validate_optional_positive_id_arg,
     validate_output_dir_path_arg, validate_output_file_path_arg, validate_positive_id_arg,
     validate_positive_ids_arg, validate_table_only_list_flags,
+};
+use inline_protocol::proto;
+use inline_sdk::RealtimeClient;
+use inline_sdk::api::{
+    ApiClient, CreateLinearIssueInput, CreateNotionTaskInput, PeerId, ReadMessagesInput,
 };
 
 #[derive(Clone, Copy)]
@@ -1449,7 +1449,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
     let config = Config::load();
     let auth_store = AuthStore::new(config.secrets_path.clone(), config.api_base_url.clone());
     let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
-    let api = ApiClient::new(config.api_base_url.clone());
+    let api = ApiClient::try_new(config.api_base_url.clone())?;
     let skip_update_check = matches!(
         &cli.command,
         Command::Login(_)
@@ -1504,7 +1504,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 AuthCommand::Me => {
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let me = fetch_me(&mut realtime).await?;
                     local_db.set_current_user(me.clone())?;
                     if cli.json {
@@ -1538,7 +1538,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             }
             Command::Me => {
                 let token = require_token(&auth_store)?;
-                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
                 let me = fetch_me(&mut realtime).await?;
                 local_db.set_current_user(me.clone())?;
                 if cli.json {
@@ -1561,7 +1561,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 let queries = normalize_search_queries(&args.query)?;
                 let peer_summary = peer_summary_from_input(&peer);
                 let token = require_token(&auth_store)?;
-                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
 
                 let input = proto::SearchMessagesInput {
                     peer_id: Some(peer.clone()),
@@ -1570,85 +1570,60 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     offset_id: None,
                     filter: None,
                 };
-                let result = realtime
-                    .call_rpc(
-                        proto::Method::SearchMessages,
-                        proto::rpc_call::Input::SearchMessages(input),
-                    )
-                    .await?;
-                match result {
-                    proto::rpc_result::Result::SearchMessages(mut payload) => {
-                        filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
-                        if cli.json {
-                            if let Some(language) = translation_language.as_deref() {
-                                let message_ids = collect_message_ids(&payload.messages);
-                                let translations_by_id = fetch_message_translations(
-                                    &mut realtime,
-                                    &peer,
-                                    &message_ids,
-                                    language,
-                                )
+                let mut payload = realtime.call(input).await?;
+                filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+                if cli.json {
+                    if let Some(language) = translation_language.as_deref() {
+                        let message_ids = collect_message_ids(&payload.messages);
+                        let translations_by_id =
+                            fetch_message_translations(&mut realtime, &peer, &message_ids, language)
                                 .await?;
-                                let output = TranslatedSearchMessagesOutput {
-                                    payload,
-                                    translations: translations_in_message_order(
-                                        &message_ids,
-                                        &translations_by_id,
-                                    ),
-                                };
-                                output::print_json(&output, json_format)?;
-                            } else {
-                                output::print_json(&payload, json_format)?;
-                            }
-                        } else {
-                            let translations_by_id =
-                                if let Some(language) = translation_language.as_deref() {
-                                    let message_ids = collect_message_ids(&payload.messages);
-                                    fetch_message_translations(
-                                        &mut realtime,
-                                        &peer,
-                                        &message_ids,
-                                        language,
-                                    )
-                                    .await?
-                                } else {
-                                    HashMap::new()
-                                };
-                            let chats_result = realtime
-                                .call_rpc(
-                                    proto::Method::GetChats,
-                                    proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                                )
-                                .await?;
-                            let (users_by_id, chats_by_id) = match chats_result {
-                                proto::rpc_result::Result::GetChats(chats_payload) => {
-                                    let users = chats_payload
-                                        .users
-                                        .into_iter()
-                                        .map(|user| (user.id, user))
-                                        .collect();
-                                    let chats = chats_payload
-                                        .chats
-                                        .into_iter()
-                                        .map(|chat| (chat.id, chat))
-                                        .collect();
-                                    (users, chats)
-                                }
-                                _ => return Err(CliError::unexpected_rpc_result("getChats").into()),
-                            };
-                            let current_user_id = local_db.load()?.current_user.map(|user| user.id);
-                            let output = build_message_list_from_messages(
-                                &payload.messages,
-                                &users_by_id,
-                                current_user_id,
-                                peer_summary,
-                                peer_name_from_input(&peer, &users_by_id, &chats_by_id),
-                                Some(&translations_by_id),
-                            );
-                            output::print_messages(&output, false, json_format)?;
-                        }
+                        let output = TranslatedSearchMessagesOutput {
+                            payload,
+                            translations: translations_in_message_order(
+                                &message_ids,
+                                &translations_by_id,
+                            ),
+                        };
+                        output::print_json(&output, json_format)?;
+                    } else {
+                        output::print_json(&payload, json_format)?;
                     }
-                    _ => return Err(CliError::unexpected_rpc_result("searchMessages").into()),
+                } else {
+                    let translations_by_id =
+                        if let Some(language) = translation_language.as_deref() {
+                            let message_ids = collect_message_ids(&payload.messages);
+                            fetch_message_translations(
+                                &mut realtime,
+                                &peer,
+                                &message_ids,
+                                language,
+                            )
+                            .await?
+                        } else {
+                            HashMap::new()
+                        };
+                    let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                    let users_by_id = chats_payload
+                        .users
+                        .into_iter()
+                        .map(|user| (user.id, user))
+                        .collect();
+                    let chats_by_id = chats_payload
+                        .chats
+                        .into_iter()
+                        .map(|chat| (chat.id, chat))
+                        .collect();
+                    let current_user_id = local_db.load()?.current_user.map(|user| user.id);
+                    let output = build_message_list_from_messages(
+                        &payload.messages,
+                        &users_by_id,
+                        current_user_id,
+                        peer_summary,
+                        peer_name_from_input(&peer, &users_by_id, &chats_by_id),
+                        Some(&translations_by_id),
+                    );
+                    output::print_messages(&output, false, json_format)?;
                 }
             }
             Command::Transcript(args) => {
@@ -1680,45 +1655,34 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 BotsCommand::List(args) => {
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let token = require_token(&auth_store)?;
-                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::ListBots,
-                            proto::rpc_call::Input::ListBots(proto::ListBotsInput {}),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::ListBots(payload) => {
-                            let mut payload = payload;
-                            if cli.json {
-                                filter_bots_payload(&mut payload, args.filter.as_deref());
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                let mut output = UserListOutput {
-                                    users: payload.bots.iter().map(user_summary).collect(),
-                                };
-                                filter_users_output(&mut output, args.filter.as_deref());
-                                if args.ids {
-                                    for user in &output.users {
-                                        println!("{}", user.user.id);
-                                    }
-                                } else if args.id {
-                                    if output.users.len() != 1 {
-                                        return Err(CliError::invalid_args(format!(
-                                            "Expected exactly 1 match for --id, got {}",
-                                            output.users.len()
-                                        ))
-                                        .into());
-                                    }
-                                    if let Some(user) = output.users.first() {
-                                        println!("{}", user.user.id);
-                                    }
-                                } else {
-                                    output::print_users(&output, false, json_format)?;
-                                }
+                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+                    let mut payload = realtime.call(proto::ListBotsInput {}).await?;
+                    if cli.json {
+                        filter_bots_payload(&mut payload, args.filter.as_deref());
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let mut output = UserListOutput {
+                            users: payload.bots.iter().map(user_summary).collect(),
+                        };
+                        filter_users_output(&mut output, args.filter.as_deref());
+                        if args.ids {
+                            for user in &output.users {
+                                println!("{}", user.user.id);
                             }
+                        } else if args.id {
+                            if output.users.len() != 1 {
+                                return Err(CliError::invalid_args(format!(
+                                    "Expected exactly 1 match for --id, got {}",
+                                    output.users.len()
+                                ))
+                                .into());
+                            }
+                            if let Some(user) = output.users.first() {
+                                println!("{}", user.user.id);
+                            }
+                        } else {
+                            output::print_users(&output, false, json_format)?;
                         }
-                        _ => return Err(CliError::unexpected_rpc_result("listBots").into()),
                     }
                 }
                 BotsCommand::Create(args) => {
@@ -1734,62 +1698,38 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
 
                     let token = require_token(&auth_store)?;
-                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::CreateBotInput {
                         name: name.to_string(),
                         username: username.to_string(),
                         add_to_space,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::CreateBot,
-                            proto::rpc_call::Input::CreateBot(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::CreateBot(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else if let Some(bot) = payload.bot.as_ref() {
-                                println!(
-                                    "Created bot {} (id {}).",
-                                    user_display_name(bot),
-                                    bot.id
-                                );
-                                println!(
-                                    "To reveal token: inline bots reveal-token --bot-user-id {}",
-                                    bot.id
-                                );
-                            } else {
-                                println!("Created bot.");
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("createBot").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if let Some(bot) = payload.bot.as_ref() {
+                        println!("Created bot {} (id {}).", user_display_name(bot), bot.id);
+                        println!(
+                            "To reveal token: inline bots reveal-token --bot-user-id {}",
+                            bot.id
+                        );
+                    } else {
+                        println!("Created bot.");
                     }
                 }
                 BotsCommand::RevealToken(args) => {
                     let bot_user_id =
                         validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
                     let token = require_token(&auth_store)?;
-                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::RevealBotTokenInput {
                         bot_user_id,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::RevealBotToken,
-                            proto::rpc_call::Input::RevealBotToken(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::RevealBotToken(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("{}", payload.token);
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("revealBotToken").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("{}", payload.token);
                     }
                 }
             },
@@ -1804,26 +1744,16 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 };
                 let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                 let token = require_token(&auth_store)?;
-                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
                 let input = proto::SendComposeActionInput {
                     peer_id: Some(peer.clone()),
                     action,
                 };
-                let result = realtime
-                    .call_rpc(
-                        proto::Method::SendComposeAction,
-                        proto::rpc_call::Input::SendComposeAction(input),
-                    )
-                    .await?;
-                match result {
-                    proto::rpc_result::Result::SendComposeAction(payload) => {
-                        if cli.json {
-                            output::print_json(&payload, json_format)?;
-                        } else {
-                            println!("Typing {label} for {}.", peer_label_from_input(&peer));
-                        }
-                    }
-                    _ => return Err(CliError::unexpected_rpc_result("sendComposeAction").into()),
+                let payload = realtime.call(input).await?;
+                if cli.json {
+                    output::print_json(&payload, json_format)?;
+                } else {
+                    println!("Typing {label} for {}.", peer_label_from_input(&peer));
                 }
             }
             Command::Chats { command } => match command {
@@ -1831,57 +1761,43 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChats,
-                            proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                        )
-                        .await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
+                    let payload = realtime.call(proto::GetChatsInput {}).await?;
 
-                    match result {
-                        proto::rpc_result::Result::GetChats(payload) => {
-                            if cli.json {
-                                let payload = apply_chat_list_filter(payload, args.filter.as_deref());
-                                if args.limit.is_some() || args.offset.is_some() {
-                                    let payload =
-                                        apply_chat_list_limits(payload, args.limit, args.offset);
-                                    output::print_json(&payload, json_format)?;
-                                } else {
-                                    output::print_json(&payload, json_format)?;
-                                }
-                            } else {
-                                let current_user = local_db.load()?.current_user;
-                                let output = build_chat_list(
-                                    payload,
-                                    current_user.as_ref(),
-                                    args.limit,
-                                    args.offset,
-                                    args.filter.as_deref(),
-                                )
-                                ?;
-                                if args.ids {
-                                    for item in &output.items {
-                                        println!("{}", item.chat.id);
-                                    }
-                                } else if args.id {
-                                    if output.items.len() != 1 {
-                                        return Err(CliError::invalid_args(format!(
-                                            "Expected exactly 1 match for --id, got {}",
-                                            output.items.len()
-                                        ))
-                                        .into());
-                                    }
-                                    if let Some(item) = output.items.first() {
-                                        println!("{}", item.chat.id);
-                                    }
-                                } else {
-                                    output::print_chat_list(&output, false, json_format)?;
-                                }
-                            }
+                    if cli.json {
+                        let payload = apply_chat_list_filter(payload, args.filter.as_deref());
+                        if args.limit.is_some() || args.offset.is_some() {
+                            let payload = apply_chat_list_limits(payload, args.limit, args.offset);
+                            output::print_json(&payload, json_format)?;
+                        } else {
+                            output::print_json(&payload, json_format)?;
                         }
-                        _ => {
-                            return Err(CliError::unexpected_rpc_result("getChats").into());
+                    } else {
+                        let current_user = local_db.load()?.current_user;
+                        let output = build_chat_list(
+                            payload,
+                            current_user.as_ref(),
+                            args.limit,
+                            args.offset,
+                            args.filter.as_deref(),
+                        )?;
+                        if args.ids {
+                            for item in &output.items {
+                                println!("{}", item.chat.id);
+                            }
+                        } else if args.id {
+                            if output.items.len() != 1 {
+                                return Err(CliError::invalid_args(format!(
+                                    "Expected exactly 1 match for --id, got {}",
+                                    output.items.len()
+                                ))
+                                .into());
+                            }
+                            if let Some(item) = output.items.first() {
+                                println!("{}", item.chat.id);
+                            }
+                        } else {
+                            output::print_chat_list(&output, false, json_format)?;
                         }
                     }
                 }
@@ -1889,58 +1805,32 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::GetChatInput {
                         peer_id: Some(peer),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChat,
-                            proto::rpc_call::Input::GetChat(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::GetChat(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else if let Some(chat) = payload.chat.as_ref() {
-                                print_chat_details(chat, payload.dialog.as_ref());
-                            } else {
-                                println!("Chat not found.");
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("getChat").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if let Some(chat) = payload.chat.as_ref() {
+                        print_chat_details(chat, payload.dialog.as_ref());
+                    } else {
+                        println!("Chat not found.");
                     }
                 }
                 ChatsCommand::Participants(args) => {
                     let chat_id = validate_positive_id_arg("--chat-id", args.chat_id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::GetChatParticipantsInput { chat_id };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChatParticipants,
-                            proto::rpc_call::Input::GetChatParticipants(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::GetChatParticipants(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                let output = build_chat_participants_output(
-                                    payload,
-                                    current_epoch_seconds() as i64,
-                                );
-                                output::print_chat_participants(&output, false, json_format)?;
-                            }
-                        }
-                        _ => {
-                            return Err(
-                                CliError::unexpected_rpc_result("getChatParticipants").into()
-                            );
-                        }
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let output =
+                            build_chat_participants_output(payload, current_epoch_seconds() as i64);
+                        output::print_chat_participants(&output, false, json_format)?;
                     }
                 }
                 ChatsCommand::AddParticipant(args) => {
@@ -1948,27 +1838,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::AddChatParticipantInput { chat_id, user_id };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::AddChatParticipant,
-                            proto::rpc_call::Input::AddChatParticipant(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::AddChatParticipant(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Added user {} to chat {}.", user_id, chat_id);
-                            }
-                        }
-                        _ => {
-                            return Err(
-                                CliError::unexpected_rpc_result("addChatParticipant").into()
-                            );
-                        }
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Added user {} to chat {}.", user_id, chat_id);
                     }
                 }
                 ChatsCommand::RemoveParticipant(args) => {
@@ -1976,27 +1852,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::RemoveChatParticipantInput { chat_id, user_id };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::RemoveChatParticipant,
-                            proto::rpc_call::Input::RemoveChatParticipant(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::RemoveChatParticipant(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Removed user {} from chat {}.", user_id, chat_id);
-                            }
-                        }
-                        _ => {
-                            return Err(
-                                CliError::unexpected_rpc_result("removeChatParticipant").into()
-                            );
-                        }
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Removed user {} from chat {}.", user_id, chat_id);
                     }
                 }
                 ChatsCommand::Create(args) => {
@@ -2029,7 +1891,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_positive_ids_arg("--participant", &args.participants)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let participants = args
                         .participants
                         .iter()
@@ -2060,23 +1922,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         participants,
                         reserved_chat_id: None,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::CreateChat,
-                            proto::rpc_call::Input::CreateChat(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::CreateChat(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else if let Some(chat) = payload.chat.as_ref() {
-                                println!("Created chat {}.", chat.id);
-                            } else {
-                                println!("Created chat.");
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("createChat").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if let Some(chat) = payload.chat.as_ref() {
+                        println!("Created chat {}.", chat.id);
+                    } else {
+                        println!("Created chat.");
                     }
                 }
                 ChatsCommand::CreateDm(args) => {
@@ -2115,7 +1967,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
 
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let participants = args
                         .participants
                         .iter()
@@ -2126,29 +1978,15 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         is_public: args.public,
                         participants,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::UpdateChatVisibility,
-                            proto::rpc_call::Input::UpdateChatVisibility(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::UpdateChatVisibility(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                let label = if args.public { "public" } else { "private" };
-                                if let Some(chat) = payload.chat.as_ref() {
-                                    println!("Updated chat {} to {}.", chat.id, label);
-                                } else {
-                                    println!("Updated chat {} to {}.", chat_id, label);
-                                }
-                            }
-                        }
-                        _ => {
-                            return Err(
-                                CliError::unexpected_rpc_result("updateChatVisibility").into()
-                            );
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let label = if args.public { "public" } else { "private" };
+                        if let Some(chat) = payload.chat.as_ref() {
+                            println!("Updated chat {} to {}.", chat.id, label);
+                        } else {
+                            println!("Updated chat {} to {}.", chat_id, label);
                         }
                     }
                 }
@@ -2168,54 +2006,34 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     });
 
                     let token = require_token(&auth_store)?;
-                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::UpdateChatInfoInput {
                         chat_id,
                         title: Some(title.to_string()),
                         emoji,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::UpdateChatInfo,
-                            proto::rpc_call::Input::UpdateChatInfo(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::UpdateChatInfo(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else if let Some(chat) = payload.chat.as_ref() {
-                                println!("Renamed chat {} to \"{}\".", chat.id, chat.title);
-                            } else {
-                                println!("Renamed chat {}.", chat_id);
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("updateChatInfo").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if let Some(chat) = payload.chat.as_ref() {
+                        println!("Renamed chat {} to \"{}\".", chat.id, chat.title);
+                    } else {
+                        println!("Renamed chat {}.", chat_id);
                     }
                 }
                 ChatsCommand::MarkUnread(args) => {
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::MarkAsUnreadInput {
                         peer_id: Some(peer),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::MarkAsUnread,
-                            proto::rpc_call::Input::MarkAsUnread(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::MarkAsUnread(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Marked as unread (updates: {}).", payload.updates.len());
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("markAsUnread").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Marked as unread (updates: {}).", payload.updates.len());
                     }
                 }
                 ChatsCommand::MarkRead(args) => {
@@ -2223,11 +2041,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let label = peer_label_from_input(&peer);
                     let token = require_token(&auth_store)?;
-                    let input = api::ReadMessagesInput {
-                        peer_user_id: args.user_id,
-                        peer_thread_id: args.chat_id,
-                        max_id,
-                    };
+                    let mut input = ReadMessagesInput::new(api_peer_from_args(args.chat_id, args.user_id)?);
+                    if let Some(max_id) = max_id {
+                        input = input.with_max_id(max_id);
+                    }
                     let payload = api.read_messages(&token, input).await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
@@ -2249,26 +2066,16 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         return Ok(());
                     }
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let peer = input_peer_from_args(Some(chat_id), None)?;
                     let input = proto::DeleteChatInput {
                         peer_id: Some(peer),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::DeleteChat,
-                            proto::rpc_call::Input::DeleteChat(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::DeleteChat(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Deleted chat {}.", chat_id);
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("deleteChat").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Deleted chat {}.", chat_id);
                     }
                 }
             },
@@ -2277,45 +2084,32 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChats,
-                            proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                        )
-                        .await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
+                    let mut payload = realtime.call(proto::GetChatsInput {}).await?;
 
-                    match result {
-                        proto::rpc_result::Result::GetChats(payload) => {
-                            let mut payload = payload;
-                            if cli.json {
-                                filter_users_payload(&mut payload, args.filter.as_deref());
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                let mut output = build_user_list(&payload);
-                                filter_users_output(&mut output, args.filter.as_deref());
-                                if args.ids {
-                                    for user in &output.users {
-                                        println!("{}", user.user.id);
-                                    }
-                                } else if args.id {
-                                    if output.users.len() != 1 {
-                                        return Err(CliError::invalid_args(format!(
-                                            "Expected exactly 1 match for --id, got {}",
-                                            output.users.len()
-                                        ))
-                                        .into());
-                                    }
-                                    if let Some(user) = output.users.first() {
-                                        println!("{}", user.user.id);
-                                    }
-                                } else {
-                                    output::print_users(&output, false, json_format)?;
-                                }
+                    if cli.json {
+                        filter_users_payload(&mut payload, args.filter.as_deref());
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let mut output = build_user_list(&payload);
+                        filter_users_output(&mut output, args.filter.as_deref());
+                        if args.ids {
+                            for user in &output.users {
+                                println!("{}", user.user.id);
                             }
-                        }
-                        _ => {
-                            return Err(CliError::unexpected_rpc_result("getChats").into());
+                        } else if args.id {
+                            if output.users.len() != 1 {
+                                return Err(CliError::invalid_args(format!(
+                                    "Expected exactly 1 match for --id, got {}",
+                                    output.users.len()
+                                ))
+                                .into());
+                            }
+                            if let Some(user) = output.users.first() {
+                                println!("{}", user.user.id);
+                            }
+                        } else {
+                            output::print_users(&output, false, json_format)?;
                         }
                     }
                 }
@@ -2323,43 +2117,29 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let user_id = validate_positive_id_arg("--id", args.id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChats,
-                            proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                        )
-                        .await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
+                    let payload = realtime.call(proto::GetChatsInput {}).await?;
 
-                    match result {
-                        proto::rpc_result::Result::GetChats(payload) => {
-                            if cli.json {
-                                if let Some(user) =
-                                    payload.users.iter().find(|user| user.id == user_id)
-                                {
-                                    output::print_json(user, json_format)?;
-                                } else {
-                                    return Err(CliError::not_found_user_id(user_id).into());
-                                }
-                            } else {
-                                let output = build_user_list(&payload);
-                                if let Some(user) = output
-                                    .users
-                                    .into_iter()
-                                    .find(|user| user.user.id == user_id)
-                                {
-                                    output::print_users(
-                                        &UserListOutput { users: vec![user] },
-                                        false,
-                                        json_format,
-                                    )?;
-                                } else {
-                                    return Err(CliError::not_found_user_id(user_id).into());
-                                }
-                            }
+                    if cli.json {
+                        if let Some(user) = payload.users.iter().find(|user| user.id == user_id) {
+                            output::print_json(user, json_format)?;
+                        } else {
+                            return Err(CliError::not_found_user_id(user_id).into());
                         }
-                        _ => {
-                            return Err(CliError::unexpected_rpc_result("getChats").into());
+                    } else {
+                        let output = build_user_list(&payload);
+                        if let Some(user) = output
+                            .users
+                            .into_iter()
+                            .find(|user| user.user.id == user_id)
+                        {
+                            output::print_users(
+                                &UserListOutput { users: vec![user] },
+                                false,
+                                json_format,
+                            )?;
+                        } else {
+                            return Err(CliError::not_found_user_id(user_id).into());
                         }
                     }
                 }
@@ -2379,7 +2159,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let peer_summary = peer_summary_from_input(&peer);
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
 
                     let input = proto::GetChatHistoryInput {
                         peer_id: Some(peer.clone()),
@@ -2388,95 +2168,67 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         ..Default::default()
                     };
 
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChatHistory,
-                            proto::rpc_call::Input::GetChatHistory(input),
-                        )
-                        .await?;
+                    let mut payload = realtime.call(input).await?;
 
-                    match result {
-                        proto::rpc_result::Result::GetChatHistory(mut payload) => {
-                            filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
-                            filter_messages_by_list_options(&mut payload.messages, &args);
+                    filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+                    filter_messages_by_list_options(&mut payload.messages, &args);
 
-                            if cli.json {
-                                if let Some(language) = translation_language.as_deref() {
-                                    let message_ids = collect_message_ids(&payload.messages);
-                                    let translations_by_id = fetch_message_translations(
-                                        &mut realtime,
-                                        &peer,
-                                        &message_ids,
-                                        language,
-                                    )
-                                    .await?;
-                                    let output = TranslatedChatHistoryOutput {
-                                        payload,
-                                        translations: translations_in_message_order(
-                                            &message_ids,
-                                            &translations_by_id,
-                                        ),
-                                    };
-                                    output::print_json(&output, json_format)?;
-                                } else {
-                                    output::print_json(&payload, json_format)?;
-                                }
+                    if cli.json {
+                        if let Some(language) = translation_language.as_deref() {
+                            let message_ids = collect_message_ids(&payload.messages);
+                            let translations_by_id = fetch_message_translations(
+                                &mut realtime,
+                                &peer,
+                                &message_ids,
+                                language,
+                            )
+                            .await?;
+                            let output = TranslatedChatHistoryOutput {
+                                payload,
+                                translations: translations_in_message_order(
+                                    &message_ids,
+                                    &translations_by_id,
+                                ),
+                            };
+                            output::print_json(&output, json_format)?;
+                        } else {
+                            output::print_json(&payload, json_format)?;
+                        }
+                    } else {
+                        let translations_by_id =
+                            if let Some(language) = translation_language.as_deref() {
+                                let message_ids = collect_message_ids(&payload.messages);
+                                fetch_message_translations(
+                                    &mut realtime,
+                                    &peer,
+                                    &message_ids,
+                                    language,
+                                )
+                                .await?
                             } else {
-                                let translations_by_id =
-                                    if let Some(language) = translation_language.as_deref() {
-                                        let message_ids = collect_message_ids(&payload.messages);
-                                        fetch_message_translations(
-                                            &mut realtime,
-                                            &peer,
-                                            &message_ids,
-                                            language,
-                                        )
-                                        .await?
-                                    } else {
-                                        HashMap::new()
-                                    };
-                                let chats_result = realtime
-                                    .call_rpc(
-                                        proto::Method::GetChats,
-                                        proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                                    )
-                                    .await?;
-                                let (users_by_id, chats_by_id) = match chats_result {
-                                    proto::rpc_result::Result::GetChats(chats_payload) => {
-                                        let users = chats_payload
-                                            .users
-                                            .into_iter()
-                                            .map(|user| (user.id, user))
-                                            .collect();
-                                        let chats = chats_payload
-                                            .chats
-                                            .into_iter()
-                                            .map(|chat| (chat.id, chat))
-                                            .collect();
-                                        (users, chats)
-                                    }
-                                    _ => {
-                                        return Err(
-                                            CliError::unexpected_rpc_result("getChats").into()
-                                        );
-                                    }
-                                };
-                                let current_user_id =
-                                    local_db.load()?.current_user.map(|user| user.id);
-                                let output = build_message_list(
-                                    payload,
-                                    &users_by_id,
-                                    current_user_id,
-                                    peer_summary,
-                                    peer_name_from_input(&peer, &users_by_id, &chats_by_id),
-                                    Some(&translations_by_id),
-                                );
-                                output::print_messages(&output, false, json_format)?;
-                            }
-                        }
-                        _ => {
-                            return Err(CliError::unexpected_rpc_result("getChatHistory").into());
-                        }
+                                HashMap::new()
+                            };
+                        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                        let users_by_id = chats_payload
+                            .users
+                            .into_iter()
+                            .map(|user| (user.id, user))
+                            .collect();
+                        let chats_by_id = chats_payload
+                            .chats
+                            .into_iter()
+                            .map(|chat| (chat.id, chat))
+                            .collect();
+                        let current_user_id = local_db.load()?.current_user.map(|user| user.id);
+                        let output = build_message_list(
+                            payload,
+                            &users_by_id,
+                            current_user_id,
+                            peer_summary,
+                            peer_name_from_input(&peer, &users_by_id, &chats_by_id),
+                            Some(&translations_by_id),
+                        );
+                        output::print_messages(&output, false, json_format)?;
                     }
                 }
                 MessagesCommand::Search(args) => {
@@ -2493,7 +2245,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let peer_summary = peer_summary_from_input(&peer);
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
 
                     let input = proto::SearchMessagesInput {
                         peer_id: Some(peer.clone()),
@@ -2503,94 +2255,65 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         filter: None,
                     };
 
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::SearchMessages,
-                            proto::rpc_call::Input::SearchMessages(input),
-                        )
-                        .await?;
+                    let mut payload = realtime.call(input).await?;
+                    filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
 
-                    match result {
-                        proto::rpc_result::Result::SearchMessages(mut payload) => {
-                            filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
-
-                            if cli.json {
-                                if let Some(language) = translation_language.as_deref() {
-                                    let message_ids = collect_message_ids(&payload.messages);
-                                    let translations_by_id = fetch_message_translations(
-                                        &mut realtime,
-                                        &peer,
-                                        &message_ids,
-                                        language,
-                                    )
-                                    .await?;
-                                    let output = TranslatedSearchMessagesOutput {
-                                        payload,
-                                        translations: translations_in_message_order(
-                                            &message_ids,
-                                            &translations_by_id,
-                                        ),
-                                    };
-                                    output::print_json(&output, json_format)?;
-                                } else {
-                                    output::print_json(&payload, json_format)?;
-                                }
+                    if cli.json {
+                        if let Some(language) = translation_language.as_deref() {
+                            let message_ids = collect_message_ids(&payload.messages);
+                            let translations_by_id = fetch_message_translations(
+                                &mut realtime,
+                                &peer,
+                                &message_ids,
+                                language,
+                            )
+                            .await?;
+                            let output = TranslatedSearchMessagesOutput {
+                                payload,
+                                translations: translations_in_message_order(
+                                    &message_ids,
+                                    &translations_by_id,
+                                ),
+                            };
+                            output::print_json(&output, json_format)?;
+                        } else {
+                            output::print_json(&payload, json_format)?;
+                        }
+                    } else {
+                        let translations_by_id =
+                            if let Some(language) = translation_language.as_deref() {
+                                let message_ids = collect_message_ids(&payload.messages);
+                                fetch_message_translations(
+                                    &mut realtime,
+                                    &peer,
+                                    &message_ids,
+                                    language,
+                                )
+                                .await?
                             } else {
-                                let translations_by_id =
-                                    if let Some(language) = translation_language.as_deref() {
-                                        let message_ids = collect_message_ids(&payload.messages);
-                                        fetch_message_translations(
-                                            &mut realtime,
-                                            &peer,
-                                            &message_ids,
-                                            language,
-                                        )
-                                        .await?
-                                    } else {
-                                        HashMap::new()
-                                    };
-                                let chats_result = realtime
-                                    .call_rpc(
-                                        proto::Method::GetChats,
-                                        proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                                    )
-                                    .await?;
-                                let (users_by_id, chats_by_id) = match chats_result {
-                                    proto::rpc_result::Result::GetChats(chats_payload) => {
-                                        let users = chats_payload
-                                            .users
-                                            .into_iter()
-                                            .map(|user| (user.id, user))
-                                            .collect();
-                                        let chats = chats_payload
-                                            .chats
-                                            .into_iter()
-                                            .map(|chat| (chat.id, chat))
-                                            .collect();
-                                        (users, chats)
-                                    }
-                                    _ => {
-                                        return Err(
-                                            CliError::unexpected_rpc_result("getChats").into()
-                                        );
-                                    }
-                                };
-                                let current_user_id =
-                                    local_db.load()?.current_user.map(|user| user.id);
-                                let output = build_message_list_from_messages(
-                                    &payload.messages,
-                                    &users_by_id,
-                                    current_user_id,
-                                    peer_summary,
-                                    peer_name_from_input(&peer, &users_by_id, &chats_by_id),
-                                    Some(&translations_by_id),
-                                );
-                                output::print_messages(&output, false, json_format)?;
-                            }
-                        }
-                        _ => {
-                            return Err(CliError::unexpected_rpc_result("searchMessages").into());
-                        }
+                                HashMap::new()
+                            };
+                        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                        let users_by_id = chats_payload
+                            .users
+                            .into_iter()
+                            .map(|user| (user.id, user))
+                            .collect();
+                        let chats_by_id = chats_payload
+                            .chats
+                            .into_iter()
+                            .map(|chat| (chat.id, chat))
+                            .collect();
+                        let current_user_id = local_db.load()?.current_user.map(|user| user.id);
+                        let output = build_message_list_from_messages(
+                            &payload.messages,
+                            &users_by_id,
+                            current_user_id,
+                            peer_summary,
+                            peer_name_from_input(&peer, &users_by_id, &chats_by_id),
+                            Some(&translations_by_id),
+                        );
+                        output::print_messages(&output, false, json_format)?;
                     }
                 }
                 MessagesCommand::Get(args) => {
@@ -2604,7 +2327,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .transpose()?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let (messages, missing_message_ids) =
                         fetch_messages_by_ids(&mut realtime, &peer, &message_ids).await?;
                     if message_ids.len() == 1 {
@@ -2645,20 +2368,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                 } else {
                                     HashMap::new()
                                 };
-                            let chats_result = realtime
-                                .call_rpc(
-                                    proto::Method::GetChats,
-                                    proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                                )
-                                .await?;
-                            let users_by_id = match chats_result {
-                                proto::rpc_result::Result::GetChats(chats_payload) => chats_payload
-                                    .users
-                                    .into_iter()
-                                    .map(|user| (user.id, user))
-                                    .collect(),
-                                _ => return Err(CliError::unexpected_rpc_result("getChats").into()),
-                            };
+                            let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                            let users_by_id = chats_payload
+                                .users
+                                .into_iter()
+                                .map(|user| (user.id, user))
+                                .collect();
                             let current_user_id = local_db.load()?.current_user.map(|user| user.id);
                             let summary = message_summary(
                                 &message,
@@ -2703,28 +2418,17 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             } else {
                                 HashMap::new()
                             };
-                        let chats_result = realtime
-                            .call_rpc(
-                                proto::Method::GetChats,
-                                proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                            )
-                            .await?;
-                        let (users_by_id, chats_by_id) = match chats_result {
-                            proto::rpc_result::Result::GetChats(chats_payload) => {
-                                let users = chats_payload
-                                    .users
-                                    .into_iter()
-                                    .map(|user| (user.id, user))
-                                    .collect();
-                                let chats = chats_payload
-                                    .chats
-                                    .into_iter()
-                                    .map(|chat| (chat.id, chat))
-                                    .collect();
-                                (users, chats)
-                            }
-                            _ => return Err(CliError::unexpected_rpc_result("getChats").into()),
-                        };
+                        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+                        let users_by_id = chats_payload
+                            .users
+                            .into_iter()
+                            .map(|user| (user.id, user))
+                            .collect();
+                        let chats_by_id = chats_payload
+                            .chats
+                            .into_iter()
+                            .map(|chat| (chat.id, chat))
+                            .collect();
                         let current_user_id = local_db.load()?.current_user.map(|user| user.id);
                         let output = build_message_list_from_messages(
                             &messages,
@@ -2771,7 +2475,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         cli.json,
                     )?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     if attachments.is_empty() {
                         let text = caption
                             .ok_or_else(|| {
@@ -2888,34 +2592,24 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
 
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::ForwardMessagesInput {
                         from_peer_id: Some(from_peer),
                         message_ids,
                         to_peer_id: Some(to_peer),
                         share_forward_header,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::ForwardMessages,
-                            proto::rpc_call::Input::ForwardMessages(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::ForwardMessages(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!(
-                                    "Forwarded {} message(s) from {} to {} (updates: {}).",
-                                    message_count,
-                                    from_label,
-                                    to_label,
-                                    payload.updates.len()
-                                );
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("forwardMessages").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!(
+                            "Forwarded {} message(s) from {} to {} (updates: {}).",
+                            message_count,
+                            from_label,
+                            to_label,
+                            payload.updates.len()
+                        );
                     }
                 }
                 MessagesCommand::Export(args) => {
@@ -2982,7 +2676,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let (messages, missing_message_ids) = if let Some(from_msg_id) = from_msg_id {
                         (
                             fetch_history_messages(&mut realtime, &peer, Some(from_msg_id), limit)
@@ -3047,30 +2741,20 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         return Ok(());
                     }
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::DeleteMessagesInput {
                         message_ids: args.message_ids,
                         peer_id: Some(peer),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::DeleteMessages,
-                            proto::rpc_call::Input::DeleteMessages(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::DeleteMessages(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!(
-                                    "Deleted {} message(s) (updates: {}).",
-                                    message_count,
-                                    payload.updates.len()
-                                );
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("deleteMessages").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!(
+                            "Deleted {} message(s) (updates: {}).",
+                            message_count,
+                            payload.updates.len()
+                        );
                     }
                 }
                 MessagesCommand::Edit(args) => {
@@ -3080,7 +2764,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .ok_or_else(CliError::missing_text_or_stdin)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::EditMessageInput {
                         message_id,
                         peer_id: Some(peer),
@@ -3089,21 +2773,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         parse_markdown: None,
                         actions: None,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::EditMessage,
-                            proto::rpc_call::Input::EditMessage(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::EditMessage(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Message edited (updates: {}).", payload.updates.len());
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("editMessage").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Message edited (updates: {}).", payload.updates.len());
                     }
                 }
                 MessagesCommand::AddReaction(args) => {
@@ -3115,27 +2789,17 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::AddReactionInput {
                         emoji,
                         message_id,
                         peer_id: Some(peer),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::AddReaction,
-                            proto::rpc_call::Input::AddReaction(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::AddReaction(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Reaction added (updates: {}).", payload.updates.len());
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("addReaction").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Reaction added (updates: {}).", payload.updates.len());
                     }
                 }
                 MessagesCommand::DeleteReaction(args) => {
@@ -3147,27 +2811,17 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::DeleteReactionInput {
                         emoji,
                         peer_id: Some(peer),
                         message_id,
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::DeleteReaction,
-                            proto::rpc_call::Input::DeleteReaction(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::DeleteReaction(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Reaction deleted (updates: {}).", payload.updates.len());
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("deleteReaction").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Reaction deleted (updates: {}).", payload.updates.len());
                     }
                 }
             },
@@ -3175,50 +2829,28 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 SpacesCommand::List => {
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetChats,
-                            proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-                        )
-                        .await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
+                    let payload = realtime.call(proto::GetChatsInput {}).await?;
 
-                    match result {
-                        proto::rpc_result::Result::GetChats(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                let output = build_space_list(&payload);
-                                output::print_spaces(&output, false, json_format)?;
-                            }
-                        }
-                        _ => {
-                            return Err(CliError::unexpected_rpc_result("getChats").into());
-                        }
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let output = build_space_list(&payload);
+                        output::print_spaces(&output, false, json_format)?;
                     }
                 }
                 SpacesCommand::Members(args) => {
                     let space_id = validate_positive_id_arg("--space-id", args.space_id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::GetSpaceMembersInput { space_id };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetSpaceMembers,
-                            proto::rpc_call::Input::GetSpaceMembers(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::GetSpaceMembers(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                let output = build_space_members_output(payload);
-                                output::print_space_members(&output, false, json_format)?;
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("getSpaceMembers").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let output = build_space_members_output(payload);
+                        output::print_space_members(&output, false, json_format)?;
                     }
                 }
                 SpacesCommand::Invite(args) => {
@@ -3227,32 +2859,22 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let role = invite_role_from_args(args.admin, args.public_chats)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::InviteToSpaceInput {
                         space_id,
                         role,
                         via: Some(via),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::InviteToSpace,
-                            proto::rpc_call::Input::InviteToSpace(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::InviteToSpace(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                let name = payload
-                                    .user
-                                    .as_ref()
-                                    .map(user_display_name)
-                                    .unwrap_or_else(|| "user".to_string());
-                                println!("Invited {} to space {}.", name, space_id);
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("inviteToSpace").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let name = payload
+                            .user
+                            .as_ref()
+                            .map(user_display_name)
+                            .unwrap_or_else(|| "user".to_string());
+                        println!("Invited {} to space {}.", name, space_id);
                     }
                 }
                 SpacesCommand::DeleteMember(args) => {
@@ -3268,23 +2890,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         return Ok(());
                     }
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::DeleteMemberInput { space_id, user_id };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::DeleteMember,
-                            proto::rpc_call::Input::DeleteMember(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::DeleteMember(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!("Member removed (updates: {}).", payload.updates.len());
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("deleteMember").into()),
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Member removed (updates: {}).", payload.updates.len());
                     }
                 }
                 SpacesCommand::UpdateMemberAccess(args) => {
@@ -3294,34 +2906,20 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         require_member_access_role(args.admin, args.member, args.public_chats)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let input = proto::UpdateMemberAccessInput {
                         space_id,
                         user_id,
                         role: Some(role),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::UpdateMemberAccess,
-                            proto::rpc_call::Input::UpdateMemberAccess(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::UpdateMemberAccess(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!(
-                                    "Updated member access (updates: {}).",
-                                    payload.updates.len()
-                                );
-                            }
-                        }
-                        _ => {
-                            return Err(
-                                CliError::unexpected_rpc_result("updateMemberAccess").into()
-                            );
-                        }
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!(
+                            "Updated member access (updates: {}).",
+                            payload.updates.len()
+                        );
                     }
                 }
             },
@@ -3329,24 +2927,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 NotificationsCommand::Get => {
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::GetUserSettings,
-                            proto::rpc_call::Input::GetUserSettings(
-                                proto::GetUserSettingsInput {},
-                            ),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::GetUserSettings(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                print_notification_settings(payload.user_settings.as_ref());
-                            }
-                        }
-                        _ => return Err(CliError::unexpected_rpc_result("getUserSettings").into()),
+                        connect_realtime(&config.realtime_url, &token).await?;
+                    let payload = realtime.call(proto::GetUserSettingsInput {}).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        print_notification_settings(payload.user_settings.as_ref());
                     }
                 }
                 NotificationsCommand::Set(args) => {
@@ -3358,7 +2944,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
                     let current = fetch_user_settings(&mut realtime).await?;
                     let mut values = notification_settings_values(
                         current
@@ -3388,28 +2974,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let input = proto::UpdateUserSettingsInput {
                         user_settings: Some(user_settings),
                     };
-                    let result = realtime
-                        .call_rpc(
-                            proto::Method::UpdateUserSettings,
-                            proto::rpc_call::Input::UpdateUserSettings(input),
-                        )
-                        .await?;
-                    match result {
-                        proto::rpc_result::Result::UpdateUserSettings(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
-                            } else {
-                                println!(
-                                    "Notification settings updated (updates: {}).",
-                                    payload.updates.len()
-                                );
-                            }
-                        }
-                        _ => {
-                            return Err(
-                                CliError::unexpected_rpc_result("updateUserSettings").into()
-                            );
-                        }
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!(
+                            "Notification settings updated (updates: {}).",
+                            payload.updates.len()
+                        );
                     }
                 }
             },
@@ -3421,7 +2993,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         validate_optional_positive_id_arg("--space-id", args.space_id)?;
                     let token = require_token(&auth_store)?;
                     let mut realtime =
-                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                        connect_realtime(&config.realtime_url, &token).await?;
 
                     // Get current user id
                     let me = fetch_me(&mut realtime).await?;
@@ -3438,15 +3010,16 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         );
                     }
 
-                    let api_input = CreateLinearIssueInput {
+                    let mut api_input = CreateLinearIssueInput::new(
                         text,
                         message_id,
                         chat_id,
                         from_id,
-                        peer_user_id: None,
-                        peer_thread_id: Some(chat_id),
-                        space_id,
-                    };
+                        PeerId::thread(chat_id),
+                    );
+                    if let Some(space_id) = space_id {
+                        api_input = api_input.with_space_id(space_id);
+                    }
 
                     let result = api.create_linear_issue(&token, api_input).await?;
 
@@ -3464,13 +3037,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let space_id = validate_positive_id_arg("--space-id", args.space_id)?;
                     let token = require_token(&auth_store)?;
 
-                    let api_input = CreateNotionTaskInput {
+                    let api_input = CreateNotionTaskInput::new(
                         space_id,
                         message_id,
                         chat_id,
-                        peer_user_id: None,
-                        peer_thread_id: Some(chat_id),
-                    };
+                        PeerId::thread(chat_id),
+                    );
 
                     let result = api.create_notion_task(&token, api_input).await?;
 
@@ -3581,17 +3153,7 @@ async fn send_message(
         actions: None,
     };
 
-    let result = realtime
-        .call_rpc(
-            proto::Method::SendMessage,
-            proto::rpc_call::Input::SendMessage(input),
-        )
-        .await?;
-
-    match result {
-        proto::rpc_result::Result::SendMessage(payload) => Ok(payload),
-        _ => Err(CliError::unexpected_rpc_result("sendMessage").into()),
-    }
+    Ok(realtime.call(input).await?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3689,7 +3251,7 @@ async fn handle_messages_export(
         validate_output_dir_path_arg("--media-dir", media_dir)?;
     }
     let token = require_token(auth_store)?;
-    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
 
     let mut messages = if args.message_ids.is_empty() {
         fetch_history_messages(&mut realtime, &peer, history_offset_id, limit).await?
@@ -3939,33 +3501,23 @@ async fn fetch_export_indexes(
     ),
     Box<dyn std::error::Error>,
 > {
-    let result = realtime
-        .call_rpc(
-            proto::Method::GetChats,
-            proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
-        )
-        .await?;
-    match result {
-        proto::rpc_result::Result::GetChats(payload) => {
-            let users = payload
-                .users
-                .into_iter()
-                .map(|user| (user.id, user))
-                .collect();
-            let chats = payload
-                .chats
-                .into_iter()
-                .map(|chat| (chat.id, chat))
-                .collect();
-            let spaces = payload
-                .spaces
-                .into_iter()
-                .map(|space| (space.id, space))
-                .collect();
-            Ok((users, chats, spaces))
-        }
-        _ => Err(CliError::unexpected_rpc_result("getChats").into()),
-    }
+    let payload = realtime.call(proto::GetChatsInput {}).await?;
+    let users = payload
+        .users
+        .into_iter()
+        .map(|user| (user.id, user))
+        .collect();
+    let chats = payload
+        .chats
+        .into_iter()
+        .map(|chat| (chat.id, chat))
+        .collect();
+    let spaces = payload
+        .spaces
+        .into_iter()
+        .map(|space| (space.id, space))
+        .collect();
+    Ok((users, chats, spaces))
 }
 
 fn collect_missing_reply_ids(
@@ -4206,33 +3758,17 @@ fn space_member_role_admin() -> proto::SpaceMemberRole {
 async fn fetch_me(
     realtime: &mut RealtimeClient,
 ) -> Result<proto::User, Box<dyn std::error::Error>> {
-    let result = realtime
-        .call_rpc(
-            proto::Method::GetMe,
-            proto::rpc_call::Input::GetMe(proto::GetMeInput {}),
-        )
-        .await?;
-    match result {
-        proto::rpc_result::Result::GetMe(payload) => payload
-            .user
-            .ok_or_else(|| CliError::unexpected_api_response("getMe", "missing user").into()),
-        _ => Err(CliError::unexpected_rpc_result("getMe").into()),
-    }
+    let payload = realtime.call(proto::GetMeInput {}).await?;
+    payload
+        .user
+        .ok_or_else(|| CliError::unexpected_api_response("getMe", "missing user").into())
 }
 
 async fn fetch_user_settings(
     realtime: &mut RealtimeClient,
 ) -> Result<Option<proto::UserSettings>, Box<dyn std::error::Error>> {
-    let result = realtime
-        .call_rpc(
-            proto::Method::GetUserSettings,
-            proto::rpc_call::Input::GetUserSettings(proto::GetUserSettingsInput {}),
-        )
-        .await?;
-    match result {
-        proto::rpc_result::Result::GetUserSettings(payload) => Ok(payload.user_settings),
-        _ => Err(CliError::unexpected_rpc_result("getUserSettings").into()),
-    }
+    let payload = realtime.call(proto::GetUserSettingsInput {}).await?;
+    Ok(payload.user_settings)
 }
 
 fn filter_messages_by_time(
@@ -4536,21 +4072,13 @@ async fn fetch_message_translations(
         language: language.to_string(),
     };
 
-    let result = realtime
-        .call_rpc(
-            proto::Method::TranslateMessages,
-            proto::rpc_call::Input::TranslateMessages(input),
-        )
-        .await?;
+    let payload = realtime.call(input).await?;
 
-    match result {
-        proto::rpc_result::Result::TranslateMessages(payload) => Ok(payload
-            .translations
-            .into_iter()
-            .map(|translation| (translation.message_id, translation))
-            .collect()),
-        _ => Err(CliError::unexpected_rpc_result("translateMessages").into()),
-    }
+    Ok(payload
+        .translations
+        .into_iter()
+        .map(|translation| (translation.message_id, translation))
+        .collect())
 }
 
 fn filter_users_output(output: &mut UserListOutput, filter: Option<&str>) {
@@ -4660,16 +4188,8 @@ async fn fetch_history_messages(
         limit,
         ..Default::default()
     };
-    let result = realtime
-        .call_rpc(
-            proto::Method::GetChatHistory,
-            proto::rpc_call::Input::GetChatHistory(input),
-        )
-        .await?;
-    match result {
-        proto::rpc_result::Result::GetChatHistory(payload) => Ok(payload.messages),
-        _ => Err(CliError::unexpected_rpc_result("getChatHistory").into()),
-    }
+    let payload = realtime.call(input).await?;
+    Ok(payload.messages)
 }
 
 async fn fetch_messages_by_ids(
@@ -4682,32 +4202,22 @@ async fn fetch_messages_by_ids(
     }
 
     let input = get_messages_input_for_ids(peer, message_ids);
-    let result = realtime
-        .call_rpc(
-            proto::Method::GetMessages,
-            proto::rpc_call::Input::GetMessages(input),
-        )
-        .await?;
-    match result {
-        proto::rpc_result::Result::GetMessages(payload) => {
-            let mut messages_by_id = payload
-                .messages
-                .into_iter()
-                .map(|message| (message.id, message))
-                .collect::<HashMap<_, _>>();
-            let mut messages = Vec::new();
-            let mut missing_message_ids = Vec::new();
-            for message_id in message_ids {
-                if let Some(message) = messages_by_id.remove(message_id) {
-                    messages.push(message);
-                } else {
-                    missing_message_ids.push(*message_id);
-                }
-            }
-            Ok((messages, missing_message_ids))
+    let payload = realtime.call(input).await?;
+    let mut messages_by_id = payload
+        .messages
+        .into_iter()
+        .map(|message| (message.id, message))
+        .collect::<HashMap<_, _>>();
+    let mut messages = Vec::new();
+    let mut missing_message_ids = Vec::new();
+    for message_id in message_ids {
+        if let Some(message) = messages_by_id.remove(message_id) {
+            messages.push(message);
+        } else {
+            missing_message_ids.push(*message_id);
         }
-        _ => Err(CliError::unexpected_rpc_result("getMessages").into()),
     }
+    Ok((messages, missing_message_ids))
 }
 
 fn get_messages_input_for_ids(
@@ -4860,7 +4370,7 @@ mod cli_parsing_tests {
         ));
         let secrets_path = root.join("secrets.json");
         let state_path = root.join("state.json");
-        let api = ApiClient::new("http://127.0.0.1:9/v1".to_string());
+        let api = ApiClient::try_new("http://127.0.0.1:9/v1".to_string()).unwrap();
         let auth_store = AuthStore::new(secrets_path.clone(), "http://127.0.0.1:9/v1".to_string());
         let local_db = LocalDb::new(state_path.clone(), "http://127.0.0.1:9/v1".to_string());
 

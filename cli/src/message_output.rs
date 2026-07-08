@@ -5,7 +5,7 @@ use crate::output::{
     AttachmentSummary, MediaSummary, MessageListOutput, MessageSummary, PeerSummary, format_bytes,
     format_relative_date, user_summary,
 };
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 pub(crate) fn build_message_list(
     result: proto::GetChatHistoryResult,

@@ -6,7 +6,7 @@ use crate::output::{
     ChatListItem, ChatListOutput, PeerSummary, SpaceSummary, space_summary, user_display_name,
 };
 use crate::peer::{MessageKey, PeerKey, peer_key_from_peer};
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 pub(crate) fn apply_chat_list_limits(
     mut payload: proto::GetChatsResult,

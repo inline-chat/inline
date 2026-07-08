@@ -1,7 +1,7 @@
 use clap::ValueEnum;
 
 use crate::output;
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum NotificationModeArg {

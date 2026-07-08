@@ -2,12 +2,12 @@ use serde::Serialize;
 use std::env;
 
 use crate::auth::AuthStore;
-use crate::client_info;
 use crate::config::Config;
+use crate::identity as client_info;
 use crate::output;
-use crate::protocol::proto;
 use crate::state::LocalDb;
 use crate::user_display_name;
+use inline_protocol::proto;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

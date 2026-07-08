@@ -5,7 +5,7 @@ use std::io::{self, IsTerminal};
 use thiserror::Error;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::protocol::proto;
+use inline_protocol::proto;
 
 #[derive(Debug, Error)]
 pub enum OutputError {
