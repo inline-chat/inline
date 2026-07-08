@@ -148,6 +148,55 @@ describe("API Endpoints", () => {
       expect(loginCodes_[0]?.challengeId).toBe(responseJson.result.challengeToken)
     })
 
+    it("does not reject unknown auth clientType before email handler validation", async () => {
+      const response = await testServer.handle(
+        new Request("http://localhost/v1/sendEmailCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: "not-an-email",
+            deviceId: "matrix-inline-test",
+            clientType: "matrix-inline-adapter",
+            clientVersion: "0.5.1",
+            deviceName: "matrix-inline-adapter",
+          }),
+        }),
+      )
+
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "EMAIL_INVALID",
+      })
+    })
+
+    it("does not reject unknown auth clientType before email verify handler validation", async () => {
+      const response = await testServer.handle(
+        new Request("http://localhost/v1/verifyEmailCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: "not-an-email",
+            code: "123456",
+            deviceId: "matrix-inline-test",
+            clientType: "matrix-inline-adapter",
+            clientVersion: "0.5.1",
+            deviceName: "matrix-inline-adapter",
+          }),
+        }),
+      )
+
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        error: "EMAIL_INVALID",
+      })
+    })
+
     it("creates independent email login challenges during active TTL", async () => {
       const email = "stable-code@example.com"
 
@@ -217,6 +266,48 @@ describe("API Endpoints", () => {
 
       const response = await testServer.handle(request)
       expect(response.status).toBe(200)
+    })
+
+    it("normalizes unknown auth clientType to api when creating a session", async () => {
+      const email = "bridge-client-type@example.com"
+      const code = "123456"
+      const challengeToken = "lc_bridge_client_type"
+      const inviteCode = await createInviteCode("BRIDGE01")
+
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        challengeId: challengeToken,
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const response = await testServer.handle(
+        new Request("http://localhost/v1/verifyEmailCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            code,
+            challengeToken,
+            inviteCode,
+            deviceId: "matrix-inline-test",
+            clientType: "matrix-inline-adapter",
+            clientVersion: "0.5.1",
+            deviceName: "matrix-inline-adapter",
+          }),
+        }),
+      )
+
+      expect(response.status).toBe(200)
+      const responseJson = await response.json()
+      const userId = responseJson.result.userId as number
+      const session = (await db.select().from(sessions).where(eq(sessions.userId, userId)).limit(1))[0]
+      expect(session?.clientType).toBe("api")
+      expect(session?.clientVersion).toBe("0.5.1")
+      expect(session?.deviceId).toBe("matrix-inline-test")
     })
 
     it("rejects email login verification without a challenge token", async () => {

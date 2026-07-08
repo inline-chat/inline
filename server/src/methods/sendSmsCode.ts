@@ -10,13 +10,12 @@ import { prelude } from "@in/server/libs/prelude"
 import parsePhoneNumber from "libphonenumber-js"
 import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
   deviceId: Type.Optional(Type.String()),
-  clientType: Type.Optional(
-    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("cli")]),
-  ),
+  clientType: Type.Optional(Type.String()),
   clientVersion: Type.Optional(Type.String()),
   osVersion: Type.Optional(Type.String()),
   deviceName: Type.Optional(Type.String()),
@@ -34,6 +33,8 @@ export const handler = async (
   context: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
+    const clientType = normalizeAuthClientType(input.clientType, "sendSmsCode")
+
     // verify formatting
     // if (isValidPhoneNumber(input.phoneNumber) === false) {
     //   throw new InlineError(InlineError.ApiError.PHONE_INVALID)
@@ -69,7 +70,7 @@ export const handler = async (
       device: {
         deviceName: input.deviceName,
         deviceId: input.deviceId,
-        clientType: input.clientType,
+        clientType,
         clientVersion: input.clientVersion,
         osVersion: input.osVersion,
       },

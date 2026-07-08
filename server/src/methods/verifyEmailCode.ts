@@ -14,6 +14,7 @@ import { maskEmail } from "@in/server/utils/privacy"
 import { verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { getOrCreateUserByEmailForSignup } from "@in/server/modules/auth/signupInvites"
+import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -23,9 +24,7 @@ export const Input = Type.Object({
   deviceId: Type.Optional(Type.String()),
 
   // optional
-  clientType: Type.Optional(
-    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("android"), Type.Literal("cli")]),
-  ),
+  clientType: Type.Optional(Type.String()),
   clientVersion: Type.Optional(Type.String()),
   osVersion: Type.Optional(Type.String()),
   deviceName: Type.Optional(Type.String()),
@@ -54,9 +53,11 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
   }
 
+  const clientType = normalizeAuthClientType(input.clientType, "verifyEmailCode")
+
   if (!input.deviceId) {
     Log.shared.warn("Missing deviceId on verifyEmailCode", {
-      clientType: input.clientType,
+      clientType,
       clientVersion: input.clientVersion,
       osVersion: input.osVersion,
     })
@@ -81,7 +82,6 @@ export const handler = async (
   let timezone = validateIanaTimezone(input.timezone ?? "")
     ? input.timezone ?? undefined
     : ipInfo?.timezone ?? undefined
-  let clientType = input.clientType ?? undefined
   let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "")
     ? input.clientVersion ?? undefined
     : undefined

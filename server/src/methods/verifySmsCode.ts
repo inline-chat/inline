@@ -17,6 +17,7 @@ import { sendBotEvent } from "@in/server/modules/bot-events"
 import { maskPhoneNumber } from "@in/server/utils/privacy"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { getOrCreateUserByPhoneForSignup } from "@in/server/modules/auth/signupInvites"
+import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -25,9 +26,7 @@ export const Input = Type.Object({
   deviceId: Type.Optional(Type.String()),
 
   // optional
-  clientType: Type.Optional(
-    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("cli")]),
-  ),
+  clientType: Type.Optional(Type.String()),
   clientVersion: Type.Optional(Type.String()),
   osVersion: Type.Optional(Type.String()),
   deviceName: Type.Optional(Type.String()),
@@ -45,6 +44,8 @@ export const handler = async (
   { ip: requestIp }: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
+    const clientType = normalizeAuthClientType(input.clientType, "verifySmsCode")
+
     // verify formatting
     // if (isValidPhoneNumber(input.phoneNumber) === false) {
     //   throw new InlineError(InlineError.ApiError.PHONE_INVALID)
@@ -58,7 +59,7 @@ export const handler = async (
 
     if (!input.deviceId) {
       Log.shared.warn("Missing deviceId on verifySmsCode", {
-        clientType: input.clientType,
+        clientType,
         clientVersion: input.clientVersion,
         osVersion: input.osVersion,
       })
@@ -88,7 +89,6 @@ export const handler = async (
     let timezone = validateIanaTimezone(input.timezone ?? "")
       ? input.timezone ?? undefined
       : ipInfo?.timezone ?? undefined
-    let clientType = input.clientType ?? undefined
     let clientVersion = validateUpToFourSegementSemver(input.clientVersion ?? "")
       ? input.clientVersion ?? undefined
       : undefined

@@ -12,13 +12,12 @@ import { sendEmail } from "@in/server/utils/email"
 import { issueEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 
 export const Input = Type.Object({
   email: Type.String(),
   deviceId: Type.Optional(Type.String()),
-  clientType: Type.Optional(
-    Type.Union([Type.Literal("ios"), Type.Literal("macos"), Type.Literal("web"), Type.Literal("android"), Type.Literal("cli")]),
-  ),
+  clientType: Type.Optional(Type.String()),
   clientVersion: Type.Optional(Type.String()),
   osVersion: Type.Optional(Type.String()),
   deviceName: Type.Optional(Type.String()),
@@ -35,6 +34,8 @@ export const handler = async (
   context: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
+    const clientType = normalizeAuthClientType(input.clientType, "sendEmailCode")
+
     if (isValidEmail(input.email) === false) {
       throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
     }
@@ -64,7 +65,7 @@ export const handler = async (
       device: {
         deviceName: input.deviceName,
         deviceId: input.deviceId,
-        clientType: input.clientType,
+        clientType,
         clientVersion: input.clientVersion,
         osVersion: input.osVersion,
       },
