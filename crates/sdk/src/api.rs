@@ -15,6 +15,7 @@ use crate::client_info::{self, AuthMetadata, ClientIdentity};
 
 /// Default timeout for API HTTP requests made by SDK-created clients.
 pub const DEFAULT_API_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_AUTH_SESSION_CLIENT_TYPE: &str = "api";
 
 /// Error returned by [`ApiClient`] HTTP calls.
 #[derive(Error)]
@@ -1313,7 +1314,7 @@ fn add_auth_metadata(
     payload.insert("deviceId".to_string(), json!(metadata.device_id()));
     payload.insert(
         "clientType".to_string(),
-        json!(metadata.client().client_type()),
+        json!(auth_session_client_type(metadata.client())),
     );
     payload.insert(
         "clientVersion".to_string(),
@@ -1321,6 +1322,17 @@ fn add_auth_metadata(
     );
     if let Some(device_name) = metadata.device_name() {
         payload.insert("deviceName".to_string(), json!(device_name));
+    }
+}
+
+fn auth_session_client_type(identity: &ClientIdentity) -> &str {
+    match identity.client_type() {
+        // Keep this to server session client types. Custom SDK,
+        // bridge, and agent identities still travel in headers/user agents.
+        "ios" | "macos" | "web" | "api" | "android" | "windows" | "linux" | "cli" => {
+            identity.client_type()
+        }
+        _ => DEFAULT_AUTH_SESSION_CLIENT_TYPE,
     }
 }
 
@@ -1843,7 +1855,7 @@ mod tests {
     }
 
     #[test]
-    fn auth_metadata_accepts_non_cli_client_identity() {
+    fn auth_metadata_maps_non_session_client_identity_to_api() {
         let mut payload = serde_json::Map::new();
         add_auth_metadata(
             &mut payload,
@@ -1851,8 +1863,19 @@ mod tests {
         );
 
         assert_eq!(payload.get("deviceId"), Some(&json!("device-1")));
-        assert_eq!(payload.get("clientType"), Some(&json!("my-agent")));
+        assert_eq!(payload.get("clientType"), Some(&json!("api")));
         assert_eq!(payload.get("clientVersion"), Some(&json!("0.1.0")));
         assert!(payload.get("deviceName").is_none());
+    }
+
+    #[test]
+    fn auth_metadata_preserves_known_session_client_identity() {
+        let mut payload = serde_json::Map::new();
+        add_auth_metadata(
+            &mut payload,
+            &AuthMetadata::new("device-1", ClientIdentity::new("web", "0.1.0")),
+        );
+
+        assert_eq!(payload.get("clientType"), Some(&json!("web")));
     }
 }

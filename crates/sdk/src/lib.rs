@@ -23,7 +23,7 @@
 //! use inline_sdk::{ApiClient, ClientIdentity};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let api = ApiClient::builder("https://api.inline.chat")
+//! let api = ApiClient::builder("https://api.inline.chat/v1")
 //!     .identity(ClientIdentity::try_new("my-agent", "0.1.0")?)
 //!     .build()?;
 //! # let _ = api;

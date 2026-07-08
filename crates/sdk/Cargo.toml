@@ -18,7 +18,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 futures-util.workspace = true
 hostname.workspace = true
-inline-protocol = { version = "0.5.0", path = "../protocol" }
+inline-protocol = { version = "0.5.1", path = "../protocol" }
 log.workspace = true
 prost.workspace = true
 reqwest.workspace = true

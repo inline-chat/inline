@@ -33,7 +33,7 @@ use crate::{
     TransactionIdentity, TransactionState, TypingRequest, UploadRequest, UserRecord, VERSION,
 };
 
-const DEFAULT_API_BASE_URL: &str = "https://api.inline.chat";
+const DEFAULT_API_BASE_URL: &str = "https://api.inline.chat/v1";
 const DEFAULT_REALTIME_URL: &str = "wss://api.inline.chat/realtime";
 
 /// Error returned when building an [`SdkBackend`].
@@ -2305,6 +2305,17 @@ mod tests {
         assert!(rendered.contains("wss://api.inline.chat/realtime"));
         assert!(!rendered.contains("secret"));
         assert!(!rendered.contains("token="));
+    }
+
+    #[test]
+    fn sdk_backend_defaults_use_production_endpoints() {
+        let backend = SdkBackend::builder().build().unwrap();
+
+        assert_eq!(
+            backend.api_client().base_url(),
+            "https://api.inline.chat/v1"
+        );
+        assert_eq!(backend.realtime_url(), "wss://api.inline.chat/realtime");
     }
 
     #[tokio::test]

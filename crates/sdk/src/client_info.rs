@@ -93,6 +93,10 @@ impl Default for ClientIdentity {
 }
 
 /// Login metadata sent with auth code and verification requests.
+///
+/// `client` remains the caller's transport identity for headers, user agents,
+/// and realtime handshakes. The HTTP auth body maps identities that the server
+/// cannot store as session client types to a compatible session type.
 #[must_use]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthMetadata {

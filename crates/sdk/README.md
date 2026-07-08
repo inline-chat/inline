@@ -18,7 +18,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let token = std::env::var("INLINE_TOKEN")?;
     let identity = ClientIdentity::try_new("my-agent", "0.1.0")?;
 
-    let api = ApiClient::builder("https://api.inline.chat")
+    let api = ApiClient::builder("https://api.inline.chat/v1")
         .identity(identity.clone())
         .request_timeout(Duration::from_secs(60))
         .build()?;
