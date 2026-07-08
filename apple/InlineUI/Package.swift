@@ -20,6 +20,7 @@ let package = Package(
   ],
 
   products: [
+    .library(name: "InlineAvatarRendering", targets: ["InlineAvatarRendering"]),
     .library(name: "InlineUI", targets: ["InlineUI"]),
     .library(name: "EmojiAutocomplete", targets: ["EmojiAutocomplete"]),
     .library(name: "ReactionPickerEmojis", targets: ["ReactionPickerEmojis"]),
@@ -35,6 +36,12 @@ let package = Package(
   ],
 
   targets: [
+    .target(
+      name: "InlineAvatarRendering",
+      dependencies: [],
+      swiftSettings: swiftSettings
+    ),
+
     .target(
       name: "InlineUI",
       dependencies: baseDependencies + [
