@@ -172,7 +172,7 @@ struct PlatformPhotoViewTests {
   }
 
   @Test("shows tiny thumbnail background when enabled for stripped photo bytes")
-  func showsTinyThumbnailBackgroundForStrippedPhotos() {
+  func showsTinyThumbnailBackgroundForStrippedPhotos() async throws {
     let view = PlatformPhotoView()
     view.frame = CGRect(x: 0, y: 0, width: 32, height: 32)
     view.showsTinyThumbnailBackground = true
@@ -193,7 +193,24 @@ struct PlatformPhotoViewTests {
 
     let backgroundView = findTinyThumbnailBackground(in: view)
     #expect(backgroundView != nil)
+    try await waitUntil { backgroundView?.isHidden == false }
     #expect(backgroundView?.isHidden == false)
+  }
+
+  private func waitUntil(
+    timeout: Duration = .milliseconds(1_000),
+    pollInterval: Duration = .milliseconds(10),
+    _ condition: @escaping @MainActor () -> Bool
+  ) async throws {
+    let clock = ContinuousClock()
+    let start = clock.now
+
+    while clock.now - start < timeout {
+      if condition() {
+        return
+      }
+      try await Task.sleep(for: pollInterval)
+    }
   }
 
   private func findTinyThumbnailBackground(in view: TestPlatformView) -> InlineTinyThumbnailBackgroundView? {

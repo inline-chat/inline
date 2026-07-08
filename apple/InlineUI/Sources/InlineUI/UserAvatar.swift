@@ -11,9 +11,17 @@ public struct UserAvatar: View, Equatable {
       && lhs.username == rhs.username && lhs.size == rhs.size
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
       && lhs.backgroundOpacity == rhs.backgroundOpacity
-      && lhs.stableAvatarIdentity == rhs.stableAvatarIdentity
-      && lhs.remoteUrl == rhs.remoteUrl
-      && lhs.localUrl == rhs.localUrl
+      && Self.avatarIdentity(
+        stableAvatarIdentity: lhs.stableAvatarIdentity,
+        remoteUrl: lhs.remoteUrl,
+        localUrl: lhs.localUrl,
+        userId: lhs.userId
+      ) == Self.avatarIdentity(
+        stableAvatarIdentity: rhs.stableAvatarIdentity,
+        remoteUrl: rhs.remoteUrl,
+        localUrl: rhs.localUrl,
+        userId: rhs.userId
+      )
   }
 
   let firstName: String?
@@ -156,9 +164,22 @@ public struct UserAvatar: View, Equatable {
   }
 
   private var avatarIdentity: String {
+    Self.avatarIdentity(
+      stableAvatarIdentity: stableAvatarIdentity,
+      remoteUrl: remoteUrl,
+      localUrl: localUrl,
+      userId: userId
+    )
+  }
+
+  private nonisolated static func avatarIdentity(
+    stableAvatarIdentity: String?,
+    remoteUrl: URL?,
+    localUrl: URL?,
+    userId: Int64
+  ) -> String {
     if let stableAvatarIdentity,
-       localUrl != nil || stableAvatarIdentity.hasPrefix("local:") == false
-    {
+       localUrl != nil || stableAvatarIdentity.hasPrefix("local:") == false {
       return stableAvatarIdentity
     }
 
@@ -238,8 +259,7 @@ public struct UserAvatar: View, Equatable {
         } else {
           let (remoteData, response) = try await URLSession.shared.data(from: sourceUrl)
           if let httpResponse = response as? HTTPURLResponse,
-             (200 ... 299).contains(httpResponse.statusCode) == false
-          {
+             (200 ... 299).contains(httpResponse.statusCode) == false {
             return
           }
           data = remoteData

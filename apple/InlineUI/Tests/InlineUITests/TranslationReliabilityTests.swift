@@ -173,8 +173,8 @@ private func makeCodeEntities(for text: String?) -> MessageEntities? {
 
   var entity = MessageEntity()
   entity.type = .code
-  entity.offset = Int32(text.distance(from: text.startIndex, to: text.index(after: start)))
-  entity.length = Int32(text.distance(from: text.index(after: start), to: end))
+  entity.offset = Int64(text.distance(from: text.startIndex, to: text.index(after: start)))
+  entity.length = Int64(text.distance(from: text.index(after: start), to: end))
 
   var entities = MessageEntities()
   entities.entities = [entity]
