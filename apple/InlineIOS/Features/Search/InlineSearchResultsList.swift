@@ -81,12 +81,13 @@ private struct InlineSearchChatRow: View {
     if let userInfo = result.userInfo {
       UserAvatar(userInfo: userInfo, size: 34)
     } else {
-      InitialsCircle(
-        name: result.title,
-        size: 34,
-        symbol: "number",
-        symbolWeight: .medium,
-        emoji: result.chat?.emoji
+      ThreadIconView(
+        threadIconDescriptor(
+          chat: result.chat,
+          title: result.title
+        ),
+        size: .regular(34),
+        shape: .circle
       )
     }
   }
@@ -123,12 +124,13 @@ private struct InlineSearchMessageRow: View {
     if let user = result.peerUser {
       UserAvatar(user: user, size: 34)
     } else {
-      InitialsCircle(
-        name: result.title,
-        size: 34,
-        symbol: "text.bubble.fill",
-        symbolWeight: .medium,
-        emoji: result.chat?.emoji
+      ThreadIconView(
+        threadIconDescriptor(
+          chat: result.chat,
+          title: result.title
+        ),
+        size: .regular(34),
+        shape: .circle
       )
     }
   }
@@ -136,6 +138,18 @@ private struct InlineSearchMessageRow: View {
   private var dateTitle: String {
     result.message.message.date.formatted(date: .abbreviated, time: .omitted)
   }
+}
+
+private func threadIconDescriptor(chat: Chat?, title: String) -> ThreadIconDescriptor {
+  if let chat {
+    return ThreadIconDescriptor(chat: chat)
+  }
+
+  return ThreadIconDescriptor(
+    emoji: nil,
+    title: title,
+    accessibilityLabel: title
+  )
 }
 
 private struct InlineSearchGlobalUserRow: View {

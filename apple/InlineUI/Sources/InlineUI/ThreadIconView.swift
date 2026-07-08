@@ -92,6 +92,8 @@ public struct ThreadIconView: View, Equatable {
   public let symbolColor: ThreadIconSymbolColor
   public let background: ThreadIconBackground
 
+  @Environment(\.colorScheme) private var colorScheme
+
   public nonisolated static func == (lhs: ThreadIconView, rhs: ThreadIconView) -> Bool {
     lhs.descriptor == rhs.descriptor &&
       lhs.size == rhs.size &&
@@ -176,15 +178,37 @@ public struct ThreadIconView: View, Equatable {
   }
 
   private var solidBackgroundColor: Color {
-    Color.primary.opacity(0.045)
+    switch colorScheme {
+    case .dark:
+      Color.white.opacity(0.14)
+    case .light:
+      Color.black.opacity(0.065)
+    @unknown default:
+      Color.primary.opacity(0.085)
+    }
   }
 
   private var backgroundGradient: LinearGradient {
-    LinearGradient(
-      colors: [
-        Color.primary.opacity(0.035),
-        Color.primary.opacity(0.055),
-      ],
+    let colors: [Color] = switch colorScheme {
+    case .dark:
+      [
+        Color.white.opacity(0.20),
+        Color.white.opacity(0.13),
+      ]
+    case .light:
+      [
+        Color.black.opacity(0.05),
+        Color.black.opacity(0.08),
+      ]
+    @unknown default:
+      [
+        Color.primary.opacity(0.07),
+        Color.primary.opacity(0.11),
+      ]
+    }
+
+    return LinearGradient(
+      colors: colors,
       startPoint: .top,
       endPoint: .bottom
     )
@@ -298,9 +322,9 @@ private struct ContentScale: Equatable {
       return ContentScale(emojiRatio: 0.56, symbolRatio: 0.44)
     case let .large(points):
       if points >= 72 {
-        return ContentScale(emojiRatio: 0.38, symbolRatio: 0.32)
+        return ContentScale(emojiRatio: 0.46, symbolRatio: 0.38)
       }
-      return ContentScale(emojiRatio: 0.46, symbolRatio: 0.38)
+      return ContentScale(emojiRatio: 0.55, symbolRatio: 0.46)
     }
   }
 }
