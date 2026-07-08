@@ -383,7 +383,8 @@ struct ChatView: View {
       ChatViewUIKit(
         peerId: peerId,
         chatId: chat.id,
-        spaceId: chat.spaceId
+        spaceId: chat.spaceId,
+        draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage
       )
       .edgesIgnoringSafeArea(.all)
     }

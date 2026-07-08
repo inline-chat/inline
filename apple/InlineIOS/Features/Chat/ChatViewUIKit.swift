@@ -1,12 +1,24 @@
 import InlineKit
+import InlineProtocol
 import SwiftUI
 import UIKit
 
 public class ChatContainerView: UIView {
-  let peerId: Peer
+  let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
-  private var peerUser: User?
+  private var peerUser: InlineKit.User?
+  private var lastAppliedDraftSignature: DraftSignature?
+
+  private struct DraftSignature: Equatable {
+    let text: String
+    let entitiesData: Data?
+
+    init(_ draftMessage: DraftMessage) {
+      text = draftMessage.text
+      entitiesData = draftMessage.hasEntities ? (try? draftMessage.entities.serializedData()) : nil
+    }
+  }
 
   private enum ComposeBottomMode {
     case safeArea
@@ -109,7 +121,7 @@ public class ChatContainerView: UIView {
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
-  init(peerId: Peer, chatId: Int64?, spaceId: Int64?, peerUser: User?) {
+  init(peerId: InlineKit.Peer, chatId: Int64?, spaceId: Int64?, peerUser: InlineKit.User?) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
@@ -137,10 +149,22 @@ public class ChatContainerView: UIView {
     resetComposeToSafeAreaIfKeyboardClosed()
   }
 
-  func setPeerUser(_ user: User?) {
+  func setPeerUser(_ user: InlineKit.User?) {
     guard peerUser != user else { return }
     peerUser = user
     composeView.setPeerUser(user)
+  }
+
+  func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
+    guard let draftMessage else {
+      lastAppliedDraftSignature = nil
+      return
+    }
+
+    let signature = DraftSignature(draftMessage)
+    guard lastAppliedDraftSignature != signature else { return }
+    lastAppliedDraftSignature = signature
+    composeView.loadDraft(from: draftMessage)
   }
 
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
@@ -778,18 +802,16 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
 }
 
 struct ChatViewUIKit: UIViewRepresentable {
-  let peerId: Peer
+  let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
+  let draftMessage: DraftMessage?
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId, peerUser: fullChatViewModel.peerUser)
-
-    if let draftMessage = fullChatViewModel.chatItem?.dialog.draftMessage {
-      view.composeView.loadDraft(from: draftMessage)
-    }
+    view.loadDraftIfNeeded(draftMessage)
 
     // Mark messages as read when view appears
     UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
@@ -799,5 +821,6 @@ struct ChatViewUIKit: UIViewRepresentable {
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
     view.setPeerUser(fullChatViewModel.peerUser)
+    view.loadDraftIfNeeded(draftMessage)
   }
 }

@@ -24,9 +24,13 @@ extension ComposeView {
 
   // MARK: - Draft Management
 
-  func loadDraft(from draftMessage: InlineProtocol.DraftMessage?) {
-    guard let draft = draftManager.load(draftMessage) else { return }
+  @discardableResult
+  func loadDraft(from draftMessage: InlineProtocol.DraftMessage?) -> Bool {
+    guard let draftMessage, !draftMessage.text.isEmpty else { return false }
+    guard canRestoreDraft else { return false }
+    guard let draft = draftManager.load(draftMessage) else { return false }
     applyDraft(draft.text, entities: draft.entities)
+    return true
   }
 
   func applyDraft(_ draft: String?, entities: MessageEntities? = nil) {
@@ -51,7 +55,7 @@ extension ComposeView {
       }
 
       textView.showPlaceholder(false)
-      buttonAppear()
+      updateSendButtonVisibility()
       updateHeight()
 
       // Start timer since we now have text content
@@ -59,10 +63,17 @@ extension ComposeView {
     }
   }
 
+  private var canRestoreDraft: Bool {
+    let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
+    return normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+      attachmentItems.isEmpty &&
+      pendingVideoAttachments.isEmpty &&
+      !isVoiceActive
+  }
+
   /// Set the initial draft from ChatView (call this after setting peerId and chatId)
   public func setInitialDraft(from draftMessage: InlineProtocol.DraftMessage?) {
-    guard let draft = draftManager.load(draftMessage) else { return }
-    applyDraft(draft.text, entities: draft.entities)
+    loadDraft(from: draftMessage)
   }
 
   func saveDraft() {

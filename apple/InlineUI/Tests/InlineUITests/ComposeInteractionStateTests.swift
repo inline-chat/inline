@@ -352,6 +352,39 @@ struct ComposeInteractionStateTests {
     ) == false)
   }
 
+  @Test("trailing control prefers send over voice when compose can send")
+  func trailingControlPrefersSendOverVoice() async throws {
+    let state = ComposeTrailingControlState.resolve(
+      canSend: true,
+      canStartVoiceRecording: true,
+      isVoiceActive: false
+    )
+
+    #expect(state == .send)
+  }
+
+  @Test("trailing control shows voice only when send is unavailable")
+  func trailingControlShowsVoiceOnlyWhenSendUnavailable() async throws {
+    let state = ComposeTrailingControlState.resolve(
+      canSend: false,
+      canStartVoiceRecording: true,
+      isVoiceActive: false
+    )
+
+    #expect(state == .voice)
+  }
+
+  @Test("trailing control hides regular controls while voice is active")
+  func trailingControlHidesRegularControlsWhileVoiceActive() async throws {
+    let state = ComposeTrailingControlState.resolve(
+      canSend: true,
+      canStartVoiceRecording: true,
+      isVoiceActive: true
+    )
+
+    #expect(state == .none)
+  }
+
   @Test("sending staged attachments resets compose without animation")
   func sendResetDoesNotAnimateAfterSendingAttachments() async throws {
     let shouldAnimateReset = ComposeResetBehavior.shouldAnimateHeightResetAfterSend(

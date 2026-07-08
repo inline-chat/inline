@@ -121,6 +121,32 @@ public enum ComposeVoiceRecordingEligibility {
   }
 }
 
+public enum ComposeTrailingControlState: Equatable, Sendable {
+  case send
+  case voice
+  case none
+
+  public static func resolve(
+    canSend: Bool,
+    canStartVoiceRecording: Bool,
+    isVoiceActive: Bool
+  ) -> ComposeTrailingControlState {
+    if isVoiceActive {
+      return .none
+    }
+
+    if canSend {
+      return .send
+    }
+
+    if canStartVoiceRecording {
+      return .voice
+    }
+
+    return .none
+  }
+}
+
 public enum ComposeAttachmentUploadBehavior {
   public static func shouldStartUploadsInCompose() -> Bool {
     false

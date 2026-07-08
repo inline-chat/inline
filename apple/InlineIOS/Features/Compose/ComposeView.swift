@@ -562,6 +562,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     guard !isFullyVisible else { return }
 
     isButtonVisible = true
+    sendButton.isHidden = false
+    updateVoiceButtonVisibility(visible: false, animated: false)
     sendButton.isEnabled = true
     sendButton.isUserInteractionEnabled = true
     sendButton.setNeedsUpdateConfiguration()
@@ -589,10 +591,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     sendButton.layer.removeAllAnimations()
     sendButton.layer.removeAnimation(forKey: "telegram.sendButton.blur")
     sendButton.layer.filters = nil
+    sendButton.isHidden = false
     sendButton.alpha = 1.0
     sendButton.transform = .identity
     sendButton.isEnabled = true
     sendButton.isUserInteractionEnabled = true
+    updateVoiceButtonVisibility(visible: false, animated: false)
     sendButton.configuration?.showsActivityIndicator = false
     sendButton.setNeedsUpdateConfiguration()
   }
@@ -702,7 +706,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     return value
   }
 
-  private var isVoiceActive: Bool {
+  var isVoiceActive: Bool {
     voiceViewModel.isActive
   }
 
@@ -719,6 +723,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       isForwarding: state?.forwardContext != nil,
       hasPeer: peerId != nil,
       hasChat: chatId != nil,
+      isVoiceActive: isVoiceActive
+    )
+  }
+
+  private var trailingControlState: ComposeTrailingControlState {
+    ComposeTrailingControlState.resolve(
+      canSend: canSend,
+      canStartVoiceRecording: canStartVoiceRecording,
       isVoiceActive: isVoiceActive
     )
   }
@@ -740,7 +752,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func updateVoiceAvailability(animated: Bool = false) {
     let voiceActive = voiceViewModel.isActive
-    let shouldShowVoiceButton = canStartVoiceRecording
+    let controlState = trailingControlState
+    let shouldShowVoiceButton = controlState == .voice
 
     if voiceActive {
       dismissOverlay()
@@ -751,7 +764,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.isHidden = voiceActive
     updateComposeWidth(showsSideButton: !voiceActive, animated: animated)
     updateVoiceButtonVisibility(visible: !voiceActive && shouldShowVoiceButton, animated: animated)
-    sendButton.isHidden = voiceActive || shouldShowVoiceButton
+    sendButton.isHidden = controlState != .send
 
     if voiceActive {
       attachmentScrollView.isHidden = true
@@ -2060,7 +2073,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     if syncVoiceAvailability {
       updateVoiceAvailability(animated: false)
     }
-    if voiceViewModel.isActive || canStartVoiceRecording {
+    let controlState = trailingControlState
+
+    if controlState == .voice || voiceViewModel.isActive {
       buttonDisappear(animated: false)
       return
     }
@@ -2072,9 +2087,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       return
     }
 
-    let shouldEnableSend = canSend
-
-    if shouldEnableSend {
+    if controlState == .send {
       buttonAppear()
     } else {
       buttonDisappear()
