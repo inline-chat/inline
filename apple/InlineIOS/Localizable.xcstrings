@@ -927,6 +927,9 @@
     "No user groups yet" : {
 
     },
+    "No voice memos found in this chat." : {
+
+    },
     "Notifications" : {
 
     },
@@ -1154,6 +1157,9 @@
     "Shared Data" : {
 
     },
+    "Show in Chat" : {
+
+    },
     "Sign in with email" : {
       "comment" : "Email sign in title"
     },
@@ -1269,6 +1275,9 @@
 
     },
     "Visibility" : {
+
+    },
+    "Voice memo" : {
 
     },
     "Welcome to Inline" : {

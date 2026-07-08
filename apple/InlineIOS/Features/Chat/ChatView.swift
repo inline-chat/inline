@@ -218,28 +218,14 @@ struct ChatView: View {
       guard let targetPeer else { return }
 
       if targetPeer == peerId, let chatId = fullChatViewModel.chat?.id {
-        MessageFocusCenter.shared.dispatch(
-          MessageFocusTarget(
-            peer: targetPeer,
-            messageId: messageId,
-            chatId: chatId,
-            source: .forwarded
-          )
-        )
+        postScrollToMessage(messageId, chatId: chatId)
         return
       }
 
       Task { @MainActor in
         if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          router.openChat(
-            peer: targetPeer,
-            focus: MessageFocusTarget(
-              peer: targetPeer,
-              messageId: messageId,
-              chatId: chat.id,
-              source: .forwarded
-            )
-          )
+          router.push(.chat(peer: targetPeer))
+          postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
           return
         }
 
@@ -250,15 +236,8 @@ struct ChatView: View {
         }
 
         if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          router.openChat(
-            peer: targetPeer,
-            focus: MessageFocusTarget(
-              peer: targetPeer,
-              messageId: messageId,
-              chatId: chat.id,
-              source: .forwarded
-            )
-          )
+          router.push(.chat(peer: targetPeer))
+          postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
           return
         }
 
@@ -329,6 +308,30 @@ struct ChatView: View {
     }
     .environmentObject(fullChatViewModel)
     .environment(router)
+  }
+
+  @MainActor
+  private func postScrollToMessage(
+    _ messageId: Int64,
+    chatId: Int64,
+    delay: TimeInterval = 0
+  ) {
+    let post = {
+      NotificationCenter.default.post(
+        name: Notification.Name("ScrollToRepliedMessage"),
+        object: nil,
+        userInfo: [
+          "repliedToMessageId": messageId,
+          "chatId": chatId,
+        ]
+      )
+    }
+
+    if delay > 0 {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: post)
+    } else {
+      post()
+    }
   }
 
   @MainActor
