@@ -515,7 +515,6 @@ private struct SidebarOpenInteractionModifier: ViewModifier {
 
   @State private var didOpenDuringPress = false
 
-  @ViewBuilder
   func body(content: Content) -> some View {
     if opensOnMouseDown {
       content
