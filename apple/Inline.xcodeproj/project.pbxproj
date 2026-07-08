@@ -689,7 +689,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 841;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -719,7 +719,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 841;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -749,7 +749,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 841;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineShareExtension/Info.plist;
@@ -1171,7 +1171,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InlineNotificationExtension/InlineNotificationExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 841;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1203,7 +1203,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InlineNotificationExtension/InlineNotificationExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 841;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1235,7 +1235,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InlineNotificationExtension/InlineNotificationExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 841;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineNotificationExtension/Info.plist;
