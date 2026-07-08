@@ -23,6 +23,14 @@ See: [Realtime API](/docs/realtime-api)
 
 See: [Rust SDK](/docs/rust-sdk)
 
+## Matrix and Beeper
+
+Inline has an official Matrix bridge for Beeper and self-hosted Matrix deployments.
+It is built on mautrix-go bridgev2 and can run alongside other Matrix application
+service bridges.
+
+Bridge repository: [inline-chat/matrix-inline](https://github.com/inline-chat/matrix-inline)
+
 ## Quick Start
 
 - Method reference: [Bot API](/docs/bot-api)
