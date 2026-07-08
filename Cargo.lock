@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "inline-cli"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "chrono",
  "clap",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "inline-client"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "futures-util",
  "inline-sdk",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "inline-protocol"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "prost",
  "prost-build",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "inline-sdk"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "futures-util",
  "hostname",

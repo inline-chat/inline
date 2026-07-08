@@ -599,6 +599,7 @@ impl ClientBackend for SdkBackend {
                 .store
                 .record_dialog(DialogRecord {
                     chat_id: created.chat_id,
+                    peer_user_id: Some(request.user_id),
                     title: created.title.clone(),
                     last_message_id: None,
                     synced_through_message_id: None,
@@ -649,6 +650,7 @@ impl ClientBackend for SdkBackend {
                 .store
                 .record_dialog(DialogRecord {
                     chat_id: created.chat_id,
+                    peer_user_id: None,
                     title: created.title.clone(),
                     last_message_id: None,
                     synced_through_message_id: None,
@@ -703,6 +705,7 @@ impl ClientBackend for SdkBackend {
                 .store
                 .record_dialog(DialogRecord {
                     chat_id: created.chat_id,
+                    peer_user_id: None,
                     title: created.title.clone(),
                     last_message_id: None,
                     synced_through_message_id: None,
@@ -1316,6 +1319,7 @@ fn dialogs_page_from_get_chats(
             let dialog = dialog_for_chat(result, chat);
             DialogRecord {
                 chat_id: InlineId::new(chat.id),
+                peer_user_id: dialog_peer_user_id(dialog, chat),
                 title: Some(chat_display_name_from_proto(chat, &users_by_id)),
                 last_message_id: chat.last_msg_id.map(InlineId::new),
                 synced_through_message_id: None,
@@ -1350,6 +1354,14 @@ fn dialog_for_chat<'a>(
                 .zip(chat.peer_id.as_ref())
                 .is_some_and(|(dialog_peer, chat_peer)| dialog_peer == chat_peer)
     })
+}
+
+fn dialog_peer_user_id(dialog: Option<&proto::Dialog>, chat: &proto::Chat) -> Option<InlineId> {
+    dialog
+        .and_then(|dialog| dialog.peer.as_ref())
+        .or(chat.peer_id.as_ref())
+        .and_then(user_id_from_peer)
+        .map(InlineId::new)
 }
 
 fn chat_display_name_from_proto(
@@ -2404,6 +2416,7 @@ mod tests {
         let store = InMemoryStore::new();
         store.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(9),
+            peer_user_id: Some(InlineId::new(10)),
             title: Some("general".to_owned()),
             last_message_id: None,
             synced_through_message_id: None,
@@ -2470,6 +2483,7 @@ mod tests {
         assert_eq!(page.dialogs.len(), 1);
         assert_eq!(page.dialogs[0].chat_id, InlineId::new(7));
         assert_eq!(page.dialogs[0].title.as_deref(), Some("* Ada Lovelace"));
+        assert_eq!(page.dialogs[0].peer_user_id, Some(InlineId::new(42)));
         assert_eq!(page.dialogs[0].last_message_id, Some(InlineId::new(99)));
         assert_eq!(page.dialogs[0].unread_count, Some(3));
         assert_eq!(page.users.len(), 1);

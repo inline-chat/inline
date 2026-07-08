@@ -507,6 +507,9 @@ impl ClientStatusSnapshot {
 pub struct DialogRecord {
     /// Inline chat ID.
     pub chat_id: InlineId,
+    /// Other user ID when this dialog is a direct message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_user_id: Option<InlineId>,
     /// Display title, when known.
     pub title: Option<String>,
     /// Last known message ID, when known.

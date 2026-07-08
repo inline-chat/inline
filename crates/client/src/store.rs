@@ -491,7 +491,7 @@ impl SqliteStore {
         let rows = {
             let mut stmt = connection
                 .prepare(
-                    "SELECT d.chat_id, d.title, d.last_message_id,
+                    "SELECT d.chat_id, d.peer_user_id, d.title, d.last_message_id,
                             (SELECT MAX(m.message_id) FROM messages m WHERE m.chat_id = d.chat_id) AS synced_through_message_id,
                             d.unread_count
                      FROM dialogs d
@@ -502,11 +502,12 @@ impl SqliteStore {
             stmt.query_map(params![(limit + 1) as i64, start as i64], |row| {
                 Ok(DialogRecord {
                     chat_id: InlineId::new(row.get::<_, i64>(0)?),
-                    title: row.get::<_, Option<String>>(1)?,
-                    last_message_id: row.get::<_, Option<i64>>(2)?.map(InlineId::new),
-                    synced_through_message_id: row.get::<_, Option<i64>>(3)?.map(InlineId::new),
+                    peer_user_id: row.get::<_, Option<i64>>(1)?.map(InlineId::new),
+                    title: row.get::<_, Option<String>>(2)?,
+                    last_message_id: row.get::<_, Option<i64>>(3)?.map(InlineId::new),
+                    synced_through_message_id: row.get::<_, Option<i64>>(4)?.map(InlineId::new),
                     unread_count: row
-                        .get::<_, Option<i64>>(4)?
+                        .get::<_, Option<i64>>(5)?
                         .and_then(|value| u32::try_from(value).ok()),
                 })
             })
@@ -823,6 +824,7 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
 
             CREATE TABLE IF NOT EXISTS dialogs (
                 chat_id INTEGER PRIMARY KEY,
+                peer_user_id INTEGER,
                 title TEXT,
                 last_message_id INTEGER,
                 unread_count INTEGER,
@@ -876,6 +878,32 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
             ",
         )
         .map_err(sqlite_error)?;
+    ensure_sqlite_column(connection, "dialogs", "peer_user_id", "INTEGER")?;
+    Ok(())
+}
+
+fn ensure_sqlite_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> StoreResult<()> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let mut stmt = connection.prepare(&pragma).map_err(sqlite_error)?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?;
+    if columns.iter().any(|name| name == column) {
+        return Ok(());
+    }
+    connection
+        .execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )
+        .map_err(sqlite_error)?;
     Ok(())
 }
 
@@ -913,15 +941,17 @@ fn upsert_sqlite_user(connection: &Connection, user: UserRecord) -> StoreResult<
 fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreResult<()> {
     connection
         .execute(
-            "INSERT INTO dialogs (chat_id, title, last_message_id, unread_count, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO dialogs (chat_id, peer_user_id, title, last_message_id, unread_count, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(chat_id) DO UPDATE SET
+               peer_user_id = excluded.peer_user_id,
                title = excluded.title,
                last_message_id = excluded.last_message_id,
                unread_count = excluded.unread_count,
                updated_at = excluded.updated_at",
             params![
                 dialog.chat_id.get(),
+                dialog.peer_user_id.map(InlineId::get),
                 dialog.title,
                 dialog.last_message_id.map(InlineId::get),
                 dialog.unread_count.map(i64::from),
@@ -1195,6 +1225,7 @@ pub(crate) fn upsert_dialog_last_message(
     }
     dialogs.push(DialogRecord {
         chat_id,
+        peer_user_id: None,
         title: None,
         last_message_id: Some(message_id),
         synced_through_message_id: None,
@@ -1241,6 +1272,7 @@ mod tests {
         let store = InMemoryStore::new();
         store.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(7),
+            peer_user_id: None,
             title: Some("general".to_owned()),
             last_message_id: None,
             synced_through_message_id: None,
@@ -1364,6 +1396,7 @@ mod tests {
         store
             .upsert_dialog(DialogRecord {
                 chat_id: InlineId::new(7),
+                peer_user_id: Some(InlineId::new(2)),
                 title: Some("general".to_owned()),
                 last_message_id: None,
                 synced_through_message_id: None,
@@ -1407,6 +1440,7 @@ mod tests {
         let dialogs = reopened.dialogs(DialogsRequest::default()).await.unwrap();
         assert_eq!(dialogs.dialogs.len(), 1);
         assert_eq!(dialogs.dialogs[0].chat_id, InlineId::new(7));
+        assert_eq!(dialogs.dialogs[0].peer_user_id, Some(InlineId::new(2)));
         assert_eq!(dialogs.dialogs[0].last_message_id, Some(InlineId::new(10)));
         assert_eq!(
             dialogs.dialogs[0].synced_through_message_id,

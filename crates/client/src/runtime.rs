@@ -871,6 +871,7 @@ mod tests {
         let backend = InMemoryBackend::new();
         backend.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(7),
+            peer_user_id: None,
             title: Some("general".to_owned()),
             last_message_id: None,
             synced_through_message_id: None,

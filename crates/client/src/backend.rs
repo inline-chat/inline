@@ -504,6 +504,7 @@ impl InMemoryBackend {
         state.next_chat_id += 1;
         state.dialogs.push(DialogRecord {
             chat_id,
+            peer_user_id: None,
             title: title.clone(),
             last_message_id: None,
             synced_through_message_id: None,
@@ -929,6 +930,7 @@ mod tests {
         let backend = InMemoryBackend::new();
         backend.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(1),
+            peer_user_id: None,
             title: Some("one".to_owned()),
             last_message_id: None,
             synced_through_message_id: None,
@@ -936,6 +938,7 @@ mod tests {
         });
         backend.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(2),
+            peer_user_id: Some(InlineId::new(3)),
             title: Some("two".to_owned()),
             last_message_id: None,
             synced_through_message_id: None,
