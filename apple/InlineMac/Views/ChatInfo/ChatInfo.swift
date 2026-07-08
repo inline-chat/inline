@@ -5,6 +5,7 @@ import InlineUI
 import Logger
 import Nuke
 import Quartz
+import RealtimeV2
 import SwiftUI
 import Translation
 
@@ -492,14 +493,14 @@ struct ChatInfo: View {
   @ViewBuilder
   private var tabContent: some View {
     switch selectedTab {
-      case .files:
-        filesTab
-      case .media:
-        filesTab
-      case .links:
-        linksTab
-      case .participants:
-        participantsTab
+    case .files:
+      filesTab
+    case .media:
+      filesTab
+    case .links:
+      linksTab
+    case .participants:
+      participantsTab
     }
   }
 
@@ -564,18 +565,6 @@ struct ChatInfo: View {
       }
       .padding(.vertical, 32)
     }
-  }
-
-  private func comingSoonView(title: String, message: String) -> some View {
-    VStack(spacing: 8) {
-      Text(title)
-        .font(.headline)
-      Text(message)
-        .foregroundStyle(.secondary)
-        .font(.subheadline)
-    }
-    .frame(maxWidth: .infinity)
-    .padding(.vertical, 40)
   }
 
   private func ensureSelectedTab() {
