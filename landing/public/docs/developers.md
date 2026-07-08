@@ -18,6 +18,21 @@ Inline currently exposes two API entry points.
 
 See: [Realtime API](https://inline.chat/docs/realtime-api)
 
+## SDKs
+
+- TypeScript SDK: use `@inline-chat/realtime-sdk` for Bun, Node.js, and JavaScript runtimes.
+- Rust SDK: use `inline-sdk` for Rust agents, bridges, CLIs, and cross-platform client foundations.
+
+See: [Rust SDK](https://inline.chat/docs/rust-sdk)
+
+## Matrix and Beeper
+
+Inline has an official Matrix bridge for Beeper and self-hosted Matrix deployments.
+It is built on mautrix-go bridgev2 and can run alongside other Matrix application
+service bridges.
+
+Bridge repository: [inline-chat/matrix-inline](https://github.com/inline-chat/matrix-inline)
+
 ## Quick Start
 
 - Method reference: [Bot API](https://inline.chat/docs/bot-api)

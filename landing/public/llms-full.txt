@@ -36,6 +36,7 @@ Inline is a fast, lightweight work chat for high-performance teams.
 
 - [What's Inline](https://inline.chat/docs/whats-inline)
 - [Roadmap](https://inline.chat/docs/roadmap)
+- [What's New](https://inline.chat/docs/changelog)
 - [Downloads](https://inline.chat/docs/downloads)
 - [CLI](https://inline.chat/docs/cli)
 - [Developers](https://inline.chat/docs/developers)
@@ -196,6 +197,21 @@ Inline currently exposes two API entry points.
 
 See: [Realtime API](https://inline.chat/docs/realtime-api)
 
+## SDKs
+
+- TypeScript SDK: use `@inline-chat/realtime-sdk` for Bun, Node.js, and JavaScript runtimes.
+- Rust SDK: use `inline-sdk` for Rust agents, bridges, CLIs, and cross-platform client foundations.
+
+See: [Rust SDK](https://inline.chat/docs/rust-sdk)
+
+## Matrix and Beeper
+
+Inline has an official Matrix bridge for Beeper and self-hosted Matrix deployments.
+It is built on mautrix-go bridgev2 and can run alongside other Matrix application
+service bridges.
+
+Bridge repository: [inline-chat/matrix-inline](https://github.com/inline-chat/matrix-inline)
+
 ## Quick Start
 
 - Method reference: [Bot API](https://inline.chat/docs/bot-api)
@@ -229,7 +245,9 @@ Inline Realtime API is the full API surface over WebSocket RPC.
 
 - `wss://api.inline.chat/realtime`
 
-## SDK
+## TypeScript SDK
+
+Use the TypeScript SDK for Bun, Node.js, and other JavaScript runtimes.
 
 - Package: `@inline-chat/realtime-sdk`
 
@@ -254,7 +272,7 @@ console.log(me.userId)
 
 await client.sendMessage({
   chatId: 42,
-  text: "hello from realtime sdk",
+  text: "hello from TypeScript SDK",
 })
 
 await client.close()
@@ -265,6 +283,8 @@ await client.close()
 - Full client integrations
 - Rich two-way bot interactions
 - Live state sync and realtime updates
+
+For Rust clients, agents, bridges, and CLI-style integrations, see [Rust SDK](https://inline.chat/docs/rust-sdk).
 
 ## Protocol Buffers
 
@@ -596,6 +616,27 @@ inline-hermes install
 hermes plugins enable inline-platform
 ```
 
+## Coding Agent Setup Prompt
+
+Use this with Codex, Claude Code, or another local coding agent for a simple setup:
+
+```text
+Set up the Inline Hermes Agent adapter on this machine.
+
+Constraints:
+- Do not read, print, or edit .env files.
+- Do not print Inline tokens or other secrets.
+- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN; if neither is present, stop and point me to https://inline.chat/docs/creating-a-bot.
+
+Tasks:
+1. Verify Node.js is version 20 or newer and Hermes Agent is installed.
+2. Install or upgrade @inline-chat/hermes-agent-adapter globally.
+3. Run inline-hermes install and hermes plugins enable inline-platform.
+4. Ensure ~/.hermes/config.yaml enables platforms.inline, using token: ${INLINE_TOKEN} if config needs an env reference.
+5. Run inline-hermes doctor --json and inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json.
+6. Report the exact commands run and any remaining manual steps, without revealing secrets.
+```
+
 ## Configure
 
 Set the token where the Hermes gateway runs:
@@ -684,13 +725,14 @@ Supported:
 - DMs, group chats, reply threads, and `hermes send --to inline:<chat-id>`.
 - Realtime inbound messages, replies, edits, deletes, typing, presence, long replies, and media uploads.
 - Inline-native clarify, approval, slash confirmation, model picker, and command-menu sync.
-- Bounded current-chat/thread history through the Hermes `inline` tool.
+- Native Hermes `inline` tool for bounded current-chat/thread history and search, exact message lookup, reactions, pins, typing/presence, and reply-thread creation.
+- Selective reply/thread/observed context, sender IDs, parent-thread context, and Inline entity summaries.
 - Allowlists, mention controls, thread prompts, skill bindings, and reply-thread routing.
 
 Unsupported or intentionally limited:
 
 - Multiple Inline accounts in one Hermes process.
-- Full Inline member, space, search, and admin tools.
+- Full Inline member, space, and admin tools beyond bounded current-chat/thread message access.
 - Full rich-text span conversion. Rich entities are summarized for the agent.
 - Native animated draft streaming.
 - Ephemeral in-channel private replies or realtime voice/calls.
@@ -701,7 +743,7 @@ Unsupported or intentionally limited:
 - Tokens are read from `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
 - Room controls are available through `INLINE_ALLOWED_CHATS`, `INLINE_FREE_RESPONSE_CHATS`, and `INLINE_STRICT_MENTION`.
 - Top-level DM and group replies use Inline reply threads by default. Use `/threads on`, `/threads off`, or `/threads auto` in Inline to configure a chat, or set `INLINE_REPLY_THREADS=false` globally.
-- Full adapter reference: [public Inline repo](https://github.com/inline-chat/inline/tree/main/packages/hermes-agent).
+- Full adapter reference: [public Inline repo](https://github.com/inline-chat/inline/tree/main/hermes-agent).
 
 # Security
 

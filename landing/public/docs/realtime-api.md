@@ -8,7 +8,9 @@ Inline Realtime API is the full API surface over WebSocket RPC.
 
 - `wss://api.inline.chat/realtime`
 
-## SDK
+## TypeScript SDK
+
+Use the TypeScript SDK for Bun, Node.js, and other JavaScript runtimes.
 
 - Package: `@inline-chat/realtime-sdk`
 
@@ -33,7 +35,7 @@ console.log(me.userId)
 
 await client.sendMessage({
   chatId: 42,
-  text: "hello from realtime sdk",
+  text: "hello from TypeScript SDK",
 })
 
 await client.close()
@@ -44,6 +46,8 @@ await client.close()
 - Full client integrations
 - Rich two-way bot interactions
 - Live state sync and realtime updates
+
+For Rust clients, agents, bridges, and CLI-style integrations, see [Rust SDK](https://inline.chat/docs/rust-sdk).
 
 ## Protocol Buffers
 

@@ -14,6 +14,7 @@ Inline is a fast, lightweight work chat for high-performance teams.
 
 - [What's Inline](https://inline.chat/docs/whats-inline)
 - [Roadmap](https://inline.chat/docs/roadmap)
+- [What's New](https://inline.chat/docs/changelog)
 - [Downloads](https://inline.chat/docs/downloads)
 - [CLI](https://inline.chat/docs/cli)
 - [Developers](https://inline.chat/docs/developers)
