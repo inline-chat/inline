@@ -218,25 +218,28 @@ struct ChatView: View {
       guard let targetPeer else { return }
 
       if targetPeer == peerId, let chatId = fullChatViewModel.chat?.id {
-        NotificationCenter.default.post(
-          name: Notification.Name("ScrollToRepliedMessage"),
-          object: nil,
-          userInfo: ["repliedToMessageId": messageId, "chatId": chatId]
+        MessageFocusCenter.shared.dispatch(
+          MessageFocusTarget(
+            peer: targetPeer,
+            messageId: messageId,
+            chatId: chatId,
+            source: .forwarded
+          )
         )
         return
       }
 
       Task { @MainActor in
         if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          router.push(.chat(peer: targetPeer))
-          let chatId = chat.id
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            NotificationCenter.default.post(
-              name: Notification.Name("ScrollToRepliedMessage"),
-              object: nil,
-              userInfo: ["repliedToMessageId": messageId, "chatId": chatId]
+          router.openChat(
+            peer: targetPeer,
+            focus: MessageFocusTarget(
+              peer: targetPeer,
+              messageId: messageId,
+              chatId: chat.id,
+              source: .forwarded
             )
-          }
+          )
           return
         }
 
@@ -247,15 +250,15 @@ struct ChatView: View {
         }
 
         if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          router.push(.chat(peer: targetPeer))
-          let chatId = chat.id
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            NotificationCenter.default.post(
-              name: Notification.Name("ScrollToRepliedMessage"),
-              object: nil,
-              userInfo: ["repliedToMessageId": messageId, "chatId": chatId]
+          router.openChat(
+            peer: targetPeer,
+            focus: MessageFocusTarget(
+              peer: targetPeer,
+              messageId: messageId,
+              chatId: chat.id,
+              source: .forwarded
             )
-          }
+          )
           return
         }
 
