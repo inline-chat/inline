@@ -82,7 +82,7 @@ export type DbInputFullMessage = DbMessage & {
   messageAttachments?: DbInputFullAttachment[]
 }
 
-export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links"
+export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links" | "voice_memos"
 
 export type ProcessedMessage = Omit<
   DbMessage,
@@ -469,6 +469,8 @@ function buildMediaFilterClause(filter: MessageMediaFilter) {
       return not(isNull(messages.documentId))
     case "links":
       return eq(messages.hasLink, true)
+    case "voice_memos":
+      return not(isNull(messages.voiceId))
   }
 }
 

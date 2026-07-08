@@ -614,6 +614,7 @@ public nonisolated enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIter
   case filterPhotoVideo // = 3
   case filterDocuments // = 4
   case filterLinks // = 5
+  case filterVoiceMemos // = 6
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -628,6 +629,7 @@ public nonisolated enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIter
     case 3: self = .filterPhotoVideo
     case 4: self = .filterDocuments
     case 5: self = .filterLinks
+    case 6: self = .filterVoiceMemos
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -640,6 +642,7 @@ public nonisolated enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIter
     case .filterPhotoVideo: return 3
     case .filterDocuments: return 4
     case .filterLinks: return 5
+    case .filterVoiceMemos: return 6
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -652,6 +655,7 @@ public nonisolated enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIter
     .filterPhotoVideo,
     .filterDocuments,
     .filterLinks,
+    .filterVoiceMemos,
   ]
 
 }
@@ -11529,7 +11533,7 @@ nonisolated extension ThreadReferenceKind: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension SearchMessagesFilter: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0FILTER_UNSPECIFIED\0\u{1}FILTER_PHOTOS\0\u{1}FILTER_VIDEOS\0\u{1}FILTER_PHOTO_VIDEO\0\u{1}FILTER_DOCUMENTS\0\u{1}FILTER_LINKS\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0FILTER_UNSPECIFIED\0\u{1}FILTER_PHOTOS\0\u{1}FILTER_VIDEOS\0\u{1}FILTER_PHOTO_VIDEO\0\u{1}FILTER_DOCUMENTS\0\u{1}FILTER_LINKS\0\u{1}FILTER_VOICE_MEMOS\0")
 }
 
 nonisolated extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

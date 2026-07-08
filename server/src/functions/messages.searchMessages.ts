@@ -217,6 +217,8 @@ function normalizeMediaFilter(filter: SearchMessagesFilter | undefined): Message
       return "documents"
     case SearchMessagesFilter.FILTER_LINKS:
       return "links"
+    case SearchMessagesFilter.FILTER_VOICE_MEMOS:
+      return "voice_memos"
     case SearchMessagesFilter.FILTER_UNSPECIFIED:
     case undefined:
       return undefined

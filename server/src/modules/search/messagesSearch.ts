@@ -34,7 +34,7 @@ export const MessageSearchModule = {
   searchMessagesInChat,
 }
 
-export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links"
+export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links" | "voice_memos"
 
 async function searchMessagesInChat(input: SearchMessagesInput): Promise<bigint[]> {
   if (input.maxResults <= 0 || input.keywordGroups.length === 0) {
@@ -116,6 +116,8 @@ function buildMediaFilterClause(filter: MessageMediaFilter | undefined) {
       return not(isNull(messages.documentId))
     case "links":
       return eq(messages.hasLink, true)
+    case "voice_memos":
+      return not(isNull(messages.voiceId))
     default:
       return undefined
   }

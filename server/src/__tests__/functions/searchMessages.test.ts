@@ -198,6 +198,65 @@ describe("searchMessages", () => {
     expect(result.messages.map((message) => Number(message.id))).toEqual([2])
   })
 
+  test("allows empty queries with voice memos filter", async () => {
+    const userA = (await testUtils.createUser("search-voice-filter-a@example.com"))!
+    const userB = (await testUtils.createUser("search-voice-filter-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    const [file] = await db
+      .insert(schema.files)
+      .values({
+        fileUniqueId: "file-search-voice-filter-1",
+        userId: userA.id,
+        mimeType: "audio/mp4",
+        fileSize: 42,
+      })
+      .returning()
+
+    const [voice] = await db
+      .insert(schema.voices)
+      .values({
+        fileId: file!.id,
+        duration: 12,
+      })
+      .returning()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: "not a voice memo",
+      })
+      .execute()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 2,
+        chatId: chat.id,
+        fromId: userA.id,
+        mediaType: "voice",
+        voiceId: voice!.id,
+      })
+      .execute()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        queries: [],
+        filter: SearchMessagesFilter.FILTER_VOICE_MEMOS,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.map((message) => Number(message.id))).toEqual([2])
+    expect(result.messages[0]?.media?.media.oneofKind).toBe("voice")
+  })
+
   test("applies media filters when searching text", async () => {
     const userA = (await testUtils.createUser("search-media-filter-a@example.com"))!
     const userB = (await testUtils.createUser("search-media-filter-b@example.com"))!
