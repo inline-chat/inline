@@ -10,6 +10,7 @@ import { isProd } from "@in/server/env"
 const REQUEST_ID_HEADER = "x-request-id"
 const MAX_REQUEST_ID_LENGTH = 128
 const REQUEST_ID_PATTERN = /^[a-zA-Z0-9._-]+$/
+const API_RATE_LIMIT_MAX = parsePositiveIntEnv("INLINE_API_RATE_LIMIT_MAX", 180, { min: 1, max: 10_000 })
 const CORS_ORIGINS = [
   "https://inline.chat",
   "https://app.inline.chat",
@@ -39,6 +40,16 @@ const CORS_EXPOSED_HEADERS = [
   "x-ratelimit-remaining",
   "x-ratelimit-reset",
 ]
+
+function parsePositiveIntEnv(name: string, fallback: number, opts: { min: number; max: number }): number {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed)) return fallback
+  const value = Math.trunc(parsed)
+  if (value < opts.min || value > opts.max) return fallback
+  return value
+}
 
 const getRequestId = (request: Request) => {
   const raw = request.headers.get(REQUEST_ID_HEADER)
@@ -90,7 +101,7 @@ export const setup = new Elysia({ name: "setup" })
   )
   .use(
     rateLimit({
-      max: 100,
+      max: API_RATE_LIMIT_MAX,
       scoping: "global",
       generator: (request, server) => {
         let ip = getIp(request, server) ?? nanoid()
