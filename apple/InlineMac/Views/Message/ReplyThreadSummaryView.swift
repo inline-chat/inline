@@ -23,6 +23,7 @@ final class ReplyThreadSummaryView: NSView {
   }
 
   var onTap: ((NSEvent.ModifierFlags) -> Void)?
+  var menuProvider: (() -> NSMenu?)?
 
   private var style: EmbeddedMessageView.EmbeddedMessageStyle
   private var avatarViews: [UserAvatarView] = []
@@ -399,5 +400,18 @@ final class ReplyThreadSummaryView: NSView {
 
     MessageGestureTrace.debug("ReplyThreadSummaryView.mouseDown trackingEndedWithoutMouseUp")
     setPressed(false)
+  }
+
+  override func menu(for event: NSEvent) -> NSMenu? {
+    menuProvider?() ?? super.menu(for: event)
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    guard let menu = menu(for: event) else {
+      super.rightMouseDown(with: event)
+      return
+    }
+
+    NSMenu.popUpContextMenu(menu, with: event, for: self)
   }
 }

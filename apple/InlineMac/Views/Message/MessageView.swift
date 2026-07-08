@@ -750,6 +750,9 @@ class MessageViewAppKit: NSView {
       }
       self?.openReplyThreadFlow(source: .threadSummary, action: Self.replyThreadOpenAction(for: flags))
     }
+    view.menuProvider = { [weak self] in
+      self?.makeReplyThreadSummaryMenu()
+    }
     return view
   }()
 
@@ -3203,6 +3206,127 @@ class MessageViewAppKit: NSView {
 
   @objc private func replyInThread() {
     openReplyThreadFlow(source: .menu)
+  }
+
+  private func makeReplyThreadSummaryMenu() -> NSMenu {
+    let menu = NSMenu()
+    menu.addItem(replyThreadMenuItem(
+      title: "Open Thread",
+      systemSymbolName: "arrow.turn.down.right",
+      action: #selector(openReplyThreadFromSummaryMenu)
+    ))
+    menu.addItem(replyThreadMenuItem(
+      title: "Copy Link",
+      systemSymbolName: "link",
+      action: #selector(copyReplyThreadLinkFromSummaryMenu)
+    ))
+    menu.addItem(replyThreadMenuItem(
+      title: "Add to Inbox",
+      systemSymbolName: "tray.and.arrow.down",
+      action: #selector(addReplyThreadToInboxFromSummaryMenu)
+    ))
+    return menu
+  }
+
+  private func replyThreadMenuItem(
+    title: String,
+    systemSymbolName: String,
+    action: Selector
+  ) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    item.target = self
+    item.isEnabled = !isAnchorMessage
+    item.image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: title)
+    return item
+  }
+
+  @objc private func openReplyThreadFromSummaryMenu() {
+    openReplyThreadFlow(source: .menu)
+  }
+
+  @objc private func copyReplyThreadLinkFromSummaryMenu() {
+    guard !isAnchorMessage else { return }
+
+    Task { @MainActor in
+      do {
+        let peer = try await resolveReplyThreadPeerForMenuAction()
+        guard let url = replyThreadDeepLinkURL(for: peer) else {
+          throw ReplyThreadOpenError.invalidResponse
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(url.absoluteString, forType: .string)
+        ToastCenter.shared.showSuccess("Copied link")
+      } catch {
+        ToastCenter.shared.showError("Failed to copy link")
+        log.error("Failed to copy reply thread link", error: error)
+      }
+    }
+  }
+
+  @objc private func addReplyThreadToInboxFromSummaryMenu() {
+    guard !isAnchorMessage else { return }
+
+    Task { @MainActor in
+      do {
+        guard let dependencies else {
+          throw ReplyThreadOpenError.invalidResponse
+        }
+
+        let peer = try await resolveReplyThreadPeerForMenuAction()
+        ToastCenter.shared.showLoading("Adding to inbox…")
+
+        _ = try await dependencies.realtimeV2.send(.updateDialogFollowMode(peerId: peer, selection: .following))
+        _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peer))
+        _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+
+        ToastCenter.shared.dismiss()
+        ToastCenter.shared.showSuccess("Added to inbox")
+      } catch {
+        ToastCenter.shared.dismiss()
+        ToastCenter.shared.showError("Failed to add to inbox")
+        log.error("Failed to add reply thread to inbox", error: error)
+      }
+    }
+  }
+
+  @MainActor
+  private func resolveReplyThreadPeerForMenuAction() async throws -> Peer {
+    if let existingPeer = message.replyThreadPeer {
+      return existingPeer
+    }
+
+    guard let dependencies else {
+      throw ReplyThreadOpenError.invalidResponse
+    }
+
+    ToastCenter.shared.showLoading("Creating thread…")
+    defer {
+      ToastCenter.shared.dismiss()
+    }
+
+    let rpcResult = try await dependencies.realtimeV2.send(
+      .createSubthread(
+        parentChatId: message.chatId,
+        parentMessageId: message.messageId
+      )
+    )
+
+    guard case let .createSubthread(response) = rpcResult, response.hasChat else {
+      throw ReplyThreadOpenError.invalidResponse
+    }
+
+    return .thread(id: response.chat.id)
+  }
+
+  private func replyThreadDeepLinkURL(for peer: Peer) -> URL? {
+    switch peer {
+    case let .user(id):
+      InlineDeepLink.user(id: id).url
+    case let .thread(id):
+      InlineDeepLink.chat(id: id).url
+    }
   }
 
   private func openReplyThreadFlow(

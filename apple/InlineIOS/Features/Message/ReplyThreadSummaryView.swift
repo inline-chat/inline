@@ -18,6 +18,7 @@ final class ReplyThreadSummaryView: UIControl {
   }
 
   var onTap: (() -> Void)?
+  var contextMenuProvider: (() -> UIMenu?)?
 
   private var outgoing = false
   private var avatarViews: [UserAvatarView] = []
@@ -139,6 +140,7 @@ final class ReplyThreadSummaryView: UIControl {
     addSubview(unreadDotView)
     addSubview(spinnerView)
     addTarget(self, action: #selector(handleTap), for: .touchUpInside)
+    addInteraction(UIContextMenuInteraction(delegate: self))
 
     avatarsWidthConstraint = avatarsContainer.widthAnchor.constraint(equalToConstant: 0)
     avatarsToLabelSpacingConstraint = replyCountLabel.leadingAnchor.constraint(
@@ -270,5 +272,16 @@ final class ReplyThreadSummaryView: UIControl {
 
   @objc private func handleTap() {
     onTap?()
+  }
+
+  override func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    guard !loading, contextMenuProvider != nil else { return nil }
+
+    return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+      self?.contextMenuProvider?() ?? UIMenu(children: [])
+    }
   }
 }

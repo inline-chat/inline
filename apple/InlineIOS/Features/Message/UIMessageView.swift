@@ -956,8 +956,45 @@ class UIMessageView: UIView {
         self?.replyThreadSummaryView.setLoading(loading)
       }
     }
+    replyThreadSummaryView.contextMenuProvider = { [weak self] in
+      self?.makeReplyThreadSummaryMenu()
+    }
 
     containerStack.addArrangedSubview(replyThreadSummaryView)
+  }
+
+  private func makeReplyThreadSummaryMenu() -> UIMenu {
+    let isDisabled = message.status == .sending || message.status == .failed
+    let attributes: UIMenuElement.Attributes = isDisabled ? [.disabled] : []
+
+    let openAction = UIAction(
+      title: "Open Thread",
+      image: UIImage(systemName: "arrow.turn.down.right"),
+      attributes: attributes
+    ) { [weak self] _ in
+      guard let self else { return }
+      ReplyThreadNavigator.open(message: message, source: .menu)
+    }
+
+    let copyLinkAction = UIAction(
+      title: "Copy Link",
+      image: UIImage(systemName: "link"),
+      attributes: attributes
+    ) { [weak self] _ in
+      guard let self else { return }
+      ReplyThreadNavigator.copyLink(message: message)
+    }
+
+    let addToInboxAction = UIAction(
+      title: "Add to Inbox",
+      image: UIImage(systemName: "tray.and.arrow.down"),
+      attributes: attributes
+    ) { [weak self] _ in
+      guard let self else { return }
+      ReplyThreadNavigator.addToInbox(message: message)
+    }
+
+    return UIMenu(children: [openAction, copyLinkAction, addToInboxAction])
   }
 
   private func recentReplyThreadAuthors() -> [UserInfo] {
