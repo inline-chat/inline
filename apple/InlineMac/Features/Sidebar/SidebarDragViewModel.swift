@@ -140,12 +140,17 @@ final class SidebarDragViewModel {
     previewWindow.update(state: state.preview)
 
     if targetChanged {
+      performReorderHaptic()
       withAnimation(.smoothSnappy) {
         self.state = state
       }
     } else {
       self.state = state
     }
+  }
+
+  private func performReorderHaptic() {
+    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
   }
 
   private func finishDrag() -> SidebarDragCommit? {
