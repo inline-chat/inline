@@ -171,7 +171,22 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
 
   @objc private func handleTap() {
     guard let url = previewUrl else { return }
-    InAppBrowser.shared.open(url, from: parentViewController)
+    InAppBrowser.shared.open(url, from: currentPresenter())
+  }
+
+  private func currentPresenter() -> UIViewController? {
+    findViewController() ?? parentViewController
+  }
+
+  private func findViewController() -> UIViewController? {
+    var responder: UIResponder? = self
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        return viewController
+      }
+      responder = nextResponder
+    }
+    return nil
   }
 
   func configure(
@@ -576,7 +591,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
         image: UIImage(systemName: "safari")
       ) { _ in
         guard let self, let url = self.previewUrl else { return }
-        InAppBrowser.shared.open(url, from: self.parentViewController)
+        InAppBrowser.shared.open(url, from: self.currentPresenter())
       }
 
       let copyAction = UIAction(
@@ -634,7 +649,7 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     _ gestureRecognizer: UIGestureRecognizer,
     shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
   ) -> Bool {
-    true
+    false
   }
 
   func gestureRecognizer(

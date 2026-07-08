@@ -47,6 +47,8 @@ class UIMessageView: UIView {
 
   private var shineEffectView: ShineEffectView?
   private weak var linkLongPressGesture: UILongPressGestureRecognizer?
+  private weak var bubbleDoubleTapGesture: UITapGestureRecognizer?
+  private weak var backgroundDoubleTapGesture: UITapGestureRecognizer?
 
   var linkTapHandler: ((URL) -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)? {
@@ -1167,18 +1169,6 @@ class UIMessageView: UIView {
     }
 
     containerStack.addArrangedSubview(documentView)
-
-    // is this on whole message?
-    let documentTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDocumentTap))
-    bubbleView.addGestureRecognizer(documentTapGesture)
-  }
-
-  @objc func handleDocumentTap() {
-    NotificationCenter.default.post(
-      name: Notification.Name("DocumentTapped"),
-      object: nil,
-      userInfo: ["fullMessage": fullMessage]
-    )
   }
 
   func setupMessageContainer() {
@@ -1390,9 +1380,10 @@ class UIMessageView: UIView {
   func setupDoubleTapGestureRecognizer() {
     let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
     doubleTapGesture.numberOfTapsRequired = 2
+    doubleTapGesture.delegate = self
+    bubbleDoubleTapGesture = doubleTapGesture
 
     if let interaction {
-      doubleTapGesture.delegate = self
       interaction.view?.gestureRecognizers?.forEach { gesture in
         doubleTapGesture.require(toFail: gesture)
       }
@@ -1405,9 +1396,10 @@ class UIMessageView: UIView {
       action: #selector(handleBackgroundDoubleTap)
     )
     backgroundDoubleTapGesture.numberOfTapsRequired = 2
+    backgroundDoubleTapGesture.delegate = self
+    self.backgroundDoubleTapGesture = backgroundDoubleTapGesture
 
     if let interaction {
-      backgroundDoubleTapGesture.delegate = self
       interaction.view?.gestureRecognizers?.forEach { gesture in
         backgroundDoubleTapGesture.require(toFail: gesture)
       }
@@ -1479,8 +1471,6 @@ class UIMessageView: UIView {
 
   @objc func handleTextViewTap(_ gesture: UITapGestureRecognizer) {
     let tapLocation = gesture.location(in: messageLabel)
-    let textContainer = messageLabel.textContainer
-    let layoutManager = messageLabel.layoutManager
 
     if let codeTextView = messageLabel as? CodeBlockTextView,
        let codeRange = codeTextView.codeBlockRange(at: tapLocation)
@@ -1495,17 +1485,12 @@ class UIMessageView: UIView {
       return
     }
 
-    // Get character index at tap location
-    let characterIndex = layoutManager.characterIndex(
-      for: tapLocation,
-      in: textContainer,
-      fractionOfDistanceBetweenInsertionPoints: nil
-    )
+    guard let characterIndex = interactiveCharacterIndex(at: tapLocation) else {
+      return
+    }
 
     // Check if tap is on a mention first
     if let attributedText = messageLabel.attributedText {
-      guard characterIndex >= 0, characterIndex < attributedText.length else { return }
-
       var foundMention = false
       attributedText.enumerateAttribute(.mentionUserId, in: NSRange(
         location: 0,
@@ -1646,8 +1631,61 @@ class UIMessageView: UIView {
   }
 
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-    guard gestureRecognizer === linkLongPressGesture else { return true }
-    return linkContextMenuTarget(at: gestureRecognizer.location(in: messageLabel)) != nil
+    if gestureRecognizer === linkLongPressGesture {
+      return linkContextMenuTarget(at: gestureRecognizer.location(in: messageLabel)) != nil
+    }
+
+    if gestureRecognizer === bubbleDoubleTapGesture {
+      return !isExclusiveMessageTapTarget(at: gestureRecognizer.location(in: self))
+    }
+
+    if gestureRecognizer === backgroundDoubleTapGesture {
+      let location = gestureRecognizer.location(in: self)
+      guard !bubbleView.frame.contains(location) else { return false }
+      return !isExclusiveMessageTapTarget(at: location)
+    }
+
+    return true
+  }
+
+  private func isExclusiveMessageTapTarget(at point: CGPoint) -> Bool {
+    if hasInteractiveTextTarget(atPointInMessageView: point) {
+      return true
+    }
+
+    guard let hitView = hitTest(point, with: nil) else {
+      return false
+    }
+
+    var currentView: UIView? = hitView
+    while let view = currentView, view !== self {
+      if view === messageLabel {
+        return hasInteractiveTextTarget(atPointInMessageView: point)
+      }
+
+      let handlesOwnTap = view is UIControl ||
+        view is URLPreviewView ||
+        view is MessageAttachmentEmbed ||
+        view is DocumentView ||
+        view is NewPhotoView ||
+        view is NewVideoView ||
+        view is PhotoView ||
+        view is EmbedMessageView ||
+        view is ReactionsFlowView
+
+      if handlesOwnTap {
+        return true
+      }
+
+      if view !== bubbleView,
+         view.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true {
+        return true
+      }
+
+      currentView = view.superview
+    }
+
+    return false
   }
 
   func linkContextMenuTarget(atPointInMessageView pointInMessageView: CGPoint) -> LinkContextMenuTarget? {
@@ -1659,7 +1697,7 @@ class UIMessageView: UIView {
     linkContextMenuTarget(atPointInMessageView: pointInMessageView)?.url
   }
 
-  private func linkContextMenuTarget(at point: CGPoint) -> LinkContextMenuTarget? {
+  private func interactiveCharacterIndex(at point: CGPoint, hitSlop: CGFloat = 2) -> Int? {
     guard messageLabel.bounds.contains(point) else { return nil }
 
     let textContainer = messageLabel.textContainer
@@ -1672,7 +1710,9 @@ class UIMessageView: UIView {
     layoutManager.ensureLayout(for: textContainer)
 
     let usedRect = layoutManager.usedRect(for: textContainer)
-    guard usedRect.insetBy(dx: -2, dy: -2).contains(containerPoint) else { return nil }
+    guard usedRect.insetBy(dx: -hitSlop, dy: -hitSlop).contains(containerPoint) else {
+      return nil
+    }
 
     var fraction: CGFloat = 0
     let glyphIndex = layoutManager.glyphIndex(
@@ -1686,12 +1726,77 @@ class UIMessageView: UIView {
       forGlyphRange: NSRange(location: glyphIndex, length: 1),
       in: textContainer
     )
-    guard glyphRect.insetBy(dx: -2, dy: -2).contains(containerPoint) else { return nil }
+    guard glyphRect.insetBy(dx: -hitSlop, dy: -hitSlop).contains(containerPoint) else {
+      return nil
+    }
 
     let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+    guard let attributedText = messageLabel.attributedText,
+          characterIndex >= 0,
+          characterIndex < attributedText.length
+    else {
+      return nil
+    }
 
-    guard let attributedText = messageLabel.attributedText else { return nil }
-    guard let linkTarget = linkTarget(at: characterIndex, in: attributedText) else { return nil }
+    return characterIndex
+  }
+
+  private func hasInteractiveTextTarget(atPointInMessageView pointInMessageView: CGPoint) -> Bool {
+    let point = convert(pointInMessageView, to: messageLabel)
+
+    if let codeTextView = messageLabel as? CodeBlockTextView,
+       codeTextView.codeBlockRange(at: point) != nil {
+      return true
+    }
+
+    guard let characterIndex = interactiveCharacterIndex(at: point),
+          let attributedText = messageLabel.attributedText
+    else {
+      return false
+    }
+
+    if attributedText.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) != nil {
+      return true
+    }
+
+    if attributedText.attribute(.mentionGroupId, at: characterIndex, effectiveRange: nil) != nil {
+      return true
+    }
+
+    if attributedText.attribute(.threadLink, at: characterIndex, effectiveRange: nil) != nil {
+      return true
+    }
+
+    if attributedText.attribute(.inlineCode, at: characterIndex, effectiveRange: nil) != nil {
+      return true
+    }
+
+    if attributedText.attribute(.botCommand, at: characterIndex, effectiveRange: nil) != nil {
+      return true
+    }
+
+    if attributedText.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) != nil {
+      return true
+    }
+
+    if attributedText.attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) != nil {
+      return true
+    }
+
+    return linkURL(at: characterIndex, in: attributedText) != nil
+  }
+
+  private func linkContextMenuTarget(at point: CGPoint) -> LinkContextMenuTarget? {
+    guard let characterIndex = interactiveCharacterIndex(at: point),
+          let attributedText = messageLabel.attributedText,
+          let linkTarget = linkTarget(at: characterIndex, in: attributedText)
+    else {
+      return nil
+    }
+
+    let textContainer = messageLabel.textContainer
+    let layoutManager = messageLabel.layoutManager
+    layoutManager.ensureLayout(for: textContainer)
 
     let glyphRange = layoutManager.glyphRange(forCharacterRange: linkTarget.range, actualCharacterRange: nil)
     var linkRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)

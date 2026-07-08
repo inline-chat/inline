@@ -6,14 +6,13 @@ import Logger
 import QuickLook
 import UIKit
 
-class DocumentView: UIView {
+class DocumentView: UIView, UIGestureRecognizerDelegate {
   // MARK: - Properties
 
   private var fullMessage: FullMessage?
   private var outgoing: Bool
   private var isBeingRemoved = false
   private static let log = Log.scoped("DocumentView", level: .info)
-
 
   enum DocumentState: Equatable {
     case locallyAvailable
@@ -37,6 +36,7 @@ class DocumentView: UIView {
   private var previewController: QLPreviewController?
   private var documentInteractionController: UIDocumentInteractionController?
   private var documentURL: URL?
+  private weak var viewTapGesture: UITapGestureRecognizer?
 
   // Progress border
   private let progressLayer = CAShapeLayer()
@@ -88,13 +88,6 @@ class DocumentView: UIView {
 
     updateUIForDocumentState()
 
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleDocumentTappedNotification(_:)),
-      name: Notification.Name("DocumentTapped"),
-      object: nil
-    )
-
     // Listen for upload notifications
     NotificationCenter.default.addObserver(
       self,
@@ -126,7 +119,9 @@ class DocumentView: UIView {
     )
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(viewTapped))
+    tapGesture.delegate = self
     addGestureRecognizer(tapGesture)
+    viewTapGesture = tapGesture
   }
 
   @available(*, unavailable)
@@ -346,6 +341,20 @@ class DocumentView: UIView {
       case .needsDownload:
         downloadFile()
     }
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    guard gestureRecognizer === viewTapGesture else { return true }
+
+    var touchedView: UIView? = touch.view
+    while let view = touchedView, view !== self {
+      if view is UIControl {
+        return false
+      }
+      touchedView = view.superview
+    }
+
+    return true
   }
 
   private func updateFileIcon() {
@@ -863,15 +872,6 @@ class DocumentView: UIView {
         bytesReceived: progress.bytesReceived,
         totalBytes: progress.displayTotalBytes(fallback: Int64(document?.size ?? 0))
       )
-    }
-  }
-
-  @objc func handleDocumentTappedNotification(_ notification: Notification) {
-    if let tappedMessage = notification.userInfo?["fullMessage"] as? FullMessage,
-       let selfMessage = fullMessage,
-       tappedMessage.message.messageId == selfMessage.message.messageId
-    {
-      viewTapped()
     }
   }
 

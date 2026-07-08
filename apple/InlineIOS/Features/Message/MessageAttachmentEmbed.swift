@@ -100,6 +100,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
 
   private func setupInteractions() {
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    tapGesture.delegate = self
     addGestureRecognizer(tapGesture)
 
     let interaction = UIContextMenuInteraction(delegate: self)
@@ -108,10 +109,8 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     // Set delegate for any long press gesture recognizers to ensure they can compete with collection view
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
-      for gestureRecognizer in gestureRecognizers ?? [] {
-        if gestureRecognizer is UILongPressGestureRecognizer {
-          gestureRecognizer.delegate = self
-        }
+      for gestureRecognizer in gestureRecognizers ?? [] where gestureRecognizer is UILongPressGestureRecognizer {
+        gestureRecognizer.delegate = self
       }
     }
 
@@ -206,8 +205,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     _ gestureRecognizer: UIGestureRecognizer,
     shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
   ) -> Bool {
-    // Allow simultaneous recognition with other gesture recognizers
-    true
+    false
   }
 
   func gestureRecognizer(
