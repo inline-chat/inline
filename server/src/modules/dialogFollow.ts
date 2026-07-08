@@ -102,10 +102,15 @@ export async function setDialogFollowModeForUsers(input: {
   skipSessionId?: number
   pushRealtime?: boolean
   showInChatList?: boolean
-}): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[]; updates: { userId: number; update: Update }[] }> {
+}): Promise<{
+  dialogs: DbDialog[]
+  changedDialogs: DbDialog[]
+  unhiddenDialogs: DbDialog[]
+  updates: { userId: number; update: Update }[]
+}> {
   const userIds = await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))
   if (userIds.length === 0) {
-    return { dialogs: [], changedDialogs: [], updates: [] }
+    return { dialogs: [], changedDialogs: [], unhiddenDialogs: [], updates: [] }
   }
 
   const result = await db.transaction(async (tx) => {
@@ -183,9 +188,12 @@ export async function setDialogFollowModeForUsers(input: {
       .from(dialogs)
       .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, userIds)))
 
+    const unhiddenUserIds = new Set(visibilityUpdateUserIds)
+
     return {
       dialogs: finalDialogs,
       changedDialogs: finalDialogs.filter((dialog) => changedUserIds.has(dialog.userId)),
+      unhiddenDialogs: finalDialogs.filter((dialog) => unhiddenUserIds.has(dialog.userId)),
       followModeChangedDialogs: finalDialogs.filter((dialog) => followModeChangedUserIds.has(dialog.userId)),
     }
   })
@@ -204,6 +212,7 @@ export async function setDialogFollowModeForUsers(input: {
   return {
     dialogs: result.dialogs,
     changedDialogs: result.changedDialogs,
+    unhiddenDialogs: result.unhiddenDialogs,
     updates,
   }
 }

@@ -804,6 +804,80 @@ describe("sendMessage", () => {
     expect(senderChatListUpdates).toHaveLength(1)
   })
 
+  test("emits chat-list update when auto-follow unhides an already-open reply-thread anchor dialog", async () => {
+    const owner = await testUtils.createUser(nextEmail("thread-open-hidden-owner"))
+    const anchorAuthor = await testUtils.createUser(nextEmail("thread-open-hidden-anchor"))
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, anchorAuthor.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: anchorAuthor.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: null,
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Child chat not created")
+
+    await db.insert(dialogs).values({
+      chatId: childChat.id,
+      userId: anchorAuthor.id,
+      chatListHidden: true,
+      open: true,
+      order: "a",
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
+        },
+        message: "reply after parent-opened anchor",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [anchorAuthorDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, anchorAuthor.id)))
+      .limit(1)
+
+    expect(anchorAuthorDialog?.followMode).toBe("following")
+    expect(anchorAuthorDialog?.chatListHidden).toBeNull()
+    expect(anchorAuthorDialog?.open).toBe(true)
+    expect(anchorAuthorDialog?.order).toBe("a")
+
+    const userUpdates = await db.query.updates.findMany({
+      where: {
+        bucket: UpdateBucket.User,
+        entityId: anchorAuthor.id,
+      },
+    })
+
+    const chatOpenUpdates = userUpdates
+      .map((update) => UpdatesModel.decrypt(update))
+      .filter((update) => update.payload.update.oneofKind === "userChatOpen")
+
+    expect(chatOpenUpdates).toHaveLength(1)
+  })
+
   test("opens replied-to authors' reply-thread dialogs for the sidebar inbox", async () => {
     const owner = await testUtils.createUser(nextEmail("thread-reply-owner"))
     const repliedUser = await testUtils.createUser(nextEmail("thread-replied-user"))

@@ -622,16 +622,28 @@ const autoFollowThreadMessage = async ({
     return
   }
 
-  const { changedDialogs } = await setDialogFollowModeForUsers({
+  const { changedDialogs, unhiddenDialogs } = await setDialogFollowModeForUsers({
     chat,
     userIds: followUserIds,
     followMode: DIALOG_FOLLOWING,
     showInChatList: true,
   })
 
+  const unhiddenUserIds = new Set(unhiddenDialogs.map((dialog) => dialog.userId))
   await emitChatListOpenUpdates({
     chat,
-    dialogs: changedDialogs.filter((dialog) => dialog.userId === currentUserId),
+    dialogs: changedDialogs.filter((dialog) => {
+      if (dialog.userId === currentUserId) {
+        return true
+      }
+
+      return (
+        unhiddenUserIds.has(dialog.userId) &&
+        dialog.open === true &&
+        dialog.order != null &&
+        dialog.archived !== true
+      )
+    }),
   })
 }
 
