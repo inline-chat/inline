@@ -11,7 +11,6 @@ struct ChatToolbarLeadingView: View {
   @EnvironmentObject private var fullChatViewModel: FullChatViewModel
   @EnvironmentObject private var realtimeState: RealtimeState
   @Environment(Router.self) private var router
-  @Environment(\.colorScheme) private var colorScheme
 
   @ObservedObject private var composeActions: ComposeActions
   @State private var toolbarContext: ReplyThreadToolbarContext?
@@ -57,14 +56,6 @@ struct ChatToolbarLeadingView: View {
 
   private var isThreadChat: Bool {
     fullChatViewModel.peer.isThread
-  }
-
-  private var chatProfileColors: [Color] {
-    let _ = colorScheme
-    return [
-      Color(.systemGray3).adjustLuminosity(by: 0.2),
-      Color(.systemGray5).adjustLuminosity(by: 0),
-    ]
   }
 
   private var activeContextSpaceId: Int64? {
@@ -115,8 +106,7 @@ struct ChatToolbarLeadingView: View {
         }
       } else if let user = fullChatViewModel.peerUserInfo?.user,
                 let timeZone = user.timeZone,
-                timeZone != TimeZone.current.identifier
-      {
+                timeZone != TimeZone.current.identifier {
         return .timezone(timeZone)
       }
     } else {
@@ -217,13 +207,8 @@ struct ChatToolbarLeadingView: View {
             .onTapGesture(perform: openChatInfo)
         } else {
           Circle()
-            .fill(
-              LinearGradient(
-                colors: chatProfileColors,
-                startPoint: .top,
-                endPoint: .bottom
-              )
-            ).frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
+            .fill(.quinary)
+            .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
             .onTapGesture(perform: openChatInfo)
         }
       }
@@ -300,29 +285,29 @@ enum ChatSubtitle {
 
   var text: String {
     switch self {
-      case let .connectionState(state):
-        state.title.lowercased()
-      case let .typing(text):
-        text
-      case let .composeAction(action):
-        action.toHumanReadableForIOS()
-      case let .timezone(timezone):
-        TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timezone) ?? ""
-      case let .parentThread(title):
-        title
-      case .empty:
-        ""
+    case let .connectionState(state):
+      state.title.lowercased()
+    case let .typing(text):
+      text
+    case let .composeAction(action):
+      action.toHumanReadableForIOS()
+    case let .timezone(timezone):
+      TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timezone) ?? ""
+    case let .parentThread(title):
+      title
+    case .empty:
+      ""
     }
   }
 
   var shouldKeepOriginalCase: Bool {
     switch self {
-      case .typing:
-        true
-      case .parentThread:
-        true
-      default:
-        false
+    case .typing:
+      true
+    case .parentThread:
+      true
+    default:
+      false
     }
   }
 

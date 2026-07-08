@@ -8,7 +8,7 @@ import Logger
 import UniformTypeIdentifiers
 import UserNotifications
 
-public actor MacNotifications: Sendable {
+public actor MacNotifications {
   public static let shared = MacNotifications()
 
   private static let urgentNudgeText = "\u{1F6A8}"
@@ -420,15 +420,13 @@ private actor AvatarAttachmentBuilder {
 
     if let localURL = userInfo.profilePhoto?.first?.getLocalURL(),
        FileManager.default.fileExists(atPath: localURL.path),
-       let image = await retrieveImage(from: .local(localURL))
-    {
+       let image = await retrieveImage(from: .local(localURL)) {
       return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
     }
 
     if let localURL = userInfo.user.getLocalURL(),
        FileManager.default.fileExists(atPath: localURL.path),
-       let image = await retrieveImage(from: .local(localURL))
-    {
+       let image = await retrieveImage(from: .local(localURL)) {
       return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
     }
 
@@ -443,8 +441,7 @@ private actor AvatarAttachmentBuilder {
 
   private func cacheKey(for localURL: URL) -> String {
     if let attributes = try? FileManager.default.attributesOfItem(atPath: localURL.path),
-       let modifiedAt = attributes[.modificationDate] as? Date
-    {
+       let modifiedAt = attributes[.modificationDate] as? Date {
       return "\(localURL.path)-\(modifiedAt.timeIntervalSince1970)"
     }
 
@@ -466,8 +463,7 @@ private actor AvatarAttachmentBuilder {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         if let httpResponse = response as? HTTPURLResponse,
-           !(200 ..< 400).contains(httpResponse.statusCode)
-        {
+           !(200 ..< 400).contains(httpResponse.statusCode) {
           log.warning("Failed to download avatar image status=\(httpResponse.statusCode)")
           return nil
         }

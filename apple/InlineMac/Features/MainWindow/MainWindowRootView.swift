@@ -168,10 +168,10 @@ struct MainWindowRootView: View {
 
   private func toggleSidebar() {
     switch columnVisibility {
-      case .detailOnly:
-        columnVisibility = .all
-      default:
-        columnVisibility = .detailOnly
+    case .detailOnly:
+      columnVisibility = .all
+    default:
+      columnVisibility = .detailOnly
     }
   }
 
@@ -325,6 +325,7 @@ private struct MainWindowRoot: View {
     let size = isSidebarCollapsed
       ? MainWindowController.minSizeWithoutSidebar
       : MainWindowController.minSizeWithSidebar
+
     dependencies?.appBridge.setWindowMinSize(size)
   }
 }

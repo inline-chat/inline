@@ -403,6 +403,9 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
                fullChat.dialog != self.chatItem?.dialog ||
                fullChat.chat?.title != self.chatItem?.chat?.title ||
+               fullChat.chat?.emoji != self.chatItem?.chat?.emoji ||
+               fullChat.chat?.parentChatId != self.chatItem?.chat?.parentChatId ||
+               fullChat.chat?.parentMessageId != self.chatItem?.chat?.parentMessageId ||
                fullChat.chat?.isPublic != self.chatItem?.chat?.isPublic ||
                fullChat.user != self.chatItem?.user
             {

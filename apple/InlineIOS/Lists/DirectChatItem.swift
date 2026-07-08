@@ -142,11 +142,9 @@ struct DirectChatItem: View {
     if let userInfo {
       Text(displayName(for: userInfo))
         .font(.body)
-          
     } else {
       Text("Unknown User")
         .font(.body)
-          
     }
   }
 
