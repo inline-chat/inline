@@ -12,6 +12,7 @@ import Translation
 enum ChatInfoDefaultTab: Hashable {
   case files
   case media
+  case voice
   case links
   case participants
 }
@@ -37,6 +38,7 @@ struct ChatInfo: View {
   @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentStateObject private var documentsState: ChatInfoDocumentsState
   @EnvironmentStateObject private var linksState: ChatInfoLinksState
+  @EnvironmentStateObject private var voiceMemosState: ChatInfoVoiceMemosState
   @EnvironmentStateObject private var participantsState: ChatInfoParticipantsState
   @StateObject private var appSettings = AppSettings.shared
   @StateObject private var avatarPreview = ChatInfoAvatarQuickLookPresenter()
@@ -150,7 +152,7 @@ struct ChatInfo: View {
     if shouldShowParticipantsTab {
       tabs.append(.participants)
     }
-    tabs.append(contentsOf: [.files, .links])
+    tabs.append(contentsOf: [.files, .voice, .links])
     return tabs
   }
 
@@ -175,6 +177,9 @@ struct ChatInfo: View {
     }
     _linksState = EnvironmentStateObject { env in
       ChatInfoLinksState(db: env.appDatabase, peer: peerId)
+    }
+    _voiceMemosState = EnvironmentStateObject { env in
+      ChatInfoVoiceMemosState(db: env.appDatabase, peer: peerId)
     }
     _participantsState = EnvironmentStateObject { env in
       ChatInfoParticipantsState(db: env.appDatabase)
@@ -497,6 +502,8 @@ struct ChatInfo: View {
       filesTab
     case .media:
       filesTab
+    case .voice:
+      voiceTab
     case .links:
       linksTab
     case .participants:
@@ -508,6 +515,21 @@ struct ChatInfo: View {
   private var filesTab: some View {
     if let documentsViewModel = documentsState.documentsViewModel {
       ChatInfoFilesList(documentsViewModel: documentsViewModel)
+    } else {
+      HStack {
+        Spacer()
+        ProgressView()
+          .controlSize(.small)
+        Spacer()
+      }
+      .padding(.vertical, 32)
+    }
+  }
+
+  @ViewBuilder
+  private var voiceTab: some View {
+    if let voiceMemosViewModel = voiceMemosState.voiceMemosViewModel {
+      ChatInfoVoiceMemosList(voiceMemosViewModel: voiceMemosViewModel)
     } else {
       HStack {
         Spacer()
@@ -587,6 +609,7 @@ struct ChatInfo: View {
     guard let chatId, chatId > 0 else { return }
     documentsState.updateChatId(chatId)
     linksState.updateChatId(chatId)
+    voiceMemosState.updateChatId(chatId)
     if shouldShowParticipantsTab {
       participantsState.updateChatId(chatId)
     }
@@ -792,6 +815,7 @@ struct ChatInfo: View {
 private enum ChatInfoTab: String, CaseIterable, Hashable {
   case files
   case media
+  case voice
   case links
   case participants
 
@@ -805,6 +829,8 @@ private enum ChatInfoTab: String, CaseIterable, Hashable {
       self = .files
     case .media:
       self = .files
+    case .voice:
+      self = .voice
     case .links:
       self = .links
     }
@@ -1020,6 +1046,27 @@ private final class ChatInfoLinksState: ObservableObject {
 }
 
 @MainActor
+private final class ChatInfoVoiceMemosState: ObservableObject {
+  @Published private(set) var voiceMemosViewModel: ChatVoiceMemosViewModel?
+
+  private let db: AppDatabase
+  private let peer: Peer
+  private var currentChatId: Int64 = 0
+
+  init(db: AppDatabase, peer: Peer) {
+    self.db = db
+    self.peer = peer
+  }
+
+  func updateChatId(_ chatId: Int64) {
+    guard chatId > 0 else { return }
+    guard chatId != currentChatId else { return }
+    currentChatId = chatId
+    voiceMemosViewModel = ChatVoiceMemosViewModel(db: db, chatId: chatId, peer: peer)
+  }
+}
+
+@MainActor
 private final class ChatInfoParticipantsState: ObservableObject {
   @Published private(set) var participantsViewModel: ChatParticipantsWithMembersViewModel?
 
@@ -1120,6 +1167,95 @@ private struct ChatInfoLinksList: View {
     .task {
       await linksViewModel.loadInitial()
     }
+  }
+}
+
+private struct ChatInfoVoiceMemosList: View {
+  @ObservedObject var voiceMemosViewModel: ChatVoiceMemosViewModel
+
+  var body: some View {
+    Group {
+      if voiceMemosViewModel.voiceMemoMessages.isEmpty {
+        Text("No voice memos found in this chat.")
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .center)
+          .padding(.vertical, 32)
+      } else {
+        LazyVStack(alignment: .leading, spacing: 12) {
+          ForEach(voiceMemosViewModel.groupedVoiceMemoMessages, id: \.date) { group in
+            VStack(alignment: .leading, spacing: 8) {
+              Text(chatInfoDateLabel(group.date))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+              ForEach(group.messages) { voiceMemo in
+                ChatInfoVoiceMemoRow(voiceMemo: voiceMemo)
+                  .onAppear {
+                    Task {
+                      await voiceMemosViewModel.loadMoreIfNeeded(currentMessageId: voiceMemo.message.messageId)
+                    }
+                  }
+              }
+            }
+            .padding(.horizontal, 16)
+          }
+        }
+      }
+    }
+    .task {
+      await voiceMemosViewModel.loadInitial()
+    }
+  }
+}
+
+private struct ChatInfoVoiceMemoRow: View {
+  let voiceMemo: VoiceMemoMessage
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 10) {
+      Image(systemName: "waveform")
+        .foregroundStyle(.secondary)
+        .font(.system(size: 14, weight: .semibold))
+        .frame(width: 24, height: 24)
+
+      VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 8) {
+          Text("Voice memo")
+            .font(.body)
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+
+          Spacer(minLength: 8)
+
+          if let duration = formatDuration(voiceMemo.voice.duration) {
+            Text(duration)
+              .font(.caption.monospacedDigit())
+              .foregroundStyle(.secondary)
+          }
+        }
+
+        VoiceMessageBubble(
+          message: voiceMemo.message,
+          outgoing: false,
+          maxWidth: 300,
+          mode: .minimal
+        )
+      }
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(
+      RoundedRectangle(cornerRadius: 10)
+        .fill(Color(nsColor: .windowBackgroundColor))
+    )
+  }
+
+  private func formatDuration(_ duration: Int32) -> String? {
+    guard duration > 0 else { return nil }
+    let clamped = Int(duration)
+    let minutes = clamped / 60
+    let seconds = clamped % 60
+    return String(format: "%d:%02d", minutes, seconds)
   }
 }
 

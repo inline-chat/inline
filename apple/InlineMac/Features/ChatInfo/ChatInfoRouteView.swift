@@ -18,6 +18,8 @@ private extension Nav3Route.ChatInfoQuery {
       .files
     case .media:
       .media
+    case .voice:
+      .voice
     case .links:
       .links
     case .participants:

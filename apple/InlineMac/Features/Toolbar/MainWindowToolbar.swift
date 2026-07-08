@@ -296,6 +296,8 @@ private enum NavHistoryMenuLabel {
       "Files"
     case .media:
       "Media"
+    case .voice:
+      "Voice"
     case .links:
       "Links"
     case .participants:
@@ -311,6 +313,8 @@ private enum NavHistoryMenuLabel {
       "folder"
     case .media:
       "photo.on.rectangle"
+    case .voice:
+      "waveform"
     case .links:
       "link"
     case .participants:

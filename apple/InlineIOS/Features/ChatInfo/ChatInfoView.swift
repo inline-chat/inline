@@ -13,6 +13,7 @@ struct ChatInfoView: View {
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
   @EnvironmentStateObject var linksViewModel: ChatLinksViewModel
   @EnvironmentStateObject var mediaViewModel: ChatMediaViewModel
+  @EnvironmentStateObject var voiceMemosViewModel: ChatVoiceMemosViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @StateObject var spaceFullMembersViewModel: SpaceFullMembersViewModel
   @StateObject var userGroupsViewModel: UserGroupsViewModel
@@ -44,17 +45,17 @@ struct ChatInfoView: View {
   @State  var notificationSelection: DialogNotificationSettingSelection
 
   @Environment(\.appDatabase) var database
-  @Environment(\.colorScheme) var colorScheme
 
   enum ChatInfoTab: String, CaseIterable {
     case info = "Info"
     case media = "Media"
+    case voice = "Voice"
     case files = "Files"
     case links = "Links"
   }
 
   var availableTabs: [ChatInfoTab] {
-    isDM ? [.media, .files, .links] : [.info, .media, .files, .links]
+    isDM ? [.media, .voice, .files, .links] : [.info, .media, .voice, .files, .links]
   }
 
   var currentChat: Chat? {
@@ -135,14 +136,6 @@ struct ChatInfoView: View {
     currentChat?.humanReadableTitle ?? chatItem.chat?.humanReadableTitle ?? "Chat"
   }
 
-  var chatProfileColors: [Color] {
-    let _ = colorScheme
-    return [
-      Color(.systemGray3).adjustLuminosity(by: 0.2),
-      Color(.systemGray5).adjustLuminosity(by: 0),
-    ]
-  }
-
   var isPresentedAsSheet: Bool {
     guard let presentedSheet = router.presentedSheet else { return false }
     guard case let .chatInfo(presentedChatItem) = presentedSheet else { return false }
@@ -178,6 +171,14 @@ struct ChatInfoView: View {
         chatId: chatItem.chat?.id ?? 0,
         peer: chatItem.peerId,
         excludeStickerMedia: true
+      )
+    }
+
+    _voiceMemosViewModel = EnvironmentStateObject { env in
+      ChatVoiceMemosViewModel(
+        db: env.appDatabase,
+        chatId: chatItem.chat?.id ?? 0,
+        peer: chatItem.peerId
       )
     }
 
@@ -305,6 +306,11 @@ struct ChatInfoView: View {
             case .media:
               MediaTabView(
                 mediaViewModel: mediaViewModel,
+                onShowInChat: showMessageInChat
+              )
+            case .voice:
+              VoiceMemosTabView(
+                voiceMemosViewModel: voiceMemosViewModel,
                 onShowInChat: showMessageInChat
               )
             case .files:

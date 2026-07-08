@@ -7,6 +7,7 @@ enum Nav3Route: Hashable, Codable {
   enum ChatInfoQuery: String, Hashable, Codable {
     case files
     case media
+    case voice
     case links
     case participants
   }
