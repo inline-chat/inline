@@ -3,7 +3,6 @@ import InlineKit
 import SwiftUI
 
 struct DataStorageSettingsDetailView: View {
-  @StateObject private var appSettings = AppSettings.shared
   @ObservedObject private var autoDownload = INUserSettings.current.autoDownload
 
   var body: some View {
@@ -16,17 +15,6 @@ struct DataStorageSettingsDetailView: View {
         Text("Auto-Download")
       } footer: {
         Text("Set a limit to 0 MB to turn off auto-download for that type. These limits are local to this Mac.")
-      }
-
-      Section {
-        Toggle(
-          "Automatically save downloaded files to Downloads",
-          isOn: $appSettings.autoSaveDownloadedFilesToDownloadsFolder
-        )
-      } header: {
-        Text("Downloads")
-      } footer: {
-        Text("Files are still available inside Inline when this is turned off.")
       }
     }
     .formStyle(.grouped)

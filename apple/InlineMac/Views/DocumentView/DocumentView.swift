@@ -473,7 +473,7 @@ class DocumentView: NSView {
     }
   }
 
-  private func downloadAction() {
+  private func downloadAction(saveToDownloadsWhenFinished: Bool) {
     guard let fullMessage else {
       Log.shared.warning("Cannot download document without a message")
       return
@@ -503,7 +503,9 @@ class DocumentView: NSView {
           self.locallyAvailableFileURL = fileURL
           self.documentState = .locallyAvailable
           self.stopMonitoringProgress()
-          self.autoSaveDownloadedFileIfNeeded(sourceURL: fileURL)
+          if saveToDownloadsWhenFinished {
+            self.saveDownloadedFileToDownloads(sourceURL: fileURL)
+          }
         }
       // Success - refresh document info
       // refreshDocumentInfo()
@@ -521,7 +523,7 @@ class DocumentView: NSView {
       showInFinder()
 
     case .needsDownload:
-      downloadAction()
+      downloadAction(saveToDownloadsWhenFinished: true)
 
     default:
       break
@@ -558,7 +560,7 @@ class DocumentView: NSView {
     let sizeBytes = documentInfo.document.size.map(Int64.init)
     guard AutoDownloadPolicy.shouldDownload(kind: .file, sizeBytes: sizeBytes) else { return }
 
-    downloadAction()
+    downloadAction(saveToDownloadsWhenFinished: false)
   }
 
   @objc private func handleClose() {
@@ -570,7 +572,7 @@ class DocumentView: NSView {
     case .locallyAvailable:
       showInFinder()
     case .needsDownload:
-      downloadAction()
+      downloadAction(saveToDownloadsWhenFinished: true)
     case .downloading, .uploadProcessing, .uploading:
       break
     }
@@ -860,12 +862,11 @@ extension DocumentView {
     }
   }
 
-  private func autoSaveDownloadedFileIfNeeded(sourceURL: URL) {
-    guard AppSettings.shared.autoSaveDownloadedFilesToDownloadsFolder else { return }
+  private func saveDownloadedFileToDownloads(sourceURL: URL) {
     do {
       _ = try ensureDocumentExistsInDownloads(sourceURL: sourceURL)
     } catch {
-      Log.shared.error("Failed to auto-save downloaded file to Downloads", error: error)
+      Log.shared.error("Failed to save downloaded file to Downloads", error: error)
     }
   }
 
