@@ -5,6 +5,47 @@ import InlineKit
 import Logger
 import Observation
 
+enum UnreadCountsTimeFrame: Equatable, Sendable {
+  case today
+  case lastDays(Int)
+  case all
+
+  func dateInterval(containing date: Date, calendar: Calendar) -> DateInterval? {
+    switch self {
+    case .all:
+      return nil
+    case .today:
+      return dayInterval(containing: date, calendar: calendar)
+    case let .lastDays(days):
+      let clampedDays = max(days, 1)
+      let todayStart = calendar.startOfDay(for: date)
+      let start = calendar.date(byAdding: .day, value: 1 - clampedDays, to: todayStart)
+        ?? todayStart.addingTimeInterval(TimeInterval(1 - clampedDays) * 86_400)
+      let end = calendar.date(byAdding: .day, value: 1, to: todayStart)
+        ?? todayStart.addingTimeInterval(86_400)
+      return DateInterval(start: start, end: end)
+    }
+  }
+
+  func nextRefreshDate(after date: Date, calendar: Calendar) -> Date? {
+    switch self {
+    case .all:
+      return nil
+    case .today, .lastDays:
+      let start = calendar.startOfDay(for: date)
+      return calendar.date(byAdding: .day, value: 1, to: start)
+        ?? start.addingTimeInterval(86_400)
+    }
+  }
+
+  private func dayInterval(containing date: Date, calendar: Calendar) -> DateInterval {
+    let start = calendar.startOfDay(for: date)
+    let end = calendar.date(byAdding: .day, value: 1, to: start)
+      ?? start.addingTimeInterval(86_400)
+    return DateInterval(start: start, end: end)
+  }
+}
+
 struct UnreadCountsSnapshot: Equatable, Sendable {
   static let empty = UnreadCountsSnapshot(
     unreadChatCount: 0,
@@ -24,6 +65,7 @@ struct UnreadCountsSnapshot: Equatable, Sendable {
 private struct UnreadCountsSidebarScope: Equatable, Sendable {
   var spaceId: Int64?
   var includeSpaceChatsInHome: Bool
+  var nonProminentUnreadTimeFrame: UnreadCountsTimeFrame
 }
 
 @MainActor
@@ -45,11 +87,13 @@ final class UnreadCountsModel {
   )
   @ObservationIgnored private var cancellable: AnyCancellable?
   @ObservationIgnored private var pendingSnapshotTask: Task<Void, Never>?
+  @ObservationIgnored private var timeFrameBoundaryTask: Task<Void, Never>?
   @ObservationIgnored private var immediateSnapshotGeneration: Int?
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var sidebarScope = UnreadCountsSidebarScope(
     spaceId: nil,
-    includeSpaceChatsInHome: true
+    includeSpaceChatsInHome: true,
+    nonProminentUnreadTimeFrame: .today
   )
 
   private nonisolated static let snapshotDebounceNanoseconds: UInt64 = 250_000_000
@@ -68,10 +112,15 @@ final class UnreadCountsModel {
     startObservation(applyFirstSnapshotImmediately: true)
   }
 
-  func setSidebarScope(spaceId: Int64?, includeSpaceChatsInHome: Bool) {
+  func setSidebarScope(
+    spaceId: Int64?,
+    includeSpaceChatsInHome: Bool,
+    nonProminentUnreadTimeFrame: UnreadCountsTimeFrame = .today
+  ) {
     let scope = UnreadCountsSidebarScope(
       spaceId: spaceId,
-      includeSpaceChatsInHome: includeSpaceChatsInHome
+      includeSpaceChatsInHome: includeSpaceChatsInHome,
+      nonProminentUnreadTimeFrame: nonProminentUnreadTimeFrame
     )
     guard sidebarScope != scope else { return }
 
@@ -89,6 +138,7 @@ final class UnreadCountsModel {
     pendingSnapshotTask = nil
     immediateSnapshotGeneration = applyFirstSnapshotImmediately ? observationGeneration : nil
     cancellable?.cancel()
+    scheduleTimeFrameBoundaryRefresh(for: scope, generation: observationGeneration)
 
     cancellable = ValueObservation
       .tracking { database in
@@ -117,10 +167,43 @@ final class UnreadCountsModel {
     generation += 1
     pendingSnapshotTask?.cancel()
     pendingSnapshotTask = nil
+    timeFrameBoundaryTask?.cancel()
+    timeFrameBoundaryTask = nil
     immediateSnapshotGeneration = nil
     cancellable?.cancel()
     cancellable = nil
     apply(.empty)
+  }
+
+  private func scheduleTimeFrameBoundaryRefresh(
+    for scope: UnreadCountsSidebarScope,
+    generation observationGeneration: Int
+  ) {
+    timeFrameBoundaryTask?.cancel()
+
+    guard let refreshDate = scope.nonProminentUnreadTimeFrame.nextRefreshDate(
+      after: Date(),
+      calendar: .autoupdatingCurrent
+    ) else {
+      timeFrameBoundaryTask = nil
+      return
+    }
+
+    timeFrameBoundaryTask = Task { @MainActor [weak self] in
+      let delay = max(0, refreshDate.timeIntervalSinceNow + 1)
+      do {
+        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        try Task.checkCancellation()
+      } catch {
+        return
+      }
+
+      guard let self else { return }
+      guard self.generation == observationGeneration else { return }
+      guard self.sidebarScope == scope else { return }
+      guard self.cancellable != nil else { return }
+      self.startObservation(applyFirstSnapshotImmediately: true)
+    }
   }
 
   private func applyOrDebounce(_ snapshot: UnreadCountsSnapshot, generation observationGeneration: Int) {
@@ -183,9 +266,13 @@ final class UnreadCountsModel {
   ) throws -> UnreadCountsSnapshot {
     let sidebarScopeFilter = sidebarScopeSQL(sidebarScope)
     let outsideSelectedSpaceFilter = prominentOutsideSelectedSpaceSQL(spaceId: sidebarScope.spaceId)
+    let nonProminentTimeFrameFilter = nonProminentUnreadTimeFrameSQL(
+      sidebarScope.nonProminentUnreadTimeFrame
+    )
     var arguments = StatementArguments()
     arguments += StatementArguments(sidebarScopeFilter.arguments)
     arguments += StatementArguments(outsideSelectedSpaceFilter.arguments)
+    arguments += nonProminentTimeFrameFilter.arguments
 
     let request = SQLRequest<Row>(
       sql: """
@@ -194,9 +281,13 @@ final class UnreadCountsModel {
           \(Dialog.prominentUnreadSQL) AS "isProminent",
           \(openInSidebarSQL) AS "isOpenInSidebar",
           \(sidebarScopeFilter.sql) AS "isInSidebarScope",
-          \(outsideSelectedSpaceFilter.sql) AS "isOutsideSelectedSpace"
+          \(outsideSelectedSpaceFilter.sql) AS "isOutsideSelectedSpace",
+          \(nonProminentTimeFrameFilter.sql) AS "isInNonProminentTimeFrame"
         FROM "dialog"
         LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
+        LEFT JOIN "message" AS "lastMessage"
+          ON "lastMessage"."chatId" = "chat"."id"
+          AND "lastMessage"."messageId" = "chat"."lastMsgId"
         WHERE \(Dialog.chatListVisibilitySQL)
         AND ("dialog"."archived" IS NULL OR "dialog"."archived" = 0)
         AND \(Dialog.unreadSQL)
@@ -208,6 +299,7 @@ final class UnreadCountsModel {
         COALESCE(SUM(CASE WHEN "isProminent" AND NOT "isOpenInSidebar" AND "isInSidebarScope"
           THEN 1 ELSE 0 END), 0) AS "scopedUnopenedProminentUnreadCount",
         COALESCE(SUM(CASE WHEN NOT "isProminent" AND NOT "isOpenInSidebar" AND "isInSidebarScope"
+          AND "isInNonProminentTimeFrame"
           THEN 1 ELSE 0 END), 0) AS "scopedUnopenedOtherUnreadCount",
         COALESCE(SUM(CASE WHEN "isProminent" AND "isOutsideSelectedSpace"
           THEN 1 ELSE 0 END), 0) AS "prominentUnreadOutsideSelectedSpaceCount"
@@ -292,6 +384,27 @@ final class UnreadCountsModel {
       )
       """,
       [spaceId, spaceId]
+    )
+  }
+
+  private nonisolated static func nonProminentUnreadTimeFrameSQL(
+    _ timeFrame: UnreadCountsTimeFrame
+  ) -> (sql: String, arguments: StatementArguments) {
+    guard let interval = timeFrame.dateInterval(
+      containing: Date(),
+      calendar: .autoupdatingCurrent
+    ) else {
+      return ("1 = 1", StatementArguments())
+    }
+
+    return (
+      """
+      (
+        COALESCE("lastMessage"."date", "chat"."date") >= ?
+        AND COALESCE("lastMessage"."date", "chat"."date") < ?
+      )
+      """,
+      StatementArguments([interval.start, interval.end])
     )
   }
 }

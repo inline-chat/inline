@@ -65,7 +65,6 @@ final class SidebarViewModel {
   var activeItems: [Item] = []
   var archivedItems: [Item] = []
   var spaces: [Space] = []
-  var todayUnreadCount = 0
   var errorText: String?
 
   @ObservationIgnored private let log = Log.scoped("SidebarViewModel")
@@ -76,7 +75,6 @@ final class SidebarViewModel {
   @ObservationIgnored private var threadsCancellable: AnyCancellable?
   @ObservationIgnored private var contactsCancellable: AnyCancellable?
   @ObservationIgnored private var spacesCancellable: AnyCancellable?
-  @ObservationIgnored private var todayUnreadCountCancellable: AnyCancellable?
   @ObservationIgnored private var includeSpaceChatsInHome = true
   @ObservationIgnored private var started = false
 
@@ -148,11 +146,6 @@ final class SidebarViewModel {
   func setIncludeSpaceChatsInHome(_ include: Bool) {
     guard includeSpaceChatsInHome != include else { return }
     includeSpaceChatsInHome = include
-    if source?.isInbox == true {
-      todayUnreadCountCancellable?.cancel()
-      todayUnreadCount = 0
-      bindTodayUnreadCount(spaceId: source?.spaceId)
-    }
     refreshItems()
   }
 
@@ -161,21 +154,14 @@ final class SidebarViewModel {
     self.source = source
     threadsCancellable?.cancel()
     contactsCancellable?.cancel()
-    todayUnreadCountCancellable?.cancel()
     threadsCancellable = nil
     contactsCancellable = nil
-    todayUnreadCountCancellable = nil
 
     threadItems = []
     contactItems = []
     activeItems = []
     archivedItems = []
-    todayUnreadCount = 0
     errorText = nil
-
-    if source.isInbox {
-      bindTodayUnreadCount(spaceId: source.spaceId)
-    }
 
     switch source {
       case .home(.chatList):
@@ -214,33 +200,6 @@ final class SidebarViewModel {
           threadItems = chats
           contactItems = []
           refreshItems()
-        }
-      )
-  }
-
-  private func bindTodayUnreadCount(spaceId: Int64?) {
-    #if DEBUG
-    db.warnIfInMemoryDatabaseForObservation("SidebarViewModel.todayUnreadCount")
-    #endif
-
-    let includeSpaceChats = includeSpaceChatsInHome
-    todayUnreadCountCancellable = ValueObservation
-      .tracking { database in
-        try Self.fetchTodayUnreadCount(
-          database,
-          spaceId: spaceId,
-          includeSpaceChatsInHome: includeSpaceChats
-        )
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { [weak self] completion in
-          if case let .failure(error) = completion {
-            self?.log.error("Sidebar all chats unread count observation failed: \(error.localizedDescription)")
-          }
-        },
-        receiveValue: { [weak self] count in
-          self?.todayUnreadCount = count
         }
       )
   }
@@ -484,51 +443,6 @@ final class SidebarViewModel {
 
       return ordered(lhs.dialog?.order, before: rhs.dialog?.order, lhs: lhs, rhs: rhs)
     }
-  }
-
-  private nonisolated static func fetchTodayUnreadCount(
-    _ db: Database,
-    spaceId: Int64?,
-    includeSpaceChatsInHome: Bool
-  ) throws -> Int {
-    let calendar = Calendar.autoupdatingCurrent
-    let start = calendar.startOfDay(for: Date())
-    let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
-    let spaceFilter: String
-    var arguments = StatementArguments([start, end])
-
-    if let spaceId {
-      spaceFilter = """
-      AND COALESCE("dialog"."spaceId", "chat"."spaceId") = ?
-      """
-      arguments += StatementArguments([spaceId])
-    } else if includeSpaceChatsInHome == false {
-      spaceFilter = """
-      AND COALESCE("dialog"."spaceId", "chat"."spaceId") IS NULL
-      """
-    } else {
-      spaceFilter = ""
-    }
-
-    let request = SQLRequest<Int>(
-      sql: """
-      SELECT COUNT(*)
-      FROM "dialog"
-      LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
-      LEFT JOIN "message"
-        ON "message"."chatId" = "chat"."id"
-        AND "message"."messageId" = "chat"."lastMsgId"
-      WHERE \(Dialog.chatListVisibilitySQL)
-      AND ("dialog"."archived" IS NULL OR "dialog"."archived" = 0)
-      AND (COALESCE("dialog"."unreadCount", 0) > 0 OR "dialog"."unreadMark" = 1)
-      AND COALESCE("message"."date", "chat"."date") >= ?
-      AND COALESCE("message"."date", "chat"."date") < ?
-      \(spaceFilter)
-      """,
-      arguments: arguments
-    )
-
-    return try request.fetchOne(db) ?? 0
   }
 
   private func stableOrder(_ lhs: ChatListItem, _ rhs: ChatListItem) -> Bool {
