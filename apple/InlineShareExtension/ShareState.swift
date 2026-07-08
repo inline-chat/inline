@@ -2,8 +2,10 @@ import Auth
 import AVFoundation
 import Foundation
 import ImageIO
+import InlineAvatarRendering
 import InlineKit
 import InlineProtocol
+import Intents
 import Logger
 import MultipartFormDataKit
 import SwiftUI
@@ -47,9 +49,42 @@ struct SharedContent {
     guard !parts.isEmpty else { return nil }
     return parts.joined(separator: "\n\n")
   }
+
+  var summaryTitle: String {
+    if photoCount > 0, videoCount == 0, documentCount == 0, !hasText, !hasUrls {
+      return "\(photoCount) photo\(photoCount == 1 ? "" : "s")"
+    }
+    if videoCount > 0, photoCount == 0, documentCount == 0, !hasText, !hasUrls {
+      return "\(videoCount) video\(videoCount == 1 ? "" : "s")"
+    }
+    if documentCount > 0, photoCount == 0, videoCount == 0, !hasText, !hasUrls {
+      return "\(documentCount) file\(documentCount == 1 ? "" : "s")"
+    }
+    if hasUrls, !hasMedia, !hasText {
+      return "\(urls.count) link\(urls.count == 1 ? "" : "s")"
+    }
+    if hasText, !hasMedia, !hasUrls {
+      return "Message"
+    }
+    return "\(totalItemCount) item\(totalItemCount == 1 ? "" : "s")"
+  }
+
+  var summaryDetail: String {
+    var parts: [String] = []
+    if photoCount > 0 { parts.append("\(photoCount) photo\(photoCount == 1 ? "" : "s")") }
+    if videoCount > 0 { parts.append("\(videoCount) video\(videoCount == 1 ? "" : "s")") }
+    if documentCount > 0 { parts.append("\(documentCount) file\(documentCount == 1 ? "" : "s")") }
+    if hasUrls { parts.append("\(urls.count) link\(urls.count == 1 ? "" : "s")") }
+    if hasText { parts.append("text") }
+    return parts.isEmpty ? "Ready to share" : parts.joined(separator: " + ")
+  }
 }
 
-private final class SharedContentAccumulator {
+private struct SendableItemProvider: @unchecked Sendable {
+  let provider: NSItemProvider
+}
+
+private final class SharedContentAccumulator: @unchecked Sendable {
   private let lock = NSLock()
   private let maxMedia: Int
   private let maxUrls: Int
@@ -103,26 +138,33 @@ private final class SharedContentAccumulator {
 class ShareState: ObservableObject {
   private nonisolated static let maxMedia = 10
   private nonisolated static let maxUrls = 10
-  private static let imageCompressionQuality: CGFloat = 0.7
-  private static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024 // 100MB for photos/documents
-  private static let maxVideoFileSizeBytes: Int64 = 2_000_000_000 // 2GB for multipart video upload
+  private nonisolated static let sharedContainerIdentifier = "group.chat.inline"
+  private nonisolated static let imageCompressionQuality: CGFloat = 0.7
+  private nonisolated static let maxPhotoUploadDimension = 2560
+  private nonisolated static let photoOptimizationThresholdBytes = 1_500_000
+  private nonisolated static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024 // Share extension uploads are Data-backed.
+  private nonisolated static let maxVideoFileSizeBytes: Int64 = maxFileSizeBytes
   private nonisolated static func maxFileSizeDisplay(for bytes: Int64) -> String {
-    if bytes % 1_000_000_000 == 0 {
-      return "\(bytes / 1_000_000_000)GB"
+    let gib: Int64 = 1024 * 1024 * 1024
+    let mib: Int64 = 1024 * 1024
+    if bytes % gib == 0 {
+      return "\(bytes / gib)GB"
     }
-    if bytes % 1_000_000 == 0 {
-      return "\(bytes / 1_000_000)MB"
+    if bytes % mib == 0 {
+      return "\(bytes / mib)MB"
     }
     return "\(bytes) bytes"
   }
 
-  @Published var sharedContent: SharedContent? = nil
+  @Published var sharedContent: SharedContent?
   @Published var sharedData: SharedData?
   @Published var isLoadingContent: Bool = false
   @Published var isSending: Bool = false
   @Published var isSent: Bool = false
   @Published var uploadProgress: Double = 0
   @Published var errorState: ErrorState?
+  @Published var sendProgress = ShareProgressState.idle
+  @Published var contentWarnings: [String] = []
 
   private nonisolated let log = Log.scoped("ShareState")
   private nonisolated let shareSessionId = UUID().uuidString
@@ -134,7 +176,7 @@ class ShareState: ObservableObject {
   private nonisolated func tagged(_ message: String) -> String {
     "[share \(shareSessionId)] \(message)"
   }
-  
+
   private nonisolated func resolveMimeType(
     fileURL: URL?,
     suggestedName: String?,
@@ -212,11 +254,78 @@ class ShareState: ObservableObject {
   }
 
   private nonisolated func transcodePhotoToJpeg(_ data: Data) -> Data? {
+    if let source = CGImageSourceCreateWithData(data as CFData, nil) {
+      let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: Self.maxPhotoUploadDimension,
+      ]
+      if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+        return UIImage(cgImage: cgImage).jpegData(compressionQuality: Self.imageCompressionQuality)
+      }
+    }
+
     guard let image = UIImage(data: data) else { return nil }
     return image.jpegData(compressionQuality: Self.imageCompressionQuality)
   }
 
+  private nonisolated func photoPixelSize(from data: Data) -> CGSize? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    else {
+      return nil
+    }
+
+    guard let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+          let height = properties[kCGImagePropertyPixelHeight] as? NSNumber
+    else {
+      return nil
+    }
+    return CGSize(width: CGFloat(truncating: width), height: CGFloat(truncating: height))
+  }
+
+  private nonisolated func optimizedPhotoUploadPayload(
+    from data: Data,
+    suggestedName: String?
+  ) -> (data: Data, fileName: String, mimeType: MIMEType)? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let pixelSize = photoPixelSize(from: data)
+    else {
+      return nil
+    }
+
+    let largestDimension = max(pixelSize.width, pixelSize.height)
+    let shouldOptimize = largestDimension > CGFloat(Self.maxPhotoUploadDimension) ||
+      data.count > Self.photoOptimizationThresholdBytes
+    guard shouldOptimize else { return nil }
+
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: Self.maxPhotoUploadDimension,
+    ]
+    guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+          let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: Self.imageCompressionQuality),
+          jpegData.count < data.count
+    else {
+      return nil
+    }
+
+    return (
+      jpegData,
+      jpegFileName(from: suggestedName),
+      MIMEType(text: "image/jpeg")
+    )
+  }
+
   private nonisolated func shouldSendPhotoAsDocument(_ data: Data) -> Bool {
+    if let pixelSize = photoPixelSize(from: data) {
+      let width = max(pixelSize.width, 1)
+      let height = max(pixelSize.height, 1)
+      let ratio = max(width / height, height / width)
+      return ratio > 20 || (width < 50 && height < 50)
+    }
+
     guard let image = UIImage(data: data) else { return false }
     let width = max(image.size.width, 1)
     let height = max(image.size.height, 1)
@@ -227,6 +336,11 @@ class ShareState: ObservableObject {
   private nonisolated func isSupportedPhotoMimeType(_ mimeType: MIMEType) -> Bool {
     let lowercased = mimeType.text.lowercased()
     return lowercased == "image/jpeg" || lowercased == "image/png" || lowercased == "image/gif"
+  }
+
+  private nonisolated func shouldOptimizePhotoUpload(mimeType: MIMEType) -> Bool {
+    let lowercased = mimeType.text.lowercased()
+    return lowercased == "image/jpeg" || lowercased == "image/jpg"
   }
 
   private nonisolated func isGIF(
@@ -550,6 +664,17 @@ class ShareState: ObservableObject {
           if shouldSendPhotoAsDocument(data) {
             resolvedFileType = .document
             log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
+          } else if shouldOptimizePhotoUpload(mimeType: mimeType),
+                    let optimized = optimizedPhotoUploadPayload(from: data, suggestedName: fileName) {
+            addFile(
+              from: optimized.data,
+              suggestedName: optimized.fileName,
+              typeIdentifier: UTType.jpeg.identifier,
+              fileType: .photo,
+              mimeTypeOverride: optimized.mimeType,
+              accumulator: accumulator
+            )
+            return
           }
         } catch {
           resolvedFileType = .document
@@ -637,6 +762,19 @@ class ShareState: ObservableObject {
       if resolvedFileType == .photo && shouldSendPhotoAsDocument(data) {
         resolvedFileType = .document
         log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
+      } else if resolvedFileType == .photo,
+                mimeTypeOverride == nil,
+                shouldOptimizePhotoUpload(mimeType: resolvedMimeType),
+                let optimized = optimizedPhotoUploadPayload(from: data, suggestedName: fileName) {
+        addFile(
+          from: optimized.data,
+          suggestedName: optimized.fileName,
+          typeIdentifier: UTType.jpeg.identifier,
+          fileType: .photo,
+          mimeTypeOverride: optimized.mimeType,
+          accumulator: accumulator
+        )
+        return
       }
       let tempURL = try writeDataToTemporaryLocation(
         data,
@@ -1163,6 +1301,29 @@ class ShareState: ObservableObject {
     let title: String
     let message: String
     let suggestion: String?
+    let retryable: Bool
+
+    init(title: String, message: String, suggestion: String?, retryable: Bool = false) {
+      self.title = title
+      self.message = message
+      self.suggestion = suggestion
+      self.retryable = retryable
+    }
+  }
+
+  private struct ErrorPresentation {
+    let title: String
+    let message: String
+    let suggestion: String?
+    let retryable: Bool
+  }
+
+  struct ShareProgressState: Equatable {
+    var title: String
+    var detail: String?
+    var fractionCompleted: Double?
+
+    static let idle = ShareProgressState(title: "", detail: nil, fractionCompleted: nil)
   }
 
   func loadSharedData() {
@@ -1192,6 +1353,8 @@ class ShareState: ObservableObject {
     isLoadingContent = true
     errorState = nil
     sharedContent = nil
+    contentWarnings = []
+    sendProgress = ShareProgressState(title: "Preparing", detail: "Reading shared content", fractionCompleted: nil)
     let group = DispatchGroup()
     let accumulator = SharedContentAccumulator(
       maxMedia: Self.maxMedia,
@@ -1200,6 +1363,7 @@ class ShareState: ObservableObject {
     var totalMediaAttachments = 0
     var totalUrlAttachments = 0
     var totalTextAttachments = 0
+    var unsupportedAttachmentCount = 0
 
     for extensionItem in extensionItems {
       if let attributedText = extensionItem.attributedContentText?.string {
@@ -1209,9 +1373,11 @@ class ShareState: ObservableObject {
       guard let attachments = extensionItem.attachments else { continue }
 
       for attachment in attachments {
+        let suggestedName = attachment.suggestedName
+        let itemProvider = SendableItemProvider(provider: attachment)
         if let fileTypeInfo = preferredFileType(
           for: attachment,
-          suggestedName: attachment.suggestedName
+          suggestedName: suggestedName
         ) {
           totalMediaAttachments += 1
           let typeIdentifier = fileTypeInfo.identifier
@@ -1226,7 +1392,7 @@ class ShareState: ObservableObject {
               }
               self.handleLoadedURLItem(
                 item,
-                suggestedName: attachment.suggestedName,
+                suggestedName: suggestedName,
                 accumulator: accumulator
               )
             }
@@ -1244,12 +1410,12 @@ class ShareState: ObservableObject {
                   ? self.inferredFileType(
                     for: url,
                     typeIdentifier: typeIdentifier,
-                    suggestedName: attachment.suggestedName
+                    suggestedName: suggestedName
                   )
                   : fileType
                 self.addFile(
                   from: url,
-                  suggestedName: attachment.suggestedName,
+                  suggestedName: suggestedName,
                   typeIdentifier: typeIdentifier,
                   fileType: resolvedType,
                   accumulator: accumulator
@@ -1258,7 +1424,7 @@ class ShareState: ObservableObject {
                 return
               }
 
-              attachment.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { [weak self] item, error in
+              itemProvider.provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { [weak self] item, error in
                 defer { group.leave() }
                 guard let self else { return }
                 if let error {
@@ -1268,7 +1434,7 @@ class ShareState: ObservableObject {
                   item,
                   typeIdentifier: typeIdentifier,
                   fileType: fileType,
-                  suggestedName: attachment.suggestedName,
+                  suggestedName: suggestedName,
                   accumulator: accumulator
                 )
               }
@@ -1288,7 +1454,7 @@ class ShareState: ObservableObject {
             }
             self.handleLoadedURLItem(
               item,
-              suggestedName: attachment.suggestedName,
+              suggestedName: suggestedName,
               accumulator: accumulator
             )
           }
@@ -1296,8 +1462,7 @@ class ShareState: ObservableObject {
         }
 
         if attachment.hasItemConformingToTypeIdentifier(UTType.text.identifier) ||
-            attachment.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
-        {
+            attachment.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
           totalTextAttachments += 1
           let typeIdentifier = attachment.hasItemConformingToTypeIdentifier(UTType.text.identifier)
             ? UTType.text.identifier
@@ -1314,6 +1479,7 @@ class ShareState: ObservableObject {
           continue
         }
 
+        unsupportedAttachmentCount += 1
         log.warning(tagged("Unsupported share attachment types: \(attachment.registeredTypeIdentifiers)"))
       }
     }
@@ -1323,6 +1489,7 @@ class ShareState: ObservableObject {
       guard let self else { return }
       let content = accumulator.finalize()
       self.isLoadingContent = false
+      self.sendProgress = .idle
       if content.totalItemCount > 0 {
         self.sharedContent = content
       } else {
@@ -1336,9 +1503,14 @@ class ShareState: ObservableObject {
 
       if totalMediaAttachments > Self.maxMedia {
         self.log.warning(self.tagged("Limited to \(Self.maxMedia) media items out of \(totalMediaAttachments) provided"))
+        self.contentWarnings.append("Only the first \(Self.maxMedia) media items will be sent.")
       }
       if totalUrlAttachments > Self.maxUrls {
         self.log.warning(self.tagged("Limited to \(Self.maxUrls) URLs out of \(totalUrlAttachments) provided"))
+        self.contentWarnings.append("Only the first \(Self.maxUrls) links will be sent.")
+      }
+      if unsupportedAttachmentCount > 0 {
+        self.contentWarnings.append("\(unsupportedAttachmentCount) unsupported item\(unsupportedAttachmentCount == 1 ? "" : "s") skipped.")
       }
       if totalTextAttachments == 0, content.totalItemCount == 0 {
         self.log.warning(self.tagged("No usable share content found"))
@@ -1347,6 +1519,10 @@ class ShareState: ObservableObject {
   }
 
   func sendMessage(caption: String, selectedChat: SharedChat, completion: @escaping () -> Void) {
+    sendMessage(caption: caption, selectedChats: [selectedChat], completion: completion)
+  }
+
+  func sendMessage(caption: String, selectedChats: [SharedChat], completion: @escaping () -> Void) {
     guard !isSending else { return }
     guard let sharedContent else {
       log.error(tagged("No content to share"))
@@ -1358,6 +1534,16 @@ class ShareState: ObservableObject {
       return
     }
 
+    let destinationChats = uniqueSendableChats(from: selectedChats)
+    guard !destinationChats.isEmpty else {
+      errorState = ErrorState(
+        title: "No Destination",
+        message: "Choose at least one chat before sending.",
+        suggestion: nil
+      )
+      return
+    }
+
     if Auth.shared.getToken() == nil {
       log.warning(tagged("Missing auth token for share; attempting refresh"))
     }
@@ -1365,12 +1551,18 @@ class ShareState: ObservableObject {
     isSending = true
     isSent = false
     uploadProgress = 0
+    sendProgress = ShareProgressState(
+      title: "Preparing",
+      detail: destinationChats.count == 1 ? "Preparing share" : "Preparing share for \(destinationChats.count) chats",
+      fractionCompleted: nil
+    )
 
     let messageText = combinedMessageText(caption: caption, content: sharedContent)
     let content = sharedContent
 
     Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
+      var didSendAnyMessage = false
       do {
         let apiClient = ApiClient.shared
         let sendStart = Date()
@@ -1379,12 +1571,14 @@ class ShareState: ObservableObject {
           _ = await self.waitForRealtimeConnected(maxSeconds: self.realtimeConnectWarmupSeconds)
         }
         let totalMediaItems = content.mediaCount
-        let totalItems = max(totalMediaItems, 1)
-        var processedItems = 0
-        var didSendText = false
+        let totalUploadItems = max(totalMediaItems, 1)
+        let totalSendOperations = max(totalMediaItems, 1) * destinationChats.count
+        var uploadedItems = 0
+        var sentOperations = 0
+        var didAttachTextToMedia = false
 
         if !content.files.isEmpty {
-          self.log.info(self.tagged("Sending \(content.files.count) attachments"))
+          self.log.info(self.tagged("Sending \(content.files.count) attachments to \(destinationChats.count) destinations"))
         }
 
         for file in content.files {
@@ -1402,116 +1596,177 @@ class ShareState: ObservableObject {
           }
 
           let uploadResult: InlineKit.UploadFileResult
-          let itemIndex = processedItems
-          let progressHandler: (ApiClient.UploadTransferProgress) -> Void = { [weak self] progress in
-            let itemProgress = (Double(itemIndex) + progress.fractionCompleted) / Double(totalItems)
+          let itemIndex = uploadedItems
+          let fileName = file.fileName
+          let progressHandler: @Sendable (ApiClient.UploadTransferProgress) -> Void = { [weak self] progress in
+            let uploadFraction = (Double(itemIndex) + progress.fractionCompleted) / Double(totalUploadItems)
+            let overallFraction = min(0.72, uploadFraction * 0.72)
             Task { @MainActor in
-              self?.uploadProgress = itemProgress * 0.9
+              self?.uploadProgress = overallFraction
+              self?.sendProgress = ShareProgressState(
+                title: "Uploading \(itemIndex + 1) of \(totalUploadItems)",
+                detail: fileName,
+                fractionCompleted: overallFraction
+              )
             }
           }
           switch file.fileType {
-            case .photo:
-              let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
-              guard Int64(fileData.count) <= Self.maxFileSizeBytes else {
-                throw NSError(
-                  domain: "ShareError",
-                  code: 3,
-                  userInfo: [
-                    NSLocalizedDescriptionKey:
-                      "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
-                  ]
-                )
-              }
-              uploadResult = try await apiClient.uploadFile(
-                type: .photo,
-                data: fileData,
-                filename: file.fileName,
-                mimeType: file.mimeType,
-                progress: progressHandler
+          case .photo:
+            await MainActor.run {
+              self.sendProgress = ShareProgressState(
+                title: "Preparing photo",
+                detail: file.fileName,
+                fractionCompleted: self.uploadProgress
               )
-            case .document:
-              let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
-              guard Int64(fileData.count) <= Self.maxFileSizeBytes else {
-                throw NSError(
-                  domain: "ShareError",
-                  code: 3,
-                  userInfo: [
-                    NSLocalizedDescriptionKey:
-                      "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
-                  ]
-                )
-              }
-              uploadResult = try await apiClient.uploadFile(
-                type: .document,
-                data: fileData,
-                filename: file.fileName,
-                mimeType: file.mimeType,
-                progress: progressHandler
-              )
-            case .video:
-              let prepared = try await prepareVideoForUpload(file)
-              defer { prepared.cleanup?() }
-              guard prepared.fileSize <= Self.maxVideoFileSizeBytes else {
-                throw NSError(
-                  domain: "ShareError",
-                  code: 3,
-                  userInfo: [
-                    NSLocalizedDescriptionKey:
-                      "\(prepared.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxVideoFileSizeBytes))."
-                  ]
-                )
-              }
-              let videoMetadata: ApiClient.VideoUploadMetadata
-              if let preparedMetadata = prepared.videoMetadata {
-                videoMetadata = preparedMetadata
-              } else {
-                videoMetadata = try await buildVideoMetadata(from: prepared.url)
-              }
-              let videoData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
-              uploadResult = try await apiClient.uploadFile(
-                type: .video,
-                data: videoData,
-                filename: prepared.fileName,
-                mimeType: prepared.mimeType,
-                videoMetadata: videoMetadata,
-                progress: progressHandler
-              )
-            case .voice:
+            }
+            let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
+            guard Int64(fileData.count) <= Self.maxFileSizeBytes else {
               throw NSError(
                 domain: "ShareError",
-                code: 13,
+                code: 3,
                 userInfo: [
-                  NSLocalizedDescriptionKey: "Voice messages are not supported from the share extension."
+                  NSLocalizedDescriptionKey:
+                    "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
                 ]
               )
+            }
+            uploadResult = try await apiClient.uploadFile(
+              type: .photo,
+              data: fileData,
+              filename: file.fileName,
+              mimeType: file.mimeType,
+              progress: progressHandler
+            )
+          case .document:
+            await MainActor.run {
+              self.sendProgress = ShareProgressState(
+                title: "Preparing file",
+                detail: file.fileName,
+                fractionCompleted: self.uploadProgress
+              )
+            }
+            let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
+            guard Int64(fileData.count) <= Self.maxFileSizeBytes else {
+              throw NSError(
+                domain: "ShareError",
+                code: 3,
+                userInfo: [
+                  NSLocalizedDescriptionKey:
+                    "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
+                ]
+              )
+            }
+            uploadResult = try await apiClient.uploadFile(
+              type: .document,
+              data: fileData,
+              filename: file.fileName,
+              mimeType: file.mimeType,
+              progress: progressHandler
+            )
+          case .video:
+            await MainActor.run {
+              self.sendProgress = ShareProgressState(
+                title: "Preparing video",
+                detail: file.fileName,
+                fractionCompleted: self.uploadProgress
+              )
+            }
+            let prepared = try await prepareVideoForUpload(file)
+            defer { prepared.cleanup?() }
+            guard prepared.fileSize <= Self.maxVideoFileSizeBytes else {
+              throw NSError(
+                domain: "ShareError",
+                code: 3,
+                userInfo: [
+                  NSLocalizedDescriptionKey:
+                    "\(prepared.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxVideoFileSizeBytes))."
+                ]
+              )
+            }
+            let videoMetadata: ApiClient.VideoUploadMetadata
+            if let preparedMetadata = prepared.videoMetadata {
+              videoMetadata = preparedMetadata
+            } else {
+              videoMetadata = try await buildVideoMetadata(from: prepared.url)
+            }
+            let videoData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
+            uploadResult = try await apiClient.uploadFile(
+              type: .video,
+              data: videoData,
+              filename: prepared.fileName,
+              mimeType: prepared.mimeType,
+              videoMetadata: videoMetadata,
+              progress: progressHandler
+            )
+          case .voice:
+            throw NSError(
+              domain: "ShareError",
+              code: 13,
+              userInfo: [
+                NSLocalizedDescriptionKey: "Voice messages are not supported from the share extension."
+              ]
+            )
           }
 
-          let fileText = (!didSendText && messageText != nil) ? messageText : nil
+          uploadedItems += 1
+          let uploadCompletionFraction = Double(uploadedItems) / Double(totalUploadItems) * 0.72
+          await MainActor.run {
+            self.uploadProgress = max(self.uploadProgress, uploadCompletionFraction)
+          }
+
+          let fileText = (!didAttachTextToMedia && messageText != nil) ? messageText : nil
           await connectionWarmup.value
           let media = try inputMedia(for: file.fileType, uploadResult: uploadResult)
-          try await sendMessageToChat(
-            selectedChat,
-            text: fileText,
-            media: media
-          )
-
-          didSendText = didSendText || (messageText != nil)
-          processedItems += 1
-          await MainActor.run {
-            self.uploadProgress = Double(processedItems) / Double(totalItems) * 0.9
+          for chat in destinationChats {
+            let destinationName = await self.displayName(for: chat)
+            let operationNumber = sentOperations + 1
+            let sendFraction = 0.72 + (Double(sentOperations) / Double(totalSendOperations) * 0.22)
+            await MainActor.run {
+              self.uploadProgress = max(self.uploadProgress, sendFraction)
+              self.sendProgress = ShareProgressState(
+                title: "Sending \(operationNumber) of \(totalSendOperations)",
+                detail: destinationName,
+                fractionCompleted: sendFraction
+              )
+            }
+            try await sendMessageToChat(
+              chat,
+              text: fileText,
+              media: media
+            )
+            didSendAnyMessage = true
+            sentOperations += 1
           }
-          self.log.debug(self.tagged("Sent \(processedItems) of \(totalItems) items"))
+
+          didAttachTextToMedia = didAttachTextToMedia || (messageText != nil)
+          let sendCompletionFraction = 0.72 + (Double(sentOperations) / Double(totalSendOperations) * 0.22)
+          await MainActor.run {
+            self.uploadProgress = max(self.uploadProgress, sendCompletionFraction)
+          }
+          self.log.debug(self.tagged("Sent \(sentOperations) of \(totalSendOperations) send operations"))
         }
 
         if totalMediaItems == 0, let messageText {
           await connectionWarmup.value
-          try await sendMessageToChat(selectedChat, text: messageText, media: nil)
-          await MainActor.run {
-            self.uploadProgress = 0.9
+          for chat in destinationChats {
+            let destinationName = await self.displayName(for: chat)
+            let operationNumber = sentOperations + 1
+            let sendFraction = 0.1 + (Double(sentOperations) / Double(totalSendOperations) * 0.84)
+            await MainActor.run {
+              self.uploadProgress = sendFraction
+              self.sendProgress = ShareProgressState(
+                title: "Sending \(operationNumber) of \(totalSendOperations)",
+                detail: destinationName,
+                fractionCompleted: sendFraction
+              )
+            }
+            try await sendMessageToChat(chat, text: messageText, media: nil)
+            didSendAnyMessage = true
+            sentOperations += 1
           }
         } else if totalMediaItems > 0, messageText == nil {
           await MainActor.run {
-            self.uploadProgress = 0.9
+            self.uploadProgress = max(self.uploadProgress, 0.94)
           }
         }
 
@@ -1519,6 +1774,12 @@ class ShareState: ObservableObject {
           self.isSending = false
           self.isSent = true
           self.uploadProgress = 1.0
+          self.sendProgress = ShareProgressState(
+            title: "Sent",
+            detail: destinationChats.count == 1 ? self.displayName(for: destinationChats[0]) : "\(destinationChats.count) chats",
+            fractionCompleted: 1
+          )
+          self.donateSendMessageIntents(for: destinationChats)
 
           // Play haptic feedback
           let impactFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -1532,66 +1793,365 @@ class ShareState: ObservableObject {
         self.log.info(self.tagged("Share completed in \(Date().timeIntervalSince(sendStart))s"))
       } catch {
         self.log.error(self.tagged("Failed to share content"), error: error)
-        
+        let didPartiallySend = didSendAnyMessage
+
         await MainActor.run {
-          // Provide more specific error messages
-          let errorMessage: (title: String, message: String, suggestion: String?) = {
-            if let apiError = error as? APIError {
-              switch apiError {
-                case .networkError:
-                  return ("Connection Error", "Unable to connect to the server.", "Check your internet connection and try again.")
-                case .rateLimited:
-                  return ("Rate Limited", "Too many requests. Please wait a moment.", "Try again in a few seconds.")
-                case let .httpError(statusCode):
-                  if statusCode == 401 || statusCode == 403 {
-                    return ("Sign In Required", "Your session has expired.", "Open the Inline app and try again.")
-                  }
-                  return ("Server Error", "Server returned error code \(statusCode).", "Please try again later.")
-                case let .error(error, _, description):
-                  return ("Share Failed", description ?? error, "Please try again.")
-                default:
-                  return ("Share Failed", "Could not share the content.", "Please check your connection and try again.")
-              }
-            }
+          let errorMessage = self.errorPresentation(for: error, didPartiallySend: didPartiallySend)
 
-            if let realtimeError = error as? RealtimeAPIError {
-              switch realtimeError {
-                case .notAuthorized:
-                  return ("Sign In Required", "Your session has expired.", "Open the Inline app and try again.")
-                case .notConnected:
-                  return ("Connection Error", "Inline couldn't reach the server.", "Check your internet connection and try again.")
-                case let .rpcError(_, message, _):
-                  return ("Share Failed", message ?? "The server rejected the message.", "Please try again.")
-                default:
-                  return ("Share Failed", "Could not share the content.", "Please try again.")
-              }
-            }
-
-            let nsError = error as NSError
-            if nsError.domain == "ShareError" {
-              switch nsError.code {
-                case 13:
-                  return ("Sign In Required", nsError.localizedDescription, "Open the Inline app and try again.")
-                case 15:
-                  return ("Connection Error", nsError.localizedDescription, "Check your internet connection and try again.")
-                case 14:
-                  return ("Connection Error", nsError.localizedDescription, "Check your internet connection and try again.")
-                default:
-                  return ("Share Failed", nsError.localizedDescription, "Please try again.")
-              }
-            }
-
-            return ("Share Failed", "An unexpected error occurred.", "Please try again.")
-          }()
-          
           self.errorState = ErrorState(
             title: errorMessage.title,
             message: errorMessage.message,
-            suggestion: errorMessage.suggestion
+            suggestion: errorMessage.suggestion,
+            retryable: errorMessage.retryable
           )
           self.isSending = false
+          self.sendProgress = .idle
         }
       }
     }
+  }
+
+  private func uniqueSendableChats(from chats: [SharedChat]) -> [SharedChat] {
+    var seen = Set<Int64>()
+    var result: [SharedChat] = []
+    for chat in chats {
+      guard chat.peerUserId != nil || chat.peerThreadId != nil else { continue }
+      guard seen.insert(chat.id).inserted else { continue }
+      result.append(chat)
+    }
+    return result
+  }
+
+  private func errorPresentation(
+    for error: Error,
+    didPartiallySend: Bool
+  ) -> ErrorPresentation {
+    if didPartiallySend {
+      return ErrorPresentation(
+        title: "Share Partially Sent",
+        message: "Some messages may have already been sent before the failure.",
+        suggestion: "Open Inline to verify the chat before trying again.",
+        retryable: false
+      )
+    }
+
+    if let apiError = error as? APIError {
+      switch apiError {
+      case .networkError:
+        return ErrorPresentation(
+          title: "Connection Error",
+          message: "Unable to connect to the server.",
+          suggestion: "Check your internet connection and try again.",
+          retryable: true
+        )
+      case .rateLimited:
+        return ErrorPresentation(
+          title: "Rate Limited",
+          message: "Too many requests. Please wait a moment.",
+          suggestion: "Try again in a few seconds.",
+          retryable: true
+        )
+      case let .httpError(statusCode):
+        if statusCode == 401 || statusCode == 403 {
+          return ErrorPresentation(
+            title: "Sign In Required",
+            message: "Your session has expired.",
+            suggestion: "Open the Inline app and try again.",
+            retryable: false
+          )
+        }
+        return ErrorPresentation(
+          title: "Server Error",
+          message: "Server returned error code \(statusCode).",
+          suggestion: "Please try again later.",
+          retryable: true
+        )
+      case let .error(error, _, description):
+        return ErrorPresentation(
+          title: "Share Failed",
+          message: description ?? error,
+          suggestion: "Please try again.",
+          retryable: true
+        )
+      default:
+        return ErrorPresentation(
+          title: "Share Failed",
+          message: "Could not share the content.",
+          suggestion: "Please check your connection and try again.",
+          retryable: true
+        )
+      }
+    }
+
+    if let realtimeError = error as? RealtimeAPIError {
+      switch realtimeError {
+      case .notAuthorized:
+        return ErrorPresentation(
+          title: "Sign In Required",
+          message: "Your session has expired.",
+          suggestion: "Open the Inline app and try again.",
+          retryable: false
+        )
+      case .notConnected:
+        return ErrorPresentation(
+          title: "Connection Error",
+          message: "Inline couldn't reach the server.",
+          suggestion: "Check your internet connection and try again.",
+          retryable: true
+        )
+      case let .rpcError(_, message, _):
+        return ErrorPresentation(
+          title: "Share Failed",
+          message: message ?? "The server rejected the message.",
+          suggestion: "Please try again.",
+          retryable: true
+        )
+      default:
+        return ErrorPresentation(
+          title: "Share Failed",
+          message: "Could not share the content.",
+          suggestion: "Please try again.",
+          retryable: true
+        )
+      }
+    }
+
+    let nsError = error as NSError
+    if nsError.domain == "ShareError" {
+      switch nsError.code {
+      case 3:
+        return ErrorPresentation(
+          title: "File Too Large",
+          message: nsError.localizedDescription,
+          suggestion: "Choose a smaller file and try again.",
+          retryable: false
+        )
+      case 13:
+        return ErrorPresentation(
+          title: "Sign In Required",
+          message: nsError.localizedDescription,
+          suggestion: "Open the Inline app and try again.",
+          retryable: false
+        )
+      case 14, 15:
+        return ErrorPresentation(
+          title: "Connection Error",
+          message: nsError.localizedDescription,
+          suggestion: "Check your internet connection and try again.",
+          retryable: true
+        )
+      default:
+        return ErrorPresentation(
+          title: "Share Failed",
+          message: nsError.localizedDescription,
+          suggestion: "Please try again.",
+          retryable: true
+        )
+      }
+    }
+
+    return ErrorPresentation(
+      title: "Share Failed",
+      message: "An unexpected error occurred.",
+      suggestion: "Please try again.",
+      retryable: true
+    )
+  }
+
+  private func donateSendMessageIntents(for chats: [SharedChat]) {
+    let users = sharedData?.shareExtensionData.users ?? []
+    for chat in chats {
+      let title = displayName(for: chat, users: users)
+      let recipient = intentRecipient(for: chat, title: title, users: users)
+      let intent = INSendMessageIntent(
+        recipients: [recipient],
+        outgoingMessageType: .outgoingMessageText,
+        content: nil,
+        speakableGroupName: INSpeakableString(spokenPhrase: title),
+        conversationIdentifier: chat.intentConversationIdentifier,
+        serviceName: "Inline",
+        sender: nil,
+        attachments: nil
+      )
+      let metadata = INSendMessageIntentDonationMetadata()
+      metadata.recipientCount = 1
+      intent.donationMetadata = metadata
+
+      let interaction = INInteraction(intent: intent, response: nil)
+      interaction.direction = .outgoing
+      interaction.donate { [log, shareSessionId] error in
+        if let error {
+          log.warning("[share \(shareSessionId)] Failed to donate send-message intent: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
+  private nonisolated func intentRecipient(
+    for chat: SharedChat,
+    title: String,
+    users: [SharedUser]
+  ) -> INPerson {
+    let user = intentUser(for: chat, users: users)
+    let suggestionType: INPersonSuggestionType = user == nil ? .none : .instantMessageAddress
+
+    return INPerson(
+      personHandle: intentPersonHandle(for: chat, user: user),
+      nameComponents: intentNameComponents(for: user),
+      displayName: title,
+      image: intentImage(for: chat, title: title, user: user),
+      contactIdentifier: nil,
+      customIdentifier: chat.intentConversationIdentifier,
+      isContactSuggestion: user != nil,
+      suggestionType: suggestionType
+    )
+  }
+
+  private nonisolated func intentUser(for chat: SharedChat, users: [SharedUser]) -> SharedUser? {
+    guard let peerUserId = chat.peerUserId else { return nil }
+    return users.first(where: { $0.id == peerUserId })
+  }
+
+  private nonisolated func intentPersonHandle(for chat: SharedChat, user: SharedUser?) -> INPersonHandle {
+    if let email = trimmedIntentString(user?.email) {
+      return INPersonHandle(value: email, type: .emailAddress)
+    }
+
+    if let username = trimmedIntentString(user?.username) {
+      return INPersonHandle(value: username, type: .unknown)
+    }
+
+    return INPersonHandle(value: chat.intentConversationIdentifier, type: .unknown)
+  }
+
+  private nonisolated func intentNameComponents(for user: SharedUser?) -> PersonNameComponents? {
+    guard let user else { return nil }
+
+    let givenName = trimmedIntentString(user.firstName)
+    let familyName = trimmedIntentString(user.lastName)
+    guard givenName != nil || familyName != nil else { return nil }
+
+    var components = PersonNameComponents()
+    components.givenName = givenName
+    components.familyName = familyName
+    return components
+  }
+
+  private nonisolated func intentImage(
+    for chat: SharedChat,
+    title: String,
+    user: SharedUser?
+  ) -> INImage? {
+    if let user,
+       let image = exportedIntentImage(for: user) ?? generatedUserIntentImage(for: user) {
+      return image
+    }
+
+    return generatedChatIntentImage(for: chat, title: title)
+  }
+
+  private nonisolated func exportedIntentImage(for user: SharedUser) -> INImage? {
+    guard let relativePath = trimmedIntentString(user.profileSharedLocalPath),
+          relativePath.hasPrefix("/") == false,
+          relativePath.contains("..") == false,
+          let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: Self.sharedContainerIdentifier
+          )
+    else {
+      return nil
+    }
+
+    let imageURL = containerURL.appendingPathComponent(relativePath)
+    guard FileManager.default.fileExists(atPath: imageURL.path) else {
+      return nil
+    }
+
+    return INImage(url: imageURL)
+  }
+
+  private nonisolated func generatedUserIntentImage(for user: SharedUser) -> INImage? {
+    let identity = InlineUserAvatarRenderIdentity(
+      firstName: trimmedIntentString(user.firstName),
+      lastName: trimmedIntentString(user.lastName),
+      displayName: trimmedIntentString(user.displayName),
+      email: trimmedIntentString(user.email),
+      username: trimmedIntentString(user.username),
+      stableIdentifier: "user:\(user.id)"
+    )
+    guard let data = InlineAvatarBitmapRenderer.userInitialsImageData(
+      identity: identity,
+      size: CGSize(width: 160, height: 160),
+      scale: 1
+    ) else {
+      return nil
+    }
+
+    return INImage(imageData: data)
+  }
+
+  private nonisolated func generatedChatIntentImage(for chat: SharedChat, title: String) -> INImage? {
+    let identity = InlineThreadAvatarRenderIdentity(
+      emoji: chat.emoji,
+      title: title,
+      isReplyThread: chat.isReplyThread ?? false,
+      stableIdentifier: chat.intentConversationIdentifier
+    )
+    guard let data = InlineAvatarBitmapRenderer.threadImageData(
+      identity: identity,
+      size: CGSize(width: 160, height: 160),
+      scale: 1
+    ) else {
+      return nil
+    }
+
+    return INImage(imageData: data)
+  }
+
+  private nonisolated func trimmedIntentString(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private func displayName(for chat: SharedChat) -> String {
+    displayName(for: chat, users: sharedData?.shareExtensionData.users ?? [])
+  }
+
+  private nonisolated func displayName(for chat: SharedChat, users: [SharedUser]) -> String {
+    let trimmedTitle = chat.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedTitle.isEmpty { return trimmedTitle }
+    if let peerUserId = chat.peerUserId,
+       let user = users.first(where: { $0.id == peerUserId }) {
+      if let displayName = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+         !displayName.isEmpty {
+        return displayName
+      }
+      let fullName = [user.firstName, user.lastName]
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+      if !fullName.isEmpty { return fullName }
+      if let username = user.username?.trimmingCharacters(in: .whitespacesAndNewlines),
+         !username.isEmpty {
+        return username
+      }
+      if let email = user.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+         !email.isEmpty {
+        return email
+      }
+    }
+    return "Chat"
+  }
+}
+
+private extension SharedChat {
+  var intentConversationIdentifier: String {
+    if let peerUserId {
+      return "inline:user:\(peerUserId)"
+    }
+    if let peerThreadId {
+      return "inline:thread:\(peerThreadId)"
+    }
+    return "inline:chat:\(id)"
   }
 }

@@ -12,6 +12,7 @@
 		B7020C562DCE157F007099D9 /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C552DCE157F007099D9 /* InlineKit */; };
 		B7020C582DCE157F007099D9 /* InlineProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C572DCE157F007099D9 /* InlineProtocol */; };
 		B7020C5A2DCE1585007099D9 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C592DCE1585007099D9 /* InlineUI */; };
+		D6B90A032F49000100000001 /* InlineAvatarRendering in Frameworks */ = {isa = PBXBuildFile; productRef = D6B90A022F49000100000001 /* InlineAvatarRendering */; };
 		B7020C5C2DCE1585007099D9 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C5B2DCE1585007099D9 /* GRDB */; };
 		B7020C5E2DCE1592007099D9 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C5D2DCE1592007099D9 /* Nuke */; };
 		B7020C602DCE1593007099D9 /* NukeExtensions in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C5F2DCE1593007099D9 /* NukeExtensions */; };
@@ -48,6 +49,8 @@
 		CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FEF2E493C8E00F7BFFE /* Translation */; };
 		CD735FF22E493C9400F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FF12E493C9400F7BFFE /* Translation */; };
 		CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */ = {isa = PBXBuildFile; productRef = CD7C6F122E5847CD00C89032 /* RealtimeV2 */; };
+		D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */ = {isa = PBXBuildFile; productRef = D6B90A002F49000100000001 /* InlineAvatarRendering */; };
+		D6B90A052F49000100000001 /* InlineAvatarRendering in Frameworks */ = {isa = PBXBuildFile; productRef = D6B90A042F49000100000001 /* InlineAvatarRendering */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
@@ -214,6 +217,7 @@
 				B7020C582DCE157F007099D9 /* InlineProtocol in Frameworks */,
 				B7020C5C2DCE1585007099D9 /* GRDB in Frameworks */,
 				B7020C602DCE1593007099D9 /* NukeExtensions in Frameworks */,
+				D6B90A032F49000100000001 /* InlineAvatarRendering in Frameworks */,
 				B7020C5A2DCE1585007099D9 /* InlineUI in Frameworks */,
 				B7020C5E2DCE1592007099D9 /* Nuke in Frameworks */,
 				B7020C562DCE157F007099D9 /* InlineKit in Frameworks */,
@@ -248,6 +252,7 @@
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C37F34402D5A4D4800D7D7CC /* MCEmojiPicker in Frameworks */,
+				D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */,
 				CD0240C42EA439D400976FDE /* Invite in Frameworks */,
@@ -286,6 +291,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D6B90A052F49000100000001 /* InlineAvatarRendering in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -363,6 +369,7 @@
 				B7020C532DCE157F007099D9 /* InlineConfig */,
 				B7020C552DCE157F007099D9 /* InlineKit */,
 				B7020C572DCE157F007099D9 /* InlineProtocol */,
+				D6B90A022F49000100000001 /* InlineAvatarRendering */,
 				B7020C592DCE1585007099D9 /* InlineUI */,
 				B7020C5B2DCE1585007099D9 /* GRDB */,
 				B7020C5D2DCE1592007099D9 /* Nuke */,
@@ -422,6 +429,7 @@
 				D4B53A102F1C000100000001 /* InlineSearch */,
 				C35EC8212CC2A24A0067979B /* InlineKit */,
 				C35EC9F32CC4176D0067979B /* SwiftUIIntrospect */,
+				D6B90A002F49000100000001 /* InlineAvatarRendering */,
 				C3CC99182CCE9AF7007F7F77 /* InlineUI */,
 				CD27856E2CFB053C008A0EEF /* InlineConfig */,
 				C3AEE6A92D4FCDC9005D1179 /* Nuke */,
@@ -497,6 +505,7 @@
 			);
 			name = InlineNotificationExtension;
 			packageProductDependencies = (
+				D6B90A042F49000100000001 /* InlineAvatarRendering */,
 			);
 			productName = InlineNotificationExtension;
 			productReference = CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */;
@@ -1692,6 +1701,10 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineUI;
 		};
+		D6B90A022F49000100000001 /* InlineAvatarRendering */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineAvatarRendering;
+		};
 		B7020C5B2DCE1585007099D9 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
@@ -1779,6 +1792,14 @@
 		C3CC991A2CCE9AFF007F7F77 /* InlineUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineUI;
+		};
+		D6B90A002F49000100000001 /* InlineAvatarRendering */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineAvatarRendering;
+		};
+		D6B90A042F49000100000001 /* InlineAvatarRendering */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineAvatarRendering;
 		};
 		C3E6D5CA2CAE82B00048D2D8 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -11,7 +11,6 @@ struct SharedData: Codable {
   }
 }
 
-
 struct ShareExtensionData: Codable {
   var chats: [SharedChat]
   var users: [SharedUser]
@@ -31,6 +30,12 @@ struct SharedChat: Codable {
   var pinned: Bool?
   var spaceName: String?
   var emoji: String?
+  var parentTitle: String?
+  var preview: String?
+  var searchText: String?
+  var unread: Bool?
+  var archived: Bool?
+  var isReplyThread: Bool?
 
   init(
     id: Int64,
@@ -40,7 +45,13 @@ struct SharedChat: Codable {
     lastMessageDate: Date?,
     pinned: Bool?,
     spaceName: String?,
-    emoji: String?
+    emoji: String?,
+    parentTitle: String? = nil,
+    preview: String? = nil,
+    searchText: String? = nil,
+    unread: Bool? = nil,
+    archived: Bool? = nil,
+    isReplyThread: Bool? = nil
   ) {
     self.id = id
     self.title = title
@@ -50,20 +61,49 @@ struct SharedChat: Codable {
     self.pinned = pinned
     self.spaceName = spaceName
     self.emoji = emoji
+    self.parentTitle = parentTitle
+    self.preview = preview
+    self.searchText = searchText
+    self.unread = unread
+    self.archived = archived
+    self.isReplyThread = isReplyThread
   }
 }
 
-struct SharedUser: Codable {
+struct SharedUser: Codable, Equatable {
   var id: Int64
   var firstName: String
   var lastName: String
   var displayName: String?
+  var email: String?
+  var username: String?
+  var profileCdnUrl: String?
+  var profileLocalPath: String?
+  var profileFileUniqueId: String?
+  var profileSharedLocalPath: String?
 
-  init(id: Int64, firstName: String, lastName: String, displayName: String?) {
+  init(
+    id: Int64,
+    firstName: String,
+    lastName: String,
+    displayName: String?,
+    email: String? = nil,
+    username: String? = nil,
+    profileCdnUrl: String? = nil,
+    profileLocalPath: String? = nil,
+    profileFileUniqueId: String? = nil,
+    profileSharedLocalPath: String? = nil
+  ) {
     self.id = id
     self.firstName = firstName
     self.lastName = lastName
     self.displayName = displayName
+    self.email = email
+    self.username = username
+    self.profileCdnUrl = profileCdnUrl
+    self.profileLocalPath = profileLocalPath
+    self.profileFileUniqueId = profileFileUniqueId
+    self.profileSharedLocalPath = profileSharedLocalPath
   }
 }
 

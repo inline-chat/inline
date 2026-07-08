@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import InlineAvatarRendering
 import Intents
 import OSLog
 import Security
@@ -42,17 +43,17 @@ final class NotificationService: UNNotificationServiceExtension {
         if let error {
           self?.logger.error("avatar download failed: \(error.localizedDescription, privacy: .public)")
         }
-        let image: INImage? = if let data {
+        let image: INImage? = if let data, UIImage(data: data) != nil {
           INImage(imageData: data)
         } else {
-          nil
+          self?.makeSenderFallbackAvatar(sender: sender)
         }
         self?.applyIntent(sender: sender, image: image, requestIdentifier: request.identifier)
       }
       avatarTask?.resume()
     } else {
       logger.info("no avatar URL provided")
-      applyIntent(sender: sender, image: nil, requestIdentifier: request.identifier)
+      applyIntent(sender: sender, image: makeSenderFallbackAvatar(sender: sender), requestIdentifier: request.identifier)
     }
   }
 
@@ -271,17 +272,19 @@ private extension NotificationService {
     let isReplyThread = boolValue(bestAttemptContent.userInfo["isReplyThread"])
     let threadTitle = bestAttemptContent.title.nonEmpty ?? bestAttemptContent.subtitle.nonEmpty
     let threadEmoji = bestAttemptContent.userInfo["threadEmoji"] as? String
+    let conversationIdentifier = conversationId(from: bestAttemptContent) ?? sender.id
     let person: INPerson
     let recipients: [INPerson]?
     if let threadTitle, isThread {
       // For threads/channels: represent the chat as the sender and the user as the sole recipient.
       person = makeGroupPerson(
-        threadId: conversationId(from: bestAttemptContent) ?? sender.id,
+        threadId: conversationIdentifier,
         title: threadTitle,
         image: makeGroupAvatar(
           emoji: threadEmoji,
           title: threadTitle,
-          isReplyThread: isReplyThread
+          isReplyThread: isReplyThread,
+          stableIdentifier: conversationIdentifier
         )
       )
       recipients = [makeMePerson()]
@@ -292,7 +295,6 @@ private extension NotificationService {
       recipients = nil // DM path: system infers current user
     }
 
-    let conversationIdentifier = conversationId(from: bestAttemptContent) ?? sender.id
     let groupName = isThread ? threadTitle : nil
     let groupNameLog = groupName ?? "nil"
     logger
@@ -404,11 +406,40 @@ private extension NotificationService {
     )
   }
 
-  func makeGroupAvatar(emoji: String?, title: String, isReplyThread: Bool) -> INImage? {
-    guard let data = NotificationThreadIconRenderer.makeImageData(
+  func makeGroupAvatar(
+    emoji: String?,
+    title: String,
+    isReplyThread: Bool,
+    stableIdentifier: String
+  ) -> INImage? {
+    let identity = InlineThreadAvatarRenderIdentity(
       emoji: emoji,
       title: title,
       isReplyThread: isReplyThread,
+      stableIdentifier: stableIdentifier
+    )
+    guard let data = InlineAvatarBitmapRenderer.threadImageData(
+      identity: identity,
+      size: CGSize(width: 60, height: 60),
+      scale: UIScreen.main.scale
+    ) else {
+      return nil
+    }
+
+    return INImage(imageData: data)
+  }
+
+  func makeSenderFallbackAvatar(sender: SenderPayload) -> INImage? {
+    let identity = InlineUserAvatarRenderIdentity(
+      firstName: nil,
+      lastName: nil,
+      displayName: sender.displayName,
+      email: nil,
+      username: nil,
+      stableIdentifier: "sender:\(sender.id)"
+    )
+    guard let data = InlineAvatarBitmapRenderer.userInitialsImageData(
+      identity: identity,
       size: CGSize(width: 60, height: 60),
       scale: UIScreen.main.scale
     ) else {
@@ -441,167 +472,4 @@ private extension NotificationService {
 
 private extension String {
   var nonEmpty: String? { isEmpty ? nil : self }
-}
-
-// Keep this mirror in sync with InlineUI/Sources/InlineUI/ThreadIconView.swift.
-// The notification extension intentionally avoids importing app UI packages.
-private enum NotificationThreadIconRenderer {
-  private static let normalFallbackSymbol = "bubble.middle.bottom.fill"
-  private static let replyFallbackSymbol = "arrow.turn.down.right"
-
-  static func makeImageData(
-    emoji: String?,
-    title _: String,
-    isReplyThread: Bool,
-    size: CGSize,
-    scale: CGFloat
-  ) -> Data? {
-    let format = UIGraphicsImageRendererFormat()
-    format.scale = scale
-    format.opaque = false
-
-    let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
-      let bounds = CGRect(origin: .zero, size: size)
-      let ctx = context.cgContext
-
-      drawBackground(in: ctx, bounds: bounds)
-      let iconSize = min(size.width, size.height)
-      let ratios = contentRatios(for: iconSize)
-
-      if let emoji = normalizedEmoji(emoji) {
-        drawCenteredText(
-          emoji,
-          font: .systemFont(ofSize: iconSize * ratios.emoji, weight: .regular),
-          color: symbolColor(),
-          in: bounds
-        )
-      } else {
-        drawCenteredSymbol(
-          isReplyThread ? replyFallbackSymbol : normalFallbackSymbol,
-          pointSize: iconSize * ratios.symbol,
-          color: symbolColor(),
-          in: bounds
-        )
-      }
-    }
-
-    return image.pngData()
-  }
-
-  private static func normalizedEmoji(_ emoji: String?) -> String? {
-    guard let emoji else { return nil }
-    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let firstCharacter = trimmed.first else { return nil }
-    return String(firstCharacter)
-  }
-
-  private static func drawBackground(in ctx: CGContext, bounds: CGRect) {
-    ctx.saveGState()
-    ctx.addEllipse(in: bounds)
-    ctx.clip()
-
-    let colorSpace = CGColorSpaceCreateDeviceRGB()
-    let colors = [
-      UIColor(white: 0.50, alpha: 0.96).cgColor,
-      UIColor(white: 0.36, alpha: 0.96).cgColor,
-    ] as CFArray
-    guard let gradient = CGGradient(
-      colorsSpace: colorSpace,
-      colors: colors,
-      locations: [0, 1]
-    ) else {
-      ctx.setFillColor(UIColor(white: 0.43, alpha: 0.96).cgColor)
-      ctx.fill(bounds)
-      ctx.restoreGState()
-      return
-    }
-
-    ctx.drawLinearGradient(
-      gradient,
-      start: CGPoint(x: bounds.midX, y: bounds.minY),
-      end: CGPoint(x: bounds.midX, y: bounds.maxY),
-      options: []
-    )
-    ctx.restoreGState()
-  }
-
-  private static func symbolColor() -> UIColor {
-    UIColor.white.withAlphaComponent(0.94)
-  }
-
-  private static func contentRatios(for size: CGFloat) -> (emoji: CGFloat, symbol: CGFloat) {
-    switch size {
-    case ..<25:
-      return (0.66, 0.52)
-    case ..<37:
-      return (0.56, 0.44)
-    case ..<71:
-      return (0.46, 0.38)
-    default:
-      return (0.38, 0.32)
-    }
-  }
-
-  private static func drawCenteredText(
-    _ text: String,
-    font: UIFont,
-    color: UIColor,
-    in bounds: CGRect
-  ) {
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.alignment = .center
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: font,
-      .foregroundColor: color,
-      .paragraphStyle: paragraph,
-    ]
-    let attr = NSAttributedString(string: text, attributes: attributes)
-    let measured = attr.boundingRect(
-      with: bounds.size,
-      options: [.usesLineFragmentOrigin, .usesFontLeading],
-      context: nil
-    )
-    let drawRect = CGRect(
-      x: bounds.midX - measured.width / 2,
-      y: bounds.midY - measured.height / 2,
-      width: measured.width,
-      height: measured.height
-    )
-    attr.draw(in: drawRect)
-  }
-
-  private static func drawCenteredSymbol(
-    _ symbolName: String,
-    pointSize: CGFloat,
-    color: UIColor,
-    in bounds: CGRect
-  ) {
-    let configuration = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
-    guard let image = UIImage(systemName: symbolName, withConfiguration: configuration)?
-      .withTintColor(color, renderingMode: .alwaysOriginal)
-    else {
-      return
-    }
-
-    let drawRect = aspectFitRect(
-      for: image.size,
-      in: bounds.insetBy(dx: bounds.width * 0.2, dy: bounds.height * 0.2)
-    )
-    image.draw(in: drawRect)
-  }
-
-  private static func aspectFitRect(for imageSize: CGSize, in bounds: CGRect) -> CGRect {
-    guard imageSize.width > 0, imageSize.height > 0 else {
-      return bounds
-    }
-
-    let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
-    let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-    return CGRect(
-      x: bounds.midX - scaledSize.width / 2,
-      y: bounds.midY - scaledSize.height / 2,
-      width: scaledSize.width,
-      height: scaledSize.height
-    )
-  }
 }
