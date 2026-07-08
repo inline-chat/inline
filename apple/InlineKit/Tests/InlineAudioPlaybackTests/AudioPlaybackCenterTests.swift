@@ -26,6 +26,32 @@ struct AudioPlaybackCenterTests {
     #expect(center.isPlaying)
   }
 
+  @Test("toggle or play reloads current item when source URL changes")
+  func toggleOrPlayReloadsCurrentItemWhenSourceURLChanges() throws {
+    let engine = TestAudioPlaybackEngine(duration: 42)
+    let center = AudioPlaybackCenter(engine: engine, userDefaults: makeUserDefaults())
+    let item = makeItem()
+    let presentation = makePresentation()
+    let firstURL = makeFileURL()
+    let secondURL = makeFileURL()
+
+    try center.toggleOrPlay(fileURL: firstURL, item: item, presentation: presentation)
+    #expect(engine.loadedURL == firstURL)
+    #expect(engine.loadCount == 1)
+    #expect(center.isPlaying)
+
+    try center.toggleOrPlay(fileURL: firstURL, item: item, presentation: presentation)
+    #expect(engine.loadedURL == firstURL)
+    #expect(engine.loadCount == 1)
+    #expect(center.isPlaying == false)
+
+    try center.toggleOrPlay(fileURL: secondURL, item: item, presentation: presentation)
+    #expect(engine.loadedURL == secondURL)
+    #expect(engine.loadCount == 2)
+    #expect(center.sourceURL == secondURL)
+    #expect(center.isPlaying)
+  }
+
   @Test("preview volume avoids observable and stored volume churn")
   func previewVolumeAvoidsObservableAndStoredVolumeChurn() throws {
     let defaults = makeUserDefaults()
@@ -75,6 +101,7 @@ private final class TestAudioPlaybackEngine: AudioPlaybackEngine {
   var volume: Float = 1
   var onFinish: ((TimeInterval) -> Void)?
   private(set) var loadedURL: URL?
+  private(set) var loadCount = 0
 
   init(duration: TimeInterval = 12) {
     self.duration = duration
@@ -82,6 +109,7 @@ private final class TestAudioPlaybackEngine: AudioPlaybackEngine {
 
   func load(contentsOf fileURL: URL) throws {
     loadedURL = fileURL
+    loadCount += 1
     currentTime = 0
   }
 

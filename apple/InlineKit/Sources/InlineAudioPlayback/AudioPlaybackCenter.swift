@@ -72,6 +72,22 @@ public final class AudioPlaybackCenter {
     )
   }
 
+  /// Toggle if this exact source is already loaded; otherwise load and play it.
+  /// The source URL matters because the same media item can be re-cached at a
+  /// new local path after a download or cache repair.
+  public func toggleOrPlay(
+    fileURL: URL,
+    item: AudioPlaybackItem,
+    presentation: AudioPlaybackPresentation
+  ) throws {
+    if self.item == item, sourceURL == fileURL {
+      try toggleCurrentPlayback()
+      return
+    }
+
+    try play(fileURL: fileURL, item: item, presentation: presentation)
+  }
+
   public func prepare(
     fileURL: URL,
     item: AudioPlaybackItem,

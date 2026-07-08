@@ -58,13 +58,18 @@ public final class SharedAudioPlayer: ObservableObject {
     presentation: SharedAudioPlayerPresentation? = nil
   ) throws {
     let item = try voiceItem(for: message)
+    let hasDifferentSourceOverride = fileURLOverride.map { state.sourceURL != $0 } ?? false
 
-    if state.item == item {
+    if state.item == item, !hasDifferentSourceOverride {
       try toggleCurrentPlaybackThrowing()
       return
     }
 
-    try playVoice(for: message, fileURLOverride: fileURLOverride, presentation: presentation)
+    let fileURL = try resolvedVoiceURL(for: message, fileURLOverride: fileURLOverride)
+    let presentation = presentation ?? voicePresentation(for: message)
+
+    try center.toggleOrPlay(fileURL: fileURL, item: item, presentation: presentation)
+    syncStateFromCenter()
   }
 
   public func playVoice(
