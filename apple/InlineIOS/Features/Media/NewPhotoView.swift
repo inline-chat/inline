@@ -240,6 +240,7 @@ final class NewPhotoView: UIView {
   }
 
   private func setupViews() {
+    backgroundColor = isSticker ? .clear : UIColor.gray.withAlphaComponent(0.05)
     addSubview(tinyThumbnailBackgroundView)
     addSubview(imageView)
     addSubview(highlightOverlay)

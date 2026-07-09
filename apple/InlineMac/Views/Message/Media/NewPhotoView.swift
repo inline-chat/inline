@@ -105,6 +105,10 @@ final class NewPhotoView: NSView {
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
       backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+    tinyThumbnailBackgroundView.onVisibilityChange = { [weak self] isVisible in
+      guard let self, currentImage == nil else { return }
+      backgroundView.isHidden = isVisible
+    }
 
     // setupImage()
     updateTinyThumbnailBackground()
@@ -162,7 +166,7 @@ final class NewPhotoView: NSView {
     tinyThumbnailBackgroundView.setPhoto(fullMessage.message.isSticker == true ? nil : fullMessage.photoInfo)
 
     if currentImage == nil {
-      backgroundView.isHidden = !shouldShowFlatPlaceholder()
+      backgroundView.isHidden = tinyThumbnailBackgroundView.isShowingThumbnail
     }
   }
 
@@ -332,9 +336,7 @@ final class NewPhotoView: NSView {
   }
 
   private func shouldShowFlatPlaceholder() -> Bool {
-    InlineTinyThumbnailDecoder.strippedBytes(
-      from: fullMessage.message.isSticker == true ? nil : fullMessage.photoInfo
-    ) == nil
+    !tinyThumbnailBackgroundView.isShowingThumbnail
   }
 
   override func layout() {

@@ -103,6 +103,10 @@ final class SimplePhotoView: NSView {
       overlayImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
       overlayImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
+    tinyThumbnailBackgroundView.onVisibilityChange = { [weak self] isVisible in
+      guard let self, imageLayer.contents == nil else { return }
+      backgroundView.isHidden = isVisible
+    }
 
     imageView.layer?.addSublayer(imageLayer)
     updateTinyThumbnailBackground()
@@ -252,7 +256,7 @@ final class SimplePhotoView: NSView {
   }
 
   private func shouldShowFlatPlaceholder() -> Bool {
-    InlineTinyThumbnailDecoder.strippedBytes(from: photoInfo) == nil
+    !tinyThumbnailBackgroundView.isShowingThumbnail
   }
 
   override func layout() {

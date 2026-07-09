@@ -18,6 +18,10 @@ actor ImagePrefetcher {
     
     /// Set of photo IDs that are already cached or being prefetched
     private var prefetchedPhotoIDs = Set<Int64>()
+
+    /// Cancellable tiny-thumbnail warmups requested by collection-view prefetching.
+    private var thumbnailPrefetches: [InlineTinyThumbnailWarmup: Set<Int64>] = [:]
+    private var thumbnailPrefetchCleanupTasks: [InlineTinyThumbnailWarmup: Task<Void, Never>] = [:]
     
     /// Maximum number of concurrent prefetch operations
     private let maxConcurrentPrefetches = 15
@@ -40,7 +44,8 @@ actor ImagePrefetcher {
     /// Prefetch images for a collection of messages
     /// - Parameter messages: Array of messages that may contain images to prefetch
     func prefetchImages(for messages: [FullMessage]) async {
-        prepareThumbnails(for: messages)
+        let thumbnailWarmup = await prepareThumbnails(for: messages)
+        trackThumbnailPrefetch(thumbnailWarmup, messages: messages)
 
         let messagesToPrefetch = messages.filter { $0.photoInfo != nil }
         
@@ -59,21 +64,35 @@ actor ImagePrefetcher {
     }
 
     /// Prepare lightweight stripped thumbnails used as first-frame placeholders.
-    /// The actual render work is queued off the main thread by InlineUI.
-    func prepareThumbnails(for messages: [FullMessage]) {
+    /// The actual render work is prioritized and queued off the main thread by InlineUI.
+    @discardableResult
+    func prepareThumbnails(
+        for messages: [FullMessage],
+        includeSupportingMedia: Bool = true,
+        priority: InlineTinyThumbnailWarmupPriority = .nearby
+    ) async -> InlineTinyThumbnailWarmup {
         let limitedMessages = Array(messages.prefix(maxConcurrentPrefetches * 2))
-
-        for message in limitedMessages {
-            prewarmTinyThumbnails(for: message)
-        }
+        return await InlineTinyThumbnailPrewarmer.beginWarmup(
+            for: limitedMessages,
+            includeSupportingMedia: includeSupportingMedia,
+            priority: priority
+        )
     }
     
     func cancelAllPrefetching() async {
         for task in prefetchTasks.values {
             task.cancel()
         }
+        for thumbnailWarmup in Array(thumbnailPrefetches.keys) {
+            await InlineTinyThumbnailPrewarmer.cancel(thumbnailWarmup)
+        }
+        for cleanupTask in thumbnailPrefetchCleanupTasks.values {
+            cleanupTask.cancel()
+        }
         prefetchTasks.removeAll()
         prefetchedPhotoIDs.removeAll()
+        thumbnailPrefetches.removeAll()
+        thumbnailPrefetchCleanupTasks.removeAll()
         
         #if DEBUG
         Log.shared.debug("Cancelled all prefetching operations")
@@ -83,6 +102,18 @@ actor ImagePrefetcher {
     /// Cancel prefetching for specific messages
     /// - Parameter messages: Array of messages to cancel prefetching for
     func cancelPrefetching(for messages: [FullMessage]) async {
+        let messageIDs = Set(messages.map(\.id))
+        for (warmup, prefetchedMessageIDs) in Array(thumbnailPrefetches) {
+            let remainingMessageIDs = prefetchedMessageIDs.subtracting(messageIDs)
+            if remainingMessageIDs.isEmpty {
+                await InlineTinyThumbnailPrewarmer.cancel(warmup)
+                thumbnailPrefetches[warmup] = nil
+                thumbnailPrefetchCleanupTasks.removeValue(forKey: warmup)?.cancel()
+            } else {
+                thumbnailPrefetches[warmup] = remainingMessageIDs
+            }
+        }
+
         for message in messages {
             guard let photoInfo = message.photoInfo else { continue }
             
@@ -205,28 +236,32 @@ actor ImagePrefetcher {
         prefetchTasks.removeValue(forKey: photoId)
     }
 
-    private func prewarmTinyThumbnails(for message: FullMessage) {
-        if message.message.isSticker != true {
-            InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.photoInfo)
-        }
-
-        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.videoInfo?.thumbnail)
-        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.documentInfo?.thumbnail)
-        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.repliedToMessage?.photoInfo)
-        InlineTinyThumbnailPrewarmer.prewarm(photoInfo: message.repliedToMessage?.videoInfo?.thumbnail)
-
-        for attachment in message.attachments {
-            InlineTinyThumbnailPrewarmer.prewarm(photoInfo: attachment.photoInfo)
-            InlineTinyThumbnailPrewarmer.prewarm(photoInfo: attachment.authorPhotoInfo)
+    private func trackThumbnailPrefetch(
+        _ warmup: InlineTinyThumbnailWarmup,
+        messages: [FullMessage]
+    ) {
+        thumbnailPrefetches[warmup] = Set(messages.map(\.id))
+        thumbnailPrefetchCleanupTasks[warmup]?.cancel()
+        thumbnailPrefetchCleanupTasks[warmup] = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await InlineTinyThumbnailPrewarmer.cancel(warmup)
+            await self?.finishThumbnailPrefetch(warmup)
         }
     }
-    
+
+    private func finishThumbnailPrefetch(_ warmup: InlineTinyThumbnailWarmup) {
+        thumbnailPrefetches[warmup] = nil
+        thumbnailPrefetchCleanupTasks[warmup] = nil
+    }
+
     /// Prefetch images in batches to reduce the number of tasks
     /// - Parameters:
     ///   - messages: Array of messages to prefetch
     ///   - batchSize: Size of each batch
     func prefetchImagesInBatches(for messages: [FullMessage], batchSize: Int = 4) async {
-        prepareThumbnails(for: messages)
+        let thumbnailWarmup = await prepareThumbnails(for: messages)
+        trackThumbnailPrefetch(thumbnailWarmup, messages: messages)
 
         // Filter messages that need prefetching
         let messagesToPrefetch = messages.filter { message in

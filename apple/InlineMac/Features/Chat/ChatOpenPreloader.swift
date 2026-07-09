@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import InlineKit
+import InlineUI
 import os.signpost
 
 struct PreparedChatPayload: Sendable {
@@ -181,7 +182,44 @@ actor ChatOpenPreloader {
     try Task.checkCancellation()
 
     preparedMessageCount = payload.messagesInitialState.messages.count
+    let likelyVisibleMessages = Self.likelyVisibleMessages(
+      in: payload.messagesInitialState.messages,
+      targetMessageId: targetMessageId,
+      limit: InlineTinyThumbnailWarmupPolicy.firstPresentationMessageLimit
+    )
+    let thumbnailWarmup = await InlineTinyThumbnailPrewarmer.beginWarmup(
+      for: likelyVisibleMessages,
+      includeSupportingMedia: false,
+      priority: .visible
+    )
+    _ = await InlineTinyThumbnailPrewarmer.waitUntilReady(
+      thumbnailWarmup,
+      timeout: InlineTinyThumbnailWarmupPolicy.firstPresentationTimeout
+    )
+    if Task.isCancelled {
+      await InlineTinyThumbnailPrewarmer.cancel(thumbnailWarmup)
+      throw CancellationError()
+    }
     return payload
+  }
+
+  private static func likelyVisibleMessages(
+    in messages: [FullMessage],
+    targetMessageId: Int64?,
+    limit: Int
+  ) -> [FullMessage] {
+    guard !messages.isEmpty, limit > 0 else { return [] }
+
+    guard let targetMessageId,
+          let targetIndex = messages.firstIndex(where: { $0.message.messageId == targetMessageId })
+    else {
+      return Array(messages.suffix(limit))
+    }
+
+    let desiredStart = max(0, targetIndex - (limit / 3))
+    let end = min(messages.count, desiredStart + limit)
+    let start = max(0, end - limit)
+    return Array(messages[start ..< end])
   }
 
   private static func fetchChatItem(peer: Peer, db: Database) throws -> SpaceChatItem? {

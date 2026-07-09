@@ -86,6 +86,7 @@ class MessageListAppKit: NSViewController {
   private var loadBatchTask: Task<Void, Never>?
   private var heightPrecalcTask: Task<Void, Never>?
   private var mediaWarmupTask: Task<Void, Never>?
+  private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
   private var readAllTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
   private var avatarOverlaySyncInProgress = false
@@ -100,7 +101,6 @@ class MessageListAppKit: NSViewController {
   private var isDisposed = false
   private weak var observedToolbar: NSToolbar?
   private var toolbarDisplayModeObservation: NSKeyValueObservation?
-  private let mediaWarmupLookaheadRows = 16
 
   // Translation system
   private let translationViewModel: TranslationViewModel
@@ -2641,29 +2641,74 @@ class MessageListAppKit: NSViewController {
 
     mediaWarmupTask?.cancel()
     mediaWarmupTask = Task { @MainActor [weak self] in
-      await Task.yield()
-      guard let self, !Task.isCancelled, !self.isDisposed else { return }
+      guard let self, !self.isDisposed else { return }
+      let previousWarmups = self.mediaWarmups
+      self.mediaWarmups.removeAll()
+      for warmup in previousWarmups {
+        await InlineTinyThumbnailPrewarmer.cancel(warmup)
+      }
 
-      let rows = self.mediaWarmupRowsAroundVisible()
-      guard !rows.isEmpty else { return }
-      self.prewarmMediaForRows(rows, reason: reason)
+      await Task.yield()
+      guard !Task.isCancelled, !self.isDisposed else { return }
+
+      let groups = self.mediaWarmupRowsAroundVisible()
+      let visibleMessages = groups.visible.compactMap { self.message(forRow: $0) }
+      let nearbyMessages = groups.nearby.compactMap { self.message(forRow: $0) }
+      var newWarmups: [InlineTinyThumbnailWarmup] = []
+
+      if !visibleMessages.isEmpty {
+        let visibleWarmup = await InlineTinyThumbnailPrewarmer.beginWarmup(
+          for: visibleMessages,
+          includeSupportingMedia: true,
+          priority: .visible
+        )
+        newWarmups.append(visibleWarmup)
+      }
+
+      if !nearbyMessages.isEmpty, !Task.isCancelled {
+        let nearbyWarmup = await InlineTinyThumbnailPrewarmer.beginWarmup(
+          for: nearbyMessages,
+          includeSupportingMedia: true,
+          priority: .nearby
+        )
+        newWarmups.append(nearbyWarmup)
+      }
+
+      guard !Task.isCancelled, !self.isDisposed else {
+        for warmup in newWarmups {
+          await InlineTinyThumbnailPrewarmer.cancel(warmup)
+        }
+        return
+      }
+
+      self.mediaWarmups = newWarmups
+      self.prewarmMediaForRows(groups.visible.union(groups.nearby), reason: reason)
     }
   }
 
-  private func mediaWarmupRowsAroundVisible() -> IndexSet {
+  private func mediaWarmupRowsAroundVisible() -> (visible: IndexSet, nearby: IndexSet) {
     let rowCount = tableView.numberOfRows
-    guard rowCount > 0 else { return [] }
+    guard rowCount > 0 else { return ([], []) }
 
     let visibleRange = tableView.rows(in: tableView.visibleRect)
     guard visibleRange.location != NSNotFound, visibleRange.length > 0 else {
-      let end = min(rowCount, mediaWarmupLookaheadRows)
-      return IndexSet(integersIn: 0 ..< end)
+      let start = max(0, rowCount - mediaWarmupLookaheadRows)
+      return ([], IndexSet(integersIn: start ..< rowCount))
     }
 
-    let start = max(0, visibleRange.location - 2)
+    let visibleEnd = min(rowCount, visibleRange.location + visibleRange.length)
+    let visible = IndexSet(integersIn: visibleRange.location ..< visibleEnd)
+    let nearbyBuffer = min(2, mediaWarmupLookaheadRows)
+    let start = max(0, visibleRange.location - nearbyBuffer)
     let end = min(rowCount, visibleRange.location + visibleRange.length + mediaWarmupLookaheadRows)
-    guard start < end else { return [] }
-    return IndexSet(integersIn: start ..< end)
+    guard start < end else { return (visible, []) }
+    var nearby = IndexSet(integersIn: start ..< end)
+    nearby.subtract(visible)
+    return (visible, nearby)
+  }
+
+  private var mediaWarmupLookaheadRows: Int {
+    InlineTinyThumbnailWarmupPolicy.adaptiveLookaheadRows()
   }
 
   private func prewarmMediaForRows(_ rows: IndexSet, reason _: String) {
@@ -2700,9 +2745,6 @@ class MessageListAppKit: NSViewController {
     let hasCaption = fullMessage.message.text?.isEmpty == false
 
     if let photoInfo = fullMessage.photoInfo {
-      if fullMessage.message.isSticker != true {
-        InlineTinyThumbnailBackgroundView.prewarm(photoInfo: photoInfo)
-      }
       prewarmPhotoDisplay(
         photoInfo,
         cacheKey: nil,
@@ -2713,8 +2755,6 @@ class MessageListAppKit: NSViewController {
     }
 
     if let videoInfo = fullMessage.videoInfo {
-      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: videoInfo.thumbnail)
-
       if let thumbnail = videoInfo.thumbnail {
         let videoId = videoInfo.video.id ?? thumbnail.id
         prewarmPhotoDisplay(
@@ -2727,15 +2767,6 @@ class MessageListAppKit: NSViewController {
       }
     }
 
-    if let repliedToMessage = fullMessage.repliedToMessage {
-      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: repliedToMessage.photoInfo)
-      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: repliedToMessage.videoInfo?.thumbnail)
-    }
-
-    for attachment in fullMessage.attachments {
-      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: attachment.photoInfo)
-      InlineTinyThumbnailBackgroundView.prewarm(photoInfo: attachment.authorPhotoInfo)
-    }
   }
 
   private func prewarmPhotoDisplay(
@@ -3652,6 +3683,13 @@ extension MessageListAppKit {
     heightPrecalcTask = nil
     mediaWarmupTask?.cancel()
     mediaWarmupTask = nil
+    let thumbnailWarmups = mediaWarmups
+    mediaWarmups.removeAll()
+    Task {
+      for warmup in thumbnailWarmups {
+        await InlineTinyThumbnailPrewarmer.cancel(warmup)
+      }
+    }
     readAllTask?.cancel()
     readAllTask = nil
     deferredTranslationTask?.cancel()

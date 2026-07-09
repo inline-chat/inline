@@ -589,6 +589,10 @@ final class NewVideoView: NSView {
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
       backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+    tinyThumbnailBackgroundView.onVisibilityChange = { [weak self] isVisible in
+      guard let self, currentImage == nil else { return }
+      backgroundView.isHidden = isVisible
+    }
 
     addSubview(overlayView)
     NSLayoutConstraint.activate([
@@ -761,7 +765,7 @@ final class NewVideoView: NSView {
   private func updateTinyThumbnailBackground() {
     tinyThumbnailBackgroundView.setPhoto(fullMessage.videoInfo?.thumbnail)
     if currentImage == nil {
-      backgroundView.isHidden = hasTinyThumbnailPlaceholder()
+      backgroundView.isHidden = tinyThumbnailBackgroundView.isShowingThumbnail
     }
   }
 
@@ -1119,7 +1123,7 @@ final class NewVideoView: NSView {
       uploadProgressFraction: uploadProgressFraction
     )
 
-    backgroundView.isHidden = hasThumb || hasTinyThumbnailPlaceholder()
+    backgroundView.isHidden = hasThumb || tinyThumbnailBackgroundView.isShowingThumbnail
 
     switch overlayViewModel.state.icon {
     case .downloadProgress:
@@ -1151,10 +1155,6 @@ final class NewVideoView: NSView {
       isDownloading = false
       clearDownloadProgressBinding(resetState: true)
     }
-  }
-
-  private func hasTinyThumbnailPlaceholder() -> Bool {
-    InlineTinyThumbnailDecoder.strippedBytes(from: fullMessage.videoInfo?.thumbnail) != nil
   }
 
   private func bindDownloadProgressIfNeeded(videoId: Int64) {

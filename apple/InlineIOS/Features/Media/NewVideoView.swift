@@ -378,6 +378,7 @@ final class NewVideoView: UIView {
   }
 
   private func setupViews() {
+    backgroundColor = UIColor.black.withAlphaComponent(0.1)
     addSubview(tinyThumbnailBackgroundView)
     addSubview(thumbnailView)
     addSubview(animatedPlayerView)

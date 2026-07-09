@@ -732,7 +732,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
     // Get messages on main actor, then move heavy work to background
     let messagesToCancel: [FullMessage] = indexPaths.compactMap { indexPath in
       coordinator.message(at: indexPath)
-    }.filter { $0.photoInfo != nil }
+    }
 
     if !messagesToCancel.isEmpty {
       // Move only the cancel prefetching to background thread
@@ -799,8 +799,11 @@ private extension MessagesCollectionView {
     private var pendingAppearingItems: Set<MessageListItem> = []
     private var sendAnimationListTransaction = SendMessageAnimationListTransaction()
     private weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
+    private var initialThumbnailWarmupTask: Task<Void, Never>?
+    private var initialThumbnailWarmup: InlineTinyThumbnailWarmup?
     private var mediaWarmupTask: Task<Void, Never>?
-    private let mediaWarmupLookaheadRows = 16
+    private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
+    private var hasPresentedMessageSnapshot = false
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
@@ -1823,8 +1826,18 @@ private extension MessagesCollectionView {
       remoteOlderTask = nil
       threadAnchorFetchTask?.cancel()
       threadAnchorFetchTask = nil
+      initialThumbnailWarmupTask?.cancel()
+      initialThumbnailWarmupTask = nil
       mediaWarmupTask?.cancel()
       mediaWarmupTask = nil
+      let thumbnailWarmups = mediaWarmups + [initialThumbnailWarmup].compactMap { $0 }
+      mediaWarmups.removeAll()
+      initialThumbnailWarmup = nil
+      Task {
+        for warmup in thumbnailWarmups {
+          await InlineTinyThumbnailPrewarmer.cancel(warmup)
+        }
+      }
       viewModel.dispose()
       cancellables.forEach { $0.cancel() }
       cancellables.removeAll()
@@ -2196,12 +2209,82 @@ private extension MessagesCollectionView {
         ]
       )
 
-      safeApplySnapshot(snapshot, animatingDifferences: animated ?? false, completion: { [weak self] in
+      let completion = { [weak self] in
         // Kick-off the auto-hide timer on first load as well (after layout pass)
         DispatchQueue.main.async {
           self?.scheduleHideDateSeparators()
         }
-      })
+      }
+
+      if shouldWarmBeforeFirstPresentation(snapshot) {
+        scheduleFirstPresentation(
+          snapshot,
+          animatingDifferences: animated ?? false,
+          completion: completion
+        )
+      } else {
+        safeApplySnapshot(
+          snapshot,
+          animatingDifferences: animated ?? false,
+          completion: completion
+        )
+      }
+    }
+
+    private func shouldWarmBeforeFirstPresentation(
+      _ snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>
+    ) -> Bool {
+      !hasPresentedMessageSnapshot && snapshot.itemIdentifiers.contains { item in
+        if case .message = item { return true }
+        return false
+      }
+    }
+
+    private func scheduleFirstPresentation(
+      _ snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>,
+      animatingDifferences: Bool,
+      completion: (() -> Void)?
+    ) {
+      initialThumbnailWarmupTask?.cancel()
+      let messagesToWarm = snapshot.itemIdentifiers
+        .prefix(InlineTinyThumbnailWarmupPolicy.firstPresentationMessageLimit)
+        .compactMap { message(for: $0) }
+
+      initialThumbnailWarmupTask = Task { @MainActor [weak self] in
+        guard let self else { return }
+
+        if let previousWarmup = initialThumbnailWarmup {
+          await InlineTinyThumbnailPrewarmer.cancel(previousWarmup)
+        }
+
+        let warmup = await ImagePrefetcher.shared.prepareThumbnails(
+          for: messagesToWarm,
+          includeSupportingMedia: false,
+          priority: .visible
+        )
+        initialThumbnailWarmup = warmup
+        let ready = await InlineTinyThumbnailPrewarmer.waitUntilReady(
+          warmup,
+          timeout: InlineTinyThumbnailWarmupPolicy.firstPresentationTimeout
+        )
+
+        guard !Task.isCancelled else {
+          await InlineTinyThumbnailPrewarmer.cancel(warmup)
+          initialThumbnailWarmup = nil
+          return
+        }
+
+        if ready {
+          initialThumbnailWarmup = nil
+        }
+        hasPresentedMessageSnapshot = true
+        safeApplySnapshot(
+          snapshot,
+          animatingDifferences: animatingDifferences,
+          completion: completion
+        )
+        initialThumbnailWarmupTask = nil
+      }
     }
 
     private func safeApplySnapshot(
@@ -2232,6 +2315,12 @@ private extension MessagesCollectionView {
       let startedAt = Date()
       let sectionCount = snapshot.sectionIdentifiers.count
       let itemCount = snapshot.itemIdentifiers.count
+      if snapshot.itemIdentifiers.contains(where: { item in
+        if case .message = item { return true }
+        return false
+      }) {
+        hasPresentedMessageSnapshot = true
+      }
       let span = PerformanceTrace.begin(
         "IOSMessagesSnapshotApply",
         category: .messages,
@@ -2313,30 +2402,62 @@ private extension MessagesCollectionView {
     private func scheduleMediaWarmupForVisibleAndNearby(reason _: String) {
       mediaWarmupTask?.cancel()
       mediaWarmupTask = Task { @MainActor [weak self] in
+        guard let self else { return }
+        let previousWarmups = self.mediaWarmups
+        self.mediaWarmups.removeAll()
+        for warmup in previousWarmups {
+          await InlineTinyThumbnailPrewarmer.cancel(warmup)
+        }
+
         await Task.yield()
-        guard !Task.isCancelled, let self else { return }
+        guard !Task.isCancelled else { return }
 
-        let indexPaths = self.mediaWarmupIndexPathsAroundVisible()
-        guard !indexPaths.isEmpty else { return }
+        let groups = self.mediaWarmupIndexPathsAroundVisible()
+        let visibleMessages = groups.visible.compactMap { self.message(at: $0) }
+        let nearbyMessages = groups.nearby.compactMap { self.message(at: $0) }
+        var newWarmups: [InlineTinyThumbnailWarmup] = []
 
-        let messages = indexPaths.compactMap { self.message(at: $0) }
-        guard !messages.isEmpty else { return }
+        if !visibleMessages.isEmpty {
+          let visibleWarmup = await ImagePrefetcher.shared.prepareThumbnails(
+            for: visibleMessages,
+            priority: .visible
+          )
+          newWarmups.append(visibleWarmup)
+        }
 
-        await ImagePrefetcher.shared.prepareThumbnails(for: messages)
+        if !nearbyMessages.isEmpty, !Task.isCancelled {
+          let nearbyWarmup = await ImagePrefetcher.shared.prepareThumbnails(
+            for: nearbyMessages,
+            priority: .nearby
+          )
+          newWarmups.append(nearbyWarmup)
+        }
+
+        guard !Task.isCancelled else {
+          for warmup in newWarmups {
+            await InlineTinyThumbnailPrewarmer.cancel(warmup)
+          }
+          return
+        }
+        self.mediaWarmups = newWarmups
       }
     }
 
-    private func mediaWarmupIndexPathsAroundVisible() -> [IndexPath] {
-      guard let collectionView = currentCollectionView else { return [] }
-      let visibleIndexPaths = collectionView.indexPathsForVisibleItems
-
-      if visibleIndexPaths.isEmpty {
-        guard let section = listSection(at: 0) else { return [] }
-        let upperBound = min(section.items.count, mediaWarmupLookaheadRows)
-        return (0 ..< upperBound).map { IndexPath(item: $0, section: 0) }
+    private func mediaWarmupIndexPathsAroundVisible() -> (visible: [IndexPath], nearby: [IndexPath]) {
+      guard let collectionView = currentCollectionView else { return ([], []) }
+      let visibleIndexPaths = collectionView.indexPathsForVisibleItems.sorted {
+        if $0.section != $1.section { return $0.section < $1.section }
+        return $0.item < $1.item
       }
 
-      var indexPaths = Set<IndexPath>()
+      if visibleIndexPaths.isEmpty {
+        guard let section = listSection(at: 0) else { return ([], []) }
+        let upperBound = min(section.items.count, mediaWarmupLookaheadRows)
+        return ([], (0 ..< upperBound).map { IndexPath(item: $0, section: 0) })
+      }
+
+      let visibleSet = Set(visibleIndexPaths)
+      var nearbyIndexPaths = Set<IndexPath>()
       let groupedBySection = Dictionary(grouping: visibleIndexPaths, by: \.section)
 
       for (sectionIndex, sectionVisibleIndexPaths) in groupedBySection {
@@ -2346,21 +2467,30 @@ private extension MessagesCollectionView {
               let maxVisibleItem = visibleItems.max()
         else { continue }
 
-        let lowerBound = max(0, minVisibleItem - 2)
+        let nearbyBuffer = min(2, mediaWarmupLookaheadRows)
+        let lowerBound = max(0, minVisibleItem - nearbyBuffer)
         let upperBound = min(section.items.count - 1, maxVisibleItem + mediaWarmupLookaheadRows)
         guard lowerBound <= upperBound else { continue }
 
         for item in lowerBound ... upperBound {
-          indexPaths.insert(IndexPath(item: item, section: sectionIndex))
+          let indexPath = IndexPath(item: item, section: sectionIndex)
+          if !visibleSet.contains(indexPath) {
+            nearbyIndexPaths.insert(indexPath)
+          }
         }
       }
 
-      return indexPaths.sorted {
+      let nearby = nearbyIndexPaths.sorted {
         if $0.section != $1.section {
           return $0.section < $1.section
         }
         return $0.item < $1.item
       }
+      return (visibleIndexPaths, nearby)
+    }
+
+    private var mediaWarmupLookaheadRows: Int {
+      InlineTinyThumbnailWarmupPolicy.adaptiveLookaheadRows()
     }
 
     private func groupBoundaryItems(
