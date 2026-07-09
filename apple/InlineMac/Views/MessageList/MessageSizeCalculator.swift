@@ -17,7 +17,6 @@ class MessageSizeCalculator {
     case minimal
   }
 
-  private let cache = NSCache<NSString, NSValue>()
   private let textHeightCache = NSCache<NSString, NSValue>()
   private let minTextWidthForSingleLine = NSCache<NSString, NSValue>()
   /// cache of last view height for row by id
@@ -191,7 +190,6 @@ class MessageSizeCalculator {
 
   init() {
     // TODO: Use message id or a fast hash for the keys instead of text
-    cache.countLimit = 5_000
     textHeightCache.countLimit = 10_000
     minTextWidthForSingleLine.countLimit = 5_000
     lastHeightForRow.countLimit = 1_000
@@ -643,8 +641,7 @@ class MessageSizeCalculator {
     }
   }
 
-  private func actionRowsSignature(for message: FullMessage) -> String {
-    let rows = actionRows(for: message)
+  private func actionRowsSignature(for rows: [InlineProtocol.MessageActionRow]) -> String {
     guard !rows.isEmpty else { return "0" }
     return rows.map { String($0.actions.count) }.joined(separator: ",")
   }
@@ -664,11 +661,16 @@ class MessageSizeCalculator {
     ReplyThreadSummaryView.height(hasTitle: props.replyThreadTitle?.isEmpty == false)
   }
 
-  private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
+  private func cacheKey(
+    for message: FullMessage,
+    width: CGFloat,
+    props: MessageViewInputProps,
+    actionRows: [InlineProtocol.MessageActionRow]
+  ) -> NSString {
     let entities = message.translationEntities ?? message.message.entities
     // Hash-based approach is faster than string concatenation
     let hashValue =
-      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(entities?.hashValue ?? 0)_\(actionRowsSignature(for: message))"
+      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(entities?.hashValue ?? 0)_\(actionRowsSignature(for: actionRows))"
     return NSString(string: "\(hashValue)")
   }
 
@@ -907,7 +909,12 @@ class MessageSizeCalculator {
     log.trace("availableWidth \(availableWidth) for text \(text)")
     #endif
 
-    let cacheKey_ = cacheKey(for: message, width: availableWidth, props: props)
+    let cacheKey_ = cacheKey(
+      for: message,
+      width: availableWidth,
+      props: props,
+      actionRows: renderableActionRows
+    )
     if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
       #if DEBUG
@@ -971,7 +978,17 @@ class MessageSizeCalculator {
       isSingleLine = false
     }
 
-    // For now, just switch to multiline, later we can fit a few reactions beside the time label
+    let canShareReactionRowWithTime =
+      isSingleLine &&
+      hasReactions &&
+      isTextOnly &&
+      !hasReply &&
+      !hasForwardHeader &&
+      !hasActionRows &&
+      !emojiMessage
+
+    // Reaction messages use the multiline content flow. A later measured-layout pass can still
+    // reclaim the time row when the final reaction line leaves enough trailing space.
     if isSingleLine, hasReactions {
       isSingleLine = false
     }
@@ -1012,6 +1029,7 @@ class MessageSizeCalculator {
     var replyPlan: LayoutPlan?
     var replyThreadSummaryPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
+    var reactionsLastLineWidth: CGFloat = 0
     var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
     var reactionsOutsideBubble = false
@@ -1288,6 +1306,8 @@ class MessageSizeCalculator {
         reactionsPlan!.size.width = max(reactionsPlan!.size.width, lineWidth)
         reactionsPlan!.size.height = CGFloat(reactionsCurrentLine + 1) * (reactionSize.height + reactionsSpacing)
       }
+
+      reactionsLastLineWidth = max(0, currentLineWidth - reactionsSpacing)
     }
 
     // MARK: - Time Size
@@ -1318,6 +1338,22 @@ class MessageSizeCalculator {
         isSingleLine = false
       }
     }
+
+    let reactionTimeSpacing: CGFloat = 6.0
+    var sharedReactionTimeWidth: CGFloat?
+    if
+      canShareReactionRowWithTime,
+      let reactionsPlan,
+      let timePlan,
+      !reactionsOutsideBubble {
+      sharedReactionTimeWidth = reactionsPlan.spacing.left +
+        reactionsLastLineWidth +
+        reactionTimeSpacing +
+        timePlan.size.width +
+        timePlan.spacing.right
+    }
+    let maxBubbleWidth = availableWidth + (textPlan?.spacing.horizontalTotal ?? 0)
+    let timeSharesReactionRow = sharedReactionTimeWidth.map { $0 <= maxBubbleWidth } ?? false
 
     // MARK: - Bubble
 
@@ -1388,7 +1424,7 @@ class MessageSizeCalculator {
       }
     }
     if let timePlan {
-      if !isSingleLine, hasText {
+      if !isSingleLine, hasText, !timeSharesReactionRow {
         bubbleHeight += timePlan.size.height
         bubbleHeight += timePlan.spacing.verticalTotal // ??? probably too much
       }
@@ -1397,6 +1433,9 @@ class MessageSizeCalculator {
       }
       // ensure we have enough width for the time when multiline
       bubbleWidth = max(bubbleWidth, timePlan.size.width + timePlan.spacing.horizontalTotal)
+    }
+    if timeSharesReactionRow, let sharedReactionTimeWidth {
+      bubbleWidth = max(bubbleWidth, sharedReactionTimeWidth)
     }
 
     if hasActionRows {
@@ -1507,7 +1546,6 @@ class MessageSizeCalculator {
     // Fitting width
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
-    cache.setObject(NSValue(size: size), forKey: cacheKey_)
     if let textSize {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
     }
@@ -1647,7 +1685,12 @@ class MessageSizeCalculator {
       )
     }
 
-    let cacheKey_ = cacheKey(for: message, width: textAvailableWidth, props: props)
+    let cacheKey_ = cacheKey(
+      for: message,
+      width: textAvailableWidth,
+      props: props,
+      actionRows: renderableActionRows
+    )
     if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
     }
@@ -2049,7 +2092,6 @@ class MessageSizeCalculator {
     plan.wrapper.size.height += plan.topMostContentTopSpacing
 
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
-    cache.setObject(NSValue(size: size), forKey: cacheKey_)
     if let textSize {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
     }
@@ -2065,7 +2107,6 @@ class MessageSizeCalculator {
   }
 
   public func invalidateCache() {
-    cache.removeAllObjects()
     textHeightCache.removeAllObjects()
     minTextWidthForSingleLine.removeAllObjects()
     lastHeightForRow.removeAllObjects()
