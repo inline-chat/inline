@@ -571,6 +571,49 @@ extension NSTextView {
 // MARK: - ComposeTextEditor Extensions
 
 extension ComposeTextEditor {
+  /// Measures laid-out text height, including soft wraps and the extra line fragment.
+  static func measuredContentHeight(for textView: NSTextView) -> CGFloat {
+    if let textLayoutManager = textView.textLayoutManager {
+      let documentEnd = textLayoutManager.documentRange.endLocation
+      var fragmentMaxY: CGFloat = 0
+      textLayoutManager.enumerateTextLayoutFragments(
+        from: documentEnd,
+        options: [.reverse, .ensuresLayout, .ensuresExtraLineFragment]
+      ) { fragment in
+        fragmentMaxY = max(fragmentMaxY, fragment.layoutFragmentFrame.maxY)
+        return false
+      }
+
+      let segmentRange = NSTextRange(location: documentEnd)
+      textLayoutManager.ensureLayout(for: segmentRange)
+      var segmentMaxY: CGFloat = 0
+      textLayoutManager.enumerateTextSegments(
+        in: segmentRange,
+        type: .standard,
+        options: .middleFragmentsExcluded
+      ) { _, rect, _, _ in
+        segmentMaxY = max(segmentMaxY, rect.maxY)
+        return true
+      }
+
+      let measuredHeight = max(segmentMaxY, fragmentMaxY)
+      if measuredHeight > 0 {
+        return measuredHeight
+      }
+
+      let usageHeight = textLayoutManager.usageBoundsForTextContainer.height
+      return usageHeight.isFinite ? usageHeight : 0
+    }
+
+    if let layoutManager = textView.layoutManager,
+       let textContainer = textView.textContainer {
+      layoutManager.ensureLayout(for: textContainer)
+      return layoutManager.usedRect(for: textContainer).height
+    }
+
+    return 0
+  }
+
   /// Create attributed string using this editor's font
   func createAttributedString(_ text: String) -> NSAttributedString {
     NSAttributedString(string: text, attributes: [

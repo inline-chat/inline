@@ -2312,38 +2312,7 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   private func contentHeight(for textView: NSTextView) -> CGFloat {
-    if let layoutManager = textView.layoutManager,
-       let textContainer = textView.textContainer
-    {
-      layoutManager.ensureLayout(for: textContainer)
-      return layoutManager.usedRect(for: textContainer).height
-    }
-
-    guard let textLayoutManager = textView.textLayoutManager else { return 0 }
-
-    let documentEnd = textLayoutManager.documentRange.endLocation
-    var fragmentMaxY: CGFloat = 0
-    textLayoutManager.enumerateTextLayoutFragments(
-      from: documentEnd,
-      options: [.reverse, .ensuresLayout, .ensuresExtraLineFragment]
-    ) { fragment in
-      fragmentMaxY = max(fragmentMaxY, fragment.layoutFragmentFrame.maxY)
-      return false
-    }
-
-    let segmentRange = NSTextRange(location: documentEnd)
-    textLayoutManager.ensureLayout(for: segmentRange)
-    var segmentMaxY: CGFloat = 0
-    textLayoutManager.enumerateTextSegments(
-      in: segmentRange,
-      type: .standard,
-      options: .middleFragmentsExcluded
-    ) { _, rect, _, _ in
-      segmentMaxY = max(segmentMaxY, rect.maxY)
-      return true
-    }
-
-    return max(segmentMaxY, fragmentMaxY)
+    ComposeTextEditor.measuredContentHeight(for: textView)
   }
 
   func textViewDidChangeSelection(_ notification: Notification) {

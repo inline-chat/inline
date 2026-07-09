@@ -178,6 +178,7 @@ class LegacyComposeAppKit: NSView {
   // ---
   private var textViewContentHeight: CGFloat = 0.0
   private var textViewHeight: CGFloat = 0.0
+  private var lastMeasuredTextLayoutWidth: CGFloat = 0.0
 
   // Features
   private var feature_animateHeightChanges = false // for now until fixing how to update list view smoothly
@@ -424,15 +425,18 @@ class LegacyComposeAppKit: NSView {
   /// This method is called from ChatViewAppKit's viewDidLayout
   /// Load draft, set initial height, etc here.
   func didLayout() {
-    guard !initializedDraft else { return }
-    let loaded = loadDraft()
-    if !loaded {
-      updateHeight(animate: false)
+    if !initializedDraft {
+      let loaded = loadDraft()
+      if !loaded {
+        updateHeight(animate: false)
 
-      // If no draft is loaded, show placeholder
-      textEditor.showPlaceholder(true)
+        // If no draft is loaded, show placeholder
+        textEditor.showPlaceholder(true)
+      }
+      initializedDraft = true
     }
-    initializedDraft = true
+
+    updateHeightForTextLayoutWidthChange()
   }
 
   private func setUpConstraints() {
@@ -1171,6 +1175,25 @@ class LegacyComposeAppKit: NSView {
     ))
 
     return textViewHeight
+  }
+
+  private func updateHeightForTextLayoutWidthChange() {
+    guard !currentVoiceActive else { return }
+
+    var textLayoutWidth = textEditor.textView.bounds.width
+    if textLayoutWidth <= 1 {
+      textEditor.layoutSubtreeIfNeeded()
+      textLayoutWidth = textEditor.textView.bounds.width
+    }
+    guard textLayoutWidth > 1 else { return }
+    guard abs(lastMeasuredTextLayoutWidth - textLayoutWidth) >= 0.5 else { return }
+
+    lastMeasuredTextLayoutWidth = textLayoutWidth
+    if textEditor.isAttributedTextEmpty {
+      return
+    }
+
+    updateHeightIfNeeded(for: textEditor.textView, animate: false)
   }
 
   // Get compose wrapper height
@@ -2131,8 +2154,9 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func updateHeightIfNeeded(for textView: NSTextView, animate: Bool = false) {
     let contentHeight = contentHeight(for: textView)
 
-    if abs(textViewContentHeight - contentHeight) < 8.0 {
-      // minimal change to height ignore
+    if abs(textViewContentHeight - contentHeight) < 0.5 {
+      // Normal typing within the same measured visual row does not change
+      // compose height.
       log.trace("minimal change to height ignore")
       return
     }
@@ -2145,16 +2169,7 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   private func contentHeight(for textView: NSTextView) -> CGFloat {
-    if let layoutManager = textView.layoutManager,
-       let textContainer = textView.textContainer
-    {
-      layoutManager.ensureLayout(for: textContainer)
-      return layoutManager.usedRect(for: textContainer).height
-    }
-
-    guard let textLayoutManager = textView.textLayoutManager else { return 0 }
-    textLayoutManager.textViewportLayoutController.layoutViewport()
-    return textLayoutManager.usageBoundsForTextContainer.height
+    ComposeTextEditor.measuredContentHeight(for: textView)
   }
 
   func textViewDidChangeSelection(_ notification: Notification) {
