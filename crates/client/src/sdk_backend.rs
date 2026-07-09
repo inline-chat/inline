@@ -499,18 +499,18 @@ impl ClientBackend for SdkBackend {
                     .call(history_input_for_request(&request, fetch_limit))
                     .await
                     .map_err(realtime_error_to_backend)?;
-                let mut records = result
+                let records = result
                     .messages
                     .into_iter()
                     .map(|message| {
                         message_record_from_proto_message(message, Some(request.chat_id), None)
                     })
                     .collect::<Vec<_>>();
-                records.sort_by_key(|message| (message.timestamp, message.message_id.get()));
-                let has_more = records.len() > limit as usize;
-                if has_more {
-                    records.truncate(limit as usize);
-                }
+                let (records, has_more) = normalize_live_history_records(
+                    records,
+                    limit,
+                    request.after_message_id.is_some(),
+                );
                 for message in &records {
                     backend
                         .store
@@ -1741,6 +1741,24 @@ fn history_input_for_request(
     }
 }
 
+fn normalize_live_history_records(
+    mut records: Vec<MessageRecord>,
+    limit: u32,
+    newer_page: bool,
+) -> (Vec<MessageRecord>, bool) {
+    records.sort_by_key(|message| (message.timestamp, message.message_id.get()));
+    let limit = limit.max(1) as usize;
+    let has_more = records.len() > limit;
+    if has_more {
+        if newer_page {
+            records.truncate(limit);
+        } else {
+            records = records.split_off(records.len() - limit);
+        }
+    }
+    (records, has_more)
+}
+
 fn chat_id_from_peer(peer: &proto::Peer) -> Option<InlineId> {
     match &peer.r#type {
         Some(proto::peer::Type::Chat(chat)) => Some(InlineId::new(chat.chat_id)),
@@ -2306,6 +2324,21 @@ mod tests {
         .with_account_namespace("team")
     }
 
+    fn test_message_record(message_id: i64) -> MessageRecord {
+        MessageRecord {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(message_id),
+            sender_id: InlineId::new(2),
+            timestamp: message_id,
+            is_outgoing: false,
+            content: MessageContent::Text {
+                text: format!("message {message_id}"),
+            },
+            reply_to_message_id: None,
+            transaction: None,
+        }
+    }
+
     #[test]
     fn sdk_backend_debug_redacts_realtime_url_credentials() {
         let backend = SdkBackend::builder()
@@ -2787,6 +2820,43 @@ mod tests {
         );
         assert_eq!(input.offset_id, None);
         assert_eq!(input.limit, Some(21));
+    }
+
+    #[test]
+    fn normalize_live_history_latest_keeps_newest_messages() {
+        let records = (1..=4).rev().map(test_message_record).collect::<Vec<_>>();
+
+        let (records, has_more) = normalize_live_history_records(records, 3, false);
+
+        assert!(has_more);
+        assert_eq!(
+            records
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>(),
+            vec![InlineId::new(2), InlineId::new(3), InlineId::new(4)]
+        );
+    }
+
+    #[test]
+    fn normalize_live_history_newer_keeps_oldest_checkpoint_window() {
+        let records = vec![
+            test_message_record(8),
+            test_message_record(7),
+            test_message_record(6),
+            test_message_record(5),
+        ];
+
+        let (records, has_more) = normalize_live_history_records(records, 3, true);
+
+        assert!(has_more);
+        assert_eq!(
+            records
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>(),
+            vec![InlineId::new(5), InlineId::new(6), InlineId::new(7)]
+        );
     }
 
     #[test]
