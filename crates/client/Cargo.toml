@@ -17,7 +17,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 futures-util.workspace = true
-inline-sdk = { version = "0.5.3", path = "../sdk" }
+inline-sdk = { version = "0.5.4", path = "../sdk" }
 log.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
