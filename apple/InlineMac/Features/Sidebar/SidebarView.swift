@@ -1291,7 +1291,7 @@ private struct SidebarTopBarHoverBackground: View {
 
 private enum SidebarTopBarMetrics {
   static let buttonHeight: CGFloat = 30
-  static let leadingPadding = Theme.sidebarItemOuterSpacing + 3
+  static let leadingPadding = Theme.sidebarItemInnerSpacing + 3
 }
 
 private struct SidebarUnreadBelowState: Equatable {
@@ -1319,7 +1319,6 @@ private struct SidebarInboxActionRow: View {
   @State private var isHovered = false
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
-  private static let innerPaddingHorizontal = 6.0
   private static let compactIconSize = 22.0
   private static let largeIconSize = 32.0
 
@@ -1365,7 +1364,8 @@ private struct SidebarInboxActionRow: View {
         }
       }
       .frame(height: rowHeight)
-      .padding(.horizontal, Self.innerPaddingHorizontal)
+      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(.trailing, Theme.sidebarItemOuterSpacing)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
       .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
@@ -1650,7 +1650,6 @@ private struct SidebarNewThreadRow: View {
   @State private var isHovered = false
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
-  private static let innerPaddingHorizontal = 6.0
   private static let compactIconSize = 22.0
   private static let largeIconSize = 32.0
 
@@ -1686,7 +1685,8 @@ private struct SidebarNewThreadRow: View {
       }
       .foregroundStyle(.secondary)
       .frame(height: rowHeight)
-      .padding(.horizontal, Self.innerPaddingHorizontal)
+      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(.trailing, Theme.sidebarItemOuterSpacing)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
       .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)

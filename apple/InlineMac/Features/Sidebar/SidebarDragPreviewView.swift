@@ -13,7 +13,6 @@ struct SidebarDragPreviewView: View {
   private static let replyThreadTitleFont: Font = .system(size: 12, weight: .regular)
   private static let parentTitleFont: Font = .system(size: 10, weight: .regular)
   private static let subtitleFont: Font = .system(size: 11)
-  private static let innerPaddingHorizontal = 6.0
   private static let showsParentChatTitle = false
 
   private var isCompact: Bool {
@@ -34,32 +33,46 @@ struct SidebarDragPreviewView: View {
   }
 
   var body: some View {
-    HStack(spacing: 0) {
-      avatar
-        .frame(width: iconSize, height: iconSize)
-        .padding(.trailing, 8)
+    ZStack(alignment: .leading) {
+      if unreadBadgeStyle == .dot {
+        unreadBadge
+          .padding(.leading, Theme.sidebarItemUnreadDotLeadingSpacing)
+      }
 
-      VStack(alignment: .leading, spacing: 2) {
-        titleBlock
+      HStack(spacing: 0) {
+        avatar
+          .frame(width: iconSize, height: iconSize)
+          .padding(.trailing, 8)
 
-        if showsPreview {
-          HStack(spacing: 5) {
-            Text(item.preview)
-              .font(Self.subtitleFont)
-              .foregroundStyle(.tertiary)
-              .lineLimit(1)
-              .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 2) {
+          titleBlock
 
-            if item.unread {
-              unreadBadge
+          if showsPreview {
+            HStack(spacing: 5) {
+              Text(item.preview)
+                .font(Self.subtitleFont)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+              if item.unread, unreadBadgeStyle == .numbered {
+                unreadBadge
+                  .transition(.scale.combined(with: .opacity))
+              }
             }
           }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(.trailing, Theme.sidebarItemOuterSpacing)
     }
-    .padding(.horizontal, Self.innerPaddingHorizontal)
     .frame(width: rowSize.width, height: rowSize.height)
+    .animation(.smoothSnappy, value: item.unread)
+    .animation(.smoothSnappy, value: item.unreadCount)
+    .animation(.smoothSnappy, value: item.unreadMark)
+    .animation(.smoothSnappy, value: item.prominentUnreadDot)
+    .animation(.smoothSnappy, value: unreadBadgeStyle)
     .background {
       RoundedRectangle(cornerRadius: Theme.sidebarItemRadius, style: .continuous)
         .fill(backgroundColor)
@@ -86,8 +99,9 @@ struct SidebarDragPreviewView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
 
-      if item.unread && showsPreview == false {
+      if item.unread, showsPreview == false, unreadBadgeStyle == .numbered {
         unreadBadge
+          .transition(.scale.combined(with: .opacity))
       }
     }
   }
@@ -115,10 +129,11 @@ struct SidebarDragPreviewView: View {
 
   private var unreadBadge: some View {
     UnreadBadge(
-      unreadCount: item.unreadCount,
-      hasUnreadMark: item.unreadMark,
+      unreadCount: item.unread ? item.unreadCount : 0,
+      hasUnreadMark: item.unread && item.unreadMark,
       prominent: item.prominentUnreadDot,
-      style: unreadBadgeStyle
+      style: unreadBadgeStyle,
+      dotSize: Theme.sidebarItemUnreadDotSize
     )
   }
 

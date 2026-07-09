@@ -90,6 +90,10 @@ public enum Theme {
   public static let sidebarItemInnerSpacing: CGFloat =
     11.0 // from inner content of item to edge of content active/hover style
   public static let sidebarItemOuterSpacing: CGFloat = Theme.sidebarContentSideSpacing - Theme.sidebarItemInnerSpacing
+  public static let sidebarItemUnreadDotSize: CGFloat = 5.0
+  /// Centers the dot between the row's leading edge and the avatar.
+  public static let sidebarItemUnreadDotLeadingSpacing: CGFloat =
+    (Theme.sidebarItemInnerSpacing - Theme.sidebarItemUnreadDotSize) / 2
   public static let sidebarNativeDefaultEdgeInsets: CGFloat = 16.0
 
   // MARK: - Message View

@@ -14,17 +14,20 @@ public struct UnreadBadge: View {
   private let hasUnreadMark: Bool
   private let prominent: Bool
   private let style: UnreadBadgeStyle
+  private let dotSize: CGFloat
 
   public init(
     unreadCount: Int,
     hasUnreadMark: Bool = false,
     prominent: Bool,
-    style: UnreadBadgeStyle
+    style: UnreadBadgeStyle,
+    dotSize: CGFloat = 6
   ) {
     self.unreadCount = max(unreadCount, 0)
     self.hasUnreadMark = hasUnreadMark
     self.prominent = prominent
     self.style = style
+    self.dotSize = max(dotSize, 0)
   }
 
   public var body: some View {
@@ -58,7 +61,7 @@ public struct UnreadBadge: View {
   private var badge: some View {
     switch badgeVariant {
     case .dot:
-      UnreadDotBadge(prominent: prominent)
+      UnreadDotBadge(prominent: prominent, size: dotSize)
     case .numbered:
       UnreadCountBadge(count: unreadCount, prominent: prominent)
     }
@@ -85,6 +88,12 @@ public struct UnreadDotBadge: View {
   public var body: some View {
     Circle()
       .fill(prominent ? Color.accentColor : mutedColor)
+      .overlay {
+        if prominent == false {
+          Circle()
+            .fill(Color.primary.opacity(Self.mutedEmphasisOpacity))
+        }
+      }
       .frame(width: size, height: size)
       .accessibilityHidden(true)
   }
@@ -92,6 +101,8 @@ public struct UnreadDotBadge: View {
   private var mutedColor: Color {
     .secondary
   }
+
+  private static let mutedEmphasisOpacity = 0.1
 }
 
 public struct UnreadCountBadge: View {

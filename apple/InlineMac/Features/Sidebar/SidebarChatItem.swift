@@ -34,7 +34,6 @@ struct SidebarChatItemView: Equatable, View {
   private static let replyThreadTitleFont: Font = .system(size: 12, weight: .regular)
   private static let parentTitleFont: Font = .system(size: 10, weight: .regular)
   private static let subtitleFont: Font = .system(size: 11)
-  private static let innerPaddingHorizontal = 6.0
   private static let outerPaddingVertical = 0.0
   private static let trailingAccessoryMinWidth = 14.0
   private static let compactIconSize = 22.0
@@ -92,6 +91,8 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var titleAccessory: SidebarChatItemAccessory? {
+    guard unreadBadgeStyle == .numbered else { return nil }
+
     if item.unread, showsPreview {
       return nil
     }
@@ -104,6 +105,7 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var previewAccessory: SidebarChatItemAccessory? {
+    guard unreadBadgeStyle == .numbered else { return nil }
     guard item.unread, showsPreview else { return nil }
     return .unread
   }
@@ -125,29 +127,38 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   var body: some View {
-    HStack(spacing: 0) {
-      avatar
-        .frame(width: iconSize, height: iconSize)
-        .padding(.trailing, 8)
+    ZStack(alignment: .leading) {
+      if unreadBadgeStyle == .dot {
+        unreadBadge
+          .padding(.leading, Theme.sidebarItemUnreadDotLeadingSpacing)
+      }
 
-      VStack(alignment: .leading, spacing: 2) {
-        titleBlock
+      HStack(spacing: 0) {
+        avatar
+          .frame(width: iconSize, height: iconSize)
+          .padding(.trailing, 8)
 
-        if showsPreview {
-          HStack(spacing: 5) {
-            Text(item.preview)
-              .font(Self.subtitleFont)
-              .foregroundStyle(.tertiary)
-              .lineLimit(1)
-              .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 2) {
+          titleBlock
 
-            if let previewAccessory {
-              accessoryView(previewAccessory)
+          if showsPreview {
+            HStack(spacing: 5) {
+              Text(item.preview)
+                .font(Self.subtitleFont)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+              if let previewAccessory {
+                accessoryView(previewAccessory)
+              }
             }
           }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(.trailing, Theme.sidebarItemOuterSpacing)
     }
     .frame(height: rowHeight)
     .animation(.smoothSnappy, value: size)
@@ -157,8 +168,6 @@ struct SidebarChatItemView: Equatable, View {
     .animation(.smoothSnappy, value: item.prominentUnreadDot)
     .animation(.smoothSnappy, value: unreadBadgeStyle)
     .animation(.smoothSnappy, value: item.pinned)
-    // Inner paddings
-    .padding(.horizontal, Self.innerPaddingHorizontal)
     .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
     .background(background)
     // Outer paddings
@@ -335,16 +344,21 @@ struct SidebarChatItemView: Equatable, View {
     Group {
       switch accessory {
       case .unread:
-        UnreadBadge(
-          unreadCount: item.unreadCount,
-          hasUnreadMark: item.unreadMark,
-          prominent: item.prominentUnreadDot,
-          style: unreadBadgeStyle
-        )
+        unreadBadge
       }
     }
     .frame(minWidth: Self.trailingAccessoryMinWidth, alignment: .center)
     .transition(.scale.combined(with: .opacity))
+  }
+
+  private var unreadBadge: some View {
+    UnreadBadge(
+      unreadCount: item.unread ? item.unreadCount : 0,
+      hasUnreadMark: item.unread && item.unreadMark,
+      prominent: item.prominentUnreadDot,
+      style: unreadBadgeStyle,
+      dotSize: Theme.sidebarItemUnreadDotSize
+    )
   }
 
   @ViewBuilder
