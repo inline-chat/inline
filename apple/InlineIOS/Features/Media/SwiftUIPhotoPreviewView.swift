@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 public struct PhotoItem: Identifiable {
   public let id = UUID()
@@ -600,19 +601,21 @@ struct SwiftUIPhotoPreviewView: View {
       applicationActivities: nil
     )
 
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let window = windowScene.windows.first,
-       let rootViewController = window.rootViewController
-    {
-      // Handle iPad popover presentation
-      if let popoverController = activityViewController.popoverPresentationController {
-        popoverController.sourceView = window
-        popoverController.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
-        popoverController.permittedArrowDirections = []
-      }
+    guard let presenter = activeTopViewController() else { return }
 
-      rootViewController.present(activityViewController, animated: true)
+    // Handle iPad popover presentation
+    if let popoverController = activityViewController.popoverPresentationController {
+      popoverController.sourceView = presenter.view
+      popoverController.sourceRect = CGRect(
+        x: presenter.view.bounds.midX,
+        y: presenter.view.bounds.midY,
+        width: 1,
+        height: 1
+      )
+      popoverController.permittedArrowDirections = []
     }
+
+    presenter.present(activityViewController, animated: true)
 
     // Optional callback
     onShare?(currentPhoto.image)

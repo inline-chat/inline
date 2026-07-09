@@ -82,18 +82,18 @@ extension DocumentRow {
 
   func openFile() {
     Log.shared.debug("📄 openFile() called for state: \(documentState)")
-    
+
     guard documentState == .locallyAvailable else {
       Log.shared.error("📄 Cannot open document: Not locally available")
       return
     }
-    
+
     guard let fileURL = documentURL else {
       Log.shared.error("📄 Cannot open document: No valid file URL")
       documentState = .needsDownload
       return
     }
-    
+
     // Validate file is readable
     guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
       Log.shared.error("📄 File is not readable at path: \(fileURL.path)")
@@ -101,9 +101,9 @@ extension DocumentRow {
       documentState = .needsDownload
       return
     }
-    
+
     Log.shared.debug("📄 Opening file: \(fileURL.lastPathComponent)")
-    
+
     if QLPreviewController.canPreview(fileURL as QLPreviewItem) {
       Log.shared.debug("📄 Using QuickLook for preview")
       showingQuickLook = true
@@ -114,12 +114,9 @@ extension DocumentRow {
   }
 
   private func showShareMenu(for url: URL) {
-    // Find the root view controller to present from
-    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-          let window = windowScene.windows.first,
-          let rootViewController = window.rootViewController
+    guard let presenter = activeTopViewController()
     else {
-      Log.shared.error("📄 Cannot find root view controller for share menu")
+      Log.shared.error("📄 Cannot find active view controller for share menu")
       return
     }
 
@@ -131,8 +128,8 @@ extension DocumentRow {
     }
 
     // Present share menu
-    let rect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
-    if !controller.presentOptionsMenu(from: rect, in: rootViewController.view, animated: true) {
+    let rect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+    if !controller.presentOptionsMenu(from: rect, in: presenter.view, animated: true) {
       Log.shared.error("📄 Failed to present share menu")
     }
   }
@@ -144,25 +141,23 @@ extension DocumentRow {
       return
     }
 
-    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-          let window = windowScene.windows.first,
-          let rootViewController = window.rootViewController
+    guard let presenter = activeTopViewController()
     else {
-      Log.shared.error("📄 Cannot find root view controller for share sheet")
+      Log.shared.error("📄 Cannot find active view controller for share sheet")
       return
     }
 
     let activityViewController = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
     if let popoverController = activityViewController.popoverPresentationController {
-      popoverController.sourceView = rootViewController.view
+      popoverController.sourceView = presenter.view
       popoverController.sourceRect = CGRect(
-        x: rootViewController.view.bounds.midX,
-        y: rootViewController.view.bounds.midY,
+        x: presenter.view.bounds.midX,
+        y: presenter.view.bounds.midY,
         width: 1,
         height: 1
       )
     }
-    rootViewController.present(activityViewController, animated: true)
+    presenter.present(activityViewController, animated: true)
   }
 
   func showDocumentError(_ message: String) {
