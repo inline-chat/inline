@@ -2823,6 +2823,24 @@ mod tests {
     }
 
     #[test]
+    fn history_input_for_before_message_id_uses_offset_id() {
+        let input = history_input_for_request(
+            &HistoryRequest {
+                chat_id: InlineId::new(7),
+                limit: Some(20),
+                before_message_id: Some(InlineId::new(30)),
+                after_message_id: None,
+            },
+            21,
+        );
+
+        assert_eq!(input.offset_id, Some(30));
+        assert_eq!(input.mode, None);
+        assert_eq!(input.after_id, None);
+        assert_eq!(input.limit, Some(21));
+    }
+
+    #[test]
     fn normalize_live_history_latest_keeps_newest_messages() {
         let records = (1..=4).rev().map(test_message_record).collect::<Vec<_>>();
 
@@ -2856,6 +2874,26 @@ mod tests {
                 .map(|message| message.message_id)
                 .collect::<Vec<_>>(),
             vec![InlineId::new(5), InlineId::new(6), InlineId::new(7)]
+        );
+    }
+
+    #[test]
+    fn normalize_live_history_older_keeps_newest_messages_below_cursor() {
+        let records = vec![
+            test_message_record(3),
+            test_message_record(2),
+            test_message_record(1),
+        ];
+
+        let (records, has_more) = normalize_live_history_records(records, 2, false);
+
+        assert!(has_more);
+        assert_eq!(
+            records
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>(),
+            vec![InlineId::new(2), InlineId::new(3)]
         );
     }
 

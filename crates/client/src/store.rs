@@ -1248,6 +1248,21 @@ mod tests {
         }
     }
 
+    fn test_message(message_id: i64) -> MessageRecord {
+        MessageRecord {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(message_id),
+            sender_id: InlineId::new(2),
+            timestamp: message_id,
+            is_outgoing: false,
+            content: MessageContent::Text {
+                text: format!("message {message_id}"),
+            },
+            reply_to_message_id: None,
+            transaction: None,
+        }
+    }
+
     #[tokio::test]
     async fn stored_session_debug_redacts_token() {
         let rendered = format!("{:?}", session());
@@ -1356,18 +1371,7 @@ mod tests {
         let store = InMemoryStore::new();
         for message_id in 1..=3 {
             store
-                .record_message(MessageRecord {
-                    chat_id: InlineId::new(7),
-                    message_id: InlineId::new(message_id),
-                    sender_id: InlineId::new(2),
-                    timestamp: message_id,
-                    is_outgoing: false,
-                    content: MessageContent::Text {
-                        text: format!("message {message_id}"),
-                    },
-                    reply_to_message_id: None,
-                    transaction: None,
-                })
+                .record_message(test_message(message_id))
                 .await
                 .unwrap();
         }
@@ -1385,6 +1389,37 @@ mod tests {
         assert_eq!(history.messages.len(), 1);
         assert_eq!(history.messages[0].message_id, InlineId::new(2));
         assert!(history.has_more);
+    }
+
+    #[tokio::test]
+    async fn in_memory_store_latest_history_keeps_newest_window() {
+        let store = InMemoryStore::new();
+        for message_id in 1..=4 {
+            store
+                .record_message(test_message(message_id))
+                .await
+                .unwrap();
+        }
+
+        let history = store
+            .history(HistoryRequest {
+                chat_id: InlineId::new(7),
+                limit: Some(2),
+                before_message_id: None,
+                after_message_id: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(history.has_more);
+        assert_eq!(
+            history
+                .messages
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>(),
+            vec![InlineId::new(3), InlineId::new(4)]
+        );
     }
 
     #[tokio::test]
@@ -1558,6 +1593,74 @@ mod tests {
             history.messages[0].content,
             MessageContent::Text { ref text } if text == "updated"
         ));
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_history_windows_match_client_cursors() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        for message_id in 1..=4 {
+            store
+                .record_message(test_message(message_id))
+                .await
+                .unwrap();
+        }
+
+        let latest = store
+            .history(HistoryRequest {
+                chat_id: InlineId::new(7),
+                limit: Some(2),
+                before_message_id: None,
+                after_message_id: None,
+            })
+            .await
+            .unwrap();
+        assert!(latest.has_more);
+        assert_eq!(
+            latest
+                .messages
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>(),
+            vec![InlineId::new(3), InlineId::new(4)]
+        );
+
+        let newer = store
+            .history(HistoryRequest {
+                chat_id: InlineId::new(7),
+                limit: Some(2),
+                before_message_id: None,
+                after_message_id: Some(InlineId::new(1)),
+            })
+            .await
+            .unwrap();
+        assert!(newer.has_more);
+        assert_eq!(
+            newer
+                .messages
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>(),
+            vec![InlineId::new(2), InlineId::new(3)]
+        );
+
+        let older = store
+            .history(HistoryRequest {
+                chat_id: InlineId::new(7),
+                limit: Some(2),
+                before_message_id: Some(InlineId::new(4)),
+                after_message_id: None,
+            })
+            .await
+            .unwrap();
+        assert!(older.has_more);
+        assert_eq!(
+            older
+                .messages
+                .iter()
+                .map(|message| message.message_id)
+                .collect::<Vec<_>>(),
+            vec![InlineId::new(2), InlineId::new(3)]
+        );
     }
 
     fn sqlite_temp_path(label: &str) -> std::path::PathBuf {

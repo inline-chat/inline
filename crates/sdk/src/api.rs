@@ -1366,11 +1366,23 @@ fn peer_id_object(peer: PeerId) -> serde_json::Map<String, serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+    use std::future::Future;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[derive(Debug, Deserialize, PartialEq)]
     #[serde(rename_all = "camelCase")]
     struct TestResult {
         value: String,
+    }
+
+    #[derive(Debug)]
+    struct CapturedRequest {
+        method: String,
+        path: String,
+        headers: BTreeMap<String, String>,
+        body: Value,
     }
 
     #[test]
@@ -1497,6 +1509,69 @@ mod tests {
             api_url_path_for_log("https://api.inline.chat/v1/getMe?token=secret#frag"),
             "/v1/getMe"
         );
+    }
+
+    #[tokio::test]
+    async fn send_email_code_posts_json_body_with_auth_metadata() {
+        let request = capture_json_request(
+            r#"{"ok":true,"result":{"existingUser":true,"needsInviteCode":false,"challengeToken":"challenge-1"}}"#,
+            |client| async move {
+                client
+                    .send_email_code(
+                        "amy@example.com",
+                        &AuthMetadata::new(
+                            "device-1",
+                            ClientIdentity::new("bridge-agent", "1.0.0"),
+                        )
+                        .with_device_name("umbrel"),
+                    )
+                    .await
+            },
+        )
+        .await;
+
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/v1/sendEmailCode");
+        assert!(
+            request
+                .headers
+                .get("content-type")
+                .is_some_and(|header| header.starts_with("application/json"))
+        );
+        assert_eq!(request.body.get("email"), Some(&json!("amy@example.com")));
+        assert_eq!(request.body.get("deviceId"), Some(&json!("device-1")));
+        assert_eq!(request.body.get("deviceName"), Some(&json!("umbrel")));
+        assert_eq!(request.body.get("clientType"), Some(&json!("api")));
+        assert_eq!(request.body.get("clientVersion"), Some(&json!("1.0.0")));
+    }
+
+    #[tokio::test]
+    async fn read_messages_posts_bearer_json_body() {
+        let request = capture_json_request(r#"{"ok":true,"result":{}}"#, |client| async move {
+            client
+                .read_messages(
+                    "secret-token",
+                    ReadMessagesInput::new(PeerId::user(42)).with_max_id(99),
+                )
+                .await
+        })
+        .await;
+
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/v1/readMessages");
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer secret-token")
+        );
+        assert!(
+            request
+                .headers
+                .get("content-type")
+                .is_some_and(|header| header.starts_with("application/json"))
+        );
+        assert_eq!(request.body.get("peerUserId"), Some(&json!(42)));
+        assert_eq!(request.body.get("maxId"), Some(&json!(99)));
+        assert!(request.body.get("peerThreadId").is_none());
     }
 
     #[test]
@@ -1877,5 +1952,89 @@ mod tests {
         );
 
         assert_eq!(payload.get("clientType"), Some(&json!("web")));
+    }
+
+    async fn capture_json_request<F, Fut, T>(
+        response_body: &'static str,
+        exercise: F,
+    ) -> CapturedRequest
+    where
+        F: FnOnce(ApiClient) -> Fut,
+        Fut: Future<Output = Result<T, ApiError>>,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0_u8; 1024];
+                let read = stream.read(&mut chunk).await.unwrap();
+                assert!(read != 0, "client closed before completing request");
+                request.extend_from_slice(&chunk[..read]);
+                if let Some(header_end) = http_header_end(&request) {
+                    let header_text = String::from_utf8_lossy(&request[..header_end]);
+                    let content_length = http_content_length(&header_text);
+                    if request.len() >= header_end + content_length {
+                        break;
+                    }
+                }
+            }
+
+            let captured = parse_captured_request(&request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            captured
+        });
+
+        let client = ApiClient::try_new(format!("http://{addr}/v1")).unwrap();
+        exercise(client).await.unwrap();
+        server.await.unwrap()
+    }
+
+    fn http_header_end(request: &[u8]) -> Option<usize> {
+        request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|position| position + 4)
+    }
+
+    fn http_content_length(headers: &str) -> usize {
+        headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().unwrap())
+            })
+            .unwrap_or(0)
+    }
+
+    fn parse_captured_request(request: &[u8]) -> CapturedRequest {
+        let header_end = http_header_end(request).unwrap();
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let mut lines = headers.lines();
+        let request_line = lines.next().unwrap();
+        let mut request_parts = request_line.split_whitespace();
+        let method = request_parts.next().unwrap().to_owned();
+        let path = request_parts.next().unwrap().to_owned();
+        let headers = lines
+            .filter_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                Some((name.to_ascii_lowercase(), value.trim().to_owned()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let body = serde_json::from_slice(&request[header_end..]).unwrap();
+
+        CapturedRequest {
+            method,
+            path,
+            headers,
+            body,
+        }
     }
 }
