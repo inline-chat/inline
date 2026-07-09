@@ -22,7 +22,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     self.appBridge = appBridge
     self.dependencies = dependencies.with(appBridge: appBridge)
     let window = NSWindow(
-      contentRect: NSRect(origin: .zero, size: CGSize(width: 800, height: 600)),
+      contentRect: NSRect(origin: .zero, size: CGSize(width: 840, height: 640)),
       styleMask: [
         .titled,
         .closable,
@@ -50,9 +50,9 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     window.title = "Settings"
     window.titleVisibility = .visible
     window.titlebarAppearsTransparent = false
-    window.toolbarStyle = .automatic
+    window.toolbarStyle = .unified
     window.setFrameAutosaveName("SettingsWindow")
-    window.minSize = NSSize(width: 600, height: 400)
+    window.minSize = NSSize(width: 780, height: 520)
     window.center()
     window.delegate = self
 

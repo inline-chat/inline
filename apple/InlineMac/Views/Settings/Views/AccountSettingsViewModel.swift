@@ -12,8 +12,10 @@ final class AccountSettingsViewModel: ObservableObject {
   @Published private(set) var isCheckingUsername = false
   @Published private(set) var isSavingUsername = false
   @Published private(set) var revokingSessionID: Int64?
-  @Published var usernameState: UsernameState = .idle
-  @Published var errorState: ErrorState?
+  @Published private(set) var usernameState: UsernameState = .idle
+  @Published private(set) var errorState: ErrorState?
+
+  private var usernameCheckGeneration = 0
 
   enum UsernameState: Equatable {
     case idle
@@ -27,31 +29,31 @@ final class AccountSettingsViewModel: ObservableObject {
 
     var message: String? {
       switch self {
-        case .idle:
-          nil
-        case .checking:
-          "Checking..."
-        case .available:
-          "Username is available."
-        case .unavailable:
-          "Username is already taken."
-        case .reserved:
-          "Username is reserved."
-        case .unchanged:
-          "This is your current username."
-        case .willClear:
-          "Username will be removed."
-        case let .invalid(message):
-          message
+      case .idle:
+        nil
+      case .checking:
+        "Checking..."
+      case .available:
+        "Username is available."
+      case .unavailable:
+        "Username is already taken."
+      case .reserved:
+        "Username is reserved."
+      case .unchanged:
+        "This is your current username."
+      case .willClear:
+        "Username will be removed."
+      case let .invalid(message):
+        message
       }
     }
 
     var canSave: Bool {
       switch self {
-        case .available, .unchanged, .willClear:
-          true
-        case .idle, .checking, .unavailable, .reserved, .invalid:
-          false
+      case .available, .unchanged, .willClear:
+        true
+      case .idle, .checking, .unavailable, .reserved, .invalid:
+        false
       }
     }
   }
@@ -64,6 +66,7 @@ final class AccountSettingsViewModel: ObservableObject {
   func loadSessions(realtimeV2: RealtimeV2) async {
     guard !isLoadingSessions else { return }
     isLoadingSessions = true
+    errorState = nil
     defer { isLoadingSessions = false }
 
     do {
@@ -76,6 +79,7 @@ final class AccountSettingsViewModel: ObservableObject {
   func revoke(_ session: InlineProtocol.AccountSession, realtimeV2: RealtimeV2) async {
     guard !session.current, revokingSessionID == nil else { return }
     revokingSessionID = session.id
+    errorState = nil
     defer { revokingSessionID = nil }
 
     do {
@@ -84,6 +88,10 @@ final class AccountSettingsViewModel: ObservableObject {
     } catch {
       showError(title: "Could Not Revoke Session", error: error)
     }
+  }
+
+  func clearError() {
+    errorState = nil
   }
 
   func saveProfile(
@@ -121,10 +129,15 @@ final class AccountSettingsViewModel: ObservableObject {
   }
 
   func resetUsernameState() {
+    usernameCheckGeneration += 1
+    isCheckingUsername = false
     usernameState = .idle
   }
 
   func usernameChanged(_ rawUsername: String, currentUsername: String?) {
+    usernameCheckGeneration += 1
+    isCheckingUsername = false
+
     let username = cleanUsername(rawUsername)
     if username.isEmpty, currentUsername != nil {
       usernameState = .willClear
@@ -134,22 +147,34 @@ final class AccountSettingsViewModel: ObservableObject {
   }
 
   func checkUsername(_ rawUsername: String, currentUsername: String?, realtimeV2: RealtimeV2) async {
+    usernameCheckGeneration += 1
+    let generation = usernameCheckGeneration
     let username = cleanUsername(rawUsername)
+
     if username == currentUsername {
+      isCheckingUsername = false
       usernameState = .unchanged
       return
     }
-    guard validateUsername(username) else { return }
+    guard validateUsername(username) else {
+      isCheckingUsername = false
+      return
+    }
 
-    guard !isCheckingUsername else { return }
     isCheckingUsername = true
     usernameState = .checking
-    defer { isCheckingUsername = false }
+    defer {
+      if generation == usernameCheckGeneration {
+        isCheckingUsername = false
+      }
+    }
 
     do {
       let result = try await realtimeV2.checkUsername(username)
+      guard generation == usernameCheckGeneration, !Task.isCancelled else { return }
       usernameState = state(for: result.availability)
     } catch {
+      guard generation == usernameCheckGeneration, !Task.isCancelled else { return }
       usernameState = .idle
       showError(title: "Could Not Check Username", error: error)
     }
@@ -205,18 +230,18 @@ final class AccountSettingsViewModel: ObservableObject {
 
   private func state(for availability: InlineProtocol.UsernameAvailability) -> UsernameState {
     switch availability {
-      case .usernameAvailable:
-        .available
-      case .usernameCurrent:
-        .unchanged
-      case .usernameTaken:
-        .unavailable
-      case .usernameReserved:
-        .reserved
-      case .usernameInvalid:
-        .invalid("Usernames must be at least 2 characters.")
-      case .unspecified, .UNRECOGNIZED(_):
-        .idle
+    case .usernameAvailable:
+      .available
+    case .usernameCurrent:
+      .unchanged
+    case .usernameTaken:
+      .unavailable
+    case .usernameReserved:
+      .reserved
+    case .usernameInvalid:
+      .invalid("Usernames must be at least 2 characters.")
+    case .unspecified, .UNRECOGNIZED:
+      .idle
     }
   }
 

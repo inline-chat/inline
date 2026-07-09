@@ -8,17 +8,29 @@ struct DataStorageSettingsDetailView: View {
   var body: some View {
     Form {
       Section {
-        autoDownloadLimitRow("Media", caps: AutoDownloadLimitCaps.media, value: binding(\.mediaMaxMB))
-        autoDownloadLimitRow("Files", caps: AutoDownloadLimitCaps.files, value: binding(\.fileMaxMB))
-        autoDownloadLimitRow("Voice Messages", caps: AutoDownloadLimitCaps.voice, value: binding(\.voiceMaxMB))
+        AutoDownloadLimitRow(
+          title: "Media",
+          caps: AutoDownloadLimitCaps.media,
+          value: binding(\.mediaMaxMB)
+        )
+        AutoDownloadLimitRow(
+          title: "Files",
+          caps: AutoDownloadLimitCaps.files,
+          value: binding(\.fileMaxMB)
+        )
+        AutoDownloadLimitRow(
+          title: "Voice Messages",
+          caps: AutoDownloadLimitCaps.voice,
+          value: binding(\.voiceMaxMB)
+        )
       } header: {
-        Text("Auto-Download")
-      } footer: {
-        Text("Set a limit to 0 MB to turn off auto-download for that type. These limits are local to this Mac.")
+        SettingsSectionHeader(
+          "Auto-Download",
+          subtitle: "Choose local download limits for this Mac. Set a type to Off to disable its auto-download."
+        )
       }
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
   }
 
   private func binding(_ keyPath: ReferenceWritableKeyPath<AutoDownloadSettingsManager, Int>) -> Binding<Int> {
@@ -28,14 +40,10 @@ struct DataStorageSettingsDetailView: View {
       autoDownload[keyPath: keyPath] = AutoDownloadSettingsManager.clamped(value)
     }
   }
-
-  private func autoDownloadLimitRow(_ title: String, caps: [Int], value: Binding<Int>) -> some View {
-    AutoDownloadLimitRow(title: title, caps: caps, value: value)
-  }
 }
 
 private struct AutoDownloadLimitRow: View {
-  let title: String
+  let title: LocalizedStringResource
   let caps: [Int]
   @Binding var value: Int
 
@@ -65,7 +73,7 @@ private struct AutoDownloadLimitRow: View {
           .frame(width: 72, alignment: .trailing)
       }
     } label: {
-      Text(title)
+      SettingsRowLabel(title)
     }
   }
 
@@ -102,7 +110,7 @@ private struct AutoDownloadLimitRow: View {
   }
 
   private func label(for value: Int) -> String {
-    value <= 0 ? "Off" : ByteCountFormatter.string(fromByteCount: Int64(value) * 1_024 * 1_024, countStyle: .file)
+    value <= 0 ? "Off" : "\(value) MB"
   }
 }
 

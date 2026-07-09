@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import InlineProtocol
+import InlineUI
 import Logger
 import RealtimeV2
 import SwiftUI
@@ -21,91 +22,88 @@ struct BotsSettingsDetailView: View {
 
   var body: some View {
     Form {
-      Section("Create Bot") {
-        TextField("Name", text: $name)
-          .focused($focusedField, equals: .name)
+      Section {
+        LabeledContent("Name") {
+          TextField("Bot Name", text: $name, prompt: Text("Bot Name"))
+            .focused($focusedField, equals: .name)
+            .labelsHidden()
+            .textFieldStyle(.plain)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 280, alignment: .trailing)
+        }
 
-        TextField("Username", text: $username)
-          .focused($focusedField, equals: .username)
+        LabeledContent("Username") {
+          TextField("Bot Username", text: $username, prompt: Text("username_bot"))
+            .focused($focusedField, equals: .username)
+            .labelsHidden()
+            .textFieldStyle(.plain)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 280, alignment: .trailing)
+            .onSubmit {
+              if canCreate {
+                createBot()
+              }
+            }
+        }
 
-        Text("Usernames must end with \"bot\" (case-insensitive). You can create up to 5 bots.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        if let createError = viewModel.createError {
+          SettingsErrorRow("Could Not Create Bot", message: createError)
+        }
 
-        HStack(spacing: 12) {
-          Button(viewModel.isCreating ? "Creating..." : "Create Bot") {
-            createBot()
-          }
-          .disabled(!canCreate)
-
+        HStack(spacing: 8) {
           if viewModel.isCreating {
             ProgressView()
               .controlSize(.small)
           }
-        }
 
-        if let createError = viewModel.createError {
-          Text(createError)
-            .font(.caption)
-            .foregroundStyle(.red)
+          Button(viewModel.isCreating ? "Creating..." : "Create Bot") {
+            createBot()
+          }
+          .disabled(!canCreate)
         }
-
-        if let token = viewModel.lastCreatedToken {
-          TokenRow(
-            title: "New Token",
-            token: token,
-            onCopy: { copyToken(token) },
-            onHide: { viewModel.clearLastCreatedToken() }
-          )
-        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+      } header: {
+        SettingsSectionHeader(
+          "Create Bot",
+          subtitle: "Create up to five bots for integrations and automated workflows."
+        )
+      } footer: {
+        Text("Usernames must end with “bot” and are not case-sensitive.")
       }
 
-      Section("Your Bots") {
-        HStack(spacing: 12) {
-          Button("Refresh") {
-            Task {
-              await viewModel.loadBots(
-                realtimeV2,
-                currentUserId: auth.currentUserId,
-                force: true
-              )
-            }
-          }
-          .disabled(viewModel.isLoading)
-
-          if viewModel.isLoading {
-            ProgressView()
-              .controlSize(.small)
-          }
-        }
-
+      Section {
         if let loadError = viewModel.loadError {
-          Text(loadError)
-            .font(.caption)
-            .foregroundStyle(.red)
+          SettingsErrorRow(
+            "Could Not Load Bots",
+            message: loadError,
+            actionTitle: "Try Again",
+            action: refreshBots
+          )
         }
 
         if let revealError = viewModel.revealError {
-          Text(revealError)
-            .font(.caption)
-            .foregroundStyle(.red)
+          SettingsErrorRow("Could Not Reveal Token", message: revealError)
         }
 
         if let rotateError = viewModel.rotateError {
-          Text(rotateError)
-            .font(.caption)
-            .foregroundStyle(.red)
+          SettingsErrorRow("Could Not Rotate Token", message: rotateError)
         }
 
         if let deleteError = viewModel.deleteError {
-          Text(deleteError)
-            .font(.caption)
-            .foregroundStyle(.red)
+          SettingsErrorRow("Could Not Delete Bot", message: deleteError)
         }
 
-        if viewModel.bots.isEmpty, !viewModel.isLoading {
-          Text("No bots yet.")
-            .foregroundStyle(.secondary)
+        if viewModel.isLoading, viewModel.bots.isEmpty {
+          SettingsLoadingRow(
+            "Loading Bots",
+            description: "Fetching bots connected to your account."
+          )
+        } else if viewModel.bots.isEmpty, viewModel.loadError == nil {
+          SettingsEmptyRow(
+            "No Bots Yet",
+            description: "Create a bot to get started.",
+            systemImage: "cpu"
+          )
         } else {
           ForEach(viewModel.bots, id: \.id) { bot in
             BotRow(
@@ -138,10 +136,26 @@ struct BotsSettingsDetailView: View {
             )
           }
         }
+      } header: {
+        SettingsSectionHeader(
+          "Your Bots",
+          subtitle: "Manage bots used by integrations and automated workflows."
+        )
       }
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          refreshBots()
+        } label: {
+          Label("Refresh Bots", systemImage: "arrow.clockwise")
+            .labelStyle(.iconOnly)
+        }
+        .disabled(viewModel.isLoading)
+        .help("Refresh Bots")
+      }
+    }
     .task(id: auth.currentUserId) {
       await viewModel.loadBots(
         realtimeV2,
@@ -214,6 +228,16 @@ struct BotsSettingsDetailView: View {
     return !viewModel.isCreating
   }
 
+  private func refreshBots() {
+    Task {
+      await viewModel.loadBots(
+        realtimeV2,
+        currentUserId: auth.currentUserId,
+        force: true
+      )
+    }
+  }
+
   private func createBot() {
     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
     let trimmedUsername = sanitizedUsername(username)
@@ -276,19 +300,18 @@ private enum Field: Hashable {
 
 @MainActor
 final class BotsSettingsViewModel: ObservableObject {
-  @Published var bots: [InlineProtocol.User] = []
-  @Published var isLoading = false
-  @Published var loadError: String?
-  @Published var isCreating = false
-  @Published var createError: String?
-  @Published var revealedTokens: [Int64: String] = [:]
-  @Published var revealingBots: Set<Int64> = []
-  @Published var lastCreatedToken: String?
-  @Published var revealError: String?
-  @Published var rotatingBots: Set<Int64> = []
-  @Published var rotateError: String?
-  @Published var deletingBots: Set<Int64> = []
-  @Published var deleteError: String?
+  @Published private(set) var bots: [InlineProtocol.User] = []
+  @Published private(set) var isLoading = false
+  @Published private(set) var loadError: String?
+  @Published private(set) var isCreating = false
+  @Published private(set) var createError: String?
+  @Published private(set) var revealedTokens: [Int64: String] = [:]
+  @Published private(set) var revealingBots: Set<Int64> = []
+  @Published private(set) var revealError: String?
+  @Published private(set) var rotatingBots: Set<Int64> = []
+  @Published private(set) var rotateError: String?
+  @Published private(set) var deletingBots: Set<Int64> = []
+  @Published private(set) var deleteError: String?
 
   let maxBots = 5
 
@@ -346,7 +369,6 @@ final class BotsSettingsViewModel: ObservableObject {
     revealError = nil
     rotateError = nil
     deleteError = nil
-    lastCreatedToken = nil
 
     do {
       let result = try await realtimeV2.send(.createBot(name: name, username: username))
@@ -359,7 +381,6 @@ final class BotsSettingsViewModel: ObservableObject {
         bots.sort { $0.id < $1.id }
         if !response.token.isEmpty {
           revealedTokens[response.bot.id] = response.token
-          lastCreatedToken = response.token
         }
       }
 
@@ -438,7 +459,6 @@ final class BotsSettingsViewModel: ObservableObject {
 
       bots.removeAll { $0.id == botId }
       revealedTokens[botId] = nil
-      lastCreatedToken = nil
     } catch {
       log.error("Failed to delete bot", error: error)
       deleteError = "Failed to delete bot."
@@ -447,10 +467,6 @@ final class BotsSettingsViewModel: ObservableObject {
 
   func hideToken(for botId: Int64) {
     revealedTokens[botId] = nil
-  }
-
-  func clearLastCreatedToken() {
-    lastCreatedToken = nil
   }
 
   func upsertBot(_ bot: InlineProtocol.User) {
@@ -479,20 +495,27 @@ private struct BotRow: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack {
-        actionsMenu
+      HStack(spacing: 10) {
+        UserAvatar(user: User(from: bot), size: 32)
 
         VStack(alignment: .leading, spacing: 2) {
           Text(displayName)
             .font(.body)
+            .fontWeight(.medium)
           if let username = usernameText {
             Text(username)
               .font(.caption)
               .foregroundStyle(.secondary)
           }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
 
-        Spacer()
+        if isRevealing || isRotating || isDeleting {
+          ProgressView()
+            .controlSize(.small)
+        }
+
+        actionsMenu
       }
 
       if let token {
@@ -502,6 +525,7 @@ private struct BotRow: View {
           onCopy: { onCopy(token) },
           onHide: onHide
         )
+        .padding(.leading, 42)
       }
     }
     .padding(.vertical, 4)
@@ -549,7 +573,7 @@ private struct BotRow: View {
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
-    .accessibilityLabel("Bot actions")
+    .accessibilityLabel("Actions for \(displayName)")
   }
 
   private var displayName: String {
@@ -580,8 +604,7 @@ private struct TokenRow: View {
         .lineLimit(1)
         .truncationMode(.middle)
         .textSelection(.enabled)
-
-      Spacer()
+        .frame(maxWidth: .infinity, alignment: .leading)
 
       Button("Copy") {
         onCopy()

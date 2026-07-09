@@ -1,4 +1,3 @@
-import InlineMacUI
 import SwiftUI
 
 struct NotificationsSettingsDetailView: View {
@@ -6,21 +5,26 @@ struct NotificationsSettingsDetailView: View {
 
   var body: some View {
     Form {
-      Section("Badges") {
-        Toggle("Show dock badge for important unread chats", isOn: $appSettings.showDockBadgeUnreadDMs)
-
-        Picker("Unread badge style", selection: $appSettings.unreadBadgeStyle) {
-          Text("Dot").tag(UnreadBadgeStyle.dot)
-          Text("Numbered").tag(UnreadBadgeStyle.numbered)
+      Section {
+        Toggle(isOn: $appSettings.showDockBadgeUnreadDMs) {
+          SettingsRowLabel(
+            "Dock Badge",
+            description: "Show important unread chats on Inline's Dock icon."
+          )
         }
-        .pickerStyle(.segmented)
+      } header: {
+        SettingsSectionHeader("Dock")
       }
-      Section("Sound") {
-        Toggle("Disable notification sound", isOn: $appSettings.disableNotificationSound)
+
+      Section {
+        Toggle(isOn: $appSettings.notificationSoundEnabled) {
+          SettingsRowLabel("Notification Sounds")
+        }
+      } header: {
+        SettingsSectionHeader("Sound")
       }
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
   }
 }
 

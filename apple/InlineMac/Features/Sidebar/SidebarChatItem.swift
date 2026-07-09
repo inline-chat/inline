@@ -3,16 +3,55 @@ import InlineMacUI
 import Logger
 import SwiftUI
 
-enum SidebarItemSize: Equatable {
-  case compact
+enum SidebarItemSize: String, CaseIterable, Identifiable {
+  case small
+  case medium
   case large
+
+  static let defaultValue: Self = .medium
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .small:
+      "Small"
+    case .medium:
+      "Medium"
+    case .large:
+      "Large"
+    }
+  }
+
+  var rowHeight: CGFloat {
+    switch self {
+    case .small:
+      34
+    case .medium:
+      40
+    case .large:
+      46
+    }
+  }
+
+  var iconSize: CGFloat {
+    switch self {
+    case .small:
+      22
+    case .medium:
+      28
+    case .large:
+      34
+    }
+  }
 }
 
 struct SidebarChatItemView: Equatable, View {
   let item: SidebarViewModel.Item
   let selected: Bool
   var titleDimmed = false
-  var size: SidebarItemSize = .large
+  var size: SidebarItemSize = .medium
+  var showsMessagePreview = true
   var unreadBadgeStyle: UnreadBadgeStyle = .defaultValue
   var showsCloseButton = false
   var opensOnMouseDown = true
@@ -36,27 +75,15 @@ struct SidebarChatItemView: Equatable, View {
   private static let subtitleFont: Font = .system(size: 11)
   private static let outerPaddingVertical = 0.0
   private static let trailingAccessoryMinWidth = 14.0
-  private static let compactIconSize = 22.0
-  private static let largeIconSize = 32.0
   private static let showsParentChatTitle = false
 
   // Computed
   private var rowHeight: CGFloat {
-    switch size {
-      case .compact:
-        30
-      case .large:
-        44
-    }
+    size.rowHeight
   }
 
   private var iconSize: CGFloat {
-    switch size {
-      case .compact:
-        Self.compactIconSize
-      case .large:
-        Self.largeIconSize
-    }
+    size.iconSize
   }
 
   private var peerId: Peer {
@@ -87,7 +114,7 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsPreview: Bool {
-    size == .large && item.preview.isEmpty == false && visibleParentTitle == nil
+    showsMessagePreview && item.preview.isEmpty == false && visibleParentTitle == nil
   }
 
   private var titleAccessory: SidebarChatItemAccessory? {
@@ -120,6 +147,7 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.selected == rhs.selected
       && lhs.titleDimmed == rhs.titleDimmed
       && lhs.size == rhs.size
+      && lhs.showsMessagePreview == rhs.showsMessagePreview
       && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.showsCloseButton == rhs.showsCloseButton
       && lhs.opensOnMouseDown == rhs.opensOnMouseDown
@@ -367,7 +395,7 @@ struct SidebarChatItemView: Equatable, View {
       SidebarThreadIcon(
         chat: chat,
         size: iconSize,
-        shape: size == .compact ? .none : .circle
+        shape: size == .small ? .none : .circle
       )
     } else if let peer = item.peer {
       ChatIcon(peer: peer, size: iconSize)

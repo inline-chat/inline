@@ -5,7 +5,7 @@ import SwiftUI
 
 struct SettingsSidebarView: View {
   @Binding var selectedCategory: SettingsCategory
-  @Environment(\.auth) var auth
+  @Environment(\.auth) private var auth
 
   var body: some View {
     List(selection: $selectedCategory) {
@@ -13,33 +13,34 @@ struct SettingsSidebarView: View {
         SettingsCategoryRow(category: category)
           .tag(category)
       }
-      SettingsSidebarFooterView()
     }
     .listStyle(.sidebar)
     .scrollEdgeEffectStyleSoftIfAvailable()
     .navigationTitle("Settings")
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      SettingsSidebarFooterView()
+    }
   }
 
-  private
-  var availableCategories: [SettingsCategory] {
+  private var availableCategories: [SettingsCategory] {
     var categories: [SettingsCategory] = []
 
     if auth.isLoggedIn {
       categories.append(.account)
     }
 
-    // more items
-    categories.append(contentsOf: [.general, .dataStorage])
+    categories.append(contentsOf: [.general, .appearance, .notifications, .dataStorage])
 #if SPARKLE
     categories.append(.updates)
 #endif
-    categories.append(contentsOf: [.appearance, .notifications, .hotkeys, .experimental])
+    categories.append(.hotkeys)
 
     if auth.isLoggedIn {
       categories.append(.bots)
+      categories.append(.activeSessions)
     }
-    categories.append(.debug)
 
+    categories.append(contentsOf: [.experimental, .debug])
     return categories
   }
 }
@@ -55,7 +56,7 @@ private extension View {
   }
 }
 
-struct SettingsCategoryRow: View {
+private struct SettingsCategoryRow: View {
   let category: SettingsCategory
 
   var body: some View {
@@ -72,7 +73,7 @@ struct SettingsCategoryRow: View {
   }
 }
 
-struct AccountSettingsRow: View {
+private struct AccountSettingsRow: View {
   @EnvironmentObject private var root: RootData
 
   var body: some View {
@@ -83,12 +84,12 @@ struct AccountSettingsRow: View {
         Text(root.currentUser?.fullName ?? "User not loaded")
           .font(.body)
           .fontWeight(.medium)
-        
+
         Text("Your Account")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
- 
+
       Spacer()
     }
     .padding(.vertical, 2)
@@ -102,14 +103,12 @@ private struct SettingsSidebarFooterView: View {
   var body: some View {
     if let footerText {
       Text(footerText)
-        .font(.footnote)
+        .font(.caption2)
         .foregroundStyle(.tertiary)
-        .fontDesign(.monospaced)
+        .monospacedDigit()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 6, trailing: 0))
     }
   }
 

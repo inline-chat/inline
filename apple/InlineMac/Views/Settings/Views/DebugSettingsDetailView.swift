@@ -20,67 +20,79 @@ struct DebugSettingsDetailView: View {
 #endif
     Form {
       Section {
-        LabeledContent("Sync Engine") {
+        LabeledContent {
           Button("Open") {
             showSyncStats = true
           }
+        } label: {
+          SettingsRowLabel(
+            "Sync Engine",
+            description: "Inspect local RealtimeV2 state and run sync debug scenarios."
+          )
         }
-      } header: {
-        Text("Sync")
-      } footer: {
-        Text("Inspect local RealtimeV2 sync state and run sync debug scenarios.")
-      }
 
-      Section {
-        LabeledContent("App Permissions") {
+        LabeledContent {
           Button("Open") {
             showPermissions = true
           }
+        } label: {
+          SettingsRowLabel(
+            "App Permissions",
+            description: "Check notification, microphone, and local permission state."
+          )
         }
-      } header: {
-        Text("Permissions")
-      } footer: {
-        Text("Check notification, microphone, and local permission state used by this build.")
-      }
 
-      Section {
-        LabeledContent("MacDevtools") {
+        LabeledContent {
           Button("Open") {
             MacDevtoolsWindowController.show()
           }
+        } label: {
+          SettingsRowLabel(
+            "MacDevtools",
+            description: "Open the internal macOS developer tools window."
+          )
         }
       } header: {
-        Text("Developer Tools")
-      } footer: {
-        Text("Open the internal macOS developer tools window.")
+        SettingsSectionHeader("Tools")
       }
 #if DEBUG || DEBUG_BUILD
       Section {
-        LabeledContent("Local Database") {
-          Button(isDeletingDatabase ? "Deleting..." : "Delete and Restart...", role: .destructive) {
+        LabeledContent {
+          Button(role: .destructive) {
             confirmDeleteDatabase = true
+          } label: {
+            if isDeletingDatabase {
+              Text("Deleting...")
+            } else {
+              Text("Delete and Restart...")
+            }
           }
           .disabled(isDeletingDatabase)
+        } label: {
+          SettingsRowLabel(
+            "Local Database",
+            description: "Delete this build profile's local SQLite database, then restart Inline."
+          )
         }
       } header: {
-        Text("Database")
-      } footer: {
-        Text("Deletes the on-disk SQLite database for the current build profile, then restarts Inline.")
+        SettingsSectionHeader("Database")
       }
 #endif
 #if DEBUG && SPARKLE
       Section {
-        Toggle("Show Update Button", isOn: $updates.debugForceReady)
+        Toggle(isOn: $updates.debugForceReady) {
+          SettingsRowLabel(
+            "Show Update Button",
+            description: "Force the update UI into a ready state in debug builds."
+          )
+        }
           .toggleStyle(.switch)
       } header: {
-        Text("Updates")
-      } footer: {
-        Text("Forces update UI into a ready state in debug builds.")
+        SettingsSectionHeader("Updates")
       }
 #endif
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
     .sheet(isPresented: $showSyncStats) {
       SyncEngineStatsDetailView()
     }

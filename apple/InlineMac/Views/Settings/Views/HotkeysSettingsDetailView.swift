@@ -8,39 +8,50 @@ struct HotkeysSettingsDetailView: View {
   var body: some View {
     Form {
       Section {
-        Toggle("Enable global hotkey", isOn: enabledBinding)
+        Toggle(isOn: enabledBinding) {
+          SettingsRowLabel(
+            "Enable Global Hotkey",
+            description: "Allow a keyboard shortcut to bring Inline to the front from any app."
+          )
+        }
 
-        HStack(alignment: .center, spacing: 12) {
-          Text("Focus Inline")
+        LabeledContent {
+          HStack(alignment: .center, spacing: 8) {
+            Text(currentHotkeyLabel)
+              .foregroundStyle(.secondary)
+              .monospaced()
+              .lineLimit(1)
+              .truncationMode(.tail)
 
-          Spacer()
-
-          Text(currentHotkeyLabel)
-            .foregroundStyle(.secondary)
-            .monospaced()
+            Button {
+              isRecordingFocusHotkey.toggle()
+            } label: {
+              if isRecordingFocusHotkey {
+                Text("Recording")
+              } else {
+                Text("Set")
+              }
+            }
             .lineLimit(1)
-            .truncationMode(.tail)
+            .fixedSize(horizontal: true, vertical: false)
 
-          Button(isRecordingFocusHotkey ? "Recording" : "Set") {
-            isRecordingFocusHotkey.toggle()
+            Button("Clear") {
+              isRecordingFocusHotkey = false
+              hotkeySettings.globalFocusHotkey = .init(enabled: false, hotkey: nil)
+            }
+            .disabled(hotkeySettings.globalFocusHotkey.hotkey == nil && !hotkeySettings.globalFocusHotkey.enabled)
           }
-          .lineLimit(1)
-          .fixedSize(horizontal: true, vertical: false)
-
-          Button("Clear") {
-            isRecordingFocusHotkey = false
-            hotkeySettings.globalFocusHotkey = .init(enabled: false, hotkey: nil)
-          }
-          .disabled(hotkeySettings.globalFocusHotkey.hotkey == nil && !hotkeySettings.globalFocusHotkey.enabled)
+        } label: {
+          SettingsRowLabel(
+            "Focus Inline",
+            description: "Some shortcuts are reserved by macOS and may not be available."
+          )
         }
       } header: {
-        Text("Global")
-      } footer: {
-        Text("When pressed, Inline comes to the front and focuses its main window. Some shortcuts are reserved by macOS and may not be registerable.")
+        SettingsSectionHeader("Global Hotkey")
       }
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
     .background {
       // Captures key presses while recording.
       KeyPressHandler { event in
@@ -71,9 +82,6 @@ struct HotkeysSettingsDetailView: View {
       set: { newValue in
         var updated = hotkeySettings.globalFocusHotkey
         updated.enabled = newValue
-        if updated.enabled, updated.hotkey == nil {
-          // Keep it enabled but require the user to set a shortcut.
-        }
         hotkeySettings.globalFocusHotkey = updated
       }
     )

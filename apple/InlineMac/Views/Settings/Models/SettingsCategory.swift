@@ -2,6 +2,7 @@ import Foundation
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
+  case activeSessions
   case bots
   case dataStorage
   case general
@@ -13,9 +14,9 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
   case notifications
   case experimental
   case debug
-  
+
   var id: String { rawValue }
-  
+
   var title: String {
     switch self {
     case .general:
@@ -28,6 +29,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "Appearance"
     case .account:
       return "Account"
+    case .activeSessions:
+      return "Active Sessions"
     case .bots:
       return "Bots"
 #if SPARKLE
@@ -42,7 +45,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "Debug"
     }
   }
-  
+
   var iconName: String {
     switch self {
     case .general:
@@ -55,6 +58,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "paintbrush"
     case .account:
       return "person.circle"
+    case .activeSessions:
+      return "laptopcomputer.and.iphone"
     case .bots:
       return "cpu"
 #if SPARKLE

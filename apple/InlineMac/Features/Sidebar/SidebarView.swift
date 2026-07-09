@@ -195,7 +195,7 @@ struct SidebarView: View {
       systemImage: "text.bubble",
       selected: nav.currentRoute == .allChats || nav.currentRoute == .archivedChats,
       titleDimmed: sidebarTitlesDimmed,
-      size: settings.showSidebarMessagePreview ? .large : .compact,
+      size: settings.sidebarItemSize,
       prominentUnreadCount: unreadCounts.scopedUnopenedProminentUnreadCount,
       nonProminentUnreadCount: unreadCounts.scopedUnopenedOtherUnreadCount,
       action: openAllChats
@@ -253,7 +253,8 @@ struct SidebarView: View {
         item: item,
         selected: isSelected,
         titleDimmed: sidebarTitlesDimmed,
-        size: settings.showSidebarMessagePreview ? .large : .compact,
+        size: settings.sidebarItemSize,
+        showsMessagePreview: settings.showSidebarMessagePreview,
         unreadBadgeStyle: settings.unreadBadgeStyle,
         showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
         opensOnMouseDown: true,
@@ -325,7 +326,7 @@ struct SidebarView: View {
 
   private var newThreadRow: some View {
     SidebarNewThreadRow(
-      size: settings.showSidebarMessagePreview ? .large : .compact,
+      size: settings.sidebarItemSize,
       action: createNewThread
     )
     .listRowInsets(.zero)
@@ -663,7 +664,7 @@ struct SidebarView: View {
   }
 
   private var sidebarChatRowHeight: CGFloat {
-    settings.showSidebarMessagePreview ? 44 : 30
+    settings.sidebarItemSize.rowHeight
   }
 
   private var sidebarTitlesDimmed: Bool {
@@ -1329,25 +1330,12 @@ private struct SidebarInboxActionRow: View {
   @State private var isHovered = false
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
-  private static let compactIconSize = 22.0
-  private static let largeIconSize = 32.0
-
   private var rowHeight: CGFloat {
-    switch size {
-    case .compact:
-      30
-    case .large:
-      44
-    }
+    size.rowHeight
   }
 
   private var iconSize: CGFloat {
-    switch size {
-    case .compact:
-      Self.compactIconSize
-    case .large:
-      Self.largeIconSize
-    }
+    size.iconSize
   }
 
   var body: some View {
@@ -1395,7 +1383,7 @@ private struct SidebarInboxActionRow: View {
       .foregroundStyle(.secondary)
       .frame(width: iconSize, height: iconSize)
       .background {
-        if size == .large {
+        if size != .small {
           Circle()
             .fill(.quinary)
         }
@@ -1660,25 +1648,12 @@ private struct SidebarNewThreadRow: View {
   @State private var isHovered = false
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
-  private static let compactIconSize = 22.0
-  private static let largeIconSize = 32.0
-
   private var rowHeight: CGFloat {
-    switch size {
-    case .compact:
-      30
-    case .large:
-      44
-    }
+    size.rowHeight
   }
 
   private var iconSize: CGFloat {
-    switch size {
-    case .compact:
-      Self.compactIconSize
-    case .large:
-      Self.largeIconSize
-    }
+    size.iconSize
   }
 
   var body: some View {
@@ -1710,7 +1685,7 @@ private struct SidebarNewThreadRow: View {
 
   @ViewBuilder
   private var icon: some View {
-    if size == .large {
+    if size != .small {
       Circle()
         .fill(.quinary)
         .overlay {

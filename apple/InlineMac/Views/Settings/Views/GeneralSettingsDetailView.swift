@@ -5,44 +5,90 @@ struct GeneralSettingsDetailView: View {
 
   var body: some View {
     Form {
-      Section("Startup") {
+      Section {
 #if DEBUG_BUILD
-        Toggle("Launch at Login", isOn: .constant(false))
+        Toggle(isOn: .constant(false)) {
+          SettingsRowLabel(
+            "Launch at Login",
+            description: "Unavailable in local debug builds."
+          )
+        }
           .disabled(true)
-        Text("Disabled for local debug builds.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
 #else
-        Toggle("Launch at Login", isOn: $appSettings.launchAtLogin)
+        Toggle(isOn: $appSettings.launchAtLogin) {
+          SettingsRowLabel("Launch at Login")
+        }
 #endif
+      } header: {
+        SettingsSectionHeader("Startup")
       }
 
-      Section("Compose") {
-        Toggle("Automatic Spell Correction", isOn: $appSettings.automaticSpellCorrection)
-        Toggle("Check Spelling While Typing", isOn: $appSettings.checkSpellingWhileTyping)
-      }
-
-      Section("Message Actions") {
-        Picker("Double-click", selection: $appSettings.messageDoubleClickAction) {
-          ForEach(MessageGestureAction.allCases) { action in
-            Text(action.title).tag(action)
-          }
+      Section {
+        Toggle(isOn: $appSettings.automaticSpellCorrection) {
+          SettingsRowLabel(
+            "Automatic Spell Correction",
+            description: "Correct misspelled words while composing messages."
+          )
         }
-        .pickerStyle(.menu)
 
-        Picker("Hold", selection: $appSettings.messageHoldAction) {
-          ForEach(MessageGestureAction.allCases) { action in
-            Text(action.title).tag(action)
-          }
+        Toggle(isOn: $appSettings.checkSpellingWhileTyping) {
+          SettingsRowLabel(
+            "Check Spelling While Typing",
+            description: "Underline misspelled words while composing messages."
+          )
         }
-        .pickerStyle(.menu)
+
+        LabeledContent {
+          Picker("Send Messages", selection: $appSettings.sendsWithCmdEnter) {
+            Text("Return").tag(false)
+            Text("⌘ + Return").tag(true)
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        } label: {
+          SettingsRowLabel("Send Messages")
+        }
+      } header: {
+        SettingsSectionHeader("Writing")
       }
 
-      Section("Translation") {
-        Toggle("Show translation controls", isOn: $appSettings.translationUIEnabled)
+      Section {
+        LabeledContent {
+          Picker("Double-click", selection: $appSettings.messageDoubleClickAction) {
+            ForEach(MessageGestureAction.allCases) { action in
+              Text(action.title).tag(action)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        } label: {
+          SettingsRowLabel("Double-click")
+        }
+
+        LabeledContent {
+          Picker("Hold", selection: $appSettings.messageHoldAction) {
+            ForEach(MessageGestureAction.allCases) { action in
+              Text(action.title).tag(action)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        } label: {
+          SettingsRowLabel("Hold")
+        }
+
+        Toggle(isOn: $appSettings.translationUIEnabled) {
+          SettingsRowLabel(
+            "Translation Controls",
+            description: "Show translation actions for supported messages."
+          )
+        }
+
+      } header: {
+        SettingsSectionHeader("Messages")
       }
 
-      Section("Sidebar") {
+      Section {
         LabeledContent {
           Picker("Sidebar Cleanup", selection: $appSettings.sidebarCleanupInterval) {
             ForEach(SidebarCleanupInterval.allCases) { interval in
@@ -52,25 +98,16 @@ struct GeneralSettingsDetailView: View {
           .labelsHidden()
           .pickerStyle(.menu)
         } label: {
-          VStack(alignment: .leading, spacing: 3) {
-            Text("Sidebar Cleanup")
-            Text(appSettings.sidebarCleanupInterval.detailText)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+          SettingsRowLabel(
+            "Sidebar Cleanup",
+            dynamicDescription: appSettings.sidebarCleanupInterval.detailText
+          )
         }
-      }
-      
-      Section("Keyboard") {
-        Picker("Send messages with:", selection: $appSettings.sendsWithCmdEnter) {
-          Text("Return").tag(false)
-          Text("⌘ + Return").tag(true)
-        }
-        .pickerStyle(.menu)
+      } header: {
+        SettingsSectionHeader("Sidebar")
       }
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
   }
 }
 

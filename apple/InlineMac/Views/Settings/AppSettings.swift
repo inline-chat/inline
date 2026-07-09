@@ -10,12 +10,14 @@ enum AppAppearance: String, CaseIterable, Identifiable {
   case light
   case dark
 
+  static let pickerOrder: [Self] = [.light, .dark, .system]
+
   var id: String { rawValue }
 
   var title: String {
     switch self {
     case .system:
-      return "System"
+      return "Auto"
     case .light:
       return "Light"
     case .dark:
@@ -104,13 +106,13 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   var detailText: String {
     switch self {
     case .twelveHours:
-      return "Close chats i haven't opened or sent to in 12 hrs."
+      return "Close chats I haven't opened or sent to in 12 hrs."
     case .twentyFourHours:
-      return "Close chats i haven't opened or sent to in 24 hrs."
+      return "Close chats I haven't opened or sent to in 24 hrs."
     case .twoDays:
-      return "Close chats i haven't opened or sent to in 2 days."
+      return "Close chats I haven't opened or sent to in 2 days."
     case .fiveDays:
-      return "Close chats i haven't opened or sent to in 5 days."
+      return "Close chats I haven't opened or sent to in 5 days."
     case .never:
       return "Don't close chats automatically."
     }
@@ -161,6 +163,7 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
+  static let sidebarItemSizeKey = "sidebarItemSize"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
   static let unreadBadgeStyleKey = "unreadBadgeStyle"
@@ -214,9 +217,20 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  var usesCompactToolbar: Bool {
+    get { toolbarStyle == .unifiedCompact }
+    set { toolbarStyle = newValue ? .unifiedCompact : .unified }
+  }
+
   @Published var messageRenderStyle: MessageRenderStyle {
     didSet {
       UserDefaults.standard.set(messageRenderStyle.rawValue, forKey: "messageRenderStyle")
+    }
+  }
+
+  @Published var unreadBadgeStyle: UnreadBadgeStyle {
+    didSet {
+      UserDefaults.standard.set(unreadBadgeStyle.rawValue, forKey: Self.unreadBadgeStyleKey)
     }
   }
 
@@ -240,6 +254,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var sidebarItemSize: SidebarItemSize {
+    didSet {
+      UserDefaults.standard.set(sidebarItemSize.rawValue, forKey: Self.sidebarItemSizeKey)
+    }
+  }
+
   @Published var includeSpaceChatsInHomeSidebar: Bool {
     didSet {
       UserDefaults.standard.set(includeSpaceChatsInHomeSidebar, forKey: "includeSpaceChatsInHomeSidebar")
@@ -260,15 +280,14 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  var notificationSoundEnabled: Bool {
+    get { !disableNotificationSound }
+    set { disableNotificationSound = !newValue }
+  }
+
   @Published var showDockBadgeUnreadDMs: Bool {
     didSet {
       UserDefaults.standard.set(showDockBadgeUnreadDMs, forKey: "showDockBadgeUnreadDMs")
-    }
-  }
-
-  @Published var unreadBadgeStyle: UnreadBadgeStyle {
-    didSet {
-      UserDefaults.standard.set(unreadBadgeStyle.rawValue, forKey: Self.unreadBadgeStyleKey)
     }
   }
 
@@ -332,6 +351,12 @@ final class AppSettings: ObservableObject {
       showSidebarMessagePreview = storedShowPreview
     } else {
       showSidebarMessagePreview = true
+    }
+    if let storedSidebarItemSize = UserDefaults.standard.string(forKey: Self.sidebarItemSizeKey),
+       let itemSize = SidebarItemSize(rawValue: storedSidebarItemSize) {
+      sidebarItemSize = itemSize
+    } else {
+      sidebarItemSize = .defaultValue
     }
     includeSpaceChatsInHomeSidebar =
       UserDefaults.standard.object(forKey: "includeSpaceChatsInHomeSidebar") as? Bool ?? true

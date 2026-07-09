@@ -1,21 +1,19 @@
 import SwiftUI
 
 struct ExperimentalSettingsDetailView: View {
-  // Example future toggle:
-  // @AppStorage("experimental.exampleFeature") private var enableExampleFeature = false
-
   var body: some View {
     Form {
-      Section("Experimental") {
-        Text("Experimental toggles will appear here.")
-          .foregroundStyle(.secondary)
-
-        // Example future toggle:
-        // Toggle("Enable example feature", isOn: $enableExampleFeature)
+      Section {
+        SettingsEmptyRow(
+          "No Experimental Features",
+          description: "Experimental controls will appear here when they are available.",
+          systemImage: "testtube.2"
+        )
+      } header: {
+        SettingsSectionHeader("Experimental")
       }
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
   }
 }
 

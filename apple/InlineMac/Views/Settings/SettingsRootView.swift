@@ -5,10 +5,8 @@ import SwiftUI
 struct SettingsRootView: View {
   @EnvironmentStateObject private var root: RootData
   @State private var selectedCategory: SettingsCategory = .general
-  @State private var detailPath: [SettingsDetailRoute] = []
-  @State private var navigationHistory: [SettingsNavigationState] = [
-    SettingsNavigationState(category: .general, detailPath: []),
-  ]
+  @State private var columnVisibility: NavigationSplitViewVisibility = .all
+  @State private var navigationHistory: [SettingsCategory] = [.general]
   @State private var historyIndex = 0
   @State private var isHistoryNavigation = false
 
@@ -18,20 +16,18 @@ struct SettingsRootView: View {
     }
   }
 
-  @Environment(\.auth) var auth
-
   var body: some View {
-    NavigationSplitView(columnVisibility: .constant(.all)) {
+    NavigationSplitView(columnVisibility: $columnVisibility) {
       SettingsSidebarView(selectedCategory: $selectedCategory)
-        .frame(width: Metrics.sidebarWidth)
+        .frame(minWidth: Metrics.sidebarMinWidth)
         .navigationSplitViewColumnWidth(
-          min: Metrics.sidebarWidth,
-          ideal: Metrics.sidebarWidth,
-          max: Metrics.sidebarWidth
+          min: Metrics.sidebarMinWidth,
+          ideal: Metrics.sidebarIdealWidth,
+          max: Metrics.sidebarMaxWidth
         )
         .toolbar(removing: .sidebarToggle)
     } detail: {
-      NavigationStack(path: $detailPath) {
+      NavigationStack {
         SettingsDetailView(category: selectedCategory)
       }
     }
@@ -61,12 +57,6 @@ struct SettingsRootView: View {
       }
     }
     .onChange(of: selectedCategory) { _, _ in
-      if !isHistoryNavigation {
-        detailPath = []
-      }
-      recordNavigation()
-    }
-    .onChange(of: detailPath) { _, _ in
       recordNavigation()
     }
     .environmentObject(root)
@@ -84,7 +74,7 @@ struct SettingsRootView: View {
     guard canGoBack else { return }
     isHistoryNavigation = true
     historyIndex -= 1
-    applyHistory(navigationHistory[historyIndex])
+    selectedCategory = navigationHistory[historyIndex]
     DispatchQueue.main.async {
       isHistoryNavigation = false
     }
@@ -94,7 +84,7 @@ struct SettingsRootView: View {
     guard canGoForward else { return }
     isHistoryNavigation = true
     historyIndex += 1
-    applyHistory(navigationHistory[historyIndex])
+    selectedCategory = navigationHistory[historyIndex]
     DispatchQueue.main.async {
       isHistoryNavigation = false
     }
@@ -102,66 +92,55 @@ struct SettingsRootView: View {
 
   private func recordNavigation() {
     guard !isHistoryNavigation else { return }
-    let snapshot = SettingsNavigationState(category: selectedCategory, detailPath: detailPath)
-    if navigationHistory.last == snapshot {
+    if navigationHistory[historyIndex] == selectedCategory {
       return
     }
     if historyIndex < navigationHistory.count - 1 {
       navigationHistory = Array(navigationHistory.prefix(historyIndex + 1))
     }
-    navigationHistory.append(snapshot)
+    navigationHistory.append(selectedCategory)
     historyIndex = navigationHistory.count - 1
-  }
-
-  private func applyHistory(_ state: SettingsNavigationState) {
-    selectedCategory = state.category
-    detailPath = state.detailPath
   }
 }
 
 private enum Metrics {
-  static let sidebarWidth: CGFloat = 200
-  static let windowMinWidth: CGFloat = 660
-  static let windowMinHeight: CGFloat = 540
+  static let sidebarMinWidth: CGFloat = 200
+  static let sidebarIdealWidth: CGFloat = 200
+  static let sidebarMaxWidth: CGFloat = 320
+  static let windowMinWidth: CGFloat = 780
+  static let windowMinHeight: CGFloat = 520
 }
 
-private struct SettingsNavigationState: Equatable {
-  let category: SettingsCategory
-  let detailPath: [SettingsDetailRoute]
-}
-
-enum SettingsDetailRoute: Hashable {
-  case screen(String)
-}
-
-struct SettingsDetailView: View {
+private struct SettingsDetailView: View {
   let category: SettingsCategory
 
   var body: some View {
     Group {
       switch category {
-        case .general:
-          GeneralSettingsDetailView()
-        case .dataStorage:
-          DataStorageSettingsDetailView()
-        case .hotkeys:
-          HotkeysSettingsDetailView()
+      case .general:
+        GeneralSettingsDetailView()
+      case .dataStorage:
+        DataStorageSettingsDetailView()
+      case .hotkeys:
+        HotkeysSettingsDetailView()
         #if SPARKLE
-        case .updates:
-          UpdatesSettingsDetailView()
+      case .updates:
+        UpdatesSettingsDetailView()
         #endif
-        case .appearance:
-          AppearanceSettingsDetailView()
-        case .account:
-          AccountSettingsDetailView()
-        case .bots:
-          BotsSettingsDetailView()
-        case .notifications:
-          NotificationsSettingsDetailView()
-        case .experimental:
-          ExperimentalSettingsDetailView()
-        case .debug:
-          DebugSettingsDetailView()
+      case .appearance:
+        AppearanceSettingsDetailView()
+      case .account:
+        AccountSettingsDetailView()
+      case .activeSessions:
+        AccountSessionsSettingsDetailView()
+      case .bots:
+        BotsSettingsDetailView()
+      case .notifications:
+        NotificationsSettingsDetailView()
+      case .experimental:
+        ExperimentalSettingsDetailView()
+      case .debug:
+        DebugSettingsDetailView()
       }
     }
     .navigationTitle(category.title)

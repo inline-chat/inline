@@ -16,23 +16,23 @@ enum UploadFileError: LocalizedError {
 
   var errorDescription: String? {
     switch self {
-      case let .permissionDenied(filename):
-        "Cannot access '\(filename)'. Make sure you have permission to view this file."
-      case let .invalidFile(filename):
-        "'\(filename)' could not be opened. The file might be corrupted or in an unsupported format."
-      case let .unknown(error):
-        error.localizedDescription
+    case let .permissionDenied(filename):
+      "Cannot access '\(filename)'. Make sure you have permission to view this file."
+    case let .invalidFile(filename):
+      "'\(filename)' could not be opened. The file might be corrupted or in an unsupported format."
+    case let .unknown(error):
+      error.localizedDescription
     }
   }
 
   var recoverySuggestion: String? {
     switch self {
-      case .permissionDenied:
-        "Try selecting a different file or check the file permissions in Finder."
-      case .invalidFile:
-        "Please select a valid image file."
-      case .unknown:
-        "Please try again or select a different file."
+    case .permissionDenied:
+      "Try selecting a different file or check the file permissions in Finder."
+    case .invalidFile:
+      "Please select a valid image file."
+    case .unknown:
+      "Please try again or select a different file."
     }
   }
 }
@@ -109,12 +109,12 @@ final class AccountSettingsPhotoViewModel: ObservableObject {
 
   private func uploadImageToServer(_ data: Data, fileType: UTType) async throws {
     let mimeType = switch fileType {
-      case .jpeg:
-        MIMEType.imageJpeg
-      case .png:
-        MIMEType.imagePng
-      default:
-        MIMEType.imageJpeg
+    case .jpeg:
+      MIMEType.imageJpeg
+    case .png:
+      MIMEType.imagePng
+    default:
+      MIMEType.imageJpeg
     }
 
     let fileName = "profile_photo.\(fileType.preferredFilenameExtension ?? "jpg")"
@@ -131,7 +131,7 @@ final class AccountSettingsPhotoViewModel: ObservableObject {
     // call update profile photo method
     let result2 = try await ApiClient.shared.updateProfilePhoto(fileUniqueId: result.fileUniqueId)
 
-    let _ = try await AppDatabase.shared.dbWriter.write { db in
+    _ = try await AppDatabase.shared.dbWriter.write { db in
       try result2.user.saveFull(db)
     }
   }
@@ -158,74 +158,38 @@ struct AccountSettingsDetailView: View {
   @State private var showLogoutConfirmation = false
   @State private var editingProfileUser: InlineKit.User?
   @State private var editingUsernameUser: InlineKit.User?
-  @State private var sessionToRevoke: InlineProtocol.AccountSession?
-
-  init() {}
 
   var body: some View {
     Form {
-      Section {
-        if let user = root.currentUser {
-          profileRows(user)
-        } else {
-          Text("Account details are loading.")
-            .foregroundStyle(.secondary)
+      if let user = root.currentUser {
+        AccountProfileSection(
+          user: user,
+          isUploadingPhoto: photoViewModel.isUploading,
+          onChangePhoto: { showImagePicker = true },
+          onEditProfile: { editingProfileUser = user }
+        )
+
+        AccountIdentitySection(
+          username: user.username,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          accountID: user.id,
+          onChangeUsername: { editingUsernameUser = user }
+        )
+      } else {
+        Section {
+          SettingsLoadingRow(
+            "Loading Account",
+            description: "Fetching your profile details."
+          )
+        } header: {
+          SettingsSectionHeader("Profile")
         }
-      } header: {
-        Text("Profile")
-      } footer: {
-        Text("Your name, username, and profile photo are visible to people you chat with.")
       }
 
-      Section {
-        if viewModel.isLoadingSessions, viewModel.sessions.isEmpty {
-          HStack(spacing: 8) {
-            ProgressView()
-              .controlSize(.small)
-            Text("Loading sessions...")
-              .foregroundStyle(.secondary)
-          }
-        } else if viewModel.sessions.isEmpty {
-          Text("No active sessions.")
-            .foregroundStyle(.secondary)
-        } else {
-          ForEach(viewModel.sessions, id: \.id) { session in
-            AccountSessionRow(
-              session: session,
-              isRevoking: viewModel.revokingSessionID == session.id,
-              onRevoke: {
-                sessionToRevoke = session
-              }
-            )
-          }
-        }
-
-        Button("Refresh") {
-          Task {
-            await viewModel.loadSessions(realtimeV2: realtimeV2)
-          }
-        }
-        .disabled(viewModel.isLoadingSessions)
-      } header: {
-        Text("Active Sessions")
-      } footer: {
-        Text("Sessions are devices and clients signed into your account. Revoke anything you do not recognize.")
-      }
-
-      Section {
-        LabeledContent("This Mac") {
-          Button("Sign Out...", role: .destructive) {
-            showLogoutConfirmation = true
-          }
-        }
-      } header: {
-        Text("Session")
-      } footer: {
-        Text("Signing out removes this device's local session. Your account and messages remain available on other devices.")
-      }
+      AccountSignOutSection(onSignOut: { showLogoutConfirmation = true })
     }
-    .formStyle(.grouped)
-    .scrollContentBackground(.hidden)
+    .settingsFormStyle()
     .environmentObject(root)
     .fileImporter(
       isPresented: $showImagePicker,
@@ -288,7 +252,7 @@ struct AccountSettingsDetailView: View {
           if let suggestion = errorState.suggestion {
             Text(suggestion)
               .font(.callout)
-              .foregroundColor(.secondary)
+              .foregroundStyle(.secondary)
           }
         }
       }
@@ -297,7 +261,7 @@ struct AccountSettingsDetailView: View {
       viewModel.errorState?.title ?? "",
       isPresented: .init(
         get: { viewModel.errorState != nil },
-        set: { if !$0 { viewModel.errorState = nil } }
+        set: { if !$0 { viewModel.clearError() } }
       )
     ) {
       Button("OK", role: .cancel) {}
@@ -320,6 +284,247 @@ struct AccountSettingsDetailView: View {
     } message: {
       Text("Are you sure you want to log out?")
     }
+  }
+
+  private func handleImageSelection(_ result: Result<[URL], Error>) async {
+    do {
+      let urls = try result.get()
+      guard let url = urls.first else { return }
+      await photoViewModel.uploadImage(from: url)
+    } catch {
+      // Handle file selection error
+      photoViewModel.errorState = AccountSettingsPhotoViewModel.ErrorState(
+        title: "Selection Error",
+        message: "Could not select the image file.",
+        suggestion: "Please try selecting a different image."
+      )
+    }
+  }
+}
+
+private struct AccountProfileSection: View {
+  let user: InlineKit.User
+  let isUploadingPhoto: Bool
+  let onChangePhoto: () -> Void
+  let onEditProfile: () -> Void
+
+  var body: some View {
+    Section {
+      HStack(alignment: .center, spacing: 16) {
+        Button(action: onChangePhoto) {
+          UserAvatar(user: user, size: 64)
+            .overlay {
+              Circle()
+                .stroke(.primary.opacity(0.16), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isUploadingPhoto)
+        .help("Change Profile Photo")
+
+        VStack(alignment: .leading, spacing: 4) {
+          Text(displayName)
+            .font(.headline)
+            .lineLimit(1)
+
+          if let bio = nonEmpty(user.bio) {
+            Text(bio)
+              .font(.callout)
+              .foregroundStyle(.secondary)
+              .lineLimit(2)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        VStack(alignment: .trailing, spacing: 8) {
+          Button("Edit Profile...") {
+            onEditProfile()
+          }
+
+          if isUploadingPhoto {
+            ProgressView()
+              .controlSize(.small)
+          } else {
+            Button("Change Photo...") {
+              onChangePhoto()
+            }
+          }
+        }
+      }
+      .padding(.vertical, 4)
+    } header: {
+      SettingsSectionHeader(
+        "Profile",
+        subtitle: "Your profile is visible to people you chat with."
+      )
+    }
+  }
+
+  private var displayName: String {
+    user.fullName.settingsTrimmed.isEmpty ? "Unnamed Account" : user.fullName
+  }
+
+  private func nonEmpty(_ value: String?) -> String? {
+    guard let value, !value.settingsTrimmed.isEmpty else { return nil }
+    return value
+  }
+}
+
+private struct AccountIdentitySection: View {
+  let username: String?
+  let email: String?
+  let phoneNumber: String?
+  let accountID: Int64
+  let onChangeUsername: () -> Void
+
+  var body: some View {
+    Section {
+      LabeledContent {
+        HStack(spacing: 12) {
+          Text(username.map { "@\($0)" } ?? "Not set")
+            .foregroundStyle(username == nil ? .secondary : .primary)
+            .textSelection(.enabled)
+
+          Button("Change...") {
+            onChangeUsername()
+          }
+        }
+      } label: {
+        SettingsRowLabel(
+          "Username",
+          description: "The public name people can use to find your account."
+        )
+      }
+
+      if let email = nonEmpty(email) {
+        LabeledContent {
+          Text(email)
+            .textSelection(.enabled)
+        } label: {
+          SettingsRowLabel("Email")
+        }
+      }
+
+      if let phoneNumber = nonEmpty(phoneNumber) {
+        LabeledContent {
+          Text(phoneNumber)
+            .textSelection(.enabled)
+        } label: {
+          SettingsRowLabel("Phone")
+        }
+      }
+
+      DisclosureGroup {
+        LabeledContent("Account ID") {
+          Text(verbatim: "\(accountID)")
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .textSelection(.enabled)
+        }
+      } label: {
+        SettingsRowLabel("Technical Details")
+      }
+    } header: {
+      SettingsSectionHeader("Account")
+    }
+  }
+
+  private func nonEmpty(_ value: String?) -> String? {
+    guard let value, !value.settingsTrimmed.isEmpty else { return nil }
+    return value
+  }
+}
+
+private struct AccountSignOutSection: View {
+  let onSignOut: () -> Void
+
+  var body: some View {
+    Section {
+      LabeledContent {
+        Button("Sign Out...", role: .destructive) {
+          onSignOut()
+        }
+      } label: {
+        SettingsRowLabel("This Mac")
+      }
+    } header: {
+      SettingsSectionHeader("Session")
+    }
+  }
+}
+
+struct AccountSessionsSettingsDetailView: View {
+  @Environment(\.realtimeV2) private var realtimeV2
+  @StateObject private var viewModel = AccountSettingsViewModel()
+  @State private var sessionToRevoke: InlineProtocol.AccountSession?
+
+  var body: some View {
+    Form {
+      Section {
+        if let errorState = viewModel.errorState {
+          if viewModel.sessions.isEmpty {
+            SettingsErrorRow(
+              dynamicTitle: errorState.title,
+              message: errorState.message,
+              actionTitle: "Try Again",
+              action: {
+                Task {
+                  await viewModel.loadSessions(realtimeV2: realtimeV2)
+                }
+              }
+            )
+          } else {
+            SettingsErrorRow(
+              dynamicTitle: errorState.title,
+              message: errorState.message,
+              actionTitle: "Dismiss",
+              action: viewModel.clearError
+            )
+          }
+        }
+
+        if viewModel.isLoadingSessions, viewModel.sessions.isEmpty {
+          SettingsLoadingRow(
+            "Loading Sessions",
+            description: "Fetching devices and clients signed into your account."
+          )
+        } else if viewModel.sessions.isEmpty, viewModel.errorState == nil {
+          SettingsEmptyRow(
+            "No Active Sessions",
+            description: "No signed-in devices or clients were returned.",
+            systemImage: "laptopcomputer.and.iphone"
+          )
+        } else {
+          ForEach(viewModel.sessions, id: \.id) { session in
+            AccountSessionRow(
+              session: session,
+              isRevoking: viewModel.revokingSessionID == session.id,
+              onRevoke: { sessionToRevoke = session }
+            )
+          }
+        }
+      } header: {
+        SettingsSectionHeader(
+          "Signed-In Devices",
+          subtitle: "Revoke anything you do not recognize. Sign out this Mac from the Account page."
+        )
+      }
+    }
+    .settingsFormStyle()
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          Task {
+            await viewModel.loadSessions(realtimeV2: realtimeV2)
+          }
+        } label: {
+          Label("Refresh Sessions", systemImage: "arrow.clockwise")
+            .labelStyle(.iconOnly)
+        }
+        .disabled(viewModel.isLoadingSessions)
+        .help("Refresh Sessions")
+      }
+    }
     .confirmationDialog(
       "Revoke Session?",
       isPresented: .init(
@@ -341,121 +546,6 @@ struct AccountSettingsDetailView: View {
     }
     .task {
       await viewModel.loadSessions(realtimeV2: realtimeV2)
-    }
-  }
-
-  @ViewBuilder
-  private func profileRows(_ user: InlineKit.User) -> some View {
-    LabeledContent("Photo") {
-      HStack(spacing: 12) {
-        Button {
-          showImagePicker = true
-        } label: {
-          UserAvatar(user: user, size: 48)
-            .overlay(
-              Circle()
-                .stroke(.primary.opacity(0.2), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(photoViewModel.isUploading)
-
-        Button("Change...") {
-          showImagePicker = true
-        }
-        .disabled(photoViewModel.isUploading)
-
-        if photoViewModel.isUploading {
-          ProgressView()
-            .controlSize(.small)
-        }
-      }
-    }
-
-    LabeledContent("Name") {
-      HStack(spacing: 12) {
-        Text(nonEmpty(user.fullName, fallback: "Not set"))
-          .foregroundStyle(user.fullName.isEmpty ? .secondary : .primary)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .textSelection(.enabled)
-          .frame(maxWidth: 280, alignment: .trailing)
-
-        Button("Edit...") {
-          editingProfileUser = user
-        }
-      }
-    }
-
-    LabeledContent("Bio") {
-      HStack(spacing: 12) {
-        Text(nonEmpty(user.bio, fallback: "Not set"))
-          .foregroundStyle(user.bio == nil ? .secondary : .primary)
-          .lineLimit(2)
-          .truncationMode(.tail)
-          .textSelection(.enabled)
-          .frame(maxWidth: 280, alignment: .trailing)
-
-        Button("Edit...") {
-          editingProfileUser = user
-        }
-      }
-    }
-
-    LabeledContent("Username") {
-      HStack(spacing: 12) {
-        Text(user.username.map { "@\($0)" } ?? "Not set")
-          .foregroundStyle(user.username == nil ? .secondary : .primary)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .textSelection(.enabled)
-          .frame(maxWidth: 280, alignment: .trailing)
-
-        Button("Change...") {
-          editingUsernameUser = user
-        }
-      }
-    }
-
-    LabeledContent("Email") {
-      Text(nonEmpty(user.email, fallback: "Not linked"))
-        .foregroundStyle(user.email == nil ? .secondary : .primary)
-        .textSelection(.enabled)
-    }
-
-    LabeledContent("Phone") {
-      Text(nonEmpty(user.phoneNumber, fallback: "Not linked"))
-        .foregroundStyle(user.phoneNumber == nil ? .secondary : .primary)
-        .textSelection(.enabled)
-    }
-
-    LabeledContent("Account ID") {
-      Text(verbatim: "\(user.id)")
-        .foregroundStyle(.secondary)
-        .monospacedDigit()
-        .textSelection(.enabled)
-    }
-  }
-
-  private func nonEmpty(_ value: String?, fallback: String) -> String {
-    guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-      return fallback
-    }
-    return value
-  }
-
-  private func handleImageSelection(_ result: Result<[URL], Error>) async {
-    do {
-      let urls = try result.get()
-      guard let url = urls.first else { return }
-      await photoViewModel.uploadImage(from: url)
-    } catch {
-      // Handle file selection error
-      photoViewModel.errorState = AccountSettingsPhotoViewModel.ErrorState(
-        title: "Selection Error",
-        message: "Could not select the image file.",
-        suggestion: "Please try selecting a different image."
-      )
     }
   }
 }
@@ -487,52 +577,43 @@ private struct ProfileEditSheet: View {
   }
 
   var body: some View {
-    NavigationStack {
-      Form {
-        Section {
-          LabeledContent("First Name") {
-            TextField("First Name", text: $firstName)
-              .textContentType(.givenName)
-              .frame(width: 260)
-          }
-
-          LabeledContent("Last Name") {
-            TextField("Last Name", text: $lastName)
-              .textContentType(.familyName)
-              .frame(width: 260)
-          }
-
-          LabeledContent("Bio") {
-            TextEditor(text: $bio)
-              .frame(width: 260, height: 96)
-          }
-        } footer: {
-          Text("Your profile is visible to people you chat with.")
+    SettingsEditSheet(
+      title: "Edit Profile",
+      detail: "Update the name and bio people see when they chat with you.",
+      isSaving: isSaving,
+      canSave: !firstName.settingsTrimmed.isEmpty,
+      onCancel: { dismiss() },
+      onSave: {
+        Task {
+          await onSave(firstName, lastName, bio)
         }
-      }
-      .formStyle(.grouped)
-      .scrollContentBackground(.hidden)
-      .navigationTitle("Edit Profile")
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel", role: .cancel) {
-            dismiss()
-          }
-          .disabled(isSaving)
-        }
-
-        ToolbarItem(placement: .confirmationAction) {
-          Button(isSaving ? "Saving..." : "Save") {
-            Task {
-              await onSave(firstName, lastName, bio)
+      },
+      content: {
+        Form {
+          Section {
+            LabeledContent("First Name") {
+              TextField("First Name", text: $firstName)
+                .textContentType(.givenName)
+                .frame(minWidth: 220, idealWidth: 280)
             }
+
+            LabeledContent("Last Name") {
+              TextField("Last Name", text: $lastName)
+                .textContentType(.familyName)
+                .frame(minWidth: 220, idealWidth: 280)
+            }
+
+            LabeledContent("Bio") {
+              TextEditor(text: $bio)
+                .frame(minWidth: 220, idealWidth: 280, minHeight: 72, idealHeight: 96)
+            }
+          } footer: {
+            Text("Your profile is visible to people you chat with.")
           }
-          .keyboardShortcut(.defaultAction)
-          .disabled(isSaving || firstName.settingsTrimmed.isEmpty)
         }
       }
-    }
-    .frame(minWidth: 460, minHeight: 340)
+    )
+    .frame(width: 500, height: 380)
   }
 }
 
@@ -550,6 +631,7 @@ private struct UsernameEditSheet: View {
   let onSave: (String) async -> Void
 
   @State private var username: String
+  @State private var availabilityTask: Task<Void, Never>?
 
   init(
     user: InlineKit.User,
@@ -571,79 +653,94 @@ private struct UsernameEditSheet: View {
   }
 
   var body: some View {
-    NavigationStack {
-      Form {
-        Section {
-          LabeledContent("Username") {
-            HStack(spacing: 4) {
-              Text("@")
-                .foregroundStyle(.secondary)
-              TextField("username", text: $username)
-                .textContentType(.username)
-                .disabled(isChecking || isSaving)
-            }
-            .frame(width: 240)
-          }
+    SettingsEditSheet(
+      title: "Change Username",
+      detail: "Choose the public username people can use to find your account.",
+      isSaving: isSaving,
+      canSave: !isChecking && usernameState.canSave,
+      onCancel: { dismiss() },
+      onSave: {
+        Task {
+          await onSave(username)
+        }
+      },
+      content: {
+        Form {
+          Section {
+            LabeledContent("Username") {
+              HStack(spacing: 6) {
+                Text("@")
+                  .foregroundStyle(.secondary)
 
-          HStack(spacing: 8) {
-            Button(isChecking ? "Checking..." : "Check Availability") {
-              Task {
-                await onCheck(username)
+                TextField("username", text: $username)
+                  .textContentType(.username)
+                  .disabled(isChecking || isSaving)
+
+                if isChecking {
+                  ProgressView()
+                    .controlSize(.small)
+                }
               }
+              .frame(minWidth: 220, idealWidth: 280)
             }
-            .disabled(isChecking || isSaving || username.settingsTrimmed.isEmpty)
 
-            if isChecking {
-              ProgressView()
-                .controlSize(.small)
-            }
-          }
-
-          if let message = usernameState.message {
-            Text(message)
+            if let message = usernameState.message {
+              Label {
+                Text(message)
+              } icon: {
+                Image(systemName: messageIconName)
+              }
               .font(.caption)
               .foregroundStyle(messageColor)
-          }
-        } footer: {
-          Text("Usernames are public and help people find your account.")
-        }
-      }
-      .formStyle(.grouped)
-      .scrollContentBackground(.hidden)
-      .navigationTitle("Change Username")
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel", role: .cancel) {
-            dismiss()
-          }
-          .disabled(isSaving)
-        }
-
-        ToolbarItem(placement: .confirmationAction) {
-          Button(isSaving ? "Saving..." : "Save") {
-            Task {
-              await onSave(username)
             }
+          } footer: {
+            Text("Availability is checked automatically as you type. Clear the field to remove your username.")
           }
-          .keyboardShortcut(.defaultAction)
-          .disabled(isSaving || isChecking || !usernameState.canSave)
         }
       }
-      .onChange(of: username) {
-        onChange(username)
-      }
+    )
+    .frame(width: 500, height: 300)
+    .onChange(of: username) { _, newValue in
+      usernameDidChange(newValue)
     }
-    .frame(minWidth: 460, minHeight: 280)
+    .onDisappear {
+      availabilityTask?.cancel()
+    }
   }
 
   private var messageColor: Color {
     switch usernameState {
-      case .available, .unchanged, .willClear:
-        .green
-      case .unavailable, .reserved, .invalid:
-        .red
-      case .idle, .checking:
-        .secondary
+    case .available, .unchanged, .willClear:
+      .green
+    case .unavailable, .reserved, .invalid:
+      .red
+    case .idle, .checking:
+      .secondary
+    }
+  }
+
+  private var messageIconName: String {
+    switch usernameState {
+    case .available, .unchanged, .willClear:
+      "checkmark.circle.fill"
+    case .unavailable, .reserved, .invalid:
+      "exclamationmark.circle.fill"
+    case .idle, .checking:
+      "circle"
+    }
+  }
+
+  private func usernameDidChange(_ candidate: String) {
+    onChange(candidate)
+    availabilityTask?.cancel()
+
+    let cleaned = candidate.settingsTrimmed.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+    guard !cleaned.isEmpty else { return }
+
+    availabilityTask = Task {
+      try? await Task.sleep(for: .milliseconds(400))
+      guard !Task.isCancelled else { return }
+      await onCheck(candidate)
     }
   }
 }
@@ -729,33 +826,33 @@ private struct AccountSessionRow: View {
 
   private var clientTitle: String {
     switch session.clientType {
-      case "macos":
-        "Inline for Mac"
-      case "ios":
-        "Inline for iOS"
-      case "web":
-        "Inline Web"
-      case "cli":
-        "Inline CLI"
-      case "api":
-        "API"
-      default:
-        "Unknown Client"
+    case "macos":
+      "Inline for Mac"
+    case "ios":
+      "Inline for iOS"
+    case "web":
+      "Inline Web"
+    case "cli":
+      "Inline CLI"
+    case "api":
+      "API"
+    default:
+      "Unknown Client"
     }
   }
 
   private var iconName: String {
     switch session.clientType {
-      case "macos":
-        "desktopcomputer"
-      case "ios":
-        "iphone"
-      case "web":
-        "globe"
-      case "cli":
-        "terminal"
-      default:
-        "person.crop.circle.badge.questionmark"
+    case "macos":
+      "desktopcomputer"
+    case "ios":
+      "iphone"
+    case "web":
+      "globe"
+    case "cli":
+      "terminal"
+    default:
+      "person.crop.circle.badge.questionmark"
     }
   }
 
