@@ -8,10 +8,10 @@ protocol UpdatePresenting: AnyObject {
 }
 
 final class UpdateWindowController: NSWindowController, UpdatePresenting {
-  private let viewModel: UpdateViewModel
+  private let controller: UpdateController
 
-  init(viewModel: UpdateViewModel) {
-    self.viewModel = viewModel
+  init(controller: UpdateController) {
+    self.controller = controller
     let window = NSPanel(
       contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
       styleMask: [.titled, .closable],
@@ -27,7 +27,7 @@ final class UpdateWindowController: NSWindowController, UpdatePresenting {
     window.contentMinSize = NSSize(width: 420, height: 260)
     super.init(window: window)
     window.contentViewController = NSHostingController(
-      rootView: UpdateWindowView(viewModel: viewModel)
+      rootView: UpdateWindowView(controller: controller)
     )
     window.center()
   }

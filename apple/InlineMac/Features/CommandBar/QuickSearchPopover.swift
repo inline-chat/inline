@@ -891,7 +891,7 @@ final class QuickSearchViewModel: ObservableObject {
         }
 #if SPARKLE
       case .checkForUpdates:
-        (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
+        dependencies.updates.performPrimaryAction()
 #endif
       case .backHome:
         if let nav2 = dependencies.nav2,
@@ -1657,6 +1657,9 @@ private struct QuickSearchSectionHeader: View {
 
 private struct QuickSearchRow: View {
   @State private var isHovered: Bool = false
+#if SPARKLE
+  @Environment(UpdateController.self) private var updates
+#endif
 
   let item: QuickSearchLocalItem?
   let user: ApiUser?
@@ -1762,14 +1765,14 @@ private struct QuickSearchRow: View {
               }
 
             case let .command(command):
-              InitialsCircle(name: command.title, size: QuickSearchLayout.iconSize, symbol: command.symbol)
+              InitialsCircle(name: title(for: command), size: QuickSearchLayout.iconSize, symbol: command.symbol)
                 .frame(
                   width: QuickSearchLayout.iconContainerSize,
                   height: QuickSearchLayout.iconContainerSize,
                   alignment: .center
                 )
               HStack(spacing: QuickSearchLayout.itemTextSpacing) {
-                Text(command.title)
+                Text(title(for: command))
                   .lineLimit(1)
                 Spacer(minLength: 0)
                 Text(command.typeLabel)
@@ -1880,6 +1883,15 @@ private struct QuickSearchRow: View {
       return .primary.opacity(0.05)
     }
     return .clear
+  }
+
+  private func title(for command: QuickSearchCommand) -> String {
+#if SPARKLE
+    if command == .checkForUpdates {
+      return updates.phase.menuTitle
+    }
+#endif
+    return command.title
   }
 
   @ViewBuilder

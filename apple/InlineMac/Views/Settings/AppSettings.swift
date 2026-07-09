@@ -5,41 +5,6 @@ import InlineKit
 import InlineMacUI
 import SwiftUI
 
-enum AutoUpdateChannel: String, CaseIterable, Identifiable {
-  case stable
-  case beta
-
-  var id: String { rawValue }
-
-  var title: String {
-    switch self {
-    case .stable:
-      return "Stable"
-    case .beta:
-      return "Beta"
-    }
-  }
-}
-
-enum AutoUpdateMode: String, CaseIterable, Identifiable {
-  case off
-  case check
-  case download
-
-  var id: String { rawValue }
-
-  var title: String {
-    switch self {
-    case .off:
-      return "Off"
-    case .check:
-      return "Check Automatically"
-    case .download:
-      return "Download Automatically"
-    }
-  }
-}
-
 enum AppAppearance: String, CaseIterable, Identifiable {
   case system
   case light
@@ -321,20 +286,6 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  // MARK: - Updates
-
-  @Published var autoUpdateChannel: AutoUpdateChannel {
-    didSet {
-      UserDefaults.standard.set(autoUpdateChannel.rawValue, forKey: "autoUpdateChannel")
-    }
-  }
-
-  @Published var autoUpdateMode: AutoUpdateMode {
-    didSet {
-      UserDefaults.standard.set(autoUpdateMode.rawValue, forKey: "autoUpdateMode")
-    }
-  }
-
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
@@ -400,36 +351,6 @@ final class AppSettings: ObservableObject {
     }
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     sidebarAsInbox = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
-    if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
-       !storedChannel.isEmpty,
-       let channel = AutoUpdateChannel(rawValue: storedChannel) {
-      autoUpdateChannel = channel
-    } else if let inferred = AppSettings.inferUpdateChannelFromBundle() {
-      autoUpdateChannel = inferred
-    } else {
-      autoUpdateChannel = .stable
-    }
-
-    if let storedMode = UserDefaults.standard.string(forKey: "autoUpdateMode"),
-       !storedMode.isEmpty,
-       let mode = AutoUpdateMode(rawValue: storedMode) {
-      autoUpdateMode = mode
-    } else {
-      autoUpdateMode = .download
-    }
-  }
-
-  private static func inferUpdateChannelFromBundle() -> AutoUpdateChannel? {
-    guard let feedUrl = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String else {
-      return nil
-    }
-    if feedUrl.contains("/beta/") {
-      return .beta
-    }
-    if feedUrl.contains("/stable/") {
-      return .stable
-    }
-    return nil
   }
 }
 

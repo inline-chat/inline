@@ -3,7 +3,7 @@ import InlineKit
 import MacDevtools
 import Translation
 #if SPARKLE
-import Combine
+import Observation
 #endif
 
 extension Notification.Name {
@@ -24,9 +24,8 @@ final class AppMenu: NSObject {
 #if SPARKLE
   private weak var updateMenuItem: NSMenuItem?
   private var updateMenuItemEnabled = true
-  private var updateStatusCancellable: AnyCancellable?
 #if DEBUG
-  private var lastAppliedUpdateStatus: UpdateStatus?
+  private var lastAppliedUpdatePhase: SoftwareUpdatePhase?
 #endif
 #endif
 
@@ -882,49 +881,49 @@ final class AppMenu: NSObject {
 #if SPARKLE
   @MainActor @objc private func handleUpdateMenuAction(_ sender: Any?) {
     guard let dependencies else { return }
-    if dependencies.updateInstallState.status.isReadyToInstall {
-      dependencies.updateInstallState.install()
-      return
-    }
-    (NSApp.delegate as? AppDelegate)?.checkForUpdates(sender)
+    dependencies.updates.performPrimaryAction()
   }
 
   @MainActor private func bindUpdateMenuItemState() {
     guard let dependencies else { return }
-    updateStatusCancellable = dependencies.updateInstallState.$status
-      .receive(on: RunLoop.main)
-      .sink { [weak self] status in
-        self?.applyUpdateMenuItemState(status)
+    withObservationTracking {
+      applyUpdateMenuItemState(
+        dependencies.updates.phase,
+        enabled: dependencies.updates.allowsPrimaryAction
+      )
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        self?.bindUpdateMenuItemState()
       }
-    applyUpdateMenuItemState(dependencies.updateInstallState.status)
+    }
   }
 
-  private func applyUpdateMenuItemState(_ status: UpdateStatus) {
-    updateMenuItem?.title = status.menuTitle
-    updateMenuItemEnabled = status.allowsManualAction
+  private func applyUpdateMenuItemState(_ phase: SoftwareUpdatePhase, enabled: Bool) {
+    updateMenuItem?.title = phase.menuTitle
+    updateMenuItemEnabled = enabled
 #if DEBUG
-    assertUpdateMenuItemBinding(status)
+    assertUpdateMenuItemBinding(phase)
 #endif
   }
 
 #if DEBUG
-  private func assertUpdateMenuItemBinding(_ status: UpdateStatus) {
+  private func assertUpdateMenuItemBinding(_ phase: SoftwareUpdatePhase) {
     if let updateMenuItem {
       assert(
-        updateMenuItem.title == status.menuTitle,
-        "Update menu title must mirror UpdateStatus.menuTitle"
+        updateMenuItem.title == phase.menuTitle,
+        "Update menu title must mirror SoftwareUpdatePhase.menuTitle"
       )
     }
-    if let previousStatus = lastAppliedUpdateStatus {
-      let titleTransitioned = previousStatus.menuTitle != status.menuTitle
+    if let previousPhase = lastAppliedUpdatePhase {
+      let titleTransitioned = previousPhase.menuTitle != phase.menuTitle
       if titleTransitioned, let updateMenuItem {
         assert(
-          updateMenuItem.title == status.menuTitle,
+          updateMenuItem.title == phase.menuTitle,
           "Update menu title must refresh when status title changes"
         )
       }
     }
-    lastAppliedUpdateStatus = status
+    lastAppliedUpdatePhase = phase
   }
 #endif
 #endif

@@ -10,11 +10,14 @@ struct DebugSettingsDetailView: View {
   @State private var isDeletingDatabase = false
   @State private var databaseErrorMessage = ""
   @State private var showDatabaseError = false
-#if DEBUG
-  @EnvironmentObject private var updateInstallState: UpdateInstallState
+#if DEBUG && SPARKLE
+  @Environment(UpdateController.self) private var updates
 #endif
 
   var body: some View {
+#if DEBUG && SPARKLE
+    @Bindable var updates = updates
+#endif
     Form {
       Section {
         LabeledContent("Sync Engine") {
@@ -65,9 +68,9 @@ struct DebugSettingsDetailView: View {
         Text("Deletes the on-disk SQLite database for the current build profile, then restarts Inline.")
       }
 #endif
-#if DEBUG
+#if DEBUG && SPARKLE
       Section {
-        Toggle("Show Update Button", isOn: $updateInstallState.debugForceReady)
+        Toggle("Show Update Button", isOn: $updates.debugForceReady)
           .toggleStyle(.switch)
       } header: {
         Text("Updates")
@@ -143,7 +146,7 @@ struct DebugSettingsDetailView: View {
 
 #Preview {
   DebugSettingsDetailView()
-#if DEBUG
-    .environmentObject(UpdateInstallState())
+#if DEBUG && SPARKLE
+    .environment(UpdateController())
 #endif
 }

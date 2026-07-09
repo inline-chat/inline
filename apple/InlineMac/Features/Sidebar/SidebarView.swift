@@ -15,7 +15,9 @@ struct SidebarView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Environment(UnreadCountsModel.self) private var unreadCounts
   @EnvironmentObject private var realtimeState: RealtimeState
-  @EnvironmentObject private var updateInstallState: UpdateInstallState
+#if SPARKLE
+  @Environment(UpdateController.self) private var updates
+#endif
   @ObservedObject private var settings = AppSettings.shared
   private let audioPlayer = AudioPlaybackCenter.shared
   @State private var isHomeHovering = false
@@ -488,10 +490,12 @@ struct SidebarView: View {
           .transition(AudioNowPlayingPill.visibilityTransition)
       }
 
-      if updateInstallState.isReadyToInstall {
+#if SPARKLE
+      if updates.showsSidebarAction {
         installUpdateButton
           .transition(.opacity)
       }
+#endif
 
       footerBar
     }
@@ -506,7 +510,9 @@ struct SidebarView: View {
     }
     .animation(.smoothSnappy, value: sidebarConnectionState)
     .animation(AudioNowPlayingPill.visibilityAnimation, value: audioPlayer.item)
-    .animation(.smoothSnappy, value: updateInstallState.isReadyToInstall)
+#if SPARKLE
+    .animation(.smoothSnappy, value: updates.showsSidebarAction)
+#endif
     .animation(SidebarUnreadBelowButton.visibilityAnimation, value: unreadBelowViewport)
   }
 
@@ -539,10 +545,11 @@ struct SidebarView: View {
 
   @ViewBuilder
   private var installUpdateButton: some View {
+#if SPARKLE
     let button = Button {
-      updateInstallState.install()
+      updates.performPrimaryAction()
     } label: {
-      Text("Update")
+      Label(updates.sidebarActionTitle, systemImage: "arrow.triangle.2.circlepath")
         .font(.system(size: 13, weight: .semibold))
     }
     .controlSize(.large)
@@ -551,7 +558,7 @@ struct SidebarView: View {
       ButtonShineOverlay(active: true)
     }
     .clipShape(Capsule())
-    .accessibilityLabel("Update")
+    .accessibilityLabel(updates.sidebarActionTitle)
 
     if #available(macOS 26.0, *) {
       button
@@ -560,6 +567,7 @@ struct SidebarView: View {
       button
         .buttonStyle(.borderedProminent)
     }
+#endif
   }
 
   @ViewBuilder
@@ -1265,7 +1273,9 @@ struct SidebarView: View {
     .environment(SidebarViewModel(db: .populated()))
     .environment(UnreadCountsModel(database: .populated()))
     .environmentObject(RealtimeState())
-    .environmentObject(UpdateInstallState())
+#if SPARKLE
+    .environment(UpdateController())
+#endif
     .frame(width: 280, height: 480)
 }
 

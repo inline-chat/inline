@@ -1,23 +1,33 @@
-import AppKit
 import SwiftUI
 
 struct UpdatesSettingsDetailView: View {
-  @StateObject private var appSettings = AppSettings.shared
-  @EnvironmentObject private var updateInstallState: UpdateInstallState
+#if SPARKLE
+  @Environment(UpdateController.self) private var updates
+#endif
 
   var body: some View {
+#if SPARKLE
+    @Bindable var updates = updates
+#endif
     Form {
-      #if SPARKLE
+#if SPARKLE
       Section("Status") {
-        LabeledContent("Current Status", value: updateInstallState.status.statusText)
+        LabeledContent("Current Status", value: updates.phase.statusText)
 
-        if updateInstallState.status.showsIndeterminateProgress {
-          ProgressView()
-            .frame(maxWidth: .infinity, alignment: .leading)
+        if let lastCheckDate = updates.lastCheckDate {
+          LabeledContent("Last Checked") {
+            Text(lastCheckDate, style: .relative)
+          }
         }
 
-        if case let .downloading(receivedBytes, expectedBytes) = updateInstallState.status {
-          if let expectedBytes, expectedBytes > 0 {
+        if let nextCheckDate = updates.nextScheduledCheckDate, updates.mode != .off {
+          LabeledContent("Next Check") {
+            Text(nextCheckDate, style: .relative)
+          }
+        }
+
+        if case let .downloading(_, receivedBytes, expectedBytes) = updates.phase {
+          if let receivedBytes, let expectedBytes, expectedBytes > 0 {
             ProgressView(
               value: min(1, Double(receivedBytes) / Double(expectedBytes))
             )
@@ -29,21 +39,18 @@ struct UpdatesSettingsDetailView: View {
             ProgressView()
               .frame(maxWidth: .infinity, alignment: .leading)
           }
+        } else if updates.phase.isBusy {
+          ProgressView()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        if case let .updateAvailable(version, build) = updateInstallState.status {
-          Text(versionLine(version: version, build: build))
+        if let info = updates.phase.info {
+          Text(info.versionLine)
             .font(.caption)
             .foregroundStyle(.secondary)
         }
 
-        if case let .readyToInstall(version, build) = updateInstallState.status {
-          Text(versionLine(version: version, build: build))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-
-        if case let .failed(message) = updateInstallState.status {
+        if case let .failed(message) = updates.phase {
           Text(message)
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -51,14 +58,14 @@ struct UpdatesSettingsDetailView: View {
       }
 
       Section("Automatic Updates") {
-        Picker("Automatic Updates", selection: $appSettings.autoUpdateMode) {
+        Picker("Automatic Updates", selection: $updates.mode) {
           ForEach(AutoUpdateMode.allCases) { mode in
             Text(mode.title).tag(mode)
           }
         }
         .pickerStyle(.menu)
 
-        Picker("Update Channel", selection: $appSettings.autoUpdateChannel) {
+        Picker("Update Channel", selection: $updates.channel) {
           ForEach(AutoUpdateChannel.allCases) { channel in
             Text(channel.title).tag(channel)
           }
@@ -67,55 +74,36 @@ struct UpdatesSettingsDetailView: View {
       }
 
       Section {
-        Button(primaryActionTitle) {
-          performPrimaryAction()
+        Button(updates.phase.menuTitle) {
+          updates.performPrimaryAction()
         }
-        .disabled(!updateInstallState.status.allowsManualAction)
+        .disabled(!updates.allowsPrimaryAction)
       }
-      #else
+#else
       Section {
         Text("Updates are unavailable in this build.")
           .foregroundStyle(.secondary)
       }
-      #endif
+#endif
     }
     .formStyle(.grouped)
     .scrollContentBackground(.hidden)
   }
 
-  #if SPARKLE
-  private var primaryActionTitle: String {
-    if updateInstallState.status.isReadyToInstall {
-      return "Install and Relaunch"
-    }
-    return "Check for Updates…"
-  }
-
-  private func performPrimaryAction() {
-    if updateInstallState.status.isReadyToInstall {
-      updateInstallState.install()
-      return
-    }
-    (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
-  }
-
+#if SPARKLE
   private func byteString(for bytes: Int64) -> String {
     let formatter = ByteCountFormatter()
     formatter.countStyle = .file
     return formatter.string(fromByteCount: bytes)
   }
-
-  private func versionLine(version: String?, build: String?) -> String {
-    let versionText = version ?? "Unknown version"
-    if let build, !build.isEmpty {
-      return "Version \(versionText) (\(build))"
-    }
-    return "Version \(versionText)"
-  }
-  #endif
+#endif
 }
 
 #Preview {
+#if SPARKLE
   UpdatesSettingsDetailView()
-    .environmentObject(UpdateInstallState())
+    .environment(UpdateController())
+#else
+  UpdatesSettingsDetailView()
+#endif
 }

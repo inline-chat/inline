@@ -13,7 +13,9 @@ public struct AppDependencies {
   let auth = Auth.shared
   let viewModel = MainWindowViewModel()
   var overlay = OverlayManager()
-  let updateInstallState = UpdateInstallState()
+#if SPARKLE
+  let updates = UpdateController()
+#endif
   let navigation = NavigationModel.shared
   let transactions = Transactions.shared
   let realtime = Realtime.shared
@@ -47,7 +49,6 @@ extension View {
     let result = environment(\.auth, deps.auth)
       .environmentObject(deps.viewModel)
       .environmentObject(deps.overlay)
-      .environmentObject(deps.updateInstallState)
       .environmentObject(deps.navigation)
       .environmentObject(deps.nav)
       .environmentObject(deps.data)
@@ -64,10 +65,16 @@ extension View {
       .environment(deps.unreadCounts)
       .environment(deps.nav2)
 
+#if SPARKLE
+    let updateResult = result.environment(deps.updates)
+#else
+    let updateResult = result
+#endif
+
     if let rootData = deps.rootData {
-      result.environmentObject(rootData)
+      updateResult.environmentObject(rootData)
     } else {
-      result
+      updateResult
     }
   }
 

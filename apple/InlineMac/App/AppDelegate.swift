@@ -38,10 +38,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private let installLocationPrompt = AppInstallLocationPrompt()
   private let launchAtLoginController = LaunchAtLoginController()
 
-#if SPARKLE
-  private var updateController: UpdateController?
-#endif
-
   // --
   let notifications = NotificationsManager()
   let log = Log.scoped("AppDelegate")
@@ -76,8 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     TimezoneManager.shared.start()
 #if SPARKLE
     Task { @MainActor in
-      ensureUpdateController()
-      updateController?.startIfNeeded()
+      dependencies.updates.start()
     }
 #endif
     Task { @MainActor in
@@ -97,23 +92,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @objc func openNewMainWindow(_ sender: Any?) {
     MainWindowController.newWindow(dependencies: dependencies, sender: sender)
   }
-
-#if SPARKLE
-  @objc func checkForUpdates(_ sender: Any?) {
-    Task { @MainActor in
-      ensureUpdateController()
-      updateController?.checkForUpdates()
-    }
-  }
-#endif
-
-#if SPARKLE
-  @MainActor private func ensureUpdateController() {
-    if updateController == nil {
-      updateController = UpdateController(installState: dependencies.updateInstallState)
-    }
-  }
-#endif
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     MainActor.assumeIsolated {

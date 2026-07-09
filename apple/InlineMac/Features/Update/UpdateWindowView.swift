@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 struct UpdateWindowView: View {
-  @ObservedObject var viewModel: UpdateViewModel
+  let controller: UpdateController
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -19,91 +19,91 @@ struct UpdateWindowView: View {
 
   @ViewBuilder
   private var content: some View {
-    switch viewModel.state {
+    switch controller.phase {
     case .idle:
-      Text("Idle")
+      Text("Inline checks for updates automatically in the background.")
         .foregroundStyle(.secondary)
-    case .permission(let state):
-      Text(state.message)
-      HStack {
-        Button("Not Now") { state.deny() }
-        Button("Allow Updates") { state.allow() }
-          .keyboardShortcut(.defaultAction)
-      }
-    case .checking(let state):
+    case .checking:
       VStack(alignment: .leading, spacing: 12) {
         ProgressView()
-        HStack {
-          Button("Cancel") { state.cancel() }
+        if controller.canCancelCurrentOperation {
+          Button("Cancel") { controller.cancel() }
         }
       }
-    case .updateAvailable(let state):
+    case let .updateAvailable(info):
       VStack(alignment: .leading, spacing: 12) {
-        Text("Version \(state.version) is available.")
-        if let build = state.build {
+        Text("Version \(info.version) is available.")
+        if let build = info.build {
           Text("Build \(build)")
             .foregroundStyle(.secondary)
         }
-        if let size = state.contentLength {
+        if let size = info.contentLength {
           Text("Download size: \(byteString(for: size))")
             .foregroundStyle(.secondary)
         }
         HStack {
-          Button("Later") { state.later() }
-          Button("Install and Relaunch") { state.install() }
+          Button("Skip This Version") { controller.skipVersion() }
+          Button("Later") { controller.remindLater() }
+          Spacer()
+          Button(info.isInformational ? "Learn More" : "Install and Relaunch") {
+            controller.beginUpdate()
+          }
             .keyboardShortcut(.defaultAction)
         }
       }
-    case .downloading(let state):
+    case let .downloading(_, receivedBytes, expectedBytes):
       VStack(alignment: .leading, spacing: 12) {
-        if let expected = state.expectedLength, expected > 0 {
-          ProgressView(value: progress(received: state.receivedLength, expected: expected))
-          Text("\(byteString(for: state.receivedLength)) of \(byteString(for: expected))")
+        if let receivedBytes, let expectedBytes, expectedBytes > 0 {
+          ProgressView(value: progress(received: receivedBytes, expected: expectedBytes))
+          Text("\(byteString(for: receivedBytes)) of \(byteString(for: expectedBytes))")
             .foregroundStyle(.secondary)
         } else {
           ProgressView()
         }
-        HStack {
-          Button("Cancel") { state.cancel() }
+        if controller.canCancelCurrentOperation {
+          Button("Cancel") { controller.cancel() }
         }
       }
-    case .extracting(let state):
+    case let .extracting(_, progress):
       VStack(alignment: .leading, spacing: 12) {
-        ProgressView(value: state.progress)
+        if let progress {
+          ProgressView(value: progress)
+        } else {
+          ProgressView()
+        }
         Text("Preparing update…")
           .foregroundStyle(.secondary)
       }
-    case .readyToInstall(let state):
+    case let .readyToInstall(info):
       VStack(alignment: .leading, spacing: 12) {
-        Text("Update is ready to install.")
+        Text("\(info.versionLine) is downloaded and ready.")
         HStack {
-          Button("Later") { state.later() }
-          Button("Install and Relaunch") { state.install() }
+          Spacer()
+          Button("Restart to Update") { controller.installAndRelaunch() }
             .keyboardShortcut(.defaultAction)
         }
       }
-    case .installing(let state):
+    case .installing:
       VStack(alignment: .leading, spacing: 12) {
         ProgressView()
         Text("Installing update…")
           .foregroundStyle(.secondary)
-        HStack {
-          Button("Retry") { state.retryTerminatingApplication() }
-          Button("Dismiss") { state.dismiss() }
+        if controller.canRetryTermination {
+          Button("Retry") { controller.retryTermination() }
         }
       }
-    case .notFound(let state):
+    case .upToDate:
       VStack(alignment: .leading, spacing: 12) {
         Text("You’re up to date.")
-        Button("OK") { state.acknowledgement() }
+        Button("OK") { controller.dismissStatus() }
           .keyboardShortcut(.defaultAction)
       }
-    case .error(let state):
+    case let .failed(message):
       VStack(alignment: .leading, spacing: 12) {
-        Text(state.message)
+        Text(message)
         HStack {
-          Button("Dismiss") { state.dismiss() }
-          Button("Retry") { state.retry() }
+          Button("Dismiss") { controller.dismissStatus() }
+          Button("Retry") { controller.retryCheck() }
             .keyboardShortcut(.defaultAction)
         }
       }
@@ -111,11 +111,9 @@ struct UpdateWindowView: View {
   }
 
   private var title: String {
-    switch viewModel.state {
+    switch controller.phase {
     case .idle:
       return "Updates"
-    case .permission:
-      return "Enable Updates"
     case .checking:
       return "Checking for Updates"
     case .updateAvailable:
@@ -128,9 +126,9 @@ struct UpdateWindowView: View {
       return "Ready to Install"
     case .installing:
       return "Installing Update"
-    case .notFound:
+    case .upToDate:
       return "No Update Available"
-    case .error:
+    case .failed:
       return "Update Error"
     }
   }
