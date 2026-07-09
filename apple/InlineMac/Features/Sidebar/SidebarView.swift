@@ -254,7 +254,6 @@ struct SidebarView: View {
         selected: isSelected,
         titleDimmed: sidebarTitlesDimmed,
         size: settings.sidebarItemSize,
-        showsMessagePreview: settings.showSidebarMessagePreview,
         unreadBadgeStyle: settings.unreadBadgeStyle,
         showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
         opensOnMouseDown: true,
@@ -1383,7 +1382,7 @@ private struct SidebarInboxActionRow: View {
       .foregroundStyle(.secondary)
       .frame(width: iconSize, height: iconSize)
       .background {
-        if size != .small {
+        if size == .large {
           Circle()
             .fill(.quinary)
         }
@@ -1685,7 +1684,7 @@ private struct SidebarNewThreadRow: View {
 
   @ViewBuilder
   private var icon: some View {
-    if size != .small {
+    if size == .large {
       Circle()
         .fill(.quinary)
         .overlay {

@@ -4,20 +4,15 @@ import Logger
 import SwiftUI
 
 enum SidebarItemSize: String, CaseIterable, Identifiable {
-  case small
-  case medium
+  case compact
   case large
-
-  static let defaultValue: Self = .medium
 
   var id: String { rawValue }
 
-  var title: String {
+  var title: LocalizedStringResource {
     switch self {
-    case .small:
-      "Small"
-    case .medium:
-      "Medium"
+    case .compact:
+      "Compact"
     case .large:
       "Large"
     }
@@ -25,23 +20,19 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
 
   var rowHeight: CGFloat {
     switch self {
-    case .small:
-      34
-    case .medium:
-      40
+    case .compact:
+      30
     case .large:
-      46
+      44
     }
   }
 
   var iconSize: CGFloat {
     switch self {
-    case .small:
+    case .compact:
       22
-    case .medium:
-      28
     case .large:
-      34
+      32
     }
   }
 }
@@ -50,8 +41,7 @@ struct SidebarChatItemView: Equatable, View {
   let item: SidebarViewModel.Item
   let selected: Bool
   var titleDimmed = false
-  var size: SidebarItemSize = .medium
-  var showsMessagePreview = true
+  var size: SidebarItemSize = .large
   var unreadBadgeStyle: UnreadBadgeStyle = .defaultValue
   var showsCloseButton = false
   var opensOnMouseDown = true
@@ -114,7 +104,7 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsPreview: Bool {
-    showsMessagePreview && item.preview.isEmpty == false && visibleParentTitle == nil
+    size == .large && item.preview.isEmpty == false && visibleParentTitle == nil
   }
 
   private var titleAccessory: SidebarChatItemAccessory? {
@@ -147,7 +137,6 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.selected == rhs.selected
       && lhs.titleDimmed == rhs.titleDimmed
       && lhs.size == rhs.size
-      && lhs.showsMessagePreview == rhs.showsMessagePreview
       && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.showsCloseButton == rhs.showsCloseButton
       && lhs.opensOnMouseDown == rhs.opensOnMouseDown
@@ -395,7 +384,7 @@ struct SidebarChatItemView: Equatable, View {
       SidebarThreadIcon(
         chat: chat,
         size: iconSize,
-        shape: size == .small ? .none : .circle
+        shape: size == .compact ? .none : .circle
       )
     } else if let peer = item.peer {
       ChatIcon(peer: peer, size: iconSize)

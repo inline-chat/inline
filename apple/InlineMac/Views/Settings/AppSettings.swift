@@ -163,7 +163,6 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
-  static let sidebarItemSizeKey = "sidebarItemSize"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
   static let unreadBadgeStyleKey = "unreadBadgeStyle"
@@ -254,10 +253,9 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var sidebarItemSize: SidebarItemSize {
-    didSet {
-      UserDefaults.standard.set(sidebarItemSize.rawValue, forKey: Self.sidebarItemSizeKey)
-    }
+  var sidebarItemSize: SidebarItemSize {
+    get { showSidebarMessagePreview ? .large : .compact }
+    set { showSidebarMessagePreview = newValue == .large }
   }
 
   @Published var includeSpaceChatsInHomeSidebar: Bool {
@@ -351,12 +349,6 @@ final class AppSettings: ObservableObject {
       showSidebarMessagePreview = storedShowPreview
     } else {
       showSidebarMessagePreview = true
-    }
-    if let storedSidebarItemSize = UserDefaults.standard.string(forKey: Self.sidebarItemSizeKey),
-       let itemSize = SidebarItemSize(rawValue: storedSidebarItemSize) {
-      sidebarItemSize = itemSize
-    } else {
-      sidebarItemSize = .defaultValue
     }
     includeSpaceChatsInHomeSidebar =
       UserDefaults.standard.object(forKey: "includeSpaceChatsInHomeSidebar") as? Bool ?? true

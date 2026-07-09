@@ -36,10 +36,6 @@ struct AppearanceSettingsDetailView: View {
         } label: {
           SettingsRowLabel("Item Size")
         }
-
-        Toggle(isOn: $appSettings.showSidebarMessagePreview) {
-          SettingsRowLabel("Message Previews")
-        }
       } header: {
         SettingsSectionHeader("Sidebar")
       }
@@ -242,7 +238,7 @@ private struct UnreadBadgeStyleOption: View {
   let isSelected: Bool
   let action: () -> Void
 
-  private var title: String {
+  private var title: LocalizedStringResource {
     switch style {
     case .dot:
       "Dot"
@@ -255,6 +251,10 @@ private struct UnreadBadgeStyleOption: View {
     Button(action: action) {
       VStack(spacing: 5) {
         HStack(spacing: 7) {
+          if style == .dot {
+            badge
+          }
+
           Circle()
             .fill(Color.secondary.opacity(0.22))
             .frame(width: 22, height: 22)
@@ -275,15 +275,12 @@ private struct UnreadBadgeStyleOption: View {
 
           Spacer(minLength: 0)
 
-          UnreadBadge(
-            unreadCount: 3,
-            prominent: true,
-            style: style,
-            dotSize: 7
-          )
+          if style == .numbered {
+            badge
+          }
         }
-        .padding(.horizontal, 8)
-        .frame(width: 108, height: 38)
+        .padding(.horizontal, 12)
+        .frame(width: 122, height: 38)
         .background(Color.primary.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay {
@@ -301,8 +298,17 @@ private struct UnreadBadgeStyleOption: View {
       }
     }
     .buttonStyle(.plain)
-    .accessibilityLabel(title)
+    .accessibilityLabel(Text(title))
     .accessibilityAddTraits(isSelected ? .isSelected : [])
+  }
+
+  private var badge: some View {
+    UnreadBadge(
+      unreadCount: 3,
+      prominent: true,
+      style: style,
+      dotSize: 7
+    )
   }
 }
 

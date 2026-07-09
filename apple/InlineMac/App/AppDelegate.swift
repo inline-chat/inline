@@ -144,7 +144,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       "NSAutoFillHeuristicControllerEnabled": false,
 
       "showSidebarMessagePreview": true,
-      AppSettings.sidebarItemSizeKey: SidebarItemSize.defaultValue.rawValue,
       "includeSpaceChatsInHomeSidebar": true,
       AppSettings.sidebarCleanupIntervalKey: SidebarCleanupInterval.defaultValue.rawValue,
       AppSettings.messageDoubleClickActionKey: MessageGestureAction.defaultDoubleClick.rawValue,
