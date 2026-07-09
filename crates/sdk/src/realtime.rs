@@ -168,6 +168,24 @@ pub struct RealtimeClient {
     rpc_timeout: Option<Duration>,
 }
 
+/// Server-pushed realtime event received outside a direct RPC result.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum RealtimeEvent {
+    /// Inline protocol updates pushed by the server.
+    Updates(Vec<proto::Update>),
+    /// Server acknowledgement for a previously sent client message.
+    Ack {
+        /// Client message ID acknowledged by the server.
+        msg_id: u64,
+    },
+    /// Server pong response.
+    Pong {
+        /// Pong nonce.
+        nonce: u64,
+    },
+}
+
 /// Builder for [`RealtimeClient`].
 #[must_use]
 #[derive(Clone)]
@@ -380,6 +398,21 @@ impl RealtimeClient {
         self.rpc_timeout
     }
 
+    /// Waits for the next server-pushed realtime event.
+    ///
+    /// This reads the same Inline realtime protocol stream used for RPC calls.
+    /// Callers that need both request/response RPCs and long-lived pushed
+    /// updates should either serialize access to one [`RealtimeClient`] or use
+    /// a separate realtime connection for the event receiver.
+    pub async fn next_event(&mut self) -> Result<RealtimeEvent, RealtimeError> {
+        loop {
+            let message = self.read_server_message().await?;
+            if let Some(event) = self.event_from_server_message(message).await? {
+                return Ok(event);
+            }
+        }
+    }
+
     async fn send_connection_init(
         &mut self,
         token: &str,
@@ -398,6 +431,7 @@ impl RealtimeClient {
     async fn wait_for_connection_open(&mut self) -> Result<(), RealtimeError> {
         loop {
             let message = self.read_server_message().await?;
+            let message_id = message.id;
             match message.body {
                 Some(proto::server_protocol_message::Body::ConnectionOpen(_)) => return Ok(()),
                 Some(proto::server_protocol_message::Body::ConnectionError(error)) => {
@@ -409,6 +443,9 @@ impl RealtimeClient {
                             .unwrap_or("UNKNOWN")
                     );
                     return Err(connection_error_from_proto(error));
+                }
+                Some(proto::server_protocol_message::Body::Message(message)) => {
+                    let _ = self.server_payload_event(message_id, message).await?;
                 }
                 _ => {}
             }
@@ -461,9 +498,68 @@ impl RealtimeClient {
                     );
                     return Err(connection_error_from_proto(error));
                 }
+                Some(proto::server_protocol_message::Body::Message(server_message)) => {
+                    if let Some(event) = self
+                        .server_payload_event(message.id, server_message)
+                        .await?
+                    {
+                        log::trace!(
+                            target: "inline_sdk::realtime",
+                            "received pushed realtime event while waiting for rpc msg_id={message_id}: {}",
+                            realtime_event_kind(&event)
+                        );
+                    }
+                }
                 _ => {}
             }
         }
+    }
+
+    async fn event_from_server_message(
+        &mut self,
+        message: proto::ServerProtocolMessage,
+    ) -> Result<Option<RealtimeEvent>, RealtimeError> {
+        match message.body {
+            Some(proto::server_protocol_message::Body::Message(server_message)) => {
+                self.server_payload_event(message.id, server_message).await
+            }
+            Some(proto::server_protocol_message::Body::Ack(ack)) => {
+                Ok(Some(RealtimeEvent::Ack { msg_id: ack.msg_id }))
+            }
+            Some(proto::server_protocol_message::Body::Pong(pong)) => {
+                Ok(Some(RealtimeEvent::Pong { nonce: pong.nonce }))
+            }
+            Some(proto::server_protocol_message::Body::ConnectionError(error)) => {
+                Err(connection_error_from_proto(error))
+            }
+            Some(proto::server_protocol_message::Body::ConnectionOpen(_))
+            | Some(proto::server_protocol_message::Body::RpcResult(_))
+            | Some(proto::server_protocol_message::Body::RpcError(_))
+            | None => Ok(None),
+        }
+    }
+
+    async fn server_payload_event(
+        &mut self,
+        message_id: u64,
+        message: proto::ServerMessage,
+    ) -> Result<Option<RealtimeEvent>, RealtimeError> {
+        match message.payload {
+            Some(proto::server_message::Payload::Update(payload)) => {
+                self.send_ack(message_id).await?;
+                Ok(Some(RealtimeEvent::Updates(payload.updates)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn send_ack(&mut self, msg_id: u64) -> Result<(), RealtimeError> {
+        let message = proto::ClientMessage {
+            id: self.next_id(),
+            seq: self.next_seq(),
+            body: Some(proto::client_message::Body::Ack(proto::Ack { msg_id })),
+        };
+        self.send_client_message(message).await
     }
 
     async fn send_client_message(
@@ -1139,6 +1235,14 @@ fn realtime_header_value(field: &'static str, value: &str) -> Result<HeaderValue
     HeaderValue::from_str(value).map_err(|_| RealtimeError::InvalidHeaderValue { field })
 }
 
+fn realtime_event_kind(event: &RealtimeEvent) -> &'static str {
+    match event {
+        RealtimeEvent::Updates(_) => "updates",
+        RealtimeEvent::Ack { .. } => "ack",
+        RealtimeEvent::Pong { .. } => "pong",
+    }
+}
+
 async fn with_optional_timeout<T, E, Fut>(
     operation: &'static str,
     timeout: Option<Duration>,
@@ -1198,8 +1302,8 @@ mod tests {
     use super::*;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_tungstenite::WebSocketStream;
-    use tokio_tungstenite::accept_hdr_async;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+    use tokio_tungstenite::{accept_async, accept_hdr_async};
 
     #[test]
     fn rpc_error_code_name_uses_stable_proto_name() {
@@ -1367,6 +1471,130 @@ mod tests {
 
         let mut client = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
             .identity(ClientIdentity::new("transport-test", "1.2.3"))
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect()
+            .await
+            .unwrap();
+        let result = client.call(proto::GetMeInput {}).await.unwrap();
+
+        assert_eq!(result.user.unwrap().id, 42);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_client_receives_update_events_and_acks_them() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+            send_test_server_message(&mut ws, test_update_server_message(9, 77)).await;
+
+            let ack = read_test_client_message(&mut ws).await;
+            match ack.body {
+                Some(proto::client_message::Body::Ack(ack)) => {
+                    assert_eq!(ack.msg_id, 9);
+                }
+                other => panic!("expected ack for pushed update, got {other:?}"),
+            }
+        });
+
+        let mut client = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect()
+            .await
+            .unwrap();
+        let event = client.next_event().await.unwrap();
+
+        match event {
+            RealtimeEvent::Updates(updates) => {
+                assert_eq!(updates.len(), 1);
+                match updates[0].update.as_ref() {
+                    Some(proto::update::Update::NewMessage(update)) => {
+                        assert_eq!(update.message.as_ref().unwrap().id, 77);
+                    }
+                    other => panic!("expected new message update, got {other:?}"),
+                }
+            }
+            other => panic!("expected updates event, got {other:?}"),
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_rpc_wait_acks_pushed_updates_before_matching_result() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let rpc = read_test_client_message(&mut ws).await;
+            send_test_server_message(&mut ws, test_update_server_message(10, 88)).await;
+
+            let ack = read_test_client_message(&mut ws).await;
+            match ack.body {
+                Some(proto::client_message::Body::Ack(ack)) => {
+                    assert_eq!(ack.msg_id, 10);
+                }
+                other => panic!("expected ack while waiting for rpc result, got {other:?}"),
+            }
+
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 2,
+                    body: Some(proto::server_protocol_message::Body::RpcResult(
+                        proto::RpcResult {
+                            req_msg_id: rpc.id,
+                            result: Some(proto::rpc_result::Result::GetMe(proto::GetMeResult {
+                                user: Some(proto::User {
+                                    id: 42,
+                                    ..Default::default()
+                                }),
+                            })),
+                        },
+                    )),
+                },
+            )
+            .await;
+        });
+
+        let mut client = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
             .without_connect_timeout()
             .without_rpc_timeout()
             .connect()
@@ -1579,5 +1807,43 @@ mod tests {
         ws.send(WsMessage::Binary(message.encode_to_vec()))
             .await
             .unwrap();
+    }
+
+    fn test_update_server_message(
+        message_id: u64,
+        inline_message_id: i64,
+    ) -> proto::ServerProtocolMessage {
+        proto::ServerProtocolMessage {
+            id: message_id,
+            body: Some(proto::server_protocol_message::Body::Message(
+                proto::ServerMessage {
+                    payload: Some(proto::server_message::Payload::Update(
+                        proto::UpdatesPayload {
+                            updates: vec![proto::Update {
+                                seq: Some(1),
+                                date: Some(1),
+                                update: Some(proto::update::Update::NewMessage(
+                                    proto::UpdateNewMessage {
+                                        message: Some(proto::Message {
+                                            id: inline_message_id,
+                                            from_id: 42,
+                                            peer_id: Some(proto::Peer {
+                                                r#type: Some(proto::peer::Type::Chat(
+                                                    proto::PeerChat { chat_id: 7 },
+                                                )),
+                                            }),
+                                            chat_id: 7,
+                                            message: Some("hello".to_owned()),
+                                            date: 1,
+                                            ..Default::default()
+                                        }),
+                                    },
+                                )),
+                            }],
+                        },
+                    )),
+                },
+            )),
+        }
     }
 }

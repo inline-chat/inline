@@ -5,9 +5,10 @@
 //! Transport, sync, store, and transaction managers plug into this runner
 //! instead of being spread across bridges or agents.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio::task::JoinHandle;
 
 use crate::{
     AuthStartRequest, AuthStartResult, AuthVerifyRequest, AuthVerifyResult, BackendError,
@@ -24,6 +25,8 @@ pub const DEFAULT_COMMAND_QUEUE_CAPACITY: usize = 128;
 
 /// Default broadcast event queue capacity.
 pub const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 1024;
+const EVENT_RETRY_DELAY: Duration = Duration::from_secs(5);
+const EVENT_RATE_LIMIT_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 /// Errors returned by the async client handle before an operation reaches the backend.
 #[derive(Debug, thiserror::Error)]
@@ -97,6 +100,7 @@ impl InlineClientBuilder {
         let (event_tx, _) = broadcast::channel(self.event_queue_capacity);
         let (status_tx, status_rx) = watch::channel(self.initial_status);
         let (failure_tx, failure_rx) = watch::channel(None);
+        let (signal_tx, signal_rx) = mpsc::channel(self.command_queue_capacity);
 
         let client = InlineClient {
             command_tx,
@@ -112,6 +116,9 @@ impl InlineClientBuilder {
             status: self.initial_status,
             failure: None,
             backend: self.backend,
+            signal_tx,
+            signal_rx,
+            event_task: None,
         };
 
         InlineClientRuntime { client, runner }
@@ -440,38 +447,93 @@ pub struct ClientRunner {
     status: ClientStatus,
     failure: Option<ClientFailure>,
     backend: Arc<dyn ClientBackend>,
+    signal_tx: mpsc::Sender<RunnerSignal>,
+    signal_rx: mpsc::Receiver<RunnerSignal>,
+    event_task: Option<JoinHandle<()>>,
 }
 
 impl ClientRunner {
     /// Runs the client command loop until shutdown or all handles are dropped.
     pub async fn run(mut self) {
         log::debug!("inline client runner started");
-        while let Some(command) = self.command_rx.recv().await {
-            match command {
-                ClientCommand::Request {
-                    request,
-                    respond_to,
-                } => {
-                    let response = self.handle_request(*request).await;
-                    let _ = respond_to.send(response);
+        loop {
+            tokio::select! {
+                command = self.command_rx.recv() => {
+                    if !self.handle_optional_command(command).await {
+                        break;
+                    }
                 }
-                ClientCommand::SetStatus {
-                    status,
-                    failure,
-                    respond_to,
-                } => {
-                    self.update_status(status, failure);
-                    let _ = respond_to.send(());
-                }
-                ClientCommand::Shutdown { respond_to } => {
-                    log::debug!("inline client runner shutdown requested");
-                    self.update_status(ClientStatus::ShuttingDown, None);
-                    let _ = respond_to.send(());
-                    break;
+                signal = self.signal_rx.recv() => {
+                    if let Some(signal) = signal {
+                        self.handle_signal(signal);
+                    }
                 }
             }
         }
+        self.stop_event_receiver();
         log::debug!("inline client runner stopped");
+    }
+
+    async fn handle_optional_command(&mut self, command: Option<ClientCommand>) -> bool {
+        let Some(command) = command else {
+            return false;
+        };
+        self.handle_command(command).await
+    }
+
+    async fn handle_command(&mut self, command: ClientCommand) -> bool {
+        match command {
+            ClientCommand::Request {
+                request,
+                respond_to,
+            } => {
+                let response = self.handle_request(*request).await;
+                let _ = respond_to.send(response);
+                true
+            }
+            ClientCommand::SetStatus {
+                status,
+                failure,
+                respond_to,
+            } => {
+                self.update_status(status, failure);
+                let _ = respond_to.send(());
+                true
+            }
+            ClientCommand::Shutdown { respond_to } => {
+                log::debug!("inline client runner shutdown requested");
+                self.update_status(ClientStatus::ShuttingDown, None);
+                let _ = respond_to.send(());
+                false
+            }
+        }
+    }
+
+    const fn should_receive_events(&self) -> bool {
+        matches!(
+            self.status,
+            ClientStatus::Connected | ClientStatus::Reconnecting
+        )
+    }
+
+    fn emit_received_events(&self, events: Vec<ClientEvent>) {
+        for event in events {
+            let _ = self.event_tx.send(event);
+        }
+    }
+
+    fn handle_signal(&mut self, signal: RunnerSignal) {
+        match signal {
+            RunnerSignal::Events(events) => {
+                if self.status == ClientStatus::Reconnecting {
+                    self.update_status(ClientStatus::Connected, None);
+                }
+                self.emit_received_events(events);
+            }
+            RunnerSignal::ReceiveError(error) => {
+                self.update_status_for_backend_error(&error);
+            }
+        }
     }
 
     async fn handle_request(&mut self, request: ClientRequest) -> BackendResult<ClientResponse> {
@@ -605,7 +667,9 @@ impl ClientRunner {
         let status = match error.category {
             ClientErrorCategory::AuthRequired => ClientStatus::AuthRequired,
             ClientErrorCategory::AuthExpired => ClientStatus::AuthExpired,
-            ClientErrorCategory::Network => ClientStatus::Reconnecting,
+            ClientErrorCategory::Network
+            | ClientErrorCategory::Timeout
+            | ClientErrorCategory::RateLimited => ClientStatus::Reconnecting,
             _ => ClientStatus::Disconnected,
         };
         self.update_status(
@@ -623,6 +687,60 @@ impl ClientRunner {
         let _ = self
             .event_tx
             .send(ClientEvent::StatusChanged { status, failure });
+        self.sync_event_receiver_to_status();
+    }
+
+    fn sync_event_receiver_to_status(&mut self) {
+        if self.should_receive_events() {
+            self.start_event_receiver();
+        } else {
+            self.stop_event_receiver();
+        }
+    }
+
+    fn start_event_receiver(&mut self) {
+        if self.event_task.is_some() {
+            return;
+        }
+        let backend = self.backend.clone();
+        let signal_tx = self.signal_tx.clone();
+        self.event_task = Some(tokio::spawn(run_backend_event_receiver(backend, signal_tx)));
+    }
+
+    fn stop_event_receiver(&mut self) {
+        if let Some(task) = self.event_task.take() {
+            task.abort();
+        }
+    }
+}
+
+async fn run_backend_event_receiver(
+    backend: Arc<dyn ClientBackend>,
+    signal_tx: mpsc::Sender<RunnerSignal>,
+) {
+    loop {
+        match backend.receive_events().await {
+            Ok(events) => {
+                if signal_tx.send(RunnerSignal::Events(events)).await.is_err() {
+                    break;
+                }
+            }
+            Err(error) => {
+                let retry = should_retry_event_receive(&error);
+                let delay = event_retry_delay(&error);
+                if signal_tx
+                    .send(RunnerSignal::ReceiveError(error))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                if !retry {
+                    break;
+                }
+                tokio::time::sleep(delay).await;
+            }
+        }
     }
 }
 
@@ -639,6 +757,12 @@ enum ClientCommand {
     Shutdown {
         respond_to: oneshot::Sender<()>,
     },
+}
+
+#[derive(Debug)]
+enum RunnerSignal {
+    Events(Vec<ClientEvent>),
+    ReceiveError(BackendError),
 }
 
 impl std::fmt::Debug for ClientCommand {
@@ -708,6 +832,22 @@ impl ClientRequest {
             Self::Typing(_) => "typing",
         }
     }
+}
+
+const fn event_retry_delay(error: &BackendError) -> Duration {
+    match error.category {
+        ClientErrorCategory::RateLimited => EVENT_RATE_LIMIT_RETRY_DELAY,
+        _ => EVENT_RETRY_DELAY,
+    }
+}
+
+const fn should_retry_event_receive(error: &BackendError) -> bool {
+    matches!(
+        error.category,
+        ClientErrorCategory::Network
+            | ClientErrorCategory::Timeout
+            | ClientErrorCategory::RateLimited
+    )
 }
 
 #[derive(Debug)]
@@ -812,6 +952,75 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn runner_emits_backend_pushed_events_while_connected() {
+        let backend = InMemoryBackend::new();
+        let client = InlineClient::builder()
+            .backend(backend.clone())
+            .build()
+            .spawn();
+        let mut events = client.subscribe();
+
+        client.connect(token_connect()).await.unwrap();
+        backend.push_event_batch(vec![ClientEvent::MessageDeleted {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(99),
+        }]);
+
+        let event = recv_until_event(&mut events, |event| {
+            matches!(
+                event,
+                ClientEvent::MessageDeleted {
+                    chat_id,
+                    message_id,
+                } if *chat_id == InlineId::new(7) && *message_id == InlineId::new(99)
+            )
+        })
+        .await;
+        assert_eq!(
+            event,
+            ClientEvent::MessageDeleted {
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(99),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn runner_marks_reconnecting_when_event_receive_is_rate_limited() {
+        let backend = InMemoryBackend::new();
+        let client = InlineClient::builder()
+            .backend(backend.clone())
+            .build()
+            .spawn();
+        let mut events = client.subscribe();
+
+        client.connect(token_connect()).await.unwrap();
+        backend.push_event_error(BackendError::new(
+            ClientErrorCategory::RateLimited,
+            "rate limited",
+        ));
+
+        let event = recv_until_event(&mut events, |event| {
+            matches!(
+                event,
+                ClientEvent::StatusChanged {
+                    status: ClientStatus::Reconnecting,
+                    ..
+                }
+            )
+        })
+        .await;
+        assert!(matches!(
+            event,
+            ClientEvent::StatusChanged {
+                status: ClientStatus::Reconnecting,
+                ..
+            }
+        ));
+        assert_eq!(client.status(), ClientStatus::Reconnecting);
     }
 
     #[tokio::test]
@@ -1071,5 +1280,21 @@ mod tests {
                 ClientCommandError::Closed | ClientCommandError::ResponseDropped
             )
         ));
+    }
+
+    async fn recv_until_event(
+        events: &mut broadcast::Receiver<ClientEvent>,
+        matches: impl Fn(&ClientEvent) -> bool,
+    ) -> ClientEvent {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let event = events.recv().await.unwrap();
+                if matches(&event) {
+                    return event;
+                }
+            }
+        })
+        .await
+        .expect("expected matching client event")
     }
 }

@@ -14,8 +14,9 @@ use std::{
 
 use futures_util::future::BoxFuture;
 use inline_sdk::{
-    ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeClient, RealtimeError, RpcRequest,
-    UploadFileBytesInput, UploadFileResult, UploadFileType, UploadVideoMetadata, proto,
+    ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeClient, RealtimeError,
+    RealtimeEvent, RpcRequest, UploadFileBytesInput, UploadFileResult, UploadFileType,
+    UploadVideoMetadata, proto,
 };
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -151,6 +152,7 @@ impl SdkBackendBuilder {
             store: self.store,
             realtime_connector: self.realtime_connector,
             realtime: Arc::new(Mutex::new(None)),
+            event_realtime: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -164,6 +166,7 @@ pub struct SdkBackend {
     store: Arc<dyn ClientStore>,
     realtime_connector: Option<Arc<dyn RealtimeConnector>>,
     realtime: Arc<Mutex<Option<RealtimeClient>>>,
+    event_realtime: Arc<Mutex<Option<RealtimeClient>>>,
 }
 
 impl fmt::Debug for SdkBackend {
@@ -263,6 +266,39 @@ impl SdkBackend {
 
     async fn clear_realtime(&self) {
         *self.realtime.lock().await = None;
+        *self.event_realtime.lock().await = None;
+    }
+
+    async fn receive_realtime_event(
+        &self,
+        session: &StoredSession,
+    ) -> BackendResult<RealtimeEvent> {
+        let mut realtime = self.event_realtime.lock().await;
+        if realtime.is_none() {
+            *realtime = Some(
+                RealtimeClient::connect_with_identity(
+                    &self.realtime_url,
+                    session.auth.access_token().expose_secret(),
+                    self.identity.clone(),
+                )
+                .await
+                .map_err(realtime_error_to_backend)?,
+            );
+        }
+
+        let Some(client) = realtime.as_mut() else {
+            return Err(BackendError::new(
+                ClientErrorCategory::Internal,
+                "realtime event client was not initialized",
+            ));
+        };
+        match client.next_event().await {
+            Ok(event) => Ok(event),
+            Err(error) => {
+                *realtime = None;
+                Err(realtime_error_to_backend(error))
+            }
+        }
     }
 
     async fn connect_with_auth(
@@ -1168,6 +1204,25 @@ impl ClientBackend for SdkBackend {
             Ok(OperationOutcome::empty())
         })
     }
+
+    fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            loop {
+                match backend.receive_realtime_event(&session).await? {
+                    RealtimeEvent::Updates(updates) => {
+                        let events = backend.apply_updates(updates, None, None).await?;
+                        if !events.is_empty() {
+                            return Ok(events);
+                        }
+                    }
+                    RealtimeEvent::Ack { .. } | RealtimeEvent::Pong { .. } => {}
+                    _ => {}
+                }
+            }
+        })
+    }
 }
 
 impl SdkBackend {
@@ -1658,8 +1713,26 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         RealtimeError::Timeout { .. } => {
             BackendError::new(ClientErrorCategory::Timeout, error.to_string())
         }
-        RealtimeError::ConnectionError { .. } | RealtimeError::RpcError { .. } => {
+        RealtimeError::ConnectionError { .. } => {
             BackendError::new(ClientErrorCategory::AuthExpired, error.to_string())
+        }
+        RealtimeError::RpcError {
+            code,
+            error_name,
+            friendly,
+            ..
+        } if code == 420 || error_name == "RATE_LIMIT" => {
+            BackendError::new(ClientErrorCategory::RateLimited, friendly)
+        }
+        RealtimeError::RpcError {
+            error_name,
+            friendly,
+            ..
+        } if error_name == "UNAUTHENTICATED" => {
+            BackendError::new(ClientErrorCategory::AuthExpired, friendly)
+        }
+        RealtimeError::RpcError { friendly, .. } => {
+            BackendError::new(ClientErrorCategory::Internal, friendly)
         }
         RealtimeError::ConnectionClosed | RealtimeError::WebSocket(_) => {
             BackendError::new(ClientErrorCategory::Network, error.to_string())

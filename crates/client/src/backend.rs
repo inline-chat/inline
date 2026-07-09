@@ -7,9 +7,10 @@
 //! same shape.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use futures_util::future::BoxFuture;
@@ -220,6 +221,9 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
     /// Sends a typing state.
     fn typing(&self, request: TypingRequest)
     -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Receives the next batch of server-pushed client events.
+    fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>>;
 }
 
 /// In-memory backend for client, bridge-adapter, and runtime tests.
@@ -235,6 +239,7 @@ struct InMemoryBackendState {
     dialogs: Vec<DialogRecord>,
     participants: HashMap<i64, Vec<ChatParticipantRecord>>,
     messages: HashMap<i64, Vec<MessageRecord>>,
+    event_batches: VecDeque<BackendResult<Vec<ClientEvent>>>,
     next_chat_id: i64,
     next_message_id: i64,
     next_random_id: i64,
@@ -249,6 +254,7 @@ impl Default for InMemoryBackendState {
             dialogs: Vec::new(),
             participants: HashMap::new(),
             messages: HashMap::new(),
+            event_batches: VecDeque::new(),
             next_chat_id: 10_000,
             next_message_id: 1,
             next_random_id: 1,
@@ -295,6 +301,24 @@ impl InMemoryBackend {
         if let Some(messages) = state.messages.get_mut(&chat_id) {
             messages.sort_by_key(|message| (message.timestamp, message.message_id.get()));
         }
+    }
+
+    /// Queues a server-pushed event batch for [`ClientBackend::receive_events`].
+    pub fn push_event_batch(&self, events: Vec<ClientEvent>) {
+        self.state
+            .lock()
+            .expect("in-memory backend poisoned")
+            .event_batches
+            .push_back(Ok(events));
+    }
+
+    /// Queues a server-pushed receive error for [`ClientBackend::receive_events`].
+    pub fn push_event_error(&self, error: BackendError) {
+        self.state
+            .lock()
+            .expect("in-memory backend poisoned")
+            .event_batches
+            .push_back(Err(error));
     }
 
     /// Returns whether the backend is connected.
@@ -865,6 +889,27 @@ impl ClientBackend for InMemoryBackend {
                 user_id: InlineId::new(0),
                 is_typing: request.is_typing,
             }]))
+        })
+    }
+
+    fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            loop {
+                {
+                    let mut state = backend.state.lock().expect("in-memory backend poisoned");
+                    if !state.connected {
+                        return Err(BackendError::new(
+                            ClientErrorCategory::AuthRequired,
+                            "client is not connected",
+                        ));
+                    }
+                    if let Some(events) = state.event_batches.pop_front() {
+                        return events;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
         })
     }
 }

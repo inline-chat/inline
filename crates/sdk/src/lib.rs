@@ -49,7 +49,7 @@ pub use client_info::{AuthMetadata, ClientIdentity, ClientIdentityError};
 pub use inline_protocol::proto;
 pub use realtime::{
     DEFAULT_CONNECT_TIMEOUT, DEFAULT_RPC_TIMEOUT, RealtimeClient, RealtimeClientBuilder,
-    RealtimeError, RpcRequest,
+    RealtimeError, RealtimeEvent, RpcRequest,
 };
 
 /// Convenient imports for common SDK consumers.
@@ -59,8 +59,8 @@ pub mod prelude {
         CreateLinearIssueInput, CreateLinearIssueResult, CreateNotionTaskInput,
         CreateNotionTaskResult, CreatePrivateChatResult, DEFAULT_API_TIMEOUT,
         DEFAULT_CONNECT_TIMEOUT, DEFAULT_RPC_TIMEOUT, PeerId, ReadMessagesInput,
-        ReadMessagesResult, RealtimeClient, RealtimeClientBuilder, RealtimeError, RpcRequest,
-        SendCodeResult, UploadFileBytesInput, UploadFileInput, UploadFileResult, UploadFileType,
-        UploadFileTypeParseError, UploadVideoMetadata, VerifyCodeResult, proto,
+        ReadMessagesResult, RealtimeClient, RealtimeClientBuilder, RealtimeError, RealtimeEvent,
+        RpcRequest, SendCodeResult, UploadFileBytesInput, UploadFileInput, UploadFileResult,
+        UploadFileType, UploadFileTypeParseError, UploadVideoMetadata, VerifyCodeResult, proto,
     };
 }
