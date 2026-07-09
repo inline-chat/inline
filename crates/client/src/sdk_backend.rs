@@ -14,10 +14,11 @@ use std::{
 
 use futures_util::future::BoxFuture;
 use inline_sdk::{
-    ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeClient, RealtimeError,
+    ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeClient, RealtimeError, RpcRequest,
     UploadFileBytesInput, UploadFileResult, UploadFileType, UploadVideoMetadata, proto,
 };
 use serde_json::Value;
+use tokio::sync::Mutex;
 
 use crate::{
     AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult, AuthToken,
@@ -149,6 +150,7 @@ impl SdkBackendBuilder {
             identity: self.identity,
             store: self.store,
             realtime_connector: self.realtime_connector,
+            realtime: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -161,6 +163,7 @@ pub struct SdkBackend {
     identity: ClientIdentity,
     store: Arc<dyn ClientStore>,
     realtime_connector: Option<Arc<dyn RealtimeConnector>>,
+    realtime: Arc<Mutex<Option<RealtimeClient>>>,
 }
 
 impl fmt::Debug for SdkBackend {
@@ -222,14 +225,44 @@ impl SdkBackend {
             })
     }
 
-    async fn connect_realtime(&self, session: &StoredSession) -> BackendResult<RealtimeClient> {
-        RealtimeClient::connect_with_identity(
-            &self.realtime_url,
-            session.auth.access_token().expose_secret(),
-            self.identity.clone(),
-        )
-        .await
-        .map_err(realtime_error_to_backend)
+    async fn call_realtime<R>(
+        &self,
+        session: &StoredSession,
+        request: R,
+    ) -> BackendResult<R::Response>
+    where
+        R: RpcRequest,
+    {
+        let mut realtime = self.realtime.lock().await;
+        if realtime.is_none() {
+            *realtime = Some(
+                RealtimeClient::connect_with_identity(
+                    &self.realtime_url,
+                    session.auth.access_token().expose_secret(),
+                    self.identity.clone(),
+                )
+                .await
+                .map_err(realtime_error_to_backend)?,
+            );
+        }
+
+        let Some(client) = realtime.as_mut() else {
+            return Err(BackendError::new(
+                ClientErrorCategory::Internal,
+                "realtime client was not initialized",
+            ));
+        };
+        match client.call(request).await {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                *realtime = None;
+                Err(realtime_error_to_backend(error))
+            }
+        }
+    }
+
+    async fn clear_realtime(&self) {
+        *self.realtime.lock().await = None;
     }
 
     async fn connect_with_auth(
@@ -245,6 +278,7 @@ impl SdkBackend {
                 ))
                 .await?;
         }
+        self.clear_realtime().await;
         self.store
             .save_session(StoredSession {
                 auth: request.auth,
@@ -284,11 +318,13 @@ impl SdkBackend {
             .await
             .map_err(store_error_to_backend)?
         else {
+            self.clear_realtime().await;
             return Ok(ClientStatusSnapshot::current(
                 crate::ClientStatus::AuthRequired,
             ));
         };
 
+        self.clear_realtime().await;
         if let Some(connector) = &self.realtime_connector {
             connector
                 .connect(RealtimeConnectRequest::new(
@@ -418,6 +454,7 @@ impl ClientBackend for SdkBackend {
     fn logout(&self) -> BoxFuture<'static, BackendResult<()>> {
         let backend = self.clone();
         Box::pin(async move {
+            backend.clear_realtime().await;
             backend
                 .store
                 .clear_session()
@@ -431,11 +468,9 @@ impl ClientBackend for SdkBackend {
         Box::pin(async move {
             let session = backend.require_session().await?;
             let live: BackendResult<DialogsPage> = async {
-                let mut realtime = backend.connect_realtime(&session).await?;
-                let result = realtime
-                    .call(proto::GetChatsInput {})
-                    .await
-                    .map_err(realtime_error_to_backend)?;
+                let result = backend
+                    .call_realtime(&session, proto::GetChatsInput {})
+                    .await?;
                 let page = dialogs_page_from_get_chats(&result, request.clone())?;
                 for dialog in &page.dialogs {
                     backend
@@ -493,12 +528,10 @@ impl ClientBackend for SdkBackend {
             }
             let limit = request.limit.unwrap_or(50).max(1);
             let live: BackendResult<HistoryPage> = async {
-                let mut realtime = backend.connect_realtime(&session).await?;
                 let fetch_limit = limit.saturating_add(1).min(i32::MAX as u32) as i32;
-                let result = realtime
-                    .call(history_input_for_request(&request, fetch_limit))
-                    .await
-                    .map_err(realtime_error_to_backend)?;
+                let result = backend
+                    .call_realtime(&session, history_input_for_request(&request, fetch_limit))
+                    .await?;
                 let records = result
                     .messages
                     .into_iter()
@@ -551,13 +584,14 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
-            let result = realtime
-                .call(proto::GetChatParticipantsInput {
-                    chat_id: request.chat_id.get(),
-                })
-                .await
-                .map_err(realtime_error_to_backend)?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::GetChatParticipantsInput {
+                        chat_id: request.chat_id.get(),
+                    },
+                )
+                .await?;
             let page = chat_participants_page_from_proto(result);
             backend
                 .store
@@ -626,25 +660,26 @@ impl ClientBackend for SdkBackend {
         Box::pin(async move {
             validate_create_participants(&request.participants)?;
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
-            let result = realtime
-                .call(proto::CreateChatInput {
-                    title: trimmed_option(request.title),
-                    space_id: request.space_id.map(InlineId::get),
-                    description: trimmed_option(request.description),
-                    emoji: trimmed_option(request.emoji),
-                    is_public: request.is_public,
-                    participants: request
-                        .participants
-                        .into_iter()
-                        .map(|participant| proto::InputChatParticipant {
-                            user_id: participant.user_id.get(),
-                        })
-                        .collect(),
-                    reserved_chat_id: None,
-                })
-                .await
-                .map_err(realtime_error_to_backend)?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::CreateChatInput {
+                        title: trimmed_option(request.title),
+                        space_id: request.space_id.map(InlineId::get),
+                        description: trimmed_option(request.description),
+                        emoji: trimmed_option(request.emoji),
+                        is_public: request.is_public,
+                        participants: request
+                            .participants
+                            .into_iter()
+                            .map(|participant| proto::InputChatParticipant {
+                                user_id: participant.user_id.get(),
+                            })
+                            .collect(),
+                        reserved_chat_id: None,
+                    },
+                )
+                .await?;
             let created = created_chat_from_proto(result.chat, result.dialog, None, None, None)?;
             backend
                 .store
@@ -676,24 +711,25 @@ impl ClientBackend for SdkBackend {
             }
             validate_create_participants(&request.participants)?;
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
-            let result = realtime
-                .call(proto::CreateSubthreadInput {
-                    parent_chat_id: request.parent_chat_id.get(),
-                    parent_message_id: request.parent_message_id.map(InlineId::get),
-                    title: trimmed_option(request.title),
-                    description: trimmed_option(request.description),
-                    emoji: trimmed_option(request.emoji),
-                    participants: request
-                        .participants
-                        .into_iter()
-                        .map(|participant| proto::InputChatParticipant {
-                            user_id: participant.user_id.get(),
-                        })
-                        .collect(),
-                })
-                .await
-                .map_err(realtime_error_to_backend)?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::CreateSubthreadInput {
+                        parent_chat_id: request.parent_chat_id.get(),
+                        parent_message_id: request.parent_message_id.map(InlineId::get),
+                        title: trimmed_option(request.title),
+                        description: trimmed_option(request.description),
+                        emoji: trimmed_option(request.emoji),
+                        participants: request
+                            .participants
+                            .into_iter()
+                            .map(|participant| proto::InputChatParticipant {
+                                user_id: participant.user_id.get(),
+                            })
+                            .collect(),
+                    },
+                )
+                .await?;
             let created = created_chat_from_proto(
                 result.chat,
                 result.dialog,
@@ -760,23 +796,6 @@ impl ClientBackend for SdkBackend {
                 .await
                 .map_err(store_error_to_backend)?;
 
-            let mut realtime = match RealtimeClient::connect_with_identity(
-                &backend.realtime_url,
-                session.auth.access_token().expose_secret(),
-                backend.identity.clone(),
-            )
-            .await
-            {
-                Ok(realtime) => realtime,
-                Err(error) => {
-                    let backend_error = realtime_error_to_backend(error);
-                    backend
-                        .record_failed_transaction(identity, initial_chat_id, backend_error.clone())
-                        .await?;
-                    return Err(backend_error);
-                }
-            };
-
             backend
                 .store
                 .record_transaction(
@@ -800,10 +819,9 @@ impl ClientBackend for SdkBackend {
                 send_mode: None,
                 actions: None,
             };
-            let send_result = match realtime.call(input).await {
+            let send_result = match backend.call_realtime(&session, input).await {
                 Ok(result) => result,
-                Err(error) => {
-                    let backend_error = realtime_error_to_backend(error);
+                Err(backend_error) => {
                     backend
                         .record_failed_transaction(identity, initial_chat_id, backend_error.clone())
                         .await?;
@@ -909,16 +927,6 @@ impl ClientBackend for SdkBackend {
                 }
             };
 
-            let mut realtime = match backend.connect_realtime(&session).await {
-                Ok(realtime) => realtime,
-                Err(error) => {
-                    backend
-                        .record_failed_transaction(identity, initial_chat_id, error.clone())
-                        .await?;
-                    return Err(error);
-                }
-            };
-
             backend
                 .store
                 .record_transaction(
@@ -942,10 +950,9 @@ impl ClientBackend for SdkBackend {
                 send_mode: None,
                 actions: None,
             };
-            let send_result = match realtime.call(input).await {
+            let send_result = match backend.call_realtime(&session, input).await {
                 Ok(result) => result,
-                Err(error) => {
-                    let backend_error = realtime_error_to_backend(error);
+                Err(backend_error) => {
                     backend
                         .record_failed_transaction(identity, initial_chat_id, backend_error.clone())
                         .await?;
@@ -995,18 +1002,19 @@ impl ClientBackend for SdkBackend {
                 ));
             }
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
-            let result = realtime
-                .call(proto::EditMessageInput {
-                    message_id: request.message_id.get(),
-                    peer_id: Some(input_peer_for_chat(request.chat_id)),
-                    text: request.text,
-                    entities: None,
-                    parse_markdown: Some(false),
-                    actions: None,
-                })
-                .await
-                .map_err(realtime_error_to_backend)?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::EditMessageInput {
+                        message_id: request.message_id.get(),
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        text: request.text,
+                        entities: None,
+                        parse_markdown: Some(false),
+                        actions: None,
+                    },
+                )
+                .await?;
             let events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -1021,14 +1029,15 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
-            let result = realtime
-                .call(proto::DeleteMessagesInput {
-                    message_ids: vec![request.message_id.get()],
-                    peer_id: Some(input_peer_for_chat(request.chat_id)),
-                })
-                .await
-                .map_err(realtime_error_to_backend)?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::DeleteMessagesInput {
+                        message_ids: vec![request.message_id.get()],
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                    },
+                )
+                .await?;
             let mut events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -1061,26 +1070,29 @@ impl ClientBackend for SdkBackend {
                 ));
             }
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
             let updates = if request.remove {
-                realtime
-                    .call(proto::DeleteReactionInput {
-                        emoji: reaction.clone(),
-                        peer_id: Some(input_peer_for_chat(request.chat_id)),
-                        message_id: request.message_id.get(),
-                    })
-                    .await
-                    .map_err(realtime_error_to_backend)?
+                backend
+                    .call_realtime(
+                        &session,
+                        proto::DeleteReactionInput {
+                            emoji: reaction.clone(),
+                            peer_id: Some(input_peer_for_chat(request.chat_id)),
+                            message_id: request.message_id.get(),
+                        },
+                    )
+                    .await?
                     .updates
             } else {
-                realtime
-                    .call(proto::AddReactionInput {
-                        emoji: reaction.clone(),
-                        message_id: request.message_id.get(),
-                        peer_id: Some(input_peer_for_chat(request.chat_id)),
-                    })
-                    .await
-                    .map_err(realtime_error_to_backend)?
+                backend
+                    .call_realtime(
+                        &session,
+                        proto::AddReactionInput {
+                            emoji: reaction.clone(),
+                            message_id: request.message_id.get(),
+                            peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        },
+                    )
+                    .await?
                     .updates
             };
             let mut events = backend
@@ -1112,14 +1124,15 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
-            let result = realtime
-                .call(proto::ReadMessagesInput {
-                    peer_id: Some(input_peer_for_chat(request.chat_id)),
-                    max_id: request.max_message_id.map(InlineId::get),
-                })
-                .await
-                .map_err(realtime_error_to_backend)?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::ReadMessagesInput {
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        max_id: request.max_message_id.map(InlineId::get),
+                    },
+                )
+                .await?;
             let mut events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -1141,16 +1154,17 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            let mut realtime = backend.connect_realtime(&session).await?;
-            realtime
-                .call(proto::SendComposeActionInput {
-                    peer_id: Some(input_peer_for_chat(request.chat_id)),
-                    action: request
-                        .is_typing
-                        .then_some(proto::update_compose_action::ComposeAction::Typing as i32),
-                })
-                .await
-                .map_err(realtime_error_to_backend)?;
+            backend
+                .call_realtime(
+                    &session,
+                    proto::SendComposeActionInput {
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        action: request
+                            .is_typing
+                            .then_some(proto::update_compose_action::ComposeAction::Typing as i32),
+                    },
+                )
+                .await?;
             Ok(OperationOutcome::empty())
         })
     }
@@ -2309,6 +2323,12 @@ fn redacted_url_for_debug(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use futures_util::{SinkExt, StreamExt};
+    use prost::Message;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_async;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+
     use crate::{
         AuthCredential, AuthToken, ClientBackend, DialogRecord, DialogsRequest, ExternalId,
         FakeRealtimeConnector, HistoryRequest, InlineId, RandomId, SendTextRequest,
@@ -2466,6 +2486,107 @@ mod tests {
 
         assert_eq!(dialogs.dialogs.len(), 1);
         assert_eq!(dialogs.dialogs[0].chat_id, InlineId::new(9));
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_reuses_realtime_connection_for_multiple_rpc_calls() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let get_chats = read_test_client_message(&mut ws).await;
+            match &get_chats.body {
+                Some(proto::client_message::Body::RpcCall(call)) => {
+                    assert_eq!(call.method, proto::Method::GetChats as i32);
+                }
+                other => panic!("expected getChats RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 2,
+                    body: Some(proto::server_protocol_message::Body::RpcResult(
+                        proto::RpcResult {
+                            req_msg_id: get_chats.id,
+                            result: Some(proto::rpc_result::Result::GetChats(
+                                proto::GetChatsResult::default(),
+                            )),
+                        },
+                    )),
+                },
+            )
+            .await;
+
+            let history = read_test_client_message(&mut ws).await;
+            match &history.body {
+                Some(proto::client_message::Body::RpcCall(call)) => {
+                    assert_eq!(call.method, proto::Method::GetChatHistory as i32);
+                }
+                other => panic!("expected getChatHistory RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 3,
+                    body: Some(proto::server_protocol_message::Body::RpcResult(
+                        proto::RpcResult {
+                            req_msg_id: history.id,
+                            result: Some(proto::rpc_result::Result::GetChatHistory(
+                                proto::GetChatHistoryResult::default(),
+                            )),
+                        },
+                    )),
+                },
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        let backend = SdkBackend::builder()
+            .store(store)
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+
+        let dialogs = backend.dialogs(DialogsRequest::default()).await.unwrap();
+        assert!(dialogs.dialogs.is_empty());
+        let history = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            backend.history(HistoryRequest {
+                chat_id: InlineId::new(7),
+                limit: Some(10),
+                before_message_id: None,
+                after_message_id: None,
+            }),
+        )
+        .await
+        .expect("history should use the existing websocket")
+        .unwrap();
+        assert!(history.messages.is_empty());
+        tokio::time::timeout(std::time::Duration::from_secs(3), server)
+            .await
+            .expect("server should observe both RPCs on one websocket")
+            .unwrap();
     }
 
     #[test]
@@ -2960,5 +3081,23 @@ mod tests {
             },
             account_namespace: Some("team".to_owned()),
         }
+    }
+
+    async fn read_test_client_message(
+        ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    ) -> proto::ClientMessage {
+        match ws.next().await.unwrap().unwrap() {
+            WsMessage::Binary(data) => proto::ClientMessage::decode(&*data).unwrap(),
+            other => panic!("expected binary client message, got {other:?}"),
+        }
+    }
+
+    async fn send_test_server_message(
+        ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+        message: proto::ServerProtocolMessage,
+    ) {
+        ws.send(WsMessage::Binary(message.encode_to_vec()))
+            .await
+            .unwrap();
     }
 }
