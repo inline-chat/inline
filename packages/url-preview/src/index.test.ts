@@ -507,6 +507,167 @@ describe("url-preview", () => {
     expect(preview?.media).toBeUndefined()
   })
 
+  it("retains normal X tweet text beyond the old compact-card storage limit", async () => {
+    const fullText =
+      "A Brown professor gave his students a take-home midterm exam. After suspecting many cheated using AI, he made the final in-person. The orange dots are the midterm scores and the gray dots are the final scores. Looks like all but 3 cheated on the midterm."
+    const payload = {
+      __typename: "Tweet",
+      text: `${fullText} https://t.co/hekcGsz76h`,
+      user: {
+        name: "Paul Graham",
+        screen_name: "paulg",
+        profile_image_url_https: "https://pbs.twimg.com/profile_images/1824002576/pg-railsconf_normal.jpg",
+      },
+      entities: {
+        media: [
+          {
+            url: "https://t.co/hekcGsz76h",
+          },
+        ],
+      },
+      mediaDetails: [
+        {
+          url: "https://t.co/hekcGsz76h",
+          media_url_https: "https://pbs.twimg.com/media/HMv9NYTWIAAcB4w.jpg",
+          original_info: { width: 621, height: 1121 },
+          type: "photo",
+        },
+      ],
+    }
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response(JSON.stringify(payload), {
+        headers: { "content-type": "application/json" },
+      })
+
+    const preview = await fetchUrlPreview("https://x.com/paulg/status/2075031014628311236", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(preview?.description).toBe(fullText)
+    expect(preview?.description).not.toContain("…")
+  })
+
+  it("retains multiline X tweet text beyond the old compact-card storage limit", async () => {
+    const fullText = [
+      "The first paragraph has enough detail to prove this text is stored for the large card instead of the old compact card limit.",
+      "",
+      "The second paragraph should stay separated by a blank line, with the final sentence still visible after the media URL is removed.",
+      "The third line should remain a real newline too.",
+    ].join("\n")
+    const payload = {
+      __typename: "Tweet",
+      text: `${fullText}\nhttps://t.co/multilineMedia`,
+      user: {
+        name: "Inline",
+        screen_name: "inline",
+        profile_image_url_https: "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg",
+      },
+      entities: {
+        media: [
+          {
+            url: "https://t.co/multilineMedia",
+          },
+        ],
+      },
+      mediaDetails: [
+        {
+          url: "https://t.co/multilineMedia",
+          media_url_https: "https://pbs.twimg.com/media/multiline.jpg",
+          original_info: { width: 1200, height: 800 },
+          type: "photo",
+        },
+      ],
+    }
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response(JSON.stringify(payload), {
+        headers: { "content-type": "application/json" },
+      })
+
+    const preview = await fetchUrlPreview("https://x.com/inline/status/2075031014628311237", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(preview?.description).toBe(fullText)
+    expect(preview?.description).toContain("\n\n")
+    expect(preview?.description).toContain("\nThe third line")
+  })
+
+  it("uses logged-out X HTML to fill note tweet text beyond the syndication compatibility body", async () => {
+    const compatibilityText = [
+      "I don't read hacker News much, someone told me my reMarkable project made it there.",
+      "",
+      "I don't recommend reading the comments.",
+      "",
+      "While it does not affect me emotionally, I was pretty baffle at how negative and suspicions people are. I have a hard time seeing the benefits of being",
+    ].join("\n")
+    const fullText = `${compatibilityText} soo gloomy :o`
+    const payload = {
+      __typename: "Tweet",
+      text: `${compatibilityText} https://t.co/v9AxXkTbpv`,
+      note_tweet: {
+        id: "Tm90ZVR3ZWV0UmVzdWx0czoyMDc0NTMxMTI5NTcxMzUyNTc2",
+      },
+      user: {
+        name: "Maxime Rivest",
+        screen_name: "MaximeRivest",
+        profile_image_url_https: "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg",
+      },
+      entities: {
+        media: [
+          {
+            url: "https://t.co/v9AxXkTbpv",
+          },
+        ],
+      },
+      mediaDetails: [
+        {
+          url: "https://t.co/v9AxXkTbpv",
+          media_url_https: "https://pbs.twimg.com/media/HMo3EW_WMAAh2le.jpg",
+          original_info: { width: 1200, height: 1116 },
+          type: "photo",
+        },
+      ],
+    }
+    const encodedFullText = fullText.replaceAll("'", "&#x27;")
+    const html = `
+      <html>
+        <body>
+          <div class="flex flex-col gap-3">
+            <div dir="auto" class='font-chirp max-w-full whitespace-pre-wrap break-words text-text text-body font-normal'>
+              <span class="font-chirp max-w-full whitespace-pre-wrap break-words text-inherit text-[length:inherit] font-normal">${encodedFullText}</span>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+    const fetchedUrls: string[] = []
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      const urlString = String(url)
+      fetchedUrls.push(urlString)
+      if (urlString.includes("cdn.syndication.twimg.com/tweet-result")) {
+        return new Response(JSON.stringify(payload), {
+          headers: { "content-type": "application/json" },
+        })
+      }
+
+      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+    }
+
+    const preview = await fetchUrlPreview("https://x.com/MaximeRivest/status/2074531129646776401", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(fetchedUrls).toHaveLength(2)
+    expect(fetchedUrls[0]).toContain("cdn.syndication.twimg.com/tweet-result")
+    expect(fetchedUrls[1]).toBe("https://x.com/i/status/2074531129646776401")
+    expect(preview?.description).toBe(fullText)
+    expect(preview?.description).toContain("\n\n")
+    expect(preview?.description).toContain("being soo gloomy :o")
+  })
+
   it("decodes html entities in generic metadata", async () => {
     const html = `
       <html>

@@ -124,7 +124,12 @@ type PreviewAttachmentSource = {
   duration: number | null
 }
 
-const maxDescriptionLength = 220
+const maxDescriptionLength = 420
+const previousMaxDescriptionLength = 220
+// Existing X note-tweet cache rows can contain only the 280-character compatibility body without an ellipsis.
+const xNoteTweetFallbackFetchedAt = new Date("2026-07-09T13:50:00.000Z")
+const xCompatibilityDescriptionMinLength = 260
+const xCompatibilityDescriptionMaxLength = 280
 const maxTitleLength = 180
 const maxSiteNameLength = 80
 const maxPreviewUrls = 3
@@ -298,7 +303,11 @@ function shouldRefetchCachedPreview(cache: DbUrlPreviewCache, url: string): bool
   }
 
   if (isXStatusUrl(normalized)) {
-    return isStaleXPreviewCache(cache) || cachedPrimaryImageIsAuthorImage(cache)
+    return (
+      isStaleXPreviewCache(cache) ||
+      cachedPrimaryImageIsAuthorImage(cache) ||
+      cachedDescriptionLooksTruncated(cache)
+    )
   }
 
   if (isYouTubeUrl(normalized)) {
@@ -356,6 +365,21 @@ function cachedPrimaryImageIsAuthorImage(cache: DbUrlPreviewCache): boolean {
   const url = decryptCacheValue(cache.url, cache.urlIv, cache.urlTag)
   const imageUrl = decryptCacheValue(cache.imageUrl, cache.imageUrlIv, cache.imageUrlTag)
   return !!url && !!imageUrl && isPreviewAuthorImageUrl(url, imageUrl)
+}
+
+function cachedDescriptionLooksTruncated(cache: DbUrlPreviewCache): boolean {
+  const description = decryptCacheValue(cache.description, cache.descriptionIv, cache.descriptionTag)?.trimEnd()
+  if (!description) {
+    return false
+  }
+
+  return (
+    (description.length <= previousMaxDescriptionLength &&
+      (description.endsWith("…") || description.endsWith("..."))) ||
+    (cache.fetchedAt < xNoteTweetFallbackFetchedAt &&
+      description.length >= xCompatibilityDescriptionMinLength &&
+      description.length <= xCompatibilityDescriptionMaxLength)
+  )
 }
 
 function shouldKeepCachedAuthorImageFallback(

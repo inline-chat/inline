@@ -1,5 +1,7 @@
 import {
   DEFAULT_DESCRIPTION_LENGTH,
+  DEFAULT_MAX_HTML_BYTES,
+  DEFAULT_MAX_REDIRECTS,
   DEFAULT_SITE_NAME_LENGTH,
   DEFAULT_TIMEOUT_MS,
   DEFAULT_TITLE_LENGTH,
@@ -7,15 +9,16 @@ import {
 } from "../constants.js"
 import { isBlockedIp } from "../filters.js"
 import { parseJsonObject } from "../json.js"
-import { defaultLookup, readResponseText } from "../network.js"
+import { defaultLookup, fetchWithRedirects, readResponseText, readResponseTextPrefix } from "../network.js"
 import { normalizeMetadataUrl } from "../normalize.js"
-import { asFiniteNumber, asString, cleanField, cleanMultilineField } from "../text.js"
+import { asFiniteNumber, asString, cleanField, cleanMultilineField, stripTags } from "../text.js"
 import type { FetchUrlPreviewOptions, PreviewMedia, PreviewMediaType, UrlPreviewResult } from "../types.js"
 import { previewLayout, textCardLayout } from "../layout.js"
 import type { UrlPreviewProvider } from "./types.js"
 
 const X_SYNDICATION_URL = "https://cdn.syndication.twimg.com/tweet-result"
 const X_SYNDICATION_TOKEN = "x"
+const X_NOTE_TWEET_TEXT_LIMIT = 4_000
 
 type XMediaPreview = {
   imageUrl?: string
@@ -62,8 +65,10 @@ async function fetchXPreview(
   const user = objectValue(data["user"])
   const author = cleanField(asString(user?.["name"]), options.maxSiteNameLength ?? DEFAULT_SITE_NAME_LENGTH)
   const screenName = cleanField(asString(user?.["screen_name"]), 80)
+  const rawTweetText = tweetTextWithoutAttachedMediaUrls(data)
+  const resolvedTweetText = (await fetchXNoteTweetText(id, data, rawTweetText, options)) ?? rawTweetText
   const tweetText = cleanMultilineField(
-    tweetTextWithoutAttachedMediaUrls(data),
+    resolvedTweetText,
     options.maxDescriptionLength ?? DEFAULT_DESCRIPTION_LENGTH,
   )
   const authorPhotoUrl = normalizeXProfileImageUrl(asString(user?.["profile_image_url_https"]))
@@ -116,6 +121,116 @@ async function fetchXEndpoint(endpoint: URL, options: FetchUrlPreviewOptions): P
   } finally {
     clearTimeout(timeout)
   }
+}
+
+async function fetchXNoteTweetText(
+  id: string,
+  data: Record<string, unknown>,
+  compatibilityText: string | undefined,
+  options: FetchUrlPreviewOptions,
+): Promise<string | null> {
+  if (!hasNoteTweet(data) || !compatibilityText) {
+    return null
+  }
+
+  const html = await fetchXStatusHtml(id, options)
+  if (!html) {
+    return null
+  }
+
+  const cleanedCompatibilityText = cleanMultilineField(compatibilityText, X_NOTE_TWEET_TEXT_LIMIT)
+  if (!cleanedCompatibilityText) {
+    return null
+  }
+
+  const candidates = extractLoggedOutTweetTexts(html)
+    .filter((candidate) => textExtendsCompatibilityText(candidate, cleanedCompatibilityText))
+    .sort((a, b) => b.length - a.length)
+
+  return candidates[0] ?? null
+}
+
+async function fetchXStatusHtml(id: string, options: FetchUrlPreviewOptions): Promise<string | null> {
+  const statusUrl = `https://x.com/i/status/${id}`
+  try {
+    const response = await fetchWithRedirects(statusUrl, {
+      fetchImpl: options.fetchImpl ?? fetch,
+      lookup: options.lookup ?? defaultLookup,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxRedirects: options.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+      userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+      accept: "text/html,application/xhtml+xml",
+    })
+
+    if (!response.response.ok || !isXStatusUrl(response.finalUrl)) {
+      return null
+    }
+
+    const contentType = response.response.headers.get("content-type")?.toLowerCase() ?? ""
+    if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
+      await response.response.body?.cancel().catch(() => undefined)
+      return null
+    }
+
+    return await readResponseTextPrefix(response.response, options.maxHtmlBytes ?? DEFAULT_MAX_HTML_BYTES)
+  } catch {
+    return null
+  }
+}
+
+function extractLoggedOutTweetTexts(html: string): string[] {
+  const texts = new Set<string>()
+
+  for (const match of html.matchAll(/<div\b(?=[^>]*\bdir\s*=\s*(?:"auto"|'auto'))([^>]*)>([\s\S]*?)<\/div>/gi)) {
+    const className = tagClassName(match[1] ?? "")
+    if (!className || !hasClassName(className, "whitespace-pre-wrap") || !hasClassName(className, "text-body")) {
+      continue
+    }
+
+    const text = cleanMultilineField(htmlFragmentText(match[2] ?? ""), X_NOTE_TWEET_TEXT_LIMIT)
+    if (text) {
+      texts.add(text)
+    }
+  }
+
+  return Array.from(texts)
+}
+
+function htmlFragmentText(html: string): string {
+  return stripTags(html.replace(/<br\s*\/?>/gi, "\n")) ?? ""
+}
+
+function tagClassName(attributes: string): string | null {
+  const match = attributes.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i)
+  return (match?.[1] ?? match?.[2])?.trim() ?? null
+}
+
+function hasClassName(className: string, expected: string): boolean {
+  return className.split(/\s+/).includes(expected)
+}
+
+function textExtendsCompatibilityText(candidate: string, compatibilityText: string): boolean {
+  const comparableCandidate = compactTweetText(candidate)
+  const comparableCompatibility = compactTweetText(compatibilityText)
+  if (!comparableCandidate || comparableCandidate.length <= comparableCompatibility.length) {
+    return false
+  }
+
+  if (comparableCandidate.startsWith(comparableCompatibility)) {
+    return true
+  }
+
+  const prefixLength = Math.min(180, Math.floor(comparableCompatibility.length * 0.75))
+  const prefix = comparableCompatibility.slice(0, prefixLength)
+  return prefix.length >= 40 && comparableCandidate.startsWith(prefix)
+}
+
+function compactTweetText(value: string): string {
+  return value.replace(/\s+/g, " ").trim()
+}
+
+function hasNoteTweet(data: Record<string, unknown>): boolean {
+  return data["note_tweet"] != null
 }
 
 function xStatusId(value: string): string | null {

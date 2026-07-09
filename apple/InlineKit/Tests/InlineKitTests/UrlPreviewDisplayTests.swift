@@ -100,6 +100,24 @@ struct UrlPreviewDisplayTests {
     #expect(display.authorSubtitle == "X")
   }
 
+  @Test("preserves multiline X body text for large previews")
+  func preservesMultilineXLargePreviewBody() {
+    let description = "First paragraph stays intact.\n\nSecond paragraph stays separated.\nThird line stays on its own line."
+    let preview = makePreview(
+      url: "https://x.com/inline/status/2075031014628311237",
+      title: "Inline (@inline) on X",
+      description: description,
+      provider: "x",
+      author: "Inline"
+    )
+    let display = preview.largeDisplayContent(maxDescriptionLength: 420)
+
+    #expect(display.style == .x)
+    #expect(display.body == description)
+    #expect(display.body?.contains("\n\n") == true)
+    #expect(display.body?.contains("\nThird line") == true)
+  }
+
   @Test("moves large standard source into author block")
   func movesLargeStandardSourceIntoAuthorBlock() {
     let preview = makePreview(

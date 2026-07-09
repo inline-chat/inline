@@ -383,6 +383,108 @@ describe("URL preview cache", () => {
     expect(preview?.showLargeMedia).toBe(true)
   })
 
+  it("refetches pre-fallback cached X note tweet compatibility text", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "X Note Tweet Cache",
+      ["x-note-tweet-cache@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create X note tweet cache test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create X note tweet cache test chat")
+    }
+
+    const url = "https://x.com/MaximeRivest/status/2074531129646776401"
+    const compatibilityText = [
+      "I don't read hacker News much, someone told me my reMarkable project made it there.",
+      "",
+      "I don't recommend reading the comments.",
+      "",
+      "While it does not affect me emotionally, I was pretty baffle at how negative and suspicions people are. I have a hard time seeing the benefits of being",
+    ].join("\n")
+    const fullText = `${compatibilityText} soo gloomy :o`
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: url,
+    })
+
+    const cache = await upsertPreviewCache({
+      now: new Date("2026-07-09T13:02:00.000Z"),
+      photoId: null,
+      metadata: {
+        url,
+        finalUrl: url,
+        siteName: "X",
+        title: "Maxime Rivest (@MaximeRivest) on X",
+        description: compatibilityText,
+        provider: "x",
+        author: "Maxime Rivest",
+      },
+    })
+    await db
+      .update(schema.urlPreviewCache)
+      .set({ expiresAt: new Date("2999-01-01T00:00:00.000Z") })
+      .where(eq(schema.urlPreviewCache.id, cache.id))
+
+    const payload = {
+      __typename: "Tweet",
+      text: compatibilityText,
+      note_tweet: {
+        id: "Tm90ZVR3ZWV0UmVzdWx0czoyMDc0NTMxMTI5NTcxMzUyNTc2",
+      },
+      user: {
+        name: "Maxime Rivest",
+        screen_name: "MaximeRivest",
+      },
+      entities: {},
+      mediaDetails: [],
+    }
+    const html = `
+      <html>
+        <body>
+          <div dir="auto" class="font-chirp max-w-full whitespace-pre-wrap break-words text-text text-body font-normal">
+            <span>${fullText.replaceAll("'", "&#x27;")}</span>
+          </div>
+        </body>
+      </html>
+    `
+    const fetchedUrls: string[] = []
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const fetchedUrl = String(input)
+      fetchedUrls.push(fetchedUrl)
+      if (fetchedUrl.includes("cdn.syndication.twimg.com/tweet-result")) {
+        return Response.json(payload)
+      }
+      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewUrl: url,
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    expect(fetchedUrls).toHaveLength(2)
+    expect(fetchedUrls[0]).toContain("cdn.syndication.twimg.com/tweet-result")
+    expect(fetchedUrls[1]).toBe("https://x.com/i/status/2074531129646776401")
+
+    const attachments = await db._query.messageAttachments.findMany({ with: { linkEmbed: true } })
+    const [attachment] = MessageModel.processAttachments(attachments)
+    expect(attachment?.linkEmbed?.description).toBe(fullText)
+  })
+
   it("moves stale cached X profile images out of primary preview media", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers(
       "X Stale Author Image Cache",

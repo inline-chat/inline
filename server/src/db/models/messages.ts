@@ -1,5 +1,5 @@
 import { MessageActions, MessageEntities, type InputPeer } from "@inline-chat/protocol/core"
-import { cleanPreviewText } from "@inline-chat/url-preview"
+import { cleanMultilinePreviewText, cleanPreviewText } from "@inline-chat/url-preview"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -40,7 +40,7 @@ import { decryptSystemMessagePayload, type SystemMessage } from "@in/server/modu
 const log = new Log("MessageModel", LogLevel.INFO)
 
 const previewTitleLength = 180
-const previewDescriptionLength = 220
+const previewDescriptionLength = 420
 const previewSiteNameLength = 80
 
 export const MessageModel = {
@@ -195,6 +195,10 @@ export type ProcessedMessageAttachment = Omit<DbMessageAttachment, "externalTask
 
 function cleanStoredPreviewText(value: string | null | undefined, maxLength: number): string | null {
   return cleanPreviewText(value, maxLength)
+}
+
+function cleanStoredPreviewDescription(value: string | null | undefined): string | null {
+  return cleanMultilinePreviewText(value, previewDescriptionLength)
 }
 
 type GetMessagesMode = "latest" | "older" | "newer" | "around"
@@ -951,13 +955,12 @@ export function processAttachments(
             : null,
         description:
           description && descriptionIv && descriptionTag
-            ? cleanStoredPreviewText(
+            ? cleanStoredPreviewDescription(
                 decrypt({
                   encrypted: description,
                   iv: descriptionIv,
                   authTag: descriptionTag,
                 }),
-                previewDescriptionLength,
               )
             : null,
         author:
