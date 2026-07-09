@@ -1196,6 +1196,10 @@ fn current_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::accept_hdr_async;
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
     #[test]
     fn rpc_error_code_name_uses_stable_proto_name() {
@@ -1284,6 +1288,94 @@ mod tests {
         assert_eq!(init.client_version.as_deref(), Some("9.9.9"));
         assert!(init.build_number.is_none());
         assert!(init.layer.is_none());
+    }
+
+    #[tokio::test]
+    async fn realtime_client_connects_and_calls_get_me_against_local_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_hdr_async(stream, |request: &Request, response: Response| {
+                assert_eq!(
+                    request
+                        .headers()
+                        .get(client_info::CLIENT_TYPE_HEADER)
+                        .and_then(|value| value.to_str().ok()),
+                    Some("transport-test")
+                );
+                assert_eq!(
+                    request
+                        .headers()
+                        .get(client_info::CLIENT_VERSION_HEADER)
+                        .and_then(|value| value.to_str().ok()),
+                    Some("1.2.3")
+                );
+                Ok(response)
+            })
+            .await
+            .unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            match init.body {
+                Some(proto::client_message::Body::ConnectionInit(init)) => {
+                    assert_eq!(init.token, "token-1");
+                    assert_eq!(init.client_version.as_deref(), Some("1.2.3"));
+                    assert!(init.os_version.is_some());
+                }
+                other => panic!("expected connection init, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let rpc = read_test_client_message(&mut ws).await;
+            match &rpc.body {
+                Some(proto::client_message::Body::RpcCall(call)) => {
+                    assert_eq!(call.method, proto::Method::GetMe as i32);
+                    assert!(matches!(call.input, Some(proto::rpc_call::Input::GetMe(_))));
+                }
+                other => panic!("expected getMe rpc call, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 2,
+                    body: Some(proto::server_protocol_message::Body::RpcResult(
+                        proto::RpcResult {
+                            req_msg_id: rpc.id,
+                            result: Some(proto::rpc_result::Result::GetMe(proto::GetMeResult {
+                                user: Some(proto::User {
+                                    id: 42,
+                                    first_name: Some("Ada".to_string()),
+                                    ..Default::default()
+                                }),
+                            })),
+                        },
+                    )),
+                },
+            )
+            .await;
+        });
+
+        let mut client = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .identity(ClientIdentity::new("transport-test", "1.2.3"))
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect()
+            .await
+            .unwrap();
+        let result = client.call(proto::GetMeInput {}).await.unwrap();
+
+        assert_eq!(result.user.unwrap().id, 42);
+        server.await.unwrap();
     }
 
     #[test]
@@ -1464,6 +1556,27 @@ mod tests {
     #[tokio::test]
     async fn optional_timeout_can_be_disabled() {
         with_optional_timeout("test", None, async { Ok::<_, RealtimeError>("done") })
+            .await
+            .unwrap();
+    }
+
+    async fn read_test_client_message(ws: &mut WebSocketStream<TcpStream>) -> proto::ClientMessage {
+        loop {
+            match ws.next().await.unwrap().unwrap() {
+                WsMessage::Binary(bytes) => {
+                    return proto::ClientMessage::decode(&*bytes).unwrap();
+                }
+                WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Text(_) => continue,
+                other => panic!("unexpected websocket message: {other:?}"),
+            }
+        }
+    }
+
+    async fn send_test_server_message(
+        ws: &mut WebSocketStream<TcpStream>,
+        message: proto::ServerProtocolMessage,
+    ) {
+        ws.send(WsMessage::Binary(message.encode_to_vec()))
             .await
             .unwrap();
     }
