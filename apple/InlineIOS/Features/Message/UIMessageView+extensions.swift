@@ -322,6 +322,7 @@ extension UIMessageView {
     stack.spacing = 6
     stack.alignment = .center
     stack.distribution = .fill
+    stack.isUserInteractionEnabled = true
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
   }
@@ -332,6 +333,7 @@ extension UIMessageView {
     stack.spacing = 10
     stack.alignment = .fill
     stack.distribution = .fill
+    stack.isUserInteractionEnabled = true
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
   }

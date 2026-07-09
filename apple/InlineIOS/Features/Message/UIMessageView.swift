@@ -64,6 +64,8 @@ class UIMessageView: UIView {
     cache.countLimit = 1_000
     return cache
   }()
+  private static let maxInlineReactionUsers = 3
+  private lazy var reactionGroups: [GroupedReaction] = fullMessage.groupedReactions
 
   var outgoing: Bool {
     fullMessage.message.out == true
@@ -203,7 +205,29 @@ class UIMessageView: UIView {
     !fullMessage.reactions.isEmpty && !shouldShowReactionsOutsideBubble
   }
 
-  private var messageActionRows: [MessageActionRow] {
+  private var shouldShareReactionRowWithMetadata: Bool {
+    guard shouldShowReactionsInsideBubble,
+          reactionGroups.count == 1,
+          let reactionGroup = reactionGroups.first,
+          reactionGroup.reactions.count <= Self.maxInlineReactionUsers
+    else { return false }
+
+    return message.hasText &&
+      !hasMedia &&
+      !isEmojiOnlyMessage &&
+      message.repliedToMessageId == nil &&
+      !shouldShowForwardHeader &&
+      !shouldShowVoiceMessage &&
+      message.documentId == nil &&
+      fullMessage.file == nil &&
+      fullMessage.attachments.isEmpty &&
+      !shouldShowReplyThreadSummary &&
+      !hasMessageActionRows
+  }
+
+  private lazy var messageActionRows: [MessageActionRow] = makeMessageActionRows()
+
+  private func makeMessageActionRows() -> [MessageActionRow] {
     guard let actions = message.actions else { return [] }
 
     return actions.rows.compactMap { row in
@@ -353,6 +377,7 @@ class UIMessageView: UIView {
       reactionBackgroundPrimaryOverride: overrides?.primary,
       reactionBackgroundSecondaryOverride: overrides?.secondary
     )
+    view.isUserInteractionEnabled = true
     view.onReactionTap = { [weak self] emoji in
       guard let self else { return }
 
@@ -469,9 +494,6 @@ class UIMessageView: UIView {
     bubbleView.isUserInteractionEnabled = true
     messageLabel.isUserInteractionEnabled = true
     containerStack.isUserInteractionEnabled = true
-    reactionsFlowView.isUserInteractionEnabled = true
-    multiLineContainer.isUserInteractionEnabled = true
-    singleLineContainer.isUserInteractionEnabled = true
 
     addSubview(bubbleView)
     bubbleView.contentView.addSubview(containerStack)
@@ -756,7 +778,7 @@ class UIMessageView: UIView {
 
     // Configure reactions using groupedReactions from FullMessage
     reactionsFlowView.configure(
-      with: fullMessage.groupedReactions,
+      with: reactionGroups,
       animatedEmoji: animatedEmoji
     )
   }
@@ -1310,6 +1332,7 @@ class UIMessageView: UIView {
       if shouldShowReactionsInsideBubble {
         setupReactionsIfNeeded()
       }
+      let sharesReactionRowWithMetadata = shouldShareReactionRowWithMetadata
 
       if isEmojiOnlyMessage, shouldShowReactionsInsideBubble {
         if message.hasText || isSticker {
@@ -1318,20 +1341,41 @@ class UIMessageView: UIView {
         multiLineContainer.addArrangedSubview(reactionsFlowView)
         applyEmojiReactionSpacing(to: multiLineContainer)
       } else {
-        if shouldShowReactionsInsideBubble {
+        if sharesReactionRowWithMetadata {
+          addReactionMetadataFooter(to: multiLineContainer)
+        } else if shouldShowReactionsInsideBubble {
           multiLineContainer.addArrangedSubview(reactionsFlowView)
           applyEmojiReactionSpacing(to: multiLineContainer)
         }
 
-        if message.hasText || isSticker {
+        if !sharesReactionRowWithMetadata && (message.hasText || isSticker) {
           setupMultilineMetadata()
         }
       }
-      applyReactionMetadataSpacing(to: multiLineContainer)
+      if !sharesReactionRowWithMetadata {
+        applyReactionMetadataSpacing(to: multiLineContainer)
+      }
       if !multiLineContainer.arrangedSubviews.isEmpty {
         containerStack.addArrangedSubview(multiLineContainer)
       }
     }
+  }
+
+  private func addReactionMetadataFooter(to stack: UIStackView) {
+    let footer = UIStackView(arrangedSubviews: [reactionsFlowView, metadataView])
+    footer.axis = .horizontal
+    footer.alignment = .bottom
+    footer.distribution = .equalSpacing
+    footer.spacing = StackPadding.inlineReactionMetadataSpacing
+    footer.translatesAutoresizingMaskIntoConstraints = false
+
+    reactionsFlowView.setContentHuggingPriority(.required, for: .horizontal)
+    reactionsFlowView.setContentCompressionResistancePriority(.required, for: .horizontal)
+    metadataView.setContentHuggingPriority(.required, for: .horizontal)
+    metadataView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+    metadataContainerView = footer
+    stack.addArrangedSubview(footer)
   }
 
   private func applyEmojiReactionSpacing(to stack: UIStackView) {
@@ -1965,6 +2009,7 @@ class UIMessageView: UIView {
     static let replyBottomSpacing: CGFloat = 0
     static let reactionMetadataExtraSpacing: CGFloat = 4
     static let emojiReactionMetadataExtraSpacing: CGFloat = 8
+    static let inlineReactionMetadataSpacing: CGFloat = 6
     static let forwardHeaderVertical: CGFloat = 6
     static let forwardHeaderSpacing: CGFloat = 1
   }
