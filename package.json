@@ -25,6 +25,7 @@
     "dev:server": "cd server && bun run dev",
     "generate:proto": "cd scripts && bun run generate",
     "public:sync": "bun run scripts/sync-public-artifacts.ts",
+    "matrix-inline:e2e": "bun run scripts/matrix-inline-e2e.ts",
     "lint:apple": "bash scripts/apple/swiftlint.sh",
     "check:apple": "bash scripts/apple/swiftlint.sh --quiet --reporter summary",
     "db:migrate": "cd server && bun run db:migrate",
