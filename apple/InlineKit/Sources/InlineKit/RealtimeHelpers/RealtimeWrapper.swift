@@ -22,6 +22,7 @@ public final actor Realtime: Sendable {
   private var api: RealtimeAPI
   private var eventsTask: Task<Void, Never>?
   private var started = false
+  private var automaticStartsSuspended = false
 
   @MainActor private var cancellable: AnyCancellable? = nil
   @MainActor public let apiStatePublisher = CurrentValueSubject<RealtimeAPIState, Never>(
@@ -40,7 +41,7 @@ public final actor Realtime: Sendable {
       }
     }
 
-    Task { @MainActor in
+    Task { @MainActor [self] in
       cancellable = Auth.shared.$isLoggedIn.sink { [weak self] isLoggedIn in
         guard let self else { return }
         if isLoggedIn {
@@ -64,14 +65,20 @@ public final actor Realtime: Sendable {
   }
 
   private func ensureStarted() {
-    if started {
+    if started || automaticStartsSuspended {
       return
     }
     started = true
-    start()
+    startConnection()
   }
 
   public func start() {
+    automaticStartsSuspended = false
+    ensureStarted()
+  }
+
+  private func startConnection() {
+    guard started, !automaticStartsSuspended else { return }
     log.info("Starting realtime connection")
 
     // Init
@@ -118,12 +125,29 @@ public final actor Realtime: Sendable {
         // Retry after delay if still logged in
         if Auth.shared.getIsLoggedIn() {
           try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-          if Auth.shared.getIsLoggedIn() {
-            self.start()
+          if started, !automaticStartsSuspended, Auth.shared.getIsLoggedIn() {
+            startConnection()
           }
         }
       }
     }
+  }
+
+  /// Stops realtime work and suppresses automatic auth-driven starts until the next explicit start.
+  /// Share-extension processes can be reused, so a later session may resume via `start()`.
+  public func suspendForSessionEnd() async {
+    guard started || !automaticStartsSuspended else { return }
+    automaticStartsSuspended = true
+    started = false
+
+    eventsTask?.cancel()
+    eventsTask = nil
+    await api.stopAndReset()
+
+    await MainActor.run {
+      apiStatePublisher.send(.waitingForNetwork)
+    }
+    log.info("Realtime API suspended for session end")
   }
 
   public func invoke(

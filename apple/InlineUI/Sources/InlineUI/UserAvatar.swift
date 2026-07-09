@@ -11,6 +11,7 @@ public struct UserAvatar: View, Equatable {
       && lhs.username == rhs.username && lhs.size == rhs.size
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
       && lhs.backgroundOpacity == rhs.backgroundOpacity
+      && lhs.cacheRemoteAvatar == rhs.cacheRemoteAvatar
       && Self.avatarIdentity(
         stableAvatarIdentity: lhs.stableAvatarIdentity,
         remoteUrl: lhs.remoteUrl,
@@ -32,10 +33,11 @@ public struct UserAvatar: View, Equatable {
   let ignoresSafeArea: Bool
   let userId: Int64
   let backgroundOpacity: Double
+  let cacheRemoteAvatar: Bool
 
-  var stableAvatarIdentity: String? = nil
-  var remoteUrl: URL? = nil
-  var localUrl: URL? = nil
+  var stableAvatarIdentity: String?
+  var remoteUrl: URL?
+  var localUrl: URL?
 
   let nameForInitials: String
 
@@ -58,7 +60,8 @@ public struct UserAvatar: View, Equatable {
     user: User,
     size: CGFloat = 32,
     ignoresSafeArea: Bool = false,
-    backgroundOpacity: Double = 1.0
+    backgroundOpacity: Double = 1.0,
+    cacheRemoteAvatar: Bool = true
   ) {
     userId = user.id
     firstName = user.firstName
@@ -71,6 +74,7 @@ public struct UserAvatar: View, Equatable {
     stableAvatarIdentity = user.stableAvatarIdentity
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
+    self.cacheRemoteAvatar = cacheRemoteAvatar
     nameForInitials = Self.getNameForInitials(user: user)
   }
 
@@ -78,7 +82,8 @@ public struct UserAvatar: View, Equatable {
     userInfo: UserInfo,
     size: CGFloat = 32,
     ignoresSafeArea: Bool = false,
-    backgroundOpacity: Double = 1.0
+    backgroundOpacity: Double = 1.0,
+    cacheRemoteAvatar: Bool = true
   ) {
     let user = userInfo.user
     userId = user.id
@@ -92,6 +97,7 @@ public struct UserAvatar: View, Equatable {
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
+    self.cacheRemoteAvatar = cacheRemoteAvatar
     nameForInitials = Self.getNameForInitials(user: user)
   }
 
@@ -99,7 +105,8 @@ public struct UserAvatar: View, Equatable {
     apiUser: ApiUser,
     size: CGFloat = 32,
     ignoresSafeArea: Bool = false,
-    backgroundOpacity: Double = 1.0
+    backgroundOpacity: Double = 1.0,
+    cacheRemoteAvatar: Bool = true
   ) {
     userId = apiUser.id
     firstName = apiUser.firstName
@@ -109,6 +116,7 @@ public struct UserAvatar: View, Equatable {
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
+    self.cacheRemoteAvatar = cacheRemoteAvatar
     nameForInitials = AvatarColorUtility.formatNameForHashing(
       firstName: apiUser.firstName,
       lastName: apiUser.lastName,
@@ -244,6 +252,7 @@ public struct UserAvatar: View, Equatable {
   }
 
   private func cacheRemoteAvatarIfNeeded(sourceUrl: URL, downloadedData: Data?) {
+    guard cacheRemoteAvatar else { return }
     guard sourceUrl.isFileURL == false else { return }
     guard localUrl == nil else { return }
     guard startedRemoteCacheUrl != sourceUrl else { return }

@@ -26,8 +26,12 @@ class ShareViewController: UIViewController {
       hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
 
-    Task { await state.prepareConnection() }
     loadSharedContent()
+  }
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+    Task { await state.finishSession() }
   }
 
   private func loadSharedContent() {

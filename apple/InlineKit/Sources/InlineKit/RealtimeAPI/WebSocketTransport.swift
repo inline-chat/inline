@@ -168,6 +168,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private var backgroundTransitionTime: Date?
 
   private func wentInBackground() async {
+    guard running else { return }
     setIsInBackground(true)
 
     backgroundTask = await UIApplication.shared
@@ -204,10 +205,11 @@ actor WebSocketTransport: NSObject, Sendable {
 
   private func endBackgroundTask() {
     guard backgroundTask != .invalid else { return }
-    Task { @MainActor in
-      await UIApplication.shared.endBackgroundTask(backgroundTask)
-    }
+    let task = backgroundTask
     backgroundTask = .invalid
+    Task { @MainActor in
+      UIApplication.shared.endBackgroundTask(task)
+    }
   }
 
   private func cleanupBackgroundResources() async {
@@ -230,6 +232,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private var reconnectionAttempts: Int = 0
 
   private func prepareForForeground() async {
+    guard running else { return }
     setIsInBackground(false)
 
     // Reset reconnection attempts counter for foreground transitions
@@ -349,6 +352,12 @@ actor WebSocketTransport: NSObject, Sendable {
     // Set running to false first to prevent reconnection attempts
     running = false
 
+    #if os(iOS)
+    NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
+    NotificationCenter.default.removeObserver(self, name: UIApplication.willEnterForegroundNotification, object: nil)
+    endBackgroundTask()
+    #endif
+
     // Cancel all tasks
     await cancelTasks()
 
@@ -466,7 +475,11 @@ actor WebSocketTransport: NSObject, Sendable {
           // Another ping is still outstanding; don't treat as a failure.
           continue
 
+        } catch is CancellationError {
+          break
+
         } catch {
+          guard running, !Task.isCancelled else { break }
           consecutiveFailures += 1
           addTransportBreadcrumb(
             "Ping failed",
@@ -617,7 +630,7 @@ actor WebSocketTransport: NSObject, Sendable {
             break
         }
       } catch {
-        if error is CancellationError { break }
+        if error is CancellationError || !running || Task.isCancelled { break }
 
         addTransportBreadcrumb("Receive failed", origin: .receive, level: .warning, error: error)
         log.warning("Error receiving messages")

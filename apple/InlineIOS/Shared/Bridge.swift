@@ -121,15 +121,21 @@ class BridgeManager {
     #endif
   }
 
-  private var sharedDataURL: URL {
-    let containerURL = FileManager.default
-      .containerURL(forSecurityApplicationGroupIdentifier: sharedContainerIdentifier)!
+  private var sharedDataURL: URL? {
+    guard let containerURL = FileManager.default
+      .containerURL(forSecurityApplicationGroupIdentifier: sharedContainerIdentifier)
+    else {
+      Log.shared.error("Unable to resolve app group container for share data")
+      return nil
+    }
     return containerURL.appendingPathComponent(shareDataFileName)
   }
 
   // Save data from main app to be shared with extension
   func saveSharedData(chats: [SharedChat], users: [SharedUser]) {
     Task(priority: .background) {
+      guard let sharedDataURL else { return }
+
       let shareExtensionData = ShareExtensionData(chats: chats, users: users)
 
       let sharedData = SharedData(shareExtensionData: shareExtensionData, lastUpdate: Date())
@@ -146,6 +152,8 @@ class BridgeManager {
 
   // Load shared data (used by both app and extension)
   func loadSharedData() -> SharedData? {
+    guard let sharedDataURL else { return nil }
+
     do {
       let data = try Data(contentsOf: sharedDataURL)
       let decoder = JSONDecoder()
@@ -158,6 +166,8 @@ class BridgeManager {
 
   // Clear shared data file
   func clearSharedData() throws {
+    guard let sharedDataURL else { return }
+
     if FileManager.default.fileExists(atPath: sharedDataURL.path) {
       try FileManager.default.removeItem(at: sharedDataURL)
       Log.shared.info("Cleared shared data file")

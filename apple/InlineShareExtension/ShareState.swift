@@ -11,11 +11,21 @@ import MultipartFormDataKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Represents a file that was shared through the extension.
-struct SharedFile: Identifiable {
+struct SendableItemProvider: @unchecked Sendable {
+  let provider: NSItemProvider
+}
+
+enum SharedFileSource: @unchecked Sendable {
+  case itemProvider(SendableItemProvider, typeIdentifier: String)
+  case fileURL(URL)
+}
+
+/// Represents a staged file that was shared through the extension.
+struct SharedFile: Identifiable, @unchecked Sendable {
   let id = UUID()
-  let url: URL
+  let source: SharedFileSource
   let fileName: String
+  let typeIdentifier: String?
   let mimeType: MIMEType
   let fileType: MessageFileType
   let fileSize: Int64?
@@ -23,7 +33,7 @@ struct SharedFile: Identifiable {
 }
 
 /// Aggregated shared content from the extension.
-struct SharedContent {
+struct SharedContent: @unchecked Sendable {
   var files: [SharedFile] = []
   var urls: [URL] = []
   var textParts: [String] = []
@@ -80,10 +90,6 @@ struct SharedContent {
   }
 }
 
-private struct SendableItemProvider: @unchecked Sendable {
-  let provider: NSItemProvider
-}
-
 private final class SharedContentAccumulator: @unchecked Sendable {
   private let lock = NSLock()
   private let maxMedia: Int
@@ -92,22 +98,19 @@ private final class SharedContentAccumulator: @unchecked Sendable {
   private(set) var files: [SharedFile] = []
   private(set) var urls: [URL] = []
   private(set) var textParts: [String] = []
-  private var fileDedupKeys: Set<String> = []
 
   init(maxMedia: Int, maxUrls: Int) {
     self.maxMedia = maxMedia
     self.maxUrls = maxUrls
   }
 
-  func addFile(_ file: SharedFile) {
+  @discardableResult
+  func addFile(_ file: SharedFile) -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard files.count < maxMedia else { return }
-    let sizeKey = file.fileSize.map(String.init) ?? "unknown"
-    let key = "\(file.fileType.rawValue)|\(file.fileName)|\(sizeKey)"
-    guard !fileDedupKeys.contains(key) else { return }
-    fileDedupKeys.insert(key)
+    guard files.count < maxMedia else { return false }
     files.append(file)
+    return true
   }
 
   func addURL(_ url: URL) {
@@ -128,7 +131,30 @@ private final class SharedContentAccumulator: @unchecked Sendable {
   }
 
   func finalize() -> SharedContent {
-    SharedContent(files: files, urls: urls, textParts: textParts)
+    lock.lock()
+    defer { lock.unlock() }
+    return SharedContent(files: files, urls: urls, textParts: textParts)
+  }
+}
+
+/// Resolves a non-cancellable realtime invocation or its local deadline exactly once.
+private final class SendMessageInvocationGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<RpcResult.OneOf_Result?, any Error>?
+
+  init(continuation: CheckedContinuation<RpcResult.OneOf_Result?, any Error>) {
+    self.continuation = continuation
+  }
+
+  func resume(with result: Result<RpcResult.OneOf_Result?, any Error>) {
+    lock.lock()
+    guard let continuation else {
+      lock.unlock()
+      return
+    }
+    self.continuation = nil
+    lock.unlock()
+    continuation.resume(with: result)
   }
 }
 
@@ -136,13 +162,13 @@ private final class SharedContentAccumulator: @unchecked Sendable {
 /// Handles loading shared content, uploading files, and sending messages
 @MainActor
 class ShareState: ObservableObject {
+  private nonisolated static let sharedContainerIdentifier = "group.chat.inline"
   private nonisolated static let maxMedia = 10
   private nonisolated static let maxUrls = 10
-  private nonisolated static let sharedContainerIdentifier = "group.chat.inline"
-  private nonisolated static let imageCompressionQuality: CGFloat = 0.7
-  private nonisolated static let maxPhotoUploadDimension = 2560
+  private nonisolated static let imageCompressionQuality: CGFloat = 0.52
+  private nonisolated static let maxPhotoUploadDimension = 1280
   private nonisolated static let photoOptimizationThresholdBytes = 1_500_000
-  private nonisolated static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024 // Share extension uploads are Data-backed.
+  private nonisolated static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024
   private nonisolated static let maxVideoFileSizeBytes: Int64 = maxFileSizeBytes
   private nonisolated static func maxFileSizeDisplay(for bytes: Int64) -> String {
     let gib: Int64 = 1024 * 1024 * 1024
@@ -154,6 +180,25 @@ class ShareState: ObservableObject {
       return "\(bytes / mib)MB"
     }
     return "\(bytes) bytes"
+  }
+
+  private struct TemporarySharedFile {
+    let url: URL
+    let fileName: String
+    let typeIdentifier: String?
+    let fileType: MessageFileType
+    let cleanupURLs: [URL]
+  }
+
+  private struct PreparedSharedFile {
+    let url: URL
+    let fileName: String
+    let mimeType: MIMEType
+    let fileType: MessageFileType
+    let fileSize: Int64
+    let isAnimatedImage: Bool
+    let videoMetadata: ApiClient.VideoUploadMetadata?
+    let cleanupURLs: [URL]
   }
 
   @Published var sharedContent: SharedContent?
@@ -175,6 +220,33 @@ class ShareState: ObservableObject {
 
   private nonisolated func tagged(_ message: String) -> String {
     "[share \(shareSessionId)] \(message)"
+  }
+
+  private nonisolated func logValue(_ value: String?) -> String {
+    guard let value, !value.isEmpty else { return "none" }
+    return value
+  }
+
+  private nonisolated func fileSizeLogValue(_ fileSize: Int64?) -> String {
+    fileSize.map(String.init) ?? "unknown"
+  }
+
+  private nonisolated func sourceLogValue(for source: SharedFileSource) -> String {
+    switch source {
+    case .itemProvider:
+      return "itemProvider"
+    case .fileURL:
+      return "fileURL"
+    }
+  }
+
+  private nonisolated func uploadResultLogValue(_ result: InlineKit.UploadFileResult) -> String {
+    var parts: [String] = []
+    if let photoId = result.photoId { parts.append("photoId=\(photoId)") }
+    if let videoId = result.videoId { parts.append("videoId=\(videoId)") }
+    if let documentId = result.documentId { parts.append("documentId=\(documentId)") }
+    if let voiceId = result.voiceId { parts.append("voiceId=\(voiceId)") }
+    return parts.isEmpty ? "no-media-id" : parts.joined(separator: " ")
   }
 
   private nonisolated func resolveMimeType(
@@ -253,26 +325,69 @@ class ShareState: ObservableObject {
     return "\(safeStem).jpg"
   }
 
-  private nonisolated func transcodePhotoToJpeg(_ data: Data) -> Data? {
-    if let source = CGImageSourceCreateWithData(data as CFData, nil) {
+  private nonisolated func imageSourceReadOptions() -> CFDictionary {
+    [kCGImageSourceShouldCache: false] as CFDictionary
+  }
+
+  private nonisolated func writeThumbnailJpeg(from source: CGImageSource, to destinationURL: URL) -> Bool {
+    autoreleasepool {
       let options: [CFString: Any] = [
+        kCGImageSourceShouldCache: false,
+        kCGImageSourceShouldCacheImmediately: true,
         kCGImageSourceCreateThumbnailFromImageAlways: true,
         kCGImageSourceCreateThumbnailWithTransform: true,
         kCGImageSourceThumbnailMaxPixelSize: Self.maxPhotoUploadDimension,
       ]
-      if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-        return UIImage(cgImage: cgImage).jpegData(compressionQuality: Self.imageCompressionQuality)
+      guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+            let destination = CGImageDestinationCreateWithURL(
+              destinationURL as CFURL,
+              UTType.jpeg.identifier as CFString,
+              1,
+              nil
+            )
+      else {
+        return false
       }
+      let properties: [CFString: Any] = [
+        kCGImageDestinationLossyCompressionQuality: Self.imageCompressionQuality,
+      ]
+      CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+      return CGImageDestinationFinalize(destination)
     }
-
-    guard let image = UIImage(data: data) else { return nil }
-    return image.jpegData(compressionQuality: Self.imageCompressionQuality)
   }
 
-  private nonisolated func photoPixelSize(from data: Data) -> CGSize? {
-    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-    else {
+  private nonisolated func jpegData(
+    from cgImage: CGImage,
+    compressionQuality: CGFloat = ShareState.imageCompressionQuality
+  ) -> Data? {
+    autoreleasepool {
+      let data = NSMutableData()
+      guard let destination = CGImageDestinationCreateWithData(
+        data,
+        UTType.jpeg.identifier as CFString,
+        1,
+        nil
+      ) else {
+        return nil
+      }
+      let properties: [CFString: Any] = [
+        kCGImageDestinationLossyCompressionQuality: compressionQuality,
+      ]
+      CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+      guard CGImageDestinationFinalize(destination) else { return nil }
+      return data as Data
+    }
+  }
+
+  private nonisolated func photoPixelSize(from url: URL) -> CGSize? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()) else {
+      return nil
+    }
+    return photoPixelSize(from: source)
+  }
+
+  private nonisolated func photoPixelSize(from source: CGImageSource) -> CGSize? {
+    guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, imageSourceReadOptions()) as? [CFString: Any] else {
       return nil
     }
 
@@ -284,51 +399,88 @@ class ShareState: ObservableObject {
     return CGSize(width: CGFloat(truncating: width), height: CGFloat(truncating: height))
   }
 
-  private nonisolated func optimizedPhotoUploadPayload(
-    from data: Data,
-    suggestedName: String?
-  ) -> (data: Data, fileName: String, mimeType: MIMEType)? {
-    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-          let pixelSize = photoPixelSize(from: data)
+  private nonisolated func optimizedPhotoUploadFile(
+    from url: URL,
+    suggestedName: String?,
+    cleanupURLs: [URL]
+  ) throws -> PreparedSharedFile? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()),
+          let pixelSize = photoPixelSize(from: source)
     else {
       return nil
     }
 
+    let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
     let largestDimension = max(pixelSize.width, pixelSize.height)
     let shouldOptimize = largestDimension > CGFloat(Self.maxPhotoUploadDimension) ||
-      data.count > Self.photoOptimizationThresholdBytes
+      (fileSize ?? 0) > Self.photoOptimizationThresholdBytes
     guard shouldOptimize else { return nil }
 
-    let options: [CFString: Any] = [
-      kCGImageSourceCreateThumbnailFromImageAlways: true,
-      kCGImageSourceCreateThumbnailWithTransform: true,
-      kCGImageSourceThumbnailMaxPixelSize: Self.maxPhotoUploadDimension,
-    ]
-    guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
-          let jpegData = UIImage(cgImage: cgImage).jpegData(compressionQuality: Self.imageCompressionQuality),
-          jpegData.count < data.count
-    else {
-      return nil
-    }
-
-    return (
-      jpegData,
-      jpegFileName(from: suggestedName),
-      MIMEType(text: "image/jpeg")
+    return try downsampledPhotoFile(
+      from: source,
+      fileName: jpegFileName(from: suggestedName),
+      cleanupURLs: cleanupURLs,
+      originalFileSize: fileSize.map { Int64($0) }
     )
   }
 
-  private nonisolated func shouldSendPhotoAsDocument(_ data: Data) -> Bool {
-    if let pixelSize = photoPixelSize(from: data) {
-      let width = max(pixelSize.width, 1)
-      let height = max(pixelSize.height, 1)
-      let ratio = max(width / height, height / width)
-      return ratio > 20 || (width < 50 && height < 50)
+  private nonisolated func downsampledPhotoFile(
+    from url: URL,
+    fileName: String,
+    cleanupURLs: [URL]
+  ) throws -> PreparedSharedFile? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()) else {
+      return nil
+    }
+    return try downsampledPhotoFile(
+      from: source,
+      fileName: fileName,
+      cleanupURLs: cleanupURLs,
+      originalFileSize: nil
+    )
+  }
+
+  private nonisolated func downsampledPhotoFile(
+    from source: CGImageSource,
+    fileName: String,
+    cleanupURLs: [URL],
+    originalFileSize: Int64?
+  ) throws -> PreparedSharedFile? {
+    let tempURL = temporaryURL(
+      suggestedName: fileName,
+      typeIdentifier: UTType.jpeg.identifier
+    )
+    guard writeThumbnailJpeg(from: source, to: tempURL) else {
+      try? FileManager.default.removeItem(at: tempURL)
+      return nil
     }
 
-    guard let image = UIImage(data: data) else { return false }
-    let width = max(image.size.width, 1)
-    let height = max(image.size.height, 1)
+    let size = fileSize(for: tempURL) ?? 0
+    if let originalFileSize, size >= originalFileSize {
+      try? FileManager.default.removeItem(at: tempURL)
+      return nil
+    }
+
+    return PreparedSharedFile(
+      url: tempURL,
+      fileName: sanitizedFileName(
+        suggestedName: fileName,
+        fallbackURL: tempURL,
+        typeIdentifier: UTType.jpeg.identifier
+      ),
+      mimeType: MIMEType(text: "image/jpeg"),
+      fileType: .photo,
+      fileSize: size,
+      isAnimatedImage: false,
+      videoMetadata: nil,
+      cleanupURLs: cleanupURLs + [tempURL]
+    )
+  }
+
+  private nonisolated func shouldSendPhotoAsDocument(at url: URL) -> Bool {
+    guard let pixelSize = photoPixelSize(from: url) else { return false }
+    let width = max(pixelSize.width, 1)
+    let height = max(pixelSize.height, 1)
     let ratio = max(width / height, height / width)
     return ratio > 20 || (width < 50 && height < 50)
   }
@@ -371,22 +523,7 @@ class ShareState: ObservableObject {
     mimeType: MIMEType
   ) -> Bool {
     guard isGIF(suggestedName: suggestedName, typeIdentifier: typeIdentifier, mimeType: mimeType),
-          let source = CGImageSourceCreateWithURL(url as CFURL, nil)
-    else {
-      return false
-    }
-
-    return CGImageSourceGetCount(source) > 1
-  }
-
-  private nonisolated func isAnimatedGIF(
-    data: Data,
-    suggestedName: String?,
-    typeIdentifier: String?,
-    mimeType: MIMEType
-  ) -> Bool {
-    guard isGIF(suggestedName: suggestedName, typeIdentifier: typeIdentifier, mimeType: mimeType),
-          let source = CGImageSourceCreateWithData(data as CFData, nil)
+          let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions())
     else {
       return false
     }
@@ -418,23 +555,34 @@ class ShareState: ObservableObject {
       guard let suggestedType else { return true }
       return !suggestedType.conforms(to: .image) && !suggestedType.conforms(to: .movie)
     }()
+    let hasFileURL = provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) ||
+      identifiers.contains(UTType.fileURL.identifier)
+    let pdfType = identifiers.first(where: { UTType($0)?.conforms(to: .pdf) == true })
+    let movieType = identifiers.first(where: { UTType($0)?.conforms(to: .movie) == true })
+    let imageType = identifiers.first(where: { UTType($0)?.conforms(to: .image) == true })
 
-    if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) ||
-        identifiers.contains(UTType.fileURL.identifier) {
+    if hasFileURL {
+      if pdfType != nil || suggestedPrefersDocument {
+        return (UTType.fileURL.identifier, .document)
+      }
+      if movieType != nil {
+        return (UTType.fileURL.identifier, .video)
+      }
+      if imageType != nil {
+        return (UTType.fileURL.identifier, .photo)
+      }
       return (UTType.fileURL.identifier, .document)
     }
 
-    if let pdfType = identifiers.first(where: { UTType($0)?.conforms(to: .pdf) == true }) {
+    if let pdfType {
       return (pdfType, .document)
     }
 
-    if let movieType = identifiers.first(where: { UTType($0)?.conforms(to: .movie) == true }) {
+    if let movieType {
       return (movieType, .video)
     }
 
-    if !suggestedPrefersDocument,
-       let imageType = identifiers.first(where: { UTType($0)?.conforms(to: .image) == true })
-    {
+    if !suggestedPrefersDocument, let imageType {
       return (imageType, .photo)
     }
 
@@ -450,10 +598,6 @@ class ShareState: ObservableObject {
         return nil
       }
       return (dataType, .document)
-    }
-
-    if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-      return (UTType.fileURL.identifier, .document)
     }
 
     if provider.hasItemConformingToTypeIdentifier(UTType.data.identifier),
@@ -523,10 +667,10 @@ class ShareState: ObservableObject {
     fallbackURL: URL?,
     typeIdentifier: String?
   ) -> String {
-    let suggested = suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let suggested = safeFileNameComponent(suggestedName ?? "")
     var fileName = suggested
     if fileName.isEmpty {
-      let fallback = fallbackURL?.lastPathComponent ?? ""
+      let fallback = safeFileNameComponent(fallbackURL?.lastPathComponent ?? "")
       fileName = fallback.isEmpty ? UUID().uuidString : fallback
     }
 
@@ -546,6 +690,30 @@ class ShareState: ObservableObject {
     return fileName
   }
 
+  private nonisolated func safeFileNameComponent(_ value: String) -> String {
+    let unsafeCharacters = CharacterSet.controlCharacters.union(
+      CharacterSet(charactersIn: "/\\")
+    )
+    let replaced = value.unicodeScalars
+      .map { unsafeCharacters.contains($0) ? "_" : String($0) }
+      .joined()
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard !replaced.isEmpty, replaced != ".", replaced != ".." else {
+      return ""
+    }
+    guard replaced.count > 180 else { return replaced }
+
+    let name = replaced as NSString
+    let fileExtension = name.pathExtension
+    guard !fileExtension.isEmpty, fileExtension.count < 32 else {
+      return String(replaced.prefix(180))
+    }
+
+    let stemLength = max(1, 180 - fileExtension.count - 1)
+    return "\(String(name.deletingPathExtension.prefix(stemLength))).\(fileExtension)"
+  }
+
   private nonisolated func copyToTemporaryLocation(
     from sourceURL: URL,
     suggestedName: String?,
@@ -563,8 +731,26 @@ class ShareState: ObservableObject {
     defer {
       if needsAccess { sourceURL.stopAccessingSecurityScopedResource() }
     }
-    try fileManager.copyItem(at: sourceURL, to: destinationURL)
-    return destinationURL
+    do {
+      try fileManager.copyItem(at: sourceURL, to: destinationURL)
+      return destinationURL
+    } catch {
+      try? fileManager.removeItem(at: destinationURL)
+      throw error
+    }
+  }
+
+  private nonisolated func temporaryURL(
+    suggestedName: String?,
+    typeIdentifier: String?
+  ) -> URL {
+    let fileName = sanitizedFileName(
+      suggestedName: suggestedName,
+      fallbackURL: nil,
+      typeIdentifier: typeIdentifier
+    )
+    return FileManager.default.temporaryDirectory
+      .appendingPathComponent("\(UUID().uuidString)_\(fileName)")
   }
 
   private nonisolated func writeDataToTemporaryLocation(
@@ -572,16 +758,50 @@ class ShareState: ObservableObject {
     suggestedName: String?,
     typeIdentifier: String?
   ) throws -> URL {
-    let fileManager = FileManager.default
-    let fileName = sanitizedFileName(
+    let destinationURL = temporaryURL(
       suggestedName: suggestedName,
-      fallbackURL: nil,
       typeIdentifier: typeIdentifier
     )
-    let destinationURL = fileManager.temporaryDirectory
-      .appendingPathComponent("\(UUID().uuidString)_\(fileName)")
     try data.write(to: destinationURL, options: .atomic)
     return destinationURL
+  }
+
+  private nonisolated func stageFile(
+    source: SharedFileSource,
+    suggestedName: String?,
+    typeIdentifier: String?,
+    fileType: MessageFileType,
+    fileSize: Int64?,
+    accumulator: SharedContentAccumulator
+  ) {
+    let fallbackURL: URL?
+    switch source {
+    case let .fileURL(url):
+      fallbackURL = url
+    case .itemProvider:
+      fallbackURL = nil
+    }
+
+    let fileName = sanitizedFileName(
+      suggestedName: suggestedName,
+      fallbackURL: fallbackURL,
+      typeIdentifier: typeIdentifier
+    )
+    let mimeType = resolveMimeType(
+      fileURL: fallbackURL,
+      suggestedName: fileName,
+      typeIdentifier: typeIdentifier
+    )
+    let sharedFile = SharedFile(
+      source: source,
+      fileName: fileName,
+      typeIdentifier: typeIdentifier,
+      mimeType: mimeType,
+      fileType: fileType,
+      fileSize: fileSize,
+      isAnimatedImage: false
+    )
+    accumulator.addFile(sharedFile)
   }
 
   private nonisolated func addFile(
@@ -591,264 +811,32 @@ class ShareState: ObservableObject {
     fileType: MessageFileType,
     accumulator: SharedContentAccumulator
   ) {
-    do {
-      let tempURL = try copyToTemporaryLocation(
-        from: url,
-        suggestedName: suggestedName,
-        typeIdentifier: typeIdentifier
-      )
-      let fileName = sanitizedFileName(
-        suggestedName: suggestedName,
-        fallbackURL: url,
-        typeIdentifier: typeIdentifier
-      )
-      let mimeType = resolveMimeType(
-        fileURL: tempURL,
-        suggestedName: fileName,
-        typeIdentifier: typeIdentifier
-      )
-      var resolvedFileType = fileType
-      var isAnimatedImage = false
-      if fileType == .photo,
-         isAnimatedGIF(
-           at: tempURL,
-           suggestedName: fileName,
-           typeIdentifier: typeIdentifier,
-           mimeType: mimeType
-         )
-      {
-        resolvedFileType = .video
-        isAnimatedImage = true
-      }
-
-      if resolvedFileType == .photo &&
-          (shouldTranscodePhotoToJpeg(
-            suggestedName: fileName,
-            typeIdentifier: typeIdentifier,
-            mimeType: mimeType
-          ) || !isSupportedPhotoMimeType(mimeType))
-      {
-        do {
-          let data = try Data(contentsOf: tempURL)
-          if let jpegData = transcodePhotoToJpeg(data) {
-            addFile(
-              from: jpegData,
-              suggestedName: jpegFileName(from: fileName),
-              typeIdentifier: UTType.jpeg.identifier,
-              fileType: .photo,
-              mimeTypeOverride: MIMEType(text: "image/jpeg"),
-              accumulator: accumulator
-            )
-            return
-          }
-          let shouldFallback = shouldTranscodePhotoToJpeg(
-            suggestedName: fileName,
-            typeIdentifier: typeIdentifier,
-            mimeType: mimeType
-          )
-          if shouldFallback {
-            resolvedFileType = .document
-            log.warning(tagged("Failed to transcode HEIC photo; falling back to document"))
-          } else {
-            resolvedFileType = .document
-            log.warning(tagged("Unsupported photo MIME type; falling back to document (\(mimeType.text))"))
-          }
-        } catch {
-          resolvedFileType = .document
-          log.error(tagged("Failed to read shared photo data; falling back to document"), error: error)
-        }
-      }
-      if resolvedFileType == .photo {
-        do {
-          let data = try Data(contentsOf: tempURL)
-          if shouldSendPhotoAsDocument(data) {
-            resolvedFileType = .document
-            log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
-          } else if shouldOptimizePhotoUpload(mimeType: mimeType),
-                    let optimized = optimizedPhotoUploadPayload(from: data, suggestedName: fileName) {
-            addFile(
-              from: optimized.data,
-              suggestedName: optimized.fileName,
-              typeIdentifier: UTType.jpeg.identifier,
-              fileType: .photo,
-              mimeTypeOverride: optimized.mimeType,
-              accumulator: accumulator
-            )
-            return
-          }
-        } catch {
-          resolvedFileType = .document
-          log.error(tagged("Failed to inspect shared photo dimensions; falling back to document"), error: error)
-        }
-      }
-      let fileSize = try? tempURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
-      accumulator.addFile(SharedFile(
-        url: tempURL,
-        fileName: fileName,
-        mimeType: mimeType,
-        fileType: resolvedFileType,
-        fileSize: fileSize.map { Int64($0) },
-        isAnimatedImage: isAnimatedImage
-      ))
-    } catch {
-      log.error(tagged("Failed to prepare shared file"), error: error)
-    }
+    let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+    stageFile(
+      source: .fileURL(url),
+      suggestedName: suggestedName,
+      typeIdentifier: typeIdentifier,
+      fileType: fileType,
+      fileSize: fileSize.map { Int64($0) },
+      accumulator: accumulator
+    )
   }
 
   private nonisolated func addFile(
-    from data: Data,
+    from itemProvider: SendableItemProvider,
     suggestedName: String?,
-    typeIdentifier: String?,
-    fileType: MessageFileType,
-    mimeTypeOverride: MIMEType? = nil,
-    accumulator: SharedContentAccumulator
-  ) {
-    do {
-      let fileName = sanitizedFileName(
-        suggestedName: suggestedName,
-        fallbackURL: nil,
-        typeIdentifier: typeIdentifier
-      )
-      let resolvedMimeType = mimeTypeOverride ?? resolveMimeType(
-        fileURL: nil,
-        suggestedName: fileName,
-        typeIdentifier: typeIdentifier
-      )
-      var resolvedFileType = fileType
-      var isAnimatedImage = false
-      if fileType == .photo,
-         isAnimatedGIF(
-           data: data,
-           suggestedName: fileName,
-           typeIdentifier: typeIdentifier,
-           mimeType: resolvedMimeType
-         )
-      {
-        resolvedFileType = .video
-        isAnimatedImage = true
-      }
-
-      if resolvedFileType == .photo && mimeTypeOverride == nil &&
-          (shouldTranscodePhotoToJpeg(
-            suggestedName: fileName,
-            typeIdentifier: typeIdentifier,
-            mimeType: resolvedMimeType
-          ) || !isSupportedPhotoMimeType(resolvedMimeType))
-      {
-        if let jpegData = transcodePhotoToJpeg(data) {
-          addFile(
-            from: jpegData,
-            suggestedName: jpegFileName(from: fileName),
-            typeIdentifier: UTType.jpeg.identifier,
-            fileType: .photo,
-            mimeTypeOverride: MIMEType(text: "image/jpeg"),
-            accumulator: accumulator
-          )
-          return
-        }
-        let shouldFallback = shouldTranscodePhotoToJpeg(
-          suggestedName: fileName,
-          typeIdentifier: typeIdentifier,
-          mimeType: resolvedMimeType
-        )
-        if shouldFallback {
-          resolvedFileType = .document
-          log.warning(tagged("Failed to transcode HEIC photo; falling back to document"))
-        } else {
-          resolvedFileType = .document
-          log.warning(tagged("Unsupported photo MIME type; falling back to document (\(resolvedMimeType.text))"))
-        }
-      }
-      if resolvedFileType == .photo && shouldSendPhotoAsDocument(data) {
-        resolvedFileType = .document
-        log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
-      } else if resolvedFileType == .photo,
-                mimeTypeOverride == nil,
-                shouldOptimizePhotoUpload(mimeType: resolvedMimeType),
-                let optimized = optimizedPhotoUploadPayload(from: data, suggestedName: fileName) {
-        addFile(
-          from: optimized.data,
-          suggestedName: optimized.fileName,
-          typeIdentifier: UTType.jpeg.identifier,
-          fileType: .photo,
-          mimeTypeOverride: optimized.mimeType,
-          accumulator: accumulator
-        )
-        return
-      }
-      let tempURL = try writeDataToTemporaryLocation(
-        data,
-        suggestedName: fileName,
-        typeIdentifier: typeIdentifier
-      )
-      let mimeType = mimeTypeOverride ?? resolveMimeType(
-        fileURL: tempURL,
-        suggestedName: fileName,
-        typeIdentifier: typeIdentifier
-      )
-      accumulator.addFile(SharedFile(
-        url: tempURL,
-        fileName: fileName,
-        mimeType: mimeType,
-        fileType: resolvedFileType,
-        fileSize: Int64(data.count),
-        isAnimatedImage: isAnimatedImage
-      ))
-    } catch {
-      log.error(tagged("Failed to write shared file"), error: error)
-    }
-  }
-
-  private nonisolated func handleLoadedFileItem(
-    _ item: NSSecureCoding?,
     typeIdentifier: String,
     fileType: MessageFileType,
-    suggestedName: String?,
     accumulator: SharedContentAccumulator
   ) {
-    if let url = item as? URL {
-      let resolvedType = fileType == .document
-        ? inferredFileType(for: url, typeIdentifier: typeIdentifier, suggestedName: suggestedName)
-        : fileType
-      addFile(
-        from: url,
-        suggestedName: suggestedName,
-        typeIdentifier: typeIdentifier,
-        fileType: resolvedType,
-        accumulator: accumulator
-      )
-      return
-    }
-
-    if let data = item as? Data {
-      addFile(
-        from: data,
-        suggestedName: suggestedName,
-        typeIdentifier: typeIdentifier,
-        fileType: fileType,
-        accumulator: accumulator
-      )
-      return
-    }
-
-    if let image = item as? UIImage, fileType == .photo {
-      guard let jpegData = image.jpegData(compressionQuality: Self.imageCompressionQuality) else {
-        log.error(tagged("Failed to encode shared image"))
-        return
-      }
-
-      addFile(
-        from: jpegData,
-        suggestedName: suggestedName ?? "shared_image.jpg",
-        typeIdentifier: UTType.jpeg.identifier,
-        fileType: .photo,
-        mimeTypeOverride: MIMEType(text: "image/jpeg"),
-        accumulator: accumulator
-      )
-      return
-    }
-
-    log.warning(tagged("Unsupported item payload for type \(typeIdentifier)"))
+    stageFile(
+      source: .itemProvider(itemProvider, typeIdentifier: typeIdentifier),
+      suggestedName: suggestedName,
+      typeIdentifier: typeIdentifier,
+      fileType: fileType,
+      fileSize: nil,
+      accumulator: accumulator
+    )
   }
 
   private nonisolated func handleLoadedURLItem(
@@ -932,6 +920,377 @@ class ShareState: ObservableObject {
     log.warning(tagged("Unsupported text payload"))
   }
 
+  private nonisolated func shareError(code: Int, message: String) -> NSError {
+    NSError(
+      domain: "ShareError",
+      code: code,
+      userInfo: [NSLocalizedDescriptionKey: message]
+    )
+  }
+
+  private nonisolated func cleanupTemporaryFiles(_ urls: [URL]) {
+    var seen = Set<URL>()
+    for url in urls where seen.insert(url).inserted {
+      _ = try? FileManager.default.removeItem(at: url)
+    }
+  }
+
+  private nonisolated func loadTemporaryFile(for file: SharedFile) async throws -> TemporarySharedFile {
+    log.debug(tagged(
+      "Preparing staged file source=\(sourceLogValue(for: file.source)) " +
+        "type=\(file.fileType) uti=\(logValue(file.typeIdentifier)) " +
+        "mime=\(file.mimeType.text) size=\(fileSizeLogValue(file.fileSize))"
+    ))
+
+    if file.fileType == .document,
+       let fileSize = file.fileSize,
+       fileSize > Self.maxFileSizeBytes {
+      throw shareError(
+        code: 3,
+        message: "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
+      )
+    }
+
+    switch file.source {
+    case let .fileURL(url):
+      let tempURL = try copyToTemporaryLocation(
+        from: url,
+        suggestedName: file.fileName,
+        typeIdentifier: file.typeIdentifier
+      )
+      let resolvedType = file.fileType == .document
+        ? inferredFileType(for: tempURL, typeIdentifier: file.typeIdentifier, suggestedName: file.fileName)
+        : file.fileType
+      return TemporarySharedFile(
+        url: tempURL,
+        fileName: file.fileName,
+        typeIdentifier: file.typeIdentifier,
+        fileType: resolvedType,
+        cleanupURLs: [tempURL]
+      )
+
+    case let .itemProvider(itemProvider, typeIdentifier):
+      return try await loadTemporaryFile(
+        from: itemProvider,
+        typeIdentifier: typeIdentifier,
+        stagedFile: file
+      )
+    }
+  }
+
+  private nonisolated func loadTemporaryFile(
+    from itemProvider: SendableItemProvider,
+    typeIdentifier: String,
+    stagedFile: SharedFile
+  ) async throws -> TemporarySharedFile {
+    if typeIdentifier == UTType.fileURL.identifier {
+      return try await loadItemTemporaryFile(
+        from: itemProvider,
+        typeIdentifier: typeIdentifier,
+        stagedFile: stagedFile
+      )
+    }
+
+    do {
+      return try await loadFileRepresentationTemporaryFile(
+        from: itemProvider,
+        typeIdentifier: typeIdentifier,
+        stagedFile: stagedFile
+      )
+    } catch {
+      if stagedFile.fileType == .photo || stagedFile.fileType == .video {
+        log.warning(tagged(
+          "File representation unavailable for media; refusing decoded fallback " +
+            "type=\(stagedFile.fileType) uti=\(typeIdentifier) error=\(error.localizedDescription)"
+        ))
+        throw shareError(
+          code: 16,
+          message: "Inline could not access the shared media file. Try saving it to Files and sharing again."
+        )
+      }
+      log.warning(tagged(
+        "File representation unavailable; falling back to item load " +
+          "type=\(stagedFile.fileType) uti=\(typeIdentifier) error=\(error.localizedDescription)"
+      ))
+      return try await loadItemTemporaryFile(
+        from: itemProvider,
+        typeIdentifier: typeIdentifier,
+        stagedFile: stagedFile
+      )
+    }
+  }
+
+  private nonisolated func loadFileRepresentationTemporaryFile(
+    from itemProvider: SendableItemProvider,
+    typeIdentifier: String,
+    stagedFile: SharedFile
+  ) async throws -> TemporarySharedFile {
+    try await withCheckedThrowingContinuation { continuation in
+      itemProvider.provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { [weak self] url, error in
+        guard let self else {
+          continuation.resume(throwing: NSError(
+            domain: "ShareError",
+            code: 16,
+            userInfo: [NSLocalizedDescriptionKey: "Inline stopped preparing the shared file."]
+          ))
+          return
+        }
+        if let error {
+          continuation.resume(throwing: error)
+          return
+        }
+        guard let url else {
+          continuation.resume(throwing: shareError(code: 16, message: "Unable to read shared file."))
+          return
+        }
+
+        do {
+          let tempURL = try copyToTemporaryLocation(
+            from: url,
+            suggestedName: stagedFile.fileName,
+            typeIdentifier: typeIdentifier
+          )
+          let fileName = sanitizedFileName(
+            suggestedName: stagedFile.fileName,
+            fallbackURL: tempURL,
+            typeIdentifier: typeIdentifier
+          )
+          let resolvedType = stagedFile.fileType == .document
+            ? inferredFileType(for: tempURL, typeIdentifier: typeIdentifier, suggestedName: fileName)
+            : stagedFile.fileType
+          continuation.resume(returning: TemporarySharedFile(
+            url: tempURL,
+            fileName: fileName,
+            typeIdentifier: typeIdentifier,
+            fileType: resolvedType,
+            cleanupURLs: [tempURL]
+          ))
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
+  private nonisolated func loadItemTemporaryFile(
+    from itemProvider: SendableItemProvider,
+    typeIdentifier: String,
+    stagedFile: SharedFile
+  ) async throws -> TemporarySharedFile {
+    try await withCheckedThrowingContinuation { continuation in
+      let options: [AnyHashable: Any]? = stagedFile.fileType == .photo
+        ? [
+          NSItemProviderPreferredImageSizeKey: NSValue(
+            cgSize: CGSize(
+              width: Self.maxPhotoUploadDimension,
+              height: Self.maxPhotoUploadDimension
+            )
+          ),
+        ]
+        : nil
+      itemProvider.provider.loadItem(forTypeIdentifier: typeIdentifier, options: options) { [weak self] item, error in
+        guard let self else {
+          continuation.resume(throwing: NSError(
+            domain: "ShareError",
+            code: 16,
+            userInfo: [NSLocalizedDescriptionKey: "Inline stopped preparing the shared file."]
+          ))
+          return
+        }
+        if let error {
+          continuation.resume(throwing: error)
+          return
+        }
+
+        do {
+          let temporaryFile = try temporaryFile(
+            fromLoadedItem: item,
+            typeIdentifier: typeIdentifier,
+            stagedFile: stagedFile
+          )
+          continuation.resume(returning: temporaryFile)
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
+  private nonisolated func temporaryFile(
+    fromLoadedItem item: NSSecureCoding?,
+    typeIdentifier: String,
+    stagedFile: SharedFile
+  ) throws -> TemporarySharedFile {
+    if let url = item as? URL {
+      guard url.isFileURL else {
+        throw shareError(code: 16, message: "The shared URL is not a file.")
+      }
+      let tempURL = try copyToTemporaryLocation(
+        from: url,
+        suggestedName: stagedFile.fileName,
+        typeIdentifier: typeIdentifier
+      )
+      let resolvedType = stagedFile.fileType == .document
+        ? inferredFileType(for: tempURL, typeIdentifier: typeIdentifier, suggestedName: stagedFile.fileName)
+        : stagedFile.fileType
+      return TemporarySharedFile(
+        url: tempURL,
+        fileName: stagedFile.fileName,
+        typeIdentifier: typeIdentifier,
+        fileType: resolvedType,
+        cleanupURLs: [tempURL]
+      )
+    }
+
+    if let string = item as? String,
+       let url = URL(string: string),
+       url.isFileURL
+    {
+      return try temporaryFile(
+        fromLoadedItem: url as NSURL,
+        typeIdentifier: typeIdentifier,
+        stagedFile: stagedFile
+      )
+    }
+
+    if let data = item as? Data {
+      if typeIdentifier == UTType.fileURL.identifier,
+         let string = String(data: data, encoding: .utf8),
+         let url = URL(string: string),
+         url.isFileURL
+      {
+        return try temporaryFile(
+          fromLoadedItem: url as NSURL,
+          typeIdentifier: typeIdentifier,
+          stagedFile: stagedFile
+        )
+      }
+
+      if stagedFile.fileType == .photo || stagedFile.fileType == .video {
+        throw shareError(
+          code: 16,
+          message: "Inline could not access the shared media as a file."
+        )
+      }
+
+      let tempURL = try writeDataToTemporaryLocation(
+        data,
+        suggestedName: stagedFile.fileName,
+        typeIdentifier: typeIdentifier
+      )
+      return TemporarySharedFile(
+        url: tempURL,
+        fileName: stagedFile.fileName,
+        typeIdentifier: typeIdentifier,
+        fileType: stagedFile.fileType,
+        cleanupURLs: [tempURL]
+      )
+    }
+
+    throw shareError(code: 16, message: "Unable to read the shared file.")
+  }
+
+  private nonisolated func prepareFileForUpload(_ file: SharedFile) async throws -> PreparedSharedFile {
+    log.info(tagged(
+      "Preparing attachment type=\(file.fileType) source=\(sourceLogValue(for: file.source)) " +
+        "uti=\(logValue(file.typeIdentifier))"
+    ))
+    let temporaryFile = try await loadTemporaryFile(for: file)
+    do {
+      let preparedFile = try prepareTemporaryFileForUpload(temporaryFile)
+      log.info(tagged(
+        "Prepared attachment type=\(preparedFile.fileType) " +
+          "mime=\(preparedFile.mimeType.text) size=\(preparedFile.fileSize)"
+      ))
+      return preparedFile
+    } catch {
+      cleanupTemporaryFiles(temporaryFile.cleanupURLs)
+      throw error
+    }
+  }
+
+  private nonisolated func prepareTemporaryFileForUpload(_ file: TemporarySharedFile) throws -> PreparedSharedFile {
+    let fileName = sanitizedFileName(
+      suggestedName: file.fileName,
+      fallbackURL: file.url,
+      typeIdentifier: file.typeIdentifier
+    )
+    let mimeType = resolveMimeType(
+      fileURL: file.url,
+      suggestedName: fileName,
+      typeIdentifier: file.typeIdentifier
+    )
+    var resolvedFileType = file.fileType == .document
+      ? inferredFileType(for: file.url, typeIdentifier: file.typeIdentifier, suggestedName: fileName)
+      : file.fileType
+    var isAnimatedImage = false
+
+    if resolvedFileType == .photo,
+       isAnimatedGIF(
+         at: file.url,
+         suggestedName: fileName,
+         typeIdentifier: file.typeIdentifier,
+         mimeType: mimeType
+       )
+    {
+      resolvedFileType = .video
+      isAnimatedImage = true
+    }
+
+    if resolvedFileType == .photo &&
+        (shouldTranscodePhotoToJpeg(
+          suggestedName: fileName,
+          typeIdentifier: file.typeIdentifier,
+          mimeType: mimeType
+        ) || !isSupportedPhotoMimeType(mimeType))
+    {
+      if let photoFile = try downsampledPhotoFile(
+        from: file.url,
+        fileName: jpegFileName(from: fileName),
+        cleanupURLs: file.cleanupURLs
+      ) {
+        return photoFile
+      }
+
+      if shouldTranscodePhotoToJpeg(
+        suggestedName: fileName,
+        typeIdentifier: file.typeIdentifier,
+        mimeType: mimeType
+      ) {
+        log.warning(tagged("Failed to transcode HEIC photo; falling back to document"))
+      } else {
+        log.warning(tagged("Unsupported photo MIME type; falling back to document (\(mimeType.text))"))
+      }
+      resolvedFileType = .document
+    }
+
+    if resolvedFileType == .photo {
+      if shouldSendPhotoAsDocument(at: file.url) {
+        resolvedFileType = .document
+        log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
+      } else if shouldOptimizePhotoUpload(mimeType: mimeType),
+                let optimized = try optimizedPhotoUploadFile(
+                  from: file.url,
+                  suggestedName: fileName,
+                  cleanupURLs: file.cleanupURLs
+                ) {
+        return optimized
+      }
+    }
+
+    let size = fileSize(for: file.url) ?? 0
+    return PreparedSharedFile(
+      url: file.url,
+      fileName: fileName,
+      mimeType: mimeType,
+      fileType: resolvedFileType,
+      fileSize: size,
+      isAnimatedImage: isAnimatedImage,
+      videoMetadata: nil,
+      cleanupURLs: file.cleanupURLs
+    )
+  }
+
   private nonisolated func buildVideoMetadata(from url: URL) async throws -> ApiClient.VideoUploadMetadata {
     let asset = AVURLAsset(url: url)
     let tracks = try await asset.loadTracks(withMediaType: .video)
@@ -975,32 +1334,36 @@ class ShareState: ObservableObject {
   }
 
   private nonisolated func prepareVideoForUpload(
-    _ file: SharedFile
-  ) async throws -> (
-    url: URL,
-    fileName: String,
-    mimeType: MIMEType,
-    fileSize: Int64,
-    videoMetadata: ApiClient.VideoUploadMetadata?,
-    cleanup: (() -> Void)?
-  ) {
+    _ file: PreparedSharedFile
+  ) async throws -> PreparedSharedFile {
     if file.isAnimatedImage {
       return try await prepareAnimatedImageVideoForUpload(file)
     }
 
     let needsMp4Transcode = file.url.pathExtension.lowercased() != "mp4"
     let options = VideoCompressionOptions.uploadDefault(forceTranscode: needsMp4Transcode)
-    let originalFileSize = file.fileSize ?? fileSize(for: file.url) ?? 0
+    let originalFileSize = file.fileSize
+    log.debug(tagged(
+      "Preparing video upload transcodeRequired=\(needsMp4Transcode) size=\(originalFileSize)"
+    ))
 
     do {
       let result = try await VideoCompressor.shared.compressVideo(at: file.url, options: options)
       let baseName = (file.fileName as NSString).deletingPathExtension
       let resolvedName = baseName.isEmpty ? "video.mp4" : "\(baseName).mp4"
       let mimeType = MIMEType(text: FileHelpers.getMimeType(for: result.url))
-      let cleanup: (() -> Void)? = {
-        _ = try? FileManager.default.removeItem(at: result.url)
-      }
-      return (result.url, resolvedName, mimeType, result.fileSize, nil, cleanup)
+      let preparedFile = PreparedSharedFile(
+        url: result.url,
+        fileName: resolvedName,
+        mimeType: mimeType,
+        fileType: .video,
+        fileSize: result.fileSize,
+        isAnimatedImage: false,
+        videoMetadata: nil,
+        cleanupURLs: file.cleanupURLs + [result.url]
+      )
+      log.debug(tagged("Video compression completed size=\(result.fileSize)"))
+      return preparedFile
     } catch VideoCompressionError.compressionNotNeeded, VideoCompressionError.compressionNotEffective {
       if needsMp4Transcode {
         throw NSError(
@@ -1009,7 +1372,17 @@ class ShareState: ObservableObject {
           userInfo: [NSLocalizedDescriptionKey: "Failed to convert video to MP4."]
         )
       }
-      return (file.url, file.fileName, file.mimeType, originalFileSize, nil, nil)
+      log.debug(tagged("Video compression skipped; using original MP4"))
+      return PreparedSharedFile(
+        url: file.url,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        fileType: .video,
+        fileSize: originalFileSize,
+        isAnimatedImage: false,
+        videoMetadata: file.videoMetadata,
+        cleanupURLs: file.cleanupURLs
+      )
     } catch {
       if needsMp4Transcode {
         throw NSError(
@@ -1018,24 +1391,29 @@ class ShareState: ObservableObject {
           userInfo: [NSLocalizedDescriptionKey: "Failed to compress video for upload."]
         )
       }
-      return (file.url, file.fileName, file.mimeType, originalFileSize, nil, nil)
+      log.debug(tagged("Video compression failed; using original MP4 error=\(error.localizedDescription)"))
+      return PreparedSharedFile(
+        url: file.url,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        fileType: .video,
+        fileSize: originalFileSize,
+        isAnimatedImage: false,
+        videoMetadata: file.videoMetadata,
+        cleanupURLs: file.cleanupURLs
+      )
     }
   }
 
   private nonisolated func prepareAnimatedImageVideoForUpload(
-    _ file: SharedFile
-  ) async throws -> (
-    url: URL,
-    fileName: String,
-    mimeType: MIMEType,
-    fileSize: Int64,
-    videoMetadata: ApiClient.VideoUploadMetadata?,
-    cleanup: (() -> Void)?
-  ) {
+    _ file: PreparedSharedFile
+  ) async throws -> PreparedSharedFile {
     let conversion = try await AnimatedImageVideoConverter.convertGIF(at: file.url)
     let baseName = (file.fileName as NSString).deletingPathExtension
     let resolvedName = baseName.isEmpty ? "animation.mp4" : "\(baseName).mp4"
-    let thumbnailData = conversion.thumbnail?.jpegData(compressionQuality: 0.7)
+    let thumbnailData = conversion.thumbnail?.cgImage.flatMap {
+      jpegData(from: $0, compressionQuality: 0.7)
+    }
     let metadata = ApiClient.VideoUploadMetadata(
       width: conversion.width,
       height: conversion.height,
@@ -1045,16 +1423,15 @@ class ShareState: ObservableObject {
       isAnimated: true,
       hasAudio: false
     )
-    let cleanup: (() -> Void)? = {
-      _ = try? FileManager.default.removeItem(at: conversion.url)
-    }
-    return (
-      conversion.url,
-      resolvedName,
-      MIMEType(text: "video/mp4"),
-      conversion.fileSize,
-      metadata,
-      cleanup
+    return PreparedSharedFile(
+      url: conversion.url,
+      fileName: resolvedName,
+      mimeType: MIMEType(text: "video/mp4"),
+      fileType: .video,
+      fileSize: conversion.fileSize,
+      isAnimatedImage: false,
+      videoMetadata: metadata,
+      cleanupURLs: file.cleanupURLs + [conversion.url]
     )
   }
 
@@ -1071,11 +1448,11 @@ class ShareState: ObservableObject {
   ) throws -> (data: Data, mimeType: MIMEType)? {
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
+    generator.maximumSize = CGSize(width: 480, height: 480)
 
     let captureTime = CMTime(seconds: max(0, min(durationSeconds * 0.1, 1.0)), preferredTimescale: 600)
     let cgImage = try generator.copyCGImage(at: captureTime, actualTime: nil)
-    let image = UIImage(cgImage: cgImage)
-    guard let jpegData = image.jpegData(compressionQuality: 0.7) else {
+    guard let jpegData = jpegData(from: cgImage) else {
       return nil
     }
 
@@ -1178,28 +1555,38 @@ class ShareState: ObservableObject {
     _ input: SendMessageInput,
     timeoutSeconds: TimeInterval
   ) async throws -> RpcResult.OneOf_Result? {
-    try await withThrowingTaskGroup(of: RpcResult.OneOf_Result?.self) { group in
-      group.addTask {
-        try await Realtime.shared.invoke(
-          .sendMessage,
-          input: .sendMessage(input),
-          // Queue during connection warmup; share extension enforces its own timeout below.
-          discardIfNotConnected: false
-        )
+    try await withCheckedThrowingContinuation { continuation in
+      let gate = SendMessageInvocationGate(continuation: continuation)
+
+      // Realtime V1 stores a checked continuation and does not currently react to task
+      // cancellation. Use unstructured racers so the extension deadline can still resolve.
+      // The caller retries with the same random ID, so a late first invocation is deduplicated.
+      Task {
+        do {
+          let result = try await Realtime.shared.invoke(
+            .sendMessage,
+            input: .sendMessage(input),
+            discardIfNotConnected: false
+          )
+          gate.resume(with: .success(result))
+        } catch {
+          gate.resume(with: .failure(error))
+        }
       }
 
-      group.addTask {
-        try await Task.sleep(for: .seconds(timeoutSeconds))
-        throw NSError(
+      Task {
+        do {
+          try await Task.sleep(for: .seconds(timeoutSeconds))
+        } catch {
+          return
+        }
+
+        gate.resume(with: .failure(NSError(
           domain: "ShareError",
           code: 15,
           userInfo: [NSLocalizedDescriptionKey: "Inline couldn't reach the server."]
-        )
+        )))
       }
-
-      let result = try await group.next()!
-      group.cancelAll()
-      return result
     }
   }
 
@@ -1326,6 +1713,20 @@ class ShareState: ObservableObject {
     static let idle = ShareProgressState(title: "", detail: nil, fractionCompleted: nil)
   }
 
+  private nonisolated func progressDetail(
+    for fileType: MessageFileType,
+    itemNumber: Int,
+    totalItems: Int
+  ) -> String {
+    let itemName: String = switch fileType {
+    case .photo: "Photo"
+    case .video: "Video"
+    case .document: "File"
+    case .voice: "Audio"
+    }
+    return totalItems > 1 ? "\(itemName) \(itemNumber) of \(totalItems)" : itemName
+  }
+
   func loadSharedData() {
     sharedData = BridgeManager.shared.loadSharedData()
 
@@ -1341,11 +1742,10 @@ class ShareState: ObservableObject {
     }
   }
 
-  func prepareConnection() async {
-    if Auth.shared.getToken() == nil {
-      await Auth.shared.refreshFromStorage()
-    }
-    await startRealtimeIfNeeded()
+  func finishSession() async {
+    guard hasStartedRealtime else { return }
+    hasStartedRealtime = false
+    await Realtime.shared.suspendForSessionEnd()
   }
 
   func loadSharedContent(from extensionItems: [NSExtensionItem]) {
@@ -1382,64 +1782,13 @@ class ShareState: ObservableObject {
           totalMediaAttachments += 1
           let typeIdentifier = fileTypeInfo.identifier
           let fileType = fileTypeInfo.fileType
-          group.enter()
-          if typeIdentifier == UTType.fileURL.identifier {
-            attachment.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { [weak self] item, error in
-              defer { group.leave() }
-              guard let self else { return }
-              if let error {
-                self.log.error(self.tagged("Failed to load file URL item"), error: error)
-              }
-              self.handleLoadedURLItem(
-                item,
-                suggestedName: suggestedName,
-                accumulator: accumulator
-              )
-            }
-          } else {
-            attachment.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { [weak self] url, error in
-              guard let self else {
-                group.leave()
-                return
-              }
-              if let error {
-                self.log.error(self.tagged("Failed to load file representation"), error: error)
-              }
-              if let url {
-                let resolvedType = fileType == .document
-                  ? self.inferredFileType(
-                    for: url,
-                    typeIdentifier: typeIdentifier,
-                    suggestedName: suggestedName
-                  )
-                  : fileType
-                self.addFile(
-                  from: url,
-                  suggestedName: suggestedName,
-                  typeIdentifier: typeIdentifier,
-                  fileType: resolvedType,
-                  accumulator: accumulator
-                )
-                group.leave()
-                return
-              }
-
-              itemProvider.provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { [weak self] item, error in
-                defer { group.leave() }
-                guard let self else { return }
-                if let error {
-                  self.log.error(self.tagged("Failed to load item"), error: error)
-                }
-                self.handleLoadedFileItem(
-                  item,
-                  typeIdentifier: typeIdentifier,
-                  fileType: fileType,
-                  suggestedName: suggestedName,
-                  accumulator: accumulator
-                )
-              }
-            }
-          }
+          addFile(
+            from: itemProvider,
+            suggestedName: suggestedName,
+            typeIdentifier: typeIdentifier,
+            fileType: fileType,
+            accumulator: accumulator
+          )
           continue
         }
 
@@ -1566,10 +1915,6 @@ class ShareState: ObservableObject {
       do {
         let apiClient = ApiClient.shared
         let sendStart = Date()
-        let connectionWarmup = Task {
-          await self.startRealtimeIfNeeded()
-          _ = await self.waitForRealtimeConnected(maxSeconds: self.realtimeConnectWarmupSeconds)
-        }
         let totalMediaItems = content.mediaCount
         let totalUploadItems = max(totalMediaItems, 1)
         let totalSendOperations = max(totalMediaItems, 1) * destinationChats.count
@@ -1581,23 +1926,57 @@ class ShareState: ObservableObject {
           self.log.info(self.tagged("Sending \(content.files.count) attachments to \(destinationChats.count) destinations"))
         }
 
-        for file in content.files {
-          self.log.debug(self.tagged("Uploading \(file.fileName) (\(file.fileSize ?? 0) bytes) as \(file.fileType)"))
-          let maxAllowedSize = file.fileType == .video ? Self.maxVideoFileSizeBytes : Self.maxFileSizeBytes
-          if let fileSize = file.fileSize, fileSize > maxAllowedSize {
+        for stagedFile in content.files {
+          let preparingItemNumber = uploadedItems + 1
+          let preparingTitle: String = switch stagedFile.fileType {
+          case .photo: "Preparing photo"
+          case .video: "Preparing video"
+          case .document: "Preparing file"
+          case .voice: "Preparing audio"
+          }
+          await MainActor.run {
+            self.sendProgress = ShareProgressState(
+              title: preparingTitle,
+              detail: self.progressDetail(
+                for: stagedFile.fileType,
+                itemNumber: preparingItemNumber,
+                totalItems: totalUploadItems
+              ),
+              fractionCompleted: self.uploadProgress
+            )
+          }
+
+          var preparedFile = try await prepareFileForUpload(stagedFile)
+          var cleanupURLs = preparedFile.cleanupURLs
+          defer { cleanupTemporaryFiles(cleanupURLs) }
+          if preparedFile.fileType == .video {
+            preparedFile = try await prepareVideoForUpload(preparedFile)
+            cleanupURLs = preparedFile.cleanupURLs
+          }
+
+          self.log.info(self.tagged(
+            "Uploading attachment type=\(preparedFile.fileType) " +
+              "mime=\(preparedFile.mimeType.text) size=\(preparedFile.fileSize)"
+          ))
+          let maxAllowedSize = preparedFile.fileType == .video ? Self.maxVideoFileSizeBytes : Self.maxFileSizeBytes
+          guard preparedFile.fileSize <= maxAllowedSize else {
             throw NSError(
               domain: "ShareError",
               code: 3,
               userInfo: [
                 NSLocalizedDescriptionKey:
-                  "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: maxAllowedSize))."
+                  "\(preparedFile.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: maxAllowedSize))."
               ]
             )
           }
 
           let uploadResult: InlineKit.UploadFileResult
           let itemIndex = uploadedItems
-          let fileName = file.fileName
+          let uploadDetail = progressDetail(
+            for: preparedFile.fileType,
+            itemNumber: itemIndex + 1,
+            totalItems: totalUploadItems
+          )
           let progressHandler: @Sendable (ApiClient.UploadTransferProgress) -> Void = { [weak self] progress in
             let uploadFraction = (Double(itemIndex) + progress.fractionCompleted) / Double(totalUploadItems)
             let overallFraction = min(0.72, uploadFraction * 0.72)
@@ -1605,96 +1984,40 @@ class ShareState: ObservableObject {
               self?.uploadProgress = overallFraction
               self?.sendProgress = ShareProgressState(
                 title: "Uploading \(itemIndex + 1) of \(totalUploadItems)",
-                detail: fileName,
+                detail: uploadDetail,
                 fractionCompleted: overallFraction
               )
             }
           }
-          switch file.fileType {
+          switch preparedFile.fileType {
           case .photo:
-            await MainActor.run {
-              self.sendProgress = ShareProgressState(
-                title: "Preparing photo",
-                detail: file.fileName,
-                fractionCompleted: self.uploadProgress
-              )
-            }
-            let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
-            guard Int64(fileData.count) <= Self.maxFileSizeBytes else {
-              throw NSError(
-                domain: "ShareError",
-                code: 3,
-                userInfo: [
-                  NSLocalizedDescriptionKey:
-                    "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
-                ]
-              )
-            }
             uploadResult = try await apiClient.uploadFile(
               type: .photo,
-              data: fileData,
-              filename: file.fileName,
-              mimeType: file.mimeType,
+              fileURL: preparedFile.url,
+              filename: preparedFile.fileName,
+              mimeType: preparedFile.mimeType,
               progress: progressHandler
             )
           case .document:
-            await MainActor.run {
-              self.sendProgress = ShareProgressState(
-                title: "Preparing file",
-                detail: file.fileName,
-                fractionCompleted: self.uploadProgress
-              )
-            }
-            let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
-            guard Int64(fileData.count) <= Self.maxFileSizeBytes else {
-              throw NSError(
-                domain: "ShareError",
-                code: 3,
-                userInfo: [
-                  NSLocalizedDescriptionKey:
-                    "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
-                ]
-              )
-            }
             uploadResult = try await apiClient.uploadFile(
               type: .document,
-              data: fileData,
-              filename: file.fileName,
-              mimeType: file.mimeType,
+              fileURL: preparedFile.url,
+              filename: preparedFile.fileName,
+              mimeType: preparedFile.mimeType,
               progress: progressHandler
             )
           case .video:
-            await MainActor.run {
-              self.sendProgress = ShareProgressState(
-                title: "Preparing video",
-                detail: file.fileName,
-                fractionCompleted: self.uploadProgress
-              )
-            }
-            let prepared = try await prepareVideoForUpload(file)
-            defer { prepared.cleanup?() }
-            guard prepared.fileSize <= Self.maxVideoFileSizeBytes else {
-              throw NSError(
-                domain: "ShareError",
-                code: 3,
-                userInfo: [
-                  NSLocalizedDescriptionKey:
-                    "\(prepared.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxVideoFileSizeBytes))."
-                ]
-              )
-            }
             let videoMetadata: ApiClient.VideoUploadMetadata
-            if let preparedMetadata = prepared.videoMetadata {
+            if let preparedMetadata = preparedFile.videoMetadata {
               videoMetadata = preparedMetadata
             } else {
-              videoMetadata = try await buildVideoMetadata(from: prepared.url)
+              videoMetadata = try await buildVideoMetadata(from: preparedFile.url)
             }
-            let videoData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
             uploadResult = try await apiClient.uploadFile(
               type: .video,
-              data: videoData,
-              filename: prepared.fileName,
-              mimeType: prepared.mimeType,
+              fileURL: preparedFile.url,
+              filename: preparedFile.fileName,
+              mimeType: preparedFile.mimeType,
               videoMetadata: videoMetadata,
               progress: progressHandler
             )
@@ -1708,6 +2031,9 @@ class ShareState: ObservableObject {
             )
           }
 
+          self.log.info(self.tagged(
+            "Upload completed type=\(preparedFile.fileType) result=\(self.uploadResultLogValue(uploadResult))"
+          ))
           uploadedItems += 1
           let uploadCompletionFraction = Double(uploadedItems) / Double(totalUploadItems) * 0.72
           await MainActor.run {
@@ -1715,8 +2041,7 @@ class ShareState: ObservableObject {
           }
 
           let fileText = (!didAttachTextToMedia && messageText != nil) ? messageText : nil
-          await connectionWarmup.value
-          let media = try inputMedia(for: file.fileType, uploadResult: uploadResult)
+          let media = try inputMedia(for: preparedFile.fileType, uploadResult: uploadResult)
           for chat in destinationChats {
             let destinationName = await self.displayName(for: chat)
             let operationNumber = sentOperations + 1
@@ -1743,11 +2068,9 @@ class ShareState: ObservableObject {
           await MainActor.run {
             self.uploadProgress = max(self.uploadProgress, sendCompletionFraction)
           }
-          self.log.debug(self.tagged("Sent \(sentOperations) of \(totalSendOperations) send operations"))
         }
 
         if totalMediaItems == 0, let messageText {
-          await connectionWarmup.value
           for chat in destinationChats {
             let destinationName = await self.displayName(for: chat)
             let operationNumber = sentOperations + 1
@@ -1781,12 +2104,12 @@ class ShareState: ObservableObject {
           )
           self.donateSendMessageIntents(for: destinationChats)
 
-          // Play haptic feedback
-          let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-          impactFeedback.impactOccurred()
+          let feedback = UINotificationFeedbackGenerator()
+          feedback.prepare()
+          feedback.notificationOccurred(.success)
 
-          // Close after delay
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+          // Let the success animation land before dismissing the extension.
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
             completion()
           }
         }
@@ -1794,6 +2117,7 @@ class ShareState: ObservableObject {
       } catch {
         self.log.error(self.tagged("Failed to share content"), error: error)
         let didPartiallySend = didSendAnyMessage
+        await self.finishSession()
 
         await MainActor.run {
           let errorMessage = self.errorPresentation(for: error, didPartiallySend: didPartiallySend)
@@ -1933,12 +2257,19 @@ class ShareState: ObservableObject {
           suggestion: "Open the Inline app and try again.",
           retryable: false
         )
-      case 14, 15:
+      case 14:
         return ErrorPresentation(
           title: "Connection Error",
           message: nsError.localizedDescription,
           suggestion: "Check your internet connection and try again.",
           retryable: true
+        )
+      case 15:
+        return ErrorPresentation(
+          title: "Delivery Uncertain",
+          message: "Inline couldn't confirm whether the message was sent.",
+          suggestion: "Open Inline to verify the chat before trying again.",
+          retryable: false
         )
       default:
         return ErrorPresentation(

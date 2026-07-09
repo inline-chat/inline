@@ -133,6 +133,17 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
   }
 
+  private enum MultipartUploadPart {
+    case data(name: String, filename: String?, mimeType: MIMEType?, data: Data)
+    case file(name: String, filename: String, mimeType: MIMEType, url: URL)
+  }
+
+  private struct MultipartUploadBody {
+    let url: URL
+    let contentType: String
+    let totalBytes: Int64
+  }
+
   public static let serverURL: String = {
     if ProjectConfig.useProductionApi {
       return "https://api.inline.chat"
@@ -831,6 +842,191 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
   }
 
+  private func escapedMultipartQuotedString(_ value: String) -> String {
+    value
+      .replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "\"", with: "\\\"")
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: "\n", with: "")
+  }
+
+  private func writeMultipartString(_ string: String, to handle: FileHandle) throws {
+    try handle.write(contentsOf: Data(string.utf8))
+  }
+
+  private func writeMultipartFile(from sourceURL: URL, to handle: FileHandle) throws {
+    let input = try FileHandle(forReadingFrom: sourceURL)
+    defer { try? input.close() }
+
+    while true {
+      let chunk = try input.read(upToCount: 512 * 1024)
+      guard let chunk, !chunk.isEmpty else { break }
+      try handle.write(contentsOf: chunk)
+    }
+  }
+
+  private func makeMultipartUploadBody(parts: [MultipartUploadPart]) throws -> MultipartUploadBody {
+    let boundary = "inline-\(UUID().uuidString)"
+    let bodyURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-upload-\(UUID().uuidString).tmp")
+
+    guard FileManager.default.createFile(atPath: bodyURL.path, contents: nil) else {
+      throw CocoaError(.fileWriteUnknown)
+    }
+    let handle: FileHandle
+    do {
+      handle = try FileHandle(forWritingTo: bodyURL)
+    } catch {
+      try? FileManager.default.removeItem(at: bodyURL)
+      throw error
+    }
+    var shouldKeepBody = false
+    defer {
+      try? handle.close()
+      if !shouldKeepBody {
+        try? FileManager.default.removeItem(at: bodyURL)
+      }
+    }
+
+    for part in parts {
+      try writeMultipartString("--\(boundary)\r\n", to: handle)
+
+      switch part {
+      case let .data(name, filename, mimeType, data):
+        var disposition = "Content-Disposition: form-data; name=\"\(escapedMultipartQuotedString(name))\""
+        if let filename {
+          disposition += "; filename=\"\(escapedMultipartQuotedString(filename))\""
+        }
+        try writeMultipartString("\(disposition)\r\n", to: handle)
+        if let mimeType {
+          try writeMultipartString("Content-Type: \(mimeType.text)\r\n", to: handle)
+        }
+        try writeMultipartString("\r\n", to: handle)
+        try handle.write(contentsOf: data)
+        try writeMultipartString("\r\n", to: handle)
+
+      case let .file(name, filename, mimeType, url):
+        let disposition = "Content-Disposition: form-data; name=\"\(escapedMultipartQuotedString(name))\"; filename=\"\(escapedMultipartQuotedString(filename))\""
+        try writeMultipartString("\(disposition)\r\n", to: handle)
+        try writeMultipartString("Content-Type: \(mimeType.text)\r\n", to: handle)
+        try writeMultipartString("\r\n", to: handle)
+        try writeMultipartFile(from: url, to: handle)
+        try writeMultipartString("\r\n", to: handle)
+      }
+    }
+
+    try writeMultipartString("--\(boundary)--\r\n", to: handle)
+    try handle.synchronize()
+
+    let totalBytes = try bodyURL.resourceValues(forKeys: [.fileSizeKey]).fileSize.map(Int64.init) ?? 0
+    shouldKeepBody = true
+    return MultipartUploadBody(
+      url: bodyURL,
+      contentType: "multipart/form-data; boundary=\(boundary)",
+      totalBytes: totalBytes
+    )
+  }
+
+  private func uploadMultipartBody(
+    _ body: MultipartUploadBody,
+    to url: URL,
+    progress: @escaping @Sendable (UploadTransferProgress) -> Void
+  ) async throws -> UploadFileResult {
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue(body.contentType, forHTTPHeaderField: "Content-Type")
+
+    if let token = Auth.shared.getToken() {
+      request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    let delegate = UploadTaskDelegate(progressHandler: progress)
+    let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+    defer {
+      session.finishTasksAndInvalidate()
+      try? FileManager.default.removeItem(at: body.url)
+    }
+
+    progress(UploadTransferProgress(bytesSent: 0, totalBytes: body.totalBytes, fractionCompleted: 0))
+    let (data, response) = try await session.upload(for: request, fromFile: body.url)
+
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw APIError.invalidResponse
+    }
+
+    switch httpResponse.statusCode {
+    case 200 ... 299:
+      let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
+      switch apiResponse {
+      case let .success(data):
+        progress(UploadTransferProgress(bytesSent: body.totalBytes, totalBytes: body.totalBytes, fractionCompleted: 1))
+        return data
+      case let .error(error, errorCode, description):
+        log.error("Error \(error): \(description ?? "")")
+        throw APIError.error(error: error, errorCode: errorCode, description: description)
+      }
+    case 429:
+      if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
+         case let .error(error, errorCode, description) = apiResponse
+      {
+        throw APIError.error(error: error, errorCode: errorCode, description: description)
+      }
+      throw APIError.rateLimited
+    default:
+      if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
+         case let .error(error, errorCode, description) = apiResponse
+      {
+        throw APIError.error(error: error, errorCode: errorCode, description: description)
+      }
+      throw APIError.httpError(statusCode: httpResponse.statusCode)
+    }
+  }
+
+  private func uploadFileParts(
+    type: MessageFileType,
+    filePart: MultipartUploadPart,
+    videoMetadata: VideoUploadMetadata?,
+    voiceMetadata: VoiceUploadMetadata?
+  ) -> [MultipartUploadPart] {
+    var parts: [MultipartUploadPart] = [
+      .data(name: "type", filename: nil, mimeType: nil, data: Data(type.rawValue.utf8)),
+      filePart,
+    ]
+
+    if let videoMetadata {
+      parts.append(contentsOf: [
+        .data(name: "width", filename: nil, mimeType: nil, data: Data("\(videoMetadata.width)".utf8)),
+        .data(name: "height", filename: nil, mimeType: nil, data: Data("\(videoMetadata.height)".utf8)),
+        .data(name: "duration", filename: nil, mimeType: nil, data: Data("\(videoMetadata.duration)".utf8)),
+        .data(name: "isAnimated", filename: nil, mimeType: nil, data: Data("\(videoMetadata.isAnimated)".utf8)),
+      ])
+
+      if let hasAudio = videoMetadata.hasAudio {
+        parts.append(.data(name: "hasAudio", filename: nil, mimeType: nil, data: Data("\(hasAudio)".utf8)))
+      }
+
+      if let thumb = videoMetadata.thumbnail, let thumbMime = videoMetadata.thumbnailMimeType {
+        let thumbFilename: String = {
+          let mime = thumbMime.text.lowercased()
+          if mime.contains("png") { return "thumbnail.png" }
+          if mime.contains("gif") { return "thumbnail.gif" }
+          return "thumbnail.jpg"
+        }()
+
+        parts.append(.data(name: "thumbnail", filename: thumbFilename, mimeType: thumbMime, data: thumb))
+      }
+    }
+
+    if let voiceMetadata {
+      parts.append(contentsOf: [
+        .data(name: "duration", filename: nil, mimeType: nil, data: Data("\(voiceMetadata.duration)".utf8)),
+        .data(name: "waveform", filename: nil, mimeType: nil, data: voiceMetadata.waveform.base64EncodedData()),
+      ])
+    }
+
+    return parts
+  }
+
   public func uploadFile(
     type: MessageFileType,
     data: Data,
@@ -963,6 +1159,37 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch let apiError as APIError {
       throw apiError
     } catch {
+      throw APIError.networkError
+    }
+  }
+
+  public func uploadFile(
+    type: MessageFileType,
+    fileURL: URL,
+    filename: String,
+    mimeType: MIMEType,
+    videoMetadata: VideoUploadMetadata? = nil,
+    voiceMetadata: VoiceUploadMetadata? = nil,
+    progress: @escaping @Sendable (UploadTransferProgress) -> Void
+  ) async throws -> UploadFileResult {
+    guard let url = URL(string: "\(baseURL)/uploadFile") else {
+      throw APIError.invalidURL
+    }
+
+    do {
+      let parts = uploadFileParts(
+        type: type,
+        filePart: .file(name: "file", filename: filename, mimeType: mimeType, url: fileURL),
+        videoMetadata: videoMetadata,
+        voiceMetadata: voiceMetadata
+      )
+      let body = try makeMultipartUploadBody(parts: parts)
+      return try await uploadMultipartBody(body, to: url, progress: progress)
+    } catch let decodingError as DecodingError {
+      throw APIError.decodingError(decodingError)
+    } catch let apiError as APIError {
+      throw apiError
+    } catch is URLError {
       throw APIError.networkError
     }
   }
