@@ -158,6 +158,14 @@ const safeQueryKeys = new Set([
   "v",
 ])
 
+const signedFigmaThumbnailQueryKeys = new Set([
+  "bucket",
+  "expiration",
+  "height",
+  "signature",
+  "width",
+])
+
 export function filterPreviewUrl(url: URL): UrlFilterResult {
   const hostname = stripIpv6Brackets(url.hostname).toLowerCase()
   if (isBlockedHostname(hostname)) {
@@ -201,10 +209,17 @@ export function isBlockedIp(ip: string): boolean {
 }
 
 function hasSensitiveQuery(url: URL): boolean {
+  const allowSignedFigmaThumbnail = isSignedFigmaThumbnailUrl(url)
+
   for (const [key, value] of url.searchParams) {
     const normalizedKey = normalizeToken(key)
     const normalizedValue = value.trim()
-    if (!normalizedKey || !normalizedValue || safeQueryKeys.has(normalizedKey)) {
+    if (
+      !normalizedKey ||
+      !normalizedValue ||
+      safeQueryKeys.has(normalizedKey) ||
+      (allowSignedFigmaThumbnail && signedFigmaThumbnailQueryKeys.has(normalizedKey))
+    ) {
       continue
     }
 
@@ -217,6 +232,11 @@ function hasSensitiveQuery(url: URL): boolean {
     }
   }
   return false
+}
+
+function isSignedFigmaThumbnailUrl(url: URL): boolean {
+  const host = stripIpv6Brackets(url.hostname).toLowerCase()
+  return host === "api-cdn.figma.com" && url.pathname.startsWith("/resize/thumbnails/")
 }
 
 function hasSensitivePath(url: URL): boolean {

@@ -4,6 +4,7 @@ import {
   fetchAuthenticatedUrlPreview,
   fetchBinary,
   fetchUrlPreview,
+  isFigmaUrl,
   isPreviewAuthorImageUrl,
   isXStatusUrl,
   isYouTubeUrl,
@@ -304,7 +305,15 @@ function shouldRefetchCachedPreview(cache: DbUrlPreviewCache, url: string): bool
     return cachedImageUrlNeedsYouTubeRefresh(cache) || cachedPrimaryImageIsAuthorImage(cache)
   }
 
+  if (isFigmaUrl(normalized)) {
+    return isStaleFigmaPreviewCache(cache)
+  }
+
   return false
+}
+
+function isStaleFigmaPreviewCache(cache: DbUrlPreviewCache): boolean {
+  return cache.provider !== "figma" || cache.mediaKind === "embed" || cache.mediaType === "video"
 }
 
 function cachedImageUrlNeedsYouTubeRefresh(cache: DbUrlPreviewCache): boolean {
@@ -805,7 +814,7 @@ async function loadProcessedAttachment(attachmentId: number): Promise<ProcessedM
 
 async function getOrSavePreviewImage(url: string, currentUserId: number): Promise<number | null> {
   const cachedPhotoId = await getCachedPreviewPhotoId(url).catch((error) => {
-    log.warn("Failed to read URL preview image cache", { error, url })
+    log.warn("Failed to read URL preview image cache", { error, url: previewImageLogUrl(url) })
     return null
   })
   if (cachedPhotoId) {
@@ -831,9 +840,24 @@ async function downloadAndSavePreviewImage(url: string, currentUserId: number): 
     const result = await uploadPhoto(file, { userId: currentUserId })
     return Number(result.photoId)
   } catch (error) {
-    log.warn("Failed to download URL preview image", { error, url })
+    log.warn("Failed to download URL preview image", { error, url: previewImageLogUrl(url) })
     return null
   }
+}
+
+function previewImageLogUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+    if (host === "api-cdn.figma.com" && parsed.pathname.startsWith("/resize/thumbnails/")) {
+      parsed.search = ""
+      return parsed.toString()
+    }
+  } catch {
+    return url
+  }
+
+  return url
 }
 
 async function pushInsertedPreviewAttachment(

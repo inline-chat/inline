@@ -4,6 +4,7 @@ import {
   extractPreviewUrls,
   fetchBinary,
   fetchUrlPreview,
+  isFigmaUrl,
   isXStatusUrl,
   isYouTubeUrl,
   normalizePreviewUrl,
@@ -55,6 +56,24 @@ describe("url-preview", () => {
     expect(normalizePreviewUrl("https://example.com/oauth-callback")).toBeNull()
     expect(normalizePreviewUrl("https://example.com/sign-in")).toBeNull()
     expect(normalizePreviewUrl("https://example.com/path?accessToken=abc")).toBeNull()
+  })
+
+  it("allows signed Figma CDN thumbnail urls without allowing generic signed urls", async () => {
+    const thumbnailUrl =
+      "https://api-cdn.figma.com/resize/thumbnails/6f703233-dc0c-4b97-9dbf-403f0e0b823e?expiration=1783900800&signature=figma-test-signature&height=450&bucket=figma-alpha"
+    expect(normalizePreviewUrl(thumbnailUrl)).toBe(thumbnailUrl)
+    expect(normalizePreviewUrl("https://example.com/image.png?signature=secret")).toBeNull()
+
+    const bytes = new Uint8Array([1, 2, 3])
+    const fetchImpl: NonNullable<FetchBinaryOptions["fetchImpl"]> = async (url) => {
+      expect(String(url)).toBe(thumbnailUrl)
+      return new Response(bytes, { headers: { "content-type": "image/webp" } })
+    }
+
+    const binary = await fetchBinary(thumbnailUrl, { fetchImpl, lookup: publicLookup })
+    expect(binary?.contentType).toBe("image/webp")
+    expect(binary?.finalUrl).toBe(thumbnailUrl)
+    expect(binary?.bytes).toEqual(bytes)
   })
 
   it("does not reject harmless words that contain sensitive substrings", () => {
@@ -134,6 +153,30 @@ describe("url-preview", () => {
       hasLargeMedia: true,
       showLargeMedia: true,
     })
+    expect(
+      resolvePreviewLayout({
+        url: "https://www.figma.com/design/x3NE1TYyRgBtNrtldA4SLE/elevator-guide",
+        provider: "figma",
+        mediaKind: "photo",
+        hasPhoto: true,
+        urlCount: 1,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: true,
+    })
+    expect(
+      resolvePreviewLayout({
+        url: "https://www.figma.com/design/x3NE1TYyRgBtNrtldA4SLE/elevator-guide",
+        provider: "figma",
+        mediaKind: "photo",
+        hasPhoto: true,
+        urlCount: 2,
+      }),
+    ).toEqual({
+      hasLargeMedia: true,
+      showLargeMedia: false,
+    })
   })
 
   it("preserves existing layout hints for unconfigured origins", () => {
@@ -181,6 +224,104 @@ describe("url-preview", () => {
     expect(preview?.description?.length).toBeLessThanOrEqual(60)
     expect(preview?.imageUrl).toBe("https://example.com/preview.png")
     expect(preview?.mediaType).toBeUndefined()
+  })
+
+  it("uses Figma oEmbed thumbnails as static image previews", async () => {
+    const figmaUrl = "https://www.figma.com/design/x3NE1TYyRgBtNrtldA4SLE/elevator-guide?node-id=0-1&t=share"
+    const thumbnailUrl =
+      "https://api-cdn.figma.com/resize/thumbnails/6f703233-dc0c-4b97-9dbf-403f0e0b823e?expiration=1783900800&signature=figma-test-signature&height=450&bucket=figma-alpha"
+    const fetchedUrls: string[] = []
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      fetchedUrls.push(String(url))
+      return Response.json({
+        version: "1.0",
+        type: "rich",
+        title: "elevator guide",
+        key: "x3NE1TYyRgBtNrtldA4SLE",
+        url: figmaUrl,
+        provider_name: "Figma",
+        provider_url: "https://www.figma.com",
+        width: 800,
+        height: 450,
+        html: '<iframe src="https://embed.figma.com/design/x3NE1TYyRgBtNrtldA4SLE/elevator-guide"></iframe>',
+        thumbnail_url: thumbnailUrl,
+        thumbnail_width: 317,
+        thumbnail_height: 450,
+      })
+    }
+
+    expect(isFigmaUrl(figmaUrl)).toBe(true)
+    const preview = await fetchUrlPreview(figmaUrl, { fetchImpl, lookup: publicLookup })
+    const endpoint = new URL(fetchedUrls[0] ?? "")
+
+    expect(`${endpoint.origin}${endpoint.pathname}`).toBe("https://www.figma.com/api/oembed")
+    expect(endpoint.searchParams.get("url")).toBe(figmaUrl)
+    expect(preview).toMatchObject({
+      provider: "figma",
+      siteName: "Figma",
+      title: "elevator guide",
+      finalUrl: figmaUrl,
+      imageUrl: thumbnailUrl,
+      mediaType: "image",
+      media: {
+        kind: "photo",
+        url: thumbnailUrl,
+        width: 317,
+        height: 450,
+      },
+      layout: {
+        hasLargeMedia: true,
+        showLargeMedia: false,
+      },
+    })
+    expect(preview?.duration).toBeUndefined()
+  })
+
+  it("does not treat fallback Figma Twitter-player metadata as video", async () => {
+    const figmaUrl = "https://www.figma.com/design/x3NE1TYyRgBtNrtldA4SLE/elevator-guide?node-id=0-1&t=share"
+    const thumbnailUrl =
+      "https://www.figma.com/file/x3NE1TYyRgBtNrtldA4SLE/thumbnail?node-id=0-1&in-better-link-exp=true&t=share"
+    const fetchedUrls: string[] = []
+    const html = `
+      <html>
+        <head>
+          <meta name="twitter:card" content="player">
+          <meta name="twitter:title" content="elevator guide">
+          <meta name="twitter:player" content="https://www.figma.com/embed?embed_host=twitter&amp;url=https://www.figma.com/design/x3NE1TYyRgBtNrtldA4SLE/elevator-guide">
+          <meta name="twitter:player:width" content="800">
+          <meta name="twitter:player:height" content="450">
+          <meta property="og:title" content="Figma">
+          <meta property="og:site_name" content="Figma">
+          <meta property="og:description" content="Created with Figma">
+          <meta property="og:image" content="${thumbnailUrl}">
+          <meta property="og:type" content="article">
+        </head>
+      </html>
+    `
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async (url) => {
+      const urlString = String(url)
+      fetchedUrls.push(urlString)
+      if (urlString.startsWith("https://www.figma.com/api/oembed?")) {
+        return new Response("unavailable", { status: 500 })
+      }
+
+      expect(urlString).toBe(figmaUrl)
+      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+    }
+
+    const preview = await fetchUrlPreview(figmaUrl, { fetchImpl, lookup: publicLookup })
+
+    expect(fetchedUrls).toHaveLength(2)
+    expect(preview).toMatchObject({
+      provider: "generic",
+      siteName: "Figma",
+      title: "Figma",
+      description: "Created with Figma",
+      imageUrl: thumbnailUrl,
+      mediaType: "article",
+    })
+    expect(preview?.media).toBeUndefined()
+    expect(preview?.duration).toBeUndefined()
   })
 
   it("keeps X profile images out of primary preview media", async () => {

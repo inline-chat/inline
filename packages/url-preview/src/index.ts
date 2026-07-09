@@ -16,10 +16,10 @@ export { isPreviewAuthorImageUrl } from "./imageRoles.js"
 export { previewLayout, resolvePreviewLayout } from "./layout.js"
 export type { PreviewLayoutPolicyInput, ResolvedPreviewLayout } from "./layout.js"
 export { normalizeMetadataUrl, normalizePreviewUrl, trimUrlToken } from "./normalize.js"
-export { isLoomUrl, isXStatusUrl, isYouTubeUrl, normalizeYouTubeUrl } from "./providers/index.js"
+export { isFigmaUrl, isLoomUrl, isXStatusUrl, isYouTubeUrl, normalizeYouTubeUrl } from "./providers/index.js"
 export { extractPreviewRoutes, routePreviewUrl } from "./router.js"
 export { extractPreviewTargets } from "./auth/index.js"
-export { cleanField as cleanPreviewText } from "./text.js"
+export { cleanField as cleanPreviewText, cleanMultilineField as cleanMultilinePreviewText } from "./text.js"
 export {
   fetchNotionPreview,
   isNotionWebHost,

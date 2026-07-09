@@ -31,6 +31,13 @@ type PreviewLayoutRule = {
 
 const largePreviewLayoutRules: readonly PreviewLayoutRule[] = [
   {
+    id: "figma-single-link",
+    hosts: ["figma.com"],
+    providers: ["figma"],
+    requireSingleUrl: true,
+    showLargeMedia: true,
+  },
+  {
     id: "youtube-single-link",
     hosts: ["youtube.com", "youtu.be", "youtube-nocookie.com"],
     providers: ["youtube"],

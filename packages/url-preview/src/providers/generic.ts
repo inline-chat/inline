@@ -68,7 +68,7 @@ function buildGenericPreview(
     options.maxSiteNameLength ?? DEFAULT_SITE_NAME_LENGTH,
   )
   const media = detectMedia(meta, finalUrl, image.primaryUrl)
-  const mediaType = detectMediaType(meta, media)
+  const mediaType = detectMediaType(meta, media, finalUrl)
   const duration = mediaDuration(media)
   const provider = previewProvider(originalUrl, finalUrl)
   const author = provider === "x" ? xAuthorFromTitle(title) : undefined
@@ -150,7 +150,7 @@ function detectMedia(meta: ParsedHtml, finalUrl: string, imageUrl: string | unde
   }
 
   const playerUrl = normalizeMetadataUrl(firstMeta(meta, ["twitter:player"]), finalUrl)
-  if (playerUrl && firstMeta(meta, ["twitter:card"])?.toLowerCase() === "player") {
+  if (playerUrl && firstMeta(meta, ["twitter:card"])?.toLowerCase() === "player" && !isFigmaPreviewUrl(finalUrl)) {
     return {
       kind: "embed",
       url: playerUrl,
@@ -173,10 +173,15 @@ function detectMedia(meta: ParsedHtml, finalUrl: string, imageUrl: string | unde
   return undefined
 }
 
-function detectMediaType(meta: ParsedHtml, media: PreviewMedia | undefined): UrlPreviewResult["mediaType"] {
+function detectMediaType(
+  meta: ParsedHtml,
+  media: PreviewMedia | undefined,
+  finalUrl: string,
+): UrlPreviewResult["mediaType"] {
   const type = firstMeta(meta, ["og:type"])?.toLowerCase()
   const videoType = firstMeta(meta, ["og:video:type", "twitter:player:stream:content_type"])?.toLowerCase()
   const twitterCard = firstMeta(meta, ["twitter:card"])?.toLowerCase()
+  const hasPlayer = firstMeta(meta, ["twitter:player"])
 
   if (media?.kind === "external_video" || media?.kind === "embed") {
     return "video"
@@ -193,8 +198,8 @@ function detectMediaType(meta: ParsedHtml, media: PreviewMedia | undefined): Url
   if (
     type?.startsWith("video") ||
     videoType?.startsWith("video/") ||
-    firstMeta(meta, ["og:video:secure_url", "og:video:url", "og:video", "twitter:player:stream", "twitter:player"]) ||
-    twitterCard === "player"
+    firstMeta(meta, ["og:video:secure_url", "og:video:url", "og:video", "twitter:player:stream"]) ||
+    (!isFigmaPreviewUrl(finalUrl) && (hasPlayer || twitterCard === "player"))
   ) {
     return "video"
   }
@@ -301,5 +306,14 @@ function fileTitle(url: string): string | undefined {
     return decodeURIComponent(lastPathPart)
   } catch {
     return lastPathPart
+  }
+}
+
+function isFigmaPreviewUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "")
+    return host === "figma.com"
+  } catch {
+    return false
   }
 }
