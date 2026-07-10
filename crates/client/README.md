@@ -16,8 +16,9 @@ adapters:
 - bounded command/event queues and in-flight backend request concurrency
 - backend and store boundaries
 - in-memory backend/store for client tests and host adapter tests
-- SQLite store for sessions, sync journals/cursors, dialogs, users, spaces,
-  memberships, messages, tombstones, reactions, read state, and transactions
+- SQLite store for sessions, sync journals/cursors, a durable client-event
+  outbox, dialogs, users, spaces, memberships, messages, tombstones, reactions,
+  read state, and transactions
 - SDK-backed production backend using one multiplexed realtime RPC/event session
 - realtime connector boundary with SDK and fake connector implementations
 - host-provided external IDs for idempotency
@@ -37,8 +38,9 @@ Design rules:
   policy
 - keep live reads and cached reads explicit: a failed live request is never
   reported as a successful cached response
-- advance a cold bucket cursor only after rebuilding its authoritative current
-  account, space-membership, or complete chat state
+- advance a cold bucket cursor only after rebuilding the state owned by that
+  bucket: account identity/deletions, space membership, or a chat snapshot plus
+  its bounded recent-history window
 - keep local storage pluggable so CLI, agents, desktop, and mobile clients can
   share the same sync model without sharing filesystem assumptions
 - use the standard Rust `log` facade in library code and leave logger
@@ -55,11 +57,34 @@ reactions, read and marked-unread state, and typing through a backend trait.
 The SDK backend owns a long-lived multiplexed realtime connection, heartbeat
 and RPC timeouts, reconnect-triggered catch-up, InlineKit-compatible bucket
 discovery/gap recovery, bounded bucket concurrency, and a write-ahead sync
-journal so a crash cannot advance a bucket cursor past unapplied state. It
-persists lossless state before emitting client events and exposes cached reads
-for consumers that need to reconcile without causing network bursts. Logout
-attempts to revoke the active Inline server session before clearing all local
-account state.
+journal so a crash cannot advance a bucket cursor past unapplied state. The
+built-in sync path negotiates a lossless schema revision, requires explicit
+accounting for every advanced sequence, rejects conflicting page envelopes,
+and treats realtime hints only as catch-up targets. Warm gaps are committed one
+validated page at a time, so very long gaps resume from durable progress rather
+than replaying an entire in-memory batch. Incompatible pending journals are
+discarded without cursor advance and refetched from the authoritative server.
+Built-in stores commit each cursor change and its resulting lossless events in
+one transaction. Lossless events remain in an outbox until the consumer
+acknowledges their delivery, so a restart replays events whose host handoff may
+not have completed. Custom stores that do not implement the outbox extension
+fail before committing a cursor that produced lossless events. Cached reads are
+available for consumers that need to reconcile without causing network bursts.
+Use `DialogsOrder::StableChatId` for mutation-safe full-account reconciliation;
+the default recent-activity order is intended for user-facing lists.
+Live `getChats` results are visibility-filtered snapshots: they merge current
+records into the durable store, but omission alone never tombstones a cached
+dialog. Lossless deletion updates and explicit reconciliation tombstones own
+chat deletion.
+Logout attempts to revoke the active Inline server session before clearing all
+local account state.
+
+Cold chat repair intentionally fetches the current chat snapshot and the latest
+50 messages, matching InlineKit's ownership boundary. Older history is paged by
+normal history APIs and host checkpoints; a cold user bucket does not walk every
+chat, download an account's complete message history, or fetch every space's
+membership. Space membership remains owned by its independently repairable
+space bucket.
 
 Message sends expose their durable transaction state. Retriable or uncertain
 stored sends are reconciled by reissuing the same server-idempotent random ID;
@@ -68,9 +93,14 @@ messages.
 
 Host-only protocol envelopes, HTTP/WebSocket routes, process flags, Matrix
 projection, and deployment behavior remain outside this crate. Production
-consumers should take the single bounded lossless event receiver and recover a
-lagged host-side delivery stream from `account_state`, `chat_state`, cached
-dialogs, and cached history. The built-in SQLite store protects credentials
-only with filesystem permissions; hosts that require encrypted-at-rest session
-storage should provide a `ClientStore` implementation backed by their platform
-keychain or secret store.
+consumers should take the single bounded lossless event receiver. Use
+`recv_delivery()` and call `LosslessEventDelivery::ack()` only after the event is
+durable in the host. Dropping a delivery without a successful acknowledgement
+releases its process-local claim for replay. The compatibility `recv()` method
+attempts acknowledgement before it returns and is intended for consumers that
+accept the legacy at-most-once host handoff. A host that has lost its own
+delivery history can reconcile from `account_state`, `chat_state`, cached
+dialogs, and cached history. The built-in
+SQLite store protects credentials only with filesystem permissions; hosts that
+require encrypted-at-rest session storage should provide a `ClientStore`
+implementation backed by their platform keychain or secret store.

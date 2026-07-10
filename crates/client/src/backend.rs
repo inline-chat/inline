@@ -15,17 +15,19 @@ use std::{
 
 use futures_util::future::BoxFuture;
 
+use crate::store::select_history_window;
 use crate::{
     AccountStateSnapshot, AddChatParticipantRequest, AuthStartRequest, AuthStartResult,
     AuthVerifyRequest, AuthVerifyResult, ChatParticipantRecord, ChatParticipantsPage,
-    ChatParticipantsRequest, ChatStateSnapshot, ClientErrorCategory, ClientEvent, ClientFailure,
-    ClientStatus, ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
-    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogRecord,
-    DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, InlineId,
-    MessageContent, MessageMutation, MessageRecord, RandomId, ReactRequest, ReadRequest,
-    RemoveChatParticipantRequest, SendTextRequest, SetMarkedUnreadRequest, TransactionEvent,
-    TransactionId, TransactionIdentity, TransactionState, TypingRequest, UpdateChatInfoRequest,
-    UpdateDialogNotificationsRequest, UploadRequest,
+    ChatParticipantsRequest, ChatStateSnapshot, ClientErrorCategory, ClientEvent,
+    ClientEventDelivery, ClientFailure, ClientStatus, ClientStatusSnapshot, ConnectRequest,
+    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
+    DeleteMessageRequest, DialogRecord, DialogsOrder, DialogsPage, DialogsRequest,
+    EditMessageRequest, HistoryPage, HistoryRequest, InlineId, MessageContent, MessageMutation,
+    MessageRecord, RandomId, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
+    SendTextRequest, SetMarkedUnreadRequest, TransactionEvent, TransactionId, TransactionIdentity,
+    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogNotificationsRequest,
+    UploadRequest,
 };
 
 /// Result type returned by client backends.
@@ -314,6 +316,53 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
 
     /// Receives the next batch of server-pushed client events.
     fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>>;
+
+    /// Receives the next event batch with durable delivery identifiers when
+    /// the backend supports crash-safe host acknowledgement.
+    fn receive_event_deliveries(
+        &self,
+    ) -> BoxFuture<'static, BackendResult<Vec<ClientEventDelivery>>> {
+        let receive = self.receive_events();
+        Box::pin(async move {
+            receive.await.map(|events| {
+                events
+                    .into_iter()
+                    .map(ClientEventDelivery::ephemeral)
+                    .collect()
+            })
+        })
+    }
+
+    /// Stages locally produced operation/status events for lossless delivery.
+    fn stage_client_events(
+        &self,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, BackendResult<Vec<ClientEventDelivery>>> {
+        Box::pin(async move {
+            Ok(events
+                .into_iter()
+                .map(ClientEventDelivery::ephemeral)
+                .collect())
+        })
+    }
+
+    /// Acknowledges one durable event after the host consumer has committed it.
+    fn acknowledge_event_delivery(
+        &self,
+        _delivery_id: u64,
+    ) -> BoxFuture<'static, BackendResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Releases a process-local claim when a consumer drops a delivery without
+    /// acknowledging it. The durable store entry remains pending.
+    fn release_event_delivery(&self, _delivery_id: u64) {}
+
+    /// Releases process-local delivery claims after the receiver task stops.
+    /// Durable events remain in the store and can be claimed after reconnect.
+    fn reset_event_delivery_claims(&self) -> BoxFuture<'static, BackendResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// In-memory backend for client, bridge-adapter, and runtime tests.
@@ -487,13 +536,56 @@ impl InMemoryBackend {
     fn dialogs_now(&self, request: DialogsRequest) -> BackendResult<DialogsPage> {
         self.require_connected()?;
         let state = self.state.lock().expect("in-memory backend poisoned");
-        let start = parse_cursor(request.cursor.as_deref())?;
         let limit = request.limit.unwrap_or(50).max(1) as usize;
-        let dialogs = state
-            .dialogs
-            .iter()
-            .skip(start)
-            .take(limit)
+        let (dialogs, next_cursor) = match request.order {
+            DialogsOrder::RecentActivity => {
+                let start = parse_cursor(request.cursor.as_deref())?;
+                let dialogs = state
+                    .dialogs
+                    .iter()
+                    .skip(start)
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let next = start + dialogs.len();
+                (
+                    dialogs,
+                    (next < state.dialogs.len()).then(|| next.to_string()),
+                )
+            }
+            DialogsOrder::StableChatId => {
+                let after = request
+                    .cursor
+                    .as_deref()
+                    .unwrap_or("0")
+                    .parse::<i64>()
+                    .map_err(|_| {
+                        BackendError::new(
+                            ClientErrorCategory::InvalidInput,
+                            "invalid stable dialog pagination cursor",
+                        )
+                    })?;
+                let mut dialogs = state
+                    .dialogs
+                    .iter()
+                    .filter(|dialog| dialog.chat_id.get() > after)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                dialogs.sort_by_key(|dialog| dialog.chat_id.get());
+                let has_more = dialogs.len() > limit;
+                dialogs.truncate(limit);
+                let next = has_more
+                    .then(|| {
+                        dialogs
+                            .last()
+                            .map(|dialog| dialog.chat_id.get().to_string())
+                    })
+                    .flatten();
+                (dialogs, next)
+            }
+        };
+        let dialogs = dialogs
+            .into_iter()
             .map(|dialog| {
                 let mut dialog = dialog.clone();
                 dialog.synced_through_message_id =
@@ -501,45 +593,34 @@ impl InMemoryBackend {
                 dialog
             })
             .collect::<Vec<_>>();
-        let next = start + dialogs.len();
         Ok(DialogsPage {
             dialogs,
             users: Vec::new(),
-            next_cursor: (next < state.dialogs.len()).then(|| next.to_string()),
+            next_cursor,
         })
     }
 
     fn history_now(&self, request: HistoryRequest) -> BackendResult<HistoryPage> {
         self.require_connected()?;
         let state = self.state.lock().expect("in-memory backend poisoned");
-        let mut messages = state
+        let messages = state
             .messages
             .get(&request.chat_id.get())
             .cloned()
             .unwrap_or_default();
-        messages.sort_by_key(|message| (message.timestamp, message.message_id.get()));
         if request.before_message_id.is_some() && request.after_message_id.is_some() {
             return Err(BackendError::new(
                 ClientErrorCategory::InvalidInput,
                 "history request cannot specify both before_message_id and after_message_id",
             ));
         }
-        if let Some(before) = request.before_message_id {
-            messages.retain(|message| message.message_id.get() < before.get());
-        }
-        if let Some(after) = request.after_message_id {
-            messages.retain(|message| message.message_id.get() > after.get());
-        }
         let limit = request.limit.unwrap_or(50).max(1) as usize;
-        let has_more = messages.len() > limit;
-        if has_more {
-            if request.after_message_id.is_some() {
-                messages.truncate(limit);
-            } else {
-                let start = messages.len() - limit;
-                messages = messages[start..].to_vec();
-            }
-        }
+        let (messages, has_more) = select_history_window(
+            messages,
+            limit,
+            request.before_message_id,
+            request.after_message_id,
+        );
         Ok(HistoryPage {
             messages,
             users: Vec::new(),
@@ -1301,6 +1382,7 @@ mod tests {
             .dialogs(DialogsRequest {
                 limit: Some(1),
                 cursor: None,
+                order: DialogsOrder::RecentActivity,
             })
             .await
             .unwrap();
@@ -1311,6 +1393,7 @@ mod tests {
             .dialogs(DialogsRequest {
                 limit: Some(1),
                 cursor: first.next_cursor,
+                order: DialogsOrder::RecentActivity,
             })
             .await
             .unwrap();

@@ -206,8 +206,13 @@ message Dialog {
 }
 
 enum DialogFollowMode {
+  // Default relevance mode: mentions/replies and server heuristics may surface the thread.
   DIALOG_FOLLOW_MODE_UNSPECIFIED = 0;
+  // Explicitly follow the thread; normal thread activity should surface it.
   FOLLOWING = 1;
+  // Explicit opt-out; server auto-follow heuristics must not flip this back to following.
+  // Mentions/replies may still surface the thread through normal relevance behavior.
+  UNFOLLOWED = 2;
 }
 
 // A thread
@@ -306,6 +311,23 @@ message MessageActionResponseUi {
 
 message MessageActionToast { string text = 1; }
 
+message MessageService {
+  oneof event {
+    MessageServiceThreadBacklink thread_backlink = 1;
+    MessageServicePinnedMessage pinned_message = 2;
+  }
+}
+
+message MessageServiceThreadBacklink {
+  optional int64 source_chat_id = 1;
+  optional string source_title = 2;
+}
+
+message MessageServicePinnedMessage {
+  // Per-chat message id of the pinned message, when known.
+  optional int64 message_id = 1;
+}
+
 message Message {
   int64 id = 1;
 
@@ -370,6 +392,10 @@ message Message {
 
   // Monotonic edit revision for the message. Increments on every edit.
   optional int64 rev = 21;
+
+  // Typed service/system message metadata. Older clients ignore this and use
+  // `message` as fallback text.
+  optional MessageService service_message = 22;
 }
 
 enum MessageSendMode {
@@ -406,6 +432,7 @@ message MessageEntity {
     TYPE_THREAD = 11;
     TYPE_THREAD_TITLE = 12;
     TYPE_BOT_COMMAND = 13;
+    TYPE_GROUP_MENTION = 14;
   }
 
   Type type = 1;
@@ -413,6 +440,7 @@ message MessageEntity {
   int64 length = 3;
 
   message MessageEntityMention { int64 user_id = 1; }
+  message MessageEntityGroupMention { int64 group_id = 1; }
   message MessageEntityTextUrl { string url = 1; }
   message MessageEntityPre { string language = 1; }
   message MessageEntityThread { int64 chat_id = 1; }
@@ -427,6 +455,7 @@ message MessageEntity {
     MessageEntityPre pre = 6;
     MessageEntityThread thread = 7;
     MessageEntityThreadTitle thread_title = 8;
+    MessageEntityGroupMention group_mention = 9;
   }
 }
 
@@ -486,6 +515,17 @@ message Space {
 
   // Whether this is a public community space with stricter member privacy.
   optional bool is_public = 5;
+}
+
+message UserGroup {
+  int64 id = 1;
+  int64 space_id = 2;
+  string name = 3;
+  optional string description = 4;
+  int32 member_count = 5;
+  repeated int64 user_ids = 6;
+  bool current_user_is_member = 7;
+  int64 date = 8;
 }
 
 // Add reaction input
@@ -587,6 +627,9 @@ message UrlPreview {
 
   // Server-provided layout hints that clients can adapt to available space.
   optional UrlPreviewLayout layout = 13;
+
+  // Author, channel, account, or publisher avatar, separate from primary media.
+  optional Photo author_photo = 14;
 }
 
 // Typed media attached to a URL preview.
@@ -739,6 +782,12 @@ message Video {
 
   // CDN URL
   optional string cdn_url = 8;
+
+  // True for GIF-style animation media stored as video.
+  optional bool is_animated = 9;
+
+  // True when the encoded video has an audio track.
+  optional bool has_audio = 10;
 }
 
 message Document {
@@ -939,6 +988,14 @@ enum Method {
   GET_SPACE_URL_PREVIEW_EXCLUSIONS = 65;
   ADD_SPACE_URL_PREVIEW_EXCLUSION = 66;
   REMOVE_SPACE_URL_PREVIEW_EXCLUSION = 67;
+  GET_USER_GROUPS = 68;
+  CREATE_USER_GROUP = 69;
+  UPDATE_USER_GROUP = 70;
+  DELETE_USER_GROUP = 71;
+  GET_SPACE_SETTINGS = 72;
+  TOGGLE_SPACE_GRID = 73;
+  GET_THREAD_REFERENCES = 74;
+  GET_THREAD_SUBTHREADS = 75;
 }
 
 message RpcCall {
@@ -1011,6 +1068,14 @@ message RpcCall {
     GetSpaceUrlPreviewExclusionsInput getSpaceUrlPreviewExclusions = 66;
     AddSpaceUrlPreviewExclusionInput addSpaceUrlPreviewExclusion = 67;
     RemoveSpaceUrlPreviewExclusionInput removeSpaceUrlPreviewExclusion = 68;
+    GetUserGroupsInput getUserGroups = 69;
+    CreateUserGroupInput createUserGroup = 70;
+    UpdateUserGroupInput updateUserGroup = 71;
+    DeleteUserGroupInput deleteUserGroup = 72;
+    GetSpaceSettingsInput getSpaceSettings = 73;
+    ToggleSpaceGridInput toggleSpaceGrid = 74;
+    GetThreadReferencesInput getThreadReferences = 75;
+    GetThreadSubthreadsInput getThreadSubthreads = 76;
   }
 }
 
@@ -1085,6 +1150,14 @@ message RpcResult {
     GetSpaceUrlPreviewExclusionsResult getSpaceUrlPreviewExclusions = 66;
     AddSpaceUrlPreviewExclusionResult addSpaceUrlPreviewExclusion = 67;
     RemoveSpaceUrlPreviewExclusionResult removeSpaceUrlPreviewExclusion = 68;
+    GetUserGroupsResult getUserGroups = 69;
+    CreateUserGroupResult createUserGroup = 70;
+    UpdateUserGroupResult updateUserGroup = 71;
+    DeleteUserGroupResult deleteUserGroup = 72;
+    GetSpaceSettingsResult getSpaceSettings = 73;
+    ToggleSpaceGridResult toggleSpaceGrid = 74;
+    GetThreadReferencesResult getThreadReferences = 75;
+    GetThreadSubthreadsResult getThreadSubthreads = 76;
   }
 }
 
@@ -1119,6 +1192,10 @@ message GetUpdatesInput {
 
   // max number of updates to return in this response
   int32 limit = 5;
+
+  // Client-supported lossless sync schema. Servers must reject pages that
+  // contain update variants newer than this revision.
+  uint32 core_sync_schema_revision = 6;
 }
 
 message UpdateSidecars {
@@ -1126,6 +1203,19 @@ message UpdateSidecars {
   repeated Chat chats = 2;
   repeated Dialog dialogs = 3;
   repeated Space spaces = 4;
+  repeated UserGroup user_groups = 5;
+}
+
+message SyncSkippedSequence {
+  int64 seq = 1;
+
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    IRRELEVANT_TO_BUCKET = 1;
+    SNAPSHOT_REPAIR_REQUIRED = 2;
+  }
+
+  Reason reason = 2;
 }
 
 message GetUpdatesResult {
@@ -1153,6 +1243,13 @@ message GetUpdatesResult {
 
   // Entities required to apply this update slice.
   UpdateSidecars sidecars = 6;
+
+  // Explicit accounting for stored lossless records intentionally omitted
+  // from `updates`. Every sequence through `seq` must be delivered or listed.
+  repeated SyncSkippedSequence skipped_sequences = 7;
+
+  // Server lossless-sync schema used to encode this page.
+  uint32 core_sync_schema_revision = 8;
 }
 
 // Remove member from space
@@ -1180,6 +1277,29 @@ message UpdateMemberAccessInput {
 }
 
 message UpdateMemberAccessResult { repeated Update updates = 1; }
+
+message SpaceSettings {
+  int64 space_id = 1;
+  bool grid_enabled = 2;
+}
+
+message GetSpaceSettingsInput {
+  int64 space_id = 1;
+}
+
+message GetSpaceSettingsResult {
+  SpaceSettings settings = 1;
+}
+
+message ToggleSpaceGridInput {
+  int64 space_id = 1;
+  bool enabled = 2;
+}
+
+message ToggleSpaceGridResult {
+  SpaceSettings settings = 1;
+  repeated Update updates = 2;
+}
 
 message SpaceUrlPreviewExclusion {
   int64 id = 1;
@@ -1223,6 +1343,9 @@ message GetUpdatesStateInput {
 
   // Local date of state
   int64 date = 2;
+
+  // Client-supported lossless sync schema.
+  uint32 core_sync_schema_revision = 3;
 }
 
 message GetUpdatesStateResult {
@@ -1231,6 +1354,10 @@ message GetUpdatesStateResult {
 
   // Set by newer servers to tell clients whether discovery found any bucket work.
   optional bool updates_found = 2;
+
+  // Server lossless-sync schema. Stateful clients must reject incompatible
+  // servers before consuming bucket updates.
+  uint32 core_sync_schema_revision = 3;
 }
 
 message GetChatInput {
@@ -1903,6 +2030,56 @@ message GetMessagesInput {
 
 message GetMessagesResult { repeated Message messages = 1; }
 
+enum ThreadReferenceKind {
+  THREAD_REFERENCE_KIND_UNSPECIFIED = 0;
+  THREAD_LINK = 1;
+  REPLY_THREAD = 2;
+}
+
+message ThreadReferenceItem {
+  // Server graph edge ID. Use as pagination cursor and row identity.
+  int64 id = 1;
+  ThreadReferenceKind kind = 2;
+  int64 from_chat_id = 3;
+  optional int64 from_message_id = 4;
+  int64 to_chat_id = 5;
+  optional int64 date = 6;
+}
+
+message GetThreadReferencesInput {
+  int64 chat_id = 1;
+  optional int64 offset_id = 2;
+  optional int32 limit = 3;
+}
+
+message GetThreadReferencesResult {
+  // Incoming graph links pointing at chat_id, including parent reply threads.
+  repeated ThreadReferenceItem items = 1;
+
+  // Sidecars for item endpoint chats.
+  repeated Chat chats = 2;
+
+  // Current viewer dialogs for endpoint chats, including unread counts.
+  repeated Dialog dialogs = 3;
+}
+
+message GetThreadSubthreadsInput {
+  int64 chat_id = 1;
+  optional int64 offset_id = 2;
+  optional int32 limit = 3;
+}
+
+message GetThreadSubthreadsResult {
+  // Structural child reply/subthreads rooted at chat_id.
+  repeated ThreadReferenceItem items = 1;
+
+  // Sidecars for item endpoint chats.
+  repeated Chat chats = 2;
+
+  // Current viewer dialogs for endpoint chats, including unread counts.
+  repeated Dialog dialogs = 3;
+}
+
 enum SearchMessagesFilter {
   FILTER_UNSPECIFIED = 0;
   FILTER_PHOTOS = 1;
@@ -1910,6 +2087,7 @@ enum SearchMessagesFilter {
   FILTER_PHOTO_VIDEO = 3;
   FILTER_DOCUMENTS = 4;
   FILTER_LINKS = 5;
+  FILTER_VOICE_MEMOS = 6;
 }
 
 message SearchMessagesInput {
@@ -1931,7 +2109,10 @@ message SearchMessagesInput {
 
 message SearchMessagesResult { repeated Message messages = 1; }
 
-message InputChatParticipant { int64 user_id = 1; }
+message InputChatParticipant {
+  optional int64 user_id = 1;
+  optional int64 group_id = 2;
+}
 
 message ReserveChatIdsInput { int32 count = 1; }
 
@@ -2003,6 +2184,41 @@ message GetSpaceMembersResult {
   repeated User users = 2;
 }
 
+message GetUserGroupsInput { int64 space_id = 1; }
+
+message GetUserGroupsResult {
+  repeated UserGroup groups = 1;
+  repeated User users = 2;
+}
+
+message CreateUserGroupInput {
+  int64 space_id = 1;
+  string name = 2;
+  optional string description = 3;
+  repeated int64 user_ids = 4;
+}
+
+message CreateUserGroupResult {
+  UserGroup group = 1;
+  repeated User users = 2;
+}
+
+message UpdateUserGroupInput {
+  int64 group_id = 1;
+  string name = 2;
+  optional string description = 3;
+  repeated int64 user_ids = 4;
+}
+
+message UpdateUserGroupResult {
+  UserGroup group = 1;
+  repeated User users = 2;
+}
+
+message DeleteUserGroupInput { int64 group_id = 1; }
+
+message DeleteUserGroupResult {}
+
 /// ------------------------------
 // Updates Subsystem
 message Update {
@@ -2049,6 +2265,9 @@ message Update {
     UpdateBotPresence bot_presence = 38;
     UpdateDialogFollowMode dialog_follow_mode = 39;
     UpdateUpdatedUser updated_user = 40;
+    UpdateChatParticipantGroupAdd participant_group_add = 41;
+    UpdateChatParticipantGroupDelete participant_group_delete = 42;
+    UpdateSpaceSettings space_settings = 43;
   }
 }
 
@@ -2128,6 +2347,11 @@ message UpdateNewMessageNotification {
 }
 
 message UpdateUserSettings { UserSettings settings = 1; }
+
+message UpdateSpaceSettings {
+  int64 space_id = 1;
+  SpaceSettings settings = 2;
+}
 
 // Update when a user's profile/account fields change.
 message UpdateUpdatedUser { User user = 1; }
@@ -2347,6 +2571,11 @@ message ChatParticipant {
   int64 date = 2;
 }
 
+message ChatParticipantGroup {
+  int64 group_id = 1;
+  int64 date = 2;
+}
+
 message UpdateChatParticipantAdd {
   int64 chat_id = 1;
   ChatParticipant participant = 2;
@@ -2355,6 +2584,16 @@ message UpdateChatParticipantAdd {
 message UpdateChatParticipantDelete {
   int64 chat_id = 1;
   int64 user_id = 2;
+}
+
+message UpdateChatParticipantGroupAdd {
+  int64 chat_id = 1;
+  ChatParticipantGroup group_participant = 2;
+}
+
+message UpdateChatParticipantGroupDelete {
+  int64 chat_id = 1;
+  int64 group_id = 2;
 }
 
 message UserStatus {
@@ -2421,18 +2660,27 @@ message GetChatParticipantsInput { int64 chat_id = 1; }
 message GetChatParticipantsResult {
   repeated ChatParticipant participants = 1;
   repeated User users = 2;
+  repeated ChatParticipantGroup group_participants = 3;
+  repeated UserGroup groups = 4;
 }
 
 message AddChatParticipantInput {
   int64 chat_id = 1;
-  int64 user_id = 2;
+  optional int64 user_id = 2;
+  optional int64 group_id = 3;
 }
 
-message AddChatParticipantResult { ChatParticipant participant = 1; }
+message AddChatParticipantResult {
+  optional ChatParticipant participant = 1;
+  optional ChatParticipantGroup group_participant = 2;
+  optional UserGroup group = 3;
+  repeated User users = 4;
+}
 
 message RemoveChatParticipantInput {
   int64 chat_id = 1;
-  int64 user_id = 2;
+  optional int64 user_id = 2;
+  optional int64 group_id = 3;
 }
 
 message RemoveChatParticipantResult {}

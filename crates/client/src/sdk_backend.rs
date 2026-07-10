@@ -5,10 +5,10 @@
 //! native client API.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt,
     sync::{
-        Arc,
+        Arc, Mutex as StdMutex,
         atomic::{AtomicBool, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -21,7 +21,7 @@ use inline_sdk::{
     UploadFileType, UploadVideoMetadata, proto,
 };
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::backend::retry_after_seconds_from_message;
 use crate::sync::{SyncHost, SyncManager};
@@ -30,22 +30,23 @@ use crate::{
     AuthStartRequest, AuthStartResult, AuthToken, AuthVerifyRequest, AuthVerifyResult,
     BackendError, BackendResult, ChatCreateParticipant, ChatParticipantRecord,
     ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot, ClientBackend,
-    ClientErrorCategory, ClientEvent, ClientStatusSnapshot, ClientStore, ConnectRequest,
-    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
-    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage,
-    DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, InMemoryStore, InlineId,
-    MediaKind, MessageContent, MessageMutation, MessageRecord, NotificationMode, OperationOutcome,
-    PeerRef, RandomId, ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnector,
-    RemoveChatParticipantRequest, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
-    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, StoreError, StoredReaction, StoredReadState,
-    StoredSession, StoredTransaction, SyncConfig, TransactionId, TransactionIdentity,
-    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogNotificationsRequest,
-    UploadRequest, UserRecord, UserSettingsRecord, VERSION,
+    ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientStatusSnapshot, ClientStore,
+    ConnectRequest, CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat,
+    DeleteChatRequest, DeleteMessageRequest, DialogFollowMode, DialogNotificationMode,
+    DialogRecord, DialogsOrder, DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage,
+    HistoryRequest, InMemoryStore, InlineId, MediaKind, MessageContent, MessageMutation,
+    MessageRecord, NotificationMode, OperationOutcome, PeerRef, RandomId, ReactRequest,
+    ReadRequest, RealtimeConnectRequest, RealtimeConnector, RemoveChatParticipantRequest,
+    SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole,
+    SpaceRecord, StoreError, StoredReaction, StoredReadState, StoredSession, StoredTransaction,
+    SyncConfig, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
+    UpdateChatInfoRequest, UpdateDialogNotificationsRequest, UploadRequest, UserRecord,
+    UserSettingsRecord, VERSION,
 };
 
 const DEFAULT_API_BASE_URL: &str = "https://api.inline.chat/v1";
 const DEFAULT_REALTIME_URL: &str = "wss://api.inline.chat/realtime";
-const SNAPSHOT_HISTORY_PAGE_LIMIT: i32 = 200;
+const CHAT_REPAIR_HISTORY_LIMIT: i32 = 50;
 
 /// Error returned when building an [`SdkBackend`].
 #[derive(Debug, thiserror::Error)]
@@ -182,6 +183,8 @@ impl SdkBackendBuilder {
             realtime_connector: self.realtime_connector,
             realtime: Arc::new(Mutex::new(None)),
             realtime_events: Arc::new(Mutex::new(None)),
+            in_flight_deliveries: Arc::new(StdMutex::new(HashSet::new())),
+            client_event_notify: Arc::new(Notify::new()),
         })
     }
 }
@@ -199,6 +202,8 @@ pub struct SdkBackend {
     realtime_connector: Option<Arc<dyn RealtimeConnector>>,
     realtime: Arc<Mutex<Option<RealtimeSession>>>,
     realtime_events: Arc<Mutex<Option<RealtimeEventReceiver>>>,
+    in_flight_deliveries: Arc<StdMutex<HashSet<u64>>>,
+    client_event_notify: Arc<Notify>,
 }
 
 impl fmt::Debug for SdkBackend {
@@ -383,6 +388,10 @@ impl SdkBackend {
                 .clear_account_data()
                 .await
                 .map_err(store_error_to_backend)?;
+            self.in_flight_deliveries
+                .lock()
+                .expect("client event delivery claims poisoned")
+                .clear();
         }
         self.store
             .save_session(StoredSession {
@@ -456,6 +465,88 @@ impl SdkBackend {
         Ok(ClientStatusSnapshot::current(
             crate::ClientStatus::Connected,
         ))
+    }
+
+    async fn claim_pending_client_events(&self) -> BackendResult<Vec<ClientEventDelivery>> {
+        let pending = self
+            .store
+            .pending_client_events()
+            .await
+            .map_err(store_error_to_backend)?;
+        let mut in_flight = self
+            .in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned");
+        Ok(pending
+            .into_iter()
+            .filter(|delivery| {
+                delivery
+                    .delivery_id
+                    .is_none_or(|delivery_id| in_flight.insert(delivery_id))
+            })
+            .collect())
+    }
+
+    fn mark_deliveries_in_flight(&self, deliveries: &[ClientEventDelivery]) {
+        let mut in_flight = self
+            .in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned");
+        in_flight.extend(
+            deliveries
+                .iter()
+                .filter_map(|delivery| delivery.delivery_id),
+        );
+    }
+
+    async fn receive_next_event_deliveries(&self) -> BackendResult<Vec<ClientEventDelivery>> {
+        let pending = self.claim_pending_client_events().await?;
+        if !pending.is_empty() {
+            return Ok(pending);
+        }
+
+        let session = self.require_session().await?;
+        if self.sync_required.load(Ordering::Acquire) {
+            let deliveries = self.sync.discover(self).await?;
+            self.sync_required.store(false, Ordering::Release);
+            self.mark_deliveries_in_flight(&deliveries);
+            if !deliveries.is_empty() {
+                return Ok(deliveries);
+            }
+            let pending = self.claim_pending_client_events().await?;
+            if !pending.is_empty() {
+                return Ok(pending);
+            }
+        }
+        loop {
+            let realtime_event = tokio::select! {
+                _ = self.client_event_notify.notified() => {
+                    let pending = self.claim_pending_client_events().await?;
+                    if !pending.is_empty() {
+                        return Ok(pending);
+                    }
+                    continue;
+                }
+                event = self.receive_realtime_event(&session) => event?,
+            };
+            match realtime_event {
+                RealtimeEvent::Updates(updates) => {
+                    let deliveries = match self.sync.process_realtime(self, updates).await {
+                        Ok(deliveries) => deliveries,
+                        Err(error) => {
+                            self.sync_required.store(true, Ordering::Release);
+                            return Err(error);
+                        }
+                    };
+                    self.mark_deliveries_in_flight(&deliveries);
+                    if !deliveries.is_empty() {
+                        return Ok(deliveries);
+                    }
+                }
+                RealtimeEvent::Ack { .. } | RealtimeEvent::Pong { .. } => {}
+                _ => {}
+            }
+        }
     }
 }
 
@@ -596,7 +687,13 @@ impl ClientBackend for SdkBackend {
                 .store
                 .clear_account_data()
                 .await
-                .map_err(store_error_to_backend)
+                .map_err(store_error_to_backend)?;
+            backend
+                .in_flight_deliveries
+                .lock()
+                .expect("client event delivery claims poisoned")
+                .clear();
+            Ok(())
         })
     }
 
@@ -726,8 +823,12 @@ impl ClientBackend for SdkBackend {
                         .await?,
                 );
             }
-            let (records, has_more) =
-                normalize_live_history_records(records, limit, request.after_message_id.is_some());
+            let (records, has_more) = crate::store::select_history_window(
+                records,
+                limit as usize,
+                request.before_message_id,
+                request.after_message_id,
+            );
             Ok(HistoryPage {
                 messages: records,
                 users: Vec::new(),
@@ -794,7 +895,8 @@ impl ClientBackend for SdkBackend {
                     &session,
                     proto::AddChatParticipantInput {
                         chat_id: request.chat_id.get(),
-                        user_id: request.user_id.get(),
+                        user_id: Some(request.user_id.get()),
+                        group_id: None,
                     },
                 )
                 .await?;
@@ -836,7 +938,8 @@ impl ClientBackend for SdkBackend {
                     &session,
                     proto::RemoveChatParticipantInput {
                         chat_id: request.chat_id.get(),
-                        user_id: request.user_id.get(),
+                        user_id: Some(request.user_id.get()),
+                        group_id: None,
                     },
                 )
                 .await?;
@@ -1008,7 +1111,8 @@ impl ClientBackend for SdkBackend {
                             .participants
                             .into_iter()
                             .map(|participant| proto::InputChatParticipant {
-                                user_id: participant.user_id.get(),
+                                user_id: Some(participant.user_id.get()),
+                                group_id: None,
                             })
                             .collect(),
                         reserved_chat_id: None,
@@ -1060,7 +1164,8 @@ impl ClientBackend for SdkBackend {
                             .participants
                             .into_iter()
                             .map(|participant| proto::InputChatParticipant {
-                                user_id: participant.user_id.get(),
+                                user_id: Some(participant.user_id.get()),
+                                group_id: None,
                             })
                             .collect(),
                     },
@@ -1645,32 +1750,95 @@ impl ClientBackend for SdkBackend {
     fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
         let backend = self.clone();
         Box::pin(async move {
-            let session = backend.require_session().await?;
-            if backend.sync_required.load(Ordering::Acquire) {
-                let events = backend.sync.discover(&backend).await?;
-                backend.sync_required.store(false, Ordering::Release);
-                if !events.is_empty() {
-                    return Ok(events);
-                }
-            }
-            loop {
-                match backend.receive_realtime_event(&session).await? {
-                    RealtimeEvent::Updates(updates) => {
-                        let events = match backend.sync.process_realtime(&backend, updates).await {
-                            Ok(events) => events,
-                            Err(error) => {
-                                backend.sync_required.store(true, Ordering::Release);
-                                return Err(error);
-                            }
-                        };
-                        if !events.is_empty() {
-                            return Ok(events);
-                        }
+            let deliveries = backend.receive_next_event_deliveries().await?;
+            let mut events = Vec::with_capacity(deliveries.len());
+            for delivery in deliveries {
+                if let Some(delivery_id) = delivery.delivery_id {
+                    let acknowledgement = backend
+                        .store
+                        .acknowledge_client_event(delivery_id)
+                        .await
+                        .map_err(store_error_to_backend);
+                    backend
+                        .in_flight_deliveries
+                        .lock()
+                        .expect("client event delivery claims poisoned")
+                        .remove(&delivery_id);
+                    backend.client_event_notify.notify_one();
+                    if let Err(error) = acknowledgement {
+                        log::error!(
+                            "failed to acknowledge legacy Inline client event delivery: {error}"
+                        );
                     }
-                    RealtimeEvent::Ack { .. } | RealtimeEvent::Pong { .. } => {}
-                    _ => {}
                 }
+                events.push(delivery.event);
             }
+            Ok(events)
+        })
+    }
+
+    fn receive_event_deliveries(
+        &self,
+    ) -> BoxFuture<'static, BackendResult<Vec<ClientEventDelivery>>> {
+        let backend = self.clone();
+        Box::pin(async move { backend.receive_next_event_deliveries().await })
+    }
+
+    fn stage_client_events(
+        &self,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, BackendResult<Vec<ClientEventDelivery>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let deliveries = backend
+                .store
+                .append_client_events(events)
+                .await
+                .map_err(store_error_to_backend)?;
+            backend.mark_deliveries_in_flight(&deliveries);
+            Ok(deliveries)
+        })
+    }
+
+    fn acknowledge_event_delivery(
+        &self,
+        delivery_id: u64,
+    ) -> BoxFuture<'static, BackendResult<()>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let acknowledgement = backend
+                .store
+                .acknowledge_client_event(delivery_id)
+                .await
+                .map_err(store_error_to_backend);
+            backend
+                .in_flight_deliveries
+                .lock()
+                .expect("client event delivery claims poisoned")
+                .remove(&delivery_id);
+            backend.client_event_notify.notify_one();
+            acknowledgement
+        })
+    }
+
+    fn release_event_delivery(&self, delivery_id: u64) {
+        self.in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned")
+            .remove(&delivery_id);
+        self.client_event_notify.notify_one();
+    }
+
+    fn reset_event_delivery_claims(&self) -> BoxFuture<'static, BackendResult<()>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend
+                .in_flight_deliveries
+                .lock()
+                .expect("client event delivery claims poisoned")
+                .clear();
+            backend.client_event_notify.notify_one();
+            Ok(())
         })
     }
 }
@@ -1684,7 +1852,13 @@ impl SyncHost for SdkBackend {
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend
-                .call_realtime(&session, proto::GetUpdatesStateInput { date })
+                .call_realtime(
+                    &session,
+                    proto::GetUpdatesStateInput {
+                        date,
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
+                    },
+                )
                 .await
         })
     }
@@ -1744,17 +1918,6 @@ impl SdkBackend {
         let settings = self
             .call_realtime(&session, proto::GetUserSettingsInput {})
             .await?;
-        let chat_peers = chats
-            .chats
-            .iter()
-            .map(sync_bucket_peer_for_chat)
-            .collect::<HashSet<_>>();
-        let space_ids = chats
-            .spaces
-            .iter()
-            .map(|space| InlineId::new(space.id))
-            .collect::<HashSet<_>>();
-
         let user = me.user.ok_or_else(|| {
             BackendError::new(
                 ClientErrorCategory::ProtocolMismatch,
@@ -1782,12 +1945,6 @@ impl SdkBackend {
             user_id: user.user_id,
         });
         events.push(ClientEvent::UserSettingsChanged {});
-        for space_id in space_ids {
-            events.extend(self.repair_space_members(&session, space_id, true).await?);
-        }
-        for peer in chat_peers {
-            events.extend(self.repair_chat_bucket(peer).await?);
-        }
         Ok(events)
     }
 
@@ -1798,6 +1955,40 @@ impl SdkBackend {
             .await?;
         let space_is_current = chats.spaces.iter().any(|space| space.id == space_id.get());
         let mut events = self.apply_get_chats_snapshot(chats).await?;
+        if space_is_current {
+            let settings = self
+                .call_realtime(
+                    &session,
+                    proto::GetSpaceSettingsInput {
+                        space_id: space_id.get(),
+                    },
+                )
+                .await?
+                .settings
+                .ok_or_else(|| {
+                    BackendError::new(
+                        ClientErrorCategory::ProtocolMismatch,
+                        "space settings snapshot did not include settings",
+                    )
+                })?;
+            let mut space = self
+                .store
+                .space(space_id)
+                .await
+                .map_err(store_error_to_backend)?
+                .ok_or_else(|| {
+                    BackendError::new(
+                        ClientErrorCategory::ProtocolMismatch,
+                        "space settings snapshot did not resolve to a stored space",
+                    )
+                })?;
+            space.grid_enabled = Some(settings.grid_enabled);
+            self.store
+                .record_space(space)
+                .await
+                .map_err(store_error_to_backend)?;
+            events.push(ClientEvent::SpaceUpserted { space_id });
+        }
         events.extend(
             self.repair_space_members(&session, space_id, space_is_current)
                 .await?,
@@ -1929,28 +2120,7 @@ impl SdkBackend {
                 },
             )
             .await?;
-        let history = self
-            .fetch_complete_chat_history(&session, peer_id, chat_id)
-            .await?;
-        let previous = self
-            .store
-            .history(HistoryRequest {
-                chat_id,
-                limit: Some(u32::MAX),
-                before_message_id: None,
-                after_message_id: None,
-            })
-            .await
-            .map_err(store_error_to_backend)?;
-        let previous_ids = previous
-            .messages
-            .iter()
-            .map(|message| message.message_id)
-            .collect::<HashSet<_>>();
-        let current_ids = history
-            .iter()
-            .map(|message| InlineId::new(message.id))
-            .collect::<HashSet<_>>();
+        let history = self.fetch_chat_repair_history(&session, peer_id).await?;
 
         let dialog = chat_result.dialog;
         let read_state = dialog
@@ -1986,25 +2156,12 @@ impl SdkBackend {
         );
         events.push(ClientEvent::ChatParticipantsChanged { chat_id });
 
-        self.store
-            .clear_chat_messages(chat_id, None)
-            .await
-            .map_err(store_error_to_backend)?;
         for message in history {
             let record = self
                 .record_proto_message(message, Some(chat_id), None)
                 .await?;
             events.push(ClientEvent::MessageStored { message: record });
         }
-        events.extend(
-            previous_ids
-                .difference(&current_ids)
-                .copied()
-                .map(|message_id| ClientEvent::MessageDeleted {
-                    chat_id,
-                    message_id,
-                }),
-        );
         if let Some(read_state) = read_state {
             self.store
                 .record_read_state(read_state)
@@ -2015,88 +2172,35 @@ impl SdkBackend {
         Ok(events)
     }
 
-    async fn fetch_complete_chat_history(
+    async fn fetch_chat_repair_history(
         &self,
         session: &StoredSession,
         peer_id: proto::InputPeer,
-        chat_id: InlineId,
     ) -> BackendResult<Vec<proto::Message>> {
-        let mut before_id = None;
-        let mut messages = BTreeMap::new();
-        for page in 0..100_000_u32 {
-            let result = self
-                .call_realtime(
-                    session,
-                    proto::GetChatHistoryInput {
-                        peer_id: Some(peer_id.clone()),
-                        offset_id: None,
-                        limit: Some(SNAPSHOT_HISTORY_PAGE_LIMIT),
-                        mode: Some(if before_id.is_some() {
-                            proto::GetChatHistoryMode::HistoryModeOlder as i32
-                        } else {
-                            proto::GetChatHistoryMode::HistoryModeLatest as i32
-                        }),
-                        anchor_id: None,
-                        before_id,
-                        after_id: None,
-                        before_limit: None,
-                        after_limit: None,
-                        include_anchor: None,
-                    },
-                )
-                .await?;
-            let count = result.messages.len();
-            if count > SNAPSHOT_HISTORY_PAGE_LIMIT as usize {
-                return Err(BackendError::new(
-                    ClientErrorCategory::ProtocolMismatch,
-                    "chat history snapshot exceeded the requested page size",
-                ));
-            }
-            if count == 0 {
-                log::debug!(
-                    "completed Inline chat history snapshot chat_id={} pages={} messages={}",
-                    chat_id.get(),
-                    page + 1,
-                    messages.len()
-                );
-                return Ok(messages.into_values().collect());
-            }
-            let next_before = result
-                .messages
-                .iter()
-                .map(|message| message.id)
-                .min()
-                .filter(|message_id| *message_id > 0)
-                .ok_or_else(|| {
-                    BackendError::new(
-                        ClientErrorCategory::ProtocolMismatch,
-                        "chat history snapshot returned an invalid message id",
-                    )
-                })?;
-            if before_id.is_some_and(|previous| next_before >= previous) {
-                return Err(BackendError::new(
-                    ClientErrorCategory::ProtocolMismatch,
-                    "chat history snapshot did not advance",
-                ));
-            }
-            for message in result.messages {
-                messages.insert(message.id, message);
-            }
-            if count < SNAPSHOT_HISTORY_PAGE_LIMIT as usize {
-                log::debug!(
-                    "completed Inline chat history snapshot chat_id={} pages={} messages={}",
-                    chat_id.get(),
-                    page + 1,
-                    messages.len()
-                );
-                return Ok(messages.into_values().collect());
-            }
-            before_id = Some(next_before);
+        let result = self
+            .call_realtime(
+                session,
+                proto::GetChatHistoryInput {
+                    peer_id: Some(peer_id),
+                    offset_id: None,
+                    limit: Some(CHAT_REPAIR_HISTORY_LIMIT),
+                    mode: Some(proto::GetChatHistoryMode::HistoryModeLatest as i32),
+                    anchor_id: None,
+                    before_id: None,
+                    after_id: None,
+                    before_limit: None,
+                    after_limit: None,
+                    include_anchor: None,
+                },
+            )
+            .await?;
+        if result.messages.len() > CHAT_REPAIR_HISTORY_LIMIT as usize {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "chat repair history exceeded the requested page size",
+            ));
         }
-        Err(BackendError::new(
-            ClientErrorCategory::ProtocolMismatch,
-            "chat history snapshot exceeded the page safety limit",
-        ))
+        Ok(result.messages)
     }
 
     async fn apply_get_chats_snapshot(
@@ -2108,7 +2212,6 @@ impl SdkBackend {
             .iter()
             .map(|dialog| dialog.chat_id)
             .collect::<HashSet<_>>();
-        let stored_ids = self.stored_dialog_ids().await?;
         let read_states = result
             .chats
             .iter()
@@ -2128,7 +2231,7 @@ impl SdkBackend {
             .map(space_record_from_proto)
             .collect::<Vec<_>>();
 
-        self.reconcile_live_dialogs(dialogs).await?;
+        self.merge_live_dialogs(dialogs).await?;
         self.store
             .record_users(users.clone())
             .await
@@ -2146,16 +2249,10 @@ impl SdkBackend {
                 .map_err(store_error_to_backend)?;
         }
 
-        let mut events = stored_ids
-            .difference(&live_ids)
-            .copied()
-            .map(|chat_id| ClientEvent::ChatDeleted { chat_id })
+        let mut events = live_ids
+            .into_iter()
+            .map(|chat_id| ClientEvent::ChatUpserted { chat_id })
             .collect::<Vec<_>>();
-        events.extend(
-            live_ids
-                .into_iter()
-                .map(|chat_id| ClientEvent::ChatUpserted { chat_id }),
-        );
         events.extend(users.into_iter().map(|user| ClientEvent::UserUpserted {
             user_id: user.user_id,
         }));
@@ -2176,32 +2273,6 @@ impl SdkBackend {
         Ok(events)
     }
 
-    async fn stored_dialog_ids(&self) -> BackendResult<HashSet<InlineId>> {
-        let mut cursor = None;
-        let mut ids = HashSet::new();
-        loop {
-            let page = self
-                .store
-                .dialogs(DialogsRequest {
-                    limit: Some(1_000),
-                    cursor: cursor.clone(),
-                })
-                .await
-                .map_err(store_error_to_backend)?;
-            ids.extend(page.dialogs.into_iter().map(|dialog| dialog.chat_id));
-            let Some(next) = page.next_cursor else {
-                return Ok(ids);
-            };
-            if cursor.as_ref() == Some(&next) {
-                return Err(BackendError::new(
-                    ClientErrorCategory::ProtocolMismatch,
-                    "stored dialog pagination did not advance",
-                ));
-            }
-            cursor = Some(next);
-        }
-    }
-
     async fn stored_chat_id_for_sync_peer(
         &self,
         peer: crate::SyncBucketPeer,
@@ -2214,6 +2285,7 @@ impl SdkBackend {
                     .dialogs(DialogsRequest {
                         limit: Some(u32::MAX),
                         cursor: None,
+                        order: DialogsOrder::StableChatId,
                     })
                     .await
                     .map_err(store_error_to_backend)?;
@@ -2230,11 +2302,25 @@ impl SdkBackend {
         &self,
         sidecars: proto::UpdateSidecars,
     ) -> BackendResult<Vec<ClientEvent>> {
-        let users = sidecars
-            .users
-            .iter()
-            .map(user_record_from_proto)
-            .collect::<Vec<_>>();
+        let mut users = Vec::with_capacity(sidecars.users.len());
+        for user in &sidecars.users {
+            let mut record = user_record_from_proto(user);
+            if user.min == Some(true)
+                && let Some(existing) = self
+                    .store
+                    .user(record.user_id)
+                    .await
+                    .map_err(store_error_to_backend)?
+            {
+                record.display_name = record.display_name.or(existing.display_name);
+                record.username = record.username.or(existing.username);
+                record.first_name = record.first_name.or(existing.first_name);
+                record.last_name = record.last_name.or(existing.last_name);
+                record.avatar_url = record.avatar_url.or(existing.avatar_url);
+                record.is_bot = record.is_bot.or(existing.is_bot);
+            }
+            users.push(record);
+        }
         self.store
             .record_users(users.clone())
             .await
@@ -2254,31 +2340,71 @@ impl SdkBackend {
                         .zip(chat.peer_id.as_ref())
                         .is_some_and(|(dialog_peer, chat_peer)| dialog_peer == chat_peer)
             });
+            let existing = self
+                .store
+                .dialog(InlineId::new(chat.id))
+                .await
+                .map_err(store_error_to_backend)?;
             self.store
                 .record_dialog(DialogRecord {
                     chat_id: InlineId::new(chat.id),
-                    peer_user_id: dialog_peer_user_id(dialog, chat),
+                    peer_user_id: dialog_peer_user_id(dialog, chat)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.peer_user_id)),
                     title: Some(chat_title_from_proto(chat, &users_by_id)),
-                    emoji: chat_emoji_from_proto(chat),
-                    last_message_id: chat.last_msg_id.map(InlineId::new),
-                    synced_through_message_id: None,
+                    emoji: chat_emoji_from_proto(chat)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.emoji.clone())),
+                    last_message_id: chat
+                        .last_msg_id
+                        .map(InlineId::new)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.last_message_id)),
+                    synced_through_message_id: existing
+                        .as_ref()
+                        .and_then(|dialog| dialog.synced_through_message_id),
                     unread_count: dialog
                         .and_then(|dialog| dialog.unread_count)
-                        .and_then(|count| u32::try_from(count).ok()),
+                        .and_then(|count| u32::try_from(count).ok())
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.unread_count)),
                     space_id: dialog
                         .and_then(|dialog| dialog.space_id)
                         .or(chat.space_id)
-                        .map(InlineId::new),
-                    is_public: chat.is_public,
-                    archived: dialog.and_then(|dialog| dialog.archived),
-                    pinned: dialog.and_then(|dialog| dialog.pinned),
-                    open: dialog.and_then(|dialog| dialog.open),
-                    chat_list_hidden: dialog.and_then(|dialog| dialog.chat_list_hidden),
-                    order: dialog.and_then(|dialog| dialog.order.clone()),
-                    pinned_order: dialog.and_then(|dialog| dialog.pinned_order.clone()),
-                    notification_mode: dialog.and_then(dialog_notification_mode_from_proto),
-                    follow_mode: dialog.and_then(dialog_follow_mode_from_proto),
-                    ..DialogRecord::new(InlineId::new(chat.id))
+                        .map(InlineId::new)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
+                    is_public: chat
+                        .is_public
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.is_public)),
+                    archived: dialog
+                        .and_then(|dialog| dialog.archived)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.archived)),
+                    pinned: dialog
+                        .and_then(|dialog| dialog.pinned)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.pinned)),
+                    open: dialog
+                        .and_then(|dialog| dialog.open)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.open)),
+                    chat_list_hidden: dialog
+                        .and_then(|dialog| dialog.chat_list_hidden)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.chat_list_hidden)),
+                    order: dialog
+                        .and_then(|dialog| dialog.order.clone())
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.order.clone())),
+                    pinned_order: dialog
+                        .and_then(|dialog| dialog.pinned_order.clone())
+                        .or_else(|| {
+                            existing
+                                .as_ref()
+                                .and_then(|dialog| dialog.pinned_order.clone())
+                        }),
+                    notification_mode: dialog
+                        .and_then(dialog_notification_mode_from_proto)
+                        .or_else(|| {
+                            existing
+                                .as_ref()
+                                .and_then(|dialog| dialog.notification_mode)
+                        }),
+                    follow_mode: dialog
+                        .and_then(dialog_follow_mode_from_proto)
+                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.follow_mode)),
+                    ..existing.unwrap_or_else(|| DialogRecord::new(InlineId::new(chat.id)))
                 })
                 .await
                 .map_err(store_error_to_backend)?;
@@ -2299,7 +2425,16 @@ impl SdkBackend {
                 }),
         );
         for space in sidecars.spaces {
-            let record = space_record_from_proto(&space);
+            let mut record = space_record_from_proto(&space);
+            if record.grid_enabled.is_none()
+                && let Some(existing) = self
+                    .store
+                    .space(record.space_id)
+                    .await
+                    .map_err(store_error_to_backend)?
+            {
+                record.grid_enabled = existing.grid_enabled;
+            }
             self.store
                 .record_space(record.clone())
                 .await
@@ -2436,6 +2571,7 @@ impl SdkBackend {
                     .dialogs(DialogsRequest {
                         limit: Some(u32::MAX),
                         cursor: None,
+                        order: DialogsOrder::StableChatId,
                     })
                     .await
                     .map_err(store_error_to_backend)?;
@@ -2468,48 +2604,12 @@ impl SdkBackend {
             .map_err(store_error_to_backend)
     }
 
-    async fn reconcile_live_dialogs(&self, dialogs: Vec<DialogRecord>) -> BackendResult<()> {
-        let live_ids = dialogs
-            .iter()
-            .map(|dialog| dialog.chat_id)
-            .collect::<HashSet<_>>();
+    async fn merge_live_dialogs(&self, dialogs: Vec<DialogRecord>) -> BackendResult<()> {
         for dialog in dialogs {
             self.store
                 .record_dialog(dialog)
                 .await
                 .map_err(store_error_to_backend)?;
-        }
-
-        let mut cursor = None;
-        let mut stored_ids = Vec::new();
-        loop {
-            let page = self
-                .store
-                .dialogs(DialogsRequest {
-                    limit: Some(1_000),
-                    cursor: cursor.clone(),
-                })
-                .await
-                .map_err(store_error_to_backend)?;
-            stored_ids.extend(page.dialogs.into_iter().map(|dialog| dialog.chat_id));
-            let Some(next) = page.next_cursor else {
-                break;
-            };
-            if cursor.as_ref() == Some(&next) {
-                return Err(BackendError::new(
-                    ClientErrorCategory::ProtocolMismatch,
-                    "stored dialog pagination did not advance",
-                ));
-            }
-            cursor = Some(next);
-        }
-        for chat_id in stored_ids {
-            if !live_ids.contains(&chat_id) {
-                self.store
-                    .remove_dialog(chat_id)
-                    .await
-                    .map_err(store_error_to_backend)?;
-            }
         }
         Ok(())
     }
@@ -2913,6 +3013,26 @@ impl SdkBackend {
                         .map_err(store_error_to_backend)?;
                     events.push(ClientEvent::ChatParticipantsChanged { chat_id });
                 }
+                Some(proto::update::Update::ParticipantGroupAdd(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    if update.group_participant.is_none() {
+                        return Err(BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "participant group add update had no group participant",
+                        ));
+                    }
+                    events.push(ClientEvent::ChatParticipantsChanged { chat_id });
+                }
+                Some(proto::update::Update::ParticipantGroupDelete(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    if update.group_id <= 0 {
+                        return Err(BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "participant group delete update had an invalid group ID",
+                        ));
+                    }
+                    events.push(ClientEvent::ChatParticipantsChanged { chat_id });
+                }
                 Some(proto::update::Update::SpaceMemberAdd(update)) => {
                     let member = update.member.ok_or_else(|| {
                         BackendError::new(
@@ -2999,6 +3119,36 @@ impl SdkBackend {
                             removed: false,
                         });
                     }
+                }
+                Some(proto::update::Update::SpaceSettings(update)) => {
+                    let settings = update.settings.ok_or_else(|| {
+                        BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "space settings update had no settings",
+                        )
+                    })?;
+                    let space_id = InlineId::new(if settings.space_id != 0 {
+                        settings.space_id
+                    } else {
+                        update.space_id
+                    });
+                    let mut space = self
+                        .store
+                        .space(space_id)
+                        .await
+                        .map_err(store_error_to_backend)?
+                        .ok_or_else(|| {
+                            BackendError::new(
+                                ClientErrorCategory::ProtocolMismatch,
+                                "space settings update did not resolve to a stored space",
+                            )
+                        })?;
+                    space.grid_enabled = Some(settings.grid_enabled);
+                    self.store
+                        .record_space(space)
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::SpaceUpserted { space_id });
                 }
                 Some(proto::update::Update::UpdateUserSettings(update)) => {
                     let settings = update.settings.ok_or_else(|| {
@@ -3166,6 +3316,9 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::BotPresence(_) => "bot_presence",
         Update::DialogFollowMode(_) => "dialog_follow_mode",
         Update::UpdatedUser(_) => "updated_user",
+        Update::ParticipantGroupAdd(_) => "participant_group_add",
+        Update::ParticipantGroupDelete(_) => "participant_group_delete",
+        Update::SpaceSettings(_) => "space_settings",
     }
 }
 
@@ -3322,6 +3475,7 @@ fn dialog_follow_mode_from_proto(dialog: &proto::Dialog) -> Option<DialogFollowM
 fn dialog_follow_mode_from_value(value: i32) -> Option<DialogFollowMode> {
     match proto::DialogFollowMode::try_from(value).ok()? {
         proto::DialogFollowMode::Following => Some(DialogFollowMode::Following),
+        proto::DialogFollowMode::Unfollowed => Some(DialogFollowMode::Unfollowed),
         proto::DialogFollowMode::Unspecified => None,
     }
 }
@@ -3373,6 +3527,7 @@ fn space_record_from_proto(space: &proto::Space) -> SpaceRecord {
         creator: space.creator,
         date: space.date,
         is_public: space.is_public,
+        grid_enabled: None,
     }
 }
 
@@ -3430,12 +3585,28 @@ fn chat_participants_page_from_proto(
 ) -> ChatParticipantsPage {
     let mut seen = std::collections::HashSet::new();
     let mut participants = Vec::new();
-    for participant in result.participants {
+    for participant in &result.participants {
         if seen.insert(participant.user_id) {
             participants.push(ChatParticipantRecord {
                 user_id: InlineId::new(participant.user_id),
                 date: Some(participant.date),
             });
+        }
+    }
+    let groups_by_id = result
+        .groups
+        .iter()
+        .map(|group| (group.id, group))
+        .collect::<HashMap<_, _>>();
+    for grant in &result.group_participants {
+        let group = groups_by_id.get(&grant.group_id);
+        for user_id in group.into_iter().flat_map(|group| group.user_ids.iter()) {
+            if seen.insert(*user_id) {
+                participants.push(ChatParticipantRecord {
+                    user_id: InlineId::new(*user_id),
+                    date: Some(grant.date),
+                });
+            }
         }
     }
     participants.sort_by_key(|participant| participant.user_id.get());
@@ -3807,20 +3978,6 @@ fn input_peer_for_sync_bucket_peer(peer: crate::SyncBucketPeer) -> proto::InputP
     }
 }
 
-fn sync_bucket_peer_for_chat(chat: &proto::Chat) -> crate::SyncBucketPeer {
-    match chat.peer_id.as_ref().and_then(|peer| peer.r#type.as_ref()) {
-        Some(proto::peer::Type::User(user)) => crate::SyncBucketPeer::User {
-            user_id: InlineId::new(user.user_id),
-        },
-        Some(proto::peer::Type::Chat(peer)) => crate::SyncBucketPeer::Chat {
-            chat_id: InlineId::new(peer.chat_id),
-        },
-        None => crate::SyncBucketPeer::Chat {
-            chat_id: InlineId::new(chat.id),
-        },
-    }
-}
-
 fn history_input_for_request(
     request: &HistoryRequest,
     fetch_limit: i32,
@@ -3852,24 +4009,6 @@ fn history_input_for_request(
         after_limit: None,
         include_anchor: None,
     }
-}
-
-fn normalize_live_history_records(
-    mut records: Vec<MessageRecord>,
-    limit: u32,
-    newer_page: bool,
-) -> (Vec<MessageRecord>, bool) {
-    records.sort_by_key(|message| (message.timestamp, message.message_id.get()));
-    let limit = limit.max(1) as usize;
-    let has_more = records.len() > limit;
-    if has_more {
-        if newer_page {
-            records.truncate(limit);
-        } else {
-            records = records.split_off(records.len() - limit);
-        }
-    }
-    (records, has_more)
 }
 
 fn chat_id_from_peer(peer: &proto::Peer) -> Option<InlineId> {
@@ -4556,16 +4695,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_dialog_reconciliation_tombstones_missing_chats() {
+    async fn live_dialog_merge_preserves_chats_omitted_by_visibility_filter() {
         let store = InMemoryStore::new();
         store
             .record_dialog(DialogRecord::new(InlineId::new(7)))
             .await
             .unwrap();
-        store
-            .record_dialog(DialogRecord::new(InlineId::new(8)))
-            .await
-            .unwrap();
+        let mut hidden_dialog = DialogRecord::new(InlineId::new(8));
+        hidden_dialog.chat_list_hidden = Some(true);
+        store.record_dialog(hidden_dialog).await.unwrap();
         let removed_message = MessageRecord {
             chat_id: InlineId::new(8),
             ..test_message_record(10)
@@ -4574,17 +4712,32 @@ mod tests {
         let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
 
         backend
-            .reconcile_live_dialogs(vec![DialogRecord::new(InlineId::new(7))])
+            .merge_live_dialogs(vec![DialogRecord::new(InlineId::new(7))])
             .await
             .unwrap();
 
-        assert_eq!(
-            store.deleted_chat_ids().await.unwrap(),
-            vec![InlineId::new(8)]
+        assert!(store.deleted_chat_ids().await.unwrap().is_empty());
+        assert!(
+            store
+                .deleted_message_ids(InlineId::new(8))
+                .await
+                .unwrap()
+                .is_empty()
         );
+        let preserved = store.dialog(InlineId::new(8)).await.unwrap().unwrap();
+        assert_eq!(preserved.chat_list_hidden, Some(true));
         assert_eq!(
-            store.deleted_message_ids(InlineId::new(8)).await.unwrap(),
-            vec![removed_message.message_id]
+            store
+                .history(HistoryRequest {
+                    chat_id: InlineId::new(8),
+                    limit: None,
+                    before_message_id: None,
+                    after_message_id: None,
+                })
+                .await
+                .unwrap()
+                .messages,
+            vec![removed_message]
         );
     }
 
@@ -4671,6 +4824,28 @@ mod tests {
         let status = backend.resume_session().await.unwrap();
 
         assert_eq!(status.status, crate::ClientStatus::AuthRequired);
+    }
+
+    #[tokio::test]
+    async fn released_event_delivery_claim_can_be_replayed_without_restart() {
+        let store = InMemoryStore::new();
+        let event = ClientEvent::MessageDeleted {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(11),
+        };
+        store
+            .append_client_events(vec![event.clone()])
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder().store(store).build().unwrap();
+
+        let first = backend.receive_event_deliveries().await.unwrap();
+        let delivery_id = first[0].delivery_id.unwrap();
+        backend.release_event_delivery(delivery_id);
+        let replayed = backend.receive_event_deliveries().await.unwrap();
+
+        assert_eq!(replayed[0].delivery_id, Some(delivery_id));
+        assert_eq!(replayed[0].event, event);
     }
 
     #[tokio::test]
@@ -5168,7 +5343,7 @@ mod tests {
             match &add.body {
                 Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
                     Some(proto::rpc_call::Input::AddChatParticipant(input)) => {
-                        assert_eq!((input.chat_id, input.user_id), (7, 42));
+                        assert_eq!((input.chat_id, input.user_id), (7, Some(42)));
                     }
                     other => panic!("expected add participant input, got {other:?}"),
                 },
@@ -5185,6 +5360,7 @@ mod tests {
                                 user_id: 42,
                                 date: 123,
                             }),
+                            ..Default::default()
                         },
                     ),
                 ),
@@ -5195,7 +5371,7 @@ mod tests {
             match &remove.body {
                 Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
                     Some(proto::rpc_call::Input::RemoveChatParticipant(input)) => {
-                        assert_eq!((input.chat_id, input.user_id), (7, 42));
+                        assert_eq!((input.chat_id, input.user_id), (7, Some(42)));
                     }
                     other => panic!("expected remove participant input, got {other:?}"),
                 },
@@ -5486,6 +5662,7 @@ mod tests {
                     proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
                         date: 100,
                         updates_found: Some(true),
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                     }),
                 ),
             )
@@ -5503,7 +5680,8 @@ mod tests {
                         date: 100,
                         r#final: Some(true),
                         result_type: proto::get_updates_result::ResultType::Empty as i32,
-                        sidecars: None,
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
+                        ..Default::default()
                     }),
                 ),
             )
@@ -5572,7 +5750,8 @@ mod tests {
                         date: 101,
                         r#final: Some(true),
                         result_type: proto::get_updates_result::ResultType::Slice as i32,
-                        sidecars: None,
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
+                        ..Default::default()
                     }),
                 ),
             )
@@ -5660,6 +5839,7 @@ mod tests {
                     proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
                         date: 100,
                         updates_found: Some(true),
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                     }),
                 ),
             )
@@ -5676,7 +5856,8 @@ mod tests {
                         date: 100,
                         r#final: Some(true),
                         result_type: proto::get_updates_result::ResultType::Empty as i32,
-                        sidecars: None,
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
+                        ..Default::default()
                     }),
                 ),
             )
@@ -5725,7 +5906,8 @@ mod tests {
                         date: 101,
                         r#final: Some(false),
                         result_type: proto::get_updates_result::ResultType::TooLong as i32,
-                        sidecars: None,
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
+                        ..Default::default()
                     }),
                 ),
             )
@@ -5809,6 +5991,32 @@ mod tests {
                 ),
             )
             .await;
+
+            let remaining = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    7,
+                    remaining.id,
+                    proto::rpc_result::Result::GetUpdates(proto::GetUpdatesResult {
+                        updates: Vec::new(),
+                        seq: 500,
+                        date: 102,
+                        r#final: Some(true),
+                        result_type: proto::get_updates_result::ResultType::Empty as i32,
+                        skipped_sequences: (401..=500)
+                            .map(|seq| proto::SyncSkippedSequence {
+                                seq,
+                                reason: proto::sync_skipped_sequence::Reason::IrrelevantToBucket
+                                    as i32,
+                            })
+                            .collect(),
+                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await;
         });
 
         let store = InMemoryStore::new();
@@ -5851,7 +6059,7 @@ mod tests {
                 .unwrap(),
             crate::SyncBucketState {
                 seq: 500,
-                date: 101
+                date: 102
             }
         );
         server.await.unwrap();
@@ -5935,7 +6143,7 @@ mod tests {
 
         let events = backend.repair_user_bucket().await.unwrap();
 
-        assert!(events.iter().any(|event| matches!(
+        assert!(!events.iter().any(|event| matches!(
             event,
             ClientEvent::ChatDeleted { chat_id } if *chat_id == InlineId::new(7)
         )));
@@ -5948,10 +6156,8 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, ClientEvent::UserSettingsChanged {}))
         );
-        assert_eq!(
-            store.deleted_chat_ids().await.unwrap(),
-            vec![InlineId::new(7)]
-        );
+        assert!(store.deleted_chat_ids().await.unwrap().is_empty());
+        assert!(store.dialog(InlineId::new(7)).await.unwrap().is_some());
         assert!(store.user_settings().await.unwrap().is_some());
         server.await.unwrap();
     }
@@ -5997,6 +6203,7 @@ mod tests {
             DialogsRequest {
                 limit: Some(10),
                 cursor: None,
+                order: DialogsOrder::RecentActivity,
             },
         )
         .unwrap();
@@ -6030,6 +6237,7 @@ mod tests {
                 first_name: Some("Ada".to_owned()),
                 ..Default::default()
             }],
+            ..Default::default()
         });
 
         assert_eq!(page.participants.len(), 1);
@@ -6439,7 +6647,7 @@ mod tests {
     fn normalize_live_history_latest_keeps_newest_messages() {
         let records = (1..=4).rev().map(test_message_record).collect::<Vec<_>>();
 
-        let (records, has_more) = normalize_live_history_records(records, 3, false);
+        let (records, has_more) = crate::store::select_history_window(records, 3, None, None);
 
         assert!(has_more);
         assert_eq!(
@@ -6460,7 +6668,8 @@ mod tests {
             test_message_record(5),
         ];
 
-        let (records, has_more) = normalize_live_history_records(records, 3, true);
+        let (records, has_more) =
+            crate::store::select_history_window(records, 3, None, Some(InlineId::new(4)));
 
         assert!(has_more);
         assert_eq!(
@@ -6480,7 +6689,8 @@ mod tests {
             test_message_record(1),
         ];
 
-        let (records, has_more) = normalize_live_history_records(records, 2, false);
+        let (records, has_more) =
+            crate::store::select_history_window(records, 2, Some(InlineId::new(4)), None);
 
         assert!(has_more);
         assert_eq!(
@@ -6489,6 +6699,35 @@ mod tests {
                 .map(|message| message.message_id)
                 .collect::<Vec<_>>(),
             vec![InlineId::new(2), InlineId::new(3)]
+        );
+    }
+
+    #[test]
+    fn history_window_membership_uses_message_id_before_timestamp_ordering() {
+        let mut records = (1..=4).map(test_message_record).collect::<Vec<_>>();
+        records[0].timestamp = 10_000;
+        records[3].timestamp = 1;
+
+        let (latest, latest_has_more) =
+            crate::store::select_history_window(records.clone(), 3, None, None);
+        let (older, older_has_more) =
+            crate::store::select_history_window(records, 2, Some(InlineId::new(4)), None);
+
+        assert!(latest_has_more);
+        assert_eq!(
+            latest
+                .iter()
+                .map(|message| message.message_id.get())
+                .collect::<Vec<_>>(),
+            vec![4, 2, 3]
+        );
+        assert!(older_has_more);
+        assert_eq!(
+            older
+                .iter()
+                .map(|message| message.message_id.get())
+                .collect::<Vec<_>>(),
+            vec![2, 3]
         );
     }
 
@@ -6536,6 +6775,7 @@ mod tests {
                         replies: None,
                         actions: None,
                         rev: None,
+                        service_message: None,
                     }),
                 })),
             }],

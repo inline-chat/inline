@@ -21,8 +21,8 @@ use crate::{
     AccountStateSnapshot, AddChatParticipantRequest, AuthStartRequest, AuthStartResult,
     AuthVerifyRequest, AuthVerifyResult, BackendError, BackendResult, ChatParticipantsPage,
     ChatParticipantsRequest, ChatStateSnapshot, ClientBackend, ClientErrorCategory, ClientEvent,
-    ClientFailure, ClientStatus, ClientStatusSnapshot, ConnectRequest, CreateDmRequest,
-    CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
+    ClientEventDelivery, ClientFailure, ClientStatus, ClientStatusSnapshot, ConnectRequest,
+    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
     DeleteMessageRequest, DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage,
     HistoryRequest, InMemoryBackend, InlineId, MessageMutation, OperationOutcome, ReactRequest,
     ReadRequest, RemoveChatParticipantRequest, SendTextOutcome, SendTextRequest,
@@ -177,6 +177,7 @@ impl InlineClientBuilder {
             broadcast: event_tx,
             lossless: lossless_event_tx,
             lossless_active: lossless_event_active,
+            backend: self.backend.clone(),
         };
         let runner = ClientRunner {
             command_rx,
@@ -225,14 +226,66 @@ pub struct InlineClientRuntime {
 /// committed lossless client events.
 #[derive(Debug)]
 pub struct LosslessEventReceiver {
-    receiver: mpsc::Receiver<ClientEvent>,
+    receiver: mpsc::Receiver<LosslessEventDelivery>,
 }
 
 impl LosslessEventReceiver {
-    /// Receives the next lossless event, or `None` after the client runner
-    /// closes.
-    pub async fn recv(&mut self) -> Option<ClientEvent> {
+    /// Receives the next lossless delivery without acknowledging it. Durable
+    /// hosts should commit the event and then call [`LosslessEventDelivery::ack`].
+    pub async fn recv_delivery(&mut self) -> Option<LosslessEventDelivery> {
         self.receiver.recv().await
+    }
+
+    /// Receives the next lossless event, or `None` after the client runner
+    /// closes. This compatibility helper acknowledges the delivery before
+    /// returning; crash-safe hosts should use [`Self::recv_delivery`] instead.
+    pub async fn recv(&mut self) -> Option<ClientEvent> {
+        let delivery = self.recv_delivery().await?;
+        let event = delivery.event.clone();
+        if let Err(error) = delivery.ack().await {
+            log::error!("failed to acknowledge consumed Inline client event: {error}");
+        }
+        Some(event)
+    }
+}
+
+/// One lossless event held durably until its single consumer acknowledges it.
+#[derive(Debug)]
+pub struct LosslessEventDelivery {
+    delivery_id: Option<u64>,
+    event: ClientEvent,
+    backend: Arc<dyn ClientBackend>,
+    acknowledged: AtomicBool,
+}
+
+impl LosslessEventDelivery {
+    /// Returns the store-local durable delivery ID when the backend supports it.
+    pub const fn delivery_id(&self) -> Option<u64> {
+        self.delivery_id
+    }
+
+    /// Returns the committed client event.
+    pub const fn event(&self) -> &ClientEvent {
+        &self.event
+    }
+
+    /// Acknowledges the event after consumer-side handling is durably committed.
+    pub async fn ack(&self) -> BackendResult<()> {
+        if let Some(delivery_id) = self.delivery_id {
+            self.backend.acknowledge_event_delivery(delivery_id).await?;
+        }
+        self.acknowledged.store(true, Ordering::Release);
+        Ok(())
+    }
+}
+
+impl Drop for LosslessEventDelivery {
+    fn drop(&mut self) {
+        if let Some(delivery_id) = self.delivery_id
+            && !self.acknowledged.load(Ordering::Acquire)
+        {
+            self.backend.release_event_delivery(delivery_id);
+        }
     }
 }
 
@@ -255,7 +308,7 @@ impl InlineClientRuntime {
 pub struct InlineClient {
     command_tx: mpsc::Sender<ClientCommand>,
     event_tx: broadcast::Sender<ClientEvent>,
-    lossless_event_rx: Arc<StdMutex<Option<mpsc::Receiver<ClientEvent>>>>,
+    lossless_event_rx: Arc<StdMutex<Option<mpsc::Receiver<LosslessEventDelivery>>>>,
     lossless_event_active: Arc<AtomicBool>,
     status_rx: watch::Receiver<ClientStatus>,
     failure_rx: watch::Receiver<Option<ClientFailure>>,
@@ -685,28 +738,51 @@ pub struct ClientRunner {
 #[derive(Clone, Debug)]
 struct ClientEventEmitter {
     broadcast: broadcast::Sender<ClientEvent>,
-    lossless: mpsc::Sender<ClientEvent>,
+    lossless: mpsc::Sender<LosslessEventDelivery>,
     lossless_active: Arc<AtomicBool>,
+    backend: Arc<dyn ClientBackend>,
 }
 
 impl ClientEventEmitter {
-    async fn emit(&self, event: ClientEvent) {
-        let _ = self.broadcast.send(event.clone());
-        if event.reliability() == crate::EventReliability::Lossless
-            && self.lossless_active.load(Ordering::Acquire)
-            && self.lossless.send(event).await.is_err()
-        {
-            self.lossless_active.store(false, Ordering::Release);
+    async fn emit_delivery(&self, delivery: ClientEventDelivery) -> BackendResult<()> {
+        let _ = self.broadcast.send(delivery.event.clone());
+        if delivery.event.reliability() != crate::EventReliability::Lossless {
+            return Ok(());
         }
+        let delivery = LosslessEventDelivery {
+            delivery_id: delivery.delivery_id,
+            event: delivery.event,
+            backend: self.backend.clone(),
+            acknowledged: AtomicBool::new(false),
+        };
+        if self.lossless_active.load(Ordering::Acquire) {
+            if let Err(error) = self.lossless.send(delivery).await {
+                self.lossless_active.store(false, Ordering::Release);
+                error.0.ack().await?;
+            }
+        } else {
+            delivery.ack().await?;
+        }
+        Ok(())
     }
 
-    async fn emit_operation_events(&self, outcome: OperationOutcome) {
-        for event in outcome.events {
-            self.emit(event).await;
-        }
+    async fn emit_events(&self, events: Vec<ClientEvent>) -> BackendResult<()> {
+        let deliveries = self.backend.stage_client_events(events).await?;
+        self.emit_deliveries(deliveries).await
     }
 
-    async fn emit_send_outcome(&self, outcome: SendTextOutcome) -> MessageMutation {
+    async fn emit_deliveries(&self, deliveries: Vec<ClientEventDelivery>) -> BackendResult<()> {
+        for delivery in deliveries {
+            self.emit_delivery(delivery).await?;
+        }
+        Ok(())
+    }
+
+    async fn emit_operation_events(&self, outcome: OperationOutcome) -> BackendResult<()> {
+        self.emit_events(outcome.events).await
+    }
+
+    async fn emit_send_outcome(&self, outcome: SendTextOutcome) -> BackendResult<MessageMutation> {
         let transaction = outcome.transaction_event();
         let message_id = outcome.message_id;
         let chat_id = outcome.chat_id;
@@ -714,19 +790,18 @@ impl ClientEventEmitter {
         let mut mutation = outcome.mutation;
         mutation.state = Some(outcome.state);
         mutation.failure = outcome.failure.clone();
-        self.emit(ClientEvent::TransactionChanged(transaction))
-            .await;
+        let mut events = vec![ClientEvent::TransactionChanged(transaction)];
         if let Some(message_id) = message_id {
-            self.emit(ClientEvent::MessageUpserted {
+            events.push(ClientEvent::MessageUpserted {
                 chat_id,
                 message_id,
-            })
-            .await;
+            });
         }
         if let Some(message) = message {
-            self.emit(ClientEvent::MessageStored { message }).await;
+            events.push(ClientEvent::MessageStored { message });
         }
-        mutation
+        self.emit_events(events).await?;
+        Ok(mutation)
     }
 }
 
@@ -753,7 +828,7 @@ impl ClientRunner {
                 }
             }
         }
-        self.stop_event_receiver();
+        self.stop_event_receiver().await;
         log::debug!("inline client runner stopped");
     }
 
@@ -805,10 +880,8 @@ impl ClientRunner {
         )
     }
 
-    async fn emit_received_events(&self, events: Vec<ClientEvent>) {
-        for event in events {
-            self.event_emitter.emit(event).await;
-        }
+    async fn emit_received_events(&self, events: Vec<ClientEventDelivery>) -> BackendResult<()> {
+        self.event_emitter.emit_deliveries(events).await
     }
 
     async fn handle_signal(&mut self, signal: RunnerSignal) {
@@ -817,7 +890,10 @@ impl ClientRunner {
                 if self.status == ClientStatus::Reconnecting {
                     self.update_status(ClientStatus::Connected, None).await;
                 }
-                self.emit_received_events(events).await;
+                if let Err(error) = self.emit_received_events(events).await {
+                    log::error!("failed to emit durable Inline client events: {error}");
+                    self.update_status_for_backend_error(&error).await;
+                }
             }
             RunnerSignal::ReceiveError(error) => {
                 self.update_status_for_backend_error(&error).await;
@@ -919,22 +995,22 @@ impl ClientRunner {
                 .map(ClientResponse::ChatParticipants),
             ClientRequest::AddChatParticipant(request) => {
                 let outcome = self.backend.add_chat_participant(request).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::RemoveChatParticipant(request) => {
                 let outcome = self.backend.remove_chat_participant(request).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::UpdateChatInfo(request) => {
                 let outcome = self.backend.update_chat_info(request).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::DeleteChat(request) => {
                 let outcome = self.backend.delete_chat(request).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::CreateDm(request) => self
@@ -955,48 +1031,48 @@ impl ClientRunner {
             ClientRequest::SendText(send) => {
                 let outcome = self.backend.send_text(send).await?;
                 Ok(ClientResponse::Message(
-                    self.event_emitter.emit_send_outcome(outcome).await,
+                    self.event_emitter.emit_send_outcome(outcome).await?,
                 ))
             }
             ClientRequest::SendMedia { request, bytes } => {
                 let outcome = self.backend.send_media(request, bytes).await?;
                 Ok(ClientResponse::Message(
-                    self.event_emitter.emit_send_outcome(outcome).await,
+                    self.event_emitter.emit_send_outcome(outcome).await?,
                 ))
             }
             ClientRequest::EditMessage(edit) => {
                 let outcome = self.backend.edit_message(edit).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::DeleteMessage(delete) => {
                 let outcome = self.backend.delete_message(delete).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::React(react) => {
                 let outcome = self.backend.react(react).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::Read(read) => {
                 let outcome = self.backend.read(read).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::SetMarkedUnread(request) => {
                 let outcome = self.backend.set_marked_unread(request).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::UpdateDialogNotifications(request) => {
                 let outcome = self.backend.update_dialog_notifications(request).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
             ClientRequest::Typing(typing) => {
                 let outcome = self.backend.typing(typing).await?;
-                self.event_emitter.emit_operation_events(outcome).await;
+                self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
         }
@@ -1024,10 +1100,14 @@ impl ClientRunner {
         self.failure = failure.clone();
         let _ = self.status_tx.send(status);
         let _ = self.failure_tx.send(failure.clone());
-        self.event_emitter
-            .emit(ClientEvent::StatusChanged { status, failure })
-            .await;
-        self.sync_event_receiver_to_status();
+        if let Err(error) = self
+            .event_emitter
+            .emit_events(vec![ClientEvent::StatusChanged { status, failure }])
+            .await
+        {
+            log::error!("failed to persist Inline status event: {error}");
+        }
+        self.sync_event_receiver_to_status().await;
     }
 
     fn spawn_concurrent_request(
@@ -1051,11 +1131,11 @@ impl ClientRunner {
         }
     }
 
-    fn sync_event_receiver_to_status(&mut self) {
+    async fn sync_event_receiver_to_status(&mut self) {
         if self.should_receive_events() {
             self.start_event_receiver();
         } else {
-            self.stop_event_receiver();
+            self.stop_event_receiver().await;
         }
     }
 
@@ -1073,9 +1153,13 @@ impl ClientRunner {
         )));
     }
 
-    fn stop_event_receiver(&mut self) {
+    async fn stop_event_receiver(&mut self) {
         if let Some(task) = self.event_task.take() {
             task.abort();
+            let _ = task.await;
+        }
+        if let Err(error) = self.backend.reset_event_delivery_claims().await {
+            log::error!("failed to release Inline client event delivery claims: {error}");
         }
     }
 }
@@ -1120,25 +1204,25 @@ async fn handle_concurrent_request(
         ClientRequest::AddChatParticipant(request) => {
             events
                 .emit_operation_events(backend.add_chat_participant(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::RemoveChatParticipant(request) => {
             events
                 .emit_operation_events(backend.remove_chat_participant(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::UpdateChatInfo(request) => {
             events
                 .emit_operation_events(backend.update_chat_info(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::DeleteChat(request) => {
             events
                 .emit_operation_events(backend.delete_chat(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::CreateDm(request) => backend
@@ -1156,55 +1240,55 @@ async fn handle_concurrent_request(
         ClientRequest::SendText(request) => {
             let outcome = backend.send_text(request).await?;
             Ok(ClientResponse::Message(
-                events.emit_send_outcome(outcome).await,
+                events.emit_send_outcome(outcome).await?,
             ))
         }
         ClientRequest::SendMedia { request, bytes } => {
             let outcome = backend.send_media(request, bytes).await?;
             Ok(ClientResponse::Message(
-                events.emit_send_outcome(outcome).await,
+                events.emit_send_outcome(outcome).await?,
             ))
         }
         ClientRequest::EditMessage(request) => {
             events
                 .emit_operation_events(backend.edit_message(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::DeleteMessage(request) => {
             events
                 .emit_operation_events(backend.delete_message(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::React(request) => {
             events
                 .emit_operation_events(backend.react(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::Read(request) => {
             events
                 .emit_operation_events(backend.read(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::SetMarkedUnread(request) => {
             events
                 .emit_operation_events(backend.set_marked_unread(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::UpdateDialogNotifications(request) => {
             events
                 .emit_operation_events(backend.update_dialog_notifications(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::Typing(request) => {
             events
                 .emit_operation_events(backend.typing(request).await?)
-                .await;
+                .await?;
             Ok(ClientResponse::Empty)
         }
         ClientRequest::AuthStart(_)
@@ -1222,7 +1306,7 @@ async fn run_backend_event_receiver(
 ) {
     let mut retry_attempt = 0_u32;
     loop {
-        match backend.receive_events().await {
+        match backend.receive_event_deliveries().await {
             Ok(events) => {
                 retry_attempt = 0;
                 if signal_tx.send(RunnerSignal::Events(events)).await.is_err() {
@@ -1247,6 +1331,9 @@ async fn run_backend_event_receiver(
             }
         }
     }
+    if let Err(error) = backend.reset_event_delivery_claims().await {
+        log::error!("failed to release stopped Inline event receiver claims: {error}");
+    }
 }
 
 enum ClientCommand {
@@ -1266,7 +1353,7 @@ enum ClientCommand {
 
 #[derive(Debug)]
 enum RunnerSignal {
-    Events(Vec<ClientEvent>),
+    Events(Vec<ClientEventDelivery>),
     ReceiveError(BackendError),
 }
 
@@ -1440,8 +1527,8 @@ enum ClientResponse {
 #[cfg(test)]
 mod tests {
     use crate::{
-        AuthContactKind, AuthCredential, AuthToken, DialogRecord, HistoryRequest, InlineId,
-        MediaKind, MessageContent, PeerRef,
+        AuthContactKind, AuthCredential, AuthToken, ClientStore, DialogRecord, HistoryRequest,
+        InlineId, MediaKind, MessageContent, PeerRef,
     };
 
     #[tokio::test]
@@ -1486,6 +1573,36 @@ mod tests {
             broadcast.recv().await,
             Err(broadcast::error::RecvError::Lagged(2))
         ));
+    }
+
+    #[tokio::test]
+    async fn durable_lossless_delivery_remains_pending_until_consumer_ack() {
+        let store = crate::InMemoryStore::new();
+        let backend = crate::SdkBackend::builder()
+            .store(store.clone())
+            .build()
+            .unwrap();
+        let client = InlineClient::builder().backend(backend).build().spawn();
+        let mut lossless = client.take_lossless_events().unwrap();
+
+        client
+            .set_status(ClientStatus::AuthRequired, None)
+            .await
+            .unwrap();
+        let delivery = lossless.recv_delivery().await.unwrap();
+        assert!(delivery.delivery_id().is_some());
+        assert_eq!(store.pending_client_events().await.unwrap().len(), 1);
+        assert!(matches!(
+            delivery.event(),
+            ClientEvent::StatusChanged {
+                status: ClientStatus::AuthRequired,
+                ..
+            }
+        ));
+
+        delivery.ack().await.unwrap();
+        assert!(store.pending_client_events().await.unwrap().is_empty());
+        client.shutdown().await.unwrap();
     }
 
     #[test]

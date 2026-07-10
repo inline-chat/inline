@@ -1485,6 +1485,62 @@ rpc_requests!(
         RemoveSpaceUrlPreviewExclusionResult,
         RemoveSpaceUrlPreviewExclusion
     ),
+    (
+        GetUserGroupsInput,
+        GetUserGroups,
+        GetUserGroups,
+        GetUserGroupsResult,
+        GetUserGroups
+    ),
+    (
+        CreateUserGroupInput,
+        CreateUserGroup,
+        CreateUserGroup,
+        CreateUserGroupResult,
+        CreateUserGroup
+    ),
+    (
+        UpdateUserGroupInput,
+        UpdateUserGroup,
+        UpdateUserGroup,
+        UpdateUserGroupResult,
+        UpdateUserGroup
+    ),
+    (
+        DeleteUserGroupInput,
+        DeleteUserGroup,
+        DeleteUserGroup,
+        DeleteUserGroupResult,
+        DeleteUserGroup
+    ),
+    (
+        GetSpaceSettingsInput,
+        GetSpaceSettings,
+        GetSpaceSettings,
+        GetSpaceSettingsResult,
+        GetSpaceSettings
+    ),
+    (
+        ToggleSpaceGridInput,
+        ToggleSpaceGrid,
+        ToggleSpaceGrid,
+        ToggleSpaceGridResult,
+        ToggleSpaceGrid
+    ),
+    (
+        GetThreadReferencesInput,
+        GetThreadReferences,
+        GetThreadReferences,
+        GetThreadReferencesResult,
+        GetThreadReferences
+    ),
+    (
+        GetThreadSubthreadsInput,
+        GetThreadSubthreads,
+        GetThreadSubthreads,
+        GetThreadSubthreadsResult,
+        GetThreadSubthreads
+    ),
 );
 
 fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::ConnectionInit {

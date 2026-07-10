@@ -40,13 +40,13 @@ pub use runtime::{
     ClientCommandError, ClientRequestError, ClientRunner, DEFAULT_COMMAND_QUEUE_CAPACITY,
     DEFAULT_EVENT_QUEUE_CAPACITY, DEFAULT_LOSSLESS_EVENT_QUEUE_CAPACITY,
     DEFAULT_MAX_CONCURRENT_REQUESTS, InlineClient, InlineClientBuilder, InlineClientRuntime,
-    LosslessEventReceiver, ReconnectPolicy,
+    LosslessEventDelivery, LosslessEventReceiver, ReconnectPolicy,
 };
 pub use sdk_backend::{SdkBackend, SdkBackendBuildError, SdkBackendBuilder};
 pub use store::{
-    AccountStateSnapshot, ChatStateSnapshot, ClientStore, InMemoryStore, PendingSyncBatch,
-    SqliteStore, StoreError, StoreResult, StoredReaction, StoredReadState, StoredSession,
-    StoredTransaction, SyncBucketKey, SyncBucketPeer, SyncBucketState, SyncState,
+    AccountStateSnapshot, ChatStateSnapshot, ClientEventDelivery, ClientStore, InMemoryStore,
+    PendingSyncBatch, SqliteStore, StoreError, StoreResult, StoredReaction, StoredReadState,
+    StoredSession, StoredTransaction, SyncBucketKey, SyncBucketPeer, SyncBucketState, SyncState,
 };
 pub use sync::SyncConfig;
 pub use types::{
@@ -54,16 +54,19 @@ pub use types::{
     AuthToken, AuthVerifyRequest, AuthVerifyResult, ChatCreateParticipant, ChatParticipantRecord,
     ChatParticipantsPage, ChatParticipantsRequest, ClientStatusSnapshot, ConnectRequest,
     CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
-    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage,
-    DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, MediaKind, MessageContent,
-    MessageMutation, MessageRecord, NotificationMode, PeerRef, ReactRequest, ReadRequest,
-    RemoveChatParticipantRequest, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord,
-    SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
+    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
+    DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, MediaKind,
+    MessageContent, MessageMutation, MessageRecord, NotificationMode, PeerRef, ReactRequest,
+    ReadRequest, RemoveChatParticipantRequest, SendTextRequest, SetMarkedUnreadRequest,
+    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
     UpdateDialogNotificationsRequest, UploadHandle, UploadRequest, UserRecord, UserSettingsRecord,
 };
 
 /// Published package version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Lossless bucket-sync schema implemented by this client release.
+pub const CORE_SYNC_SCHEMA_REVISION: u32 = 1;
 
 /// Errors returned by public `inline-client` helper types.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -601,17 +604,17 @@ pub mod prelude {
     pub use crate::{
         AddChatParticipantRequest, AuthCredential, AuthToken, BackendError, BackendResult,
         ClientBackend, ClientCommandError, ClientError, ClientErrorCategory, ClientEvent,
-        ClientFailure, ClientIdentity, ClientRequestError, ClientRunner, ClientStatus, ClientStore,
-        ConnectRequest, DEFAULT_COMMAND_QUEUE_CAPACITY, DEFAULT_EVENT_QUEUE_CAPACITY,
-        DEFAULT_LOSSLESS_EVENT_QUEUE_CAPACITY, DeleteChatRequest, DeleteMessageRequest,
-        DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage, DialogsRequest,
-        EditMessageRequest, EventReliability, ExternalId, FakeRealtimeAttempt,
+        ClientEventDelivery, ClientFailure, ClientIdentity, ClientRequestError, ClientRunner,
+        ClientStatus, ClientStore, ConnectRequest, DEFAULT_COMMAND_QUEUE_CAPACITY,
+        DEFAULT_EVENT_QUEUE_CAPACITY, DEFAULT_LOSSLESS_EVENT_QUEUE_CAPACITY, DeleteChatRequest,
+        DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage,
+        DialogsRequest, EditMessageRequest, EventReliability, ExternalId, FakeRealtimeAttempt,
         FakeRealtimeConnector, HistoryPage, HistoryRequest, InMemoryBackend, InMemoryStore,
-        InlineClient, InlineClientBuilder, InlineClientRuntime, InlineId, LosslessEventReceiver,
-        MessageContent, MessageMutation, MessageRecord, NotificationMode, PeerRef, RandomId,
-        ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnectionInfo,
-        RealtimeConnector, ReconnectPolicy, RemoveChatParticipantRequest, SdkBackend,
-        SdkBackendBuildError, SdkBackendBuilder, SdkRealtimeConnector, SendTextOutcome,
+        InlineClient, InlineClientBuilder, InlineClientRuntime, InlineId, LosslessEventDelivery,
+        LosslessEventReceiver, MessageContent, MessageMutation, MessageRecord, NotificationMode,
+        PeerRef, RandomId, ReactRequest, ReadRequest, RealtimeConnectRequest,
+        RealtimeConnectionInfo, RealtimeConnector, ReconnectPolicy, RemoveChatParticipantRequest,
+        SdkBackend, SdkBackendBuildError, SdkBackendBuilder, SdkRealtimeConnector, SendTextOutcome,
         SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole, SpaceRecord,
         SqliteStore, StoreError, StoreResult, StoredReaction, StoredReadState, StoredSession,
         StoredTransaction, SyncBucketKey, SyncBucketPeer, SyncBucketState, SyncConfig, SyncState,

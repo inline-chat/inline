@@ -19,11 +19,42 @@ use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AuthCredential, ChatParticipantRecord, ClientErrorCategory, ClientFailure, DialogFollowMode,
-    DialogNotificationMode, DialogRecord, DialogsPage, DialogsRequest, HistoryPage, HistoryRequest,
-    InlineId, MessageContent, MessageRecord, SpaceMemberRecord, SpaceRecord, TransactionEvent,
-    TransactionId, TransactionIdentity, TransactionState, UserRecord, UserSettingsRecord,
+    AuthCredential, ChatParticipantRecord, ClientErrorCategory, ClientEvent, ClientFailure,
+    DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage,
+    DialogsRequest, EventReliability, HistoryPage, HistoryRequest, InlineId, MessageContent,
+    MessageRecord, SpaceMemberRecord, SpaceRecord, TransactionEvent, TransactionId,
+    TransactionIdentity, TransactionState, UserRecord, UserSettingsRecord,
 };
+
+/// Selects a history page by the monotonic message-ID cursor before applying
+/// presentation ordering. Keeping this shared prevents timestamp skew from
+/// changing which records belong to a cursor window.
+pub(crate) fn select_history_window(
+    mut messages: Vec<MessageRecord>,
+    limit: usize,
+    before_message_id: Option<InlineId>,
+    after_message_id: Option<InlineId>,
+) -> (Vec<MessageRecord>, bool) {
+    if let Some(before) = before_message_id {
+        messages.retain(|message| message.message_id.get() < before.get());
+    }
+    if let Some(after) = after_message_id {
+        messages.retain(|message| message.message_id.get() > after.get());
+    }
+
+    messages.sort_by_key(|message| message.message_id.get());
+    let limit = limit.max(1);
+    let has_more = messages.len() > limit;
+    if has_more {
+        if after_message_id.is_some() {
+            messages.truncate(limit);
+        } else {
+            messages = messages.split_off(messages.len() - limit);
+        }
+    }
+    messages.sort_by_key(|message| (message.timestamp, message.message_id.get()));
+    (messages, has_more)
+}
 
 /// Result type returned by client stores.
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -124,6 +155,28 @@ pub struct PendingSyncBatch {
     pub committed_state: SyncBucketState,
     /// Versioned opaque encoded updates and sidecars.
     pub payload: Vec<u8>,
+}
+
+/// One client event prepared for delivery to the single lossless consumer.
+///
+/// Lossless events have a durable positive `delivery_id`. Best-effort events
+/// are carried through the same ordered batch with no durable identifier.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientEventDelivery {
+    /// Store-local identifier used to acknowledge a durable lossless event.
+    pub delivery_id: Option<u64>,
+    /// Committed client event.
+    pub event: ClientEvent,
+}
+
+impl ClientEventDelivery {
+    /// Creates an event that does not require durable acknowledgement.
+    pub fn ephemeral(event: ClientEvent) -> Self {
+        Self {
+            delivery_id: None,
+            event,
+        }
+    }
 }
 
 /// Durable current reaction state for one user and message.
@@ -253,12 +306,92 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
     /// Lists write-ahead batches that were not fully committed.
     fn pending_sync_batches(&self) -> BoxFuture<'static, StoreResult<Vec<PendingSyncBatch>>>;
 
+    /// Removes an invalid write-ahead batch without advancing its bucket
+    /// cursor. Stores should implement this so a journal written by an older
+    /// or incompatible client cannot permanently poison startup recovery.
+    fn discard_pending_sync_batch(
+        &self,
+        _key: SyncBucketKey,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not support discarding invalid sync journals",
+            ))
+        })
+    }
+
     /// Atomically advances a bucket cursor and removes its write-ahead batch.
     fn commit_pending_sync_batch(
         &self,
         key: SyncBucketKey,
         state: SyncBucketState,
     ) -> BoxFuture<'static, StoreResult<()>>;
+
+    /// Atomically advances a bucket cursor, records resulting lossless events,
+    /// and removes its write-ahead batch. Custom stores must override this to
+    /// use durable lossless delivery; the default fails before cursor commit.
+    fn commit_pending_sync_batch_with_events(
+        &self,
+        key: SyncBucketKey,
+        state: SyncBucketState,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        if events
+            .iter()
+            .any(|event| event.reliability() == EventReliability::Lossless)
+        {
+            return Box::pin(async {
+                Err(StoreError::new(
+                    ClientErrorCategory::Unsupported,
+                    "client store does not support a durable event outbox",
+                ))
+            });
+        }
+        let commit = self.commit_pending_sync_batch(key, state);
+        Box::pin(async move {
+            commit.await?;
+            Ok(events
+                .into_iter()
+                .map(ClientEventDelivery::ephemeral)
+                .collect())
+        })
+    }
+
+    /// Appends committed events to the durable lossless outbox while retaining
+    /// best-effort events as unsequenced deliveries.
+    fn append_client_events(
+        &self,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        Box::pin(async move {
+            if events
+                .iter()
+                .any(|event| event.reliability() == EventReliability::Lossless)
+            {
+                return Err(StoreError::new(
+                    ClientErrorCategory::Unsupported,
+                    "client store does not support a durable event outbox",
+                ));
+            }
+            Ok(events
+                .into_iter()
+                .map(ClientEventDelivery::ephemeral)
+                .collect())
+        })
+    }
+
+    /// Lists durable lossless events that have not yet been acknowledged by
+    /// the host consumer.
+    fn pending_client_events(&self) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    /// Acknowledges one durable lossless event after the host has persisted or
+    /// otherwise committed its handling.
+    fn acknowledge_client_event(&self, _delivery_id: u64) -> BoxFuture<'static, StoreResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
 
     /// Lists stored dialogs.
     fn dialogs(&self, request: DialogsRequest) -> BoxFuture<'static, StoreResult<DialogsPage>>;
@@ -277,6 +410,11 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
 
     /// Records user summaries in local state.
     fn record_users(&self, users: Vec<UserRecord>) -> BoxFuture<'static, StoreResult<()>>;
+
+    /// Loads one stored user summary.
+    fn user(&self, _user_id: InlineId) -> BoxFuture<'static, StoreResult<Option<UserRecord>>> {
+        Box::pin(async { Ok(None) })
+    }
 
     /// Inserts or replaces a durable space summary.
     fn record_space(&self, space: SpaceRecord) -> BoxFuture<'static, StoreResult<()>>;
@@ -519,6 +657,8 @@ struct InMemoryStoreState {
     sync_state: SyncState,
     sync_buckets: HashMap<SyncBucketKey, SyncBucketState>,
     pending_sync_batches: HashMap<SyncBucketKey, PendingSyncBatch>,
+    client_event_outbox: Vec<ClientEventDelivery>,
+    next_client_event_id: u64,
     dialogs: Vec<DialogRecord>,
     chat_tombstones: HashSet<i64>,
     users: HashMap<i64, UserRecord>,
@@ -533,6 +673,27 @@ struct InMemoryStoreState {
     reaction_snapshots: HashSet<(i64, i64)>,
     read_states: HashMap<i64, StoredReadState>,
     transactions: HashMap<String, StoredTransaction>,
+}
+
+fn append_memory_client_events(
+    state: &mut InMemoryStoreState,
+    events: Vec<ClientEvent>,
+) -> Vec<ClientEventDelivery> {
+    events
+        .into_iter()
+        .map(|event| {
+            if event.reliability() == EventReliability::BestEffort {
+                return ClientEventDelivery::ephemeral(event);
+            }
+            state.next_client_event_id = state.next_client_event_id.saturating_add(1).max(1);
+            let delivery = ClientEventDelivery {
+                delivery_id: Some(state.next_client_event_id),
+                event,
+            };
+            state.client_event_outbox.push(delivery.clone());
+            delivery
+        })
+        .collect()
 }
 
 impl InMemoryStore {
@@ -736,6 +897,22 @@ impl ClientStore for InMemoryStore {
         })
     }
 
+    fn discard_pending_sync_batch(
+        &self,
+        key: SyncBucketKey,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .pending_sync_batches
+                .remove(&key);
+            Ok(())
+        })
+    }
+
     fn commit_pending_sync_batch(
         &self,
         key: SyncBucketKey,
@@ -750,30 +927,115 @@ impl ClientStore for InMemoryStore {
         })
     }
 
+    fn commit_pending_sync_batch_with_events(
+        &self,
+        key: SyncBucketKey,
+        state: SyncBucketState,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut stored = store.state.lock().expect("in-memory store poisoned");
+            let deliveries = append_memory_client_events(&mut stored, events);
+            stored.sync_buckets.insert(key, state);
+            stored.pending_sync_batches.remove(&key);
+            Ok(deliveries)
+        })
+    }
+
+    fn append_client_events(
+        &self,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut stored = store.state.lock().expect("in-memory store poisoned");
+            Ok(append_memory_client_events(&mut stored, events))
+        })
+    }
+
+    fn pending_client_events(&self) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            Ok(store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .client_event_outbox
+                .clone())
+        })
+    }
+
+    fn acknowledge_client_event(&self, delivery_id: u64) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .client_event_outbox
+                .retain(|delivery| delivery.delivery_id != Some(delivery_id));
+            Ok(())
+        })
+    }
+
     fn dialogs(&self, request: DialogsRequest) -> BoxFuture<'static, StoreResult<DialogsPage>> {
         let store = self.clone();
         Box::pin(async move {
             let state = store.state.lock().expect("in-memory store poisoned");
-            let start = parse_cursor(request.cursor.as_deref())?;
             let limit = request.limit.unwrap_or(50).max(1) as usize;
-            let dialogs = state
-                .dialogs
-                .iter()
-                .skip(start)
-                .take(limit)
+            let (dialogs, next_cursor) = match request.order {
+                DialogsOrder::RecentActivity => {
+                    let start = parse_cursor(request.cursor.as_deref())?;
+                    let dialogs = state
+                        .dialogs
+                        .iter()
+                        .skip(start)
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let next = start + dialogs.len();
+                    (
+                        dialogs,
+                        (next < state.dialogs.len()).then(|| next.to_string()),
+                    )
+                }
+                DialogsOrder::StableChatId => {
+                    let after = parse_stable_dialog_cursor(request.cursor.as_deref())?;
+                    let mut candidates = state
+                        .dialogs
+                        .iter()
+                        .filter(|dialog| dialog.chat_id.get() > after)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    candidates.sort_by_key(|dialog| dialog.chat_id.get());
+                    let has_more = candidates.len() > limit;
+                    candidates.truncate(limit);
+                    let next = has_more
+                        .then(|| {
+                            candidates
+                                .last()
+                                .map(|dialog| dialog.chat_id.get().to_string())
+                        })
+                        .flatten();
+                    (candidates, next)
+                }
+            };
+            let dialogs = dialogs
+                .into_iter()
                 .map(|dialog| {
+                    let chat_id = dialog.chat_id;
                     dialog_with_synced_through(
-                        dialog.clone(),
-                        max_message_id_from_memory(&state.messages, dialog.chat_id),
+                        dialog,
+                        max_message_id_from_memory(&state.messages, chat_id),
                     )
                 })
                 .collect::<Vec<_>>();
-            let next = start + dialogs.len();
             let users = all_users_from_memory(&state.users);
             Ok(DialogsPage {
                 dialogs,
                 users,
-                next_cursor: (next < state.dialogs.len()).then(|| next.to_string()),
+                next_cursor,
             })
         })
     }
@@ -855,6 +1117,19 @@ impl ClientStore for InMemoryStore {
                 state.users.insert(user.user_id.get(), user);
             }
             Ok(())
+        })
+    }
+
+    fn user(&self, user_id: InlineId) -> BoxFuture<'static, StoreResult<Option<UserRecord>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            Ok(store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .users
+                .get(&user_id.get())
+                .cloned())
         })
     }
 
@@ -1085,34 +1360,24 @@ impl ClientStore for InMemoryStore {
         let store = self.clone();
         Box::pin(async move {
             let state = store.state.lock().expect("in-memory store poisoned");
-            let mut messages = state
+            let messages = state
                 .messages
                 .get(&request.chat_id.get())
                 .cloned()
                 .unwrap_or_default();
-            messages.sort_by_key(|message| (message.timestamp, message.message_id.get()));
             if request.before_message_id.is_some() && request.after_message_id.is_some() {
                 return Err(StoreError::new(
                     ClientErrorCategory::InvalidInput,
                     "history request cannot specify both before_message_id and after_message_id",
                 ));
             }
-            if let Some(before) = request.before_message_id {
-                messages.retain(|message| message.message_id.get() < before.get());
-            }
-            if let Some(after) = request.after_message_id {
-                messages.retain(|message| message.message_id.get() > after.get());
-            }
             let limit = request.limit.unwrap_or(50).max(1) as usize;
-            let has_more = messages.len() > limit;
-            if has_more {
-                if request.after_message_id.is_some() {
-                    messages.truncate(limit);
-                } else {
-                    let start = messages.len() - limit;
-                    messages = messages[start..].to_vec();
-                }
-            }
+            let (messages, has_more) = select_history_window(
+                messages,
+                limit,
+                request.before_message_id,
+                request.after_message_id,
+            );
             let users = users_for_messages_from_memory(&state.users, &messages);
             Ok(HistoryPage {
                 messages,
@@ -1563,6 +1828,7 @@ impl SqliteStore {
             "sync_state",
             "sync_buckets",
             "pending_sync_batches",
+            "client_event_outbox",
             "dialogs",
             "chat_tombstones",
             "users",
@@ -1741,14 +2007,29 @@ impl SqliteStore {
             .map_err(sqlite_error)
     }
 
+    fn discard_pending_sync_batch_sync(&self, key: SyncBucketKey) -> StoreResult<()> {
+        let (kind, entity_id) = sync_bucket_key_parts(key);
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        connection
+            .execute(
+                "DELETE FROM pending_sync_batches
+                 WHERE bucket_kind = ?1 AND entity_id = ?2",
+                params![kind, entity_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     fn commit_pending_sync_batch_sync(
         &self,
         key: SyncBucketKey,
         state: SyncBucketState,
-    ) -> StoreResult<()> {
+        events: Vec<ClientEvent>,
+    ) -> StoreResult<Vec<ClientEventDelivery>> {
         let (kind, entity_id) = sync_bucket_key_parts(key);
         let mut connection = self.connection.lock().expect("sqlite store poisoned");
         let transaction = connection.transaction().map_err(sqlite_error)?;
+        let deliveries = append_sqlite_client_events(&transaction, events)?;
         upsert_sync_bucket(&transaction, kind, entity_id, state)?;
         transaction
             .execute(
@@ -1758,16 +2039,68 @@ impl SqliteStore {
             )
             .map_err(sqlite_error)?;
         transaction.commit().map_err(sqlite_error)?;
+        Ok(deliveries)
+    }
+
+    fn append_client_events_sync(
+        &self,
+        events: Vec<ClientEvent>,
+    ) -> StoreResult<Vec<ClientEventDelivery>> {
+        let mut connection = self.connection.lock().expect("sqlite store poisoned");
+        let transaction = connection.transaction().map_err(sqlite_error)?;
+        let deliveries = append_sqlite_client_events(&transaction, events)?;
+        transaction.commit().map_err(sqlite_error)?;
+        Ok(deliveries)
+    }
+
+    fn pending_client_events_sync(&self) -> StoreResult<Vec<ClientEventDelivery>> {
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        let mut statement = connection
+            .prepare(
+                "SELECT delivery_id, event_json
+                 FROM client_event_outbox
+                 ORDER BY delivery_id ASC",
+            )
+            .map_err(sqlite_error)?;
+        statement
+            .query_map([], |row| {
+                let delivery_id = row.get::<_, i64>(0)?;
+                let event_json = row.get::<_, String>(1)?;
+                let event = serde_json::from_str(&event_json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(error))
+                })?;
+                Ok(ClientEventDelivery {
+                    delivery_id: Some(u64::try_from(delivery_id).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(0, Type::Integer, Box::new(error))
+                    })?),
+                    event,
+                })
+            })
+            .map_err(sqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    fn acknowledge_client_event_sync(&self, delivery_id: u64) -> StoreResult<()> {
+        let delivery_id = i64::try_from(delivery_id)
+            .map_err(|_| StoreError::internal("client event delivery ID exceeded SQLite range"))?;
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        connection
+            .execute(
+                "DELETE FROM client_event_outbox WHERE delivery_id = ?1",
+                params![delivery_id],
+            )
+            .map_err(sqlite_error)?;
         Ok(())
     }
 
     fn dialogs_sync(&self, request: DialogsRequest) -> StoreResult<DialogsPage> {
-        let start = parse_cursor(request.cursor.as_deref())?;
         let limit = request.limit.unwrap_or(50).max(1) as usize;
         let connection = self.connection.lock().expect("sqlite store poisoned");
-        let rows = {
-            let mut stmt = connection
-                .prepare(
+        let rows = match request.order {
+            DialogsOrder::RecentActivity => {
+                let start = parse_cursor(request.cursor.as_deref())?;
+                let mut stmt = connection.prepare(
                     "SELECT d.chat_id, d.peer_user_id, d.title, d.emoji, d.last_message_id,
                             (SELECT MAX(m.message_id) FROM messages m WHERE m.chat_id = d.chat_id) AS synced_through_message_id,
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
@@ -1776,22 +2109,53 @@ impl SqliteStore {
                      FROM dialogs d
                      ORDER BY COALESCE(last_message_id, 0) DESC, chat_id ASC
                      LIMIT ?1 OFFSET ?2",
+                ).map_err(sqlite_error)?;
+                stmt.query_map(
+                    params![(limit + 1) as i64, start as i64],
+                    sqlite_dialog_from_row,
                 )
-                .map_err(sqlite_error)?;
-            stmt.query_map(
-                params![(limit + 1) as i64, start as i64],
-                sqlite_dialog_from_row,
-            )
-            .map_err(sqlite_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sqlite_error)?
+                .map_err(sqlite_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?
+            }
+            DialogsOrder::StableChatId => {
+                let after = parse_stable_dialog_cursor(request.cursor.as_deref())?;
+                let mut stmt = connection.prepare(
+                    "SELECT d.chat_id, d.peer_user_id, d.title, d.emoji, d.last_message_id,
+                            (SELECT MAX(m.message_id) FROM messages m WHERE m.chat_id = d.chat_id) AS synced_through_message_id,
+                            d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
+                            d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
+                            d.notification_mode, d.follow_mode, d.pinned_message_ids_json
+                     FROM dialogs d
+                     WHERE d.chat_id > ?1
+                     ORDER BY d.chat_id ASC
+                     LIMIT ?2",
+                ).map_err(sqlite_error)?;
+                stmt.query_map(params![after, (limit + 1) as i64], sqlite_dialog_from_row)
+                    .map_err(sqlite_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sqlite_error)?
+            }
         };
 
         let has_more = rows.len() > limit;
         let dialogs = rows.into_iter().take(limit).collect::<Vec<_>>();
         let users = all_sqlite_users(&connection)?;
+        let next_cursor = match request.order {
+            DialogsOrder::RecentActivity => {
+                let start = parse_cursor(request.cursor.as_deref())?;
+                has_more.then(|| (start + dialogs.len()).to_string())
+            }
+            DialogsOrder::StableChatId => has_more
+                .then(|| {
+                    dialogs
+                        .last()
+                        .map(|dialog| dialog.chat_id.get().to_string())
+                })
+                .flatten(),
+        };
         Ok(DialogsPage {
-            next_cursor: has_more.then(|| (start + dialogs.len()).to_string()),
+            next_cursor,
             dialogs,
             users,
         })
@@ -1920,13 +2284,16 @@ impl SqliteStore {
             )?
         };
 
-        let has_more = rows.len() > limit;
-        let mut messages = rows
+        let messages = rows
             .into_iter()
-            .take(limit)
             .map(raw_sqlite_message_to_record)
             .collect::<StoreResult<Vec<_>>>()?;
-        messages.sort_by_key(|message| (message.timestamp, message.message_id.get()));
+        let (messages, has_more) = select_history_window(
+            messages,
+            limit,
+            request.before_message_id,
+            request.after_message_id,
+        );
         let users = sqlite_users_for_messages(&connection, &messages)?;
         Ok(HistoryPage {
             messages,
@@ -1945,6 +2312,19 @@ impl SqliteStore {
             upsert_sqlite_user(&connection, user)?;
         }
         Ok(())
+    }
+
+    fn user_sync(&self, user_id: InlineId) -> StoreResult<Option<UserRecord>> {
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        connection
+            .query_row(
+                "SELECT user_id, display_name, username, first_name, last_name, avatar_url, is_bot
+                 FROM users WHERE user_id = ?1",
+                params![user_id.get()],
+                sqlite_user_from_row,
+            )
+            .optional()
+            .map_err(sqlite_error)
     }
 
     fn record_space_sync(&self, space: SpaceRecord) -> StoreResult<()> {
@@ -2686,6 +3066,34 @@ impl SqliteStore {
     }
 }
 
+fn append_sqlite_client_events(
+    connection: &Connection,
+    events: Vec<ClientEvent>,
+) -> StoreResult<Vec<ClientEventDelivery>> {
+    events
+        .into_iter()
+        .map(|event| {
+            if event.reliability() == EventReliability::BestEffort {
+                return Ok(ClientEventDelivery::ephemeral(event));
+            }
+            let event_json = serde_json::to_string(&event)
+                .map_err(|error| StoreError::internal(format!("encode client event: {error}")))?;
+            connection
+                .execute(
+                    "INSERT INTO client_event_outbox (event_json, created_at) VALUES (?1, ?2)",
+                    params![event_json, now_seconds()],
+                )
+                .map_err(sqlite_error)?;
+            let delivery_id = u64::try_from(connection.last_insert_rowid())
+                .map_err(|_| StoreError::internal("stored client event delivery ID was invalid"))?;
+            Ok(ClientEventDelivery {
+                delivery_id: Some(delivery_id),
+                event,
+            })
+        })
+        .collect()
+}
+
 fn prepare_private_sqlite_file(path: &Path) -> StoreResult<()> {
     let mut options = OpenOptions::new();
     options.create(true).truncate(false).read(true).write(true);
@@ -2786,13 +3194,53 @@ impl ClientStore for SqliteStore {
         Box::pin(async move { store.pending_sync_batches_sync() })
     }
 
+    fn discard_pending_sync_batch(
+        &self,
+        key: SyncBucketKey,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move { store.discard_pending_sync_batch_sync(key) })
+    }
+
     fn commit_pending_sync_batch(
         &self,
         key: SyncBucketKey,
         state: SyncBucketState,
     ) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
-        Box::pin(async move { store.commit_pending_sync_batch_sync(key, state) })
+        Box::pin(async move {
+            store
+                .commit_pending_sync_batch_sync(key, state, Vec::new())
+                .map(|_| ())
+        })
+    }
+
+    fn commit_pending_sync_batch_with_events(
+        &self,
+        key: SyncBucketKey,
+        state: SyncBucketState,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move { store.commit_pending_sync_batch_sync(key, state, events) })
+    }
+
+    fn append_client_events(
+        &self,
+        events: Vec<ClientEvent>,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move { store.append_client_events_sync(events) })
+    }
+
+    fn pending_client_events(&self) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move { store.pending_client_events_sync() })
+    }
+
+    fn acknowledge_client_event(&self, delivery_id: u64) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move { store.acknowledge_client_event_sync(delivery_id) })
     }
 
     fn dialogs(&self, request: DialogsRequest) -> BoxFuture<'static, StoreResult<DialogsPage>> {
@@ -2823,6 +3271,11 @@ impl ClientStore for SqliteStore {
     fn record_users(&self, users: Vec<UserRecord>) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move { store.record_users_sync(users) })
+    }
+
+    fn user(&self, user_id: InlineId) -> BoxFuture<'static, StoreResult<Option<UserRecord>>> {
+        let store = self.clone();
+        Box::pin(async move { store.user_sync(user_id) })
     }
 
     fn record_space(&self, space: SpaceRecord) -> BoxFuture<'static, StoreResult<()>> {
@@ -3067,6 +3520,27 @@ pub(crate) fn parse_cursor(cursor: Option<&str>) -> StoreResult<usize> {
     }
 }
 
+fn parse_stable_dialog_cursor(cursor: Option<&str>) -> StoreResult<i64> {
+    match cursor {
+        Some(cursor) if !cursor.trim().is_empty() => {
+            let value = cursor.parse::<i64>().map_err(|_| {
+                StoreError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "invalid stable dialog pagination cursor",
+                )
+            })?;
+            if value < 0 {
+                return Err(StoreError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "invalid stable dialog pagination cursor",
+                ));
+            }
+            Ok(value)
+        }
+        _ => Ok(0),
+    }
+}
+
 fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
     connection
         .execute_batch(
@@ -3103,6 +3577,12 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
                 payload BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY (bucket_kind, entity_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS client_event_outbox (
+                delivery_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS dialogs (
@@ -3538,12 +4018,14 @@ fn dialog_notification_mode_from_store(value: &str) -> Option<DialogNotification
 const fn dialog_follow_mode_for_store(mode: DialogFollowMode) -> &'static str {
     match mode {
         DialogFollowMode::Following => "following",
+        DialogFollowMode::Unfollowed => "unfollowed",
     }
 }
 
 fn dialog_follow_mode_from_store(value: &str) -> Option<DialogFollowMode> {
     match value {
         "following" => Some(DialogFollowMode::Following),
+        "unfollowed" => Some(DialogFollowMode::Unfollowed),
         _ => None,
     }
 }
@@ -4048,6 +4530,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stable_dialog_cursor_does_not_duplicate_when_activity_order_changes() {
+        let store = InMemoryStore::new();
+        for (chat_id, last_message_id) in [(10, 100), (30, 300), (50, 500)] {
+            store.upsert_dialog(DialogRecord {
+                chat_id: InlineId::new(chat_id),
+                last_message_id: Some(InlineId::new(last_message_id)),
+                ..DialogRecord::new(InlineId::new(chat_id))
+            });
+        }
+
+        let first = store
+            .dialogs(DialogsRequest {
+                limit: Some(2),
+                cursor: None,
+                order: DialogsOrder::StableChatId,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            first
+                .dialogs
+                .iter()
+                .map(|dialog| dialog.chat_id.get())
+                .collect::<Vec<_>>(),
+            vec![10, 30]
+        );
+        assert_eq!(first.next_cursor.as_deref(), Some("30"));
+
+        store.upsert_dialog(DialogRecord {
+            chat_id: InlineId::new(50),
+            last_message_id: Some(InlineId::new(1_000)),
+            ..DialogRecord::new(InlineId::new(50))
+        });
+        store.upsert_dialog(DialogRecord::new(InlineId::new(20)));
+        store.upsert_dialog(DialogRecord::new(InlineId::new(40)));
+
+        let second = store
+            .dialogs(DialogsRequest {
+                limit: Some(2),
+                cursor: first.next_cursor,
+                order: DialogsOrder::StableChatId,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            second
+                .dialogs
+                .iter()
+                .map(|dialog| dialog.chat_id.get())
+                .collect::<Vec<_>>(),
+            vec![40, 50]
+        );
+        assert_eq!(second.next_cursor, None);
+    }
+
+    #[tokio::test]
     async fn in_memory_store_records_transactions() {
         let store = InMemoryStore::new();
         let transaction = stored_transaction("txn-mem", TransactionState::Queued);
@@ -4418,6 +4956,7 @@ mod tests {
             creator: true,
             date: 100,
             is_public: Some(false),
+            grid_enabled: Some(true),
         };
         let member = SpaceMemberRecord {
             space_id: InlineId::new(5),
@@ -4833,12 +5372,40 @@ mod tests {
                 payload: vec![1, 2, 3],
             }]
         );
-        reopened
-            .commit_pending_sync_batch(key, state)
+        let lossless = ClientEvent::MessageDeleted {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(11),
+        };
+        let best_effort = ClientEvent::Typing {
+            chat_id: InlineId::new(7),
+            user_id: InlineId::new(2),
+            is_typing: true,
+        };
+        let deliveries = reopened
+            .commit_pending_sync_batch_with_events(
+                key,
+                state,
+                vec![lossless.clone(), best_effort.clone()],
+            )
             .await
             .unwrap();
+        assert_eq!(deliveries.len(), 2);
+        assert!(deliveries[0].delivery_id.is_some());
+        assert_eq!(deliveries[0].event, lossless);
+        assert_eq!(deliveries[1], ClientEventDelivery::ephemeral(best_effort));
         assert_eq!(reopened.sync_bucket_state(key).await.unwrap(), state);
         assert!(reopened.pending_sync_batches().await.unwrap().is_empty());
+
+        drop(reopened);
+        let reopened = SqliteStore::open(&path).unwrap();
+        let pending = reopened.pending_client_events().await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event, lossless);
+        reopened
+            .acknowledge_client_event(pending[0].delivery_id.unwrap())
+            .await
+            .unwrap();
+        assert!(reopened.pending_client_events().await.unwrap().is_empty());
 
         drop(reopened);
         let _ = std::fs::remove_file(path);

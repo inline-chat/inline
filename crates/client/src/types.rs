@@ -261,6 +261,21 @@ pub struct DialogsRequest {
     pub limit: Option<u32>,
     /// Optional opaque pagination cursor.
     pub cursor: Option<String>,
+    /// Ordering contract used for this traversal.
+    #[serde(default)]
+    pub order: DialogsOrder,
+}
+
+/// Dialog traversal ordering.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialogsOrder {
+    /// User-facing recent-activity order. Offset cursors can shift while chats
+    /// are active and should not be used for full reconciliation scans.
+    #[default]
+    RecentActivity,
+    /// Stable chat-ID keyset order for mutation-safe reconciliation scans.
+    StableChatId,
 }
 
 /// Request to fetch chat history.
@@ -672,6 +687,8 @@ pub enum DialogNotificationMode {
 pub enum DialogFollowMode {
     /// Automatically surface activity from this reply thread.
     Following,
+    /// Explicitly opt out of automatic surfacing for ordinary activity.
+    Unfollowed,
 }
 
 /// A page of dialogs.
@@ -718,6 +735,9 @@ pub struct SpaceRecord {
     pub date: i64,
     /// Whether this is a public community space.
     pub is_public: Option<bool>,
+    /// Whether the space uses grid layout, when the setting has been loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_enabled: Option<bool>,
 }
 
 /// Inline space membership role.
