@@ -58,9 +58,10 @@ The SDK backend owns a long-lived multiplexed realtime connection, heartbeat
 and RPC timeouts, reconnect-triggered catch-up, InlineKit-compatible bucket
 discovery/gap recovery, bounded bucket concurrency, and a write-ahead sync
 journal so a crash cannot advance a bucket cursor past unapplied state. The
-built-in sync path negotiates a lossless schema revision, requires explicit
-accounting for every advanced sequence, rejects conflicting page envelopes,
-and treats realtime hints only as catch-up targets. Warm gaps are committed one
+built-in sync path advertises its lossless schema revision as additive metadata,
+requires explicit accounting for every advanced sequence, rejects conflicting
+page envelopes regardless of revision, and treats realtime hints only as
+catch-up targets. Warm gaps are committed one
 validated page at a time, so very long gaps resume from durable progress rather
 than replaying an entire in-memory batch. Incompatible pending journals are
 discarded without cursor advance and refetched from the authoritative server.

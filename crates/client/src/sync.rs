@@ -114,7 +114,6 @@ impl SyncManager {
             state.last_sync_date
         );
         let result = host.get_updates_state(state.last_sync_date).await?;
-        validate_core_sync_schema(result.core_sync_schema_revision)?;
         if result.updates_found == Some(false) {
             self.update_last_sync_date(result.date).await?;
         }
@@ -352,7 +351,6 @@ impl SyncManager {
                     core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                 })
                 .await?;
-            validate_core_sync_schema(response.core_sync_schema_revision)?;
             let result_type = proto::get_updates_result::ResultType::try_from(response.result_type)
                 .unwrap_or(proto::get_updates_result::ResultType::Unspecified);
 
@@ -1124,19 +1122,6 @@ fn store_error_to_backend(error: StoreError) -> BackendError {
     BackendError::new(error.category, error.message)
 }
 
-fn validate_core_sync_schema(server_revision: u32) -> BackendResult<()> {
-    if server_revision == crate::CORE_SYNC_SCHEMA_REVISION {
-        return Ok(());
-    }
-    Err(BackendError::new(
-        ClientErrorCategory::ProtocolMismatch,
-        format!(
-            "incompatible Inline sync schema: client={} server={server_revision}",
-            crate::CORE_SYNC_SCHEMA_REVISION
-        ),
-    ))
-}
-
 fn now_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1434,6 +1419,49 @@ mod tests {
         assert_eq!(requests[0].seq_end, 3);
         assert_eq!(requests[1].start_seq, 2);
         assert_eq!(requests[1].seq_end, 3);
+    }
+
+    #[tokio::test]
+    async fn safe_page_accepts_future_revision_metadata() {
+        let store = Arc::new(InMemoryStore::new());
+        let key = chat_key(7);
+        store
+            .save_sync_bucket_state(key, SyncBucketState { seq: 1, date: 10 })
+            .await
+            .unwrap();
+        let mut response = updates_result(vec![message_update(2, 20, 7, 102)], 2, 20, true);
+        response.core_sync_schema_revision = crate::CORE_SYNC_SCHEMA_REVISION + 1;
+        let host = FakeHost::new(vec![response]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        let events = sync
+            .process_realtime(&host, vec![chat_hint(7, 2)])
+            .await
+            .unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            store.sync_bucket_state(key).await.unwrap(),
+            SyncBucketState { seq: 2, date: 20 }
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_accepts_unversioned_state_and_page_metadata() {
+        let store = Arc::new(InMemoryStore::new());
+        let mut response = skipped_result(0, 1, 20);
+        response.core_sync_schema_revision = 0;
+        let mut host = FakeHost::new(vec![response]);
+        host.state.core_sync_schema_revision = 0;
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        let events = sync.discover(&host).await.unwrap();
+
+        assert!(events.is_empty());
+        assert_eq!(
+            store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
+            SyncBucketState { seq: 1, date: 20 }
+        );
     }
 
     #[tokio::test]

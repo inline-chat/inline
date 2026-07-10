@@ -65,7 +65,10 @@ pub use types::{
 /// Published package version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Lossless bucket-sync schema implemented by this client release.
+/// Informational lossless bucket-sync schema implemented by this client release.
+///
+/// Runtime compatibility is determined from each page's structure and explicit
+/// sequence accounting rather than exact revision equality.
 pub const CORE_SYNC_SCHEMA_REVISION: u32 = 1;
 
 /// Errors returned by public `inline-client` helper types.
