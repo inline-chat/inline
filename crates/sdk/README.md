@@ -3,7 +3,7 @@
 Rust SDK for Inline API calls, uploads, client metadata, and realtime RPC.
 
 This is the low-level SDK. It does not own a durable cache or sync engine; that
-will live in the higher-level `inline-client` crate. Use this crate when you
+lives in the higher-level `inline-client` crate. Use this crate when you
 want typed protocol access, HTTP auth/upload helpers, or a realtime RPC
 transport.
 
@@ -52,6 +52,10 @@ Use `inline_sdk::proto` for generated protobuf request and response types.
 Realtime request inputs implement `RpcRequest`, so prefer
 `RealtimeClient::call(proto::SomeInput { ... })` for normal RPCs. The lower
 level `invoke(method, input)` remains available for advanced protocol work.
+For concurrent RPCs and pushed updates on one WebSocket, use
+`connect_session()`. Multiplexed sessions have per-RPC timeouts, heartbeat
+deadlines, a bounded command queue, and a configurable
+`max_in_flight_rpcs(...)` limit.
 
 The SDK uses the standard Rust `log` facade and never initializes a logger.
 Parent applications can opt in with `env_logger`, `tracing-log`, `android_logger`,
@@ -67,8 +71,7 @@ specifically and keep a fallback arm so applications continue compiling when
 future SDK versions add more precise error cases.
 
 The SDK keeps transport and convenience helpers here; durable cache, sync
-state, and higher-level update handling belong in the future `inline-client`
-crate.
+state, and higher-level update handling belong in the `inline-client` crate.
 
 ## Publishing
 

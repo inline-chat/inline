@@ -2,7 +2,7 @@
 //!
 //! This crate contains the reusable pieces for API calls, uploads, client
 //! metadata, and the realtime RPC transport. It deliberately stays lower-level
-//! than the future stateful `inline-client` crate: callers own cache and sync
+//! than the stateful `inline-client` crate: callers own cache and sync
 //! policy here.
 //!
 //! The SDK follows normal Rust library logging practice: it emits diagnostics
@@ -48,8 +48,10 @@ pub use api::{
 pub use client_info::{AuthMetadata, ClientIdentity, ClientIdentityError};
 pub use inline_protocol::proto;
 pub use realtime::{
-    DEFAULT_CONNECT_TIMEOUT, DEFAULT_RPC_TIMEOUT, RealtimeClient, RealtimeClientBuilder,
-    RealtimeError, RealtimeEvent, RpcRequest,
+    DEFAULT_CONNECT_TIMEOUT, DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_TIMEOUT,
+    DEFAULT_RPC_TIMEOUT, DEFAULT_SESSION_COMMAND_CAPACITY, DEFAULT_SESSION_EVENT_CAPACITY,
+    DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS, RealtimeClient, RealtimeClientBuilder, RealtimeError,
+    RealtimeEvent, RealtimeEventReceiver, RealtimeSession, RpcRequest,
 };
 
 /// Convenient imports for common SDK consumers.
@@ -58,9 +60,12 @@ pub mod prelude {
         ApiClient, ApiClientBuilder, ApiError, AuthMetadata, ClientIdentity, ClientIdentityError,
         CreateLinearIssueInput, CreateLinearIssueResult, CreateNotionTaskInput,
         CreateNotionTaskResult, CreatePrivateChatResult, DEFAULT_API_TIMEOUT,
-        DEFAULT_CONNECT_TIMEOUT, DEFAULT_RPC_TIMEOUT, PeerId, ReadMessagesInput,
-        ReadMessagesResult, RealtimeClient, RealtimeClientBuilder, RealtimeError, RealtimeEvent,
-        RpcRequest, SendCodeResult, UploadFileBytesInput, UploadFileInput, UploadFileResult,
-        UploadFileType, UploadFileTypeParseError, UploadVideoMetadata, VerifyCodeResult, proto,
+        DEFAULT_CONNECT_TIMEOUT, DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_TIMEOUT,
+        DEFAULT_RPC_TIMEOUT, DEFAULT_SESSION_COMMAND_CAPACITY, DEFAULT_SESSION_EVENT_CAPACITY,
+        DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS, PeerId, ReadMessagesInput, ReadMessagesResult,
+        RealtimeClient, RealtimeClientBuilder, RealtimeError, RealtimeEvent, RealtimeEventReceiver,
+        RealtimeSession, RpcRequest, SendCodeResult, UploadFileBytesInput, UploadFileInput,
+        UploadFileResult, UploadFileType, UploadFileTypeParseError, UploadVideoMetadata,
+        VerifyCodeResult, proto,
     };
 }

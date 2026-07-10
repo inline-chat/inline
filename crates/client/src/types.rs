@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ClientError, ClientFailure, ClientStatus, ExternalId, InlineId, RandomId, TransactionIdentity,
-    validate_token,
+    TransactionState, validate_token,
 };
 
 /// Secret bearer-style auth token accepted by the client connect command.
@@ -124,7 +124,10 @@ impl fmt::Debug for ConnectRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConnectRequest")
             .field("auth", &self.auth)
-            .field("account_namespace", &self.account_namespace)
+            .field(
+                "account_namespace",
+                &self.account_namespace.as_ref().map(|_| "[redacted]"),
+            )
             .finish()
     }
 }
@@ -222,13 +225,16 @@ impl fmt::Debug for AuthVerifyRequest {
                 &self.challenge_token.as_ref().map(|_| "[redacted]"),
             )
             .field("device_name", &self.device_name)
-            .field("account_namespace", &self.account_namespace)
+            .field(
+                "account_namespace",
+                &self.account_namespace.as_ref().map(|_| "[redacted]"),
+            )
             .finish()
     }
 }
 
 /// Response from verifying an Inline login code.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthVerifyResult {
     /// Verified Inline user ID.
     pub user_id: InlineId,
@@ -236,6 +242,16 @@ pub struct AuthVerifyResult {
     pub account_namespace: String,
     /// Updated client status after persisting the session.
     pub status: ClientStatusSnapshot,
+}
+
+impl fmt::Debug for AuthVerifyResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthVerifyResult")
+            .field("user_id", &self.user_id)
+            .field("account_namespace", &"[redacted]")
+            .field("status", &self.status)
+            .finish()
+    }
 }
 
 /// Request to list dialogs.
@@ -263,6 +279,44 @@ pub struct HistoryRequest {
 /// Request to fetch chat participants.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatParticipantsRequest {
+    /// Inline chat ID.
+    pub chat_id: InlineId,
+}
+
+/// Request to add a user to an Inline chat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddChatParticipantRequest {
+    /// Inline chat ID.
+    pub chat_id: InlineId,
+    /// Inline user ID to add.
+    pub user_id: InlineId,
+}
+
+/// Request to remove a user from an Inline chat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoveChatParticipantRequest {
+    /// Inline chat ID.
+    pub chat_id: InlineId,
+    /// Inline user ID to remove.
+    pub user_id: InlineId,
+}
+
+/// Request to update mutable Inline chat metadata.
+///
+/// `None` leaves a field unchanged. An empty emoji clears the current icon.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateChatInfoRequest {
+    /// Inline chat ID.
+    pub chat_id: InlineId,
+    /// Replacement title, when changing it.
+    pub title: Option<String>,
+    /// Replacement emoji, or an empty string to clear it.
+    pub emoji: Option<String>,
+}
+
+/// Request to delete an Inline chat when the authenticated user is allowed to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteChatRequest {
     /// Inline chat ID.
     pub chat_id: InlineId,
 }
@@ -422,6 +476,24 @@ pub struct ReadRequest {
     pub max_message_id: Option<InlineId>,
 }
 
+/// Request to set the explicit marked-unread state for a chat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetMarkedUnreadRequest {
+    /// Inline chat ID.
+    pub chat_id: InlineId,
+    /// Whether the chat should be explicitly marked unread.
+    pub unread: bool,
+}
+
+/// Request to set or clear a per-dialog notification override.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateDialogNotificationsRequest {
+    /// Inline chat ID.
+    pub chat_id: InlineId,
+    /// Explicit mode, or `None` to inherit the account-wide setting.
+    pub mode: Option<DialogNotificationMode>,
+}
+
 /// Request to set typing state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypingRequest {
@@ -512,12 +584,94 @@ pub struct DialogRecord {
     pub peer_user_id: Option<InlineId>,
     /// Display title, when known.
     pub title: Option<String>,
+    /// Chat emoji/icon, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
     /// Last known message ID, when known.
     pub last_message_id: Option<InlineId>,
     /// Highest message ID currently stored by `inline-client`, when known.
     pub synced_through_message_id: Option<InlineId>,
     /// Unread count, when known.
     pub unread_count: Option<u32>,
+    /// Parent Inline space ID, when this chat belongs to a space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<InlineId>,
+    /// Whether the chat is visible to all eligible members of its parent space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_public: Option<bool>,
+    /// Whether the dialog is archived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
+    /// Whether the dialog is pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
+    /// Whether the dialog belongs to the stable sidebar inbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open: Option<bool>,
+    /// Whether the dialog is hidden from normal chat lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_list_hidden: Option<bool>,
+    /// Stable fractional normal-list order, when assigned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<String>,
+    /// Stable fractional pinned-list order, when assigned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_order: Option<String>,
+    /// Per-dialog notification override, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_mode: Option<DialogNotificationMode>,
+    /// Reply-thread follow mode, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_mode: Option<DialogFollowMode>,
+    /// Ordered pinned message IDs, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_message_ids: Vec<InlineId>,
+}
+
+impl DialogRecord {
+    /// Creates an empty dialog record for a chat ID.
+    pub fn new(chat_id: InlineId) -> Self {
+        Self {
+            chat_id,
+            peer_user_id: None,
+            title: None,
+            emoji: None,
+            last_message_id: None,
+            synced_through_message_id: None,
+            unread_count: None,
+            space_id: None,
+            is_public: None,
+            archived: None,
+            pinned: None,
+            open: None,
+            chat_list_hidden: None,
+            order: None,
+            pinned_order: None,
+            notification_mode: None,
+            follow_mode: None,
+            pinned_message_ids: Vec::new(),
+        }
+    }
+}
+
+/// Per-dialog notification override.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialogNotificationMode {
+    /// Notify for all messages.
+    All,
+    /// Notify only for mentions.
+    Mentions,
+    /// Do not notify for this dialog.
+    None,
+}
+
+/// Reply-thread automatic surfacing policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialogFollowMode {
+    /// Automatically surface activity from this reply thread.
+    Following,
 }
 
 /// A page of dialogs.
@@ -549,6 +703,81 @@ pub struct UserRecord {
     pub avatar_url: Option<String>,
     /// Whether this user is a bot.
     pub is_bot: Option<bool>,
+}
+
+/// Durable Inline space summary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpaceRecord {
+    /// Inline space ID.
+    pub space_id: InlineId,
+    /// Space display name.
+    pub name: String,
+    /// Whether the authenticated user created the space.
+    pub creator: bool,
+    /// Unix timestamp when the space was created.
+    pub date: i64,
+    /// Whether this is a public community space.
+    pub is_public: Option<bool>,
+}
+
+/// Inline space membership role.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceMemberRole {
+    /// Space owner.
+    Owner,
+    /// Space administrator.
+    Admin,
+    /// Regular space member.
+    Member,
+}
+
+/// Durable Inline space member state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpaceMemberRecord {
+    /// Inline space ID.
+    pub space_id: InlineId,
+    /// Inline user ID.
+    pub user_id: InlineId,
+    /// Membership role, when supplied by the server.
+    pub role: Option<SpaceMemberRole>,
+    /// Unix timestamp when the user joined.
+    pub date: i64,
+    /// Whether the member may access public chats in this space.
+    pub can_access_public_chats: bool,
+}
+
+/// Global notification policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationMode {
+    /// Notify for all messages.
+    All,
+    /// Disable notifications.
+    None,
+    /// Notify for mentions.
+    Mentions,
+    /// Notify only for important messages.
+    ImportantOnly,
+    /// Notify only for direct mentions.
+    OnlyMentions,
+}
+
+/// Durable user notification settings relevant to generic clients.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserSettingsRecord {
+    /// Global notification mode, when set.
+    pub notification_mode: Option<NotificationMode>,
+    /// Whether notification sounds are disabled.
+    pub silent: Option<bool>,
+    /// Whether zen mode requires a mention.
+    pub zen_mode_requires_mention: Option<bool>,
+    /// Whether zen mode uses default rules.
+    pub zen_mode_uses_default_rules: Option<bool>,
+    /// Custom zen-mode rules.
+    pub zen_mode_custom_rules: Option<String>,
+    /// Whether direct-message notifications are disabled.
+    pub disable_dm_notifications: Option<bool>,
 }
 
 /// Message content returned by the client.
@@ -719,6 +948,12 @@ pub struct MessageMutation {
     pub transaction: TransactionIdentity,
     /// Final message ID, when already known.
     pub message_id: Option<InlineId>,
+    /// Durable transaction state after this send attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<TransactionState>,
+    /// Redacted terminal or retryable failure details, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<ClientFailure>,
 }
 
 /// Uploaded file/media handle returned by the client.
@@ -743,6 +978,18 @@ mod tests {
 
         assert_eq!(format!("{token:?}"), "AuthToken(\"[redacted]\")");
         assert_eq!(token.expose_secret(), "secret-token");
+    }
+
+    #[test]
+    fn session_namespace_debug_is_redacted() {
+        let request = ConnectRequest::new(AuthCredential::AccessToken {
+            token: AuthToken::try_new("token").unwrap(),
+        })
+        .with_account_namespace("secret-namespace");
+
+        let rendered = format!("{request:?}");
+        assert!(rendered.contains("[redacted]"));
+        assert!(!rendered.contains("secret-namespace"));
     }
 
     #[test]

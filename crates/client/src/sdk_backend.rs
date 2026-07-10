@@ -1,42 +1,51 @@
-//! SDK-backed backend skeleton.
+//! SDK-backed production backend.
 //!
-//! This backend is the production-facing seam: it owns the configured
-//! `inline-sdk` clients and durable store. Network-backed realtime sync and
-//! transaction managers will be added behind this type without changing the
-//! native client API or runner shape.
+//! This backend owns the configured `inline-sdk` clients, durable store,
+//! multiplexed realtime session, bucket sync, and transaction state behind the
+//! native client API.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap, HashSet},
     fmt,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::future::BoxFuture;
 use inline_sdk::{
-    ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeClient, RealtimeError,
-    RealtimeEvent, RpcRequest, UploadFileBytesInput, UploadFileResult, UploadFileType,
-    UploadVideoMetadata, proto,
+    ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeError, RealtimeEvent,
+    RealtimeEventReceiver, RealtimeSession, RpcRequest, UploadFileBytesInput, UploadFileResult,
+    UploadFileType, UploadVideoMetadata, proto,
 };
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+use crate::backend::retry_after_seconds_from_message;
+use crate::sync::{SyncHost, SyncManager};
 use crate::{
-    AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult, AuthToken,
-    AuthVerifyRequest, AuthVerifyResult, BackendError, BackendResult, ChatCreateParticipant,
-    ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest, ClientBackend,
+    AccountStateSnapshot, AddChatParticipantRequest, AuthContactKind, AuthCredential,
+    AuthStartRequest, AuthStartResult, AuthToken, AuthVerifyRequest, AuthVerifyResult,
+    BackendError, BackendResult, ChatCreateParticipant, ChatParticipantRecord,
+    ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot, ClientBackend,
     ClientErrorCategory, ClientEvent, ClientStatusSnapshot, ClientStore, ConnectRequest,
-    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat,
-    DeleteMessageRequest, DialogRecord, DialogsPage, DialogsRequest, EditMessageRequest,
-    HistoryPage, HistoryRequest, InMemoryStore, InlineId, MediaKind, MessageContent,
-    MessageMutation, MessageRecord, OperationOutcome, PeerRef, RandomId, ReactRequest, ReadRequest,
-    RealtimeConnectRequest, RealtimeConnector, SdkRealtimeConnector, SendTextOutcome,
-    SendTextRequest, StoreError, StoredSession, StoredTransaction, TransactionId,
-    TransactionIdentity, TransactionState, TypingRequest, UploadRequest, UserRecord, VERSION,
+    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
+    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage,
+    DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, InMemoryStore, InlineId,
+    MediaKind, MessageContent, MessageMutation, MessageRecord, NotificationMode, OperationOutcome,
+    PeerRef, RandomId, ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnector,
+    RemoveChatParticipantRequest, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
+    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, StoreError, StoredReaction, StoredReadState,
+    StoredSession, StoredTransaction, SyncConfig, TransactionId, TransactionIdentity,
+    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogNotificationsRequest,
+    UploadRequest, UserRecord, UserSettingsRecord, VERSION,
 };
 
 const DEFAULT_API_BASE_URL: &str = "https://api.inline.chat/v1";
 const DEFAULT_REALTIME_URL: &str = "wss://api.inline.chat/realtime";
+const SNAPSHOT_HISTORY_PAGE_LIMIT: i32 = 200;
 
 /// Error returned when building an [`SdkBackend`].
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +63,8 @@ pub struct SdkBackendBuilder {
     realtime_url: String,
     identity: ClientIdentity,
     store: Arc<dyn ClientStore>,
+    sync_config: SyncConfig,
+    realtime_handshake: bool,
     realtime_connector: Option<Arc<dyn RealtimeConnector>>,
 }
 
@@ -64,6 +75,8 @@ impl fmt::Debug for SdkBackendBuilder {
             .field("realtime_url", &redacted_url_for_debug(&self.realtime_url))
             .field("identity", &self.identity)
             .field("store", &"<client-store>")
+            .field("sync_config", &self.sync_config)
+            .field("realtime_handshake", &self.realtime_handshake)
             .field(
                 "realtime_connector",
                 &self
@@ -82,6 +95,8 @@ impl Default for SdkBackendBuilder {
             realtime_url: DEFAULT_REALTIME_URL.to_owned(),
             identity: ClientIdentity::new("inline-client", VERSION),
             store: Arc::new(InMemoryStore::new()),
+            sync_config: SyncConfig::default(),
+            realtime_handshake: false,
             realtime_connector: None,
         }
     }
@@ -118,26 +133,36 @@ impl SdkBackendBuilder {
         self
     }
 
+    /// Sets Inline update discovery and bucket catch-up policy.
+    pub fn sync_config(mut self, config: SyncConfig) -> Self {
+        self.sync_config = config;
+        self
+    }
+
     /// Enables realtime handshake using the SDK realtime connector.
     pub fn enable_realtime_handshake(mut self) -> Self {
-        self.realtime_connector = Some(Arc::new(SdkRealtimeConnector::new()));
+        self.realtime_handshake = true;
+        self.realtime_connector = None;
         self
     }
 
     /// Sets a custom realtime connector.
     pub fn realtime_connector(mut self, connector: impl RealtimeConnector) -> Self {
+        self.realtime_handshake = true;
         self.realtime_connector = Some(Arc::new(connector));
         self
     }
 
     /// Sets a shared realtime connector.
     pub fn shared_realtime_connector(mut self, connector: Arc<dyn RealtimeConnector>) -> Self {
+        self.realtime_handshake = true;
         self.realtime_connector = Some(connector);
         self
     }
 
     /// Disables realtime handshake on connect.
     pub fn without_realtime_handshake(mut self) -> Self {
+        self.realtime_handshake = false;
         self.realtime_connector = None;
         self
     }
@@ -145,14 +170,18 @@ impl SdkBackendBuilder {
     /// Builds an SDK-backed backend.
     pub fn build(self) -> Result<SdkBackend, SdkBackendBuildError> {
         let api = ApiClient::try_new_with_identity(self.api_base_url, self.identity.clone())?;
+        let sync = Arc::new(SyncManager::new(self.store.clone(), self.sync_config));
         Ok(SdkBackend {
             api,
             realtime_url: self.realtime_url,
             identity: self.identity,
             store: self.store,
+            sync,
+            sync_required: Arc::new(AtomicBool::new(true)),
+            realtime_handshake: self.realtime_handshake,
             realtime_connector: self.realtime_connector,
             realtime: Arc::new(Mutex::new(None)),
-            event_realtime: Arc::new(Mutex::new(None)),
+            realtime_events: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -164,9 +193,12 @@ pub struct SdkBackend {
     realtime_url: String,
     identity: ClientIdentity,
     store: Arc<dyn ClientStore>,
+    sync: Arc<SyncManager>,
+    sync_required: Arc<AtomicBool>,
+    realtime_handshake: bool,
     realtime_connector: Option<Arc<dyn RealtimeConnector>>,
-    realtime: Arc<Mutex<Option<RealtimeClient>>>,
-    event_realtime: Arc<Mutex<Option<RealtimeClient>>>,
+    realtime: Arc<Mutex<Option<RealtimeSession>>>,
+    realtime_events: Arc<Mutex<Option<RealtimeEventReceiver>>>,
 }
 
 impl fmt::Debug for SdkBackend {
@@ -176,6 +208,8 @@ impl fmt::Debug for SdkBackend {
             .field("realtime_url", &redacted_url_for_debug(&self.realtime_url))
             .field("identity", &self.identity)
             .field("store", &"<client-store>")
+            .field("sync_required", &self.sync_required.load(Ordering::Relaxed))
+            .field("realtime_handshake", &self.realtime_handshake)
             .field(
                 "realtime_connector",
                 &self
@@ -215,7 +249,7 @@ impl SdkBackend {
 
     /// Returns whether connect will perform a realtime handshake.
     pub fn realtime_handshake_enabled(&self) -> bool {
-        self.realtime_connector.is_some()
+        self.realtime_handshake
     }
 
     async fn require_session(&self) -> BackendResult<StoredSession> {
@@ -236,66 +270,71 @@ impl SdkBackend {
     where
         R: RpcRequest,
     {
-        let mut realtime = self.realtime.lock().await;
-        if realtime.is_none() {
-            *realtime = Some(
-                RealtimeClient::connect_with_identity(
-                    &self.realtime_url,
-                    session.auth.access_token().expose_secret(),
-                    self.identity.clone(),
-                )
-                .await
-                .map_err(realtime_error_to_backend)?,
-            );
-        }
-
-        let Some(client) = realtime.as_mut() else {
-            return Err(BackendError::new(
-                ClientErrorCategory::Internal,
-                "realtime client was not initialized",
-            ));
-        };
-        match client.call(request).await {
+        let realtime = self.ensure_realtime(session).await?;
+        match realtime.call(request).await {
             Ok(response) => Ok(response),
             Err(error) => {
-                *realtime = None;
+                if realtime_error_closes_session(&error) {
+                    self.clear_realtime().await;
+                }
                 Err(realtime_error_to_backend(error))
             }
         }
     }
 
+    async fn ensure_realtime(&self, session: &StoredSession) -> BackendResult<RealtimeSession> {
+        let mut realtime = self.realtime.lock().await;
+        if let Some(existing) = realtime.as_ref()
+            && !existing.is_closed()
+        {
+            return Ok(existing.clone());
+        }
+
+        let connected = RealtimeSession::connect_with_identity(
+            &self.realtime_url,
+            session.auth.access_token().expose_secret(),
+            self.identity.clone(),
+        )
+        .await
+        .map_err(realtime_error_to_backend)?;
+        let receiver = connected.subscribe();
+        *self.realtime_events.lock().await = Some(receiver);
+        *realtime = Some(connected.clone());
+        Ok(connected)
+    }
+
+    async fn install_realtime(&self, realtime: RealtimeSession) {
+        let receiver = realtime.subscribe();
+        *self.realtime.lock().await = Some(realtime);
+        *self.realtime_events.lock().await = Some(receiver);
+    }
+
     async fn clear_realtime(&self) {
         *self.realtime.lock().await = None;
-        *self.event_realtime.lock().await = None;
+        *self.realtime_events.lock().await = None;
+        self.sync_required.store(true, Ordering::Release);
     }
 
     async fn receive_realtime_event(
         &self,
         session: &StoredSession,
     ) -> BackendResult<RealtimeEvent> {
-        let mut realtime = self.event_realtime.lock().await;
-        if realtime.is_none() {
-            *realtime = Some(
-                RealtimeClient::connect_with_identity(
-                    &self.realtime_url,
-                    session.auth.access_token().expose_secret(),
-                    self.identity.clone(),
-                )
-                .await
-                .map_err(realtime_error_to_backend)?,
-            );
-        }
-
-        let Some(client) = realtime.as_mut() else {
+        self.ensure_realtime(session).await?;
+        let mut receiver = self.realtime_events.lock().await;
+        let Some(events) = receiver.as_mut() else {
             return Err(BackendError::new(
                 ClientErrorCategory::Internal,
-                "realtime event client was not initialized",
+                "realtime event receiver was not initialized",
             ));
         };
-        match client.next_event().await {
+        match events.recv().await {
             Ok(event) => Ok(event),
             Err(error) => {
-                *realtime = None;
+                self.sync_required.store(true, Ordering::Release);
+                drop(receiver);
+                if realtime_error_closes_session(&error) {
+                    self.clear_realtime().await;
+                }
                 Err(realtime_error_to_backend(error))
             }
         }
@@ -305,16 +344,46 @@ impl SdkBackend {
         &self,
         request: ConnectRequest,
     ) -> BackendResult<ClientStatusSnapshot> {
-        if let Some(connector) = &self.realtime_connector {
-            connector
-                .connect(RealtimeConnectRequest::new(
-                    self.realtime_url.clone(),
-                    request.auth.access_token().clone(),
-                    self.identity.clone(),
-                ))
-                .await?;
-        }
+        let existing_session = self
+            .store
+            .load_session()
+            .await
+            .map_err(store_error_to_backend)?;
+        let next_namespace = normalized_account_namespace(request.account_namespace.as_deref());
+        let account_changed = existing_session.as_ref().is_none_or(|session| {
+            normalized_account_namespace(session.account_namespace.as_deref()) != next_namespace
+        });
+        let connected = if self.realtime_handshake {
+            if let Some(connector) = &self.realtime_connector {
+                connector
+                    .connect(RealtimeConnectRequest::new(
+                        self.realtime_url.clone(),
+                        request.auth.access_token().clone(),
+                        self.identity.clone(),
+                    ))
+                    .await?;
+                None
+            } else {
+                Some(
+                    RealtimeSession::connect_with_identity(
+                        &self.realtime_url,
+                        request.auth.access_token().expose_secret(),
+                        self.identity.clone(),
+                    )
+                    .await
+                    .map_err(realtime_error_to_backend)?,
+                )
+            }
+        } else {
+            None
+        };
         self.clear_realtime().await;
+        if account_changed {
+            self.store
+                .clear_account_data()
+                .await
+                .map_err(store_error_to_backend)?;
+        }
         self.store
             .save_session(StoredSession {
                 auth: request.auth,
@@ -322,6 +391,9 @@ impl SdkBackend {
             })
             .await
             .map_err(store_error_to_backend)?;
+        if let Some(connected) = connected {
+            self.install_realtime(connected).await;
+        }
         Ok(ClientStatusSnapshot::current(
             crate::ClientStatus::Connected,
         ))
@@ -361,14 +433,25 @@ impl SdkBackend {
         };
 
         self.clear_realtime().await;
-        if let Some(connector) = &self.realtime_connector {
-            connector
-                .connect(RealtimeConnectRequest::new(
-                    self.realtime_url.clone(),
-                    session.auth.access_token().clone(),
+        if self.realtime_handshake {
+            if let Some(connector) = &self.realtime_connector {
+                connector
+                    .connect(RealtimeConnectRequest::new(
+                        self.realtime_url.clone(),
+                        session.auth.access_token().clone(),
+                        self.identity.clone(),
+                    ))
+                    .await?;
+            } else {
+                let connected = RealtimeSession::connect_with_identity(
+                    &self.realtime_url,
+                    session.auth.access_token().expose_secret(),
                     self.identity.clone(),
-                ))
-                .await?;
+                )
+                .await
+                .map_err(realtime_error_to_backend)?;
+                self.install_realtime(connected).await;
+            }
         }
         Ok(ClientStatusSnapshot::current(
             crate::ClientStatus::Connected,
@@ -490,10 +573,28 @@ impl ClientBackend for SdkBackend {
     fn logout(&self) -> BoxFuture<'static, BackendResult<()>> {
         let backend = self.clone();
         Box::pin(async move {
+            let session = backend
+                .store
+                .load_session()
+                .await
+                .map_err(store_error_to_backend)?;
             backend.clear_realtime().await;
+            if let Some(session) = session
+                && let Err(error) = backend
+                    .api
+                    .logout(session.auth.access_token().expose_secret())
+                    .await
+            {
+                log::warn!("Inline remote session logout failed; clearing local session: {error}");
+            }
             backend
                 .store
                 .clear_session()
+                .await
+                .map_err(store_error_to_backend)?;
+            backend
+                .store
+                .clear_account_data()
                 .await
                 .map_err(store_error_to_backend)
         })
@@ -503,52 +604,102 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            let live: BackendResult<DialogsPage> = async {
-                let result = backend
-                    .call_realtime(&session, proto::GetChatsInput {})
-                    .await?;
-                let page = dialogs_page_from_get_chats(&result, request.clone())?;
-                for dialog in &page.dialogs {
-                    backend
-                        .store
-                        .record_dialog(dialog.clone())
-                        .await
-                        .map_err(store_error_to_backend)?;
-                }
-                backend
-                    .store
-                    .record_users(page.users.clone())
-                    .await
-                    .map_err(store_error_to_backend)?;
-                for message in result.messages {
-                    let record = message_record_from_proto_message(message, None, None);
-                    backend
-                        .store
-                        .record_message(record)
-                        .await
-                        .map_err(store_error_to_backend)?;
-                }
-                backend
-                    .store
-                    .dialogs(request.clone())
-                    .await
-                    .map_err(store_error_to_backend)
-            }
-            .await;
-            match live {
-                Ok(page) => Ok(page),
-                Err(error) => {
-                    log::warn!(
-                        "Inline realtime dialog sync failed; serving cached dialogs: {}",
-                        error
-                    );
-                    backend
-                        .store
-                        .dialogs(request)
-                        .await
-                        .map_err(store_error_to_backend)
-                }
-            }
+            let result = backend
+                .call_realtime(&session, proto::GetChatsInput {})
+                .await?;
+            backend.apply_get_chats_snapshot(result).await?;
+            backend
+                .store
+                .dialogs(request)
+                .await
+                .map_err(store_error_to_backend)
+        })
+    }
+
+    fn cached_dialogs(
+        &self,
+        request: DialogsRequest,
+    ) -> BoxFuture<'static, BackendResult<DialogsPage>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend
+                .store
+                .dialogs(request)
+                .await
+                .map_err(store_error_to_backend)
+        })
+    }
+
+    fn account_state(&self) -> BoxFuture<'static, BackendResult<AccountStateSnapshot>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let deleted_chat_ids = backend
+                .store
+                .deleted_chat_ids()
+                .await
+                .map_err(store_error_to_backend)?;
+            Ok(AccountStateSnapshot { deleted_chat_ids })
+        })
+    }
+
+    fn chat_state(
+        &self,
+        chat_id: InlineId,
+    ) -> BoxFuture<'static, BackendResult<ChatStateSnapshot>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let dialog = backend
+                .store
+                .dialog(chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            let deleted = backend
+                .store
+                .deleted_chat_ids()
+                .await
+                .map_err(store_error_to_backend)?
+                .contains(&chat_id);
+            let deleted_message_ids = backend
+                .store
+                .deleted_message_ids(chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            let reactions = backend
+                .store
+                .reactions_for_chat(chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            let reaction_snapshot_message_ids = backend
+                .store
+                .reaction_snapshot_message_ids(chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            let read_state = backend
+                .store
+                .read_state(chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            let participants = backend
+                .store
+                .chat_participants(chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            let participants_complete = backend
+                .store
+                .chat_participants_complete(chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            Ok(ChatStateSnapshot {
+                chat_id,
+                dialog,
+                deleted,
+                deleted_message_ids,
+                reactions,
+                reaction_snapshot_message_ids,
+                read_state,
+                participants,
+                participants_complete,
+            })
         })
     }
 
@@ -563,53 +714,40 @@ impl ClientBackend for SdkBackend {
                 ));
             }
             let limit = request.limit.unwrap_or(50).max(1);
-            let live: BackendResult<HistoryPage> = async {
-                let fetch_limit = limit.saturating_add(1).min(i32::MAX as u32) as i32;
-                let result = backend
-                    .call_realtime(&session, history_input_for_request(&request, fetch_limit))
-                    .await?;
-                let records = result
-                    .messages
-                    .into_iter()
-                    .map(|message| {
-                        message_record_from_proto_message(message, Some(request.chat_id), None)
-                    })
-                    .collect::<Vec<_>>();
-                let (records, has_more) = normalize_live_history_records(
-                    records,
-                    limit,
-                    request.after_message_id.is_some(),
+            let fetch_limit = limit.saturating_add(1).min(i32::MAX as u32) as i32;
+            let result = backend
+                .call_realtime(&session, history_input_for_request(&request, fetch_limit))
+                .await?;
+            let mut records = Vec::with_capacity(result.messages.len());
+            for message in result.messages {
+                records.push(
+                    backend
+                        .record_proto_message(message, Some(request.chat_id), None)
+                        .await?,
                 );
-                for message in &records {
-                    backend
-                        .store
-                        .record_message(message.clone())
-                        .await
-                        .map_err(store_error_to_backend)?;
-                }
-                Ok(HistoryPage {
-                    messages: records,
-                    users: Vec::new(),
-                    has_more,
-                    next_cursor: None,
-                })
             }
-            .await;
-            match live {
-                Ok(page) => Ok(page),
-                Err(error) => {
-                    log::warn!(
-                        "Inline realtime history sync failed; serving cached history for chat {}: {}",
-                        request.chat_id.get(),
-                        error
-                    );
-                    backend
-                        .store
-                        .history(request)
-                        .await
-                        .map_err(store_error_to_backend)
-                }
-            }
+            let (records, has_more) =
+                normalize_live_history_records(records, limit, request.after_message_id.is_some());
+            Ok(HistoryPage {
+                messages: records,
+                users: Vec::new(),
+                has_more,
+                next_cursor: None,
+            })
+        })
+    }
+
+    fn cached_history(
+        &self,
+        request: HistoryRequest,
+    ) -> BoxFuture<'static, BackendResult<HistoryPage>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend
+                .store
+                .history(request)
+                .await
+                .map_err(store_error_to_backend)
         })
     }
 
@@ -634,7 +772,167 @@ impl ClientBackend for SdkBackend {
                 .record_users(page.users.clone())
                 .await
                 .map_err(store_error_to_backend)?;
+            backend
+                .store
+                .record_chat_participants(request.chat_id, page.participants.clone())
+                .await
+                .map_err(store_error_to_backend)?;
             Ok(page)
+        })
+    }
+
+    fn add_chat_participant(
+        &self,
+        request: AddChatParticipantRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            validate_chat_and_user_ids(request.chat_id, request.user_id)?;
+            let session = backend.require_session().await?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::AddChatParticipantInput {
+                        chat_id: request.chat_id.get(),
+                        user_id: request.user_id.get(),
+                    },
+                )
+                .await?;
+            let participant = result.participant.ok_or_else(|| {
+                BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "add chat participant result did not include the participant",
+                )
+            })?;
+            backend
+                .store
+                .record_chat_participant(
+                    request.chat_id,
+                    ChatParticipantRecord {
+                        user_id: InlineId::new(participant.user_id),
+                        date: Some(participant.date),
+                    },
+                )
+                .await
+                .map_err(store_error_to_backend)?;
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatParticipantsChanged {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
+    fn remove_chat_participant(
+        &self,
+        request: RemoveChatParticipantRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            validate_chat_and_user_ids(request.chat_id, request.user_id)?;
+            let session = backend.require_session().await?;
+            backend
+                .call_realtime(
+                    &session,
+                    proto::RemoveChatParticipantInput {
+                        chat_id: request.chat_id.get(),
+                        user_id: request.user_id.get(),
+                    },
+                )
+                .await?;
+            backend
+                .store
+                .remove_chat_participant(request.chat_id, request.user_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatParticipantsChanged {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
+    fn update_chat_info(
+        &self,
+        request: UpdateChatInfoRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            if request.chat_id.get() <= 0 {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "chat_id must be positive",
+                ));
+            }
+            if request.title.is_none() && request.emoji.is_none() {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "at least one chat info field must be provided",
+                ));
+            }
+            let title = request.title.map(|title| title.trim().to_owned());
+            if title.as_deref().is_some_and(str::is_empty) {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "chat title must not be empty",
+                ));
+            }
+            let emoji = request.emoji.map(|emoji| emoji.trim().to_owned());
+            let session = backend.require_session().await?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::UpdateChatInfoInput {
+                        chat_id: request.chat_id.get(),
+                        title,
+                        emoji,
+                    },
+                )
+                .await?;
+            let chat = result.chat.ok_or_else(|| {
+                BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "update chat info result did not include the chat",
+                )
+            })?;
+            Ok(OperationOutcome::with_events(
+                backend.record_chat_update(chat, None, None).await?,
+            ))
+        })
+    }
+
+    fn delete_chat(
+        &self,
+        request: DeleteChatRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            if request.chat_id.get() <= 0 {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "chat_id must be positive",
+                ));
+            }
+            let session = backend.require_session().await?;
+            backend
+                .call_realtime(
+                    &session,
+                    proto::DeleteChatInput {
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                    },
+                )
+                .await?;
+            backend
+                .store
+                .remove_dialog(request.chat_id)
+                .await
+                .map_err(store_error_to_backend)?;
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatDeleted {
+                    chat_id: request.chat_id,
+                },
+            ]))
         })
     }
 
@@ -674,6 +972,7 @@ impl ClientBackend for SdkBackend {
                     last_message_id: None,
                     synced_through_message_id: None,
                     unread_count: Some(0),
+                    ..DialogRecord::new(created.chat_id)
                 })
                 .await
                 .map_err(store_error_to_backend)?;
@@ -726,6 +1025,7 @@ impl ClientBackend for SdkBackend {
                     last_message_id: None,
                     synced_through_message_id: None,
                     unread_count: Some(0),
+                    ..DialogRecord::new(created.chat_id)
                 })
                 .await
                 .map_err(store_error_to_backend)?;
@@ -782,6 +1082,7 @@ impl ClientBackend for SdkBackend {
                     last_message_id: None,
                     synced_through_message_id: None,
                     unread_count: Some(0),
+                    ..DialogRecord::new(created.chat_id)
                 })
                 .await
                 .map_err(store_error_to_backend)?;
@@ -808,29 +1109,44 @@ impl ClientBackend for SdkBackend {
                 .random_id
                 .unwrap_or_else(|| random_id_for_request(&request));
             let transaction_id = transaction_id_for_send(&request, random_id);
-            let identity = TransactionIdentity::new(
+            let new_identity = TransactionIdentity::new(
                 transaction_id.clone(),
                 request.external_id.clone(),
                 random_id,
             );
-
-            if let Some(existing) = backend
+            let existing = backend
                 .store
                 .transaction(transaction_id.clone())
                 .await
-                .map_err(store_error_to_backend)?
-            {
-                return Ok(outcome_from_stored_transaction(existing, initial_chat_id));
-            }
-
-            backend
-                .store
-                .record_transaction(
-                    StoredTransaction::new(identity.clone(), TransactionState::Queued)
-                        .with_chat_id(initial_chat_id),
-                )
-                .await
                 .map_err(store_error_to_backend)?;
+            if let Some(existing) = existing.as_ref()
+                && !stored_transaction_needs_retry(existing)
+            {
+                return Ok(outcome_from_stored_transaction(
+                    existing.clone(),
+                    initial_chat_id,
+                ));
+            }
+            let identity = existing
+                .map(|transaction| transaction.identity)
+                .unwrap_or(new_identity);
+
+            if backend
+                .store
+                .transaction(transaction_id)
+                .await
+                .map_err(store_error_to_backend)?
+                .is_none()
+            {
+                backend
+                    .store
+                    .record_transaction(
+                        StoredTransaction::new(identity.clone(), TransactionState::Queued)
+                            .with_chat_id(initial_chat_id),
+                    )
+                    .await
+                    .map_err(store_error_to_backend)?;
+            }
 
             backend
                 .store
@@ -859,7 +1175,12 @@ impl ClientBackend for SdkBackend {
                 Ok(result) => result,
                 Err(backend_error) => {
                     backend
-                        .record_failed_transaction(identity, initial_chat_id, backend_error.clone())
+                        .record_transaction_error(
+                            identity,
+                            initial_chat_id,
+                            TransactionState::Sent,
+                            backend_error.clone(),
+                        )
                         .await?;
                     return Err(backend_error);
                 }
@@ -884,6 +1205,8 @@ impl ClientBackend for SdkBackend {
                 MessageMutation {
                     transaction: applied.transaction.identity,
                     message_id: applied.message_id,
+                    state: None,
+                    failure: None,
                 },
                 applied.chat_id,
                 applied.message_id,
@@ -914,29 +1237,44 @@ impl ClientBackend for SdkBackend {
                 .random_id
                 .unwrap_or_else(|| random_id_for_upload_request(&request, bytes.len()));
             let transaction_id = transaction_id_for_upload(&request, random_id);
-            let identity = TransactionIdentity::new(
+            let new_identity = TransactionIdentity::new(
                 transaction_id.clone(),
                 request.external_id.clone(),
                 random_id,
             );
-
-            if let Some(existing) = backend
+            let existing = backend
                 .store
                 .transaction(transaction_id.clone())
                 .await
-                .map_err(store_error_to_backend)?
-            {
-                return Ok(outcome_from_stored_transaction(existing, initial_chat_id));
-            }
-
-            backend
-                .store
-                .record_transaction(
-                    StoredTransaction::new(identity.clone(), TransactionState::Queued)
-                        .with_chat_id(initial_chat_id),
-                )
-                .await
                 .map_err(store_error_to_backend)?;
+            if let Some(existing) = existing.as_ref()
+                && !stored_transaction_needs_retry(existing)
+            {
+                return Ok(outcome_from_stored_transaction(
+                    existing.clone(),
+                    initial_chat_id,
+                ));
+            }
+            let identity = existing
+                .map(|transaction| transaction.identity)
+                .unwrap_or(new_identity);
+
+            if backend
+                .store
+                .transaction(transaction_id)
+                .await
+                .map_err(store_error_to_backend)?
+                .is_none()
+            {
+                backend
+                    .store
+                    .record_transaction(
+                        StoredTransaction::new(identity.clone(), TransactionState::Queued)
+                            .with_chat_id(initial_chat_id),
+                    )
+                    .await
+                    .map_err(store_error_to_backend)?;
+            }
 
             let upload_input = upload_input_for_request(&request, bytes);
             let upload = match backend
@@ -948,7 +1286,12 @@ impl ClientBackend for SdkBackend {
                 Err(error) => {
                     let backend_error = api_error_to_backend(error);
                     backend
-                        .record_failed_transaction(identity, initial_chat_id, backend_error.clone())
+                        .record_transaction_error(
+                            identity,
+                            initial_chat_id,
+                            TransactionState::Queued,
+                            backend_error.clone(),
+                        )
                         .await?;
                     return Err(backend_error);
                 }
@@ -957,7 +1300,12 @@ impl ClientBackend for SdkBackend {
                 Ok(media) => media,
                 Err(error) => {
                     backend
-                        .record_failed_transaction(identity, initial_chat_id, error.clone())
+                        .record_transaction_error(
+                            identity,
+                            initial_chat_id,
+                            TransactionState::Failed,
+                            error.clone(),
+                        )
                         .await?;
                     return Err(error);
                 }
@@ -990,7 +1338,12 @@ impl ClientBackend for SdkBackend {
                 Ok(result) => result,
                 Err(backend_error) => {
                     backend
-                        .record_failed_transaction(identity, initial_chat_id, backend_error.clone())
+                        .record_transaction_error(
+                            identity,
+                            initial_chat_id,
+                            TransactionState::Sent,
+                            backend_error.clone(),
+                        )
                         .await?;
                     return Err(backend_error);
                 }
@@ -1015,6 +1368,8 @@ impl ClientBackend for SdkBackend {
                 MessageMutation {
                     transaction: applied.transaction.identity,
                     message_id: applied.message_id,
+                    state: None,
+                    failure: None,
                 },
                 applied.chat_id,
                 applied.message_id,
@@ -1183,6 +1538,88 @@ impl ClientBackend for SdkBackend {
         })
     }
 
+    fn set_marked_unread(
+        &self,
+        request: SetMarkedUnreadRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            let updates = if request.unread {
+                backend
+                    .call_realtime(
+                        &session,
+                        proto::MarkAsUnreadInput {
+                            peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        },
+                    )
+                    .await?
+                    .updates
+            } else {
+                backend
+                    .call_realtime(
+                        &session,
+                        proto::ReadMessagesInput {
+                            peer_id: Some(input_peer_for_chat(request.chat_id)),
+                            max_id: None,
+                        },
+                    )
+                    .await?
+                    .updates
+            };
+            let mut events = backend
+                .apply_updates(updates, Some(request.chat_id), None)
+                .await?;
+            if !events.iter().any(|event| {
+                matches!(event, ClientEvent::ReadStateChanged { chat_id } if *chat_id == request.chat_id)
+            }) {
+                events.push(ClientEvent::ReadStateChanged {
+                    chat_id: request.chat_id,
+                });
+            }
+            Ok(OperationOutcome::with_events(events))
+        })
+    }
+
+    fn update_dialog_notifications(
+        &self,
+        request: UpdateDialogNotificationsRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::UpdateDialogNotificationSettingsInput {
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        notification_settings: request.mode.map(|mode| {
+                            proto::DialogNotificationSettings {
+                                mode: Some(dialog_notification_mode_to_proto(mode) as i32),
+                            }
+                        }),
+                    },
+                )
+                .await?;
+            let mut events = backend
+                .apply_updates(result.updates, Some(request.chat_id), None)
+                .await?;
+            backend
+                .mutate_dialog(request.chat_id, |dialog| {
+                    dialog.notification_mode = request.mode;
+                })
+                .await?;
+            if !events.iter().any(|event| {
+                matches!(event, ClientEvent::ChatUpserted { chat_id } if *chat_id == request.chat_id)
+            }) {
+                events.push(ClientEvent::ChatUpserted {
+                    chat_id: request.chat_id,
+                });
+            }
+            Ok(OperationOutcome::with_events(events))
+        })
+    }
+
     fn typing(
         &self,
         request: TypingRequest,
@@ -1209,10 +1646,23 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
+            if backend.sync_required.load(Ordering::Acquire) {
+                let events = backend.sync.discover(&backend).await?;
+                backend.sync_required.store(false, Ordering::Release);
+                if !events.is_empty() {
+                    return Ok(events);
+                }
+            }
             loop {
                 match backend.receive_realtime_event(&session).await? {
                     RealtimeEvent::Updates(updates) => {
-                        let events = backend.apply_updates(updates, None, None).await?;
+                        let events = match backend.sync.process_realtime(&backend, updates).await {
+                            Ok(events) => events,
+                            Err(error) => {
+                                backend.sync_required.store(true, Ordering::Release);
+                                return Err(error);
+                            }
+                        };
                         if !events.is_empty() {
                             return Ok(events);
                         }
@@ -1225,16 +1675,881 @@ impl ClientBackend for SdkBackend {
     }
 }
 
+impl SyncHost for SdkBackend {
+    fn get_updates_state(
+        &self,
+        date: i64,
+    ) -> BoxFuture<'static, BackendResult<proto::GetUpdatesStateResult>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend
+                .call_realtime(&session, proto::GetUpdatesStateInput { date })
+                .await
+        })
+    }
+
+    fn get_updates(
+        &self,
+        input: proto::GetUpdatesInput,
+    ) -> BoxFuture<'static, BackendResult<proto::GetUpdatesResult>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend.call_realtime(&session, input).await
+        })
+    }
+
+    fn apply_sync_batch(
+        &self,
+        updates: Vec<proto::Update>,
+        sidecars: Option<proto::UpdateSidecars>,
+    ) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let mut events = if let Some(sidecars) = sidecars {
+                backend.apply_sidecars(sidecars).await?
+            } else {
+                Vec::new()
+            };
+            events.extend(backend.apply_updates(updates, None, None).await?);
+            Ok(events)
+        })
+    }
+
+    fn repair_bucket(
+        &self,
+        key: crate::SyncBucketKey,
+    ) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            match key {
+                crate::SyncBucketKey::User => backend.repair_user_bucket().await,
+                crate::SyncBucketKey::Space { space_id } => {
+                    backend.repair_space_bucket(space_id).await
+                }
+                crate::SyncBucketKey::Chat { peer } => backend.repair_chat_bucket(peer).await,
+            }
+        })
+    }
+}
+
 impl SdkBackend {
-    async fn record_failed_transaction(
+    async fn repair_user_bucket(&self) -> BackendResult<Vec<ClientEvent>> {
+        let session = self.require_session().await?;
+        let chats = self
+            .call_realtime(&session, proto::GetChatsInput {})
+            .await?;
+        let me = self.call_realtime(&session, proto::GetMeInput {}).await?;
+        let settings = self
+            .call_realtime(&session, proto::GetUserSettingsInput {})
+            .await?;
+        let chat_peers = chats
+            .chats
+            .iter()
+            .map(sync_bucket_peer_for_chat)
+            .collect::<HashSet<_>>();
+        let space_ids = chats
+            .spaces
+            .iter()
+            .map(|space| InlineId::new(space.id))
+            .collect::<HashSet<_>>();
+
+        let user = me.user.ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "user bucket snapshot did not include the current user",
+            )
+        })?;
+        let settings = settings.user_settings.ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "user bucket snapshot did not include user settings",
+            )
+        })?;
+
+        let mut events = self.apply_get_chats_snapshot(chats).await?;
+        let user = user_record_from_proto(&user);
+        self.store
+            .record_users(vec![user.clone()])
+            .await
+            .map_err(store_error_to_backend)?;
+        self.store
+            .record_user_settings(user_settings_record_from_proto(&settings))
+            .await
+            .map_err(store_error_to_backend)?;
+        events.push(ClientEvent::UserUpserted {
+            user_id: user.user_id,
+        });
+        events.push(ClientEvent::UserSettingsChanged {});
+        for space_id in space_ids {
+            events.extend(self.repair_space_members(&session, space_id, true).await?);
+        }
+        for peer in chat_peers {
+            events.extend(self.repair_chat_bucket(peer).await?);
+        }
+        Ok(events)
+    }
+
+    async fn repair_space_bucket(&self, space_id: InlineId) -> BackendResult<Vec<ClientEvent>> {
+        let session = self.require_session().await?;
+        let chats = self
+            .call_realtime(&session, proto::GetChatsInput {})
+            .await?;
+        let space_is_current = chats.spaces.iter().any(|space| space.id == space_id.get());
+        let mut events = self.apply_get_chats_snapshot(chats).await?;
+        events.extend(
+            self.repair_space_members(&session, space_id, space_is_current)
+                .await?,
+        );
+        Ok(events)
+    }
+
+    async fn repair_space_members(
+        &self,
+        session: &StoredSession,
+        space_id: InlineId,
+        space_is_current: bool,
+    ) -> BackendResult<Vec<ClientEvent>> {
+        let members = if space_is_current {
+            Some(
+                self.call_realtime(
+                    session,
+                    proto::GetSpaceMembersInput {
+                        space_id: space_id.get(),
+                    },
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let previous_members = self
+            .store
+            .space_members(space_id)
+            .await
+            .map_err(store_error_to_backend)?;
+        let (current_members, users) = if let Some(result) = members {
+            (
+                result
+                    .members
+                    .iter()
+                    .map(space_member_record_from_proto)
+                    .collect::<Vec<_>>(),
+                result
+                    .users
+                    .iter()
+                    .map(user_record_from_proto)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        self.store
+            .record_users(users.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+        self.store
+            .record_space_members(space_id, current_members.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+
+        let mut events = users
+            .into_iter()
+            .map(|user| ClientEvent::UserUpserted {
+                user_id: user.user_id,
+            })
+            .collect::<Vec<_>>();
+        let current_ids = current_members
+            .iter()
+            .map(|member| member.user_id)
+            .collect::<HashSet<_>>();
+        events.extend(
+            current_members
+                .into_iter()
+                .map(|member| ClientEvent::SpaceMemberChanged {
+                    space_id,
+                    user_id: member.user_id,
+                    removed: false,
+                }),
+        );
+        events.extend(
+            previous_members
+                .into_iter()
+                .filter(|member| !current_ids.contains(&member.user_id))
+                .map(|member| ClientEvent::SpaceMemberChanged {
+                    space_id,
+                    user_id: member.user_id,
+                    removed: true,
+                }),
+        );
+        Ok(events)
+    }
+
+    async fn repair_chat_bucket(
+        &self,
+        peer: crate::SyncBucketPeer,
+    ) -> BackendResult<Vec<ClientEvent>> {
+        let session = self.require_session().await?;
+        let peer_id = input_peer_for_sync_bucket_peer(peer);
+        let chat_result = match self
+            .call_realtime(
+                &session,
+                proto::GetChatInput {
+                    peer_id: Some(peer_id.clone()),
+                },
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(error) if error.category == ClientErrorCategory::NotFound => {
+                let Some(chat_id) = self.stored_chat_id_for_sync_peer(peer).await? else {
+                    return Ok(Vec::new());
+                };
+                self.store
+                    .remove_dialog(chat_id)
+                    .await
+                    .map_err(store_error_to_backend)?;
+                return Ok(vec![ClientEvent::ChatDeleted { chat_id }]);
+            }
+            Err(error) => return Err(error),
+        };
+        let chat = chat_result.chat.ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "chat bucket snapshot did not include the chat",
+            )
+        })?;
+        let chat_id = InlineId::new(chat.id);
+        let participants = self
+            .call_realtime(
+                &session,
+                proto::GetChatParticipantsInput {
+                    chat_id: chat_id.get(),
+                },
+            )
+            .await?;
+        let history = self
+            .fetch_complete_chat_history(&session, peer_id, chat_id)
+            .await?;
+        let previous = self
+            .store
+            .history(HistoryRequest {
+                chat_id,
+                limit: Some(u32::MAX),
+                before_message_id: None,
+                after_message_id: None,
+            })
+            .await
+            .map_err(store_error_to_backend)?;
+        let previous_ids = previous
+            .messages
+            .iter()
+            .map(|message| message.message_id)
+            .collect::<HashSet<_>>();
+        let current_ids = history
+            .iter()
+            .map(|message| InlineId::new(message.id))
+            .collect::<HashSet<_>>();
+
+        let dialog = chat_result.dialog;
+        let read_state = dialog
+            .as_ref()
+            .and_then(|dialog| read_state_from_proto_dialog(chat_id, dialog));
+        let pinned_message_ids = chat_result
+            .pinned_message_ids
+            .into_iter()
+            .map(InlineId::new)
+            .collect::<Vec<_>>();
+        let mut events = self.record_chat_update(chat, dialog, None).await?;
+        self.mutate_dialog(chat_id, |dialog| {
+            dialog.pinned_message_ids = pinned_message_ids;
+        })
+        .await?;
+
+        let participant_page = chat_participants_page_from_proto(participants);
+        self.store
+            .record_users(participant_page.users.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+        self.store
+            .record_chat_participants(chat_id, participant_page.participants)
+            .await
+            .map_err(store_error_to_backend)?;
+        events.extend(
+            participant_page
+                .users
+                .into_iter()
+                .map(|user| ClientEvent::UserUpserted {
+                    user_id: user.user_id,
+                }),
+        );
+        events.push(ClientEvent::ChatParticipantsChanged { chat_id });
+
+        self.store
+            .clear_chat_messages(chat_id, None)
+            .await
+            .map_err(store_error_to_backend)?;
+        for message in history {
+            let record = self
+                .record_proto_message(message, Some(chat_id), None)
+                .await?;
+            events.push(ClientEvent::MessageStored { message: record });
+        }
+        events.extend(
+            previous_ids
+                .difference(&current_ids)
+                .copied()
+                .map(|message_id| ClientEvent::MessageDeleted {
+                    chat_id,
+                    message_id,
+                }),
+        );
+        if let Some(read_state) = read_state {
+            self.store
+                .record_read_state(read_state)
+                .await
+                .map_err(store_error_to_backend)?;
+            events.push(ClientEvent::ReadStateChanged { chat_id });
+        }
+        Ok(events)
+    }
+
+    async fn fetch_complete_chat_history(
+        &self,
+        session: &StoredSession,
+        peer_id: proto::InputPeer,
+        chat_id: InlineId,
+    ) -> BackendResult<Vec<proto::Message>> {
+        let mut before_id = None;
+        let mut messages = BTreeMap::new();
+        for page in 0..100_000_u32 {
+            let result = self
+                .call_realtime(
+                    session,
+                    proto::GetChatHistoryInput {
+                        peer_id: Some(peer_id.clone()),
+                        offset_id: None,
+                        limit: Some(SNAPSHOT_HISTORY_PAGE_LIMIT),
+                        mode: Some(if before_id.is_some() {
+                            proto::GetChatHistoryMode::HistoryModeOlder as i32
+                        } else {
+                            proto::GetChatHistoryMode::HistoryModeLatest as i32
+                        }),
+                        anchor_id: None,
+                        before_id,
+                        after_id: None,
+                        before_limit: None,
+                        after_limit: None,
+                        include_anchor: None,
+                    },
+                )
+                .await?;
+            let count = result.messages.len();
+            if count > SNAPSHOT_HISTORY_PAGE_LIMIT as usize {
+                return Err(BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "chat history snapshot exceeded the requested page size",
+                ));
+            }
+            if count == 0 {
+                log::debug!(
+                    "completed Inline chat history snapshot chat_id={} pages={} messages={}",
+                    chat_id.get(),
+                    page + 1,
+                    messages.len()
+                );
+                return Ok(messages.into_values().collect());
+            }
+            let next_before = result
+                .messages
+                .iter()
+                .map(|message| message.id)
+                .min()
+                .filter(|message_id| *message_id > 0)
+                .ok_or_else(|| {
+                    BackendError::new(
+                        ClientErrorCategory::ProtocolMismatch,
+                        "chat history snapshot returned an invalid message id",
+                    )
+                })?;
+            if before_id.is_some_and(|previous| next_before >= previous) {
+                return Err(BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "chat history snapshot did not advance",
+                ));
+            }
+            for message in result.messages {
+                messages.insert(message.id, message);
+            }
+            if count < SNAPSHOT_HISTORY_PAGE_LIMIT as usize {
+                log::debug!(
+                    "completed Inline chat history snapshot chat_id={} pages={} messages={}",
+                    chat_id.get(),
+                    page + 1,
+                    messages.len()
+                );
+                return Ok(messages.into_values().collect());
+            }
+            before_id = Some(next_before);
+        }
+        Err(BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "chat history snapshot exceeded the page safety limit",
+        ))
+    }
+
+    async fn apply_get_chats_snapshot(
+        &self,
+        result: proto::GetChatsResult,
+    ) -> BackendResult<Vec<ClientEvent>> {
+        let dialogs = dialog_records_from_get_chats(&result);
+        let live_ids = dialogs
+            .iter()
+            .map(|dialog| dialog.chat_id)
+            .collect::<HashSet<_>>();
+        let stored_ids = self.stored_dialog_ids().await?;
+        let read_states = result
+            .chats
+            .iter()
+            .filter_map(|chat| {
+                dialog_for_chat(&result, chat)
+                    .and_then(|dialog| read_state_from_proto_dialog(InlineId::new(chat.id), dialog))
+            })
+            .collect::<Vec<_>>();
+        let users = result
+            .users
+            .iter()
+            .map(user_record_from_proto)
+            .collect::<Vec<_>>();
+        let spaces = result
+            .spaces
+            .iter()
+            .map(space_record_from_proto)
+            .collect::<Vec<_>>();
+
+        self.reconcile_live_dialogs(dialogs).await?;
+        self.store
+            .record_users(users.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+        for space in &spaces {
+            self.store
+                .record_space(space.clone())
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+        for read_state in &read_states {
+            self.store
+                .record_read_state(*read_state)
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+
+        let mut events = stored_ids
+            .difference(&live_ids)
+            .copied()
+            .map(|chat_id| ClientEvent::ChatDeleted { chat_id })
+            .collect::<Vec<_>>();
+        events.extend(
+            live_ids
+                .into_iter()
+                .map(|chat_id| ClientEvent::ChatUpserted { chat_id }),
+        );
+        events.extend(users.into_iter().map(|user| ClientEvent::UserUpserted {
+            user_id: user.user_id,
+        }));
+        events.extend(spaces.into_iter().map(|space| ClientEvent::SpaceUpserted {
+            space_id: space.space_id,
+        }));
+        events.extend(
+            read_states
+                .into_iter()
+                .map(|state| ClientEvent::ReadStateChanged {
+                    chat_id: state.chat_id,
+                }),
+        );
+        for message in result.messages {
+            let record = self.record_proto_message(message, None, None).await?;
+            events.push(ClientEvent::MessageStored { message: record });
+        }
+        Ok(events)
+    }
+
+    async fn stored_dialog_ids(&self) -> BackendResult<HashSet<InlineId>> {
+        let mut cursor = None;
+        let mut ids = HashSet::new();
+        loop {
+            let page = self
+                .store
+                .dialogs(DialogsRequest {
+                    limit: Some(1_000),
+                    cursor: cursor.clone(),
+                })
+                .await
+                .map_err(store_error_to_backend)?;
+            ids.extend(page.dialogs.into_iter().map(|dialog| dialog.chat_id));
+            let Some(next) = page.next_cursor else {
+                return Ok(ids);
+            };
+            if cursor.as_ref() == Some(&next) {
+                return Err(BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "stored dialog pagination did not advance",
+                ));
+            }
+            cursor = Some(next);
+        }
+    }
+
+    async fn stored_chat_id_for_sync_peer(
+        &self,
+        peer: crate::SyncBucketPeer,
+    ) -> BackendResult<Option<InlineId>> {
+        match peer {
+            crate::SyncBucketPeer::Chat { chat_id } => Ok(Some(chat_id)),
+            crate::SyncBucketPeer::User { user_id } => {
+                let dialogs = self
+                    .store
+                    .dialogs(DialogsRequest {
+                        limit: Some(u32::MAX),
+                        cursor: None,
+                    })
+                    .await
+                    .map_err(store_error_to_backend)?;
+                Ok(dialogs
+                    .dialogs
+                    .into_iter()
+                    .find(|dialog| dialog.peer_user_id == Some(user_id))
+                    .map(|dialog| dialog.chat_id))
+            }
+        }
+    }
+
+    async fn apply_sidecars(
+        &self,
+        sidecars: proto::UpdateSidecars,
+    ) -> BackendResult<Vec<ClientEvent>> {
+        let users = sidecars
+            .users
+            .iter()
+            .map(user_record_from_proto)
+            .collect::<Vec<_>>();
+        self.store
+            .record_users(users.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+
+        let users_by_id = sidecars
+            .users
+            .iter()
+            .map(|user| (user.id, user))
+            .collect::<HashMap<_, _>>();
+        for chat in &sidecars.chats {
+            let dialog = sidecars.dialogs.iter().find(|dialog| {
+                dialog.chat_id == Some(chat.id)
+                    || dialog
+                        .peer
+                        .as_ref()
+                        .zip(chat.peer_id.as_ref())
+                        .is_some_and(|(dialog_peer, chat_peer)| dialog_peer == chat_peer)
+            });
+            self.store
+                .record_dialog(DialogRecord {
+                    chat_id: InlineId::new(chat.id),
+                    peer_user_id: dialog_peer_user_id(dialog, chat),
+                    title: Some(chat_title_from_proto(chat, &users_by_id)),
+                    emoji: chat_emoji_from_proto(chat),
+                    last_message_id: chat.last_msg_id.map(InlineId::new),
+                    synced_through_message_id: None,
+                    unread_count: dialog
+                        .and_then(|dialog| dialog.unread_count)
+                        .and_then(|count| u32::try_from(count).ok()),
+                    space_id: dialog
+                        .and_then(|dialog| dialog.space_id)
+                        .or(chat.space_id)
+                        .map(InlineId::new),
+                    is_public: chat.is_public,
+                    archived: dialog.and_then(|dialog| dialog.archived),
+                    pinned: dialog.and_then(|dialog| dialog.pinned),
+                    open: dialog.and_then(|dialog| dialog.open),
+                    chat_list_hidden: dialog.and_then(|dialog| dialog.chat_list_hidden),
+                    order: dialog.and_then(|dialog| dialog.order.clone()),
+                    pinned_order: dialog.and_then(|dialog| dialog.pinned_order.clone()),
+                    notification_mode: dialog.and_then(dialog_notification_mode_from_proto),
+                    follow_mode: dialog.and_then(dialog_follow_mode_from_proto),
+                    ..DialogRecord::new(InlineId::new(chat.id))
+                })
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+
+        let mut events = users
+            .into_iter()
+            .map(|user| ClientEvent::UserUpserted {
+                user_id: user.user_id,
+            })
+            .collect::<Vec<_>>();
+        events.extend(
+            sidecars
+                .chats
+                .into_iter()
+                .map(|chat| ClientEvent::ChatUpserted {
+                    chat_id: InlineId::new(chat.id),
+                }),
+        );
+        for space in sidecars.spaces {
+            let record = space_record_from_proto(&space);
+            self.store
+                .record_space(record.clone())
+                .await
+                .map_err(store_error_to_backend)?;
+            events.push(ClientEvent::SpaceUpserted {
+                space_id: record.space_id,
+            });
+        }
+        Ok(events)
+    }
+
+    async fn record_chat_update(
+        &self,
+        chat: proto::Chat,
+        dialog: Option<proto::Dialog>,
+        user: Option<proto::User>,
+    ) -> BackendResult<Vec<ClientEvent>> {
+        let user_record = user.as_ref().map(user_record_from_proto);
+        if let Some(user) = user_record.as_ref() {
+            self.store
+                .record_users(vec![user.clone()])
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+        let existing = self
+            .store
+            .dialog(InlineId::new(chat.id))
+            .await
+            .map_err(store_error_to_backend)?;
+        let users_by_id = user
+            .as_ref()
+            .map(|user| HashMap::from([(user.id, user)]))
+            .unwrap_or_default();
+        let record = DialogRecord {
+            chat_id: InlineId::new(chat.id),
+            peer_user_id: dialog_peer_user_id(dialog.as_ref(), &chat)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.peer_user_id)),
+            title: Some(chat_title_from_proto(&chat, &users_by_id)),
+            emoji: chat_emoji_from_proto(&chat),
+            last_message_id: chat
+                .last_msg_id
+                .map(InlineId::new)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.last_message_id)),
+            synced_through_message_id: existing
+                .as_ref()
+                .and_then(|dialog| dialog.synced_through_message_id),
+            unread_count: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.unread_count)
+                .and_then(|count| u32::try_from(count).ok())
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.unread_count)),
+            space_id: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.space_id)
+                .or(chat.space_id)
+                .map(InlineId::new)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
+            is_public: chat
+                .is_public
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.is_public)),
+            archived: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.archived)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.archived)),
+            pinned: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.pinned)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.pinned)),
+            open: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.open)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.open)),
+            chat_list_hidden: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.chat_list_hidden)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.chat_list_hidden)),
+            order: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.order.clone())
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.order.clone())),
+            pinned_order: dialog
+                .as_ref()
+                .and_then(|dialog| dialog.pinned_order.clone())
+                .or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|dialog| dialog.pinned_order.clone())
+                }),
+            notification_mode: dialog
+                .as_ref()
+                .and_then(dialog_notification_mode_from_proto)
+                .or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|dialog| dialog.notification_mode)
+                }),
+            follow_mode: dialog
+                .as_ref()
+                .and_then(dialog_follow_mode_from_proto)
+                .or_else(|| existing.as_ref().and_then(|dialog| dialog.follow_mode)),
+            ..existing
+                .clone()
+                .unwrap_or_else(|| DialogRecord::new(InlineId::new(chat.id)))
+        };
+        self.store
+            .record_dialog(record.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+
+        let mut events = vec![ClientEvent::ChatUpserted {
+            chat_id: record.chat_id,
+        }];
+        if let Some(user) = user_record {
+            events.push(ClientEvent::UserUpserted {
+                user_id: user.user_id,
+            });
+        }
+        Ok(events)
+    }
+
+    async fn resolve_chat_id(
+        &self,
+        peer: Option<&proto::Peer>,
+        fallback: Option<InlineId>,
+    ) -> BackendResult<Option<InlineId>> {
+        let Some(peer) = peer else {
+            return Ok(fallback);
+        };
+        match peer.r#type.as_ref() {
+            Some(proto::peer::Type::Chat(chat)) => Ok(Some(InlineId::new(chat.chat_id))),
+            Some(proto::peer::Type::User(user)) => {
+                let dialogs = self
+                    .store
+                    .dialogs(DialogsRequest {
+                        limit: Some(u32::MAX),
+                        cursor: None,
+                    })
+                    .await
+                    .map_err(store_error_to_backend)?;
+                Ok(dialogs
+                    .dialogs
+                    .into_iter()
+                    .find(|dialog| dialog.peer_user_id == Some(InlineId::new(user.user_id)))
+                    .map(|dialog| dialog.chat_id)
+                    .or(fallback))
+            }
+            None => Ok(fallback),
+        }
+    }
+
+    async fn mutate_dialog(
+        &self,
+        chat_id: InlineId,
+        mutate: impl FnOnce(&mut DialogRecord),
+    ) -> BackendResult<()> {
+        let mut dialog = self
+            .store
+            .dialog(chat_id)
+            .await
+            .map_err(store_error_to_backend)?
+            .unwrap_or_else(|| DialogRecord::new(chat_id));
+        mutate(&mut dialog);
+        self.store
+            .record_dialog(dialog)
+            .await
+            .map_err(store_error_to_backend)
+    }
+
+    async fn reconcile_live_dialogs(&self, dialogs: Vec<DialogRecord>) -> BackendResult<()> {
+        let live_ids = dialogs
+            .iter()
+            .map(|dialog| dialog.chat_id)
+            .collect::<HashSet<_>>();
+        for dialog in dialogs {
+            self.store
+                .record_dialog(dialog)
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+
+        let mut cursor = None;
+        let mut stored_ids = Vec::new();
+        loop {
+            let page = self
+                .store
+                .dialogs(DialogsRequest {
+                    limit: Some(1_000),
+                    cursor: cursor.clone(),
+                })
+                .await
+                .map_err(store_error_to_backend)?;
+            stored_ids.extend(page.dialogs.into_iter().map(|dialog| dialog.chat_id));
+            let Some(next) = page.next_cursor else {
+                break;
+            };
+            if cursor.as_ref() == Some(&next) {
+                return Err(BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "stored dialog pagination did not advance",
+                ));
+            }
+            cursor = Some(next);
+        }
+        for chat_id in stored_ids {
+            if !live_ids.contains(&chat_id) {
+                self.store
+                    .remove_dialog(chat_id)
+                    .await
+                    .map_err(store_error_to_backend)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn record_proto_message(
+        &self,
+        message: proto::Message,
+        fallback_chat_id: Option<InlineId>,
+        transaction: Option<TransactionIdentity>,
+    ) -> BackendResult<MessageRecord> {
+        let reaction_snapshot = reaction_snapshot_from_proto_message(&message, fallback_chat_id);
+        let record = message_record_from_proto_message(message, fallback_chat_id, transaction);
+        self.store
+            .record_message(record.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+        if let Some(reactions) = reaction_snapshot {
+            self.store
+                .replace_message_reactions(record.chat_id, record.message_id, reactions)
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+        Ok(record)
+    }
+
+    async fn record_transaction_error(
         &self,
         identity: TransactionIdentity,
         chat_id: InlineId,
+        retry_state: TransactionState,
         error: BackendError,
     ) -> BackendResult<()> {
+        let state = if retryable_transaction_category(error.category) {
+            retry_state
+        } else {
+            TransactionState::Failed
+        };
         self.store
             .record_transaction(
-                StoredTransaction::new(identity, TransactionState::Failed)
+                StoredTransaction::new(identity, state)
                     .with_chat_id(chat_id)
                     .with_failure(error.into()),
             )
@@ -1250,71 +2565,122 @@ impl SdkBackend {
     ) -> BackendResult<Vec<ClientEvent>> {
         let mut events = Vec::new();
         for update in updates {
+            let seq = update.seq.unwrap_or_default();
             match update.update {
                 Some(proto::update::Update::NewMessage(update)) => {
                     if let Some(message) = update.message {
-                        let record =
-                            message_record_from_proto_message(message, fallback_chat_id, None);
-                        self.store
-                            .record_message(record.clone())
-                            .await
-                            .map_err(store_error_to_backend)?;
+                        let record = self
+                            .record_proto_message(message, fallback_chat_id, None)
+                            .await?;
                         events.push(ClientEvent::MessageStored { message: record });
                     }
                 }
                 Some(proto::update::Update::EditMessage(update)) => {
                     if let Some(message) = update.message {
-                        let record =
-                            message_record_from_proto_message(message, fallback_chat_id, None);
-                        self.store
-                            .record_message(record.clone())
-                            .await
-                            .map_err(store_error_to_backend)?;
+                        let record = self
+                            .record_proto_message(message, fallback_chat_id, None)
+                            .await?;
                         events.push(ClientEvent::MessageStored { message: record });
                     }
                 }
                 Some(proto::update::Update::DeleteMessages(update)) => {
-                    let chat_id = update
-                        .peer_id
-                        .as_ref()
-                        .and_then(chat_id_from_peer)
-                        .or(fallback_chat_id);
-                    if let Some(chat_id) = chat_id {
-                        for message_id in update.message_ids {
-                            events.push(ClientEvent::MessageDeleted {
-                                chat_id,
-                                message_id: InlineId::new(message_id),
-                            });
-                        }
+                    let chat_id = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?
+                        .ok_or_else(|| {
+                            BackendError::new(
+                                ClientErrorCategory::ProtocolMismatch,
+                                "delete update did not resolve to a stored chat",
+                            )
+                        })?;
+                    for message_id in update.message_ids {
+                        let message_id = InlineId::new(message_id);
+                        self.store
+                            .record_message_deleted(chat_id, message_id)
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::MessageDeleted {
+                            chat_id,
+                            message_id,
+                        });
                     }
                 }
                 Some(proto::update::Update::UpdateReaction(update)) => {
                     if let Some(reaction) = update.reaction {
-                        events.push(ClientEvent::ReactionChanged {
+                        let stored = StoredReaction {
                             chat_id: InlineId::new(reaction.chat_id),
                             message_id: InlineId::new(reaction.message_id),
                             user_id: InlineId::new(reaction.user_id),
                             reaction: reaction.emoji,
+                        };
+                        self.store
+                            .record_reaction(stored.clone())
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::ReactionChanged {
+                            chat_id: stored.chat_id,
+                            message_id: stored.message_id,
+                            user_id: stored.user_id,
+                            reaction: stored.reaction,
                             removed: false,
                         });
                     }
                 }
                 Some(proto::update::Update::DeleteReaction(update)) => {
-                    events.push(ClientEvent::ReactionChanged {
+                    let stored = StoredReaction {
                         chat_id: InlineId::new(update.chat_id),
                         message_id: InlineId::new(update.message_id),
                         user_id: InlineId::new(update.user_id),
                         reaction: update.emoji,
+                    };
+                    self.store
+                        .remove_reaction(stored.clone())
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::ReactionChanged {
+                        chat_id: stored.chat_id,
+                        message_id: stored.message_id,
+                        user_id: stored.user_id,
+                        reaction: stored.reaction,
                         removed: true,
                     });
                 }
                 Some(proto::update::Update::UpdateReadMaxId(update)) => {
-                    let chat_id = update
-                        .peer_id
-                        .as_ref()
-                        .and_then(chat_id_from_peer)
-                        .or(fallback_chat_id);
+                    let chat_id = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?;
                     if let Some(chat_id) = chat_id {
+                        self.store
+                            .record_read_state(StoredReadState {
+                                chat_id,
+                                read_max_id: Some(InlineId::new(update.read_max_id)),
+                                unread_count: u32::try_from(update.unread_count).ok(),
+                                marked_unread: false,
+                            })
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::ReadStateChanged { chat_id });
+                    }
+                }
+                Some(proto::update::Update::MarkAsUnread(update)) => {
+                    if let Some(chat_id) = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?
+                    {
+                        let current = self
+                            .store
+                            .read_state(chat_id)
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        self.store
+                            .record_read_state(StoredReadState {
+                                chat_id,
+                                read_max_id: current.and_then(|state| state.read_max_id),
+                                unread_count: current.and_then(|state| state.unread_count),
+                                marked_unread: update.unread_mark,
+                            })
+                            .await
+                            .map_err(store_error_to_backend)?;
                         events.push(ClientEvent::ReadStateChanged { chat_id });
                     }
                 }
@@ -1344,7 +2710,405 @@ impl SdkBackend {
                         });
                     }
                 }
-                _ => {}
+                Some(proto::update::Update::NewChat(update)) => {
+                    if let Some(chat) = update.chat {
+                        events.extend(self.record_chat_update(chat, None, update.user).await?);
+                    }
+                }
+                Some(proto::update::Update::ChatOpen(update)) => {
+                    if let Some(chat) = update.chat {
+                        events.extend(
+                            self.record_chat_update(chat, update.dialog, update.user)
+                                .await?,
+                        );
+                    }
+                }
+                Some(proto::update::Update::ChatMoved(update)) => {
+                    if let Some(chat) = update.chat {
+                        events.extend(self.record_chat_update(chat, None, None).await?);
+                    }
+                }
+                Some(proto::update::Update::ChatInfo(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    let mut dialog = self
+                        .store
+                        .dialog(chat_id)
+                        .await
+                        .map_err(store_error_to_backend)?
+                        .unwrap_or(DialogRecord {
+                            chat_id,
+                            peer_user_id: None,
+                            title: None,
+                            last_message_id: None,
+                            synced_through_message_id: None,
+                            unread_count: None,
+                            ..DialogRecord::new(chat_id)
+                        });
+                    if let Some(title) = update.title {
+                        dialog.title = trimmed_option(Some(title));
+                    }
+                    if let Some(emoji) = update.emoji {
+                        dialog.emoji = non_empty_option(Some(&emoji));
+                    }
+                    self.store
+                        .record_dialog(dialog)
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::ChatUpserted { chat_id });
+                }
+                Some(proto::update::Update::ChatVisibility(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    self.mutate_dialog(chat_id, |dialog| {
+                        dialog.is_public = Some(update.is_public);
+                    })
+                    .await?;
+                    events.push(ClientEvent::ChatUpserted { chat_id });
+                }
+                Some(proto::update::Update::DialogArchived(update)) => {
+                    let chat_id = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?
+                        .ok_or_else(|| unresolved_update_peer("dialog archived"))?;
+                    self.mutate_dialog(chat_id, |dialog| {
+                        dialog.archived = Some(update.archived);
+                    })
+                    .await?;
+                    events.push(ClientEvent::ChatUpserted { chat_id });
+                }
+                Some(proto::update::Update::DialogNotificationSettings(update)) => {
+                    let chat_id = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?
+                        .ok_or_else(|| unresolved_update_peer("dialog notification settings"))?;
+                    let mode = update
+                        .notification_settings
+                        .as_ref()
+                        .and_then(dialog_notification_mode_from_settings);
+                    self.mutate_dialog(chat_id, |dialog| {
+                        dialog.notification_mode = mode;
+                    })
+                    .await?;
+                    events.push(ClientEvent::ChatUpserted { chat_id });
+                }
+                Some(proto::update::Update::DialogFollowMode(update)) => {
+                    let chat_id = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?
+                        .ok_or_else(|| unresolved_update_peer("dialog follow mode"))?;
+                    let mode = update.follow_mode.and_then(dialog_follow_mode_from_value);
+                    self.mutate_dialog(chat_id, |dialog| {
+                        dialog.follow_mode = mode;
+                    })
+                    .await?;
+                    events.push(ClientEvent::ChatUpserted { chat_id });
+                }
+                Some(proto::update::Update::PinnedMessages(update)) => {
+                    let chat_id = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?
+                        .ok_or_else(|| unresolved_update_peer("pinned messages"))?;
+                    let message_ids = update
+                        .message_ids
+                        .into_iter()
+                        .map(InlineId::new)
+                        .collect::<Vec<_>>();
+                    self.mutate_dialog(chat_id, |dialog| {
+                        dialog.pinned_message_ids = message_ids;
+                    })
+                    .await?;
+                    events.push(ClientEvent::ChatUpserted { chat_id });
+                }
+                Some(proto::update::Update::MessageAttachment(update)) => {
+                    let chat_id = (update.chat_id > 0)
+                        .then(|| InlineId::new(update.chat_id))
+                        .or(self
+                            .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                            .await?)
+                        .ok_or_else(|| unresolved_update_peer("message attachment"))?;
+                    events.push(ClientEvent::MessageUpserted {
+                        chat_id,
+                        message_id: InlineId::new(update.message_id),
+                    });
+                }
+                Some(proto::update::Update::ClearChatHistory(update)) => {
+                    let chat_ids = match update.target {
+                        Some(proto::update_clear_chat_history::Target::PeerId(peer)) => vec![
+                            self.resolve_chat_id(Some(&peer), fallback_chat_id)
+                                .await?
+                                .ok_or_else(|| unresolved_update_peer("clear history"))?,
+                        ],
+                        Some(proto::update_clear_chat_history::Target::SpaceId(space_id)) => self
+                            .store
+                            .chat_ids_in_space(InlineId::new(space_id))
+                            .await
+                            .map_err(store_error_to_backend)?,
+                        None => {
+                            return Err(BackendError::new(
+                                ClientErrorCategory::ProtocolMismatch,
+                                "clear history update had no target",
+                            ));
+                        }
+                    };
+                    for chat_id in chat_ids {
+                        self.store
+                            .clear_chat_messages(chat_id, update.before_date)
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::ChatHistoryCleared {
+                            chat_id,
+                            before_date: update.before_date,
+                        });
+                    }
+                    for deleted_chat_id in update.deleted_chat_ids {
+                        let chat_id = InlineId::new(deleted_chat_id);
+                        self.store
+                            .remove_dialog(chat_id)
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::ChatDeleted { chat_id });
+                    }
+                    for changed_chat_id in update
+                        .orphaned_chat_ids
+                        .into_iter()
+                        .chain(update.detached_chat_ids)
+                    {
+                        events.push(ClientEvent::ChatUpserted {
+                            chat_id: InlineId::new(changed_chat_id),
+                        });
+                    }
+                }
+                Some(proto::update::Update::DeleteChat(update)) => {
+                    if let Some(chat_id) = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?
+                    {
+                        self.store
+                            .remove_dialog(chat_id)
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::ChatDeleted { chat_id });
+                    }
+                }
+                Some(proto::update::Update::ParticipantAdd(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    if let Some(participant) = update.participant {
+                        self.store
+                            .record_chat_participant(
+                                chat_id,
+                                ChatParticipantRecord {
+                                    user_id: InlineId::new(participant.user_id),
+                                    date: Some(participant.date),
+                                },
+                            )
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::ChatParticipantsChanged { chat_id });
+                    }
+                }
+                Some(proto::update::Update::ParticipantDelete(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    self.store
+                        .remove_chat_participant(chat_id, InlineId::new(update.user_id))
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::ChatParticipantsChanged { chat_id });
+                }
+                Some(proto::update::Update::SpaceMemberAdd(update)) => {
+                    let member = update.member.ok_or_else(|| {
+                        BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "space member add update had no member",
+                        )
+                    })?;
+                    if let Some(user) = update.user {
+                        let user = user_record_from_proto(&user);
+                        self.store
+                            .record_users(vec![user.clone()])
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::UserUpserted {
+                            user_id: user.user_id,
+                        });
+                    }
+                    let member = space_member_record_from_proto(&member);
+                    self.store
+                        .record_space_member(member.clone())
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::SpaceMemberChanged {
+                        space_id: member.space_id,
+                        user_id: member.user_id,
+                        removed: false,
+                    });
+                }
+                Some(proto::update::Update::SpaceMemberDelete(update)) => {
+                    let space_id = InlineId::new(update.space_id);
+                    let user_id = InlineId::new(update.user_id);
+                    self.store
+                        .remove_space_member(space_id, user_id)
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::SpaceMemberChanged {
+                        space_id,
+                        user_id,
+                        removed: true,
+                    });
+                }
+                Some(proto::update::Update::SpaceMemberUpdate(update)) => {
+                    let member = update.member.ok_or_else(|| {
+                        BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "space member update had no member",
+                        )
+                    })?;
+                    let member = space_member_record_from_proto(&member);
+                    self.store
+                        .record_space_member(member.clone())
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::SpaceMemberChanged {
+                        space_id: member.space_id,
+                        user_id: member.user_id,
+                        removed: false,
+                    });
+                }
+                Some(proto::update::Update::JoinSpace(update)) => {
+                    let space = update.space.ok_or_else(|| {
+                        BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "join space update had no space",
+                        )
+                    })?;
+                    let space = space_record_from_proto(&space);
+                    self.store
+                        .record_space(space.clone())
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::SpaceUpserted {
+                        space_id: space.space_id,
+                    });
+                    if let Some(member) = update.member {
+                        let member = space_member_record_from_proto(&member);
+                        self.store
+                            .record_space_member(member.clone())
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::SpaceMemberChanged {
+                            space_id: member.space_id,
+                            user_id: member.user_id,
+                            removed: false,
+                        });
+                    }
+                }
+                Some(proto::update::Update::UpdateUserSettings(update)) => {
+                    let settings = update.settings.ok_or_else(|| {
+                        BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "user settings update had no settings",
+                        )
+                    })?;
+                    self.store
+                        .record_user_settings(user_settings_record_from_proto(&settings))
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::UserSettingsChanged {});
+                }
+                Some(proto::update::Update::MessageActionInvoked(update)) => {
+                    events.push(ClientEvent::MessageActionInvoked {
+                        interaction_id: InlineId::new(update.interaction_id),
+                        chat_id: InlineId::new(update.chat_id),
+                        message_id: InlineId::new(update.message_id),
+                        actor_user_id: InlineId::new(update.actor_user_id),
+                        action_id: update.action_id,
+                        data: update.data,
+                    });
+                }
+                Some(proto::update::Update::MessageActionAnswered(update)) => {
+                    let toast = update.ui.and_then(|ui| match ui.kind {
+                        Some(proto::message_action_response_ui::Kind::Toast(toast)) => {
+                            trimmed_option(Some(toast.text))
+                        }
+                        None => None,
+                    });
+                    events.push(ClientEvent::MessageActionAnswered {
+                        interaction_id: InlineId::new(update.interaction_id),
+                        toast,
+                    });
+                }
+                Some(proto::update::Update::UpdatedUser(update)) => {
+                    if let Some(user) = update.user {
+                        let record = user_record_from_proto(&user);
+                        self.store
+                            .record_users(vec![record.clone()])
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::UserUpserted {
+                            user_id: record.user_id,
+                        });
+                    }
+                }
+                Some(proto::update::Update::ChatSkipPts(_)) => {}
+                Some(proto::update::Update::UpdateUserStatus(update)) => {
+                    let status = update.status.as_ref();
+                    let is_online = status.and_then(|status| {
+                        match proto::user_status::Status::try_from(status.online).ok()? {
+                            proto::user_status::Status::Online => Some(true),
+                            proto::user_status::Status::Offline => Some(false),
+                            proto::user_status::Status::Unknown => None,
+                        }
+                    });
+                    events.push(ClientEvent::UserStatusChanged {
+                        user_id: InlineId::new(update.user_id),
+                        is_online,
+                        last_online: status
+                            .and_then(|status| status.last_online.as_ref())
+                            .and_then(|last_online| last_online.date),
+                    });
+                }
+                Some(proto::update::Update::BotPresence(update)) => {
+                    let state = update.state.as_ref();
+                    let kind = state
+                        .and_then(|state| {
+                            proto::bot_presence_state::Kind::try_from(state.kind).ok()
+                        })
+                        .map(|kind| kind.as_str_name().to_owned())
+                        .unwrap_or_else(|| "KIND_UNSPECIFIED".to_owned());
+                    let chat_id = self
+                        .resolve_chat_id(update.peer_id.as_ref(), fallback_chat_id)
+                        .await?;
+                    events.push(ClientEvent::BotPresenceChanged {
+                        bot_user_id: InlineId::new(update.bot_user_id),
+                        chat_id,
+                        kind,
+                        comment: state.and_then(|state| trimmed_option(state.comment.clone())),
+                        avatar_changed: update.avatar_changed,
+                    });
+                }
+                Some(proto::update::Update::NewMessageNotification(update)) => {
+                    if let Some(message) = update.message {
+                        let message =
+                            message_record_from_proto_message(message, fallback_chat_id, None);
+                        let reason =
+                            proto::update_new_message_notification::Reason::try_from(update.reason)
+                                .map(|reason| reason.as_str_name().to_owned())
+                                .unwrap_or_else(|_| "REASON_UNSPECIFIED".to_owned());
+                        events.push(ClientEvent::NewMessageNotification { message, reason });
+                    }
+                }
+                Some(other) => {
+                    let kind = update_kind(&other);
+                    return Err(BackendError::new(
+                        ClientErrorCategory::Unsupported,
+                        format!("Inline update is not implemented: {kind}"),
+                    ));
+                }
+                None if seq > 0 => {
+                    return Err(BackendError::new(
+                        ClientErrorCategory::ProtocolMismatch,
+                        "sequenced Inline update had no payload",
+                    ));
+                }
+                None => {}
             }
         }
         Ok(events)
@@ -1355,15 +3119,61 @@ fn store_error_to_backend(error: StoreError) -> BackendError {
     BackendError::new(error.category, error.message)
 }
 
+fn unresolved_update_peer(kind: &str) -> BackendError {
+    BackendError::new(
+        ClientErrorCategory::ProtocolMismatch,
+        format!("{kind} update did not resolve to a stored chat"),
+    )
+}
+
+fn update_kind(update: &proto::update::Update) -> &'static str {
+    use proto::update::Update;
+    match update {
+        Update::NewMessage(_) => "new_message",
+        Update::EditMessage(_) => "edit_message",
+        Update::UpdateMessageId(_) => "update_message_id",
+        Update::DeleteMessages(_) => "delete_messages",
+        Update::UpdateComposeAction(_) => "update_compose_action",
+        Update::UpdateUserStatus(_) => "update_user_status",
+        Update::MessageAttachment(_) => "message_attachment",
+        Update::UpdateReaction(_) => "update_reaction",
+        Update::DeleteReaction(_) => "delete_reaction",
+        Update::ParticipantAdd(_) => "participant_add",
+        Update::ParticipantDelete(_) => "participant_delete",
+        Update::NewChat(_) => "new_chat",
+        Update::DeleteChat(_) => "delete_chat",
+        Update::SpaceMemberAdd(_) => "space_member_add",
+        Update::SpaceMemberDelete(_) => "space_member_delete",
+        Update::JoinSpace(_) => "join_space",
+        Update::UpdateReadMaxId(_) => "update_read_max_id",
+        Update::UpdateUserSettings(_) => "update_user_settings",
+        Update::NewMessageNotification(_) => "new_message_notification",
+        Update::MarkAsUnread(_) => "mark_as_unread",
+        Update::ChatSkipPts(_) => "chat_skip_pts",
+        Update::ChatHasNewUpdates(_) => "chat_has_new_updates",
+        Update::SpaceHasNewUpdates(_) => "space_has_new_updates",
+        Update::SpaceMemberUpdate(_) => "space_member_update",
+        Update::ChatVisibility(_) => "chat_visibility",
+        Update::DialogArchived(_) => "dialog_archived",
+        Update::ChatInfo(_) => "chat_info",
+        Update::PinnedMessages(_) => "pinned_messages",
+        Update::ChatMoved(_) => "chat_moved",
+        Update::DialogNotificationSettings(_) => "dialog_notification_settings",
+        Update::ChatOpen(_) => "chat_open",
+        Update::MessageActionInvoked(_) => "message_action_invoked",
+        Update::MessageActionAnswered(_) => "message_action_answered",
+        Update::ClearChatHistory(_) => "clear_chat_history",
+        Update::BotPresence(_) => "bot_presence",
+        Update::DialogFollowMode(_) => "dialog_follow_mode",
+        Update::UpdatedUser(_) => "updated_user",
+    }
+}
+
+#[cfg(test)]
 fn dialogs_page_from_get_chats(
     result: &proto::GetChatsResult,
     request: DialogsRequest,
 ) -> BackendResult<DialogsPage> {
-    let users_by_id = result
-        .users
-        .iter()
-        .map(|user| (user.id, user))
-        .collect::<HashMap<_, _>>();
     let start = request
         .cursor
         .as_deref()
@@ -1381,23 +3191,7 @@ fn dialogs_page_from_get_chats(
         .unwrap_or(0);
     let limit = request.limit.unwrap_or(100).max(1) as usize;
 
-    let mut dialogs = result
-        .chats
-        .iter()
-        .map(|chat| {
-            let dialog = dialog_for_chat(result, chat);
-            DialogRecord {
-                chat_id: InlineId::new(chat.id),
-                peer_user_id: dialog_peer_user_id(dialog, chat),
-                title: Some(chat_display_name_from_proto(chat, &users_by_id)),
-                last_message_id: chat.last_msg_id.map(InlineId::new),
-                synced_through_message_id: None,
-                unread_count: dialog
-                    .and_then(|dialog| dialog.unread_count)
-                    .and_then(|count| u32::try_from(count).ok()),
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut dialogs = dialog_records_from_get_chats(result);
     let total = dialogs.len();
     if start >= dialogs.len() {
         dialogs.clear();
@@ -1409,6 +3203,46 @@ fn dialogs_page_from_get_chats(
         users: result.users.iter().map(user_record_from_proto).collect(),
         next_cursor: (start + limit < total).then(|| (start + limit).to_string()),
     })
+}
+
+fn dialog_records_from_get_chats(result: &proto::GetChatsResult) -> Vec<DialogRecord> {
+    let users_by_id = result
+        .users
+        .iter()
+        .map(|user| (user.id, user))
+        .collect::<HashMap<_, _>>();
+    result
+        .chats
+        .iter()
+        .map(|chat| {
+            let dialog = dialog_for_chat(result, chat);
+            DialogRecord {
+                chat_id: InlineId::new(chat.id),
+                peer_user_id: dialog_peer_user_id(dialog, chat),
+                title: Some(chat_title_from_proto(chat, &users_by_id)),
+                emoji: chat_emoji_from_proto(chat),
+                last_message_id: chat.last_msg_id.map(InlineId::new),
+                synced_through_message_id: None,
+                unread_count: dialog
+                    .and_then(|dialog| dialog.unread_count)
+                    .and_then(|count| u32::try_from(count).ok()),
+                space_id: dialog
+                    .and_then(|dialog| dialog.space_id)
+                    .or(chat.space_id)
+                    .map(InlineId::new),
+                is_public: chat.is_public,
+                archived: dialog.and_then(|dialog| dialog.archived),
+                pinned: dialog.and_then(|dialog| dialog.pinned),
+                open: dialog.and_then(|dialog| dialog.open),
+                chat_list_hidden: dialog.and_then(|dialog| dialog.chat_list_hidden),
+                order: dialog.and_then(|dialog| dialog.order.clone()),
+                pinned_order: dialog.and_then(|dialog| dialog.pinned_order.clone()),
+                notification_mode: dialog.and_then(dialog_notification_mode_from_proto),
+                follow_mode: dialog.and_then(dialog_follow_mode_from_proto),
+                ..DialogRecord::new(InlineId::new(chat.id))
+            }
+        })
+        .collect()
 }
 
 fn dialog_for_chat<'a>(
@@ -1425,6 +3259,24 @@ fn dialog_for_chat<'a>(
     })
 }
 
+fn read_state_from_proto_dialog(
+    chat_id: InlineId,
+    dialog: &proto::Dialog,
+) -> Option<StoredReadState> {
+    if dialog.read_max_id.is_none() && dialog.unread_count.is_none() && dialog.unread_mark.is_none()
+    {
+        return None;
+    }
+    Some(StoredReadState {
+        chat_id,
+        read_max_id: dialog.read_max_id.map(InlineId::new),
+        unread_count: dialog
+            .unread_count
+            .and_then(|count| u32::try_from(count).ok()),
+        marked_unread: dialog.unread_mark.unwrap_or(false),
+    })
+}
+
 fn dialog_peer_user_id(dialog: Option<&proto::Dialog>, chat: &proto::Chat) -> Option<InlineId> {
     dialog
         .and_then(|dialog| dialog.peer.as_ref())
@@ -1433,12 +3285,49 @@ fn dialog_peer_user_id(dialog: Option<&proto::Dialog>, chat: &proto::Chat) -> Op
         .map(InlineId::new)
 }
 
-fn chat_display_name_from_proto(
-    chat: &proto::Chat,
-    users_by_id: &HashMap<i64, &proto::User>,
-) -> String {
-    let mut name = chat
-        .peer_id
+fn dialog_notification_mode_from_proto(dialog: &proto::Dialog) -> Option<DialogNotificationMode> {
+    dialog
+        .notification_settings
+        .as_ref()
+        .and_then(dialog_notification_mode_from_settings)
+}
+
+fn dialog_notification_mode_from_settings(
+    settings: &proto::DialogNotificationSettings,
+) -> Option<DialogNotificationMode> {
+    match proto::dialog_notification_settings::Mode::try_from(settings.mode?).ok()? {
+        proto::dialog_notification_settings::Mode::All => Some(DialogNotificationMode::All),
+        proto::dialog_notification_settings::Mode::Mentions => {
+            Some(DialogNotificationMode::Mentions)
+        }
+        proto::dialog_notification_settings::Mode::None => Some(DialogNotificationMode::None),
+        proto::dialog_notification_settings::Mode::Unspecified => None,
+    }
+}
+
+fn dialog_notification_mode_to_proto(
+    mode: DialogNotificationMode,
+) -> proto::dialog_notification_settings::Mode {
+    match mode {
+        DialogNotificationMode::All => proto::dialog_notification_settings::Mode::All,
+        DialogNotificationMode::Mentions => proto::dialog_notification_settings::Mode::Mentions,
+        DialogNotificationMode::None => proto::dialog_notification_settings::Mode::None,
+    }
+}
+
+fn dialog_follow_mode_from_proto(dialog: &proto::Dialog) -> Option<DialogFollowMode> {
+    dialog.follow_mode.and_then(dialog_follow_mode_from_value)
+}
+
+fn dialog_follow_mode_from_value(value: i32) -> Option<DialogFollowMode> {
+    match proto::DialogFollowMode::try_from(value).ok()? {
+        proto::DialogFollowMode::Following => Some(DialogFollowMode::Following),
+        proto::DialogFollowMode::Unspecified => None,
+    }
+}
+
+fn chat_title_from_proto(chat: &proto::Chat, users_by_id: &HashMap<i64, &proto::User>) -> String {
+    chat.peer_id
         .as_ref()
         .and_then(user_id_from_peer)
         .and_then(|user_id| users_by_id.get(&user_id))
@@ -1450,16 +3339,11 @@ fn chat_display_name_from_proto(
             } else {
                 title.to_owned()
             }
-        });
-    if let Some(emoji) = chat
-        .emoji
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        name = format!("{emoji} {name}");
-    }
-    name
+        })
+}
+
+fn chat_emoji_from_proto(chat: &proto::Chat) -> Option<String> {
+    non_empty_option(chat.emoji.as_deref())
 }
 
 fn user_record_from_proto(user: &proto::User) -> UserRecord {
@@ -1479,6 +3363,65 @@ fn user_record_from_proto(user: &proto::User) -> UserRecord {
                     .and_then(|avatar| non_empty_option(avatar.cdn_url.as_deref()))
             }),
         is_bot: user.bot,
+    }
+}
+
+fn space_record_from_proto(space: &proto::Space) -> SpaceRecord {
+    SpaceRecord {
+        space_id: InlineId::new(space.id),
+        name: space.name.clone(),
+        creator: space.creator,
+        date: space.date,
+        is_public: space.is_public,
+    }
+}
+
+fn space_member_record_from_proto(member: &proto::Member) -> SpaceMemberRecord {
+    SpaceMemberRecord {
+        space_id: InlineId::new(member.space_id),
+        user_id: InlineId::new(member.user_id),
+        role: member
+            .role
+            .and_then(|role| match proto::member::Role::try_from(role).ok()? {
+                proto::member::Role::Owner => Some(SpaceMemberRole::Owner),
+                proto::member::Role::Admin => Some(SpaceMemberRole::Admin),
+                proto::member::Role::Member => Some(SpaceMemberRole::Member),
+            }),
+        date: member.date,
+        can_access_public_chats: member.can_access_public_chats,
+    }
+}
+
+fn user_settings_record_from_proto(settings: &proto::UserSettings) -> UserSettingsRecord {
+    let notifications = settings.notification_settings.as_ref();
+    UserSettingsRecord {
+        notification_mode: notifications
+            .and_then(|settings| settings.mode)
+            .and_then(
+                |mode| match proto::notification_settings::Mode::try_from(mode).ok()? {
+                    proto::notification_settings::Mode::All => Some(NotificationMode::All),
+                    proto::notification_settings::Mode::None => Some(NotificationMode::None),
+                    proto::notification_settings::Mode::Mentions => {
+                        Some(NotificationMode::Mentions)
+                    }
+                    proto::notification_settings::Mode::ImportantOnly => {
+                        Some(NotificationMode::ImportantOnly)
+                    }
+                    proto::notification_settings::Mode::OnlyMentions => {
+                        Some(NotificationMode::OnlyMentions)
+                    }
+                    proto::notification_settings::Mode::Unspecified => None,
+                },
+            ),
+        silent: notifications.and_then(|settings| settings.silent),
+        zen_mode_requires_mention: notifications
+            .and_then(|settings| settings.zen_mode_requires_mention),
+        zen_mode_uses_default_rules: notifications
+            .and_then(|settings| settings.zen_mode_uses_default_rules),
+        zen_mode_custom_rules: notifications
+            .and_then(|settings| settings.zen_mode_custom_rules.clone()),
+        disable_dm_notifications: notifications
+            .and_then(|settings| settings.disable_dm_notifications),
     }
 }
 
@@ -1510,6 +3453,16 @@ fn validate_create_participants(participants: &[ChatCreateParticipant]) -> Backe
         return Err(BackendError::new(
             ClientErrorCategory::InvalidInput,
             "participant user_id must be positive",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_chat_and_user_ids(chat_id: InlineId, user_id: InlineId) -> BackendResult<()> {
+    if chat_id.get() <= 0 || user_id.get() <= 0 {
+        return Err(BackendError::new(
+            ClientErrorCategory::InvalidInput,
+            "chat_id and user_id must be positive",
         ));
     }
     Ok(())
@@ -1670,6 +3623,10 @@ fn trimmed_option(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn normalized_account_namespace(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
 fn user_display_name_from_proto(user: &proto::User) -> Option<String> {
     if let Some(bot_name) = user
         .bot_avatar
@@ -1721,8 +3678,8 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
             error_name,
             friendly,
             ..
-        } if code == 420 || error_name == "RATE_LIMIT" => {
-            BackendError::new(ClientErrorCategory::RateLimited, friendly)
+        } if code == 420 || code == 429 || is_rate_limit_error_name(&error_name) => {
+            rate_limited_backend_error(friendly)
         }
         RealtimeError::RpcError {
             error_name,
@@ -1734,7 +3691,9 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         RealtimeError::RpcError { friendly, .. } => {
             BackendError::new(ClientErrorCategory::Internal, friendly)
         }
-        RealtimeError::ConnectionClosed | RealtimeError::WebSocket(_) => {
+        RealtimeError::ConnectionClosed
+        | RealtimeError::EventLagged { .. }
+        | RealtimeError::WebSocket(_) => {
             BackendError::new(ClientErrorCategory::Network, error.to_string())
         }
         RealtimeError::InvalidHeaderValue { .. }
@@ -1747,6 +3706,15 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
     }
 }
 
+fn realtime_error_closes_session(error: &RealtimeError) -> bool {
+    matches!(
+        error,
+        RealtimeError::ConnectionClosed
+            | RealtimeError::ConnectionError { .. }
+            | RealtimeError::WebSocket(_)
+    )
+}
+
 fn api_error_to_backend(error: ApiError) -> BackendError {
     let rendered = error.to_string();
     match error {
@@ -1756,10 +3724,20 @@ fn api_error_to_backend(error: ApiError) -> BackendError {
         ApiError::Status { status, .. } if status == 401 || status == 403 => {
             BackendError::new(ClientErrorCategory::AuthExpired, rendered)
         }
+        ApiError::Status {
+            status: 420 | 429, ..
+        } => rate_limited_backend_error(rendered),
         ApiError::Api {
             status: Some(401) | Some(403),
             ..
         } => BackendError::new(ClientErrorCategory::AuthExpired, rendered),
+        ApiError::Api {
+            status: Some(420) | Some(429),
+            ..
+        } => rate_limited_backend_error(rendered),
+        ApiError::Api { ref error, .. } if is_rate_limit_error_name(error) => {
+            rate_limited_backend_error(rendered)
+        }
         ApiError::Http(_) | ApiError::Status { .. } => {
             BackendError::new(ClientErrorCategory::Network, rendered)
         }
@@ -1769,6 +3747,22 @@ fn api_error_to_backend(error: ApiError) -> BackendError {
         }
         _ => BackendError::new(ClientErrorCategory::Internal, rendered),
     }
+}
+
+fn rate_limited_backend_error(message: String) -> BackendError {
+    let retry_after_seconds = retry_after_seconds_from_message(&message);
+    let error = BackendError::new(ClientErrorCategory::RateLimited, message);
+    match retry_after_seconds {
+        Some(seconds) => error.with_retry_after_seconds(seconds),
+        None => error,
+    }
+}
+
+fn is_rate_limit_error_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_uppercase().as_str(),
+        "RATE_LIMIT" | "RATE_LIMITED" | "FLOOD_WAIT"
+    )
 }
 
 fn input_peer_for_client_peer(peer: PeerRef) -> proto::InputPeer {
@@ -1792,6 +3786,38 @@ fn input_peer_for_chat(chat_id: InlineId) -> proto::InputPeer {
         r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
             chat_id: chat_id.get(),
         })),
+    }
+}
+
+fn input_peer_for_sync_bucket_peer(peer: crate::SyncBucketPeer) -> proto::InputPeer {
+    let r#type = match peer {
+        crate::SyncBucketPeer::User { user_id } => {
+            proto::input_peer::Type::User(proto::InputPeerUser {
+                user_id: user_id.get(),
+            })
+        }
+        crate::SyncBucketPeer::Chat { chat_id } => {
+            proto::input_peer::Type::Chat(proto::InputPeerChat {
+                chat_id: chat_id.get(),
+            })
+        }
+    };
+    proto::InputPeer {
+        r#type: Some(r#type),
+    }
+}
+
+fn sync_bucket_peer_for_chat(chat: &proto::Chat) -> crate::SyncBucketPeer {
+    match chat.peer_id.as_ref().and_then(|peer| peer.r#type.as_ref()) {
+        Some(proto::peer::Type::User(user)) => crate::SyncBucketPeer::User {
+            user_id: InlineId::new(user.user_id),
+        },
+        Some(proto::peer::Type::Chat(peer)) => crate::SyncBucketPeer::Chat {
+            chat_id: InlineId::new(peer.chat_id),
+        },
+        None => crate::SyncBucketPeer::Chat {
+            chat_id: InlineId::new(chat.id),
+        },
     }
 }
 
@@ -2190,6 +4216,41 @@ fn message_record_from_proto_message(
     }
 }
 
+fn reaction_snapshot_from_proto_message(
+    message: &proto::Message,
+    fallback_chat_id: Option<InlineId>,
+) -> Option<Vec<StoredReaction>> {
+    let snapshot = message.reactions.as_ref()?;
+    let chat_id = if message.chat_id != 0 {
+        InlineId::new(message.chat_id)
+    } else if let Some(peer) = &message.peer_id {
+        chat_id_from_peer(peer).unwrap_or_else(|| fallback_chat_id.unwrap_or(InlineId::new(0)))
+    } else {
+        fallback_chat_id.unwrap_or(InlineId::new(0))
+    };
+    Some(
+        snapshot
+            .reactions
+            .iter()
+            .filter(|reaction| !reaction.emoji.trim().is_empty())
+            .map(|reaction| StoredReaction {
+                chat_id: if reaction.chat_id != 0 {
+                    InlineId::new(reaction.chat_id)
+                } else {
+                    chat_id
+                },
+                message_id: if reaction.message_id != 0 {
+                    InlineId::new(reaction.message_id)
+                } else {
+                    InlineId::new(message.id)
+                },
+                user_id: InlineId::new(reaction.user_id),
+                reaction: reaction.emoji.clone(),
+            })
+            .collect(),
+    )
+}
+
 fn content_from_proto_message(message: &proto::Message) -> MessageContent {
     match &message.media {
         None => match &message.message {
@@ -2363,12 +4424,38 @@ fn outcome_from_stored_transaction(
         MessageMutation {
             transaction: transaction.identity.clone(),
             message_id,
+            state: None,
+            failure: None,
         },
         transaction.chat_id.unwrap_or(fallback_chat_id),
         message_id,
         None,
         transaction.state,
         transaction.failure,
+    )
+}
+
+fn stored_transaction_needs_retry(transaction: &StoredTransaction) -> bool {
+    match transaction.state {
+        TransactionState::Queued | TransactionState::Sent | TransactionState::Acked => true,
+        TransactionState::Failed => transaction
+            .failure
+            .as_ref()
+            .is_some_and(|failure| retryable_transaction_category(failure.category)),
+        TransactionState::Completed | TransactionState::Cancelled => false,
+    }
+}
+
+fn retryable_transaction_category(category: ClientErrorCategory) -> bool {
+    matches!(
+        category,
+        ClientErrorCategory::AuthRequired
+            | ClientErrorCategory::AuthExpired
+            | ClientErrorCategory::ReloginRequired
+            | ClientErrorCategory::Network
+            | ClientErrorCategory::Timeout
+            | ClientErrorCategory::RateLimited
+            | ClientErrorCategory::Internal
     )
 }
 
@@ -2398,14 +4485,17 @@ fn redacted_url_for_debug(url: &str) -> String {
 mod tests {
     use futures_util::{SinkExt, StreamExt};
     use prost::Message;
-    use tokio::net::TcpListener;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
     use tokio_tungstenite::accept_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     use crate::{
-        AuthCredential, AuthToken, ClientBackend, DialogRecord, DialogsRequest, ExternalId,
-        FakeRealtimeConnector, HistoryRequest, InlineId, RandomId, SendTextRequest,
-        StoredTransaction,
+        AuthCredential, AuthToken, ClientBackend, ClientStatus, DialogRecord, DialogsRequest,
+        ExternalId, FakeRealtimeConnector, HistoryRequest, InlineClient, InlineId, RandomId,
+        SendTextRequest, StoredTransaction,
     };
 
     use super::*;
@@ -2430,6 +4520,72 @@ mod tests {
             reply_to_message_id: None,
             transaction: None,
         }
+    }
+
+    #[test]
+    fn proto_message_reaction_snapshot_preserves_complete_empty_and_nonempty_sets() {
+        let mut message = proto::Message {
+            id: 11,
+            chat_id: 7,
+            reactions: Some(proto::MessageReactions { reactions: vec![] }),
+            ..Default::default()
+        };
+        assert_eq!(
+            reaction_snapshot_from_proto_message(&message, None),
+            Some(Vec::new())
+        );
+
+        message.reactions = Some(proto::MessageReactions {
+            reactions: vec![proto::Reaction {
+                emoji: "👍".to_owned(),
+                user_id: 2,
+                message_id: 11,
+                chat_id: 7,
+                ..Default::default()
+            }],
+        });
+        assert_eq!(
+            reaction_snapshot_from_proto_message(&message, None),
+            Some(vec![StoredReaction {
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(11),
+                user_id: InlineId::new(2),
+                reaction: "👍".to_owned(),
+            }])
+        );
+    }
+
+    #[tokio::test]
+    async fn live_dialog_reconciliation_tombstones_missing_chats() {
+        let store = InMemoryStore::new();
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(7)))
+            .await
+            .unwrap();
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(8)))
+            .await
+            .unwrap();
+        let removed_message = MessageRecord {
+            chat_id: InlineId::new(8),
+            ..test_message_record(10)
+        };
+        store.record_message(removed_message.clone()).await.unwrap();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+
+        backend
+            .reconcile_live_dialogs(vec![DialogRecord::new(InlineId::new(7))])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.deleted_chat_ids().await.unwrap(),
+            vec![InlineId::new(8)]
+        );
+        assert_eq!(
+            store.deleted_message_ids(InlineId::new(8)).await.unwrap(),
+            vec![removed_message.message_id]
+        );
     }
 
     #[test]
@@ -2538,8 +4694,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sdk_backend_reads_dialogs_from_store_after_connect() {
+    async fn live_dialog_failure_does_not_masquerade_as_cached_success() {
         let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
         store.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(9),
             peer_user_id: Some(InlineId::new(10)),
@@ -2547,6 +4704,7 @@ mod tests {
             last_message_id: None,
             synced_through_message_id: None,
             unread_count: Some(0),
+            ..DialogRecord::new(InlineId::new(9))
         });
         let backend = SdkBackend::builder()
             .store(store)
@@ -2555,10 +4713,193 @@ mod tests {
             .unwrap();
 
         backend.connect(connect_request()).await.unwrap();
-        let dialogs = backend.dialogs(DialogsRequest::default()).await.unwrap();
+        let error = backend
+            .dialogs(DialogsRequest::default())
+            .await
+            .unwrap_err();
+        assert_eq!(error.category, ClientErrorCategory::InvalidInput);
+        let dialogs = backend
+            .cached_dialogs(DialogsRequest::default())
+            .await
+            .unwrap();
 
         assert_eq!(dialogs.dialogs.len(), 1);
         assert_eq!(dialogs.dialogs[0].chat_id, InlineId::new(9));
+    }
+
+    #[tokio::test]
+    async fn cached_dialogs_reads_durable_state_without_session_or_network() {
+        let store = InMemoryStore::new();
+        store
+            .record_dialog(DialogRecord {
+                title: Some("cached".to_owned()),
+                ..DialogRecord::new(InlineId::new(9))
+            })
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store)
+            .realtime_url("not-a-websocket-url")
+            .build()
+            .unwrap();
+
+        let dialogs = backend
+            .cached_dialogs(DialogsRequest::default())
+            .await
+            .unwrap();
+
+        assert_eq!(dialogs.dialogs.len(), 1);
+        assert_eq!(dialogs.dialogs[0].title.as_deref(), Some("cached"));
+    }
+
+    #[tokio::test]
+    async fn live_participant_failure_does_not_fall_back_to_cached_snapshot() {
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url("not-a-websocket-url")
+            .build()
+            .unwrap();
+        let request = ChatParticipantsRequest {
+            chat_id: InlineId::new(7),
+        };
+
+        assert!(backend.chat_participants(request.clone()).await.is_err());
+
+        store
+            .record_chat_participants(
+                InlineId::new(7),
+                vec![ChatParticipantRecord {
+                    user_id: InlineId::new(42),
+                    date: Some(10),
+                }],
+            )
+            .await
+            .unwrap();
+        assert!(backend.chat_participants(request).await.is_err());
+        let cached = backend.chat_state(InlineId::new(7)).await.unwrap();
+        assert_eq!(cached.participants.len(), 1);
+        assert_eq!(cached.participants[0].user_id, InlineId::new(42));
+    }
+
+    #[tokio::test]
+    async fn live_history_failure_does_not_masquerade_as_cached_success() {
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .record_message(MessageRecord {
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(11),
+                sender_id: InlineId::new(42),
+                timestamp: 100,
+                is_outgoing: false,
+                content: MessageContent::Text {
+                    text: "cached".to_owned(),
+                },
+                reply_to_message_id: None,
+                transaction: None,
+            })
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store)
+            .realtime_url("not-a-websocket-url")
+            .build()
+            .unwrap();
+        let request = HistoryRequest {
+            chat_id: InlineId::new(7),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        };
+
+        let error = backend.history(request.clone()).await.unwrap_err();
+        assert_eq!(error.category, ClientErrorCategory::InvalidInput);
+        let cached = backend.cached_history(request).await.unwrap();
+        assert_eq!(cached.messages.len(), 1);
+        assert_eq!(cached.messages[0].message_id, InlineId::new(11));
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_clears_account_data_when_namespace_changes_or_logs_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api_addr = listener.local_addr().unwrap();
+        let logout_server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..read]);
+            assert!(request.starts_with("POST /v1/logout HTTP/1.1"));
+            assert!(request.contains("authorization: Bearer secret-token"));
+            let body = r#"{"ok":true,"result":null}"#;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let store = InMemoryStore::new();
+        store
+            .save_session(StoredSession {
+                auth: AuthCredential::AccessToken {
+                    token: AuthToken::try_new("old-token").unwrap(),
+                },
+                account_namespace: Some("old-account".to_owned()),
+            })
+            .await
+            .unwrap();
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(9)))
+            .await
+            .unwrap();
+        store
+            .save_sync_bucket_state(
+                crate::SyncBucketKey::User,
+                crate::SyncBucketState { seq: 9, date: 9 },
+            )
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .api_base_url(format!("http://{api_addr}/v1"))
+            .store(store.clone())
+            .build()
+            .unwrap();
+
+        backend.connect(connect_request()).await.unwrap();
+
+        assert!(store.dialog(InlineId::new(9)).await.unwrap().is_none());
+        assert_eq!(
+            store
+                .sync_bucket_state(crate::SyncBucketKey::User)
+                .await
+                .unwrap(),
+            crate::SyncBucketState::default()
+        );
+        assert_eq!(
+            store
+                .load_session()
+                .await
+                .unwrap()
+                .unwrap()
+                .account_namespace
+                .as_deref(),
+            Some("team")
+        );
+
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(10)))
+            .await
+            .unwrap();
+        backend.logout().await.unwrap();
+        logout_server.await.unwrap();
+        assert!(store.load_session().await.unwrap().is_none());
+        assert!(store.dialog(InlineId::new(10)).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -2662,6 +5003,959 @@ mod tests {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn inline_client_runner_allows_concurrent_rpcs_on_one_realtime_session() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let first = read_test_client_message(&mut ws).await;
+            let second = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                read_test_client_message(&mut ws),
+            )
+            .await
+            .expect("runner should issue the second RPC before the first completes");
+            for (id, request) in [(2, first), (3, second)] {
+                send_test_server_message(
+                    &mut ws,
+                    rpc_result_message(
+                        id,
+                        request.id,
+                        proto::rpc_result::Result::GetChats(proto::GetChatsResult::default()),
+                    ),
+                )
+                .await;
+            }
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        let backend = SdkBackend::builder()
+            .store(store)
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+        let client = InlineClient::builder()
+            .backend(backend)
+            .initial_status(ClientStatus::Connected)
+            .build()
+            .spawn();
+
+        let (first, second) = tokio::join!(
+            client.dialogs(DialogsRequest::default()),
+            client.dialogs(DialogsRequest::default())
+        );
+        assert!(first.unwrap().dialogs.is_empty());
+        assert!(second.unwrap().dialogs.is_empty());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn inline_client_runner_bounds_in_flight_rpcs() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let first = read_test_client_message(&mut ws).await;
+            assert!(
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(50),
+                    read_test_client_message(&mut ws),
+                )
+                .await
+                .is_err(),
+                "runner issued a second RPC above its configured in-flight limit"
+            );
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    first.id,
+                    proto::rpc_result::Result::GetChats(proto::GetChatsResult::default()),
+                ),
+            )
+            .await;
+
+            let second = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    3,
+                    second.id,
+                    proto::rpc_result::Result::GetChats(proto::GetChatsResult::default()),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        let backend = SdkBackend::builder()
+            .store(store)
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+        let client = InlineClient::builder()
+            .backend(backend)
+            .initial_status(ClientStatus::Connected)
+            .max_concurrent_requests(1)
+            .build()
+            .spawn();
+
+        let (first, second) = tokio::join!(
+            client.dialogs(DialogsRequest::default()),
+            client.dialogs(DialogsRequest::default())
+        );
+        assert!(first.unwrap().dialogs.is_empty());
+        assert!(second.unwrap().dialogs.is_empty());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn chat_management_rpcs_use_one_session_and_commit_durable_state() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let add = read_test_client_message(&mut ws).await;
+            match &add.body {
+                Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
+                    Some(proto::rpc_call::Input::AddChatParticipant(input)) => {
+                        assert_eq!((input.chat_id, input.user_id), (7, 42));
+                    }
+                    other => panic!("expected add participant input, got {other:?}"),
+                },
+                other => panic!("expected add participant RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    add.id,
+                    proto::rpc_result::Result::AddChatParticipant(
+                        proto::AddChatParticipantResult {
+                            participant: Some(proto::ChatParticipant {
+                                user_id: 42,
+                                date: 123,
+                            }),
+                        },
+                    ),
+                ),
+            )
+            .await;
+
+            let remove = read_test_client_message(&mut ws).await;
+            match &remove.body {
+                Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
+                    Some(proto::rpc_call::Input::RemoveChatParticipant(input)) => {
+                        assert_eq!((input.chat_id, input.user_id), (7, 42));
+                    }
+                    other => panic!("expected remove participant input, got {other:?}"),
+                },
+                other => panic!("expected remove participant RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    3,
+                    remove.id,
+                    proto::rpc_result::Result::RemoveChatParticipant(
+                        proto::RemoveChatParticipantResult {},
+                    ),
+                ),
+            )
+            .await;
+
+            let update = read_test_client_message(&mut ws).await;
+            match &update.body {
+                Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
+                    Some(proto::rpc_call::Input::UpdateChatInfo(input)) => {
+                        assert_eq!(input.chat_id, 7);
+                        assert_eq!(input.title.as_deref(), Some("Renamed"));
+                        assert_eq!(input.emoji.as_deref(), Some("✨"));
+                    }
+                    other => panic!("expected update chat info input, got {other:?}"),
+                },
+                other => panic!("expected update chat info RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    4,
+                    update.id,
+                    proto::rpc_result::Result::UpdateChatInfo(proto::UpdateChatInfoResult {
+                        chat: Some(proto::Chat {
+                            id: 7,
+                            title: "Renamed".to_owned(),
+                            emoji: Some("✨".to_owned()),
+                            ..Default::default()
+                        }),
+                    }),
+                ),
+            )
+            .await;
+
+            let mark = read_test_client_message(&mut ws).await;
+            match &mark.body {
+                Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
+                    Some(proto::rpc_call::Input::MarkAsUnread(input)) => {
+                        assert_eq!(
+                            test_chat_id_from_input_peer(input.peer_id.as_ref()),
+                            Some(7)
+                        );
+                    }
+                    other => panic!("expected mark unread input, got {other:?}"),
+                },
+                other => panic!("expected mark unread RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    5,
+                    mark.id,
+                    proto::rpc_result::Result::MarkAsUnread(proto::MarkAsUnreadResult::default()),
+                ),
+            )
+            .await;
+
+            let clear_mark = read_test_client_message(&mut ws).await;
+            match &clear_mark.body {
+                Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
+                    Some(proto::rpc_call::Input::ReadMessages(input)) => {
+                        assert_eq!(
+                            test_chat_id_from_input_peer(input.peer_id.as_ref()),
+                            Some(7)
+                        );
+                        assert_eq!(input.max_id, None);
+                    }
+                    other => panic!("expected read messages input, got {other:?}"),
+                },
+                other => panic!("expected read messages RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    7,
+                    clear_mark.id,
+                    proto::rpc_result::Result::ReadMessages(proto::ReadMessagesResult::default()),
+                ),
+            )
+            .await;
+
+            let notifications = read_test_client_message(&mut ws).await;
+            match &notifications.body {
+                Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
+                    Some(proto::rpc_call::Input::UpdateDialogNotificationSettings(input)) => {
+                        assert_eq!(
+                            test_chat_id_from_input_peer(input.peer_id.as_ref()),
+                            Some(7)
+                        );
+                        assert_eq!(
+                            input
+                                .notification_settings
+                                .as_ref()
+                                .and_then(|settings| settings.mode),
+                            Some(proto::dialog_notification_settings::Mode::None as i32)
+                        );
+                    }
+                    other => panic!("expected notification settings input, got {other:?}"),
+                },
+                other => panic!("expected notification settings RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    7,
+                    notifications.id,
+                    proto::rpc_result::Result::UpdateDialogNotificationSettings(
+                        proto::UpdateDialogNotificationSettingsResult::default(),
+                    ),
+                ),
+            )
+            .await;
+
+            let delete = read_test_client_message(&mut ws).await;
+            match &delete.body {
+                Some(proto::client_message::Body::RpcCall(call)) => match &call.input {
+                    Some(proto::rpc_call::Input::DeleteChat(input)) => {
+                        assert_eq!(
+                            test_chat_id_from_input_peer(input.peer_id.as_ref()),
+                            Some(7)
+                        );
+                    }
+                    other => panic!("expected delete chat input, got {other:?}"),
+                },
+                other => panic!("expected delete chat RPC, got {other:?}"),
+            }
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    8,
+                    delete.id,
+                    proto::rpc_result::Result::DeleteChat(proto::DeleteChatResult {}),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(7)))
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+
+        backend
+            .add_chat_participant(AddChatParticipantRequest {
+                chat_id: InlineId::new(7),
+                user_id: InlineId::new(42),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .chat_participants(InlineId::new(7))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        backend
+            .remove_chat_participant(RemoveChatParticipantRequest {
+                chat_id: InlineId::new(7),
+                user_id: InlineId::new(42),
+            })
+            .await
+            .unwrap();
+        assert!(
+            store
+                .chat_participants(InlineId::new(7))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        backend
+            .update_chat_info(UpdateChatInfoRequest {
+                chat_id: InlineId::new(7),
+                title: Some(" Renamed ".to_owned()),
+                emoji: Some(" ✨ ".to_owned()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .dialog(InlineId::new(7))
+                .await
+                .unwrap()
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("Renamed")
+        );
+        assert_eq!(
+            store
+                .dialog(InlineId::new(7))
+                .await
+                .unwrap()
+                .unwrap()
+                .emoji
+                .as_deref(),
+            Some("✨")
+        );
+        backend
+            .set_marked_unread(SetMarkedUnreadRequest {
+                chat_id: InlineId::new(7),
+                unread: true,
+            })
+            .await
+            .unwrap();
+        backend
+            .set_marked_unread(SetMarkedUnreadRequest {
+                chat_id: InlineId::new(7),
+                unread: false,
+            })
+            .await
+            .unwrap();
+        backend
+            .update_dialog_notifications(UpdateDialogNotificationsRequest {
+                chat_id: InlineId::new(7),
+                mode: Some(DialogNotificationMode::None),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .dialog(InlineId::new(7))
+                .await
+                .unwrap()
+                .unwrap()
+                .notification_mode,
+            Some(DialogNotificationMode::None)
+        );
+        backend
+            .delete_chat(DeleteChatRequest {
+                chat_id: InlineId::new(7),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store.deleted_chat_ids().await.unwrap(),
+            vec![InlineId::new(7)]
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_recovers_hint_only_updates_on_the_multiplexed_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let state = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    state.id,
+                    proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
+                        date: 100,
+                        updates_found: Some(true),
+                    }),
+                ),
+            )
+            .await;
+
+            let user_bucket = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    3,
+                    user_bucket.id,
+                    proto::rpc_result::Result::GetUpdates(proto::GetUpdatesResult {
+                        updates: Vec::new(),
+                        seq: 1,
+                        date: 100,
+                        r#final: Some(true),
+                        result_type: proto::get_updates_result::ResultType::Empty as i32,
+                        sidecars: None,
+                    }),
+                ),
+            )
+            .await;
+
+            let peer = proto::Peer {
+                r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+            };
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 10,
+                    body: Some(proto::server_protocol_message::Body::Message(
+                        proto::ServerMessage {
+                            payload: Some(proto::server_message::Payload::Update(
+                                proto::UpdatesPayload {
+                                    updates: vec![proto::Update {
+                                        seq: None,
+                                        date: None,
+                                        update: Some(proto::update::Update::ChatHasNewUpdates(
+                                            proto::UpdateChatHasNewUpdates {
+                                                chat_id: 7,
+                                                update_seq: 2,
+                                                peer_id: Some(peer.clone()),
+                                            },
+                                        )),
+                                    }],
+                                },
+                            )),
+                        },
+                    )),
+                },
+            )
+            .await;
+            let ack = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                ack.body,
+                Some(proto::client_message::Body::Ack(proto::Ack { msg_id: 10 }))
+            ));
+
+            let chat_bucket = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    4,
+                    chat_bucket.id,
+                    proto::rpc_result::Result::GetUpdates(proto::GetUpdatesResult {
+                        updates: vec![proto::Update {
+                            seq: Some(2),
+                            date: Some(101),
+                            update: Some(proto::update::Update::NewMessage(
+                                proto::UpdateNewMessage {
+                                    message: Some(proto::Message {
+                                        id: 11,
+                                        from_id: 2,
+                                        peer_id: Some(peer),
+                                        chat_id: 7,
+                                        message: Some("recovered".to_owned()),
+                                        date: 101,
+                                        ..Default::default()
+                                    }),
+                                },
+                            )),
+                        }],
+                        seq: 2,
+                        date: 101,
+                        r#final: Some(true),
+                        result_type: proto::get_updates_result::ResultType::Slice as i32,
+                        sidecars: None,
+                    }),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .save_sync_bucket_state(
+                crate::SyncBucketKey::User,
+                crate::SyncBucketState { seq: 1, date: 100 },
+            )
+            .await
+            .unwrap();
+        store
+            .save_sync_bucket_state(
+                crate::SyncBucketKey::Chat {
+                    peer: crate::SyncBucketPeer::Chat {
+                        chat_id: InlineId::new(7),
+                    },
+                },
+                crate::SyncBucketState { seq: 1, date: 100 },
+            )
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+
+        let events =
+            tokio::time::timeout(std::time::Duration::from_secs(3), backend.receive_events())
+                .await
+                .unwrap()
+                .unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::MessageStored { message }
+                if message.chat_id == InlineId::new(7)
+                    && message.message_id == InlineId::new(11)
+        )));
+        assert_eq!(
+            store
+                .sync_bucket_state(crate::SyncBucketKey::Chat {
+                    peer: crate::SyncBucketPeer::Chat {
+                        chat_id: InlineId::new(7),
+                    },
+                })
+                .await
+                .unwrap(),
+            crate::SyncBucketState { seq: 2, date: 101 }
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_repairs_cold_chat_bucket_after_too_long() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let state = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    state.id,
+                    proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
+                        date: 100,
+                        updates_found: Some(true),
+                    }),
+                ),
+            )
+            .await;
+            let user_bucket = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    3,
+                    user_bucket.id,
+                    proto::rpc_result::Result::GetUpdates(proto::GetUpdatesResult {
+                        updates: Vec::new(),
+                        seq: 1,
+                        date: 100,
+                        r#final: Some(true),
+                        result_type: proto::get_updates_result::ResultType::Empty as i32,
+                        sidecars: None,
+                    }),
+                ),
+            )
+            .await;
+
+            let peer = proto::Peer {
+                r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+            };
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 10,
+                    body: Some(proto::server_protocol_message::Body::Message(
+                        proto::ServerMessage {
+                            payload: Some(proto::server_message::Payload::Update(
+                                proto::UpdatesPayload {
+                                    updates: vec![proto::Update {
+                                        seq: None,
+                                        date: None,
+                                        update: Some(proto::update::Update::ChatHasNewUpdates(
+                                            proto::UpdateChatHasNewUpdates {
+                                                chat_id: 7,
+                                                update_seq: 500,
+                                                peer_id: Some(peer.clone()),
+                                            },
+                                        )),
+                                    }],
+                                },
+                            )),
+                        },
+                    )),
+                },
+            )
+            .await;
+            let _ack = read_test_client_message(&mut ws).await;
+
+            let bucket = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    4,
+                    bucket.id,
+                    proto::rpc_result::Result::GetUpdates(proto::GetUpdatesResult {
+                        updates: Vec::new(),
+                        seq: 400,
+                        date: 101,
+                        r#final: Some(false),
+                        result_type: proto::get_updates_result::ResultType::TooLong as i32,
+                        sidecars: None,
+                    }),
+                ),
+            )
+            .await;
+
+            let get_chat = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                &get_chat.body,
+                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                    method,
+                    input: Some(proto::rpc_call::Input::GetChat(_)),
+                })) if *method == proto::Method::GetChat as i32
+            ));
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    5,
+                    get_chat.id,
+                    proto::rpc_result::Result::GetChat(proto::GetChatResult {
+                        chat: Some(proto::Chat {
+                            id: 7,
+                            title: "Repaired".to_owned(),
+                            peer_id: Some(peer.clone()),
+                            ..Default::default()
+                        }),
+                        dialog: Some(proto::Dialog {
+                            chat_id: Some(7),
+                            peer: Some(peer.clone()),
+                            ..Default::default()
+                        }),
+                        pinned_message_ids: vec![11],
+                        anchor_message: None,
+                    }),
+                ),
+            )
+            .await;
+
+            let participants = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                &participants.body,
+                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                    method,
+                    input: Some(proto::rpc_call::Input::GetChatParticipants(_)),
+                })) if *method == proto::Method::GetChatParticipants as i32
+            ));
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    6,
+                    participants.id,
+                    proto::rpc_result::Result::GetChatParticipants(
+                        proto::GetChatParticipantsResult::default(),
+                    ),
+                ),
+            )
+            .await;
+
+            let history = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                &history.body,
+                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                    method,
+                    input: Some(proto::rpc_call::Input::GetChatHistory(_)),
+                })) if *method == proto::Method::GetChatHistory as i32
+            ));
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    6,
+                    history.id,
+                    proto::rpc_result::Result::GetChatHistory(proto::GetChatHistoryResult {
+                        messages: vec![proto::Message {
+                            id: 11,
+                            chat_id: 7,
+                            peer_id: Some(peer),
+                            message: Some("snapshot".to_owned()),
+                            date: 101,
+                            ..Default::default()
+                        }],
+                    }),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .save_sync_bucket_state(
+                crate::SyncBucketKey::User,
+                crate::SyncBucketState { seq: 1, date: 100 },
+            )
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+
+        let events =
+            tokio::time::timeout(std::time::Duration::from_secs(3), backend.receive_events())
+                .await
+                .unwrap()
+                .unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::MessageStored { message } if message.message_id == InlineId::new(11)
+        )));
+        let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
+        assert_eq!(dialog.title.as_deref(), Some("Repaired"));
+        assert_eq!(dialog.pinned_message_ids, vec![InlineId::new(11)]);
+        assert_eq!(
+            store
+                .sync_bucket_state(crate::SyncBucketKey::Chat {
+                    peer: crate::SyncBucketPeer::Chat {
+                        chat_id: InlineId::new(7),
+                    },
+                })
+                .await
+                .unwrap(),
+            crate::SyncBucketState {
+                seq: 500,
+                date: 101
+            }
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_user_snapshot_rebuilds_authoritative_account_state() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let chats = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    chats.id,
+                    proto::rpc_result::Result::GetChats(proto::GetChatsResult::default()),
+                ),
+            )
+            .await;
+            let me = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    3,
+                    me.id,
+                    proto::rpc_result::Result::GetMe(proto::GetMeResult {
+                        user: Some(proto::User {
+                            id: 42,
+                            first_name: Some("Ada".to_owned()),
+                            ..Default::default()
+                        }),
+                    }),
+                ),
+            )
+            .await;
+            let settings = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    4,
+                    settings.id,
+                    proto::rpc_result::Result::GetUserSettings(proto::GetUserSettingsResult {
+                        user_settings: Some(proto::UserSettings::default()),
+                    }),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(7)))
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+
+        let events = backend.repair_user_bucket().await.unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::ChatDeleted { chat_id } if *chat_id == InlineId::new(7)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::UserUpserted { user_id } if *user_id == InlineId::new(42)
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ClientEvent::UserSettingsChanged {}))
+        );
+        assert_eq!(
+            store.deleted_chat_ids().await.unwrap(),
+            vec![InlineId::new(7)]
+        );
+        assert!(store.user_settings().await.unwrap().is_some());
+        server.await.unwrap();
+    }
+
     #[test]
     fn dialogs_page_from_get_chats_uses_user_records() {
         let result = proto::GetChatsResult {
@@ -2709,7 +6003,8 @@ mod tests {
 
         assert_eq!(page.dialogs.len(), 1);
         assert_eq!(page.dialogs[0].chat_id, InlineId::new(7));
-        assert_eq!(page.dialogs[0].title.as_deref(), Some("* Ada Lovelace"));
+        assert_eq!(page.dialogs[0].title.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(page.dialogs[0].emoji.as_deref(), Some("*"));
         assert_eq!(page.dialogs[0].peer_user_id, Some(InlineId::new(42)));
         assert_eq!(page.dialogs[0].last_message_id, Some(InlineId::new(99)));
         assert_eq!(page.dialogs[0].unread_count, Some(3));
@@ -2829,6 +6124,112 @@ mod tests {
         assert_eq!(outcome.message_id, Some(InlineId::new(11)));
         assert_eq!(outcome.state, TransactionState::Completed);
         assert_eq!(outcome.mutation.transaction.transaction_id, transaction_id);
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_retries_uncertain_stored_send_with_same_random_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let send = read_test_client_message(&mut ws).await;
+            let input = match &send.body {
+                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                    method,
+                    input: Some(proto::rpc_call::Input::SendMessage(input)),
+                })) if *method == proto::Method::SendMessage as i32 => input,
+                other => panic!("expected sendMessage retry, got {other:?}"),
+            };
+            assert_eq!(input.random_id, Some(99));
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    send.id,
+                    proto::rpc_result::Result::SendMessage(proto::SendMessageResult {
+                        updates: vec![proto::Update {
+                            seq: None,
+                            date: None,
+                            update: Some(proto::update::Update::UpdateMessageId(
+                                proto::UpdateMessageId {
+                                    message_id: 11,
+                                    random_id: 99,
+                                },
+                            )),
+                        }],
+                    }),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        let request = SendTextRequest {
+            peer: crate::PeerRef::Chat {
+                chat_id: InlineId::new(7),
+            },
+            text: "hello".to_owned(),
+            external_id: Some(ExternalId::try_new("host-event", "event-1").unwrap()),
+            random_id: Some(RandomId::new(99)),
+            reply_to_message_id: None,
+        };
+        let transaction_id = transaction_id_for_send(&request, RandomId::new(99));
+        let identity = TransactionIdentity::new(
+            transaction_id.clone(),
+            request.external_id.clone(),
+            RandomId::new(99),
+        );
+        store
+            .record_transaction(
+                StoredTransaction::new(identity, TransactionState::Sent)
+                    .with_chat_id(InlineId::new(7))
+                    .with_failure(crate::ClientFailure::new(
+                        ClientErrorCategory::Timeout,
+                        "send result timed out",
+                    )),
+            )
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+
+        let outcome = backend.send_text(request).await.unwrap();
+
+        assert_eq!(outcome.state, TransactionState::Completed);
+        assert_eq!(outcome.message_id, Some(InlineId::new(11)));
+        assert_eq!(outcome.mutation.transaction.transaction_id, transaction_id);
+        assert_eq!(
+            store
+                .transaction(transaction_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            TransactionState::Completed
+        );
+        server.await.unwrap();
     }
 
     #[test]
@@ -3147,12 +6548,463 @@ mod tests {
         assert_eq!(applied.message.unwrap().message_id, InlineId::new(11));
     }
 
+    #[tokio::test]
+    async fn apply_updates_persists_lossless_message_state_before_emitting() {
+        let store = InMemoryStore::new();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let peer = proto::Peer {
+            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+        };
+        let updates = vec![
+            proto::Update {
+                seq: Some(1),
+                date: Some(10),
+                update: Some(proto::update::Update::NewMessage(proto::UpdateNewMessage {
+                    message: Some(proto::Message {
+                        id: 11,
+                        from_id: 2,
+                        peer_id: Some(peer.clone()),
+                        chat_id: 7,
+                        message: Some("hello".to_owned()),
+                        date: 10,
+                        ..Default::default()
+                    }),
+                })),
+            },
+            proto::Update {
+                seq: Some(2),
+                date: Some(11),
+                update: Some(proto::update::Update::UpdateReaction(
+                    proto::UpdateReaction {
+                        reaction: Some(proto::Reaction {
+                            emoji: "👍".to_owned(),
+                            user_id: 2,
+                            message_id: 11,
+                            chat_id: 7,
+                            date: 11,
+                        }),
+                    },
+                )),
+            },
+            proto::Update {
+                seq: Some(3),
+                date: Some(12),
+                update: Some(proto::update::Update::UpdateReadMaxId(
+                    proto::UpdateReadMaxId {
+                        peer_id: Some(peer.clone()),
+                        read_max_id: 11,
+                        unread_count: 1,
+                    },
+                )),
+            },
+            proto::Update {
+                seq: Some(4),
+                date: Some(13),
+                update: Some(proto::update::Update::ParticipantAdd(
+                    proto::UpdateChatParticipantAdd {
+                        chat_id: 7,
+                        participant: Some(proto::ChatParticipant {
+                            user_id: 2,
+                            date: 13,
+                        }),
+                    },
+                )),
+            },
+            proto::Update {
+                seq: Some(5),
+                date: Some(14),
+                update: Some(proto::update::Update::DeleteReaction(
+                    proto::UpdateDeleteReaction {
+                        emoji: "👍".to_owned(),
+                        chat_id: 7,
+                        message_id: 11,
+                        user_id: 2,
+                    },
+                )),
+            },
+            proto::Update {
+                seq: Some(6),
+                date: Some(15),
+                update: Some(proto::update::Update::DeleteMessages(
+                    proto::UpdateDeleteMessages {
+                        message_ids: vec![11],
+                        peer_id: Some(peer),
+                    },
+                )),
+            },
+        ];
+
+        let events = backend.apply_updates(updates, None, None).await.unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::MessageDeleted { chat_id, message_id }
+                if *chat_id == InlineId::new(7) && *message_id == InlineId::new(11)
+        )));
+        assert!(
+            store
+                .message_deleted(InlineId::new(7), InlineId::new(11))
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .reactions(InlineId::new(7), InlineId::new(11))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store.read_state(InlineId::new(7)).await.unwrap(),
+            Some(StoredReadState {
+                chat_id: InlineId::new(7),
+                read_max_id: Some(InlineId::new(11)),
+                unread_count: Some(1),
+                marked_unread: false,
+            })
+        );
+        assert_eq!(
+            store.chat_participants(InlineId::new(7)).await.unwrap(),
+            vec![ChatParticipantRecord {
+                user_id: InlineId::new(2),
+                date: Some(13),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_updates_persists_dialog_metadata_and_attachment_invalidation() {
+        let store = InMemoryStore::new();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let peer = proto::Peer {
+            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+        };
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(7)))
+            .await
+            .unwrap();
+        let updates = vec![
+            proto::Update {
+                update: Some(proto::update::Update::ChatInfo(proto::UpdateChatInfo {
+                    chat_id: 7,
+                    title: Some("General".to_owned()),
+                    emoji: None,
+                    untitled: None,
+                })),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::ChatInfo(proto::UpdateChatInfo {
+                    chat_id: 7,
+                    title: None,
+                    emoji: Some("✨".to_owned()),
+                    untitled: None,
+                })),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::ChatVisibility(
+                    proto::UpdateChatVisibility {
+                        chat_id: 7,
+                        is_public: true,
+                    },
+                )),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::DialogArchived(
+                    proto::UpdateDialogArchived {
+                        peer_id: Some(peer.clone()),
+                        archived: true,
+                    },
+                )),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::DialogNotificationSettings(
+                    proto::UpdateDialogNotificationSettings {
+                        peer_id: Some(peer.clone()),
+                        notification_settings: Some(proto::DialogNotificationSettings {
+                            mode: Some(proto::dialog_notification_settings::Mode::Mentions as i32),
+                        }),
+                    },
+                )),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::DialogFollowMode(
+                    proto::UpdateDialogFollowMode {
+                        peer_id: Some(peer.clone()),
+                        follow_mode: Some(proto::DialogFollowMode::Following as i32),
+                    },
+                )),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::PinnedMessages(
+                    proto::UpdatePinnedMessages {
+                        peer_id: Some(peer.clone()),
+                        message_ids: vec![11, 10],
+                    },
+                )),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::MessageAttachment(
+                    proto::UpdateMessageAttachment {
+                        attachment: None,
+                        message_id: 11,
+                        peer_id: Some(peer),
+                        chat_id: 7,
+                    },
+                )),
+                ..Default::default()
+            },
+        ];
+
+        let events = backend.apply_updates(updates, None, None).await.unwrap();
+        let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
+        assert_eq!(dialog.title.as_deref(), Some("General"));
+        assert_eq!(dialog.emoji.as_deref(), Some("✨"));
+        assert_eq!(dialog.is_public, Some(true));
+        assert_eq!(dialog.archived, Some(true));
+        assert_eq!(
+            dialog.notification_mode,
+            Some(DialogNotificationMode::Mentions)
+        );
+        assert_eq!(dialog.follow_mode, Some(DialogFollowMode::Following));
+        assert_eq!(
+            dialog.pinned_message_ids,
+            vec![InlineId::new(11), InlineId::new(10)]
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::MessageUpserted { chat_id, message_id }
+                if *chat_id == InlineId::new(7) && *message_id == InlineId::new(11)
+        )));
+    }
+
+    #[tokio::test]
+    async fn apply_updates_rejects_still_unsupported_lossless_update() {
+        let backend = SdkBackend::builder().build().unwrap();
+        let update = proto::Update {
+            seq: Some(1),
+            date: Some(10),
+            update: Some(proto::update::Update::ChatHasNewUpdates(
+                proto::UpdateChatHasNewUpdates::default(),
+            )),
+        };
+
+        let error = backend
+            .apply_updates(vec![update], None, None)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.category, ClientErrorCategory::Unsupported);
+        assert!(error.message.contains("chat_has_new_updates"));
+    }
+
+    #[tokio::test]
+    async fn apply_updates_clears_history_and_applies_reply_thread_side_effects() {
+        let store = InMemoryStore::new();
+        for chat_id in [7, 8, 9] {
+            store
+                .record_dialog(DialogRecord::new(InlineId::new(chat_id)))
+                .await
+                .unwrap();
+        }
+        for (message_id, timestamp) in [(10, 100), (11, 200)] {
+            store
+                .record_message(MessageRecord {
+                    chat_id: InlineId::new(7),
+                    message_id: InlineId::new(message_id),
+                    sender_id: InlineId::new(2),
+                    timestamp,
+                    is_outgoing: false,
+                    content: MessageContent::Text {
+                        text: format!("message {message_id}"),
+                    },
+                    reply_to_message_id: None,
+                    transaction: None,
+                })
+                .await
+                .unwrap();
+        }
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let peer = proto::Peer {
+            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+        };
+        let update = proto::Update {
+            seq: Some(1),
+            date: Some(201),
+            update: Some(proto::update::Update::ClearChatHistory(
+                proto::UpdateClearChatHistory {
+                    target: Some(proto::update_clear_chat_history::Target::PeerId(peer)),
+                    before_date: Some(150),
+                    delete_reply_threads: true,
+                    deleted_chat_ids: vec![8],
+                    orphaned_chat_ids: vec![9],
+                    detached_chat_ids: Vec::new(),
+                },
+            )),
+        };
+
+        let events = backend
+            .apply_updates(vec![update], None, None)
+            .await
+            .unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::ChatHistoryCleared { chat_id, before_date: Some(150) }
+                if *chat_id == InlineId::new(7)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::ChatDeleted { chat_id } if *chat_id == InlineId::new(8)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::ChatUpserted { chat_id } if *chat_id == InlineId::new(9)
+        )));
+        assert!(store.dialog(InlineId::new(8)).await.unwrap().is_none());
+        let history = store
+            .history(HistoryRequest {
+                chat_id: InlineId::new(7),
+                limit: Some(10),
+                before_message_id: None,
+                after_message_id: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(history.messages[0].message_id, InlineId::new(11));
+    }
+
+    #[tokio::test]
+    async fn apply_updates_persists_spaces_members_and_user_settings() {
+        let store = InMemoryStore::new();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let member = |user_id| proto::Member {
+            id: user_id,
+            space_id: 5,
+            user_id,
+            role: Some(proto::member::Role::Member as i32),
+            date: 100 + user_id,
+            can_access_public_chats: true,
+        };
+        let updates = vec![
+            proto::Update {
+                update: Some(proto::update::Update::JoinSpace(proto::UpdateJoinSpace {
+                    space: Some(proto::Space {
+                        id: 5,
+                        name: "Engineering".to_owned(),
+                        creator: true,
+                        date: 100,
+                        is_public: Some(false),
+                    }),
+                    member: Some(member(2)),
+                })),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::SpaceMemberAdd(
+                    proto::UpdateSpaceMemberAdd {
+                        member: Some(member(3)),
+                        user: Some(proto::User {
+                            id: 3,
+                            first_name: Some("Ada".to_owned()),
+                            ..Default::default()
+                        }),
+                    },
+                )),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::SpaceMemberDelete(
+                    proto::UpdateSpaceMemberDelete {
+                        space_id: 5,
+                        user_id: 3,
+                    },
+                )),
+                ..Default::default()
+            },
+            proto::Update {
+                update: Some(proto::update::Update::UpdateUserSettings(
+                    proto::UpdateUserSettings {
+                        settings: Some(proto::UserSettings {
+                            notification_settings: Some(proto::NotificationSettings {
+                                mode: Some(proto::notification_settings::Mode::Mentions as i32),
+                                silent: Some(true),
+                                ..Default::default()
+                            }),
+                        }),
+                    },
+                )),
+                ..Default::default()
+            },
+        ];
+
+        let events = backend.apply_updates(updates, None, None).await.unwrap();
+
+        assert_eq!(
+            store.space(InlineId::new(5)).await.unwrap().unwrap().name,
+            "Engineering"
+        );
+        assert_eq!(
+            store.space_members(InlineId::new(5)).await.unwrap(),
+            vec![SpaceMemberRecord {
+                space_id: InlineId::new(5),
+                user_id: InlineId::new(2),
+                role: Some(SpaceMemberRole::Member),
+                date: 102,
+                can_access_public_chats: true,
+            }]
+        );
+        assert_eq!(
+            store
+                .user_settings()
+                .await
+                .unwrap()
+                .unwrap()
+                .notification_mode,
+            Some(NotificationMode::Mentions)
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::SpaceUpserted { space_id } if *space_id == InlineId::new(5)
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ClientEvent::UserSettingsChanged { .. }))
+        );
+    }
+
+    #[test]
+    fn rest_rate_limit_errors_keep_category_and_retry_hint() {
+        let error = api_error_to_backend(ApiError::Status {
+            status: 420,
+            message: "retry after 23 seconds".to_owned(),
+            body: None,
+        });
+
+        assert_eq!(error.category, ClientErrorCategory::RateLimited);
+        assert_eq!(error.retry_after_seconds, Some(23));
+    }
+
     fn connect_session() -> StoredSession {
         StoredSession {
             auth: AuthCredential::AccessToken {
                 token: AuthToken::try_new("secret-token").unwrap(),
             },
             account_namespace: Some("team".to_owned()),
+        }
+    }
+
+    fn test_chat_id_from_input_peer(peer: Option<&proto::InputPeer>) -> Option<i64> {
+        match peer?.r#type.as_ref()? {
+            proto::input_peer::Type::Chat(chat) => Some(chat.chat_id),
+            proto::input_peer::Type::Self_(_) | proto::input_peer::Type::User(_) => None,
         }
     }
 
@@ -3172,5 +7024,21 @@ mod tests {
         ws.send(WsMessage::Binary(message.encode_to_vec()))
             .await
             .unwrap();
+    }
+
+    fn rpc_result_message(
+        id: u64,
+        request_id: u64,
+        result: proto::rpc_result::Result,
+    ) -> proto::ServerProtocolMessage {
+        proto::ServerProtocolMessage {
+            id,
+            body: Some(proto::server_protocol_message::Body::RpcResult(
+                proto::RpcResult {
+                    req_msg_id: request_id,
+                    result: Some(result),
+                },
+            )),
+        }
     }
 }

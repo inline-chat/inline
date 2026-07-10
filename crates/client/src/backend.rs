@@ -16,14 +16,16 @@ use std::{
 use futures_util::future::BoxFuture;
 
 use crate::{
-    AuthStartRequest, AuthStartResult, AuthVerifyRequest, AuthVerifyResult, ChatParticipantRecord,
-    ChatParticipantsPage, ChatParticipantsRequest, ClientErrorCategory, ClientEvent, ClientFailure,
+    AccountStateSnapshot, AddChatParticipantRequest, AuthStartRequest, AuthStartResult,
+    AuthVerifyRequest, AuthVerifyResult, ChatParticipantRecord, ChatParticipantsPage,
+    ChatParticipantsRequest, ChatStateSnapshot, ClientErrorCategory, ClientEvent, ClientFailure,
     ClientStatus, ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
-    CreateThreadRequest, CreatedChat, DeleteMessageRequest, DialogRecord, DialogsPage,
-    DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, InlineId, MessageContent,
-    MessageMutation, MessageRecord, RandomId, ReactRequest, ReadRequest, SendTextRequest,
-    TransactionEvent, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
-    UploadRequest,
+    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogRecord,
+    DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, InlineId,
+    MessageContent, MessageMutation, MessageRecord, RandomId, ReactRequest, ReadRequest,
+    RemoveChatParticipantRequest, SendTextRequest, SetMarkedUnreadRequest, TransactionEvent,
+    TransactionId, TransactionIdentity, TransactionState, TypingRequest, UpdateChatInfoRequest,
+    UpdateDialogNotificationsRequest, UploadRequest,
 };
 
 /// Result type returned by client backends.
@@ -32,11 +34,14 @@ pub type BackendResult<T> = Result<T, BackendError>;
 /// Redacted backend error.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{category:?}: {message}")]
+#[non_exhaustive]
 pub struct BackendError {
     /// Stable error category.
     pub category: ClientErrorCategory,
     /// Redacted message suitable for hosts.
     pub message: String,
+    /// Server-requested retry delay, when the failure is rate limited.
+    pub retry_after_seconds: Option<u64>,
 }
 
 impl BackendError {
@@ -45,7 +50,14 @@ impl BackendError {
         Self {
             category,
             message: message.into(),
+            retry_after_seconds: None,
         }
+    }
+
+    /// Attaches a server-requested retry delay.
+    pub fn with_retry_after_seconds(mut self, seconds: u64) -> Self {
+        self.retry_after_seconds = (seconds > 0).then_some(seconds);
+        self
     }
 }
 
@@ -53,6 +65,27 @@ impl From<BackendError> for ClientFailure {
     fn from(error: BackendError) -> Self {
         Self::new(error.category, error.message)
     }
+}
+
+pub(crate) fn retry_after_seconds_from_message(message: &str) -> Option<u64> {
+    let normalized = message.to_ascii_lowercase();
+    for marker in ["retry after ", "retry_after=", "flood_wait_"] {
+        let Some((_, suffix)) = normalized.split_once(marker) else {
+            continue;
+        };
+        let Ok(seconds) = suffix
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse::<u64>()
+        else {
+            continue;
+        };
+        if seconds > 0 {
+            return Some(seconds);
+        }
+    }
+    None
 }
 
 /// Outcome from a text-send operation.
@@ -162,14 +195,59 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
     /// Lists dialogs.
     fn dialogs(&self, request: DialogsRequest) -> BoxFuture<'static, BackendResult<DialogsPage>>;
 
+    /// Lists only durable cached dialogs without a network request.
+    fn cached_dialogs(
+        &self,
+        request: DialogsRequest,
+    ) -> BoxFuture<'static, BackendResult<DialogsPage>>;
+
+    /// Loads account-level durable state used for consumer reconciliation.
+    fn account_state(&self) -> BoxFuture<'static, BackendResult<AccountStateSnapshot>>;
+
+    /// Loads durable state for one chat used for consumer reconciliation.
+    fn chat_state(&self, chat_id: InlineId)
+    -> BoxFuture<'static, BackendResult<ChatStateSnapshot>>;
+
     /// Fetches chat history.
     fn history(&self, request: HistoryRequest) -> BoxFuture<'static, BackendResult<HistoryPage>>;
+
+    /// Fetches only the client's durable cached history without making a
+    /// network request. This is intended for offline consumers and state
+    /// reconciliation; ordinary callers should prefer [`Self::history`].
+    fn cached_history(
+        &self,
+        request: HistoryRequest,
+    ) -> BoxFuture<'static, BackendResult<HistoryPage>>;
 
     /// Fetches chat participants.
     fn chat_participants(
         &self,
         request: ChatParticipantsRequest,
     ) -> BoxFuture<'static, BackendResult<ChatParticipantsPage>>;
+
+    /// Adds a user to a chat.
+    fn add_chat_participant(
+        &self,
+        request: AddChatParticipantRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Removes a user from a chat.
+    fn remove_chat_participant(
+        &self,
+        request: RemoveChatParticipantRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Updates mutable chat metadata.
+    fn update_chat_info(
+        &self,
+        request: UpdateChatInfoRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Deletes a chat when permitted by the service.
+    fn delete_chat(
+        &self,
+        request: DeleteChatRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
 
     /// Creates or opens a direct message chat.
     fn create_dm(&self, request: CreateDmRequest)
@@ -217,6 +295,18 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
 
     /// Marks messages read.
     fn read(&self, request: ReadRequest) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Sets the explicit marked-unread state for a chat.
+    fn set_marked_unread(
+        &self,
+        request: SetMarkedUnreadRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Sets or clears a per-dialog notification override.
+    fn update_dialog_notifications(
+        &self,
+        request: UpdateDialogNotificationsRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
 
     /// Sends a typing state.
     fn typing(&self, request: TypingRequest)
@@ -503,6 +593,8 @@ impl InMemoryBackend {
             MessageMutation {
                 transaction,
                 message_id: Some(message_id),
+                state: None,
+                failure: None,
             },
             chat_id,
             Some(message_id),
@@ -533,6 +625,7 @@ impl InMemoryBackend {
             last_message_id: None,
             synced_through_message_id: None,
             unread_count: Some(0),
+            ..DialogRecord::new(chat_id)
         });
         if !participants.is_empty() {
             state.participants.insert(chat_id.get(), participants);
@@ -607,6 +700,8 @@ impl InMemoryBackend {
             MessageMutation {
                 transaction,
                 message_id: Some(message_id),
+                state: None,
+                failure: None,
             },
             chat_id,
             Some(message_id),
@@ -673,7 +768,63 @@ impl ClientBackend for InMemoryBackend {
         Box::pin(async move { backend.dialogs_now(request) })
     }
 
+    fn cached_dialogs(
+        &self,
+        request: DialogsRequest,
+    ) -> BoxFuture<'static, BackendResult<DialogsPage>> {
+        let backend = self.clone();
+        Box::pin(async move { backend.dialogs_now(request) })
+    }
+
+    fn account_state(&self) -> BoxFuture<'static, BackendResult<AccountStateSnapshot>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            Ok(AccountStateSnapshot::default())
+        })
+    }
+
+    fn chat_state(
+        &self,
+        chat_id: InlineId,
+    ) -> BoxFuture<'static, BackendResult<ChatStateSnapshot>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            let state = backend.state.lock().expect("in-memory backend poisoned");
+            let dialog = state
+                .dialogs
+                .iter()
+                .find(|dialog| dialog.chat_id == chat_id)
+                .cloned();
+            let participants = state
+                .participants
+                .get(&chat_id.get())
+                .cloned()
+                .unwrap_or_default();
+            Ok(ChatStateSnapshot {
+                chat_id,
+                dialog,
+                deleted: false,
+                deleted_message_ids: Vec::new(),
+                reactions: Vec::new(),
+                reaction_snapshot_message_ids: Vec::new(),
+                read_state: None,
+                participants,
+                participants_complete: true,
+            })
+        })
+    }
+
     fn history(&self, request: HistoryRequest) -> BoxFuture<'static, BackendResult<HistoryPage>> {
+        let backend = self.clone();
+        Box::pin(async move { backend.history_now(request) })
+    }
+
+    fn cached_history(
+        &self,
+        request: HistoryRequest,
+    ) -> BoxFuture<'static, BackendResult<HistoryPage>> {
         let backend = self.clone();
         Box::pin(async move { backend.history_now(request) })
     }
@@ -694,6 +845,119 @@ impl ClientBackend for InMemoryBackend {
                     .unwrap_or_default(),
                 users: Vec::new(),
             })
+        })
+    }
+
+    fn add_chat_participant(
+        &self,
+        request: AddChatParticipantRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            if request.chat_id.get() <= 0 || request.user_id.get() <= 0 {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "chat_id and user_id must be positive",
+                ));
+            }
+            let mut state = backend.state.lock().expect("in-memory backend poisoned");
+            let participants = state.participants.entry(request.chat_id.get()).or_default();
+            if !participants
+                .iter()
+                .any(|participant| participant.user_id == request.user_id)
+            {
+                participants.push(ChatParticipantRecord {
+                    user_id: request.user_id,
+                    date: None,
+                });
+            }
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatParticipantsChanged {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
+    fn remove_chat_participant(
+        &self,
+        request: RemoveChatParticipantRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            let mut state = backend.state.lock().expect("in-memory backend poisoned");
+            state
+                .participants
+                .entry(request.chat_id.get())
+                .or_default()
+                .retain(|participant| participant.user_id != request.user_id);
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatParticipantsChanged {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
+    fn update_chat_info(
+        &self,
+        request: UpdateChatInfoRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            if request.title.is_none() && request.emoji.is_none() {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "at least one chat info field must be provided",
+                ));
+            }
+            if let Some(title) = request.title {
+                if title.trim().is_empty() {
+                    return Err(BackendError::new(
+                        ClientErrorCategory::InvalidInput,
+                        "chat title must not be empty",
+                    ));
+                }
+                if let Some(dialog) = backend
+                    .state
+                    .lock()
+                    .expect("in-memory backend poisoned")
+                    .dialogs
+                    .iter_mut()
+                    .find(|dialog| dialog.chat_id == request.chat_id)
+                {
+                    dialog.title = Some(title.trim().to_owned());
+                }
+            }
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatUpserted {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
+    fn delete_chat(
+        &self,
+        request: DeleteChatRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            let mut state = backend.state.lock().expect("in-memory backend poisoned");
+            state
+                .dialogs
+                .retain(|dialog| dialog.chat_id != request.chat_id);
+            state.participants.remove(&request.chat_id.get());
+            state.messages.remove(&request.chat_id.get());
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatDeleted {
+                    chat_id: request.chat_id,
+                },
+            ]))
         })
     }
 
@@ -877,6 +1141,46 @@ impl ClientBackend for InMemoryBackend {
         })
     }
 
+    fn set_marked_unread(
+        &self,
+        request: SetMarkedUnreadRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ReadStateChanged {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
+    fn update_dialog_notifications(
+        &self,
+        request: UpdateDialogNotificationsRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            if let Some(dialog) = backend
+                .state
+                .lock()
+                .expect("in-memory backend poisoned")
+                .dialogs
+                .iter_mut()
+                .find(|dialog| dialog.chat_id == request.chat_id)
+            {
+                dialog.notification_mode = request.mode;
+            }
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatUpserted {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
     fn typing(
         &self,
         request: TypingRequest,
@@ -980,6 +1284,7 @@ mod tests {
             last_message_id: None,
             synced_through_message_id: None,
             unread_count: Some(0),
+            ..DialogRecord::new(InlineId::new(1))
         });
         backend.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(2),
@@ -988,6 +1293,7 @@ mod tests {
             last_message_id: None,
             synced_through_message_id: None,
             unread_count: Some(0),
+            ..DialogRecord::new(InlineId::new(2))
         });
         backend.connect(token_connect()).await.unwrap();
 

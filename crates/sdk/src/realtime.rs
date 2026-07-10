@@ -2,9 +2,12 @@
 
 use futures_util::{SinkExt, StreamExt};
 use prost::Message;
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -18,6 +21,16 @@ use inline_protocol::proto;
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default timeout for a single realtime RPC invocation.
 pub const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default number of queued commands accepted by a multiplexed realtime session.
+pub const DEFAULT_SESSION_COMMAND_CAPACITY: usize = 64;
+/// Default maximum number of RPCs awaiting responses on one realtime session.
+pub const DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS: usize = 64;
+/// Default number of pushed events retained for each realtime session subscriber.
+pub const DEFAULT_SESSION_EVENT_CAPACITY: usize = 256;
+/// Default interval between protocol heartbeat pings.
+pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+/// Default deadline for a matching protocol pong.
+pub const DEFAULT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Error returned by realtime connection and RPC operations.
 #[derive(thiserror::Error)]
@@ -77,6 +90,12 @@ pub enum RealtimeError {
     /// The realtime connection closed before the requested operation completed.
     #[error("realtime connection closed")]
     ConnectionClosed,
+    /// A multiplexed event subscriber could not keep up with pushed events.
+    #[error("realtime event subscriber lagged and skipped {skipped} events")]
+    EventLagged {
+        /// Number of events dropped for this subscriber.
+        skipped: u64,
+    },
     /// The realtime server returned an RPC error for a request.
     #[error("{friendly}")]
     RpcError {
@@ -134,6 +153,10 @@ impl fmt::Debug for RealtimeError {
                 .field("friendly", friendly)
                 .finish(),
             RealtimeError::ConnectionClosed => f.debug_struct("ConnectionClosed").finish(),
+            RealtimeError::EventLagged { skipped } => f
+                .debug_struct("EventLagged")
+                .field("skipped", skipped)
+                .finish(),
             RealtimeError::RpcError {
                 code,
                 error_code,
@@ -166,6 +189,9 @@ pub struct RealtimeClient {
     seq: u32,
     id_gen: IdGenerator,
     rpc_timeout: Option<Duration>,
+    heartbeat_interval: Option<Duration>,
+    heartbeat_timeout: Duration,
+    max_in_flight_rpcs: usize,
 }
 
 /// Server-pushed realtime event received outside a direct RPC result.
@@ -186,6 +212,59 @@ pub enum RealtimeEvent {
     },
 }
 
+/// Cloneable realtime session that multiplexes concurrent RPCs and pushed
+/// events over one WebSocket connection.
+///
+/// Create an event receiver with [`RealtimeSession::subscribe`] before issuing
+/// RPCs that may cause the server to push update hints.
+#[derive(Clone)]
+pub struct RealtimeSession {
+    commands: mpsc::Sender<SessionCommand>,
+    events: broadcast::Sender<RealtimeEvent>,
+    closed: watch::Receiver<bool>,
+    rpc_timeout: Option<Duration>,
+    heartbeat_interval: Option<Duration>,
+    heartbeat_timeout: Duration,
+    rpc_permits: Arc<Semaphore>,
+}
+
+impl fmt::Debug for RealtimeSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RealtimeSession")
+            .field("rpc_timeout", &self.rpc_timeout)
+            .field("heartbeat_interval", &self.heartbeat_interval)
+            .field("heartbeat_timeout", &self.heartbeat_timeout)
+            .field(
+                "available_rpc_permits",
+                &self.rpc_permits.available_permits(),
+            )
+            .field("closed", &*self.closed.borrow())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Receiver for pushed events from a multiplexed [`RealtimeSession`].
+pub struct RealtimeEventReceiver {
+    events: broadcast::Receiver<RealtimeEvent>,
+    closed: watch::Receiver<bool>,
+}
+
+impl fmt::Debug for RealtimeEventReceiver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RealtimeEventReceiver")
+            .field("closed", &*self.closed.borrow())
+            .finish_non_exhaustive()
+    }
+}
+
+enum SessionCommand {
+    Invoke {
+        method: proto::Method,
+        input: proto::rpc_call::Input,
+        response: oneshot::Sender<Result<proto::rpc_result::Result, RealtimeError>>,
+    },
+}
+
 /// Builder for [`RealtimeClient`].
 #[must_use]
 #[derive(Clone)]
@@ -195,6 +274,9 @@ pub struct RealtimeClientBuilder {
     identity: ClientIdentity,
     connect_timeout: Option<Duration>,
     rpc_timeout: Option<Duration>,
+    heartbeat_interval: Option<Duration>,
+    heartbeat_timeout: Duration,
+    max_in_flight_rpcs: usize,
 }
 
 impl fmt::Debug for RealtimeClientBuilder {
@@ -205,6 +287,9 @@ impl fmt::Debug for RealtimeClientBuilder {
             .field("identity", &self.identity)
             .field("connect_timeout", &self.connect_timeout)
             .field("rpc_timeout", &self.rpc_timeout)
+            .field("heartbeat_interval", &self.heartbeat_interval)
+            .field("heartbeat_timeout", &self.heartbeat_timeout)
+            .field("max_in_flight_rpcs", &self.max_in_flight_rpcs)
             .finish()
     }
 }
@@ -251,6 +336,135 @@ impl RealtimeClient {
     }
 }
 
+impl RealtimeSession {
+    /// Connects a multiplexed realtime session using the default SDK identity.
+    pub async fn connect(url: &str, token: &str) -> Result<Self, RealtimeError> {
+        RealtimeClient::builder(url, token).connect_session().await
+    }
+
+    /// Connects a multiplexed realtime session with an explicit client identity.
+    pub async fn connect_with_identity(
+        url: &str,
+        token: &str,
+        identity: ClientIdentity,
+    ) -> Result<Self, RealtimeError> {
+        RealtimeClient::builder(url, token)
+            .identity(identity)
+            .connect_session()
+            .await
+    }
+
+    /// Subscribes to server-pushed events routed by this session.
+    pub fn subscribe(&self) -> RealtimeEventReceiver {
+        RealtimeEventReceiver {
+            events: self.events.subscribe(),
+            closed: self.closed.clone(),
+        }
+    }
+
+    /// Returns whether the session transport task has stopped.
+    pub fn is_closed(&self) -> bool {
+        *self.closed.borrow()
+    }
+
+    /// Invokes a typed Inline RPC while the same transport continues routing
+    /// pushed events to subscribers.
+    pub async fn call<R>(&self, request: R) -> Result<R::Response, RealtimeError>
+    where
+        R: RpcRequest,
+    {
+        let result = self.invoke(R::METHOD, request.into_rpc_input()).await?;
+        R::response_from_rpc_result(result)
+    }
+
+    /// Invokes an Inline RPC while the same transport continues routing pushed
+    /// events and other concurrent RPC results.
+    pub async fn invoke(
+        &self,
+        method: proto::Method,
+        input: proto::rpc_call::Input,
+    ) -> Result<proto::rpc_result::Result, RealtimeError> {
+        if self.is_closed() {
+            return Err(RealtimeError::ConnectionClosed);
+        }
+        let (response_tx, response_rx) = oneshot::channel();
+        let commands = self.commands.clone();
+        let permits = self.rpc_permits.clone();
+        let response = async move {
+            let _permit = permits
+                .acquire_owned()
+                .await
+                .map_err(|_| RealtimeError::ConnectionClosed)?;
+            commands
+                .send(SessionCommand::Invoke {
+                    method,
+                    input,
+                    response: response_tx,
+                })
+                .await
+                .map_err(|_| RealtimeError::ConnectionClosed)?;
+            response_rx
+                .await
+                .map_err(|_| RealtimeError::ConnectionClosed)?
+        };
+        with_optional_timeout("rpc", self.rpc_timeout, response).await
+    }
+
+    fn from_client(client: RealtimeClient) -> Self {
+        let rpc_timeout = client.rpc_timeout;
+        let heartbeat_interval = client.heartbeat_interval;
+        let heartbeat_timeout = client.heartbeat_timeout;
+        let max_in_flight_rpcs = client.max_in_flight_rpcs;
+        let (command_tx, command_rx) = mpsc::channel(DEFAULT_SESSION_COMMAND_CAPACITY);
+        let (event_tx, _) = broadcast::channel(DEFAULT_SESSION_EVENT_CAPACITY);
+        let (closed_tx, closed_rx) = watch::channel(false);
+        tokio::spawn(run_realtime_session(
+            client,
+            command_rx,
+            event_tx.clone(),
+            closed_tx,
+        ));
+        Self {
+            commands: command_tx,
+            events: event_tx,
+            closed: closed_rx,
+            rpc_timeout,
+            heartbeat_interval,
+            heartbeat_timeout,
+            rpc_permits: Arc::new(Semaphore::new(max_in_flight_rpcs)),
+        }
+    }
+}
+
+impl RealtimeEventReceiver {
+    /// Waits for the next pushed event or a terminal session failure.
+    pub async fn recv(&mut self) -> Result<RealtimeEvent, RealtimeError> {
+        loop {
+            if *self.closed.borrow() && self.events.is_empty() {
+                return Err(RealtimeError::ConnectionClosed);
+            }
+
+            tokio::select! {
+                result = self.events.recv() => return match result {
+                    Ok(event) => Ok(event),
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        Err(RealtimeError::EventLagged { skipped })
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        Err(RealtimeError::ConnectionClosed)
+                    }
+                },
+                changed = self.closed.changed() => {
+                    match changed {
+                        Ok(()) => continue,
+                        Err(_) => return Err(RealtimeError::ConnectionClosed),
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl RealtimeClientBuilder {
     /// Creates a realtime client builder with the default SDK identity.
     pub fn new(url: impl Into<String>, token: impl Into<String>) -> Self {
@@ -260,6 +474,9 @@ impl RealtimeClientBuilder {
             identity: ClientIdentity::sdk(),
             connect_timeout: Some(DEFAULT_CONNECT_TIMEOUT),
             rpc_timeout: Some(DEFAULT_RPC_TIMEOUT),
+            heartbeat_interval: Some(DEFAULT_HEARTBEAT_INTERVAL),
+            heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
+            max_in_flight_rpcs: DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS,
         }
     }
 
@@ -290,6 +507,25 @@ impl RealtimeClientBuilder {
     /// Disables the per-RPC timeout.
     pub fn without_rpc_timeout(mut self) -> Self {
         self.rpc_timeout = None;
+        self
+    }
+
+    /// Sets the maximum number of RPCs awaiting responses on one session.
+    pub fn max_in_flight_rpcs(mut self, maximum: usize) -> Self {
+        self.max_in_flight_rpcs = maximum.max(1);
+        self
+    }
+
+    /// Configures protocol heartbeat interval and pong deadline.
+    pub fn heartbeat(mut self, interval: Duration, timeout: Duration) -> Self {
+        self.heartbeat_interval = Some(interval.max(Duration::from_millis(1)));
+        self.heartbeat_timeout = timeout.max(Duration::from_millis(1));
+        self
+    }
+
+    /// Disables multiplexed-session protocol heartbeat pings.
+    pub fn without_heartbeat(mut self) -> Self {
+        self.heartbeat_interval = None;
         self
     }
 
@@ -326,6 +562,9 @@ impl RealtimeClientBuilder {
             seq: 0,
             id_gen: IdGenerator::new(),
             rpc_timeout: self.rpc_timeout,
+            heartbeat_interval: self.heartbeat_interval,
+            heartbeat_timeout: self.heartbeat_timeout,
+            max_in_flight_rpcs: self.max_in_flight_rpcs,
         };
 
         with_optional_timeout(
@@ -343,6 +582,12 @@ impl RealtimeClientBuilder {
         .await?;
         log::debug!(target: "inline_sdk::realtime", "realtime protocol open");
         Ok(client)
+    }
+
+    /// Opens one WebSocket and starts a multiplexed session for concurrent RPC
+    /// calls and pushed events.
+    pub async fn connect_session(self) -> Result<RealtimeSession, RealtimeError> {
+        self.connect().await.map(RealtimeSession::from_client)
     }
 }
 
@@ -367,10 +612,21 @@ impl RealtimeClient {
         method: proto::Method,
         input: proto::rpc_call::Input,
     ) -> Result<proto::rpc_result::Result, RealtimeError> {
-        let rpc_call = proto::RpcCall {
-            method: method as i32,
-            input: Some(input),
-        };
+        let message_id = self.send_rpc_call(method, input).await?;
+
+        with_optional_timeout(
+            "rpc",
+            self.rpc_timeout,
+            self.wait_for_rpc_result(message_id),
+        )
+        .await
+    }
+
+    async fn send_rpc_call(
+        &mut self,
+        method: proto::Method,
+        input: proto::rpc_call::Input,
+    ) -> Result<u64, RealtimeError> {
         let message_id = self.next_id();
         log::trace!(
             target: "inline_sdk::realtime",
@@ -380,17 +636,13 @@ impl RealtimeClient {
         let message = proto::ClientMessage {
             id: message_id,
             seq: self.next_seq(),
-            body: Some(proto::client_message::Body::RpcCall(rpc_call)),
+            body: Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                method: method as i32,
+                input: Some(input),
+            })),
         };
-
         self.send_client_message(message).await?;
-
-        with_optional_timeout(
-            "rpc",
-            self.rpc_timeout,
-            self.wait_for_rpc_result(message_id),
-        )
-        .await
+        Ok(message_id)
     }
 
     /// Returns the configured per-RPC timeout.
@@ -471,22 +723,13 @@ impl RealtimeClient {
                 Some(proto::server_protocol_message::Body::RpcError(error))
                     if error.req_msg_id == message_id =>
                 {
-                    let message = error.message;
-                    let error_name = rpc_error_code_name(error.error_code);
-                    let friendly =
-                        format_rpc_error(error.error_code, &error_name, &message, error.code);
                     log::warn!(
                         target: "inline_sdk::realtime",
-                        "received rpc error msg_id={message_id} error={error_name} status={}",
-                        error.code
+                        "received rpc error msg_id={message_id} error={} status={}",
+                        rpc_error_code_name(error.error_code),
+                        error.code,
                     );
-                    return Err(RealtimeError::RpcError {
-                        code: error.code,
-                        error_code: error.error_code,
-                        error_name,
-                        message,
-                        friendly,
-                    });
+                    return Err(rpc_error_from_proto(error));
                 }
                 Some(proto::server_protocol_message::Body::ConnectionError(error)) => {
                     log::warn!(
@@ -562,6 +805,15 @@ impl RealtimeClient {
         self.send_client_message(message).await
     }
 
+    async fn send_ping(&mut self, nonce: u64) -> Result<(), RealtimeError> {
+        let message = proto::ClientMessage {
+            id: self.next_id(),
+            seq: self.next_seq(),
+            body: Some(proto::client_message::Body::Ping(proto::Ping { nonce })),
+        };
+        self.send_client_message(message).await
+    }
+
     async fn send_client_message(
         &mut self,
         message: proto::ClientMessage,
@@ -598,6 +850,149 @@ impl RealtimeClient {
     fn next_id(&mut self) -> u64 {
         self.id_gen.next_id()
     }
+}
+
+async fn run_realtime_session(
+    mut client: RealtimeClient,
+    mut commands: mpsc::Receiver<SessionCommand>,
+    events: broadcast::Sender<RealtimeEvent>,
+    closed: watch::Sender<bool>,
+) {
+    let heartbeat_interval = client.heartbeat_interval;
+    let heartbeat_timeout = client.heartbeat_timeout;
+    let mut heartbeat =
+        tokio::time::interval(heartbeat_interval.unwrap_or(Duration::from_secs(24 * 60 * 60)));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    heartbeat.tick().await;
+    let mut pending_ping: Option<(u64, tokio::time::Instant)> = None;
+    let mut pending =
+        HashMap::<u64, oneshot::Sender<Result<proto::rpc_result::Result, RealtimeError>>>::new();
+
+    loop {
+        // A timed-out or cancelled caller drops its receiver. Remove those
+        // entries before accepting more work so an unresponsive server cannot
+        // grow the pending map indefinitely.
+        pending.retain(|_, response| !response.is_closed());
+        let heartbeat_deadline = pending_ping
+            .map(|(_, deadline)| deadline)
+            .unwrap_or_else(tokio::time::Instant::now);
+        tokio::select! {
+            _ = heartbeat.tick(), if heartbeat_interval.is_some() => {
+                if pending_ping.is_none() {
+                    let nonce = client.next_id();
+                    if let Err(error) = client.send_ping(nonce).await {
+                        log::warn!(
+                            target: "inline_sdk::realtime",
+                            "failed to send realtime heartbeat: {error}"
+                        );
+                        break;
+                    }
+                    pending_ping = Some((nonce, tokio::time::Instant::now() + heartbeat_timeout));
+                }
+            }
+            _ = tokio::time::sleep_until(heartbeat_deadline), if pending_ping.is_some() => {
+                let nonce = pending_ping.map(|(nonce, _)| nonce).unwrap_or_default();
+                log::warn!(
+                    target: "inline_sdk::realtime",
+                    "realtime heartbeat timed out nonce={nonce} timeout={heartbeat_timeout:?}"
+                );
+                break;
+            }
+            command = commands.recv() => {
+                let Some(command) = command else {
+                    break;
+                };
+                match command {
+                    SessionCommand::Invoke { method, input, response } => {
+                        match client.send_rpc_call(method, input).await {
+                            Ok(message_id) => {
+                                pending.insert(message_id, response);
+                            }
+                            Err(error) => {
+                                let _ = response.send(Err(error));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            message = client.read_server_message() => {
+                let message = match message {
+                    Ok(message) => message,
+                    Err(error) => {
+                        log::warn!(
+                            target: "inline_sdk::realtime",
+                            "multiplexed realtime session stopped: {error}"
+                        );
+                        break;
+                    }
+                };
+                match message.body {
+                    Some(proto::server_protocol_message::Body::RpcResult(result)) => {
+                        if let Some(response) = pending.remove(&result.req_msg_id) {
+                            let value = result.result.ok_or(RealtimeError::MissingResult);
+                            let _ = response.send(value);
+                        } else {
+                            log::debug!(
+                                target: "inline_sdk::realtime",
+                                "received result for unknown or timed-out rpc msg_id={}",
+                                result.req_msg_id
+                            );
+                        }
+                    }
+                    Some(proto::server_protocol_message::Body::RpcError(error)) => {
+                        if let Some(response) = pending.remove(&error.req_msg_id) {
+                            let _ = response.send(Err(rpc_error_from_proto(error)));
+                        } else {
+                            log::debug!(
+                                target: "inline_sdk::realtime",
+                                "received error for unknown or timed-out rpc msg_id={}",
+                                error.req_msg_id
+                            );
+                        }
+                    }
+                    Some(proto::server_protocol_message::Body::Message(server_message)) => {
+                        match client.server_payload_event(message.id, server_message).await {
+                            Ok(Some(event)) => {
+                                let _ = events.send(event);
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                log::warn!(
+                                    target: "inline_sdk::realtime",
+                                    "failed to route pushed realtime event: {error}"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    Some(proto::server_protocol_message::Body::Ack(ack)) => {
+                        let _ = events.send(RealtimeEvent::Ack { msg_id: ack.msg_id });
+                    }
+                    Some(proto::server_protocol_message::Body::Pong(pong)) => {
+                        if pending_ping.is_some_and(|(nonce, _)| nonce == pong.nonce) {
+                            pending_ping = None;
+                        }
+                        let _ = events.send(RealtimeEvent::Pong { nonce: pong.nonce });
+                    }
+                    Some(proto::server_protocol_message::Body::ConnectionError(error)) => {
+                        let error = connection_error_from_proto(error);
+                        log::warn!(
+                            target: "inline_sdk::realtime",
+                            "multiplexed realtime session rejected: {error}"
+                        );
+                        break;
+                    }
+                    Some(proto::server_protocol_message::Body::ConnectionOpen(_)) | None => {}
+                }
+            }
+        }
+    }
+
+    for (_, response) in pending {
+        let _ = response.send(Err(RealtimeError::ConnectionClosed));
+    }
+    let _ = closed.send(true);
 }
 
 macro_rules! rpc_requests {
@@ -1109,6 +1504,18 @@ fn rpc_error_code_name(error_code: i32) -> String {
         .to_string()
 }
 
+fn rpc_error_from_proto(error: proto::RpcError) -> RealtimeError {
+    let error_name = rpc_error_code_name(error.error_code);
+    let friendly = format_rpc_error(error.error_code, &error_name, &error.message, error.code);
+    RealtimeError::RpcError {
+        code: error.code,
+        error_code: error.error_code,
+        error_name,
+        message: error.message,
+        friendly,
+    }
+}
+
 fn format_rpc_error(error_code: i32, error_name: &str, message: &str, status_code: i32) -> String {
     let label = match error_name {
         "UNKNOWN" => "Unknown RPC error",
@@ -1395,6 +1802,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::result_large_err)]
     async fn realtime_client_connects_and_calls_get_me_against_local_server() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1606,6 +2014,311 @@ mod tests {
         server.await.unwrap();
     }
 
+    #[tokio::test]
+    async fn realtime_session_routes_pushed_updates_during_rpc() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let rpc = read_test_client_message(&mut ws).await;
+            send_test_server_message(&mut ws, test_update_server_message(10, 88)).await;
+            let ack = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                ack.body,
+                Some(proto::client_message::Body::Ack(proto::Ack { msg_id: 10 }))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 2,
+                    body: Some(proto::server_protocol_message::Body::RpcResult(
+                        proto::RpcResult {
+                            req_msg_id: rpc.id,
+                            result: Some(proto::rpc_result::Result::GetMe(proto::GetMeResult {
+                                user: Some(proto::User {
+                                    id: 42,
+                                    ..Default::default()
+                                }),
+                            })),
+                        },
+                    )),
+                },
+            )
+            .await;
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect_session()
+            .await
+            .unwrap();
+        let mut events = session.subscribe();
+        let (result, event) = tokio::join!(session.call(proto::GetMeInput {}), events.recv());
+
+        assert_eq!(result.unwrap().user.unwrap().id, 42);
+        match event.unwrap() {
+            RealtimeEvent::Updates(updates) => match updates[0].update.as_ref() {
+                Some(proto::update::Update::NewMessage(update)) => {
+                    assert_eq!(update.message.as_ref().unwrap().id, 88);
+                }
+                other => panic!("expected new message update, got {other:?}"),
+            },
+            other => panic!("expected updates event, got {other:?}"),
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_session_matches_concurrent_rpc_results_by_request_id() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let first = read_test_client_message(&mut ws).await;
+            let second = read_test_client_message(&mut ws).await;
+            for (id, request, user_id) in [(2, &second, 2), (3, &first, 1)] {
+                send_test_server_message(
+                    &mut ws,
+                    proto::ServerProtocolMessage {
+                        id,
+                        body: Some(proto::server_protocol_message::Body::RpcResult(
+                            proto::RpcResult {
+                                req_msg_id: request.id,
+                                result: Some(proto::rpc_result::Result::GetMe(
+                                    proto::GetMeResult {
+                                        user: Some(proto::User {
+                                            id: user_id,
+                                            ..Default::default()
+                                        }),
+                                    },
+                                )),
+                            },
+                        )),
+                    },
+                )
+                .await;
+            }
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect_session()
+            .await
+            .unwrap();
+        let (first, second) = tokio::join!(
+            session.call(proto::GetMeInput {}),
+            session.call(proto::GetMeInput {})
+        );
+
+        assert_eq!(first.unwrap().user.unwrap().id, 1);
+        assert_eq!(second.unwrap().user.unwrap().id, 2);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_session_bounds_in_flight_rpcs() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let first = read_test_client_message(&mut ws).await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), read_test_client_message(&mut ws),)
+                    .await
+                    .is_err(),
+                "session issued a second RPC above its configured in-flight limit"
+            );
+            send_test_server_message(&mut ws, get_me_result_message(2, first.id, 1)).await;
+            let second = read_test_client_message(&mut ws).await;
+            send_test_server_message(&mut ws, get_me_result_message(3, second.id, 2)).await;
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .max_in_flight_rpcs(1)
+            .connect_session()
+            .await
+            .unwrap();
+        let (first, second) = tokio::join!(
+            session.call(proto::GetMeInput {}),
+            session.call(proto::GetMeInput {})
+        );
+
+        assert_eq!(first.unwrap().user.unwrap().id, 1);
+        assert_eq!(second.unwrap().user.unwrap().id, 2);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_session_drops_timed_out_rpc_and_remains_usable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let timed_out = read_test_client_message(&mut ws).await;
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 2,
+                    body: Some(proto::server_protocol_message::Body::RpcResult(
+                        proto::RpcResult {
+                            req_msg_id: timed_out.id,
+                            result: Some(proto::rpc_result::Result::GetMe(proto::GetMeResult {
+                                user: Some(proto::User {
+                                    id: 1,
+                                    ..Default::default()
+                                }),
+                            })),
+                        },
+                    )),
+                },
+            )
+            .await;
+
+            let recovered = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 3,
+                    body: Some(proto::server_protocol_message::Body::RpcResult(
+                        proto::RpcResult {
+                            req_msg_id: recovered.id,
+                            result: Some(proto::rpc_result::Result::GetMe(proto::GetMeResult {
+                                user: Some(proto::User {
+                                    id: 2,
+                                    ..Default::default()
+                                }),
+                            })),
+                        },
+                    )),
+                },
+            )
+            .await;
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .rpc_timeout(Duration::from_millis(25))
+            .connect_session()
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            session.call(proto::GetMeInput {}).await,
+            Err(RealtimeError::Timeout {
+                operation: "rpc",
+                ..
+            })
+        ));
+        let recovered = session.call(proto::GetMeInput {}).await.unwrap();
+        assert_eq!(recovered.user.unwrap().id, 2);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_session_closes_when_heartbeat_pong_is_missing() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+            let ping = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                ping.body,
+                Some(proto::client_message::Body::Ping(_))
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .heartbeat(Duration::from_millis(20), Duration::from_millis(30))
+            .connect_session()
+            .await
+            .unwrap();
+        let mut events = session.subscribe();
+
+        let error = tokio::time::timeout(Duration::from_millis(150), events.recv())
+            .await
+            .expect("heartbeat deadline should close the session")
+            .unwrap_err();
+        assert!(matches!(error, RealtimeError::ConnectionClosed));
+        assert!(session.is_closed());
+        server.await.unwrap();
+    }
+
     #[test]
     fn realtime_url_validation_accepts_ws_urls() {
         let url = normalize_realtime_url(" wss://api.inline.chat/realtime?edge=iad ").unwrap();
@@ -1690,6 +2403,12 @@ mod tests {
         assert_eq!(builder.identity.client_version(), "0.2.0");
         assert_eq!(builder.connect_timeout, Some(DEFAULT_CONNECT_TIMEOUT));
         assert_eq!(builder.rpc_timeout, Some(DEFAULT_RPC_TIMEOUT));
+        assert_eq!(builder.heartbeat_interval, Some(DEFAULT_HEARTBEAT_INTERVAL));
+        assert_eq!(builder.heartbeat_timeout, DEFAULT_HEARTBEAT_TIMEOUT);
+        assert_eq!(
+            builder.max_in_flight_rpcs,
+            DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS
+        );
     }
 
     #[test]
@@ -1712,14 +2431,20 @@ mod tests {
     fn realtime_builder_can_override_or_disable_timeouts() {
         let builder = RealtimeClient::builder("wss://api.inline.chat/realtime", "token-1")
             .connect_timeout(Duration::from_secs(5))
-            .rpc_timeout(Duration::from_secs(10));
+            .rpc_timeout(Duration::from_secs(10))
+            .max_in_flight_rpcs(7);
 
         assert_eq!(builder.connect_timeout, Some(Duration::from_secs(5)));
         assert_eq!(builder.rpc_timeout, Some(Duration::from_secs(10)));
+        assert_eq!(builder.max_in_flight_rpcs, 7);
 
-        let builder = builder.without_connect_timeout().without_rpc_timeout();
+        let builder = builder
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .without_heartbeat();
         assert_eq!(builder.connect_timeout, None);
         assert_eq!(builder.rpc_timeout, None);
+        assert_eq!(builder.heartbeat_interval, None);
     }
 
     #[test]
@@ -1807,6 +2532,27 @@ mod tests {
         ws.send(WsMessage::Binary(message.encode_to_vec()))
             .await
             .unwrap();
+    }
+
+    fn get_me_result_message(
+        id: u64,
+        request_id: u64,
+        user_id: i64,
+    ) -> proto::ServerProtocolMessage {
+        proto::ServerProtocolMessage {
+            id,
+            body: Some(proto::server_protocol_message::Body::RpcResult(
+                proto::RpcResult {
+                    req_msg_id: request_id,
+                    result: Some(proto::rpc_result::Result::GetMe(proto::GetMeResult {
+                        user: Some(proto::User {
+                            id: user_id,
+                            ..Default::default()
+                        }),
+                    })),
+                },
+            )),
+        }
     }
 
     fn test_update_server_message(

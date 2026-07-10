@@ -451,6 +451,16 @@ impl ApiClient {
         self.post_with_token(url, token, payload).await
     }
 
+    /// Revokes the current authenticated API session.
+    pub async fn logout(&self, token: &str) -> Result<(), ApiError> {
+        validate_bearer_token(token)?;
+        let url = format!("{}/logout", self.base_url);
+        let _: Value = self
+            .post_with_token(url, token, serde_json::Map::new())
+            .await?;
+        Ok(())
+    }
+
     /// Creates a Linear issue from an Inline message.
     pub async fn create_linear_issue(
         &self,
@@ -1572,6 +1582,22 @@ mod tests {
         assert_eq!(request.body.get("peerUserId"), Some(&json!(42)));
         assert_eq!(request.body.get("maxId"), Some(&json!(99)));
         assert!(request.body.get("peerThreadId").is_none());
+    }
+
+    #[tokio::test]
+    async fn logout_posts_empty_bearer_request() {
+        let request = capture_json_request(r#"{"ok":true,"result":null}"#, |client| async move {
+            client.logout("secret-token").await
+        })
+        .await;
+
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/v1/logout");
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer secret-token")
+        );
+        assert_eq!(request.body, json!({}));
     }
 
     #[test]

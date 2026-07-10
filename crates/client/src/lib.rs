@@ -10,7 +10,7 @@ use thiserror::Error;
 /// Backend/store boundary for client runtime operations.
 pub mod backend;
 
-/// Async client facade and runner skeleton.
+/// Async client facade and runner.
 pub mod runtime;
 
 /// Realtime connector boundary.
@@ -18,6 +18,9 @@ pub mod realtime;
 
 /// SDK-backed backend implementation.
 pub mod sdk_backend;
+
+/// Inline-native update discovery and bucket recovery policy.
+pub mod sync;
 
 /// Durable store boundary.
 pub mod store;
@@ -35,22 +38,28 @@ pub use realtime::{
 };
 pub use runtime::{
     ClientCommandError, ClientRequestError, ClientRunner, DEFAULT_COMMAND_QUEUE_CAPACITY,
-    DEFAULT_EVENT_QUEUE_CAPACITY, InlineClient, InlineClientBuilder, InlineClientRuntime,
+    DEFAULT_EVENT_QUEUE_CAPACITY, DEFAULT_LOSSLESS_EVENT_QUEUE_CAPACITY,
+    DEFAULT_MAX_CONCURRENT_REQUESTS, InlineClient, InlineClientBuilder, InlineClientRuntime,
+    LosslessEventReceiver, ReconnectPolicy,
 };
 pub use sdk_backend::{SdkBackend, SdkBackendBuildError, SdkBackendBuilder};
 pub use store::{
-    ClientStore, InMemoryStore, SqliteStore, StoreError, StoreResult, StoredSession,
-    StoredTransaction,
+    AccountStateSnapshot, ChatStateSnapshot, ClientStore, InMemoryStore, PendingSyncBatch,
+    SqliteStore, StoreError, StoreResult, StoredReaction, StoredReadState, StoredSession,
+    StoredTransaction, SyncBucketKey, SyncBucketPeer, SyncBucketState, SyncState,
 };
+pub use sync::SyncConfig;
 pub use types::{
-    AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult, AuthToken,
-    AuthVerifyRequest, AuthVerifyResult, ChatCreateParticipant, ChatParticipantRecord,
+    AddChatParticipantRequest, AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult,
+    AuthToken, AuthVerifyRequest, AuthVerifyResult, ChatCreateParticipant, ChatParticipantRecord,
     ChatParticipantsPage, ChatParticipantsRequest, ClientStatusSnapshot, ConnectRequest,
-    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat,
-    DeleteMessageRequest, DialogRecord, DialogsPage, DialogsRequest, EditMessageRequest,
-    HistoryPage, HistoryRequest, MediaKind, MessageContent, MessageMutation, MessageRecord,
-    PeerRef, ReactRequest, ReadRequest, SendTextRequest, TypingRequest, UploadHandle,
-    UploadRequest, UserRecord,
+    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
+    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage,
+    DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, MediaKind, MessageContent,
+    MessageMutation, MessageRecord, NotificationMode, PeerRef, ReactRequest, ReadRequest,
+    RemoveChatParticipantRequest, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord,
+    SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
+    UpdateDialogNotificationsRequest, UploadHandle, UploadRequest, UserRecord, UserSettingsRecord,
 };
 
 /// Published package version.
@@ -421,10 +430,58 @@ pub enum ClientEvent {
         /// Inline chat ID.
         chat_id: InlineId,
     },
+    /// A chat was deleted from durable client state.
+    ChatDeleted {
+        /// Inline chat ID.
+        chat_id: InlineId,
+    },
+    /// The participant snapshot for a chat changed.
+    ChatParticipantsChanged {
+        /// Inline chat ID.
+        chat_id: InlineId,
+    },
     /// A user was inserted or updated in the local store.
     UserUpserted {
         /// Inline user ID.
         user_id: InlineId,
+    },
+    /// A space was inserted or updated in durable client state.
+    SpaceUpserted {
+        /// Inline space ID.
+        space_id: InlineId,
+    },
+    /// Durable membership for a space changed.
+    SpaceMemberChanged {
+        /// Inline space ID.
+        space_id: InlineId,
+        /// Inline user ID.
+        user_id: InlineId,
+        /// Whether the member was removed.
+        removed: bool,
+    },
+    /// Durable global user settings changed.
+    UserSettingsChanged {},
+    /// A bot message action was invoked and requires lossless host handling.
+    MessageActionInvoked {
+        /// Server interaction ID.
+        interaction_id: InlineId,
+        /// Chat containing the action.
+        chat_id: InlineId,
+        /// Message containing the action.
+        message_id: InlineId,
+        /// User who invoked the action.
+        actor_user_id: InlineId,
+        /// Bot-defined action ID.
+        action_id: String,
+        /// Opaque bot-defined payload.
+        data: Vec<u8>,
+    },
+    /// A previously invoked message action received a UI response.
+    MessageActionAnswered {
+        /// Server interaction ID.
+        interaction_id: InlineId,
+        /// Optional toast text supplied by the bot.
+        toast: Option<String>,
     },
     /// A message was inserted or updated in the local store.
     MessageUpserted {
@@ -444,6 +501,13 @@ pub enum ClientEvent {
         chat_id: InlineId,
         /// Inline message ID.
         message_id: InlineId,
+    },
+    /// Stored history was cleared for a chat, optionally before a timestamp.
+    ChatHistoryCleared {
+        /// Inline chat ID.
+        chat_id: InlineId,
+        /// Unix timestamp cutoff; `None` means all history.
+        before_date: Option<i64>,
     },
     /// Reactions for a message changed.
     ReactionChanged {
@@ -472,20 +536,60 @@ pub enum ClientEvent {
         /// Whether the user is typing.
         is_typing: bool,
     },
+    /// Transient user presence changed.
+    UserStatusChanged {
+        /// Inline user ID.
+        user_id: InlineId,
+        /// `Some(true)` for online, `Some(false)` for offline, or `None` when hidden/unknown.
+        is_online: Option<bool>,
+        /// Last-online Unix timestamp, when disclosed.
+        last_online: Option<i64>,
+    },
+    /// Transient bot activity/presence changed for a peer.
+    BotPresenceChanged {
+        /// Inline bot user ID.
+        bot_user_id: InlineId,
+        /// Resolved chat ID, when available.
+        chat_id: Option<InlineId>,
+        /// Stable protobuf presence kind name.
+        kind: String,
+        /// Optional bot-supplied status comment.
+        comment: Option<String>,
+        /// Whether the bot avatar changed.
+        avatar_changed: bool,
+    },
+    /// A notification-class message update was received.
+    NewMessageNotification {
+        /// Message referenced by the notification.
+        message: MessageRecord,
+        /// Stable protobuf notification reason name.
+        reason: String,
+    },
 }
 
 impl ClientEvent {
     /// Returns the event delivery reliability class.
     pub const fn reliability(&self) -> EventReliability {
         match self {
-            Self::Typing { .. } => EventReliability::BestEffort,
+            Self::Typing { .. }
+            | Self::UserStatusChanged { .. }
+            | Self::BotPresenceChanged { .. }
+            | Self::NewMessageNotification { .. } => EventReliability::BestEffort,
             Self::StatusChanged { .. }
             | Self::TransactionChanged(_)
             | Self::ChatUpserted { .. }
+            | Self::ChatDeleted { .. }
+            | Self::ChatParticipantsChanged { .. }
             | Self::UserUpserted { .. }
+            | Self::SpaceUpserted { .. }
+            | Self::SpaceMemberChanged { .. }
+            | Self::UserSettingsChanged { .. }
+            | Self::MessageActionInvoked { .. }
+            | Self::MessageActionAnswered { .. }
             | Self::MessageUpserted { .. }
             | Self::MessageStored { .. }
             | Self::MessageDeleted { .. }
+            | Self::ChatHistoryCleared { .. }
             | Self::ReactionChanged { .. }
             | Self::ReadStateChanged { .. } => EventReliability::Lossless,
         }
@@ -495,19 +599,25 @@ impl ClientEvent {
 /// Convenient imports for common client consumers.
 pub mod prelude {
     pub use crate::{
-        AuthCredential, AuthToken, BackendError, BackendResult, ClientBackend, ClientCommandError,
-        ClientError, ClientErrorCategory, ClientEvent, ClientFailure, ClientIdentity,
-        ClientRequestError, ClientRunner, ClientStatus, ClientStore, ConnectRequest,
-        DEFAULT_COMMAND_QUEUE_CAPACITY, DEFAULT_EVENT_QUEUE_CAPACITY, DeleteMessageRequest,
-        DialogRecord, DialogsPage, DialogsRequest, EditMessageRequest, EventReliability,
-        ExternalId, FakeRealtimeAttempt, FakeRealtimeConnector, HistoryPage, HistoryRequest,
-        InMemoryBackend, InMemoryStore, InlineClient, InlineClientBuilder, InlineClientRuntime,
-        InlineId, MessageContent, MessageMutation, MessageRecord, PeerRef, RandomId, ReactRequest,
-        ReadRequest, RealtimeConnectRequest, RealtimeConnectionInfo, RealtimeConnector, SdkBackend,
+        AddChatParticipantRequest, AuthCredential, AuthToken, BackendError, BackendResult,
+        ClientBackend, ClientCommandError, ClientError, ClientErrorCategory, ClientEvent,
+        ClientFailure, ClientIdentity, ClientRequestError, ClientRunner, ClientStatus, ClientStore,
+        ConnectRequest, DEFAULT_COMMAND_QUEUE_CAPACITY, DEFAULT_EVENT_QUEUE_CAPACITY,
+        DEFAULT_LOSSLESS_EVENT_QUEUE_CAPACITY, DeleteChatRequest, DeleteMessageRequest,
+        DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage, DialogsRequest,
+        EditMessageRequest, EventReliability, ExternalId, FakeRealtimeAttempt,
+        FakeRealtimeConnector, HistoryPage, HistoryRequest, InMemoryBackend, InMemoryStore,
+        InlineClient, InlineClientBuilder, InlineClientRuntime, InlineId, LosslessEventReceiver,
+        MessageContent, MessageMutation, MessageRecord, NotificationMode, PeerRef, RandomId,
+        ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnectionInfo,
+        RealtimeConnector, ReconnectPolicy, RemoveChatParticipantRequest, SdkBackend,
         SdkBackendBuildError, SdkBackendBuilder, SdkRealtimeConnector, SendTextOutcome,
-        SendTextRequest, SqliteStore, StoreError, StoreResult, StoredSession, StoredTransaction,
+        SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole, SpaceRecord,
+        SqliteStore, StoreError, StoreResult, StoredReaction, StoredReadState, StoredSession,
+        StoredTransaction, SyncBucketKey, SyncBucketPeer, SyncBucketState, SyncConfig, SyncState,
         TransactionEvent, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
-        UploadHandle, UploadRequest, VERSION,
+        UpdateChatInfoRequest, UpdateDialogNotificationsRequest, UploadHandle, UploadRequest,
+        UserSettingsRecord, VERSION,
     };
 }
 
