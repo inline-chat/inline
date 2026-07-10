@@ -1445,6 +1445,7 @@ mod tests {
                         date: now - 45,
                     },
                 ],
+                ..Default::default()
             },
             now,
         );
