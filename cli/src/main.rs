@@ -1839,7 +1839,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let token = require_token(&auth_store)?;
                     let mut realtime =
                         connect_realtime(&config.realtime_url, &token).await?;
-                    let input = proto::AddChatParticipantInput { chat_id, user_id };
+                    let input = proto::AddChatParticipantInput {
+                        chat_id,
+                        user_id: Some(user_id),
+                        group_id: None,
+                    };
                     let payload = realtime.call(input).await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
@@ -1853,7 +1857,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let token = require_token(&auth_store)?;
                     let mut realtime =
                         connect_realtime(&config.realtime_url, &token).await?;
-                    let input = proto::RemoveChatParticipantInput { chat_id, user_id };
+                    let input = proto::RemoveChatParticipantInput {
+                        chat_id,
+                        user_id: Some(user_id),
+                        group_id: None,
+                    };
                     let payload = realtime.call(input).await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
@@ -1895,7 +1903,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let participants = args
                         .participants
                         .iter()
-                        .map(|user_id| proto::InputChatParticipant { user_id: *user_id })
+                        .map(|user_id| proto::InputChatParticipant {
+                            user_id: Some(*user_id),
+                            group_id: None,
+                        })
                         .collect();
                     let description = args.description.and_then(|value| {
                         let trimmed = value.trim();
@@ -1971,7 +1982,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let participants = args
                         .participants
                         .iter()
-                        .map(|user_id| proto::InputChatParticipant { user_id: *user_id })
+                        .map(|user_id| proto::InputChatParticipant {
+                            user_id: Some(*user_id),
+                            group_id: None,
+                        })
                         .collect();
                     let input = proto::UpdateChatVisibilityInput {
                         chat_id,
