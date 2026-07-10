@@ -677,16 +677,29 @@ private struct ChatListRow: View {
   }
 
   var body: some View {
-    HStack(spacing: rowIconSpacing) {
-      icon
-        .frame(width: rowIconSize, height: rowIconSize)
+    ZStack(alignment: .leading) {
+      if unreadBadgeStyle == .dot {
+        unreadIndicator
+          .padding(.leading, Theme.sidebarItemUnreadDotLeadingSpacing)
+      }
 
-      rowContent
+      HStack(spacing: rowIconSpacing) {
+        icon
+          .frame(width: rowIconSize, height: rowIconSize)
+
+        rowContent
+      }
+      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(.trailing, Self.horizontalPadding)
     }
     .frame(height: rowHeight)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, Self.horizontalPadding)
     .padding(.vertical, Self.verticalPadding)
+    .animation(.smoothSnappy, value: item.unread)
+    .animation(.smoothSnappy, value: item.unreadCount)
+    .animation(.smoothSnappy, value: item.unreadMark)
+    .animation(.smoothSnappy, value: item.prominentUnreadIndicator)
+    .animation(.smoothSnappy, value: unreadBadgeStyle)
     .contentShape(.rect(cornerRadius: Self.cornerRadius))
     .background(background)
     .onTapGesture(perform: openFromClick)
@@ -791,7 +804,9 @@ private struct ChatListRow: View {
           showsProfilePhotos: true
         )
 
-        unreadIndicator
+        if unreadBadgeStyle == .numbered {
+          unreadIndicator
+        }
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -813,9 +828,11 @@ private struct ChatListRow: View {
         .frame(width: Self.oneLineTrailingWidth, alignment: .trailing)
         .layoutPriority(1)
 
-      unreadIndicator
-        .fixedSize(horizontal: true, vertical: false)
-        .layoutPriority(2)
+      if unreadBadgeStyle == .numbered {
+        unreadIndicator
+          .fixedSize(horizontal: true, vertical: false)
+          .layoutPriority(2)
+      }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -841,7 +858,8 @@ private struct ChatListRow: View {
       unreadCount: item.unread ? item.unreadCount : 0,
       hasUnreadMark: item.unread && item.unreadMark,
       prominent: item.prominentUnreadIndicator,
-      style: unreadBadgeStyle
+      style: unreadBadgeStyle,
+      dotSize: Theme.sidebarItemUnreadDotSize
     )
     .layoutPriority(1)
   }
