@@ -50,8 +50,6 @@ export const Sync = {
   inflateUserUpdatesPage: inflateUserUpdatesPage,
 }
 
-export const CORE_SYNC_SCHEMA_REVISION = 1
-
 export type InflatedUpdatesPage = {
   updates: Update[]
   skippedSequences: SyncSkippedSequence[]

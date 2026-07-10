@@ -15,7 +15,6 @@ export const getUpdates = async (input: GetUpdatesInput, handlerContext: Handler
       seqEnd: input.seqEnd ?? 0n,
       totalLimit: input.totalLimit ?? 0,
       limit: input.limit ?? 0,
-      coreSyncSchemaRevision: input.coreSyncSchemaRevision ?? 0,
     },
     {
       currentSessionId: handlerContext.sessionId,

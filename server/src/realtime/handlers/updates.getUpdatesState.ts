@@ -9,7 +9,7 @@ export const getUpdatesState = async (
   input: GetUpdatesStateInput,
   handlerContext: HandlerContext,
 ): Promise<GetUpdatesStateResult> => {
-  const { date, updatesFound, coreSyncSchemaRevision } = await Functions.updates.getUpdatesState(input, {
+  const { date, updatesFound } = await Functions.updates.getUpdatesState(input, {
     currentSessionId: handlerContext.sessionId,
     currentUserId: handlerContext.userId,
   })
@@ -17,6 +17,5 @@ export const getUpdatesState = async (
   return {
     date,
     updatesFound,
-    coreSyncSchemaRevision,
   }
 }

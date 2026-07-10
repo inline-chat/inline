@@ -2,12 +2,6 @@ import Foundation
 import InlineProtocol
 import Logger
 
-private let coreSyncSchemaRevision: UInt32 = 1
-
-private enum SyncCompatibilityError: Error {
-  case incompatibleSchema(server: UInt32, client: UInt32)
-}
-
 public struct SyncConfig: Sendable {
   public var lastSyncSafetyGapSeconds: Int64
   /// Caps concurrent `getUpdates` RPCs across buckets to avoid thundering herds on reconnect.
@@ -620,19 +614,12 @@ actor Sync {
         // events in response to this call (or as part of the result).
         let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
           $0.date = state.lastSyncDate
-          $0.coreSyncSchemaRevision = coreSyncSchemaRevision
         }), timeout: Self.getUpdatesStateTimeout)
         span.end(
           "attempt=\(attempt) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
         )
         log.trace("sent get updates state request with date: \(state.lastSyncDate)")
         if case let .getUpdatesState(payload) = result {
-          guard payload.coreSyncSchemaRevision == coreSyncSchemaRevision else {
-            throw SyncCompatibilityError.incompatibleSchema(
-              server: payload.coreSyncSchemaRevision,
-              client: coreSyncSchemaRevision
-            )
-          }
           log.trace(
             "received get updates state date: \(payload.date), updatesFound=\(payload.hasUpdatesFound ? String(payload.updatesFound) : "unknown")"
           )
@@ -1470,7 +1457,6 @@ actor BucketActor {
             $0.totalLimit = Int32(Self.maxTotalUpdates)
           }
           $0.limit = Self.updatesPageLimit
-          $0.coreSyncSchemaRevision = coreSyncSchemaRevision
           if let requestSeqEnd {
             $0.seqEnd = requestSeqEnd
           }
@@ -1492,13 +1478,6 @@ actor BucketActor {
           log.error("failed to parse getUpdates result")
           resultLabel = "parse_failed"
           return false
-        }
-
-        guard payload.coreSyncSchemaRevision == coreSyncSchemaRevision else {
-          throw SyncCompatibilityError.incompatibleSchema(
-            server: payload.coreSyncSchemaRevision,
-            client: coreSyncSchemaRevision
-          )
         }
 
         let totalCount = payload.updates.count

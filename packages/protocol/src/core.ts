@@ -3324,13 +3324,6 @@ export interface GetUpdatesInput {
      * @generated from protobuf field: int32 limit = 5;
      */
     limit: number;
-    /**
-     * Client-supported lossless sync schema. Servers must reject pages that
-     * contain update variants newer than this revision.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 6;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf message UpdateSidecars
@@ -3432,12 +3425,6 @@ export interface GetUpdatesResult {
      * @generated from protobuf field: repeated SyncSkippedSequence skipped_sequences = 7;
      */
     skippedSequences: SyncSkippedSequence[];
-    /**
-     * Server lossless-sync schema used to encode this page.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 8;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf enum GetUpdatesResult.ResultType
@@ -3694,12 +3681,6 @@ export interface GetUpdatesStateInput {
      * @generated from protobuf field: int64 date = 2;
      */
     date: bigint;
-    /**
-     * Client-supported lossless sync schema.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 3;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf message GetUpdatesStateResult
@@ -3717,13 +3698,6 @@ export interface GetUpdatesStateResult {
      * @generated from protobuf field: optional bool updates_found = 2;
      */
     updatesFound?: boolean;
-    /**
-     * Server lossless-sync schema. Stateful clients must reject incompatible
-     * servers before consuming bucket updates.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 3;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf message GetChatInput
@@ -14548,8 +14522,7 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
             { no: 2, name: "start_seq", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "total_limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "seq_end", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 6, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 5, name: "limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesInput>): GetUpdatesInput {
@@ -14558,7 +14531,6 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
         message.totalLimit = 0;
         message.seqEnd = 0n;
         message.limit = 0;
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesInput>(this, message, value);
         return message;
@@ -14582,9 +14554,6 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
                     break;
                 case /* int32 limit */ 5:
                     message.limit = reader.int32();
-                    break;
-                case /* uint32 core_sync_schema_revision */ 6:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -14613,9 +14582,6 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
         /* int32 limit = 5; */
         if (message.limit !== 0)
             writer.tag(5, WireType.Varint).int32(message.limit);
-        /* uint32 core_sync_schema_revision = 6; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(6, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14770,8 +14736,7 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
             { no: 4, name: "final", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 5, name: "result_type", kind: "enum", T: () => ["GetUpdatesResult.ResultType", GetUpdatesResult_ResultType, "RESULT_TYPE_"] },
             { no: 6, name: "sidecars", kind: "message", T: () => UpdateSidecars },
-            { no: 7, name: "skipped_sequences", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => SyncSkippedSequence },
-            { no: 8, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 7, name: "skipped_sequences", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => SyncSkippedSequence }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesResult>): GetUpdatesResult {
@@ -14781,7 +14746,6 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
         message.date = 0n;
         message.resultType = 0;
         message.skippedSequences = [];
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesResult>(this, message, value);
         return message;
@@ -14811,9 +14775,6 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
                     break;
                 case /* repeated SyncSkippedSequence skipped_sequences */ 7:
                     message.skippedSequences.push(SyncSkippedSequence.internalBinaryRead(reader, reader.uint32(), options));
-                    break;
-                case /* uint32 core_sync_schema_revision */ 8:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -14848,9 +14809,6 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
         /* repeated SyncSkippedSequence skipped_sequences = 7; */
         for (let i = 0; i < message.skippedSequences.length; i++)
             SyncSkippedSequence.internalBinaryWrite(message.skippedSequences[i], writer.tag(7, WireType.LengthDelimited).fork(), options).join();
-        /* uint32 core_sync_schema_revision = 8; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(8, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15723,14 +15681,12 @@ export const RemoveSpaceUrlPreviewExclusionResult = new RemoveSpaceUrlPreviewExc
 class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
     constructor() {
         super("GetUpdatesStateInput", [
-            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateInput>): GetUpdatesStateInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.date = 0n;
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesStateInput>(this, message, value);
         return message;
@@ -15742,9 +15698,6 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
             switch (fieldNo) {
                 case /* int64 date */ 2:
                     message.date = reader.int64().toBigInt();
-                    break;
-                case /* uint32 core_sync_schema_revision */ 3:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -15761,9 +15714,6 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
         /* int64 date = 2; */
         if (message.date !== 0n)
             writer.tag(2, WireType.Varint).int64(message.date);
-        /* uint32 core_sync_schema_revision = 3; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(3, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15779,14 +15729,12 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
     constructor() {
         super("GetUpdatesStateResult", [
             { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "updates_found", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 2, name: "updates_found", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateResult>): GetUpdatesStateResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.date = 0n;
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesStateResult>(this, message, value);
         return message;
@@ -15801,9 +15749,6 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
                     break;
                 case /* optional bool updates_found */ 2:
                     message.updatesFound = reader.bool();
-                    break;
-                case /* uint32 core_sync_schema_revision */ 3:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -15823,9 +15768,6 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         /* optional bool updates_found = 2; */
         if (message.updatesFound !== undefined)
             writer.tag(2, WireType.Varint).bool(message.updatesFound);
-        /* uint32 core_sync_schema_revision = 3; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(3, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

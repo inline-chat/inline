@@ -18,7 +18,6 @@ import { UpdatesModel } from "@in/server/db/models/updates"
 import { chats, dialogs, members, messages, spaces } from "@in/server/db/schema"
 import { handler as readMessages } from "@in/server/methods/readMessages"
 import { and, desc, eq } from "drizzle-orm"
-import { CORE_SYNC_SCHEMA_REVISION } from "@in/server/modules/updates/sync"
 
 const insertServerUpdate = async (params: {
   bucket: UpdateBucket
@@ -189,7 +188,7 @@ describe("getUpdates", () => {
     expect(result.updates).toHaveLength(0)
   })
 
-  test("trusts page cursor when one record is filtered but later updates inflate", async () => {
+  test("accounts for a filtered record before advancing past later updates", async () => {
     const { users } = await testUtils.createSpaceWithMembers("Filtered Cursor", ["filtered-cursor@example.com"])
     const user = users[0]
     if (!user) throw new Error("User creation failed")
@@ -236,25 +235,9 @@ describe("getUpdates", () => {
         reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET,
       },
     ])
-    expect(result.coreSyncSchemaRevision).toBe(CORE_SYNC_SCHEMA_REVISION)
   })
 
-  test("rejects a client with an incompatible lossless sync schema", async () => {
-    const user = await testUtils.createUser("incompatible-sync-schema@example.com")
-
-    expect(
-      getUpdates({
-        bucket: { type: { oneofKind: "user", user: {} } },
-        startSeq: 0n,
-        seqEnd: 0n,
-        totalLimit: 1000,
-        limit: 10,
-        coreSyncSchemaRevision: CORE_SYNC_SCHEMA_REVISION + 1,
-      }, { currentUserId: user.id } as any),
-    ).rejects.toThrow("Incompatible sync schema")
-  })
-
-  test("includes chat and group sidecars for user-bucket group grants", async () => {
+  test("serves group grants with chat and group sidecars", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Group Grant Sidecars", [
       "group-sidecar-owner@example.com",
       "group-sidecar-old@example.com",
@@ -296,17 +279,6 @@ describe("getUpdates", () => {
       { currentUserId: owner.id } as any,
     )
 
-    await expect(getUpdates(
-      {
-        bucket: { type: { oneofKind: "user", user: {} } },
-        startSeq: 0n,
-        seqEnd: 0n,
-        totalLimit: 1000,
-        limit: 10,
-      },
-      { currentUserId: newMember.id } as any,
-    )).rejects.toThrow("Incompatible sync schema")
-
     const result = await getUpdates(
       {
         bucket: { type: { oneofKind: "user", user: {} } },
@@ -314,7 +286,6 @@ describe("getUpdates", () => {
         seqEnd: 0n,
         totalLimit: 1000,
         limit: 10,
-        coreSyncSchemaRevision: CORE_SYNC_SCHEMA_REVISION,
       },
       { currentUserId: newMember.id } as any,
     )

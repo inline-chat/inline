@@ -1,4 +1,4 @@
-import { RpcError as RpcErrorProtocol, RpcError_Code } from "@inline-chat/protocol/core"
+import { RpcError_Code } from "@inline-chat/protocol/core"
 import type { InlineError } from "@in/server/types/errors"
 
 export class RealtimeRpcError extends Error {
@@ -36,14 +36,6 @@ export class RealtimeRpcError extends Error {
   // Convenience Helpers (fresh instance for correct stack traces)
   public static BadRequest() {
     return RealtimeRpcError.create(RpcError_Code.BAD_REQUEST, "Bad request", 400, RealtimeRpcError.BadRequest)
-  }
-  public static SyncSchemaIncompatible(clientRevision: number, serverRevision: number) {
-    return RealtimeRpcError.create(
-      RpcError_Code.BAD_REQUEST,
-      `Incompatible sync schema: client=${clientRevision} server=${serverRevision}`,
-      400,
-      (): RealtimeRpcError => RealtimeRpcError.SyncSchemaIncompatible(clientRevision, serverRevision),
-    )
   }
   public static UnsupportedRpcMethod(method: number): RealtimeRpcError {
     return RealtimeRpcError.create(

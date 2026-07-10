@@ -5425,10 +5425,6 @@ public nonisolated struct GetUpdatesInput: Sendable {
   /// max number of updates to return in this response
   public var limit: Int32 = 0
 
-  /// Client-supported lossless sync schema. Servers must reject pages that
-  /// contain update variants newer than this revision.
-  public var coreSyncSchemaRevision: UInt32 = 0
-
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -5547,9 +5543,6 @@ public nonisolated struct GetUpdatesResult: Sendable {
   /// Explicit accounting for stored lossless records intentionally omitted
   /// from `updates`. Every sequence through `seq` must be delivered or listed.
   public var skippedSequences: [SyncSkippedSequence] = []
-
-  /// Server lossless-sync schema used to encode this page.
-  public var coreSyncSchemaRevision: UInt32 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -5911,9 +5904,6 @@ public nonisolated struct GetUpdatesStateInput: Sendable {
   /// Local date of state
   public var date: Int64 = 0
 
-  /// Client-supported lossless sync schema.
-  public var coreSyncSchemaRevision: UInt32 = 0
-
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -5936,10 +5926,6 @@ public nonisolated struct GetUpdatesStateResult: Sendable {
   public var hasUpdatesFound: Bool {self._updatesFound != nil}
   /// Clears the value of `updatesFound`. Subsequent reads from it will return its default value.
   public mutating func clearUpdatesFound() {self._updatesFound = nil}
-
-  /// Server lossless-sync schema. Stateful clients must reject incompatible
-  /// servers before consuming bucket updates.
-  public var coreSyncSchemaRevision: UInt32 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -18508,7 +18494,7 @@ nonisolated extension UpdateBucketChat: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bucket\0\u{3}start_seq\0\u{3}total_limit\0\u{3}seq_end\0\u{1}limit\0\u{3}core_sync_schema_revision\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bucket\0\u{3}start_seq\0\u{3}total_limit\0\u{3}seq_end\0\u{1}limit\0\u{b}core_sync_schema_revision\0\u{c}\u{6}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18521,7 +18507,6 @@ nonisolated extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 3: try { try decoder.decodeSingularInt32Field(value: &self.totalLimit) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.seqEnd) }()
       case 5: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
-      case 6: try { try decoder.decodeSingularUInt32Field(value: &self.coreSyncSchemaRevision) }()
       default: break
       }
     }
@@ -18547,9 +18532,6 @@ nonisolated extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.limit != 0 {
       try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 5)
     }
-    if self.coreSyncSchemaRevision != 0 {
-      try visitor.visitSingularUInt32Field(value: self.coreSyncSchemaRevision, fieldNumber: 6)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -18559,7 +18541,6 @@ nonisolated extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.totalLimit != rhs.totalLimit {return false}
     if lhs.seqEnd != rhs.seqEnd {return false}
     if lhs.limit != rhs.limit {return false}
-    if lhs.coreSyncSchemaRevision != rhs.coreSyncSchemaRevision {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -18656,7 +18637,7 @@ nonisolated extension SyncSkippedSequence.Reason: SwiftProtobuf._ProtoNameProvid
 
 nonisolated extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0\u{1}seq\0\u{1}date\0\u{1}final\0\u{3}result_type\0\u{1}sidecars\0\u{3}skipped_sequences\0\u{3}core_sync_schema_revision\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0\u{1}seq\0\u{1}date\0\u{1}final\0\u{3}result_type\0\u{1}sidecars\0\u{3}skipped_sequences\0\u{b}core_sync_schema_revision\0\u{c}\u{8}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -18671,7 +18652,6 @@ nonisolated extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._Me
       case 5: try { try decoder.decodeSingularEnumField(value: &self.resultType) }()
       case 6: try { try decoder.decodeSingularMessageField(value: &self._sidecars) }()
       case 7: try { try decoder.decodeRepeatedMessageField(value: &self.skippedSequences) }()
-      case 8: try { try decoder.decodeSingularUInt32Field(value: &self.coreSyncSchemaRevision) }()
       default: break
       }
     }
@@ -18703,9 +18683,6 @@ nonisolated extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._Me
     if !self.skippedSequences.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.skippedSequences, fieldNumber: 7)
     }
-    if self.coreSyncSchemaRevision != 0 {
-      try visitor.visitSingularUInt32Field(value: self.coreSyncSchemaRevision, fieldNumber: 8)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -18717,7 +18694,6 @@ nonisolated extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._Me
     if lhs.resultType != rhs.resultType {return false}
     if lhs._sidecars != rhs._sidecars {return false}
     if lhs.skippedSequences != rhs.skippedSequences {return false}
-    if lhs.coreSyncSchemaRevision != rhs.coreSyncSchemaRevision {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -19307,7 +19283,7 @@ nonisolated extension RemoveSpaceUrlPreviewExclusionResult: SwiftProtobuf.Messag
 
 nonisolated extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesStateInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{2}date\0\u{3}core_sync_schema_revision\0\u{c}\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{2}date\0\u{b}core_sync_schema_revision\0\u{c}\u{1}\u{1}\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19316,7 +19292,6 @@ nonisolated extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
-      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.coreSyncSchemaRevision) }()
       default: break
       }
     }
@@ -19326,15 +19301,11 @@ nonisolated extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf
     if self.date != 0 {
       try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 2)
     }
-    if self.coreSyncSchemaRevision != 0 {
-      try visitor.visitSingularUInt32Field(value: self.coreSyncSchemaRevision, fieldNumber: 3)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetUpdatesStateInput, rhs: GetUpdatesStateInput) -> Bool {
     if lhs.date != rhs.date {return false}
-    if lhs.coreSyncSchemaRevision != rhs.coreSyncSchemaRevision {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -19342,7 +19313,7 @@ nonisolated extension GetUpdatesStateInput: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetUpdatesStateResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}date\0\u{3}updates_found\0\u{3}core_sync_schema_revision\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}date\0\u{3}updates_found\0\u{b}core_sync_schema_revision\0\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19352,7 +19323,6 @@ nonisolated extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobu
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self._updatesFound) }()
-      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.coreSyncSchemaRevision) }()
       default: break
       }
     }
@@ -19369,16 +19339,12 @@ nonisolated extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobu
     try { if let v = self._updatesFound {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
     } }()
-    if self.coreSyncSchemaRevision != 0 {
-      try visitor.visitSingularUInt32Field(value: self.coreSyncSchemaRevision, fieldNumber: 3)
-    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetUpdatesStateResult, rhs: GetUpdatesStateResult) -> Bool {
     if lhs.date != rhs.date {return false}
     if lhs._updatesFound != rhs._updatesFound {return false}
-    if lhs.coreSyncSchemaRevision != rhs.coreSyncSchemaRevision {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
