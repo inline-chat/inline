@@ -7021,7 +7021,7 @@ mod tests {
         ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
         message: proto::ServerProtocolMessage,
     ) {
-        ws.send(WsMessage::Binary(message.encode_to_vec()))
+        ws.send(WsMessage::Binary(message.encode_to_vec().into()))
             .await
             .unwrap();
     }

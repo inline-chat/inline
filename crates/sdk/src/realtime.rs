@@ -540,7 +540,7 @@ impl RealtimeClientBuilder {
             self.connect_timeout,
             self.rpc_timeout
         );
-        let mut request = url.into_client_request()?;
+        let mut request = url.as_str().into_client_request()?;
         request.headers_mut().insert(
             client_info::CLIENT_TYPE_HEADER,
             realtime_header_value("client_type", self.identity.client_type())?,
@@ -819,7 +819,7 @@ impl RealtimeClient {
         message: proto::ClientMessage,
     ) -> Result<(), RealtimeError> {
         let bytes = message.encode_to_vec();
-        self.ws.send(WsMessage::Binary(bytes)).await?;
+        self.ws.send(WsMessage::Binary(bytes.into())).await?;
         Ok(())
     }
 
@@ -2529,7 +2529,7 @@ mod tests {
         ws: &mut WebSocketStream<TcpStream>,
         message: proto::ServerProtocolMessage,
     ) {
-        ws.send(WsMessage::Binary(message.encode_to_vec()))
+        ws.send(WsMessage::Binary(message.encode_to_vec().into()))
             .await
             .unwrap();
     }
