@@ -204,6 +204,7 @@ struct SidebarChatItemView: Equatable, View {
     ))
     .accessibilityElement(children: .combine)
     .accessibilityLabel(accessibilityTitle)
+    .accessibilityValue(accessibilityUnreadValue)
     .accessibilityAddTraits(.isButton)
     .accessibilityAddTraits(selected ? .isSelected : [])
     .accessibilityAction {
@@ -431,6 +432,20 @@ struct SidebarChatItemView: Equatable, View {
       return "\(parentTitle), \(item.title)"
     }
     return item.title
+  }
+
+  private var accessibilityUnreadValue: Text {
+    guard item.unread else { return Text("") }
+    if item.unreadCount == 1 {
+      return Text("1 unread message")
+    }
+    if item.unreadCount > 1 {
+      return Text("\(item.unreadCount) unread messages")
+    }
+    if item.unreadMark {
+      return Text("Marked unread")
+    }
+    return Text("Unread")
   }
 
   private var showsCloseControl: Bool {

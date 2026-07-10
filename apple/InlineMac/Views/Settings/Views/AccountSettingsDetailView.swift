@@ -499,6 +499,7 @@ struct AccountSessionsSettingsDetailView: View {
             AccountSessionRow(
               session: session,
               isRevoking: viewModel.revokingSessionID == session.id,
+              isRevokeDisabled: viewModel.revokingSessionID != nil,
               onRevoke: { sessionToRevoke = session }
             )
           }
@@ -535,9 +536,9 @@ struct AccountSessionsSettingsDetailView: View {
     ) {
       Button("Revoke", role: .destructive) {
         guard let session = sessionToRevoke else { return }
+        sessionToRevoke = nil
         Task {
           await viewModel.revoke(session, realtimeV2: realtimeV2)
-          sessionToRevoke = nil
         }
       }
       Button("Cancel", role: .cancel) {}
@@ -750,6 +751,7 @@ private struct UsernameEditSheet: View {
 private struct AccountSessionRow: View {
   let session: InlineProtocol.AccountSession
   let isRevoking: Bool
+  let isRevokeDisabled: Bool
   let onRevoke: () -> Void
 
   var body: some View {
@@ -792,6 +794,7 @@ private struct AccountSessionRow: View {
         Button("Revoke", role: .destructive) {
           onRevoke()
         }
+        .disabled(isRevokeDisabled)
       }
     }
     .padding(.vertical, 2)

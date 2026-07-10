@@ -291,6 +291,22 @@ private final class BotAvatarSettingsViewModel: ObservableObject {
     )
   }
 
+  func showImporterError(_ error: Error) {
+    if error is CancellationError {
+      return
+    }
+    let cocoaError = error as NSError
+    if cocoaError.domain == NSCocoaErrorDomain, cocoaError.code == NSUserCancelledError {
+      return
+    }
+
+    Log.shared.error("Failed to select bot avatar archive", error: error)
+    errorState = ErrorState(
+      message: "Could not select the bot avatar archive.",
+      suggestion: "Please try selecting a different zip file."
+    )
+  }
+
   private func save(_ bot: InlineProtocol.User) async {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
@@ -377,6 +393,7 @@ struct BotAvatarSettingsSheet: View {
         Button("Done") {
           dismiss()
         }
+        .disabled(viewModel.isSaving)
       }
     }
     .padding(20)
@@ -396,9 +413,10 @@ struct BotAvatarSettingsSheet: View {
             }
           }
         case let .failure(error):
-          Log.shared.error("Failed to select bot avatar archive", error: error)
+          viewModel.showImporterError(error)
       }
     }
+    .interactiveDismissDisabled(viewModel.isSaving)
   }
 
   private var currentAvatarTitle: String {

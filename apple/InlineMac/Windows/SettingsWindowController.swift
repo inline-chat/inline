@@ -51,9 +51,11 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     window.titleVisibility = .visible
     window.titlebarAppearsTransparent = false
     window.toolbarStyle = .unified
-    window.setFrameAutosaveName("SettingsWindow")
     window.minSize = NSSize(width: 780, height: 520)
-    window.center()
+    if !window.setFrameUsingName("SettingsWindow") {
+      window.center()
+    }
+    window.setFrameAutosaveName("SettingsWindow")
     window.delegate = self
 
     // Set up SwiftUI content with dependencies

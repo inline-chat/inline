@@ -54,7 +54,7 @@ private struct AutoDownloadLimitRow: View {
       HStack(spacing: 12) {
         Slider(
           value: sliderBinding,
-          in: 0 ... Double(max(caps.count - 1, 0)),
+          in: 0 ... Double(max(displayCaps.count - 1, 0)),
           step: 1
         ) { editing in
           if editing {
@@ -90,7 +90,7 @@ private struct AutoDownloadLimitRow: View {
   }
 
   private var selectedValue: Int {
-    caps[Int((draftIndex ?? Double(currentIndex)).rounded())]
+    displayCaps[Int(clampedIndex(draftIndex ?? Double(currentIndex)))]
   }
 
   private func commitDraft() {
@@ -100,13 +100,19 @@ private struct AutoDownloadLimitRow: View {
 
   private func nearestIndex(for value: Int) -> Int {
     let current = AutoDownloadSettingsManager.clamped(value)
-    return caps.indices.min { first, second in
-      abs(caps[first] - current) < abs(caps[second] - current)
+    return displayCaps.indices.min { first, second in
+      abs(displayCaps[first] - current) < abs(displayCaps[second] - current)
     } ?? 0
   }
 
   private func clampedIndex(_ index: Double) -> Double {
-    min(max(index.rounded(), 0), Double(max(caps.count - 1, 0)))
+    min(max(index.rounded(), 0), Double(max(displayCaps.count - 1, 0)))
+  }
+
+  private var displayCaps: [Int] {
+    let current = AutoDownloadSettingsManager.clamped(value)
+    guard !caps.contains(current) else { return caps }
+    return (caps + [current]).sorted()
   }
 
   private func label(for value: Int) -> String {

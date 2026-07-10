@@ -112,6 +112,7 @@ struct BotsSettingsDetailView: View {
               isRevealing: viewModel.revealingBots.contains(bot.id),
               isRotating: viewModel.rotatingBots.contains(bot.id),
               isDeleting: viewModel.deletingBots.contains(bot.id),
+              isBusy: viewModel.isBusy(bot.id),
               onReveal: {
                 Task { await viewModel.revealToken(for: bot.id, realtimeV2: realtimeV2) }
               },
@@ -376,12 +377,14 @@ final class BotsSettingsViewModel: ObservableObject {
         throw TransactionExecutionError.invalid
       }
 
-      if response.hasBot {
-        bots.append(response.bot)
-        bots.sort { $0.id < $1.id }
-        if !response.token.isEmpty {
-          revealedTokens[response.bot.id] = response.token
-        }
+      guard response.hasBot else {
+        throw TransactionExecutionError.invalid
+      }
+
+      bots.append(response.bot)
+      bots.sort { $0.id < $1.id }
+      if !response.token.isEmpty {
+        revealedTokens[response.bot.id] = response.token
       }
 
       isCreating = false
@@ -395,9 +398,10 @@ final class BotsSettingsViewModel: ObservableObject {
   }
 
   func revealToken(for botId: Int64, realtimeV2: RealtimeV2) async {
-    guard revealingBots.contains(botId) == false else { return }
+    guard !isBusy(botId) else { return }
 
     revealingBots.insert(botId)
+    defer { revealingBots.remove(botId) }
     revealError = nil
     rotateError = nil
     deleteError = nil
@@ -407,20 +411,22 @@ final class BotsSettingsViewModel: ObservableObject {
       guard case let .revealBotToken(response) = result else {
         throw TransactionExecutionError.invalid
       }
+      guard !response.token.isEmpty else {
+        throw TransactionExecutionError.invalid
+      }
 
       revealedTokens[botId] = response.token
     } catch {
       log.error("Failed to reveal bot token", error: error)
       revealError = "Failed to reveal token."
     }
-
-    revealingBots.remove(botId)
   }
 
   func rotateToken(for botId: Int64, realtimeV2: RealtimeV2) async {
-    guard rotatingBots.contains(botId) == false else { return }
+    guard !isBusy(botId) else { return }
 
     rotatingBots.insert(botId)
+    defer { rotatingBots.remove(botId) }
     rotateError = nil
     revealError = nil
     deleteError = nil
@@ -430,18 +436,20 @@ final class BotsSettingsViewModel: ObservableObject {
       guard case let .rotateBotToken(response) = result else {
         throw TransactionExecutionError.invalid
       }
+      guard !response.token.isEmpty else {
+        revealedTokens[botId] = nil
+        throw TransactionExecutionError.invalid
+      }
 
       revealedTokens[botId] = response.token
     } catch {
       log.error("Failed to rotate bot token", error: error)
       rotateError = "Failed to rotate token."
     }
-
-    rotatingBots.remove(botId)
   }
 
   func deleteBot(for botId: Int64, realtimeV2: RealtimeV2) async {
-    guard deletingBots.contains(botId) == false else { return }
+    guard !isBusy(botId) else { return }
 
     deletingBots.insert(botId)
     deleteError = nil
@@ -469,6 +477,12 @@ final class BotsSettingsViewModel: ObservableObject {
     revealedTokens[botId] = nil
   }
 
+  func isBusy(_ botId: Int64) -> Bool {
+    revealingBots.contains(botId)
+      || rotatingBots.contains(botId)
+      || deletingBots.contains(botId)
+  }
+
   func upsertBot(_ bot: InlineProtocol.User) {
     if let idx = bots.firstIndex(where: { $0.id == bot.id }) {
       bots[idx] = bot
@@ -485,6 +499,7 @@ private struct BotRow: View {
   let isRevealing: Bool
   let isRotating: Bool
   let isDeleting: Bool
+  let isBusy: Bool
   let onReveal: () -> Void
   let onHide: () -> Void
   let onRotateRequested: () -> Void
@@ -573,6 +588,7 @@ private struct BotRow: View {
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
+    .disabled(isBusy)
     .accessibilityLabel("Actions for \(displayName)")
   }
 
