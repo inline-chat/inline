@@ -2,6 +2,12 @@ import Foundation
 import InlineProtocol
 import Logger
 
+private let coreSyncSchemaRevision: UInt32 = 1
+
+private enum SyncCompatibilityError: Error {
+  case incompatibleSchema(server: UInt32, client: UInt32)
+}
+
 public struct SyncConfig: Sendable {
   public var lastSyncSafetyGapSeconds: Int64
   /// Caps concurrent `getUpdates` RPCs across buckets to avoid thundering herds on reconnect.
@@ -614,12 +620,19 @@ actor Sync {
         // events in response to this call (or as part of the result).
         let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
           $0.date = state.lastSyncDate
+          $0.coreSyncSchemaRevision = coreSyncSchemaRevision
         }), timeout: Self.getUpdatesStateTimeout)
         span.end(
           "attempt=\(attempt) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
         )
         log.trace("sent get updates state request with date: \(state.lastSyncDate)")
         if case let .getUpdatesState(payload) = result {
+          guard payload.coreSyncSchemaRevision == coreSyncSchemaRevision else {
+            throw SyncCompatibilityError.incompatibleSchema(
+              server: payload.coreSyncSchemaRevision,
+              client: coreSyncSchemaRevision
+            )
+          }
           log.trace(
             "received get updates state date: \(payload.date), updatesFound=\(payload.hasUpdatesFound ? String(payload.updatesFound) : "unknown")"
           )
@@ -1457,6 +1470,7 @@ actor BucketActor {
             $0.totalLimit = Int32(Self.maxTotalUpdates)
           }
           $0.limit = Self.updatesPageLimit
+          $0.coreSyncSchemaRevision = coreSyncSchemaRevision
           if let requestSeqEnd {
             $0.seqEnd = requestSeqEnd
           }
@@ -1480,35 +1494,38 @@ actor BucketActor {
           return false
         }
 
+        guard payload.coreSyncSchemaRevision == coreSyncSchemaRevision else {
+          throw SyncCompatibilityError.incompatibleSchema(
+            server: payload.coreSyncSchemaRevision,
+            client: coreSyncSchemaRevision
+          )
+        }
+
         let totalCount = payload.updates.count
+
+        if payload.resultType != .tooLong {
+          guard let requiresSnapshotRepair = validatePageEnvelope(payload, startSeq: currentSeq) else {
+            resultLabel = "invalid_page_envelope"
+            return false
+          }
+          if requiresSnapshotRepair {
+            guard await repairChatSnapshotIfNeeded(
+              targetSeq: payload.seq,
+              targetDate: payload.date,
+              reason: "server_classified_gap",
+              advanceCursor: true
+            ) else {
+              resultLabel = "snapshot_repair_required"
+              return false
+            }
+            resultLabel = "repaired_server_classified_gap"
+            return true
+          }
+        }
 
         // Defensive guard: if the server reports non-final but does not advance seq,
         // we'd spin this loop forever and keep the sync actor busy.
         if !payload.final, payload.seq == currentSeq {
-          let pointerSeq = max(hardEndSeq ?? 0, Int64(payload.seq))
-          if totalCount == 0, payload.resultType == .empty, pendingUpdates.isEmpty {
-            PerformanceTrace.breadcrumb(
-              "sync bucket fetch trusted empty pointer",
-              category: "sync.catchup",
-              level: .warning,
-              data: [
-                "bucket": key.traceKind,
-                "seq": payload.seq,
-                "target_seq": pointerSeq,
-              ]
-            )
-            if await trustServerPointer(
-              targetSeq: pointerSeq,
-              targetDate: payload.date,
-              reason: "empty_non_progress"
-            ) {
-              resultLabel = "trusted_empty_pointer"
-              return true
-            }
-            resultLabel = "empty_pointer_save_failed"
-            return false
-          }
-
           log.error(
             "non-progress getUpdates response for bucket \(key) (seq=\(payload.seq), total=\(totalCount), result=\(payload.resultType)); aborting fetch loop"
           )
@@ -1523,15 +1540,6 @@ actor BucketActor {
               "updates": totalCount,
             ]
           )
-          if await repairChatSnapshotIfNeeded(
-            targetSeq: pointerSeq,
-            targetDate: payload.date,
-            reason: "non_progress",
-            advanceCursor: true
-          ) {
-            resultLabel = "repaired_non_progress"
-            return true
-          }
           return false
         }
 
@@ -1557,7 +1565,7 @@ actor BucketActor {
           )
           await sync.recordBucketFetchTooLong()
           if isColdStart, shouldRepairColdChatTooLong {
-            let repairedSeq = hardEndSeq ?? Int64(payload.seq)
+            let repairedSeq = Int64(payload.seq)
             if await repairChatSnapshotIfNeeded(
               targetSeq: repairedSeq,
               targetDate: payload.date,
@@ -1568,17 +1576,6 @@ actor BucketActor {
               return true
             }
           }
-          if isColdStart, shouldFastForwardColdTooLong {
-            // On cold start, prefer fast-forwarding to a known upper bound (e.g. updateSeq from
-            // chatHasNewUpdates). This prevents huge catch-up costs on first-run and avoids getting
-            // stuck behind if the server only returns a slice boundary for TOO_LONG.
-            finalSeq = hardEndSeq ?? payload.seq
-            finalDate = payload.date
-            isFinal = true // Stop fetching
-            clearPendingCatchupBatch() // Discard pending
-            break
-          }
-
           // Slice within max total updates.
           // Note: keep `hardEndSeq` intact so we can continue slicing until we reach it.
           //
@@ -1649,7 +1646,7 @@ actor BucketActor {
           .max() ?? currentSeq
         if Int64(payload.seq) > maxDeliveredSeq {
           log.warning(
-            "trusting getUpdates pointer ahead of delivered updates for bucket \(key) (deliveredSeq=\(maxDeliveredSeq), pointerSeq=\(payload.seq), total=\(totalCount), delivered=\(filteredUpdates.count))"
+            "advancing getUpdates pointer with explicit sequence accounting for bucket \(key) (deliveredSeq=\(maxDeliveredSeq), pointerSeq=\(payload.seq), total=\(totalCount), delivered=\(filteredUpdates.count), skipped=\(payload.skippedSequences.count))"
           )
         }
 
@@ -1941,15 +1938,6 @@ actor BucketActor {
     retryTask = nil
   }
 
-  private var shouldFastForwardColdTooLong: Bool {
-    switch key {
-      case .chat:
-        false
-      case .space, .user:
-        true
-    }
-  }
-
   private var shouldRepairColdChatTooLong: Bool {
     switch key {
       case .chat:
@@ -1998,36 +1986,58 @@ actor BucketActor {
     return true
   }
 
-  private func trustServerPointer(targetSeq: Int64, targetDate: Int64, reason: String) async -> Bool {
-    guard let sync else { return false }
-    guard targetSeq >= seq else { return false }
-
-    let bufferedMaxDate = await applyBufferedRealtimeUpdates(upTo: targetSeq, reason: reason)
-    let nextDate = targetDate > 0 ? max(date, targetDate) : date
-    let committedDate = max(nextDate, bufferedMaxDate)
-    guard targetSeq > seq || committedDate > date else {
-      log.warning("trusting server pointer for bucket \(key) without local cursor change (seq=\(seq), reason=\(reason))")
-      return true
+  /// Validates that a lossless page accounts for every sequence it advances.
+  /// Returns whether the server requires an authoritative snapshot repair.
+  private func validatePageEnvelope(
+    _ payload: InlineProtocol.GetUpdatesResult,
+    startSeq: Int64
+  ) -> Bool? {
+    guard payload.resultType == .slice || payload.resultType == .empty else {
+      log.error("invalid getUpdates result type \(payload.resultType) for bucket \(key)")
+      return nil
+    }
+    guard payload.seq >= startSeq else {
+      log.error("getUpdates page moved backwards for bucket \(key): start=\(startSeq), end=\(payload.seq)")
+      return nil
     }
 
-    let saved = await sync.saveBucketState(for: key, seq: targetSeq, date: committedDate)
-    guard saved else {
-      log.error("failed to save trusted server pointer for \(key): seq=\(targetSeq), date=\(committedDate)")
-      return false
+    var accounted = Set<Int64>()
+    for update in payload.updates {
+      guard update.hasSeq else {
+        log.error("getUpdates page included an unsequenced update for bucket \(key)")
+        return nil
+      }
+      let updateSeq = Int64(update.seq)
+      guard updateSeq > startSeq, updateSeq <= payload.seq, accounted.insert(updateSeq).inserted else {
+        log.error("getUpdates page included an invalid or duplicate sequence \(updateSeq) for bucket \(key)")
+        return nil
+      }
     }
 
-    log.warning("trusting server pointer for bucket \(key): seq \(seq) -> \(targetSeq) (reason=\(reason))")
-    seq = targetSeq
-    date = committedDate
-    clearPendingCatchupBatch()
-    bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > targetSeq }
-    if let fetchSeqEnd, targetSeq >= fetchSeqEnd {
-      self.fetchSeqEnd = nil
+    var requiresSnapshotRepair = false
+    for skipped in payload.skippedSequences {
+      guard skipped.seq > startSeq, skipped.seq <= payload.seq, accounted.insert(skipped.seq).inserted else {
+        log.error("getUpdates page included an invalid or duplicate skipped sequence \(skipped.seq) for bucket \(key)")
+        return nil
+      }
+      switch skipped.reason {
+        case .irrelevantToBucket:
+          break
+        case .snapshotRepairRequired:
+          requiresSnapshotRepair = true
+        case .unspecified, .UNRECOGNIZED:
+          log.error("getUpdates page included an unknown skipped-sequence reason for bucket \(key)")
+          return nil
+      }
     }
-    if committedDate > 0 {
-      await sync.updateLastSyncDate(maxAppliedDate: committedDate, source: "pointer:\(key)")
+
+    guard Int64(accounted.count) == payload.seq - startSeq else {
+      log.error(
+        "getUpdates page did not account for every sequence for bucket \(key): start=\(startSeq), end=\(payload.seq), accounted=\(accounted.count)"
+      )
+      return nil
     }
-    return true
+    return requiresSnapshotRepair
   }
 
   @discardableResult

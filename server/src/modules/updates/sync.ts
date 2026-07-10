@@ -6,10 +6,12 @@ import type {
   Space as ProtocolSpace,
   Update,
   UpdateSidecars,
+  SyncSkippedSequence,
   User,
   UserGroup as ProtocolUserGroup,
   Dialog,
 } from "@inline-chat/protocol/core"
+import { SyncSkippedSequence_Reason } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -44,6 +46,15 @@ export const Sync = {
   buildUserSidecarsForUpdates: buildUserSidecarsForUpdates,
   inflateSpaceUpdates: inflateSpaceUpdates,
   inflateUserUpdates: inflateUserUpdates,
+  inflateSpaceUpdatesPage: inflateSpaceUpdatesPage,
+  inflateUserUpdatesPage: inflateUserUpdatesPage,
+}
+
+export const CORE_SYNC_SCHEMA_REVISION = 1
+
+export type InflatedUpdatesPage = {
+  updates: Update[]
+  skippedSequences: SyncSkippedSequence[]
 }
 
 type GetUpdatesInput = {
@@ -115,7 +126,7 @@ const getEntityId = (bucket: UpdateBoxInput): number => {
     case UpdateBucket.User:
       return bucket.userId
     default:
-      return -1
+      return assertNever(bucket)
   }
 }
 
@@ -544,10 +555,32 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         })
         break
 
-      default:
-        log.warn("Unhandled chat update", { type: serverUpdate.update.oneofKind })
+      case "spaceRemoveMember":
+      case "spaceMemberUpdate":
+      case "spaceMemberAdd":
+      case "spaceClearHistory":
+      case "spaceSettings":
+      case "userSpaceMemberDelete":
+      case "userChatParticipantDelete":
+      case "userChatParticipantAdd":
+      case "userDialogArchived":
+      case "userJoinSpace":
+      case "userReadMaxId":
+      case "userMarkAsUnread":
+      case "userDialogNotificationSettings":
+      case "userChatOpen":
+      case "userMessageActionInvoked":
+      case "userMessageActionAnswered":
+      case "userDialogFollowMode":
+      case "updatedUser":
+      case "userChatParticipantGroupAdd":
+      case "userChatParticipantGroupDelete":
         inflatedUpdates.push(chatSkipPts(update, chatId))
         break
+      case undefined:
+        throw new Error(`Chat sync update ${update.seq} has no payload`)
+      default:
+        assertNever(serverUpdate.update)
     }
   }
 
@@ -564,6 +597,10 @@ const chatSkipPts = (update: DecryptedUpdate, chatId: number): Update => ({
     },
   },
 })
+
+const assertNever = (value: never): never => {
+  throw new Error(`Unhandled lossless sync update: ${JSON.stringify(value)}`)
+}
 
 const emptySidecars = (): UpdateSidecars => ({
   users: [],
@@ -994,21 +1031,44 @@ function sortChatsForSidecars(rows: (typeof chats.$inferSelect)[]): (typeof chat
 }
 
 function inflateSpaceUpdates(dbUpdates: DbUpdate[], options?: { sanitizeUsers?: boolean }): Update[] {
-  return dbUpdates
-    .map((dbUpdate) => {
-      const decrypted = UpdatesModel.decrypt(dbUpdate)
-      return convertSpaceUpdate(decrypted, options)
-    })
-    .filter((update): update is Update => Boolean(update))
+  return inflateSpaceUpdatesPage(dbUpdates, options).updates
 }
 
 function inflateUserUpdates(dbUpdates: DbUpdate[]): Update[] {
-  return dbUpdates
-    .map((dbUpdate) => {
-      const decrypted = UpdatesModel.decrypt(dbUpdate)
-      return convertUserUpdate(decrypted, dbUpdate.entityId)
-    })
-    .filter((update): update is Update => Boolean(update))
+  return inflateUserUpdatesPage(dbUpdates).updates
+}
+
+function inflateSpaceUpdatesPage(
+  dbUpdates: DbUpdate[],
+  options?: { sanitizeUsers?: boolean },
+): InflatedUpdatesPage {
+  return inflateUpdatesPage(dbUpdates, (dbUpdate) => convertSpaceUpdate(UpdatesModel.decrypt(dbUpdate), options))
+}
+
+function inflateUserUpdatesPage(dbUpdates: DbUpdate[]): InflatedUpdatesPage {
+  return inflateUpdatesPage(dbUpdates, (dbUpdate) =>
+    convertUserUpdate(UpdatesModel.decrypt(dbUpdate), dbUpdate.entityId),
+  )
+}
+
+function inflateUpdatesPage(
+  dbUpdates: DbUpdate[],
+  convert: (dbUpdate: DbUpdate) => Update | null,
+): InflatedUpdatesPage {
+  const updates: Update[] = []
+  const skippedSequences: SyncSkippedSequence[] = []
+  for (const dbUpdate of dbUpdates) {
+    const update = convert(dbUpdate)
+    if (update) {
+      updates.push(update)
+    } else {
+      skippedSequences.push({
+        seq: BigInt(dbUpdate.seq),
+        reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET,
+      })
+    }
+  }
+  return { updates, skippedSequences }
 }
 
 function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?: boolean }): Update | null {
@@ -1016,85 +1076,113 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
   const date = encodeDateStrict(update.date)
   const payload = update.payload.update
 
-  if (payload.oneofKind === "spaceRemoveMember") {
-    return {
-      seq,
-      date,
-      update: {
-        oneofKind: "spaceMemberDelete",
-        spaceMemberDelete: {
-          spaceId: payload.spaceRemoveMember.spaceId,
-          userId: payload.spaceRemoveMember.userId,
-        },
-      },
-    }
-  }
-
-  if (payload.oneofKind === "spaceMemberUpdate") {
-    return {
-      seq,
-      date,
-      update: {
-        oneofKind: "spaceMemberUpdate",
-        spaceMemberUpdate: {
-          member: payload.spaceMemberUpdate.member,
-        },
-      },
-    }
-  }
-
-  if (payload.oneofKind === "spaceMemberAdd") {
-    const user = options?.sanitizeUsers ? sanitizeUser(payload.spaceMemberAdd.user) : payload.spaceMemberAdd.user
-    return {
-      seq,
-      date,
-      update: {
-        oneofKind: "spaceMemberAdd",
-        spaceMemberAdd: {
-          member: payload.spaceMemberAdd.member,
-          user,
-        },
-      },
-    }
-  }
-
-  if (payload.oneofKind === "spaceClearHistory") {
-    return {
-      seq,
-      date,
-      update: {
-        oneofKind: "clearChatHistory",
-        clearChatHistory: {
-          target: {
-            oneofKind: "spaceId",
-            spaceId: payload.spaceClearHistory.spaceId,
+  switch (payload.oneofKind) {
+    case "spaceRemoveMember":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "spaceMemberDelete",
+          spaceMemberDelete: {
+            spaceId: payload.spaceRemoveMember.spaceId,
+            userId: payload.spaceRemoveMember.userId,
           },
-          beforeDate: payload.spaceClearHistory.beforeDate,
-          deleteReplyThreads: payload.spaceClearHistory.deleteReplyThreads,
-          deletedChatIds: payload.spaceClearHistory.deletedChatIds,
-          orphanedChatIds: payload.spaceClearHistory.orphanedChatIds,
-          detachedChatIds: payload.spaceClearHistory.detachedChatIds,
         },
-      },
-    }
-  }
-
-  if (payload.oneofKind === "spaceSettings") {
-    return {
-      seq,
-      date,
-      update: {
-        oneofKind: "spaceSettings",
-        spaceSettings: {
-          spaceId: payload.spaceSettings.settings?.spaceId ?? BigInt(update.entityId),
-          settings: payload.spaceSettings.settings,
+      }
+    case "spaceMemberUpdate":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "spaceMemberUpdate",
+          spaceMemberUpdate: {
+            member: payload.spaceMemberUpdate.member,
+          },
         },
-      },
+      }
+    case "spaceMemberAdd": {
+      const user = options?.sanitizeUsers
+        ? sanitizeUser(payload.spaceMemberAdd.user)
+        : payload.spaceMemberAdd.user
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "spaceMemberAdd",
+          spaceMemberAdd: {
+            member: payload.spaceMemberAdd.member,
+            user,
+          },
+        },
+      }
     }
+    case "spaceClearHistory":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "clearChatHistory",
+          clearChatHistory: {
+            target: {
+              oneofKind: "spaceId",
+              spaceId: payload.spaceClearHistory.spaceId,
+            },
+            beforeDate: payload.spaceClearHistory.beforeDate,
+            deleteReplyThreads: payload.spaceClearHistory.deleteReplyThreads,
+            deletedChatIds: payload.spaceClearHistory.deletedChatIds,
+            orphanedChatIds: payload.spaceClearHistory.orphanedChatIds,
+            detachedChatIds: payload.spaceClearHistory.detachedChatIds,
+          },
+        },
+      }
+    case "spaceSettings":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "spaceSettings",
+          spaceSettings: {
+            spaceId: payload.spaceSettings.settings?.spaceId ?? BigInt(update.entityId),
+            settings: payload.spaceSettings.settings,
+          },
+        },
+      }
+    case "newMessage":
+    case "editMessage":
+    case "deleteMessages":
+    case "deleteChat":
+    case "participantDelete":
+    case "participantAdd":
+    case "newChat":
+    case "chatVisibility":
+    case "chatInfo":
+    case "pinnedMessages":
+    case "chatMoved":
+    case "userSpaceMemberDelete":
+    case "userChatParticipantDelete":
+    case "userChatParticipantAdd":
+    case "userDialogArchived":
+    case "userJoinSpace":
+    case "userReadMaxId":
+    case "userMarkAsUnread":
+    case "userDialogNotificationSettings":
+    case "userChatOpen":
+    case "userMessageActionInvoked":
+    case "userMessageActionAnswered":
+    case "clearChatHistory":
+    case "messageAttachment":
+    case "userDialogFollowMode":
+    case "updatedUser":
+    case "participantGroupAdd":
+    case "participantGroupDelete":
+    case "userChatParticipantGroupAdd":
+    case "userChatParticipantGroupDelete":
+      return null
+    case undefined:
+      throw new Error(`Space sync update ${update.seq} has no payload`)
+    default:
+      return assertNever(payload)
   }
-
-  log.warn("Unhandled space update", { type: payload.oneofKind })
-  return null
 }
 
 function sanitizeUser(user: User | undefined): User | undefined {
@@ -1319,8 +1407,30 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         },
       }
 
-    default:
-      log.warn("Unhandled user update", { type: payload.oneofKind })
+    case "newMessage":
+    case "editMessage":
+    case "deleteMessages":
+    case "deleteChat":
+    case "participantDelete":
+    case "participantAdd":
+    case "newChat":
+    case "chatVisibility":
+    case "chatInfo":
+    case "pinnedMessages":
+    case "chatMoved":
+    case "spaceRemoveMember":
+    case "spaceMemberUpdate":
+    case "spaceMemberAdd":
+    case "spaceClearHistory":
+    case "spaceSettings":
+    case "clearChatHistory":
+    case "messageAttachment":
+    case "participantGroupAdd":
+    case "participantGroupDelete":
       return null
+    case undefined:
+      throw new Error(`User sync update ${decrypted.seq} has no payload`)
+    default:
+      return assertNever(payload)
   }
 }

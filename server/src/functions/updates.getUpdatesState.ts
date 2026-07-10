@@ -9,16 +9,24 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
+import { CORE_SYNC_SCHEMA_REVISION } from "@in/server/modules/updates/sync"
 
 const log = new Log("updates.getUpdatesState")
 const INITIAL_STATE_LOOKBACK_MS = 5 * 24 * 60 * 60 * 1000
 
+type CompatibleGetUpdatesStateInput = Omit<GetUpdatesStateInput, "coreSyncSchemaRevision"> &
+  Partial<Pick<GetUpdatesStateInput, "coreSyncSchemaRevision">>
+
 export const getUpdatesState = async (
-  input: GetUpdatesStateInput,
+  input: CompatibleGetUpdatesStateInput,
   context: FunctionContext,
 ): Promise<GetUpdatesStateResult> => {
   const startedAt = performance.now()
   const nowEncoded = encodeDateStrict(new Date())
+  const clientSchemaRevision = input.coreSyncSchemaRevision ?? 0
+  if (clientSchemaRevision !== 0 && clientSchemaRevision !== CORE_SYNC_SCHEMA_REVISION) {
+    throw RealtimeRpcError.SyncSchemaIncompatible(clientSchemaRevision, CORE_SYNC_SCHEMA_REVISION)
+  }
 
   // If client sends 0 (uninitialized), scan a bounded recent window instead of
   // returning "now". Unknown local state should trigger repair hints, but not an
@@ -73,6 +81,7 @@ export const getUpdatesState = async (
     return {
       date: nowEncoded > input.date ? nowEncoded : input.date,
       updatesFound: false,
+      coreSyncSchemaRevision: CORE_SYNC_SCHEMA_REVISION,
     }
   }
   let latestUpdateDate = new Date(latestUpdateTs)
@@ -137,6 +146,7 @@ export const getUpdatesState = async (
   return {
     date: latestUpdateDateEncoded,
     updatesFound: true,
+    coreSyncSchemaRevision: CORE_SYNC_SCHEMA_REVISION,
   }
 }
 

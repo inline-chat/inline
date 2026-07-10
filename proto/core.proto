@@ -1192,6 +1192,10 @@ message GetUpdatesInput {
 
   // max number of updates to return in this response
   int32 limit = 5;
+
+  // Client-supported lossless sync schema. Servers must reject pages that
+  // contain update variants newer than this revision.
+  uint32 core_sync_schema_revision = 6;
 }
 
 message UpdateSidecars {
@@ -1200,6 +1204,18 @@ message UpdateSidecars {
   repeated Dialog dialogs = 3;
   repeated Space spaces = 4;
   repeated UserGroup user_groups = 5;
+}
+
+message SyncSkippedSequence {
+  int64 seq = 1;
+
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    IRRELEVANT_TO_BUCKET = 1;
+    SNAPSHOT_REPAIR_REQUIRED = 2;
+  }
+
+  Reason reason = 2;
 }
 
 message GetUpdatesResult {
@@ -1227,6 +1243,13 @@ message GetUpdatesResult {
 
   // Entities required to apply this update slice.
   UpdateSidecars sidecars = 6;
+
+  // Explicit accounting for stored lossless records intentionally omitted
+  // from `updates`. Every sequence through `seq` must be delivered or listed.
+  repeated SyncSkippedSequence skipped_sequences = 7;
+
+  // Server lossless-sync schema used to encode this page.
+  uint32 core_sync_schema_revision = 8;
 }
 
 // Remove member from space
@@ -1320,6 +1343,9 @@ message GetUpdatesStateInput {
 
   // Local date of state
   int64 date = 2;
+
+  // Client-supported lossless sync schema.
+  uint32 core_sync_schema_revision = 3;
 }
 
 message GetUpdatesStateResult {
@@ -1328,6 +1354,10 @@ message GetUpdatesStateResult {
 
   // Set by newer servers to tell clients whether discovery found any bucket work.
   optional bool updates_found = 2;
+
+  // Server lossless-sync schema. Stateful clients must reject incompatible
+  // servers before consuming bucket updates.
+  uint32 core_sync_schema_revision = 3;
 }
 
 message GetChatInput {

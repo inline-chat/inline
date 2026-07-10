@@ -5,6 +5,7 @@ import { setupTestLifecycle, testUtils } from "../setup"
 import { db } from "@in/server/db"
 import { chats, members, spaces } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
+import { CORE_SYNC_SCHEMA_REVISION } from "@in/server/modules/updates/sync"
 
 describe("getUpdatesState", () => {
   setupTestLifecycle()
@@ -33,6 +34,18 @@ describe("getUpdatesState", () => {
 
     expect(result.date).toBe(encodeDateStrict(chatUpdateDate))
     expect(result.updatesFound).toBe(true)
+    expect(result.coreSyncSchemaRevision).toBe(CORE_SYNC_SCHEMA_REVISION)
+  })
+
+  test("rejects a client with an incompatible lossless sync schema", async () => {
+    const user = await testUtils.createUser("updates-state-incompatible-schema@example.com")
+
+    expect(
+      getUpdatesState(
+        { date: 0n, coreSyncSchemaRevision: CORE_SYNC_SCHEMA_REVISION + 1 },
+        testUtils.functionContext({ userId: user.id }),
+      ),
+    ).rejects.toThrow("Incompatible sync schema")
   })
 
   test("advances date when there are no updates", async () => {

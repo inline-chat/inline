@@ -71,7 +71,7 @@ function printUsage() {
 function parseArgs(args: string[]): Record<string, string | boolean> {
   const parsed: Record<string, string | boolean> = {}
   for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i]
+    const arg = args[i]!
     if (!arg.startsWith("--")) {
       throw new Error(`Unexpected argument: ${arg}`)
     }

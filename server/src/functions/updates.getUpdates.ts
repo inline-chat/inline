@@ -5,7 +5,7 @@ import type { UpdateBoxInput } from "@in/server/db/models/updates"
 import type { DbChat } from "@in/server/db/schema"
 import { UpdateBucket as DbUpdateBucket } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { Sync } from "@in/server/modules/updates/sync"
+import { CORE_SYNC_SCHEMA_REVISION, Sync } from "@in/server/modules/updates/sync"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -16,6 +16,9 @@ import { Log } from "@in/server/utils/log"
 
 const MAX_TOTAL_LIMIT = 1000
 const log = new Log("updates.getUpdates")
+
+type CompatibleGetUpdatesInput = Omit<GetUpdatesInput, "coreSyncSchemaRevision"> &
+  Partial<Pick<GetUpdatesInput, "coreSyncSchemaRevision">>
 
 type BucketDescriptor =
   | {
@@ -35,11 +38,16 @@ type BucketDescriptor =
       box: UpdateBoxInput
     }
 
-export const getUpdates = async (input: GetUpdatesInput, context: FunctionContext): Promise<GetUpdatesResult> => {
+export const getUpdates = async (input: CompatibleGetUpdatesInput, context: FunctionContext): Promise<GetUpdatesResult> => {
   const startedAt = performance.now()
   const resolveStartedAt = performance.now()
   const descriptor = await resolveBucket(input.bucket, context)
   const resolveMs = elapsedMs(resolveStartedAt)
+
+  const clientSchemaRevision = input.coreSyncSchemaRevision ?? 0
+  if (clientSchemaRevision !== 0 && clientSchemaRevision !== CORE_SYNC_SCHEMA_REVISION) {
+    throw RealtimeRpcError.SyncSchemaIncompatible(clientSchemaRevision, CORE_SYNC_SCHEMA_REVISION)
+  }
 
   const seqStartBigInt = input.startSeq ?? 0n
   if (seqStartBigInt < 0n) {
@@ -119,10 +127,13 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
       date: encodeOptionalDate(latestDate),
       final: false,
       resultType: GetUpdatesResult_ResultType.TOO_LONG,
+      skippedSequences: [],
+      coreSyncSchemaRevision: CORE_SYNC_SCHEMA_REVISION,
     }
   }
 
   let inflatedUpdates: GetUpdatesResult["updates"] = []
+  let skippedSequences: GetUpdatesResult["skippedSequences"] = []
   const inflateStartedAt = performance.now()
 
   switch (descriptor.scope) {
@@ -138,33 +149,26 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     }
 
     case "space": {
-      inflatedUpdates = Sync.inflateSpaceUpdates(dbUpdates, { sanitizeUsers: descriptor.sanitizeUsers })
+      const page = Sync.inflateSpaceUpdatesPage(dbUpdates, { sanitizeUsers: descriptor.sanitizeUsers })
+      inflatedUpdates = page.updates
+      skippedSequences = page.skippedSequences
       break
     }
 
     case "user": {
-      inflatedUpdates = Sync.inflateUserUpdates(dbUpdates)
+      const page = Sync.inflateUserUpdatesPage(dbUpdates)
+      inflatedUpdates = page.updates
+      skippedSequences = page.skippedSequences
       break
     }
   }
   const inflateMs = elapsedMs(inflateStartedAt)
 
-  // The server is authoritative for the bucket cursor. Deliver every update we
-  // can inflate for this page, but advance the response cursor to the page
-  // boundary even if some records were filtered or could not be represented.
   const updates = inflatedUpdates
-  const filteredCount = dbUpdates.length - updates.length
-  if (filteredCount > 0) {
-    log.warn("getUpdates trusting page cursor after filtering updates", {
-      scope: descriptor.scope,
-      filtered: filteredCount,
-      dbUpdates: dbUpdates.length,
-      delivered: updates.length,
-      startSeq: seqStart,
-      pageSeq,
-      latestSeq,
-    })
+  if (clientSchemaRevision === 0 && updates.some(requiresCoreSyncSchemaRevision)) {
+    throw RealtimeRpcError.SyncSchemaIncompatible(clientSchemaRevision, CORE_SYNC_SCHEMA_REVISION)
   }
+  assertPageSequenceAccounting(dbUpdates, updates, skippedSequences)
   const final = latestSeq <= pageSeq
   const sidecarsStartedAt = performance.now()
   const sidecars =
@@ -206,6 +210,97 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     final,
     resultType,
     sidecars: updates.length > 0 && hasSidecars(sidecars) ? sidecars : undefined,
+    skippedSequences,
+    coreSyncSchemaRevision: CORE_SYNC_SCHEMA_REVISION,
+  }
+}
+
+const requiresCoreSyncSchemaRevision = (update: GetUpdatesResult["updates"][number]): boolean => {
+  switch (update.update.oneofKind) {
+    case "participantGroupAdd":
+    case "participantGroupDelete":
+    case "spaceSettings":
+      return true
+    case "newMessage":
+    case "editMessage":
+    case "updateMessageId":
+    case "deleteMessages":
+    case "updateComposeAction":
+    case "updateUserStatus":
+    case "messageAttachment":
+    case "updateReaction":
+    case "deleteReaction":
+    case "participantAdd":
+    case "participantDelete":
+    case "newChat":
+    case "deleteChat":
+    case "spaceMemberAdd":
+    case "spaceMemberDelete":
+    case "joinSpace":
+    case "updateReadMaxId":
+    case "updateUserSettings":
+    case "newMessageNotification":
+    case "markAsUnread":
+    case "chatSkipPts":
+    case "chatHasNewUpdates":
+    case "spaceHasNewUpdates":
+    case "spaceMemberUpdate":
+    case "chatVisibility":
+    case "dialogArchived":
+    case "chatInfo":
+    case "pinnedMessages":
+    case "chatMoved":
+    case "dialogNotificationSettings":
+    case "chatOpen":
+    case "messageActionInvoked":
+    case "messageActionAnswered":
+    case "clearChatHistory":
+    case "botPresence":
+    case "dialogFollowMode":
+    case "updatedUser":
+    case "botChatSettingsRequested":
+    case "botChatSettingsResolved":
+    case "botChatSettingsItemInvoked":
+    case "botChatSettingsItemAnswered":
+      return false
+    case undefined:
+      throw new Error("Inflated lossless sync update has no payload")
+    default:
+      return assertNever(update.update)
+  }
+}
+
+const assertNever = (value: never): never => {
+  throw new Error(`Unhandled lossless sync update: ${JSON.stringify(value)}`)
+}
+
+const assertPageSequenceAccounting = (
+  dbUpdates: Awaited<ReturnType<typeof Sync.getUpdates>>["updates"],
+  updates: GetUpdatesResult["updates"],
+  skippedSequences: GetUpdatesResult["skippedSequences"],
+): void => {
+  const accounted = new Set<number>()
+  for (const update of updates) {
+    const seq = Number(update.seq ?? 0)
+    if (!Number.isSafeInteger(seq) || seq <= 0 || accounted.has(seq)) {
+      throw new Error(`Invalid or duplicate delivered sync sequence: ${seq}`)
+    }
+    accounted.add(seq)
+  }
+  for (const skipped of skippedSequences) {
+    const seq = Number(skipped.seq)
+    if (!Number.isSafeInteger(seq) || seq <= 0 || accounted.has(seq)) {
+      throw new Error(`Invalid or duplicate skipped sync sequence: ${seq}`)
+    }
+    accounted.add(seq)
+  }
+  for (const update of dbUpdates) {
+    if (!accounted.has(update.seq)) {
+      throw new Error(`Unclassified lossless sync sequence: ${update.seq}`)
+    }
+  }
+  if (accounted.size !== dbUpdates.length) {
+    throw new Error("Sync page accounting contains a sequence outside the database page")
   }
 }
 

@@ -4,15 +4,14 @@ import { dirname, resolve, relative } from "node:path"
 const repoRoot = resolve(import.meta.dir, "..")
 const publicRoot = resolve(repoRoot, "../inline-public")
 
-const files = [
-  "proto/core.proto",
-  "packages/protocol/package.json",
-  "packages/protocol/src/core.ts",
-  "packages/protocol/src/index.ts",
-  "packages/protocol/tsconfig.json",
-  "packages/bot-api-types/package.json",
-  "packages/bot-api-types/src/index.ts",
-  "packages/bot-api-types/tsconfig.json",
+const files: Array<{ source: string; destination: string }> = [
+  { source: "proto/core.proto", destination: "proto/core.proto" },
+  { source: "proto/core.proto", destination: "crates/protocol/proto/core.proto" },
+  { source: "packages/protocol/src/core.ts", destination: "packages/protocol/src/core.ts" },
+  { source: "packages/protocol/src/index.ts", destination: "packages/protocol/src/index.ts" },
+  { source: "packages/protocol/tsconfig.json", destination: "packages/protocol/tsconfig.json" },
+  { source: "packages/bot-api-types/src/index.ts", destination: "packages/bot-api-types/src/index.ts" },
+  { source: "packages/bot-api-types/tsconfig.json", destination: "packages/bot-api-types/tsconfig.json" },
 ]
 
 async function exists(path: string): Promise<boolean> {
@@ -36,10 +35,10 @@ if (!(await exists(resolve(publicRoot, "package.json")))) {
 }
 
 for (const file of files) {
-  const src = resolve(repoRoot, file)
-  const dest = resolve(publicRoot, file)
+  const src = resolve(repoRoot, file.source)
+  const dest = resolve(publicRoot, file.destination)
   assertInside(publicRoot, dest)
   await mkdir(dirname(dest), { recursive: true })
   await copyFile(src, dest)
-  console.log(`synced ${file}`)
+  console.log(`synced ${file.source} -> ${file.destination}`)
 }
