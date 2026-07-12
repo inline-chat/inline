@@ -10,6 +10,7 @@ Usage: scripts/apple/upload-dsyms.sh [options]
 Options:
   --archive-path <path>  Path to an .xcarchive bundle. Uploads dSYMs from <path>/dSYMs.
   --search-root <path>   Directory to scan recursively for .dSYM bundles.
+  --required-dsym <name> Require a named dSYM bundle, such as InlineIOS.app.dSYM.
   --auth-token <token>   Sentry auth token. Defaults to SENTRY_AUTH_TOKEN or `sentry auth token`.
   --org <slug>           Sentry org slug. Default: usenoor
   --project <slug>       Sentry project slug. Default: inline-ios-macos
@@ -21,6 +22,7 @@ EOF
 
 archive_path=""
 search_root=""
+required_dsym=""
 auth_token="${SENTRY_AUTH_TOKEN:-}"
 org="${SENTRY_ORG:-usenoor}"
 project="${SENTRY_PROJECT:-inline-ios-macos}"
@@ -35,6 +37,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --search-root)
       search_root="${2:-}"
+      shift 2
+      ;;
+    --required-dsym)
+      required_dsym="${2:-}"
       shift 2
       ;;
     --auth-token)
@@ -94,6 +100,11 @@ if [ ! -d "$search_root" ]; then
   exit 1
 fi
 
+if [ -n "$required_dsym" ] && ! find "$search_root" -type d -name "$required_dsym" -print -quit | grep -q .; then
+  echo "Required dSYM bundle was not found under $search_root: $required_dsym" >&2
+  exit 1
+fi
+
 if [ -z "$auth_token" ] && [ "$dry_run" -ne 1 ] && command -v sentry >/dev/null 2>&1; then
   auth_token="$(sentry auth token 2>/dev/null | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 fi
@@ -124,6 +135,15 @@ count=0
 while IFS= read -r -d '' dsym; do
   base_name="$(basename "$dsym")"
   zip_path="$tmp_dir/$base_name.zip"
+
+  if command -v xcrun >/dev/null 2>&1; then
+    if ! uuids="$(xcrun dwarfdump --uuid "$dsym" 2>&1)"; then
+      echo "Failed to read UUIDs from $dsym: $uuids" >&2
+      exit 1
+    fi
+    echo "$base_name UUIDs:"
+    echo "$uuids"
+  fi
 
   if [ "$dry_run" -eq 1 ]; then
     echo "Would upload $base_name to $org/$project"

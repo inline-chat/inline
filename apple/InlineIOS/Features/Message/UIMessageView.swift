@@ -530,7 +530,10 @@ class UIMessageView: UIView {
       serviceContainerView.centerXAnchor.constraint(equalTo: centerXAnchor),
       serviceContainerView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
       serviceContainerView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
-      serviceContainerView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
+      // A multiline label cannot reliably self-size when both its wrapping width and its
+      // container width are inferred from one another. UICollectionView repeatedly invalidates
+      // that circular layout on iOS 26 and eventually trips its feedback-loop assertion.
+      serviceContainerView.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.9),
 
       serviceLabel.topAnchor.constraint(equalTo: serviceContainerView.topAnchor, constant: 6),
       serviceLabel.leadingAnchor.constraint(equalTo: serviceContainerView.leadingAnchor, constant: 10),

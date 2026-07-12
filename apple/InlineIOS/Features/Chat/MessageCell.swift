@@ -1,5 +1,6 @@
 import InlineKit
 import InlineUI
+import Logger
 import SwiftUI
 import Translation
 import UIKit
@@ -27,6 +28,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var prevText: String?
   private var canReply: Bool = true
   private(set) var isPreparedForSendAnimationTarget = false
+  private var lastSelfSizingMeasurement: (width: CGFloat, height: CGFloat)?
+  private var didReportUnstableSelfSizing = false
 
   // MARK: - Props
 
@@ -108,6 +111,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     animateTail: Bool = true
   ) {
     let newOutgoing = message.message.out == true
+
+    if self.message?.id != message.id {
+      resetSelfSizingDiagnostics()
+    }
 
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
@@ -473,6 +480,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // Clear cached values to force reconfiguration
     prevText = nil
     message = nil
+    resetSelfSizingDiagnostics()
 
     // Reset delegate
     delegate = nil
@@ -486,11 +494,19 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: UICollectionViewLayoutAttributes
   ) -> UICollectionViewLayoutAttributes {
-    let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
+    guard
+      let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes,
+      layoutAttributes.bounds.width.isFinite,
+      layoutAttributes.bounds.width > 0
+    else {
+      return layoutAttributes
+    }
+
+    setNeedsLayout()
     layoutIfNeeded()
 
     let targetSize = CGSize(
-      width: layoutAttributes.frame.width,
+      width: layoutAttributes.bounds.width,
       height: UIView.layoutFittingCompressedSize.height
     )
 
@@ -500,8 +516,61 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       verticalFittingPriority: .fittingSizeLevel
     )
 
-    attributes.frame.size = size
+    guard size.height.isFinite, size.height > 0 else {
+      return layoutAttributes
+    }
+
+    let displayScale = max(traitCollection.displayScale, 1)
+    let fittedHeight = ceil(size.height * displayScale) / displayScale
+    reportUnstableSelfSizingIfNeeded(
+      width: targetSize.width,
+      height: fittedHeight
+    )
+
+    // The compositional layout owns the item width. Returning Auto Layout's width here can
+    // cause the collection view to alternate between its fractional width and the fitted width.
+    var fittedFrame = layoutAttributes.frame
+    fittedFrame.size.height = fittedHeight
+    attributes.frame = fittedFrame
     return attributes
+  }
+
+  private func resetSelfSizingDiagnostics() {
+    lastSelfSizingMeasurement = nil
+    didReportUnstableSelfSizing = false
+  }
+
+  private func reportUnstableSelfSizingIfNeeded(width: CGFloat, height: CGFloat) {
+    defer {
+      lastSelfSizingMeasurement = (width: width, height: height)
+    }
+
+    guard
+      let previous = lastSelfSizingMeasurement,
+      abs(previous.width - width) < 0.5,
+      abs(previous.height - height) >= 0.5,
+      !didReportUnstableSelfSizing,
+      let message
+    else {
+      return
+    }
+
+    didReportUnstableSelfSizing = true
+    PerformanceTrace.breadcrumb(
+      "unstable iOS message cell self-sizing",
+      category: "messages.layout",
+      level: .warning,
+      data: [
+        "chat_id": String(message.message.chatId),
+        "message_id": String(message.message.messageId),
+        "peer": message.peerId.toString(),
+        "message_kind": isServiceMessage ? "service" : "regular",
+        "display_mode": String(describing: displayMode),
+        "fitting_width": Double(width),
+        "previous_height": Double(previous.height),
+        "fitted_height": Double(height),
+      ]
+    )
   }
 
   @objc func handleAvatarTap() {
