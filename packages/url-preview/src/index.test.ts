@@ -756,6 +756,26 @@ describe("url-preview", () => {
     })
   })
 
+  it("retains fallback images when generic metadata advertises multiple candidates", async () => {
+    const html = `
+      <html>
+        <head>
+          <meta property="og:title" content="Self-hosted recording">
+          <meta property="og:image" content="https://cap.example/api/video/preview?id=abc">
+          <meta property="og:image" content="https://cap.example/api/video/og?id=abc">
+          <meta name="twitter:image" content="https://cap.example/api/video/og?id=abc">
+        </head>
+      </html>
+    `
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+
+    const preview = await fetchUrlPreview("https://cap.example/s/abc", { fetchImpl, lookup: publicLookup })
+
+    expect(preview?.imageUrl).toBe("https://cap.example/api/video/preview?id=abc")
+    expect(preview?.fallbackImageUrls).toEqual(["https://cap.example/api/video/og?id=abc"])
+  })
+
   it("detects direct video files and reads bounded mp4 duration metadata", async () => {
     const moov = mp4Box("moov", mp4MvhdBox({ timescale: 1_000, duration: 3_723_000 }))
     const fetchedRanges: string[] = []

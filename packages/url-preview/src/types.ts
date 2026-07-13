@@ -112,6 +112,9 @@ export type UrlPreviewResult = {
   /** Poster or thumbnail image URL, if any. */
   imageUrl?: string
 
+  /** Alternative poster or thumbnail URLs to try when the primary image cannot be stored. */
+  fallbackImageUrls?: readonly string[]
+
   /** Duration summary in seconds for compatibility clients. */
   duration?: number
 

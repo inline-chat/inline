@@ -128,6 +128,8 @@ const maxDescriptionLength = 420
 const previousMaxDescriptionLength = 220
 // Existing X note-tweet cache rows can contain only the 280-character compatibility body without an ellipsis.
 const xNoteTweetFallbackFetchedAt = new Date("2026-07-09T13:50:00.000Z")
+// Retry older image-less rows once so they can use fallback metadata added by this fix.
+const previewImageFallbackFetchedAt = new Date("2026-07-13T11:00:00.000Z")
 const xCompatibilityDescriptionMinLength = 260
 const xCompatibilityDescriptionMaxLength = 280
 const maxTitleLength = 180
@@ -137,6 +139,7 @@ const maxImageBytes = 5 * 1024 * 1024
 const maxImagePixels = 16_000_000
 const maxImageWidth = 800
 const maxImageHeight = 450
+const maxImageCandidates = 3
 const jpegQuality = 82
 const maxConcurrentPreviewJobs = 8
 const maxQueuedPreviewJobs = 256
@@ -235,7 +238,9 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
     }
 
     // TODO: Generate and cache poster thumbnails for direct video previews once capture can be safely bounded.
-    const photoId = metadata.imageUrl ? await getOrSavePreviewImage(metadata.imageUrl, input.currentUserId) : null
+    const resolvedImage = await resolvePreviewImage(metadata, input.currentUserId)
+    const resolvedMetadata = resolvedImage.metadata
+    const photoId = resolvedImage.photoId
     const authorPhotoId = metadata.authorPhotoUrl
       ? await getOrSavePreviewImage(metadata.authorPhotoUrl, input.currentUserId)
       : null
@@ -244,10 +249,10 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
       return
     }
 
-    const cache = await upsertPreviewCache({ metadata, photoId, authorPhotoId }).catch((error) => {
+    const cache = await upsertPreviewCache({ metadata: resolvedMetadata, photoId, authorPhotoId }).catch((error) => {
       log.warn("Failed to write URL preview cache", {
         error,
-        url: metadata.url,
+        url: resolvedMetadata.url,
         messageId: input.message.messageId,
         chatId: input.chatId,
       })
@@ -257,7 +262,7 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
       input.message,
       input.chatId,
       previewSourceForMessage(
-        previewSourceFromMetadata(metadata, photoId, authorPhotoId, cache?.id ?? null),
+        previewSourceFromMetadata(resolvedMetadata, photoId, authorPhotoId, cache?.id ?? null),
         previewRouteUrl(previewRoute),
         input.previewUrlCount,
       ),
@@ -300,6 +305,10 @@ function shouldRefetchCachedPreview(cache: DbUrlPreviewCache, url: string): bool
   const normalized = normalizePreviewUrl(url)
   if (!normalized) {
     return false
+  }
+
+  if (cache.photoId == null && cache.imageUrl != null && cache.fetchedAt < previewImageFallbackFetchedAt) {
+    return true
   }
 
   if (isXStatusUrl(normalized)) {
@@ -416,7 +425,9 @@ async function processAuthenticatedUrlPreview(
     return
   }
 
-  const photoId = metadata.imageUrl ? await getOrSavePreviewImage(metadata.imageUrl, input.currentUserId) : null
+  const resolvedImage = await resolvePreviewImage(metadata, input.currentUserId)
+  const resolvedMetadata = resolvedImage.metadata
+  const photoId = resolvedImage.photoId
   const authorPhotoId = metadata.authorPhotoUrl
     ? await getOrSavePreviewImage(metadata.authorPhotoUrl, input.currentUserId)
     : null
@@ -424,7 +435,7 @@ async function processAuthenticatedUrlPreview(
     input.message,
     input.chatId,
     previewSourceForMessage(
-      previewSourceFromMetadata(metadata, photoId, authorPhotoId, null),
+      previewSourceFromMetadata(resolvedMetadata, photoId, authorPhotoId, null),
       previewRouteUrl(previewRoute),
       input.previewUrlCount,
     ),
@@ -846,6 +857,39 @@ async function getOrSavePreviewImage(url: string, currentUserId: number): Promis
   }
 
   return downloadAndSavePreviewImage(url, currentUserId)
+}
+
+async function resolvePreviewImage(
+  metadata: UrlPreviewResult,
+  currentUserId: number,
+): Promise<{ metadata: UrlPreviewResult; photoId: number | null }> {
+  const candidates = Array.from(
+    new Set(
+      [metadata.imageUrl, ...(metadata.fallbackImageUrls ?? [])].filter((candidate): candidate is string => !!candidate),
+    ),
+  ).slice(0, maxImageCandidates)
+
+  for (const candidate of candidates) {
+    const photoId = await getOrSavePreviewImage(candidate, currentUserId)
+    if (!photoId) {
+      continue
+    }
+
+    if (candidate === metadata.imageUrl) {
+      return { metadata, photoId }
+    }
+
+    const media =
+      metadata.media?.kind === "photo" && metadata.media.url === metadata.imageUrl
+        ? { ...metadata.media, url: candidate }
+        : metadata.media
+    return {
+      metadata: { ...metadata, imageUrl: candidate, media },
+      photoId,
+    }
+  }
+
+  return { metadata, photoId: null }
 }
 
 async function downloadAndSavePreviewImage(url: string, currentUserId: number): Promise<number | null> {

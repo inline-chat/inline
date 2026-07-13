@@ -11,7 +11,12 @@ import {
   processUrlPreview,
   processUrlPreviews,
 } from "@in/server/modules/urlPreview/processUrlPreview"
-import { getCachedPreviewPhotoId, getFreshPreviewCache, upsertPreviewCache } from "@in/server/modules/urlPreview/cache"
+import {
+  getCachedPreviewPhotoId,
+  getFreshPreviewCache,
+  hashPreviewUrl,
+  upsertPreviewCache,
+} from "@in/server/modules/urlPreview/cache"
 import { setupTestLifecycle, testUtils } from "../setup"
 
 const originalFetch = globalThis.fetch
@@ -184,6 +189,104 @@ describe("URL preview cache", () => {
     expect(attachment?.linkEmbed?.siteName).toBe("Facebook & Video")
     expect(attachment?.linkEmbed?.title).toBe("\u{1f534} \u6b63\u5728\u76f4\u64ad\uff01Amy \u5e36\u4f60")
     expect(attachment?.linkEmbed?.description).toBe('Fish & chips "safe" \u00a9')
+  })
+
+  it("tries fallback metadata images and refreshes stale image-less cache rows", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "URL Preview Image Fallback",
+      ["preview-image-fallback@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create image fallback test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create image fallback test chat")
+    }
+
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: "https://example.com/recording",
+    })
+    const primaryImageUrl = "https://example.com/api/video/preview?id=abc"
+    const fallbackImageUrl = "https://example.com/api/video/og?id=abc"
+    const [fallbackPhoto] = await db.insert(schema.photos).values({ format: "jpeg" }).returning()
+    if (!fallbackPhoto) {
+      throw new Error("Failed to create fallback photo fixture")
+    }
+
+    await upsertPreviewCache({
+      photoId: fallbackPhoto.id,
+      metadata: {
+        url: "https://example.com/fallback-source",
+        finalUrl: "https://example.com/fallback-source",
+        title: "Fallback source",
+        imageUrl: fallbackImageUrl,
+        provider: "generic",
+      },
+    })
+    const staleCache = await upsertPreviewCache({
+      now: new Date("2026-07-12T10:00:00.000Z"),
+      photoId: null,
+      metadata: {
+        url: "https://example.com/recording",
+        finalUrl: "https://example.com/recording",
+        title: "Self-hosted recording",
+        imageUrl: primaryImageUrl,
+        provider: "generic",
+      },
+    })
+
+    const html = `
+      <html>
+        <head>
+          <meta property="og:title" content="Self-hosted recording">
+          <meta property="og:image" content="${primaryImageUrl}">
+          <meta property="og:image" content="${fallbackImageUrl}">
+        </head>
+      </html>
+    `
+    const fetchedUrls: string[] = []
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input)
+      fetchedUrls.push(url)
+      if (url === "https://example.com/recording") {
+        return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+      }
+      if (url === primaryImageUrl) {
+        return new Response("not an image", { headers: { "content-type": "text/plain" } })
+      }
+      throw new Error(`Unexpected URL preview fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewUrl: "https://example.com/recording",
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    expect(fetchedUrls).toEqual(["https://example.com/recording", primaryImageUrl])
+    const refreshedCache = await getFreshPreviewCache("https://example.com/recording")
+    expect(refreshedCache?.id).toBe(staleCache.id)
+    expect(refreshedCache?.photoId).toBe(fallbackPhoto.id)
+    expect(refreshedCache?.imageUrlHash).toEqual(hashPreviewUrl(fallbackImageUrl))
+
+    const [preview] = await db
+      .select()
+      .from(schema.urlPreview)
+      .where(eq(schema.urlPreview.cacheId, staleCache.id))
+      .limit(1)
+    expect(preview?.photoId).toBe(fallbackPhoto.id)
   })
 
   it("recalculates cached large preview display per message URL count", async () => {

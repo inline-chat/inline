@@ -67,13 +67,14 @@ export function selectPreviewImage(
   originalUrl: string,
   finalUrl: string,
   imageUrls: readonly string[],
-): { primaryUrl?: string; authorPhotoUrl?: string } {
+): { primaryUrl?: string; fallbackUrls: string[]; authorPhotoUrl?: string } {
   const rule = imageRuleForPreview(originalUrl, finalUrl)
   if (!rule) {
-    return { primaryUrl: imageUrls[0] }
+    return { primaryUrl: imageUrls[0], fallbackUrls: imageUrls.slice(1) }
   }
 
   let authorPhotoUrl: string | undefined
+  const primaryUrls: string[] = []
   for (const imageUrl of imageUrls) {
     const role = imageRole(rule, imageUrl)
     if (role === "author") {
@@ -81,10 +82,14 @@ export function selectPreviewImage(
       continue
     }
 
-    return { primaryUrl: imageUrl, authorPhotoUrl }
+    primaryUrls.push(imageUrl)
   }
 
-  return { authorPhotoUrl }
+  return {
+    primaryUrl: primaryUrls[0],
+    fallbackUrls: primaryUrls.slice(1),
+    authorPhotoUrl,
+  }
 }
 
 export function previewProviderFromImageRules(

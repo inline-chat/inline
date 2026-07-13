@@ -85,6 +85,7 @@ function buildGenericPreview(
     title: title ?? undefined,
     description: description ?? undefined,
     imageUrl: image.primaryUrl,
+    fallbackImageUrls: image.fallbackUrls.length > 0 ? image.fallbackUrls : undefined,
     duration,
     mediaType,
     author,
