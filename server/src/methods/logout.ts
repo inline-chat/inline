@@ -8,6 +8,7 @@ import type { HandlerContext } from "@in/server/controllers/helpers"
 import { connectionManager } from "../ws/connections"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import { revokeSession } from "@in/server/modules/sessions/revokeSession"
 
 export const Input = Type.Object({})
 
@@ -20,6 +21,12 @@ export const handler = async (
   try {
     const session = await SessionsModel.getById(context.currentSessionId).catch(() => null)
 
+    await revokeSession({
+      actor: "user",
+      actorUserId: context.currentUserId,
+      targetUserId: context.currentUserId,
+      sessionId: context.currentSessionId,
+    })
     await db.delete(sessions).where(eq(sessions.id, context.currentSessionId))
 
     // Best-effort internal alert (should never affect the user action).

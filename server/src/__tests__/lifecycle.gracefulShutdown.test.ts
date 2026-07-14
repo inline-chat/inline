@@ -24,6 +24,9 @@ describe("graceful shutdown lifecycle", () => {
         stopUserSettingsCleanup: () => {
           calls.push("cache.stop")
         },
+        stopGridProviderEffects: () => {
+          calls.push("grid-provider.stop")
+        },
         closeConnections: async () => {
           calls.push("connections.close")
         },
@@ -65,6 +68,7 @@ describe("graceful shutdown lifecycle", () => {
       "timer.start:5000",
       "monitor.stop",
       "cache.stop",
+      "grid-provider.stop",
       "server.stop:false",
       "connections.close",
       "presence.shutdown",
@@ -98,6 +102,9 @@ describe("graceful shutdown lifecycle", () => {
         stopUserSettingsCleanup: () => {
           calls.push("cache.stop")
         },
+        stopGridProviderEffects: () => {
+          calls.push("grid-provider.stop")
+        },
         closeConnections: async () => {
           calls.push("connections.close")
           throw new Error("close failed")
@@ -128,6 +135,7 @@ describe("graceful shutdown lifecycle", () => {
     await manager.shutdown("SIGTERM")
 
     expect(calls).toContain("connections.close")
+    expect(calls).toContain("grid-provider.stop")
     expect(calls).toContain("presence.shutdown")
     expect(calls).toContain("db.close")
     expect(calls).toContain("sentry.flush:2000")

@@ -7,6 +7,7 @@ import {
   wsSendClientProtocolMessage,
   wsServerProtocolMessage,
 } from "@in/server/realtime/test/utils"
+import { sendMessageToRealtimeSession } from "@in/server/realtime/message"
 import {
   ConnectionError_Reason,
   Method,
@@ -72,7 +73,7 @@ describe("realtime protocol safety", () => {
 
     const openMessage = await wsServerProtocolMessage(ws)
     expect(openMessage.body.oneofKind).toBe("connectionOpen")
-    return { ws, userId: user.id, sessionId: session.id }
+    return { ws, userId: user.id, sessionId: session.id, token }
   }
 
   const authenticateExistingUserSocket = async (
@@ -99,6 +100,55 @@ describe("realtime protocol safety", () => {
     expect(openMessage.body.oneofKind).toBe("connectionOpen")
     return { ws, sessionId: session.id }
   }
+
+  const authenticateExistingSessionSocket = async (token: string) => {
+    const ws = await openRealtimeSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 9_999n,
+      seq: 1,
+      body: {
+        oneofKind: "connectionInit",
+        connectionInit: {
+          token,
+          layer: 2,
+          clientVersion: "1.2.3",
+        },
+      },
+    })
+
+    const openMessage = await wsServerProtocolMessage(ws)
+    expect(openMessage.body.oneofKind).toBe("connectionOpen")
+    return ws
+  }
+
+  it("routes session-scoped messages to every matching socket and no other app session", async () => {
+    const target = await authenticateSocket()
+    const reconnectOverlap = await authenticateExistingSessionSocket(target.token)
+    const otherSession = await authenticateExistingUserSocket(target.userId)
+    let otherSessionMessageCount = 0
+    otherSession.ws.addEventListener("message", () => {
+      otherSessionMessageCount += 1
+    })
+
+    const firstDelivery = wsServerProtocolMessage(target.ws)
+    const overlapDelivery = wsServerProtocolMessage(reconnectOverlap)
+    await sendMessageToRealtimeSession(target.userId, target.sessionId, {
+      oneofKind: "update",
+      update: { updates: [] },
+    })
+
+    const [firstMessage, overlapMessage] = await Promise.all([firstDelivery, overlapDelivery])
+    expect(firstMessage.body.oneofKind).toBe("message")
+    expect(overlapMessage.body.oneofKind).toBe("message")
+    expect(firstMessage.id).toBe(overlapMessage.id)
+    await Bun.sleep(25)
+    expect(otherSessionMessageCount).toBe(0)
+
+    await wsClosed(otherSession.ws)
+    await wsClosed(reconnectOverlap)
+    await wsClosed(target.ws)
+  })
 
   it("closes socket for text payloads", async () => {
     const ws = await openRealtimeSocket()

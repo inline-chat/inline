@@ -21,6 +21,9 @@ export const spaces = pgTable("spaces", {
     mode: "date",
     precision: 3,
   }),
+
+  /** Monotonic version of this Space's replaceable Grid snapshot. */
+  gridRevision: integer("grid_revision").default(0).notNull(),
 })
 
 export const spaceRelations = relations(spaces, ({ many }) => ({

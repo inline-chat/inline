@@ -645,6 +645,55 @@
       "when": 1783689226308,
       "tag": "0091_bot_capabilities",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1783712916936,
+      "tag": "0092_add_grid_rooms",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1783972906789,
+      "tag": "0093_persist_grid_avatar_microphone_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1784025941530,
+      "tag": "0094_grid_provider_effects",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1784026535277,
+      "tag": "0095_grid_provider_membership_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1784026671196,
+      "tag": "0096_grid_media_membership_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1784027078099,
+      "tag": "0097_grid_microphone_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1784046917770,
+      "tag": "0098_grid_snapshot_revision",
+      "breakpoints": true
     }
   ]
 }

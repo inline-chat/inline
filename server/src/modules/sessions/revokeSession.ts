@@ -2,6 +2,11 @@ import { db } from "@in/server/db"
 import { sessions, type DbSession } from "@in/server/db/schema"
 import { connectionManager } from "@in/server/ws/connections"
 import { and, eq, isNull } from "drizzle-orm"
+import { finishGridSessionAccess } from "@in/server/modules/grid/accessLifecycle"
+import {
+  lockGridMutations,
+  removeGridSessionPresenceInTransaction,
+} from "@in/server/modules/grid/roomLifecycle"
 
 type RevokeActor = "admin" | "user" | "system"
 
@@ -19,45 +24,64 @@ export type RevokeSessionResult = {
 }
 
 export async function revokeSession(input: RevokeSessionInput): Promise<RevokeSessionResult> {
-  const session = await db._query.sessions.findFirst({
-    where: and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId)),
+  const outcome = await db.transaction(async (tx) => {
+    // Grid mutations take this lock before checking the session row. Reusing
+    // that order makes a claim either complete before revocation and get
+    // removed here, or observe the revoked session after this transaction.
+    await lockGridMutations(tx)
+    const [session] = await tx
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId)))
+      .for("update")
+      .limit(1)
+
+    if (!session) {
+      return {
+        result: { session: null, revoked: false, alreadyRevoked: false } satisfies RevokeSessionResult,
+        gridState: undefined,
+      }
+    }
+
+    if (session.revoked) {
+      const gridState = await removeGridSessionPresenceInTransaction(tx, input.targetUserId, input.sessionId)
+      return {
+        result: { session, revoked: false, alreadyRevoked: true } satisfies RevokeSessionResult,
+        gridState,
+      }
+    }
+
+    const [updated] = await tx
+      .update(sessions)
+      .set({
+        revoked: new Date(),
+        active: false,
+        applePushToken: null,
+        applePushTokenEncrypted: null,
+        applePushTokenIv: null,
+        applePushTokenTag: null,
+        pushNotificationProvider: null,
+        pushContentKeyPublic: null,
+        pushContentKeyId: null,
+        pushContentKeyAlgorithm: null,
+        pushContentVersion: null,
+      })
+      .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId), isNull(sessions.revoked)))
+      .returning()
+    if (!updated) throw new Error("Session revocation lost its row lock")
+
+    const gridState = await removeGridSessionPresenceInTransaction(tx, input.targetUserId, input.sessionId)
+    return {
+      result: { session: updated, revoked: true, alreadyRevoked: false } satisfies RevokeSessionResult,
+      gridState,
+    }
   })
 
-  if (!session) {
-    return { session: null, revoked: false, alreadyRevoked: false }
+  if (outcome.gridState) {
+    await finishGridSessionAccess(outcome.gridState, input.targetUserId, input.sessionId)
   }
-
-  if (session.revoked) {
-    return { session, revoked: false, alreadyRevoked: true }
+  if (outcome.result.session) {
+    connectionManager.closeConnectionForSession(input.targetUserId, input.sessionId)
   }
-
-  const now = new Date()
-  const [updated] = await db
-    .update(sessions)
-    .set({
-      revoked: now,
-      active: false,
-      applePushToken: null,
-      applePushTokenEncrypted: null,
-      applePushTokenIv: null,
-      applePushTokenTag: null,
-      pushContentKeyPublic: null,
-      pushContentKeyId: null,
-      pushContentKeyAlgorithm: null,
-      pushContentVersion: null,
-    })
-    .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId), isNull(sessions.revoked)))
-    .returning()
-
-  if (!updated) {
-    const latest = await db._query.sessions.findFirst({
-      where: and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId)),
-    })
-
-    return { session: latest ?? session, revoked: false, alreadyRevoked: true }
-  }
-
-  connectionManager.closeConnectionForSession(input.targetUserId, input.sessionId)
-
-  return { session: updated, revoked: true, alreadyRevoked: false }
+  return outcome.result
 }

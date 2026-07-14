@@ -1,0 +1,1 @@
+ALTER TABLE "grid_provider_effects" ADD COLUMN "participant_identity" varchar(128);

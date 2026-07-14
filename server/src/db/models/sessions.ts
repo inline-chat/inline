@@ -6,6 +6,7 @@ import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
 import { Log } from "@in/server/utils/log"
+import { revokeSession } from "@in/server/modules/sessions/revokeSession"
 
 type SessionClientType = NonNullable<DbNewSession["clientType"]>
 export type SessionPushNotificationProvider = "apns" | "expo_android"
@@ -130,6 +131,11 @@ export class SessionsModel {
           .where(and(eq(sessions.deviceId, data.deviceId), eq(sessions.userId, data.userId)))
         let existingDevice = hasExistingDevice[0]
         if (existingDevice) {
+          await revokeSession({
+            actor: "system",
+            targetUserId: data.userId,
+            sessionId: existingDevice.id,
+          })
           await db.delete(sessions).where(eq(sessions.id, existingDevice.id))
           log.info("Deleted previous session with matching device id", { userId: data.userId, sessionId: existingDevice.id })
         }
@@ -275,27 +281,19 @@ export class SessionsModel {
     }
 
     try {
-      const result = await db
-        .update(sessions)
-        .set({
-          revoked: new Date(),
-          active: false,
-          applePushToken: null,
-          applePushTokenEncrypted: null,
-          applePushTokenIv: null,
-          applePushTokenTag: null,
-          pushNotificationProvider: null,
-          pushContentKeyPublic: null,
-          pushContentKeyId: null,
-          pushContentKeyAlgorithm: null,
-          pushContentVersion: null,
-        })
+      const [session] = await db
+        .select({ userId: sessions.userId })
+        .from(sessions)
         .where(eq(sessions.id, id))
-        .returning({ id: sessions.id })
-
-      if (!result.length) {
+        .limit(1)
+      if (!session) {
         throw new Error(`Session not found: ${id}`)
       }
+      await revokeSession({
+        actor: "system",
+        targetUserId: session.userId,
+        sessionId: id,
+      })
     } catch (error) {
       throw new Error(`Failed to revoke session: ${error instanceof Error ? error.message : "Unknown error"}`)
     }

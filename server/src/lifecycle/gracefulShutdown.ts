@@ -3,6 +3,7 @@ import { closeDb } from "@in/server/db"
 import { shutdownApnProvider } from "@in/server/libs/apn"
 import { stopUserSettingsCacheCleanup } from "@in/server/modules/cache/userSettings"
 import { stopDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
+import { stopGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { presenceManager } from "@in/server/ws/presence"
@@ -22,6 +23,7 @@ export type GracefulShutdownDeps = {
   markShuttingDown: (signal: ShutdownSignal) => void
   stopDatabaseMonitor: Step
   stopUserSettingsCleanup: Step
+  stopGridProviderEffects: Step
   stopServer: (server: Server<unknown>, closeActiveConnections: boolean) => void
   closeConnections: Step
   shutdownPresence: Step
@@ -59,6 +61,7 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   markShuttingDown: markServerShuttingDown,
   stopDatabaseMonitor: () => stopDatabaseHealthMonitor(),
   stopUserSettingsCleanup: () => stopUserSettingsCacheCleanup(),
+  stopGridProviderEffects: () => stopGridProviderEffectWorker(),
   stopServer: (server, closeActiveConnections) => server.stop(closeActiveConnections),
   closeConnections: () => connectionManager.shutdown(),
   shutdownPresence: () => presenceManager.shutdown(),
@@ -121,6 +124,7 @@ export const createGracefulShutdownManager = ({
 
       hasErrors = !(await runStep("stop_database_monitor", runtime.stopDatabaseMonitor)) || hasErrors
       hasErrors = !(await runStep("stop_user_settings_cleanup", runtime.stopUserSettingsCleanup)) || hasErrors
+      hasErrors = !(await runStep("stop_grid_provider_effects", runtime.stopGridProviderEffects)) || hasErrors
       hasErrors = !(await runStep("stop_server_listener", () => runtime.stopServer(server, false))) || hasErrors
       hasErrors = !(await runStep("close_realtime_connections", runtime.closeConnections)) || hasErrors
       hasErrors = !(await runStep("shutdown_presence", runtime.shutdownPresence)) || hasErrors

@@ -76,6 +76,18 @@ import {
 } from "@in/server/realtime/handlers/space.urlPreviewExclusions"
 import { getSpaceSettingsHandler, toggleSpaceGridHandler } from "@in/server/realtime/handlers/space.settings"
 import {
+  createGridRoomHandler,
+  deleteGridRoomHandler,
+  getGridHandler,
+  getGridHomeHandler,
+  joinGridRoomHandler,
+  leaveGridRoomHandler,
+  prepareGridConnectionHandler,
+  setGridAvatarMicrophoneEnabledHandler,
+  setGridRoomLockedHandler,
+  setGridRoomTitleHandler,
+} from "@in/server/realtime/handlers/grid"
+import {
   createUserGroupHandler,
   deleteUserGroupHandler,
   getUserGroupsHandler,
@@ -274,6 +286,69 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await toggleSpaceGridHandler(call.input.toggleSpaceGrid, handlerContext)
       return { oneofKind: "toggleSpaceGrid", toggleSpaceGrid: result }
+    }
+
+    case Method.GET_GRID: {
+      if (call.input.oneofKind !== "getGrid") throw RealtimeRpcError.BadRequest()
+      const result = await getGridHandler(call.input.getGrid, handlerContext)
+      return { oneofKind: "getGrid", getGrid: result }
+    }
+
+    case Method.GET_GRID_HOME: {
+      if (call.input.oneofKind !== "getGridHome") throw RealtimeRpcError.BadRequest()
+      const result = await getGridHomeHandler(call.input.getGridHome, handlerContext)
+      return { oneofKind: "getGridHome", getGridHome: result }
+    }
+
+    case Method.CREATE_GRID_ROOM: {
+      if (call.input.oneofKind !== "createGridRoom") throw RealtimeRpcError.BadRequest()
+      const result = await createGridRoomHandler(call.input.createGridRoom, handlerContext)
+      return { oneofKind: "createGridRoom", createGridRoom: result }
+    }
+
+    case Method.JOIN_GRID_ROOM: {
+      if (call.input.oneofKind !== "joinGridRoom") throw RealtimeRpcError.BadRequest()
+      const result = await joinGridRoomHandler(call.input.joinGridRoom, handlerContext)
+      return { oneofKind: "joinGridRoom", joinGridRoom: result }
+    }
+
+    case Method.LEAVE_GRID_ROOM: {
+      if (call.input.oneofKind !== "leaveGridRoom") throw RealtimeRpcError.BadRequest()
+      const result = await leaveGridRoomHandler(call.input.leaveGridRoom, handlerContext)
+      return { oneofKind: "leaveGridRoom", leaveGridRoom: result }
+    }
+
+    case Method.SET_GRID_ROOM_TITLE: {
+      if (call.input.oneofKind !== "setGridRoomTitle") throw RealtimeRpcError.BadRequest()
+      const result = await setGridRoomTitleHandler(call.input.setGridRoomTitle, handlerContext)
+      return { oneofKind: "setGridRoomTitle", setGridRoomTitle: result }
+    }
+
+    case Method.SET_GRID_ROOM_LOCKED: {
+      if (call.input.oneofKind !== "setGridRoomLocked") throw RealtimeRpcError.BadRequest()
+      const result = await setGridRoomLockedHandler(call.input.setGridRoomLocked, handlerContext)
+      return { oneofKind: "setGridRoomLocked", setGridRoomLocked: result }
+    }
+
+    case Method.DELETE_GRID_ROOM: {
+      if (call.input.oneofKind !== "deleteGridRoom") throw RealtimeRpcError.BadRequest()
+      const result = await deleteGridRoomHandler(call.input.deleteGridRoom, handlerContext)
+      return { oneofKind: "deleteGridRoom", deleteGridRoom: result }
+    }
+
+    case Method.PREPARE_GRID_CONNECTION: {
+      if (call.input.oneofKind !== "prepareGridConnection") throw RealtimeRpcError.BadRequest()
+      const result = await prepareGridConnectionHandler(call.input.prepareGridConnection, handlerContext)
+      return { oneofKind: "prepareGridConnection", prepareGridConnection: result }
+    }
+
+    case Method.SET_GRID_AVATAR_MICROPHONE_ENABLED: {
+      if (call.input.oneofKind !== "setGridAvatarMicrophoneEnabled") throw RealtimeRpcError.BadRequest()
+      const result = await setGridAvatarMicrophoneEnabledHandler(
+        call.input.setGridAvatarMicrophoneEnabled,
+        handlerContext,
+      )
+      return { oneofKind: "setGridAvatarMicrophoneEnabled", setGridAvatarMicrophoneEnabled: result }
     }
 
     case Method.DELETE_CHAT: {

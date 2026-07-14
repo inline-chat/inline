@@ -24,6 +24,7 @@ Sentry.init({
 import { root } from "@in/server/controllers/root"
 import { health } from "@in/server/controllers/health"
 import { startDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
+import { startGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
 import { registerGracefulShutdown } from "@in/server/lifecycle/gracefulShutdown"
 import { waitlist } from "@in/server/controllers/extra/waitlist"
 import { Elysia } from "elysia"
@@ -177,6 +178,7 @@ app
 app.listen(port, (server: Server<unknown>) => {
   connectionManager.setServer(server)
   startDatabaseHealthMonitor()
+  startGridProviderEffectWorker()
   registerGracefulShutdown(server)
   log.info(`Running on http://${server.hostname}:${server.port}`)
 })

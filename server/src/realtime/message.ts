@@ -325,13 +325,38 @@ export const sendMessageToRealtimeUser = async (
   }
 }
 
+/**
+ * Sends session-scoped material only to sockets authenticated by the exact app
+ * session. A user may have several active sessions, and one session may own
+ * more than one socket during reconnect overlap, so neither a user-wide send
+ * nor a single-connection lookup is sufficient for Grid credentials.
+ */
+export const sendMessageToRealtimeSession = async (
+  userId: number,
+  sessionId: number,
+  payload: ServerMessage["payload"],
+) => {
+  const connections = connectionManager
+    .getUserConnections(userId)
+    .filter((connection) => connection.sessionId === sessionId)
+  const id = genId()
+
+  for (const connection of connections) {
+    log.trace(`sending message to user ${userId} with exact session ${sessionId} with payload ${payload}`)
+    sendRaw(connection.ws, {
+      id,
+      body: {
+        oneofKind: "message",
+        message: { payload },
+      },
+    })
+  }
+}
+
 /** Sends a message to all users in a space that are connected to the server */
 export const sendMessageToRealtimeSpace = async (spaceId: number, payload: ServerMessage["payload"]) => {
   const userIds = connectionManager.getSpaceUserIds(spaceId)
-
-  for (let userId of userIds) {
-    sendMessageToRealtimeUser(userId, payload)
-  }
+  await Promise.all(userIds.map((userId) => sendMessageToRealtimeUser(userId, payload)))
 }
 
 export class RealtimeUpdates {

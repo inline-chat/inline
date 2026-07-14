@@ -102,6 +102,10 @@ export const NOTION_CLIENT_SECRET = process.env["NOTION_CLIENT_SECRET"]
 export const NOTION_CLIENT_ID_DEV = process.env["NOTION_CLIENT_ID_DEV"]
 export const NOTION_CLIENT_SECRET_DEV = process.env["NOTION_CLIENT_SECRET_DEV"]
 
+export const LIVEKIT_URL = process.env["LIVEKIT_URL"]
+export const LIVEKIT_API_KEY = process.env["LIVEKIT_API_KEY"]
+export const LIVEKIT_API_SECRET = process.env["LIVEKIT_API_SECRET"]
+
 // Check required variables
 const requiredProductionVariables = [
   "DATABASE_URL",
@@ -159,6 +163,9 @@ const optionalVariables = [
   "NOTION_CLIENT_ID",
   "NOTION_CLIENT_SECRET",
   "FILES_PROXY_SIGNING_KEY",
+  "LIVEKIT_URL",
+  "LIVEKIT_API_KEY",
+  "LIVEKIT_API_SECRET",
 ]
 
 optionalVariables.forEach((variable) => {

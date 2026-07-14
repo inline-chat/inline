@@ -45,6 +45,7 @@ class ConnectionManager {
   private authenticatedUsers: Map<number, Set<string>> = new Map()
   private usersBySpaceId: Map<number, Set<number>> = new Map()
   private userSpaceIds: Map<number, number[]> = new Map()
+  private userSpaceMembershipRevision: Map<number, number> = new Map()
 
   setServer(server: Server<unknown>) {
     this.server = server
@@ -221,6 +222,7 @@ class ConnectionManager {
       this.authenticatedUsers.clear()
       this.usersBySpaceId.clear()
       this.userSpaceIds.clear()
+      this.userSpaceMembershipRevision.clear()
       return
     }
 
@@ -241,6 +243,7 @@ class ConnectionManager {
     this.authenticatedUsers.clear()
     this.usersBySpaceId.clear()
     this.userSpaceIds.clear()
+    this.userSpaceMembershipRevision.clear()
   }
 
   getUserConnections(userId: number): Connection[] {
@@ -276,6 +279,10 @@ class ConnectionManager {
       this.usersBySpaceId.set(spaceId, spaceConnections)
     }
     spaceConnections.add(userId)
+    const cachedSpaceIds = this.userSpaceIds.get(userId)
+    if (cachedSpaceIds && !cachedSpaceIds.includes(spaceId)) {
+      this.userSpaceIds.set(userId, [...cachedSpaceIds, spaceId])
+    }
 
     // Subscribe the user to the space
     const userConnections = this.authenticatedUsers.get(userId)
@@ -289,6 +296,26 @@ class ConnectionManager {
     }
   }
 
+  /** Immediately removes a former member from process-local Space fanout. */
+  unsubscribeUserFromSpace(userId: number, spaceId: number): void {
+    log.debug(`Unsubscribing from space ${spaceId} for user ${userId}`)
+    this.userSpaceMembershipRevision.set(userId, (this.userSpaceMembershipRevision.get(userId) ?? 0) + 1)
+
+    const spaceUsers = this.usersBySpaceId.get(spaceId)
+    spaceUsers?.delete(userId)
+    if (spaceUsers?.size === 0) this.usersBySpaceId.delete(spaceId)
+
+    const cachedSpaceIds = this.userSpaceIds.get(userId)
+    if (cachedSpaceIds) this.userSpaceIds.set(userId, cachedSpaceIds.filter((id) => id !== spaceId))
+
+    for (const connectionId of this.authenticatedUsers.get(userId) ?? []) {
+      const connection = this.connections.get(connectionId)
+      if (connection?.version === ConnVersion.BASIC_V1) {
+        connection.ws.unsubscribe(WebSocketTopic.Space(spaceId))
+      }
+    }
+  }
+
   // ------------------------------------------------------------------------------------------------
   // Private methods
   // ------------------------------------------------------------------------------------------------
@@ -299,24 +326,19 @@ class ConnectionManager {
     return await getSpaceIdsForUser(userId)
   }
 
-  private async cacheUserSpaceIds(userId: number): Promise<number[]> {
-    if (this.userSpaceIds.has(userId)) {
-      // Already cached
-      return this.userSpaceIds.get(userId) ?? []
-    }
-
-    const spaceIds = await this.getUserSpaceIds(userId)
-    this.userSpaceIds.set(userId, spaceIds)
-    return spaceIds
-  }
-
   private async subscribeUserToSpaceIds(userId: number): Promise<void> {
-    const spaceIds = await this.cacheUserSpaceIds(userId)
-    if (!spaceIds) return
+    // A membership removal can race the initial database read. Retry from the
+    // authoritative database whenever the revision changes so stale results
+    // cannot resubscribe a removed user after unsubscribeUserFromSpace.
+    while (true) {
+      const revision = this.userSpaceMembershipRevision.get(userId) ?? 0
+      const spaceIds = await this.getUserSpaceIds(userId)
+      if ((this.userSpaceMembershipRevision.get(userId) ?? 0) !== revision) continue
 
-    spaceIds.forEach((spaceId) => {
-      this.subscribeToSpace(userId, spaceId)
-    })
+      this.userSpaceIds.set(userId, spaceIds)
+      spaceIds.forEach((spaceId) => this.subscribeToSpace(userId, spaceId))
+      return
+    }
   }
 }
 

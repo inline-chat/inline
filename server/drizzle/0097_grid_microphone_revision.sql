@@ -1,0 +1,2 @@
+ALTER TABLE "grid_presence" ADD COLUMN "microphone_revision" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "grid_presence" ADD CONSTRAINT "grid_presence_microphone_revision_check" CHECK ("grid_presence"."microphone_revision" >= 0);

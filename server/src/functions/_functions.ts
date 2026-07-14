@@ -57,6 +57,18 @@ import { updateDialogOrder } from "./messages.updateDialogOrder"
 import { reserveChatIds } from "./messages.reserveChatIds"
 import { invokeMessageAction } from "./messages.invokeMessageAction"
 import { answerMessageAction } from "./messages.answerMessageAction"
+import {
+  createGridRoom,
+  deleteGridRoom,
+  getGrid,
+  getGridHome,
+  joinGridRoom,
+  leaveGridRoom,
+  prepareGridConnection,
+  setGridAvatarMicrophoneEnabled,
+  setGridRoomLocked,
+  setGridRoomTitle,
+} from "./grid"
 
 export const Functions = {
   messages: {
@@ -132,5 +144,17 @@ export const Functions = {
   updates: {
     getUpdatesState: getUpdatesState,
     getUpdates: getUpdates,
+  },
+  grid: {
+    get: getGrid,
+    getHome: getGridHome,
+    createRoom: createGridRoom,
+    joinRoom: joinGridRoom,
+    leaveRoom: leaveGridRoom,
+    setRoomTitle: setGridRoomTitle,
+    setRoomLocked: setGridRoomLocked,
+    deleteRoom: deleteGridRoom,
+    prepareConnection: prepareGridConnection,
+    setAvatarMicrophoneEnabled: setGridAvatarMicrophoneEnabled,
   },
 }

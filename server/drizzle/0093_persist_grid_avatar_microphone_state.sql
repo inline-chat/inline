@@ -1,0 +1,1 @@
+ALTER TABLE "grid_presence" ADD COLUMN "microphone_enabled" boolean DEFAULT false NOT NULL;

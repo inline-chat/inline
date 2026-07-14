@@ -1,4 +1,4 @@
-import { spaces } from "@in/server/db/schema"
+import { members, spaces } from "@in/server/db/schema"
 import { chatParticipants, chats } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
 import { userGroupMembers, userGroups } from "@in/server/db/schema/userGroups"
@@ -7,7 +7,6 @@ import type { FunctionContext } from "@in/server/functions/_types"
 
 import { DeleteMemberInput, Update } from "@inline-chat/protocol/core"
 import { isValidSpaceId } from "@in/server/utils/validate"
-import { MembersModel } from "@in/server/db/models/members"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { Log } from "@in/server/utils/log"
 import { getUpdateGroupForSpace } from "@in/server/modules/updates"
@@ -24,6 +23,12 @@ import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
 import { and, eq, inArray } from "drizzle-orm"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { finishGridMemberAccess } from "@in/server/modules/grid/accessLifecycle"
+import {
+  removeGridMemberPresenceInTransaction,
+  type GridPresenceRemovalState,
+} from "@in/server/modules/grid/roomLifecycle"
+import { connectionManager } from "@in/server/ws/connections"
 
 const log = new Log("space.removeMember")
 
@@ -60,9 +65,24 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
 
     log.debug("Deleting member", { spaceId, userId, currentUserId: context.currentUserId })
 
-    // Delete member
-    yield* MembersModel.deleteMemberEffect(spaceId, userId)
+    // Membership and Grid media authority are one durable state transition.
+    // Provider revocation is inserted into the outbox before this commits.
+    const gridRemovalState = yield* Effect.tryPromise({
+      try: () => removeMemberAndGridPresence(spaceId, userId),
+      catch: (error) =>
+        error instanceof MemberNotExistsError
+          ? error
+          : error instanceof Error
+            ? error
+            : new Error("removeMemberAndGridPresence failed"),
+    })
     AccessGuardsCache.resetSpaceMember(spaceId, userId)
+    connectionManager.unsubscribeUserFromSpace(userId, spaceId)
+
+    yield* Effect.tryPromise({
+      try: () => finishGridMemberAccess(gridRemovalState, spaceId, userId),
+      catch: (error) => (error instanceof Error ? error : new Error("finishGridMemberAccess failed")),
+    })
 
     const privateThreadIds = yield* Effect.tryPromise({
       try: () => getPrivateThreadIdsForUser({ spaceId, userId }),
@@ -108,6 +128,22 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
       result: { updates },
     }
   })
+
+async function removeMemberAndGridPresence(
+  spaceId: number,
+  userId: number,
+): Promise<GridPresenceRemovalState> {
+  return db.transaction(async (tx) => {
+    const gridRemovalState = await removeGridMemberPresenceInTransaction(tx, spaceId, userId)
+    const removed = await tx
+      .delete(members)
+      .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
+      .returning({ id: members.id })
+
+    if (removed.length === 0) throw new MemberNotExistsError()
+    return gridRemovalState
+  })
+}
 
 // ------------------------------------------------------------
 // Updates

@@ -20,6 +20,8 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { Authorize } from "@in/server/utils/authorize"
 import { eq } from "drizzle-orm"
+import { notifyGridSpaceChanged } from "@in/server/modules/grid/realtime"
+import { clearGridPresenceForSpace, lockGridMutations } from "@in/server/modules/grid/roomLifecycle"
 
 export async function getSpaceSettings(
   input: GetSpaceSettingsInput,
@@ -41,12 +43,14 @@ export async function toggleSpaceGrid(
   await Authorize.spaceAdmin(spaceId, context.currentUserId)
 
   const { settings, update } = await db.transaction(async (tx) => {
+    await lockGridMutations(tx)
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
     if (!space) {
       throw RealtimeRpcError.SpaceIdInvalid()
     }
 
     const settings = await SpaceSettingsModel.updateGrid(spaceId, input.enabled, tx)
+    if (!input.enabled) await clearGridPresenceForSpace(tx, spaceId)
     const payload: ServerUpdate["update"] = {
       oneofKind: "spaceSettings",
       spaceSettings: { settings },
@@ -75,7 +79,7 @@ export async function toggleSpaceGrid(
     seq: update.seq,
     date: update.date,
   })
-
+  await notifyGridSpaceChanged(spaceId)
   return { settings, updates }
 }
 
