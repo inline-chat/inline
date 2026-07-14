@@ -166,7 +166,10 @@ private enum NavHistoryMenuLabel {
   }
 
   static func title(for state: Nav3RouteState) -> String {
-    title(for: state.route, selectedSpaceId: state.selectedSpaceId)
+    let primaryTitle = title(for: state.route, selectedSpaceId: state.selectedSpaceId)
+    guard let replyThreadPeer = state.replyThreadPeer else { return primaryTitle }
+    let replyThreadTitle = threadMenuTitle(peerTitle(replyThreadPeer), for: replyThreadPeer)
+    return "\(primaryTitle) — \(replyThreadTitle)"
   }
 
   private static func title(for route: Nav3Route, selectedSpaceId: Int64?) -> String {

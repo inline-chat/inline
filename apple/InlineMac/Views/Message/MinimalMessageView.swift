@@ -31,12 +31,6 @@ private enum ReplyThreadOpenSource {
   case threadSummary
 }
 
-private enum ReplyThreadOpenAction {
-  case current
-  case sidebarBackground
-  case newTab
-}
-
 class MinimalMessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
   private let log = Log.scoped("MinimalMessageView", enableTracing: false)
@@ -696,7 +690,13 @@ class MinimalMessageViewAppKit: NSView {
           "MinimalMessageView.replyThreadSummaryTap messageId=\(self.message.messageId) modifiers=\(flags.rawValue)"
         )
       }
-      self?.openReplyThreadFlow(source: .threadSummary, action: Self.replyThreadOpenAction(for: flags))
+      self?.openReplyThreadFlow(
+        source: .threadSummary,
+        action: ReplyThreadOpenAction(
+          modifierFlags: flags,
+          opensInSidePane: AppSettings.shared.openReplyThreadsInSidePane
+        )
+      )
     }
     view.menuProvider = { [weak self] in
       self?.makeReplyThreadSummaryMenu()
@@ -728,18 +728,6 @@ class MinimalMessageViewAppKit: NSView {
       title: props.replyThreadTitle
     )
     replyThreadSummaryView.isHidden = false
-  }
-
-  private static func replyThreadOpenAction(for flags: NSEvent.ModifierFlags) -> ReplyThreadOpenAction {
-    if flags.contains(.option) {
-      return .sidebarBackground
-    }
-
-    if flags.contains(.command) {
-      return .newTab
-    }
-
-    return .current
   }
 
   private func recentReplyThreadAuthors() -> [UserInfo] {
@@ -3172,9 +3160,14 @@ class MinimalMessageViewAppKit: NSView {
   private func makeReplyThreadSummaryMenu() -> NSMenu {
     let menu = NSMenu()
     menu.addItem(replyThreadMenuItem(
-      title: "Open Thread",
+      title: "Open in Side Pane",
       systemSymbolName: "arrow.turn.down.right",
       action: #selector(openReplyThreadFromSummaryMenu)
+    ))
+    menu.addItem(replyThreadMenuItem(
+      title: "Open as Chat",
+      systemSymbolName: "arrow.up.left.and.arrow.down.right",
+      action: #selector(openReplyThreadAsChatFromSummaryMenu)
     ))
     menu.addItem(replyThreadMenuItem(
       title: "Copy Link",
@@ -3203,6 +3196,10 @@ class MinimalMessageViewAppKit: NSView {
 
   @objc private func openReplyThreadFromSummaryMenu() {
     openReplyThreadFlow(source: .menu)
+  }
+
+  @objc private func openReplyThreadAsChatFromSummaryMenu() {
+    openReplyThreadFlow(source: .menu, action: .current)
   }
 
   @objc private func copyReplyThreadLinkFromSummaryMenu() {
@@ -3292,13 +3289,16 @@ class MinimalMessageViewAppKit: NSView {
 
   private func openReplyThreadFlow(
     source: ReplyThreadOpenSource,
-    action: ReplyThreadOpenAction = .current
+    action: ReplyThreadOpenAction = .sidePane
   ) {
     guard !isAnchorMessage else { return }
-    if action == .current {
+    if action.usesCurrentWindowPresentation {
       focusWindowIfNeeded()
     }
-    let useInlineSpinner = source == .threadSummary && hasReplyThreadSummary && action == .current
+    let useInlineSpinner =
+      source == .threadSummary
+      && hasReplyThreadSummary
+      && action.usesCurrentWindowPresentation
 
     if useInlineSpinner {
       replyThreadSummaryView.setLoading(true)
@@ -3359,6 +3359,8 @@ class MinimalMessageViewAppKit: NSView {
     action: ReplyThreadOpenAction
   ) {
     switch action {
+    case .sidePane:
+      dependencies.openReplyThreadInPane(parentPeer: message.peerId, threadPeer: peer)
     case .current:
       dependencies.openChatRoute(peer: peer)
     case .sidebarBackground:

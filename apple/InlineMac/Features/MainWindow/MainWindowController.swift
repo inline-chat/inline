@@ -299,6 +299,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       guard let self else { return }
       guard dependencies.viewModel.topLevelRoute == .main else { return }
       guard nav3.currentRoute != .empty else { return }
+      if nav3.currentReplyThreadPeer != nil {
+        nav3.closeReplyThread()
+        return
+      }
       guard nav3.goBackToAllChatsOriginIfNeeded() == false else { return }
       nav3.open(.empty)
     }

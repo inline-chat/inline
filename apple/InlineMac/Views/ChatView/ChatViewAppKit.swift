@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Cocoa
 import InlineKit
+import InlineMacUI
 import InlineUI
 import Logger
 import Nuke
@@ -13,11 +14,32 @@ enum ChatViewError: Error {
   case failedToLoad
 }
 
+struct ChatViewAppearance {
+  let surfaceBackgroundColor: NSColor
+  let additionalTopContentInset: CGFloat
+
+  init(
+    surfaceBackgroundColor: NSColor,
+    additionalTopContentInset: CGFloat = 0
+  ) {
+    self.surfaceBackgroundColor = surfaceBackgroundColor
+    self.additionalTopContentInset = additionalTopContentInset.isFinite
+      ? max(0, additionalTopContentInset)
+      : 0
+  }
+
+  static let standard = ChatViewAppearance(
+    surfaceBackgroundColor: Theme.windowContentBackgroundColor,
+    additionalTopContentInset: 0
+  )
+}
+
 class ChatViewAppKit: NSViewController {
   let peerId: Peer
   let dependencies: AppDependencies
   private let toolbarState: ChatToolbarState?
   private let onDialogChange: (@MainActor (Dialog?) -> Void)?
+  private let appearance: ChatViewAppearance
   private var viewModel: FullChatViewModel
   private let preparedPayload: PreparedChatPayload?
 
@@ -59,11 +81,13 @@ class ChatViewAppKit: NSViewController {
     chat: Chat? = nil,
     preparedPayload: PreparedChatPayload? = nil,
     dependencies: AppDependencies,
+    appearance: ChatViewAppearance = .standard,
     toolbarState: ChatToolbarState? = nil,
     onDialogChange: (@MainActor (Dialog?) -> Void)? = nil
   ) {
     self.peerId = peerId
     self.dependencies = dependencies
+    self.appearance = appearance
     self.toolbarState = toolbarState
     self.onDialogChange = onDialogChange
     self.preparedPayload = preparedPayload
@@ -130,7 +154,9 @@ class ChatViewAppKit: NSViewController {
       os_signpost(.end, log: signpostLog, name: "ChatViewLoadView", signpostID: signpostID)
     }
 
-    view = ChatDropView()
+    let rootView = ChatDropView()
+    rootView.surfaceBackgroundColor = appearance.surfaceBackgroundColor
+    view = rootView
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
 
@@ -327,7 +353,9 @@ class ChatViewAppKit: NSViewController {
         chat: chat,
         showUnreadAfter: unreadBoundaryAtOpen(),
         initialState: preparedPayload?.messagesInitialState,
-        initialPinnedMessage: preparedPayload?.pinnedMessage
+        initialPinnedMessage: preparedPayload?.pinnedMessage,
+        surfaceBackgroundColor: appearance.surfaceBackgroundColor,
+        additionalTopContentInset: appearance.additionalTopContentInset
       )
     }
     addChild(messageListVC_)
@@ -351,7 +379,8 @@ class ChatViewAppKit: NSViewController {
         dependencies: dependencies,
         toolbarState: toolbarState,
         parentChatView: self,
-        dialog: dialog
+        dialog: dialog,
+        surfaceBackgroundColor: appearance.surfaceBackgroundColor
       )
     }
     view.addSubview(compose)

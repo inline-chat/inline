@@ -73,7 +73,7 @@ struct ChatRouteView: View {
       )
       .ignoresSafeArea(.all, edges: .vertical)
       .id(peer.toString())
-      .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
+      .frame(minWidth: Theme.chatViewMinWidth, maxWidth: .infinity, maxHeight: .infinity)
       .chatScrollEdgeEffect()
       .navigationTitle(navigationTitle.isEmpty ? fallbackTitle : navigationTitle)
       .commandBar {
@@ -282,7 +282,7 @@ struct ChatRouteView: View {
   }
 }
 
-private extension View {
+extension View {
   @ViewBuilder
   func chatScrollEdgeEffect() -> some View {
     if #available(macOS 27.0, *) {

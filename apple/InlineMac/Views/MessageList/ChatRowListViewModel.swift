@@ -8,6 +8,7 @@ final class ChatRowListViewModel {
   enum Row: Equatable, Hashable {
     case daySeparator(dayStart: Date)
     case unreadSeparator
+    case repliesSeparator
     case parentMessage(id: Int64)
     case message(id: Int64)
   }
@@ -138,7 +139,7 @@ final class ChatRowListViewModel {
     switch row {
       case let .message(id), let .parentMessage(id):
         return id
-      case .daySeparator, .unreadSeparator:
+      case .daySeparator, .unreadSeparator, .repliesSeparator:
         return nil
     }
   }
@@ -333,7 +334,7 @@ final class ChatRowListViewModel {
         case let .parentMessage(id):
           allIdxsByMsgId[id, default: []].insert(rowIdx)
 
-        case .daySeparator, .unreadSeparator:
+        case .daySeparator, .unreadSeparator, .repliesSeparator:
           break
       }
     }
@@ -423,6 +424,7 @@ final class ChatRowListViewModel {
 
     if let parentMessageStableId {
       out.append(.parentMessage(id: parentMessageStableId))
+      out.append(.repliesSeparator)
     }
 
     var prevDayStart: Date?

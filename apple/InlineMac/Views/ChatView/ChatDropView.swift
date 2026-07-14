@@ -3,9 +3,13 @@ import InlineMacUI
 
 class ChatDropView: NSView {
   var dropHandler: ((NSDraggingInfo) -> Bool)?
+  var surfaceBackgroundColor = Theme.windowContentBackgroundColor {
+    didSet { updateSurfaceBackgroundColor() }
+  }
 
   override init(frame: NSRect) {
     super.init(frame: frame)
+    wantsLayer = true
     identifier = LocalDragSurfaceGuard.chatSurfaceIdentifier
     registerForDraggedTypes([
       .fileURL,
@@ -14,11 +18,17 @@ class ChatDropView: NSView {
       NSPasteboard.PasteboardType("public.image"),
       NSPasteboard.PasteboardType("public.file-url"),
     ])
+    updateSurfaceBackgroundColor()
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateSurfaceBackgroundColor()
   }
 
   override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -56,5 +66,11 @@ class ChatDropView: NSView {
     }
 
     return false
+  }
+
+  private func updateSurfaceBackgroundColor() {
+    layer?.backgroundColor = surfaceBackgroundColor
+      .resolvedColor(with: effectiveAppearance)
+      .cgColor
   }
 }

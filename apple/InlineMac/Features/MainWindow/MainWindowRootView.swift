@@ -293,7 +293,7 @@ private struct MainWindowRoot: View {
         .navigationSplitViewColumnWidth(
           min: Theme.minimumSidebarWidth,
           ideal: Theme.idealSidebarWidth,
-          max: 340
+          max: Theme.maximumSidebarWidth
         )
       } detail: {
         MainContentView()
@@ -312,6 +312,9 @@ private struct MainWindowRoot: View {
     .onChange(of: isSidebarCollapsed) { _, _ in
       updateWindowMinSize()
     }
+    .onChange(of: nav3.currentReplyThreadPeer) { _, _ in
+      updateWindowMinSize()
+    }
   }
 
   private var isSidebarCollapsed: Bool {
@@ -322,9 +325,16 @@ private struct MainWindowRoot: View {
   }
 
   private func updateWindowMinSize() {
-    let size = isSidebarCollapsed
+    var size = isSidebarCollapsed
       ? MainWindowController.minSizeWithoutSidebar
       : MainWindowController.minSizeWithSidebar
+
+    if nav3.currentReplyThreadPeer != nil {
+      size.width = max(
+        size.width,
+        ReplyThreadPaneMetrics.minimumWindowWidth(isSidebarCollapsed: isSidebarCollapsed)
+      )
+    }
 
     dependencies?.appBridge.setWindowMinSize(size)
   }

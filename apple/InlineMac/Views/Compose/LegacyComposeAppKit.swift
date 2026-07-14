@@ -56,6 +56,10 @@ class LegacyComposeAppKit: NSView {
   }
 
   private var placeholderText: String {
+    if chat?.isReplyThread == true {
+      return "Reply"
+    }
+
     guard let peerUser,
           peerId.asUserId() == peerUser.id,
           !peerUser.isCurrentUser(),

@@ -25,6 +25,8 @@ class MessageListAppKit: NSViewController {
   private let chatRows: ChatRowListViewModel
   private let showUnreadAfter: Int64?
   private let initialPinnedMessage: PreparedPinnedMessage?
+  private let surfaceBackgroundColor: NSColor
+  private let additionalTopContentInset: CGFloat
   var viewModel: MessagesProgressiveViewModel { chatRows.progressiveViewModel }
   private var messages: [FullMessage] { chatRows.messages }
   private var state: ChatState
@@ -117,13 +119,17 @@ class MessageListAppKit: NSViewController {
     chat: Chat,
     showUnreadAfter: Int64? = nil,
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
-    initialPinnedMessage: PreparedPinnedMessage? = nil
+    initialPinnedMessage: PreparedPinnedMessage? = nil,
+    surfaceBackgroundColor: NSColor = Theme.windowContentBackgroundColor,
+    additionalTopContentInset: CGFloat = 0
   ) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chat = chat
     self.showUnreadAfter = showUnreadAfter
     self.initialPinnedMessage = initialPinnedMessage
+    self.surfaceBackgroundColor = surfaceBackgroundColor
+    self.additionalTopContentInset = additionalTopContentInset
     chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
     let renderStyle = AppSettings.shared.messageRenderStyle
     messageRenderStyle = renderStyle
@@ -224,7 +230,7 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private lazy var toolbarBgView = ToolbarBackgroundView(dependencies: dependencies)
+  private lazy var toolbarBgView = ToolbarBackgroundView(backgroundColor: surfaceBackgroundColor)
   private var pinnedHeaderHeight: CGFloat = 0
   private var pinnedHeaderTopConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
@@ -588,9 +594,9 @@ class MessageListAppKit: NSViewController {
     let toolbarHeight = chromeHeight
     self.toolbarHeight = toolbarHeight
     toolbarBgHeightConstraint?.constant = toolbarHeight
-    let topInset = toolbarHeight + pinnedHeaderHeight
+    let topInset = toolbarHeight + additionalTopContentInset + pinnedHeaderHeight
 
-    pinnedHeaderTopConstraint?.constant = toolbarHeight
+    pinnedHeaderTopConstraint?.constant = toolbarHeight + additionalTopContentInset
     pinnedHeaderHeightConstraint?.constant = pinnedHeaderHeight
 
     if scrollView.contentInsets.top != topInset {
@@ -730,7 +736,10 @@ class MessageListAppKit: NSViewController {
     }
 
     view.addSubview(pinnedHeaderView)
-    pinnedHeaderTopConstraint = pinnedHeaderView.topAnchor.constraint(equalTo: view.topAnchor, constant: toolbarHeight)
+    pinnedHeaderTopConstraint = pinnedHeaderView.topAnchor.constraint(
+      equalTo: view.topAnchor,
+      constant: toolbarHeight + additionalTopContentInset
+    )
     pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: pinnedHeaderHeight)
 
     NSLayoutConstraint.activate([
@@ -3314,6 +3323,14 @@ extension MessageListAppKit: NSTableViewDelegate {
         cell.configure(text: NSLocalizedString("Unread messages", comment: "Unread separator label"))
         return cell
 
+      case .repliesSeparator:
+        let identifier = NSUserInterfaceItemIdentifier("RepliesSeparatorCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? UnreadSeparatorTableCell
+          ?? UnreadSeparatorTableCell()
+        cell.identifier = identifier
+        cell.configure(text: NSLocalizedString("Replies", comment: "Reply thread separator label"))
+        return cell
+
       case .parentMessage:
         guard let id = messageStableId(forRow: row) else { return nil }
         return makeMessageCell(tableView: tableView, stableId: id, row: row)
@@ -3355,6 +3372,9 @@ extension MessageListAppKit: NSTableViewDelegate {
         return DateSeparatorTableCell.height
 
       case .unreadSeparator:
+        return UnreadSeparatorTableCell.height
+
+      case .repliesSeparator:
         return UnreadSeparatorTableCell.height
 
       case let .message(id), let .parentMessage(id):

@@ -84,6 +84,12 @@ struct GeneralSettingsDetailView: View {
           )
         }
 
+        Toggle(isOn: $appSettings.openReplyThreadsInSidePane) {
+          SettingsRowLabel(
+            "Open Reply Threads in Side Pane",
+            description: "Keep the current chat visible when opening a reply thread."
+          )
+        }
       } header: {
         SettingsSectionHeader("Messages")
       }

@@ -168,6 +168,7 @@ final class AppSettings: ObservableObject {
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
+  static let openReplyThreadsInSidePaneKey = "openReplyThreadsInSidePane"
   static let unreadBadgeStyleKey = "unreadBadgeStyle"
 
   // MARK: - General Settings
@@ -251,6 +252,12 @@ final class AppSettings: ObservableObject {
   @Published var messageHoldAction: MessageGestureAction {
     didSet {
       UserDefaults.standard.set(messageHoldAction.rawValue, forKey: Self.messageHoldActionKey)
+    }
+  }
+
+  @Published var openReplyThreadsInSidePane: Bool {
+    didSet {
+      UserDefaults.standard.set(openReplyThreadsInSidePane, forKey: Self.openReplyThreadsInSidePaneKey)
     }
   }
 
@@ -355,6 +362,8 @@ final class AppSettings: ObservableObject {
     } else {
       messageHoldAction = .defaultHold
     }
+    openReplyThreadsInSidePane =
+      UserDefaults.standard.object(forKey: Self.openReplyThreadsInSidePaneKey) as? Bool ?? false
 
     if let storedShowPreview = UserDefaults.standard.object(forKey: "showSidebarMessagePreview") as? Bool {
       showSidebarMessagePreview = storedShowPreview

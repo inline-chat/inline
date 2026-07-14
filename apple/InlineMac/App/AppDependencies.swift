@@ -129,6 +129,13 @@ extension AppDependencies {
     nav.open(.chat(peer: peer))
   }
 
+  func openReplyThreadInPane(parentPeer: Peer, threadPeer: Peer) {
+    guard nav3?.openReplyThread(parentPeer: parentPeer, threadPeer: threadPeer) == true else {
+      openChatRoute(peer: threadPeer)
+      return
+    }
+  }
+
   /// User-initiated chat open. Nav3 uses the temporary preload path here.
   /// Route restoration/hydration should call `Nav3.open` directly so the first
   /// frame commits immediately and the chat view performs its normal load.

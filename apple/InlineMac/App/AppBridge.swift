@@ -117,7 +117,8 @@ final class AppBridge {
       width: width,
       height: height
     )
-    window.setFrame(rect, display: true)
+    let constrainedRect = window.screen.map { window.constrainFrameRect(rect, to: $0) } ?? rect
+    window.setFrame(constrainedRect, display: true)
   }
 }
 

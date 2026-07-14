@@ -52,16 +52,26 @@ extension Nav3Route {
 struct Nav3RouteState: Hashable, RawRepresentable {
   var route: Nav3Route
   var selectedSpaceId: Int64?
+  var replyThreadPeer: Peer?
 
   static let empty = Nav3RouteState(route: .empty)
 
-  init(route: Nav3Route = .empty, selectedSpaceId: Int64? = nil) {
+  init(
+    route: Nav3Route = .empty,
+    selectedSpaceId: Int64? = nil,
+    replyThreadPeer: Peer? = nil
+  ) {
     self.route = route
     self.selectedSpaceId = selectedSpaceId
+    if case .chat = route {
+      self.replyThreadPeer = replyThreadPeer
+    } else {
+      self.replyThreadPeer = nil
+    }
   }
 
   init(nav: Nav3) {
-    self.init(route: nav.currentRoute, selectedSpaceId: nav.selectedSpaceId)
+    self = nav.currentState
   }
 
   init?(rawValue: String) {
@@ -75,7 +85,11 @@ struct Nav3RouteState: Hashable, RawRepresentable {
     }
 
     if let payload = try? JSONDecoder().decode(Payload.self, from: data) {
-      self = Self(route: payload.route, selectedSpaceId: payload.selectedSpaceId)
+      self = Self(
+        route: payload.route,
+        selectedSpaceId: payload.selectedSpaceId,
+        replyThreadPeer: payload.replyThreadPeer
+      )
       return
     }
 
@@ -89,7 +103,11 @@ struct Nav3RouteState: Hashable, RawRepresentable {
 
   var rawValue: String {
     guard route != .empty || selectedSpaceId != nil else { return "" }
-    let payload = Payload(route: route, selectedSpaceId: selectedSpaceId)
+    let payload = Payload(
+      route: route,
+      selectedSpaceId: selectedSpaceId,
+      replyThreadPeer: replyThreadPeer
+    )
     guard let data = try? JSONEncoder().encode(payload) else { return "" }
     return String(data: data, encoding: .utf8) ?? ""
   }
@@ -97,6 +115,7 @@ struct Nav3RouteState: Hashable, RawRepresentable {
   private struct Payload: Codable {
     var route: Nav3Route
     var selectedSpaceId: Int64?
+    var replyThreadPeer: Peer?
   }
 }
 
@@ -131,6 +150,10 @@ class Nav3 {
 
   var currentRoute: Nav3Route {
     currentState.route
+  }
+
+  var currentReplyThreadPeer: Peer? {
+    currentState.replyThreadPeer
   }
 
   var canGoBack: Bool {
@@ -173,6 +196,36 @@ class Nav3 {
   }
 
   @discardableResult
+  func openReplyThread(parentPeer: Peer, threadPeer: Peer) -> Bool {
+    guard threadPeer.isThread else { return false }
+    guard case .chat = currentRoute else { return false }
+    let opensFromPrimaryChat = currentRoute.selectedPeer == parentPeer
+    let opensFromCurrentPane = currentReplyThreadPeer == parentPeer
+    guard opensFromPrimaryChat || opensFromCurrentPane else { return false }
+
+    open(
+      Nav3RouteState(
+        route: currentRoute,
+        selectedSpaceId: selectedSpaceId,
+        replyThreadPeer: threadPeer
+      ),
+      tracksChatNavigation: false
+    )
+    return true
+  }
+
+  func closeReplyThread() {
+    guard currentReplyThreadPeer != nil else { return }
+    open(
+      Nav3RouteState(
+        route: currentRoute,
+        selectedSpaceId: selectedSpaceId
+      ),
+      tracksChatNavigation: false
+    )
+  }
+
+  @discardableResult
   func removeChat(peer: Peer) -> Bool {
     if currentRoute.selectedPeer == peer {
       let spaceId = selectedSpaceId
@@ -183,6 +236,7 @@ class Nav3 {
 
       let oldCount = history.count
       history.removeAll { $0.route.selectedPeer == peer }
+      history = history.map { $0.clearingReplyThread(peer) }
       guard history.count != oldCount else { return false }
 
       let emptyState = Nav3RouteState(route: .empty, selectedSpaceId: spaceId)
@@ -194,16 +248,17 @@ class Nav3 {
       return true
     }
 
+    let clearsReplyThread = history.contains { $0.replyThreadPeer == peer }
     let indexedRoutes = history.enumerated().filter { _, state in
       state.route.selectedPeer != peer
     }
-    guard indexedRoutes.count != history.count else { return false }
+    guard indexedRoutes.count != history.count || clearsReplyThread else { return false }
 
     let oldIndex = historyIndex
     let nextIndex = indexedRoutes.firstIndex { $0.offset == oldIndex }
       ?? indexedRoutes.lastIndex { oldIndex > $0.offset }
 
-    history = indexedRoutes.map(\.element)
+    history = indexedRoutes.map { $0.element.clearingReplyThread(peer) }
     historyIndex = nextIndex ?? -1
     notifyRouteChange()
     return true
@@ -289,7 +344,11 @@ class Nav3 {
 
   private func openContextState(selectedSpaceId: Int64?) {
     open(
-      Nav3RouteState(route: currentRoute, selectedSpaceId: selectedSpaceId),
+      Nav3RouteState(
+        route: currentRoute,
+        selectedSpaceId: selectedSpaceId,
+        replyThreadPeer: currentReplyThreadPeer
+      ),
       tracksChatNavigation: false,
       recordsImplicitBase: true
     )
@@ -388,6 +447,13 @@ class Nav3 {
     return state
   }
 
+}
+
+private extension Nav3RouteState {
+  func clearingReplyThread(_ peer: Peer) -> Nav3RouteState {
+    guard replyThreadPeer == peer else { return self }
+    return Nav3RouteState(route: route, selectedSpaceId: selectedSpaceId)
+  }
 }
 
 private extension Nav3Route {

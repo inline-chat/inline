@@ -46,6 +46,16 @@ public enum Theme {
     return NSColor.windowBackgroundColor
   }
 
+  /// A subtle inspector-like tint that still belongs to the main chat surface family.
+  public static let replyThreadPaneBackgroundColor: NSColor = .init(
+    name: "replyThreadPaneBackgroundColor"
+  ) { appearance in
+    let background = windowContentBackgroundColor.resolvedColor(with: appearance)
+    let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let tint = isDark ? NSColor.white : NSColor.black
+    return background.blended(withFraction: 0.025, of: tint) ?? background
+  }
+
   // MARK: - Main View & Split View
 
   public static let collapseSidebarAtWindowSize: CGFloat = 500
@@ -72,6 +82,7 @@ public enum Theme {
   /// 190 is minimum that fits both sidebar collapse button and plus button
   public static let minimumSidebarWidth: CGFloat = 180
   public static let idealSidebarWidth: CGFloat = 240
+  public static let maximumSidebarWidth: CGFloat = 340
   public static let sidebarItemRadius: CGFloat = 10
   public static let sidebarItemPadding: CGFloat = 7.0
   // extra to above padding. note: weird thing is making this 3.0 fucks up home sidebar.
@@ -164,7 +175,10 @@ public enum Theme {
   // MARK: - Chat View
 
   public static let chatToolbarIconSize: CGFloat = 30
-  public static let chatViewMinWidth: CGFloat = 315 // going below this makes media calcs mess up
+  /// Renderer-safe minimum for a chat column, including reply-thread panes.
+  /// Message/media plans reserve fixed avatar and side insets; validate all narrow
+  /// message variants before lowering this contract.
+  public static let chatViewMinWidth: CGFloat = 315
   public static let messageGroupSpacing: CGFloat = 8
   public static let messageListTopInset: CGFloat = 14
   public static let messageListBottomInset: CGFloat = 10

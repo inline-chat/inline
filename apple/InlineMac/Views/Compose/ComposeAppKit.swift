@@ -26,6 +26,7 @@ final class ComposeAppKit: NSView {
   // exists; broad layout-mode conditionals already proved too fragile here.
   private let implementation: any ComposeImplementation
   private let usesGlassCompose: Bool
+  private let surfaceBackgroundColor: NSColor
 
   weak var messageList: MessageListAppKit? {
     get { implementation.messageList }
@@ -40,8 +41,10 @@ final class ComposeAppKit: NSView {
     dependencies: AppDependencies,
     toolbarState: ChatToolbarState? = nil,
     parentChatView: ChatViewAppKit? = nil,
-    dialog: InlineKit.Dialog?
+    dialog: InlineKit.Dialog?,
+    surfaceBackgroundColor: NSColor = Theme.windowContentBackgroundColor
   ) {
+    self.surfaceBackgroundColor = surfaceBackgroundColor
     if #available(macOS 26.0, *) {
       implementation = GlassComposeAppKit(
         peerId: peerId,
@@ -112,7 +115,7 @@ final class ComposeAppKit: NSView {
     var constraints: [NSLayoutConstraint] = []
 
     if usesGlassCompose {
-      let backgroundView = GlassComposeBackgroundUnderlayView()
+      let backgroundView = GlassComposeBackgroundUnderlayView(backgroundColor: surfaceBackgroundColor)
       backgroundView.translatesAutoresizingMaskIntoConstraints = false
       addSubview(backgroundView)
 
@@ -144,11 +147,13 @@ private final class GlassComposeBackgroundUnderlayView: NSView {
   private static let maxOpacity: CGFloat = 0.7
   private static let fadeStops: [CGFloat] = [0, 0.35, 0.72, 1]
   private static let fadeOpacities: [CGFloat] = [0, maxOpacity * 0.3, maxOpacity * 0.7, maxOpacity]
+  private let backgroundColor: NSColor
 
   override var isFlipped: Bool { true }
   override var isOpaque: Bool { false }
 
-  init() {
+  init(backgroundColor: NSColor) {
+    self.backgroundColor = backgroundColor
     super.init(frame: .zero)
   }
 
@@ -177,7 +182,7 @@ private final class GlassComposeBackgroundUnderlayView: NSView {
     guard let context = NSGraphicsContext.current?.cgContext else { return }
     guard bounds.width > 0, bounds.height > 0 else { return }
 
-    let backgroundColor = Theme.windowContentBackgroundColor
+    let backgroundColor = self.backgroundColor
       .resolvedColor(with: effectiveAppearance)
     let maxColor = backgroundColor.withAlphaComponent(Self.maxOpacity).cgColor
     let fadeHeight = min(Self.fadeHeight, bounds.height)

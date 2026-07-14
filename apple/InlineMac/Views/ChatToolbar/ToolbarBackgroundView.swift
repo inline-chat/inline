@@ -27,15 +27,14 @@ class ToolbarBackgroundView: NSView {
   private let separatorView = NSView()
   private var separatorHeightConstraint: NSLayoutConstraint?
 
-  convenience init(dependencies _: AppDependencies) {
-    self.init()
-  }
-
-  init(separatorEdge: ToolbarBackgroundSeparatorEdge = .bottom) {
+  init(
+    separatorEdge: ToolbarBackgroundSeparatorEdge = .bottom,
+    backgroundColor: NSColor = Theme.windowContentBackgroundColor
+  ) {
     self.separatorEdge = separatorEdge
 
     if #available(macOS 27.0, *) {
-      let view = ToolbarBackgroundMaterialView()
+      let view = ToolbarBackgroundMaterialView(tintColor: backgroundColor)
       backgroundView = view
       materialView = view
     } else {
@@ -169,10 +168,17 @@ class ToolbarBackgroundView: NSView {
 private final class ToolbarBackgroundMaterialView: NSView {
   private let backdropLayer = ToolbarBackgroundPrivateBackdrop.makeLayer()
   private let tintLayer = CALayer()
+  private let tintColor: NSColor
 
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
+  init(tintColor: NSColor) {
+    self.tintColor = tintColor
+    super.init(frame: .zero)
     setupLayers()
+  }
+
+  @available(*, unavailable)
+  override init(frame frameRect: NSRect) {
+    fatalError("init(frame:) has not been implemented")
   }
 
   @available(*, unavailable)
@@ -204,7 +210,7 @@ private final class ToolbarBackgroundMaterialView: NSView {
   }
 
   func updateAppearance() {
-    let tint = NSColor.windowBackgroundColor
+    let tint = tintColor
       .resolvedColor(with: effectiveAppearance)
       .withAlphaComponent(ToolbarBackgroundMaterial.tintAlpha)
 
