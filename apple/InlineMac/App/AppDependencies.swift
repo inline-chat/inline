@@ -25,6 +25,8 @@ public struct AppDependencies {
   let session = MainWindowSessionRefresher()
   let unreadCounts = UnreadCountsModel.shared
   let userSettings = INUserSettings.current
+  let gridRuntime = GridRuntime()
+  var grid: GridRoomService { gridRuntime.rooms }
 
   // Per window
   let nav: Nav = .main
@@ -63,6 +65,7 @@ extension View {
       .environment(\.appBridge, deps.appBridge)
       .environment(\.dependencies, deps)
       .environment(deps.unreadCounts)
+      .environment(deps.grid)
       .environment(deps.nav2)
 
 #if SPARKLE

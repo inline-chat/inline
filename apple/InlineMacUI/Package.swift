@@ -5,6 +5,7 @@ import PackageDescription
 
 let baseDependencies: [PackageDescription.Target.Dependency] = [
   "InlineKit",
+  .product(name: "InlineRTC", package: "InlineKit"),
   "InlineUI",
 ]
 

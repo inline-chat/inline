@@ -211,6 +211,9 @@ private enum NavHistoryMenuLabel {
 
     case let .spaceIntegrations(spaceId):
       return spaceRouteTitle(spaceId: spaceId, suffix: "Integrations", fallback: "Space Integrations")
+
+    case let .grid(spaceId):
+      return spaceRouteTitle(spaceId: spaceId, suffix: "Grid", fallback: "Grid")
     }
   }
 
@@ -251,6 +254,9 @@ private enum NavHistoryMenuLabel {
 
     case .spaceIntegrations:
       return "puzzlepiece"
+
+    case .grid:
+      return "circle.grid.2x2.fill"
     }
   }
 

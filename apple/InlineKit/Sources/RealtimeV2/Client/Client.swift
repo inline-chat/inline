@@ -107,6 +107,8 @@ actor ProtocolSession: ProtocolSessionType {
       switch serverMessage.payload {
       case let .update(updatesPayload):
         await events.send(.updates(updates: updatesPayload))
+      case let .grid(gridEvent):
+        await events.send(.grid(event: gridEvent))
       default:
         log.trace("Protocol session: unhandled message type: \(String(describing: serverMessage.payload))")
       }

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import InlineKit
 import InlineMacUI
+import struct InlineProtocol.GridHomeSpace
 import InlineUI
 import Logger
 import RealtimeV2
@@ -15,6 +16,7 @@ struct SidebarView: View {
   @Environment(\.appearsActive) private var appearsActive
   @Environment(\.colorScheme) private var colorScheme
   @Environment(UnreadCountsModel.self) private var unreadCounts
+  @Environment(GridRoomService.self) private var gridStore
   @EnvironmentObject private var realtimeState: RealtimeState
 #if SPARKLE
   @Environment(UpdateController.self) private var updates
@@ -102,6 +104,17 @@ struct SidebarView: View {
         allChatsRow
       }
 
+      if showsGridRow {
+        gridSidebarRow
+        .listRowInsets(.zero)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .padding(.bottom, SidebarSeparatorRow.totalHeight)
+        .overlay(alignment: .bottom) {
+          SidebarSeparatorRow()
+        }
+      }
+
       if isArchiveVisible {
         Section("Archived") {
           chatRows
@@ -129,6 +142,11 @@ struct SidebarView: View {
       syncSource(spaceId: spaceId)
       refreshEphemeralChatScope(selectedPeer)
       refreshSpaceIfNeeded(spaceId)
+      if let spaceId {
+        Task { await gridStore.load(spaceID: spaceId) }
+      } else {
+        Task { await gridStore.loadHome() }
+      }
     }
     .onChange(of: settings.sidebarAsInbox, initial: true) { _, isEnabled in
       if isEnabled {
@@ -165,6 +183,10 @@ struct SidebarView: View {
       legacyApiState = realtime.apiState
       handleRealtimeConnectionStateChange(realtimeState.connectionState)
       refreshSidebarCleanup()
+      Task { await gridStore.loadHome() }
+    }
+    .onChange(of: gridStore.networkRefreshRevision) {
+      Task { await gridStore.loadHome() }
     }
     .onChange(of: sidebarNavigationSignature, initial: true) { _, _ in
       registerSidebarNavigation()
@@ -202,13 +224,81 @@ struct SidebarView: View {
       nonProminentUnreadCount: unreadCounts.scopedUnopenedOtherUnreadCount,
       action: openAllChats
     )
-    .padding(.bottom, SidebarSeparatorRow.totalHeight)
+    .padding(.bottom, showsGridRow ? 0 : SidebarSeparatorRow.totalHeight)
     .overlay(alignment: .bottom) {
-      SidebarSeparatorRow()
+      if showsGridRow == false {
+        SidebarSeparatorRow()
+      }
     }
     .listRowInsets(.zero)
     .listRowSeparator(.hidden)
     .listRowBackground(Color.clear)
+  }
+
+  private var selectedSpaceGridEnabled: Bool {
+    guard let spaceID = nav.selectedSpaceId else { return false }
+    return gridStore.isEnabled(spaceID: spaceID)
+  }
+
+  private var showsGridRow: Bool {
+    if nav.selectedSpaceId != nil { return selectedSpaceGridEnabled }
+    return gridStore.homeSpaces.isEmpty == false
+  }
+
+  @ViewBuilder
+  private var gridSidebarRow: some View {
+    if let spaceID = nav.selectedSpaceId {
+      SidebarGridRow(
+        avatars: gridStore.recentAvatars(spaceID: spaceID).map { InlineKit.User(from: $0.user) },
+        selected: nav.currentRoute == .grid(spaceId: spaceID),
+        size: settings.sidebarItemSize,
+        action: { openGrid(spaceID: spaceID) }
+      )
+    } else if homeGridSpaces.count == 1, let home = homeGridSpaces.first {
+      SidebarGridRow(
+        avatars: home.recentAvatars.map { InlineKit.User(from: $0.user) },
+        selected: nav.currentRoute == .grid(spaceId: home.spaceID),
+        size: settings.sidebarItemSize,
+        action: { openGrid(spaceID: home.spaceID) }
+      )
+    } else {
+      SidebarGridMenuRow(
+        avatars: homeGridAvatars,
+        selected: isAnyHomeGridSelected,
+        size: settings.sidebarItemSize,
+        spaces: homeGridSpaces.map { home in
+          SidebarGridMenuSpace(
+            id: home.spaceID,
+            name: viewModel.space(id: home.spaceID)?.displayName ?? "Space",
+            activeAvatarCount: Int(home.activeAvatarCount)
+          )
+        },
+        action: openGrid(spaceID:)
+      )
+    }
+  }
+
+  private var homeGridSpaces: [GridHomeSpace] {
+    gridStore.orderedHomeSpaces
+  }
+
+  private var homeGridAvatars: [InlineKit.User] {
+    var seen = Set<Int64>()
+    return homeGridSpaces
+      .flatMap(\.recentAvatars)
+      .filter { seen.insert($0.user.id).inserted }
+      .prefix(4)
+      .map { InlineKit.User(from: $0.user) }
+  }
+
+  private var isAnyHomeGridSelected: Bool {
+    guard case let .grid(spaceID) = nav.currentRoute else { return false }
+    return homeGridSpaces.contains { $0.spaceID == spaceID }
+  }
+
+  private func openGrid(spaceID: Int64) {
+    gridStore.recordGridOpened(spaceID: spaceID)
+    nav.open(.grid(spaceId: spaceID))
   }
 
   @ViewBuilder
@@ -1580,6 +1670,127 @@ private struct SidebarInboxActionRow: View {
   private func unreadAccessibilityDescription(count: Int, singularLabel: String) -> String? {
     guard count > 0 else { return nil }
     return "\(count) \(singularLabel)\(count == 1 ? "" : "s")"
+  }
+}
+
+private struct SidebarGridRow: View {
+  let avatars: [InlineKit.User]
+  let selected: Bool
+  let size: SidebarItemSize
+  let action: () -> Void
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var isHovered = false
+
+  var body: some View {
+    Button(action: action) {
+      SidebarGridRowContent(avatars: avatars, size: size, backgroundColor: backgroundColor)
+    }
+    .buttonStyle(.plain)
+    .help("Grid")
+    .accessibilityLabel("Grid")
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    .onHover { isHovered = $0 }
+  }
+
+  private var backgroundColor: Color {
+    if selected {
+      colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
+    } else if isHovered {
+      colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
+    } else {
+      .clear
+    }
+  }
+}
+
+private struct SidebarGridMenuSpace: Identifiable {
+  let id: Int64
+  let name: String
+  let activeAvatarCount: Int
+}
+
+private struct SidebarGridMenuRow: View {
+  let avatars: [InlineKit.User]
+  let selected: Bool
+  let size: SidebarItemSize
+  let spaces: [SidebarGridMenuSpace]
+  let action: (Int64) -> Void
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var isHovered = false
+
+  var body: some View {
+    Menu {
+      ForEach(spaces) { space in
+        Button {
+          action(space.id)
+        } label: {
+          Label(menuTitle(for: space), systemImage: "circle.grid.2x2")
+        }
+      }
+    } label: {
+      SidebarGridRowContent(avatars: avatars, size: size, backgroundColor: backgroundColor)
+    }
+    .menuStyle(.borderlessButton)
+    .menuIndicator(.hidden)
+    .frame(maxWidth: .infinity)
+    .help("Choose a Space Grid")
+    .accessibilityLabel("Grid")
+    .accessibilityHint("Choose a Space")
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    .onHover { isHovered = $0 }
+  }
+
+  private func menuTitle(for space: SidebarGridMenuSpace) -> String {
+    guard space.activeAvatarCount > 0 else { return space.name }
+    return "\(space.name) · \(space.activeAvatarCount) active"
+  }
+
+  private var backgroundColor: Color {
+    if selected {
+      colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
+    } else if isHovered {
+      colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
+    } else {
+      .clear
+    }
+  }
+}
+
+private struct SidebarGridRowContent: View {
+  let avatars: [InlineKit.User]
+  let size: SidebarItemSize
+  let backgroundColor: Color
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "circle.grid.2x2.fill")
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(.secondary)
+        .frame(width: size.iconSize, height: size.iconSize)
+
+      Text("Grid", comment: "Sidebar button for realtime voice rooms.")
+        .font(.system(size: 13))
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+      HStack(spacing: -6) {
+        ForEach(avatars, id: \.id) { avatar in
+          UserAvatar(user: avatar, size: 20)
+            .transition(.scale(scale: 0.8).combined(with: .opacity))
+        }
+      }
+      .animation(.smoothSnappy, value: avatars.map(\.id))
+    }
+    .frame(height: size.rowHeight)
+    .padding(.leading, Theme.sidebarItemInnerSpacing)
+    .padding(.trailing, Theme.sidebarItemOuterSpacing)
+    .contentShape(.rect(cornerRadius: Theme.sidebarItemRadius))
+    .background {
+      RoundedRectangle(cornerRadius: Theme.sidebarItemRadius, style: .continuous)
+        .fill(backgroundColor)
+    }
+    .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
   }
 }
 

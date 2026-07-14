@@ -121,6 +121,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 //        try? await DataManager.shared.updateStatus(online: true)
 //      }
 //    }
+    Task { @MainActor [weak self] in
+      guard Auth.shared.isLoggedIn else { return }
+      await self?.dependencies.gridRuntime.applicationDidWake()
+    }
+
     if !didHandleInitialActivation {
       didHandleInitialActivation = true
       if MainWindowController.all.isEmpty {
@@ -639,6 +644,8 @@ extension AppDelegate {
 
   @MainActor
   func performLogOut(notifyServer: Bool = true) async {
+    await dependencies.gridRuntime.prepareForLogout()
+
     // Navigate outside of the app
     dependencies.viewModel.navigate(.onboarding)
 

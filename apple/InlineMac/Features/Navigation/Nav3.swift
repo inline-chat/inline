@@ -24,6 +24,7 @@ enum Nav3Route: Hashable, Codable {
   case members(spaceId: Int64)
   case spaceSettings(spaceId: Int64)
   case spaceIntegrations(spaceId: Int64)
+  case grid(spaceId: Int64)
 }
 
 extension Nav3Route {
@@ -40,7 +41,7 @@ extension Nav3Route {
     switch self {
     case let .newChat(spaceId), let .inviteToSpace(spaceId):
       spaceId
-    case let .members(spaceId), let .spaceSettings(spaceId), let .spaceIntegrations(spaceId):
+    case let .members(spaceId), let .spaceSettings(spaceId), let .spaceIntegrations(spaceId), let .grid(spaceId):
       spaceId
     default:
       nil

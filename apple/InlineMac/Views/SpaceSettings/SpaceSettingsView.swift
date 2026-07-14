@@ -12,6 +12,7 @@ struct SpaceSettingsView: View {
 
   @EnvironmentObject private var nav: Nav
   @EnvironmentObject private var data: DataManager
+  @Environment(GridRoomService.self) private var gridStore
 
   @StateObject private var viewModel: FullSpaceViewModel
   @StateObject private var membershipStatus: SpaceMembershipStatusViewModel
@@ -193,6 +194,22 @@ struct SpaceSettingsView: View {
         ) {
           openIntegrations()
         }
+
+        SpaceSettingsActionRow(
+          title: "Grid",
+          subtitle: "Let members join realtime voice rooms from this space's sidebar.",
+          systemImage: "circle.grid.2x2.fill",
+          buttonTitle: gridStore.isEnabled(spaceID: spaceId) ? "Disable Grid" : "Enable Grid",
+          disabledReason: isAdminOrOwner ? nil : "Only space admins and owners can change Grid access."
+        ) {
+          Task {
+            do {
+              try await gridStore.setEnabled(!gridStore.isEnabled(spaceID: spaceId), spaceID: spaceId)
+            } catch {
+              actionError = error.localizedDescription
+            }
+          }
+        }
       }
 
       if isAdminOrOwner {
@@ -222,6 +239,7 @@ struct SpaceSettingsView: View {
     .task {
       await membershipStatus.refreshIfNeeded()
       try? await data.getSpace(spaceId: spaceId)
+      await gridStore.load(spaceID: spaceId)
       if isAdminOrOwner {
         await userGroups.loadIfNeeded()
         await urlPreviewExclusions.loadIfNeeded()

@@ -40,6 +40,7 @@ public actor RealtimeV2 {
 
   // Connection state channel for cross-task consumption and the latest cached state
   private var connectionStateContinuations: [UUID: AsyncStream<RealtimeConnectionState>.Continuation] = [:]
+  private var gridEventContinuations: [UUID: AsyncStream<InlineProtocol.GridEvent>.Continuation] = [:]
   private var transportConnectionState: RealtimeConnectionState = .connecting
   private var currentConnectionState: RealtimeConnectionState = .connecting
   private var syncActivityInProgress = false
@@ -172,6 +173,9 @@ public actor RealtimeV2 {
         case let .updates(updates):
           self.log.trace("Received updates \(updates)")
           await self.sync.process(updates: updates.updates)
+
+        case let .grid(event):
+          self.publishGridEvent(event)
 
         case .authFailed:
           self.log.error("Realtime handshake failed due to missing auth token")
@@ -399,14 +403,30 @@ public actor RealtimeV2 {
   /// Returns a stream of connection state changes that can be consumed from any task.
   public func connectionStates() -> AsyncStream<RealtimeConnectionState> {
     let id = UUID()
-    return AsyncStream { continuation in
-      Task { [weak self] in
-        await self?.addConnectionStateContinuation(id: id, continuation: continuation)
-      }
-      continuation.onTermination = { [weak self] _ in
-        Task { await self?.removeConnectionStateContinuation(id) }
-      }
+    let stream = AsyncStream.makeStream(
+      of: RealtimeConnectionState.self,
+      bufferingPolicy: .bufferingNewest(1)
+    )
+    stream.continuation.onTermination = { [weak self] _ in
+      Task { await self?.removeConnectionStateContinuation(id) }
     }
+    addConnectionStateContinuation(id: id, continuation: stream.continuation)
+    return stream.stream
+  }
+
+  public func gridEvents() -> AsyncStream<InlineProtocol.GridEvent> {
+    let id = UUID()
+    let stream = AsyncStream.makeStream(
+      of: InlineProtocol.GridEvent.self,
+      // Grid events are ephemeral invalidations/targeted hints; snapshots and
+      // target-scoped credential retries repair any observer suspension.
+      bufferingPolicy: .bufferingNewest(128)
+    )
+    stream.continuation.onTermination = { [weak self] _ in
+      Task { await self?.removeGridEventContinuation(id) }
+    }
+    addGridEventContinuation(id: id, continuation: stream.continuation)
+    return stream.stream
   }
 
   public func applyUpdates(_ updates: [InlineProtocol.Update]) {
@@ -611,6 +631,23 @@ public actor RealtimeV2 {
 
   private func removeConnectionStateContinuation(_ id: UUID) {
     connectionStateContinuations.removeValue(forKey: id)
+  }
+
+  private func addGridEventContinuation(
+    id: UUID,
+    continuation: AsyncStream<InlineProtocol.GridEvent>.Continuation
+  ) {
+    gridEventContinuations[id] = continuation
+  }
+
+  private func removeGridEventContinuation(_ id: UUID) {
+    gridEventContinuations.removeValue(forKey: id)
+  }
+
+  private func publishGridEvent(_ event: InlineProtocol.GridEvent) {
+    for continuation in gridEventContinuations.values {
+      continuation.yield(event)
+    }
   }
 
   private func notifyConnectionInitFailureIfNeeded() {

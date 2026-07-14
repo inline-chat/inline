@@ -14,6 +14,7 @@ enum ProtocolSessionEvent: Sendable {
   case rpcResult(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?)
   case rpcError(msgId: UInt64, rpcError: InlineProtocol.RpcError)
   case updates(updates: InlineProtocol.UpdatesPayload)
+  case grid(event: InlineProtocol.GridEvent)
   case pong(nonce: UInt64)
 }
 

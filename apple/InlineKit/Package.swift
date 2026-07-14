@@ -52,6 +52,10 @@ let package = Package(
       name: "InlineAudioPlayback",
       targets: ["InlineAudioPlayback"]
     ),
+    .library(
+      name: "InlineRTC",
+      targets: ["InlineRTC"]
+    ),
   ],
   dependencies: [
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
@@ -69,6 +73,13 @@ let package = Package(
       .upToNextMajor(from: "1.2.0")
     ),
     .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
+    // Inline's narrow LiveKit 2.15.1 fork preserves intentionally muted local
+    // tracks across publication and full reconnect. InlineRTC owns physical
+    // audio devices, routing, and health without SDK device/HAL patches.
+    .package(
+      url: "https://github.com/inline-chat/client-sdk-swift.git",
+      revision: "b5970c3528397b954bc4097877b42a3bfe6e5458"
+    ),
     .package(
       url: "https://github.com/apple/swift-collections.git",
       .upToNextMajor(from: "1.2.0")
@@ -104,6 +115,16 @@ let package = Package(
         "Logger",
         "Auth",
         "RealtimeV2",
+      ],
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
+      name: "InlineRTC",
+      dependencies: [
+        .product(name: "Atomics", package: "swift-atomics"),
+        .product(name: "LiveKit", package: "client-sdk-swift"),
+        "Logger",
       ],
       swiftSettings: swiftSettings
     ),
@@ -178,6 +199,12 @@ let package = Package(
     .testTarget(
       name: "InlineKitTests",
       dependencies: ["InlineKit"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineRTCTests",
+      dependencies: ["InlineRTC"],
       swiftSettings: swiftSettings
     ),
 

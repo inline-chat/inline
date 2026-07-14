@@ -53,6 +53,9 @@ struct RouteView: View {
 
     case let .spaceIntegrations(spaceId):
       SpaceIntegrationsRouteView(spaceId: spaceId)
+
+    case let .grid(spaceId):
+      GridView(spaceID: spaceId)
     }
   }
 

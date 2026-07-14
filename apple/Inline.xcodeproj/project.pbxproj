@@ -51,6 +51,7 @@
 		CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */ = {isa = PBXBuildFile; productRef = CD7C6F122E5847CD00C89032 /* RealtimeV2 */; };
 		D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */ = {isa = PBXBuildFile; productRef = D6B90A002F49000100000001 /* InlineAvatarRendering */; };
 		D6B90A052F49000100000001 /* InlineAvatarRendering in Frameworks */ = {isa = PBXBuildFile; productRef = D6B90A042F49000100000001 /* InlineAvatarRendering */; };
+		D7A0C0022F50000100000001 /* InlineRTC in Frameworks */ = {isa = PBXBuildFile; productRef = D7A0C0012F50000100000001 /* InlineRTC */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
@@ -265,6 +266,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
 				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
 				E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */,
 				CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */,
@@ -464,6 +466,7 @@
 			);
 			name = InlineMac;
 			packageProductDependencies = (
+				D7A0C0012F50000100000001 /* InlineRTC */,
 				C38C905F2CB9432200B78B8A /* InlineKit */,
 				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
 				C3CC991A2CCE9AFF007F7F77 /* InlineUI */,
@@ -1774,6 +1777,10 @@
 		C38C905F2CB9432200B78B8A /* InlineKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineKit;
+		};
+		D7A0C0012F50000100000001 /* InlineRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineRTC;
 		};
 		C3AEE6A92D4FCDC9005D1179 /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;
