@@ -46,6 +46,7 @@ struct SidebarChatItemView: Equatable, View {
   var showsCloseButton = false
   var opensOnMouseDown = true
   var isTemporary = false
+  var isDropTargeted = false
   var onOpen: (() -> Void)?
   var onClose: (() -> Void)?
   var onPersist: (() -> Void)?
@@ -141,6 +142,7 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.showsCloseButton == rhs.showsCloseButton
       && lhs.opensOnMouseDown == rhs.opensOnMouseDown
       && lhs.isTemporary == rhs.isTemporary
+      && lhs.isDropTargeted == rhs.isDropTargeted
   }
 
   var body: some View {
@@ -408,7 +410,7 @@ struct SidebarChatItemView: Equatable, View {
   private var backgroundColor: Color {
     if isActive {
       colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
-    } else if isHovered {
+    } else if isHovered || isDropTargeted {
       colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
     } else {
       .clear

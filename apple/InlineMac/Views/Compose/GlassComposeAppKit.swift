@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import GRDB
 import InlineKit
+import InlineMacUI
 import InlineProtocol
 import Logger
 import SwiftUI
@@ -44,7 +45,8 @@ class GlassComposeAppKit: NSView {
   }
 
   private var canSend: Bool {
-    !isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil
+    !drafts2.hasPendingAttachments(peer: peerId) &&
+      (!isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil)
   }
 
   private var canStartVoiceRecording: Bool {
@@ -74,6 +76,7 @@ class GlassComposeAppKit: NSView {
 
   private func isVoiceRecordingAvailable(isVoiceActive: Bool) -> Bool {
     !isVoiceActive &&
+      !drafts2.hasPendingAttachments(peer: peerId) &&
       isEmptyTrimmed &&
       attachmentItems.isEmpty &&
       state.editingMsgId == nil &&
@@ -849,6 +852,8 @@ class GlassComposeAppKit: NSView {
   }
 
   private func sendVoiceRecording() {
+    guard !drafts2.hasPendingAttachments(peer: peerId) else { return }
+
     do {
       guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }
 
@@ -2020,29 +2025,6 @@ class GlassComposeAppKit: NSView {
 // MARK: External Interface for file drop
 
 extension GlassComposeAppKit {
-  func handlePasteboardAttachments(_ attachments: [PasteboardAttachment]) {
-    guard !voiceViewModel.isActive else { return }
-
-    for attachment in attachments {
-      switch attachment {
-        case let .image(image, url):
-          handleImageDropOrPaste(image, url)
-        case let .animatedImage(url):
-          Task { [weak self] in
-            await self?.addAnimatedImage(url)
-          }
-        case let .video(url, thumbnail):
-          Task { [weak self] in
-            await self?.addVideo(url, thumbnail: thumbnail)
-          }
-        case let .file(url, _):
-          handleFileDrop([url])
-        case let .text(text):
-          handleTextDropOrPaste(text)
-      }
-    }
-  }
-
   func handleFileDrop(_ urls: [URL]) {
     guard !voiceViewModel.isActive else { return }
 
@@ -2168,17 +2150,7 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textView(_ textView: NSTextView, didFailToPasteAttachment failure: PasteboardAttachmentFailure) {
-    if failure.isTelegramSource {
-      ToastCenter.shared.showError("Telegram copies images as private files. Drag the image or use Save Media.")
-      return
-    }
-
-    if failure.isSymlink {
-      ToastCenter.shared.showError("That clipboard file is a private symlink and can't be read.")
-      return
-    }
-
-    ToastCenter.shared.showError("Couldn't read the file from the clipboard.")
+    ToastCenter.shared.showError(failure.userFacingMessage)
   }
 
   /// Note(@mo): User reported Chinese users still see the placeholder when they start typing in Chinese characters.
@@ -2869,11 +2841,18 @@ extension GlassComposeAppKit {
 
   private func handleDraftAttachmentResult(_ result: Drafts2AttachmentResult) {
     switch result {
+      case .pending:
+        updateSendButtonIfNeeded()
       case let .success(pendingId, attachment):
         removeDraftAttachmentPlaceholder(id: pendingId)
         pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
+        guard drafts2.load(peer: peerId)?.attachments.contains(where: { $0.id == attachment.id }) == true else {
+          updateSendButtonIfNeeded()
+          return
+        }
         renderDraftAttachment(attachment)
         updateHeight(animate: true)
+        updateSendButtonIfNeeded()
       case let .failure(pendingId, message):
         removeDraftAttachmentPlaceholder(id: pendingId)
         if let fallbackURL = pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId), addFile(fallbackURL) {
@@ -2883,6 +2862,12 @@ extension GlassComposeAppKit {
 
         log.error("Failed to save draft attachment: \(message)")
         updateHeight(animate: true)
+        updateSendButtonIfNeeded()
+      case let .cancelled(pendingId):
+        removeDraftAttachmentPlaceholder(id: pendingId)
+        pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
+        updateHeight(animate: true)
+        updateSendButtonIfNeeded()
     }
   }
 

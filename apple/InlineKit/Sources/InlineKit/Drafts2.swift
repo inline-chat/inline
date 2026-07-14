@@ -57,8 +57,10 @@ public struct Drafts2SendSnapshot: Sendable {
 }
 
 public enum Drafts2AttachmentResult: Sendable {
+  case pending(pendingId: String)
   case success(pendingId: String, attachment: Drafts2Attachment)
   case failure(pendingId: String, message: String)
+  case cancelled(pendingId: String)
 }
 
 public typealias Drafts2AttachmentCompletion = @MainActor @Sendable (Drafts2AttachmentResult) -> Void
@@ -430,6 +432,13 @@ public final class Drafts2: @unchecked Sendable {
     persist(snapshot)
   }
 
+  public func hasPendingAttachments(peer: Peer) -> Bool {
+    let peerKey = peer.toString()
+    return stateQueue.sync {
+      pendingAttachmentIdsByPeerKey[peerKey]?.isEmpty == false
+    }
+  }
+
   public func clear(peer: Peer) {
     let peerKey = peer.toString()
     let pendingTasks = stateQueue.sync { () -> [Task<Void, Never>] in
@@ -482,7 +491,7 @@ public final class Drafts2: @unchecked Sendable {
     }
   }
 
-  private func startMaterialization(
+  func startMaterialization(
     peer: Peer,
     prefix: String,
     makeMedia: @escaping @Sendable () async throws -> FileMediaItem,
@@ -494,15 +503,24 @@ public final class Drafts2: @unchecked Sendable {
     _ = stateQueue.sync {
       pendingAttachmentIdsByPeerKey[peerKey, default: []].insert(pendingId)
     }
+    emitAttachmentResult(
+      peerKey: peerKey,
+      result: .pending(pendingId: pendingId)
+    )
 
     let task = Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
 
       do {
         let media = try await makeMedia()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+          let result = Drafts2AttachmentResult.cancelled(pendingId: pendingId)
+          emitAttachmentResult(peerKey: peerKey, result: result)
+          await MainActor.run { onComplete?(result) }
+          return
+        }
         guard let attachment = finishMaterialization(peer: peer, pendingId: pendingId, media: media) else {
-          let result = Drafts2AttachmentResult.failure(pendingId: pendingId, message: "Attachment was removed")
+          let result = Drafts2AttachmentResult.cancelled(pendingId: pendingId)
           emitAttachmentResult(peerKey: peerKey, result: result)
           await MainActor.run { onComplete?(result) }
           return
@@ -512,7 +530,11 @@ public final class Drafts2: @unchecked Sendable {
         await MainActor.run { onComplete?(result) }
       } catch {
         finishFailedMaterialization(peerKey: peerKey, pendingId: pendingId)
-        if !Task.isCancelled {
+        if Task.isCancelled {
+          let result = Drafts2AttachmentResult.cancelled(pendingId: pendingId)
+          emitAttachmentResult(peerKey: peerKey, result: result)
+          await MainActor.run { onComplete?(result) }
+        } else {
           log.error("Failed to materialize draft attachment", error: error)
           let result = Drafts2AttachmentResult.failure(pendingId: pendingId, message: error.localizedDescription)
           emitAttachmentResult(peerKey: peerKey, result: result)
@@ -522,6 +544,9 @@ public final class Drafts2: @unchecked Sendable {
     }
 
     stateQueue.sync {
+      // A very small attachment can finish before the detached task reaches
+      // this registration point. Do not retain an already-completed task.
+      guard pendingAttachmentIdsByPeerKey[peerKey]?.contains(pendingId) == true else { return }
       pendingAttachmentTasks[taskKey] = task
     }
     return pendingId

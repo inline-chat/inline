@@ -8,7 +8,6 @@ protocol ComposeImplementation: AnyObject {
   func hostWillMove(toSuperview newSuperview: NSView?)
   func didLayout()
   func setPeerUser(_ user: InlineKit.User?)
-  func handlePasteboardAttachments(_ attachments: [PasteboardAttachment])
   func handleFileDrop(_ urls: [URL])
   func handleTextDropOrPaste(_ text: String)
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL?)
@@ -91,10 +90,6 @@ final class ComposeAppKit: NSView {
 
   func setPeerUser(_ user: InlineKit.User?) {
     implementation.setPeerUser(user)
-  }
-
-  func handlePasteboardAttachments(_ attachments: [PasteboardAttachment]) {
-    implementation.handlePasteboardAttachments(attachments)
   }
 
   func handleFileDrop(_ urls: [URL]) {

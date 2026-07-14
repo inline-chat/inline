@@ -63,7 +63,6 @@ class ChatViewAppKit: NSViewController {
   private var compose: ComposeAppKit?
   private var spinnerVC: NSHostingController<SpinnerView>?
   private var errorVC: NSHostingController<ErrorView>?
-  private var pendingDropObserver: NSObjectProtocol?
   private var appDidBecomeActiveObserver: NSObjectProtocol?
   private var mediaSendFailedObserver: NSObjectProtocol?
   private var chatItemCancellable: AnyCancellable?
@@ -166,7 +165,6 @@ class ChatViewAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupDragAndDrop()
-    setupPendingDropObserver()
   }
 
   override func viewDidAppear() {
@@ -407,7 +405,6 @@ class ChatViewAppKit: NSViewController {
       ])
     }
 
-    consumePendingDropAttachmentsIfPossible()
     scheduleInitialTargetScrollIfNeeded(chat: chat)
   }
 
@@ -539,10 +536,6 @@ class ChatViewAppKit: NSViewController {
       NotificationCenter.default.removeObserver(appDidBecomeActiveObserver)
       self.appDidBecomeActiveObserver = nil
     }
-    if let pendingDropObserver {
-      NotificationCenter.default.removeObserver(pendingDropObserver)
-      self.pendingDropObserver = nil
-    }
     if let mediaSendFailedObserver {
       NotificationCenter.default.removeObserver(mediaSendFailedObserver)
       self.mediaSendFailedObserver = nil
@@ -556,25 +549,6 @@ class ChatViewAppKit: NSViewController {
     dropView.dropHandler = { [weak self] sender in
       self?.handleAttachments(from: sender.draggingPasteboard) ?? false
     }
-  }
-
-  private func setupPendingDropObserver() {
-    pendingDropObserver = NotificationCenter.default.addObserver(
-      forName: PendingDropAttachments.didUpdateNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] notification in
-      guard let self else { return }
-      guard let peer = notification.userInfo?["peerId"] as? Peer, peer == self.peerId else { return }
-      self.consumePendingDropAttachmentsIfPossible()
-    }
-  }
-
-  private func consumePendingDropAttachmentsIfPossible() {
-    guard let compose else { return }
-    let attachments = PendingDropAttachments.shared.consume(peerId: peerId)
-    guard attachments.isEmpty == false else { return }
-    compose.handlePasteboardAttachments(attachments)
   }
 
   private func handleAttachments(from pasteboard: NSPasteboard) -> Bool {

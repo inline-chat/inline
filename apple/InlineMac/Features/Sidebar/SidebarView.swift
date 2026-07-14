@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import InlineKit
 import InlineMacUI
@@ -33,6 +34,7 @@ struct SidebarView: View {
   @State private var cleanupOwnerID = UUID()
   @State private var visibleInboxItemIDs = Set<ChatListItem.Identifier>()
   @State private var hasMeasuredInboxViewport = false
+  @State private var activeDropImportID: UUID?
   @Environment(SidebarViewModel.self) private var viewModel
   private let isCollapsed: Bool
 
@@ -249,26 +251,44 @@ struct SidebarView: View {
       let isTemporary = isTemporaryItem(item)
       let showsSeparator = showsTopSeparator && index == displayItems.startIndex
 
-      SidebarChatItemView(
-        item: item,
-        selected: isSelected,
-        titleDimmed: sidebarTitlesDimmed,
-        size: settings.sidebarItemSize,
-        unreadBadgeStyle: settings.unreadBadgeStyle,
-        showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
-        opensOnMouseDown: true,
-        isTemporary: isTemporary,
-        onOpen: {
-          openChat(item)
+      SidebarDropDestination(
+        beginTransferDrop: {
+          beginSidebarDrop(on: item)
         },
-        onClose: {
-          closeChat(item)
+        performTransferredDrop: { transfers, importID in
+          handleSidebarTransferredDrop(
+            transfers,
+            importID: importID,
+            on: item
+          )
         },
-        onPersist: {
-          persistTemporaryChat(item)
+        performNativeDrop: { pasteboard in
+          handleSidebarDrop(pasteboard, on: item)
+        },
+        content: { isDropTargeted in
+          SidebarChatItemView(
+            item: item,
+            selected: isSelected,
+            titleDimmed: sidebarTitlesDimmed,
+            size: settings.sidebarItemSize,
+            unreadBadgeStyle: settings.unreadBadgeStyle,
+            showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
+            opensOnMouseDown: true,
+            isTemporary: isTemporary,
+            isDropTargeted: isDropTargeted,
+            onOpen: {
+              openChat(item)
+            },
+            onClose: {
+              closeChat(item)
+            },
+            onPersist: {
+              persistTemporaryChat(item)
+            }
+          )
+          .equatable()
         }
       )
-      .equatable()
       .id(item.id)
       .onScrollVisibilityChange { isVisible in
         setInboxItemVisibility(item.id, isVisible: isVisible)
@@ -769,6 +789,144 @@ struct SidebarView: View {
     }
 
     nav.open(.chat(peer: item.peerId))
+  }
+
+  private func handleSidebarDrop(
+    _ pasteboard: NSPasteboard,
+    on item: SidebarViewModel.Item
+  ) -> Bool {
+    let importID = beginSidebarDrop(on: item)
+    let pasteboardResult = InlinePasteboard.findAttachmentsResult(
+      from: pasteboard,
+      includeText: false
+    )
+    let attachments = pasteboardResult.attachments
+
+    guard attachments.isEmpty == false else {
+      handleSidebarTransferFailure(
+        importID: importID,
+        message: pasteboardResult.failures.first?.userFacingMessage
+          ?? "No supported attachments were found."
+      )
+      return true
+    }
+
+    importSidebarAttachments(
+      pasteboardResult,
+      into: item,
+      importID: importID
+    )
+
+    return true
+  }
+
+  private func handleSidebarTransferredDrop(
+    _ transfers: [IncomingAttachmentTransfer],
+    importID: UUID?,
+    on item: SidebarViewModel.Item
+  ) {
+    // Usually the DropSession begins navigation before Core Transferable
+    // delivers its values. If delivery wins that race, preserve the same
+    // navigation-first contract here before validating the transferred files.
+    let resolvedImportID = importID ?? beginSidebarDrop(on: item)
+    let pasteboardResult = InlinePasteboard.findAttachmentsResult(from: transfers)
+    let attachments = pasteboardResult.attachments
+
+    guard attachments.isEmpty == false else {
+      cleanupTransferredAttachments(transfers)
+      handleSidebarTransferFailure(
+        importID: resolvedImportID,
+        message: pasteboardResult.failures.first?.userFacingMessage
+          ?? "No supported attachments were found."
+      )
+      return
+    }
+
+    importSidebarAttachments(
+      pasteboardResult,
+      into: item,
+      importID: resolvedImportID,
+      transferredAttachments: transfers
+    )
+  }
+
+  private func beginSidebarDrop(on item: SidebarViewModel.Item) -> UUID {
+    let importID = UUID()
+    activeDropImportID = importID
+    activateDropDestinationWindow()
+
+    // Navigation and attachment materialization are independent. Opening now
+    // lets the composer either load a fast result from Drafts2 or observe a
+    // slower result while Drafts2 prepares it in the background.
+    openChat(item)
+    return importID
+  }
+
+  private func activateDropDestinationWindow() {
+    guard let appBridge = dependencies?.appBridge else {
+      NSApp.activate(ignoringOtherApps: true)
+      return
+    }
+
+    appBridge.currentWindow()?.makeKeyAndOrderFront(nil)
+    appBridge.activate(ignoringOtherApps: true)
+  }
+
+  private func importSidebarAttachments(
+    _ pasteboardResult: PasteboardAttachmentResult,
+    into item: SidebarViewModel.Item,
+    importID: UUID,
+    transferredAttachments: [IncomingAttachmentTransfer] = []
+  ) {
+    let attachments = pasteboardResult.attachments
+
+    Task { @MainActor in
+      let summary = await DraftAttachmentImporter.import(
+        attachments,
+        into: item.peerId
+      )
+      cleanupTransferredAttachments(transferredAttachments)
+      let failedCount = pasteboardResult.failures.count + summary.failedCount
+      if failedCount > 0 {
+        Log.shared.error("Sidebar drop failed to prepare \(failedCount) item(s)")
+      }
+
+      // Every drop persists, but only the latest one owns global toast/error state.
+      guard activeDropImportID == importID else { return }
+      activeDropImportID = nil
+
+      if failedCount > 0 {
+        ToastCenter.shared.showError(
+          failedCount == 1
+            ? "One dropped item couldn't be added."
+            : "Some dropped items couldn't be added."
+        )
+      } else if summary.importedCount == 0 {
+        ToastCenter.shared.showError("No supported attachments were found.")
+      }
+    }
+  }
+
+  private func handleSidebarTransferFailure(
+    importID: UUID?,
+    message: String = "Couldn't prepare that item."
+  ) {
+    if let importID {
+      guard activeDropImportID == importID else { return }
+      activeDropImportID = nil
+    }
+    ToastCenter.shared.showError(message)
+  }
+
+  private func cleanupTransferredAttachments(
+    _ transfers: [IncomingAttachmentTransfer]
+  ) {
+    guard transfers.isEmpty == false else { return }
+    _ = Task.detached(priority: .utility) {
+      for transfer in transfers {
+        transfer.cleanup()
+      }
+    }
   }
 
   private func closeChat(_ item: SidebarViewModel.Item) {

@@ -180,6 +180,32 @@ struct Drafts2Tests {
     #expect(reloadedVoice.waveform == voice.waveform)
   }
 
+  @MainActor
+  @Test("pending attachment cancellation clears readiness and completes")
+  func pendingAttachmentCancellationCompletes() async {
+    let drafts = Drafts2(database: AppDatabase.empty())
+    let peer: InlineKit.Peer = .user(id: 9)
+    let media = FileMediaItem.document(documentInfo(id: -90))
+
+    let result = await withCheckedContinuation { (continuation: CheckedContinuation<Drafts2AttachmentResult, Never>) in
+      let pendingID = drafts.startMaterialization(peer: peer, prefix: "pending_test") {
+        try await Task.sleep(for: .seconds(30))
+        return media
+      } onComplete: { result in
+        continuation.resume(returning: result)
+      }
+
+      #expect(drafts.hasPendingAttachments(peer: peer))
+      drafts.removeAttachment(peer: peer, id: pendingID)
+      #expect(!drafts.hasPendingAttachments(peer: peer))
+    }
+
+    guard case .cancelled = result else {
+      Issue.record("Expected cancelled materialization")
+      return
+    }
+  }
+
   private func mentionEntities() -> MessageEntities {
     var entity = MessageEntity()
     entity.type = .mention

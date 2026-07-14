@@ -849,16 +849,7 @@ class ComposeNSTextView: NSTextView {
 
   override func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
     var types = newTypes
-    types.append(contentsOf: [
-      .fileURL,
-      .tiff,
-      .png,
-      NSPasteboard.PasteboardType("public.image"),
-      NSPasteboard.PasteboardType("public.jpeg"),
-      NSPasteboard.PasteboardType("image/png"),
-      NSPasteboard.PasteboardType("image/jpeg"),
-
-    ])
+    types.append(contentsOf: InlinePasteboard.draggedTypes)
 
     super.registerForDraggedTypes(types)
   }
@@ -873,25 +864,10 @@ class ComposeNSTextView: NSTextView {
   }
 
   private func canHandlePasteboard(_ pasteboard: NSPasteboard) -> Bool {
-    // Check for files
-    if pasteboard.canReadObject(forClasses: [NSURL.self], options: nil) {
-      return true
-    }
-
-    // Check for images from browsers
-    let imageTypes: [NSPasteboard.PasteboardType] = [
-      .tiff, .png, .html,
-      NSPasteboard.PasteboardType("public.image"),
-      NSPasteboard.PasteboardType("public.jpeg"),
-      NSPasteboard.PasteboardType("public.gif"),
-      NSPasteboard.PasteboardType("com.compuserve.gif"),
-      NSPasteboard.PasteboardType("image/png"),
-      NSPasteboard.PasteboardType("image/jpeg"),
-      NSPasteboard.PasteboardType("image/gif"),
-      NSPasteboard.PasteboardType("image/webp"),
-    ]
-
-    return pasteboard.availableType(from: imageTypes) != nil
+    InlinePasteboard.canImportAttachments(
+      from: pasteboard,
+      includeText: false
+    )
   }
 
   override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
