@@ -435,6 +435,25 @@
   margin: 1.25rem 0;
 }
 
+.changelog-content.page-content img,
+.changelog-content.page-content .docs-changelog-video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.85rem 0 1.25rem;
+  border: 1px solid var(--docs-faint);
+  border-radius: 16px;
+  background: var(--docs-panel);
+}
+
+.changelog-content.page-content .docs-changelog-video {
+  width: min(100%, 540px);
+}
+
+.changelog-content.page-content h2:not(:first-of-type) {
+  margin-top: 2.75rem;
+}
+
 /* Make heading links subtle; clicking a heading should update the hash. */
 .docs-content.page-content .docs-heading-link {
   color: inherit;

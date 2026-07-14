@@ -46,6 +46,13 @@ const pages: DocPage[] = [
     summary: "Current product roadmap status.",
   },
   {
+    title: "What's New",
+    source: "changelog.md",
+    route: "/docs/changelog",
+    markdownPath: "/docs/changelog.md",
+    summary: "Release notes and exact app build links.",
+  },
+  {
     title: "CLI",
     source: "cli.md",
     route: "/docs/cli",

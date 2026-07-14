@@ -10,5 +10,7 @@ export function docsPageHead(slug: DocsPageSlug) {
 
 export function DocsPage({ slug }: { slug: DocsPageSlug }) {
   const page = requireDocsPage(slug)
-  return <DocsMarkdown markdown={page.markdown} className="page-content docs-content" />
+  const isChangelog = slug === "changelog"
+  const className = `page-content docs-content${isChangelog ? " changelog-content" : ""}`
+  return <DocsMarkdown markdown={page.markdown} className={className} renderVideoLinks={isChangelog} />
 }

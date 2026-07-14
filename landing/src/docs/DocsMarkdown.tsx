@@ -9,6 +9,7 @@ import { emailFallback, emailParts } from "~/lib/email"
 type DocsMarkdownProps = {
   markdown: string
   className?: string
+  renderVideoLinks?: boolean
 }
 
 type Slugger = {
@@ -81,6 +82,10 @@ function isExternalHref(href: string) {
   return /^(https?:)?\/\//i.test(href) || href.startsWith("mailto:") || href.startsWith("tel:")
 }
 
+function isVideoHref(href: string) {
+  return /\.mp4(?:[?#].*)?$/i.test(href)
+}
+
 function PreWithCopy({ children, ...props }: { children?: ReactNode; [key: string]: unknown }) {
   const [copied, setCopied] = useState(false)
 
@@ -109,7 +114,7 @@ function PreWithCopy({ children, ...props }: { children?: ReactNode; [key: strin
   )
 }
 
-export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
+export function DocsMarkdown({ markdown, className, renderVideoLinks = false }: DocsMarkdownProps) {
   const slugger = createSlugger()
   const toc = extractToc(markdown)
   const showToc = toc.length >= 5 && markdown.split("\n").length >= 45
@@ -150,7 +155,7 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
         h2: heading("h2"),
         h3: heading("h3"),
         h4: heading("h4"),
-        a: ({ href, children, ...props }) => {
+        a: ({ href, children, node: _node, ...props }) => {
           const safeHref = href ?? ""
 
           if (safeHref.startsWith("mailto:")) {
@@ -185,6 +190,24 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
             )
           }
 
+          if (renderVideoLinks && isVideoHref(safeHref)) {
+            return (
+              <video
+                className="docs-changelog-video"
+                src={safeHref}
+                aria-label={nodeText(children) || "Changelog video"}
+                autoPlay
+                controls
+                loop
+                muted
+                playsInline
+                preload="metadata"
+              >
+                <a href={safeHref}>{children}</a>
+              </video>
+            )
+          }
+
           if (!safeHref || safeHref.startsWith("#") || isExternalHref(safeHref)) {
             return (
               <a href={href} {...props}>
@@ -208,10 +231,10 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
             </a>
           )
         },
-        img: ({ src, alt, ...props }) => {
+        img: ({ src, alt, node: _node, ...props }) => {
           return <img src={src} alt={alt ?? ""} loading="lazy" {...props} />
         },
-        pre: ({ children, ...props }) => <PreWithCopy {...props}>{children}</PreWithCopy>,
+        pre: ({ children, node: _node, ...props }) => <PreWithCopy {...props}>{children}</PreWithCopy>,
       }}
     >
       {markdown}
