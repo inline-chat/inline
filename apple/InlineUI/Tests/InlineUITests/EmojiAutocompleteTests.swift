@@ -1,4 +1,5 @@
 import EmojiAutocomplete
+import Foundation
 import InlineKit
 import Testing
 import TextProcessing
@@ -142,13 +143,54 @@ struct EmojiAutocompleteTests {
     #expect(sections.flatMap(\.items).contains { $0.shortcode == "thumbsup" })
   }
 
-  @Test("picker data browse sections include all generated emoji")
-  func pickerDataBrowseSectionsIncludeAllGeneratedEmoji() {
+  @Test("picker data browse sections include one base entry instead of skin tone variants")
+  func pickerDataBrowseSectionsExcludeSkinToneVariants() {
     let sectionItems = EmojiPickerData.defaultSections.flatMap(\.items)
     let sectionIDs = Set(sectionItems.map(\.id))
-    let generatedIDs = Set(EmojiAutocomplete.allSuggestions.map(\.id))
+    let generatedBaseItems = EmojiAutocomplete.allSuggestions.filter { !containsSkinToneModifier($0.emoji) }
+    let generatedBaseIDs = Set(generatedBaseItems.map(\.id))
 
-    #expect(sectionItems.count == EmojiAutocomplete.allSuggestions.count)
-    #expect(sectionIDs == generatedIDs)
+    #expect(sectionItems.count == generatedBaseItems.count)
+    #expect(sectionIDs == generatedBaseIDs)
+    #expect(sectionItems.allSatisfy { !containsSkinToneModifier($0.emoji) })
+  }
+
+  @Test("picker search excludes skin tone variants")
+  func pickerSearchExcludesSkinToneVariants() {
+    let items = EmojiPickerData.suggestions(matching: "wave", limit: 64)
+
+    #expect(items.contains { $0.shortcode == "wave" })
+    #expect(items.allSatisfy { !containsSkinToneModifier($0.emoji) })
+  }
+
+  @Test("preferred skin tone resolves supported emoji variants")
+  func preferredSkinToneResolvesSupportedEmojiVariants() {
+    #expect(EmojiSkinTone.light.applying(to: "👋") == "👋🏻")
+    #expect(EmojiSkinTone.dark.applying(to: "🧑‍💻") == "🧑🏿‍💻")
+
+    let wave = EmojiPickerItem(emoji: "👋", shortcode: "wave", label: "waving hand")
+    #expect(wave.applying(skinTone: .medium).emoji == "👋🏽")
+  }
+
+  @Test("preferred skin tone preserves explicit variants, unsupported emoji, and standard mode")
+  func preferredSkinTonePreservesExplicitUnsupportedAndStandardEmoji() {
+    #expect(EmojiSkinTone.medium.applying(to: "👋🏻") == "👋🏻")
+    #expect(EmojiSkinTone.dark.applying(to: "🚀") == "🚀")
+    #expect(EmojiSkinTone.standard.applying(to: "👋🏽") == "👋🏽")
+  }
+
+  @Test("preferred skin tone store defaults and persists")
+  func preferredSkinToneStoreDefaultsAndPersists() throws {
+    let suiteName = "EmojiSkinTonePreferenceTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    #expect(EmojiSkinTonePreferenceStore.current(userDefaults: defaults) == .standard)
+    EmojiSkinTonePreferenceStore.set(.mediumDark, userDefaults: defaults)
+    #expect(EmojiSkinTonePreferenceStore.current(userDefaults: defaults) == .mediumDark)
+  }
+
+  private func containsSkinToneModifier(_ emoji: String) -> Bool {
+    emoji.unicodeScalars.contains { (0x1F3FB ... 0x1F3FF).contains($0.value) }
   }
 }

@@ -2516,10 +2516,11 @@ extension LegacyComposeAppKit: ComposeAutocompleteMenuDelegate {
         saveDraft()
 
       case let .emoji(value, _):
+        let preferredValue = AppSettings.shared.preferredEmojiSkinTone.applying(to: value)
         let result = emojiAutocompleteDetector.replaceEmojiAutocomplete(
           in: textEditor.attributedString,
           range: match.range,
-          with: value
+          with: preferredValue
         )
 
         ignoreNextHeightChange = true

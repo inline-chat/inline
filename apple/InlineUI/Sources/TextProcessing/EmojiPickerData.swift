@@ -15,6 +15,14 @@ public struct EmojiPickerItem: Hashable, Identifiable, Sendable {
     self.shortcode = shortcode
     self.label = label
   }
+
+  public func applying(skinTone: EmojiSkinTone) -> EmojiPickerItem {
+    EmojiPickerItem(
+      emoji: skinTone.applying(to: emoji),
+      shortcode: shortcode,
+      label: label
+    )
+  }
 }
 
 public struct EmojiPickerSection: Hashable, Identifiable, Sendable {
@@ -29,15 +37,83 @@ public struct EmojiPickerSection: Hashable, Identifiable, Sendable {
   }
 }
 
+public enum EmojiSkinTone: String, CaseIterable, Identifiable, Sendable {
+  case standard
+  case light
+  case mediumLight
+  case medium
+  case mediumDark
+  case dark
+
+  public var id: String { rawValue }
+
+  public func applying(to emoji: String) -> String {
+    guard let modifierValue, !EmojiPickerData.containsSkinToneModifier(in: emoji) else { return emoji }
+    return EmojiPickerData.skinToneVariant(of: emoji, modifierValue: modifierValue) ?? emoji
+  }
+
+  private var modifierValue: UInt32? {
+    switch self {
+    case .standard:
+      nil
+    case .light:
+      0x1F3FB
+    case .mediumLight:
+      0x1F3FC
+    case .medium:
+      0x1F3FD
+    case .mediumDark:
+      0x1F3FE
+    case .dark:
+      0x1F3FF
+    }
+  }
+}
+
+public enum EmojiSkinTonePreferenceStore {
+  public static let key = "chat.inline.preferredEmojiSkinTone.v1"
+
+  public static func current(userDefaults: UserDefaults = .standard) -> EmojiSkinTone {
+    guard let rawValue = userDefaults.string(forKey: key),
+          let tone = EmojiSkinTone(rawValue: rawValue)
+    else {
+      return .standard
+    }
+    return tone
+  }
+
+  public static func set(_ tone: EmojiSkinTone, userDefaults: UserDefaults = .standard) {
+    userDefaults.set(tone.rawValue, forKey: key)
+  }
+}
+
 public enum EmojiPickerData {
   public static func suggestions(matching query: String, limit: Int = 64) -> [EmojiPickerItem] {
-    EmojiAutocomplete.suggestions(matching: query, limit: limit).map(EmojiPickerItem.init)
+    guard limit > 0 else { return [] }
+
+    return Array(EmojiAutocomplete.suggestions(matching: query, limit: .max)
+      .lazy
+      .filter { !containsSkinToneModifier(in: $0.emoji) }
+      .prefix(limit)
+      .map(EmojiPickerItem.init))
   }
 
   public static let defaultSections: [EmojiPickerSection] = makeDefaultSections()
 
+  fileprivate static func skinToneVariant(of emoji: String, modifierValue: UInt32) -> String? {
+    let base = removingSkinToneModifiers(from: emoji)
+    return skinToneVariantsByBase[base]?[modifierValue]
+  }
+
+  fileprivate static func containsSkinToneModifier(in emoji: String) -> Bool {
+    emoji.unicodeScalars.contains { isSkinToneModifier($0.value) }
+  }
+
   private static func makeDefaultSections() -> [EmojiPickerSection] {
-    let items = EmojiAutocomplete.allSuggestions.map(EmojiPickerItem.init)
+    let items = Array(EmojiAutocomplete.allSuggestions
+      .lazy
+      .filter { !containsSkinToneModifier(in: $0.emoji) }
+      .map(EmojiPickerItem.init))
     let starts = sectionStarts(in: items)
     guard starts.count == sectionBoundaries.count else {
       return [EmojiPickerSection(id: "emoji", title: "Emoji", items: items)]
@@ -72,6 +148,35 @@ public enum EmojiPickerData {
     SectionBoundary(id: "symbols", title: "Symbols", firstShortcode: "atm_sign"),
     SectionBoundary(id: "flags", title: "Flags", firstShortcode: "chequered_flag"),
   ]
+
+  private static let skinToneVariantsByBase: [String: [UInt32: String]] = {
+    var variants: [String: [UInt32: String]] = [:]
+
+    for suggestion in EmojiAutocomplete.allSuggestions {
+      let modifierValues = suggestion.emoji.unicodeScalars
+        .map(\.value)
+        .filter(isSkinToneModifier)
+      guard let modifierValue = modifierValues.first,
+            modifierValues.allSatisfy({ $0 == modifierValue })
+      else {
+        continue
+      }
+
+      let base = removingSkinToneModifiers(from: suggestion.emoji)
+      variants[base, default: [:]][modifierValue] = suggestion.emoji
+    }
+
+    return variants
+  }()
+
+  private static func removingSkinToneModifiers(from emoji: String) -> String {
+    let scalars = emoji.unicodeScalars.filter { !isSkinToneModifier($0.value) }
+    return String(String.UnicodeScalarView(scalars))
+  }
+
+  private static func isSkinToneModifier(_ value: UInt32) -> Bool {
+    (0x1F3FB ... 0x1F3FF).contains(value)
+  }
 }
 
 private struct SectionBoundary: Sendable {

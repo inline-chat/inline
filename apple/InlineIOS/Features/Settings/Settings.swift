@@ -3,6 +3,7 @@ import GRDBQuery
 import InlineKit
 import Logger
 import SwiftUI
+import TextProcessing
 import Translation
 
 struct SettingsView: View {
@@ -23,6 +24,8 @@ struct SettingsView: View {
   @State private var showCropper: Bool = false
   @AppStorage(InAppLinkPreferences.openLinksInAppKey)
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
+  @AppStorage(EmojiSkinTonePreferenceStore.key)
+  private var preferredEmojiSkinToneRawValue = EmojiSkinTone.standard.rawValue
 
   var body: some View {
     List {
@@ -49,6 +52,23 @@ struct SettingsView: View {
           iconColor: .blue,
           title: "Appearance"
         )
+      }
+
+      Section("Emoji") {
+        SettingsItem(
+          icon: "hand.raised.fill",
+          iconColor: .orange,
+          title: "Preferred Skin Tone"
+        ) {
+          Picker("Preferred Skin Tone", selection: preferredEmojiSkinToneBinding) {
+            ForEach(EmojiSkinTone.allCases) { tone in
+              Text(tone.settingsLabel)
+                .tag(tone)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+        }
       }
 
       Section("Notifications") {
@@ -241,6 +261,32 @@ struct SettingsView: View {
   private func dismissSettings() {
     router.dismissSheet()
     dismiss()
+  }
+
+  private var preferredEmojiSkinToneBinding: Binding<EmojiSkinTone> {
+    Binding(
+      get: { EmojiSkinTone(rawValue: preferredEmojiSkinToneRawValue) ?? .standard },
+      set: { preferredEmojiSkinToneRawValue = $0.rawValue }
+    )
+  }
+}
+
+private extension EmojiSkinTone {
+  var settingsLabel: LocalizedStringResource {
+    switch self {
+    case .standard:
+      "👋 Default"
+    case .light:
+      "👋🏻 Light"
+    case .mediumLight:
+      "👋🏼 Medium-Light"
+    case .medium:
+      "👋🏽 Medium"
+    case .mediumDark:
+      "👋🏾 Medium-Dark"
+    case .dark:
+      "👋🏿 Dark"
+    }
   }
 }
 

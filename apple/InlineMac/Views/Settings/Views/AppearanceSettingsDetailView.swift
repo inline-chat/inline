@@ -1,5 +1,6 @@
 import InlineMacUI
 import SwiftUI
+import TextProcessing
 
 struct AppearanceSettingsDetailView: View {
   @StateObject private var appSettings = AppSettings.shared
@@ -60,6 +61,8 @@ struct AppearanceSettingsDetailView: View {
         SettingsSectionHeader("Messages")
       }
 
+      EmojiSkinToneSettingsSection(selection: $appSettings.preferredEmojiSkinTone)
+
       Section {
         LabeledContent {
           UnreadBadgeStylePicker(selection: $appSettings.unreadBadgeStyle)
@@ -71,6 +74,52 @@ struct AppearanceSettingsDetailView: View {
       }
     }
     .settingsFormStyle()
+  }
+}
+
+private struct EmojiSkinToneSettingsSection: View {
+  @Binding var selection: EmojiSkinTone
+
+  var body: some View {
+    Section {
+      LabeledContent {
+        Picker("Skin Tone", selection: $selection) {
+          ForEach(EmojiSkinTone.allCases) { tone in
+            Text(tone.settingsLabel)
+              .tag(tone)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .fixedSize()
+      } label: {
+        SettingsRowLabel(
+          "Preferred Skin Tone",
+          description: "Apply this tone when selecting supported emoji. Explicit variants remain available."
+        )
+      }
+    } header: {
+      SettingsSectionHeader("Emoji")
+    }
+  }
+}
+
+private extension EmojiSkinTone {
+  var settingsLabel: LocalizedStringResource {
+    switch self {
+    case .standard:
+      "👋 Default"
+    case .light:
+      "👋🏻 Light"
+    case .mediumLight:
+      "👋🏼 Medium-Light"
+    case .medium:
+      "👋🏽 Medium"
+    case .mediumDark:
+      "👋🏾 Medium-Dark"
+    case .dark:
+      "👋🏿 Dark"
+    }
   }
 }
 

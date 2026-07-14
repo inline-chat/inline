@@ -9,6 +9,7 @@ import Nuke
 import NukeUI
 import Photos
 import SwiftUI
+import TextProcessing
 import Translation
 import UIKit
 
@@ -2985,7 +2986,12 @@ private extension MessagesCollectionView {
     private let maxCacheSize = 1_000
 
     func createReactionPickerView(for message: Message, at indexPath: IndexPath) -> UIView {
-      let reactions = ReactionPickerEmojiUsageStore.suggestedEmojis()
+      let preferredSkinTone = EmojiSkinTonePreferenceStore.current()
+      var seenReactions = Set<String>()
+      let reactions = ReactionPickerEmojiUsageStore.suggestedEmojis().compactMap { emoji -> String? in
+        let preferredEmoji = preferredSkinTone.applying(to: emoji)
+        return seenReactions.insert(preferredEmoji).inserted ? preferredEmoji : nil
+      }
 
       let containerWidth = currentCollectionView?.window?.bounds.width
         ?? currentCollectionView?.bounds.width

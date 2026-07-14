@@ -4,6 +4,7 @@ import Foundation
 import InlineKit
 import InlineMacUI
 import SwiftUI
+import TextProcessing
 
 enum AppAppearance: String, CaseIterable, Identifiable {
   case system
@@ -147,16 +148,18 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
   }
 
   var reactionEmoji: String? {
-    switch self {
+    let emoji: String? = switch self {
     case .toggleAck:
-      return "✔️"
+      "✔️"
     case .toggleHeart:
-      return "❤️"
+      "❤️"
     case .toggleThumbsUp:
-      return "👍"
+      "👍"
     case .reply, .reactionsMenu:
-      return nil
+      nil
     }
+
+    return emoji.map { AppSettings.shared.preferredEmojiSkinTone.applying(to: $0) }
   }
 }
 
@@ -224,6 +227,12 @@ final class AppSettings: ObservableObject {
   @Published var messageRenderStyle: MessageRenderStyle {
     didSet {
       UserDefaults.standard.set(messageRenderStyle.rawValue, forKey: "messageRenderStyle")
+    }
+  }
+
+  @Published var preferredEmojiSkinTone: EmojiSkinTone {
+    didSet {
+      EmojiSkinTonePreferenceStore.set(preferredEmojiSkinTone)
     }
   }
 
@@ -330,6 +339,8 @@ final class AppSettings: ObservableObject {
     } else {
       messageRenderStyle = .bubble
     }
+
+    preferredEmojiSkinTone = EmojiSkinTonePreferenceStore.current()
 
     if let storedDoubleClickAction = UserDefaults.standard.string(forKey: Self.messageDoubleClickActionKey),
        let action = MessageGestureAction(rawValue: storedDoubleClickAction) {

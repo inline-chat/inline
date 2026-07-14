@@ -459,7 +459,14 @@ private final class EmojiPickerRootView: NSView {
   }
 
   private func applySections(_ newSections: [EmojiPickerSection], resetScroll: Bool) {
-    sections = newSections
+    let preferredSkinTone = AppSettings.shared.preferredEmojiSkinTone
+    sections = newSections.map { section in
+      EmojiPickerSection(
+        id: section.id,
+        title: section.title,
+        items: section.items.map { $0.applying(skinTone: preferredSkinTone) }
+      )
+    }
     emptyLabel.isHidden = sections.contains { !$0.items.isEmpty }
     collectionLayout.invalidateLayout()
     collectionView.reloadData()
