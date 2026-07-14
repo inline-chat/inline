@@ -76,6 +76,7 @@ class MessageListAppKit: NSViewController {
   private var heightRecalcCount = 0
   private var madeMessageCellCount = 0
   private var rowHeightQueryCount = 0
+  private var didScheduleChatNavigationReady = false
 
   private var suppressResizeScrollMaintenance = false
   private let minimumAvailableMeasurementWidth: CGFloat = 80
@@ -1811,6 +1812,7 @@ class MessageListAppKit: NSViewController {
     }
 
     checkWidthChangeForHeights()
+    scheduleChatNavigationReadyAfterInitialLayout()
 
     if feature_scrollsToBottomInDidLayout {
       // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
@@ -1818,6 +1820,19 @@ class MessageListAppKit: NSViewController {
         // TODO: see how we can avoid this when user is sending message and we're resizing it's fucked up
         scrollToBottom(animated: false)
       }
+    }
+  }
+
+  private func scheduleChatNavigationReadyAfterInitialLayout() {
+    guard !didScheduleChatNavigationReady, !isDisposed else { return }
+    didScheduleChatNavigationReady = true
+
+    // Queue the end after the first message-list layout. This also captures synchronous main-thread
+    // work that delays the callback, but it does not prove that Core Animation presented a frame.
+    DispatchQueue.main.async { [weak self] in
+      guard let self, !isDisposed else { return }
+      dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "first_message_layout")
+      dependencies.nav3?.endChatNavigationSignpost(peer: peerId, reason: "first_message_layout")
     }
   }
 

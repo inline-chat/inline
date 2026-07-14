@@ -232,8 +232,6 @@ class ChatViewAppKit: NSViewController {
         showSpinner()
       case let .loaded(chat):
         setupChatComponents(chat: chat)
-        dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "loaded")
-        dependencies.nav3?.endChatNavigationSignpost(peer: peerId, reason: "loaded")
       case let .error(error):
         showError(error: error)
         dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "error")
