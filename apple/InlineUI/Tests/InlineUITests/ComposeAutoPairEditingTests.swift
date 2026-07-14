@@ -47,6 +47,13 @@ struct ComposeAutoPairEditingTests {
     #expect(result?.selectedRange == NSRange(location: 4, length: 0))
   }
 
+  @Test("typing an opening parenthesis after a colon falls back to normal insertion for emoji")
+  func openingParenthesisAfterColonDoesNotAutoClose() {
+    let result = applyInsertion("(", to: ":", cursor: 1)
+
+    #expect(result == nil)
+  }
+
   @Test("typing an opening pair before existing text falls back to normal insertion")
   func openingPairBeforeExistingTextDoesNotAutoClose() {
     let result = applyInsertion("(", to: "a b", cursor: 2)

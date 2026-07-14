@@ -48,6 +48,10 @@ public enum ComposeAutoPairEditing {
         )
       }
 
+      if insertedText == "(", previousCharacter(in: text, at: range.location) == ":" {
+        return nil
+      }
+
       guard shouldInsertPair(before: nextCharacter(in: text, at: range.location)) else { return nil }
 
       return Replacement(
@@ -135,6 +139,12 @@ public enum ComposeAutoPairEditing {
     let nsText = text as NSString
     guard location >= 0, location < nsText.length else { return nil }
     return nsText.substring(with: NSRange(location: location, length: 1))
+  }
+
+  private static func previousCharacter(in text: String, at location: Int) -> String? {
+    let nsText = text as NSString
+    guard location > 0, location <= nsText.length else { return nil }
+    return nsText.substring(with: NSRange(location: location - 1, length: 1))
   }
 
   private static func shouldInsertPair(before next: String?) -> Bool {
