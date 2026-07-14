@@ -32,6 +32,7 @@
     "db:generate": "cd server && bun run db:generate",
     "ios:debug": "bash scripts/ios/open-debug-app.sh",
     "macos:debug": "bash scripts/macos/open-debug-app.sh",
+    "macos:grid-logs": "bash scripts/macos/stream-grid-logs.sh",
     "cleanup:builds": "cd scripts && bun run cleanup:builds",
     "cleanup:builds:deep": "cd scripts && bun run cleanup:builds:deep"
   },

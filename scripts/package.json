@@ -14,6 +14,7 @@
     "ios:debug": "bash ios/open-debug-app.sh",
     "macos:update-version": "bun run macos/update-version.ts",
     "macos:debug": "bash macos/open-debug-app.sh",
+    "macos:grid-logs": "bash macos/stream-grid-logs.sh",
     "macos:build-local-app": "bash macos/build-local-app.sh",
     "macos:build-direct": "bash macos/build-direct.sh",
     "macos:check-notary-credentials": "bash macos/check-notary-credentials.sh",
