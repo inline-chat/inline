@@ -306,6 +306,145 @@ describe("getUpdates", () => {
     expect(sidecarUserIds.has(newMember.id)).toBe(true)
   })
 
+  test("serves participant deletion with the chat dependency sidecars", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Participant Delete Sidecars", [
+      "participant-delete@example.com",
+    ])
+    const user = users[0]
+    if (!space || !user) throw new Error("Failed to create participant delete fixtures")
+
+    const chat = await testUtils.createChat(space.id, "Removed Private Thread", "thread", false)
+    if (!chat) throw new Error("Failed to create participant delete chat")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: { chatId: BigInt(chat.id) },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 10,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantDelete"])
+    expect(result.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(chat.id)
+    expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).toContain(space.id)
+  })
+
+  test("serves join-space updates with the current-user dependency", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Join Space Sidecars", [
+      "join-space-sidecar@example.com",
+    ])
+    const user = users[0]
+    if (!space || !user) throw new Error("Failed to create join-space fixtures")
+
+    const [member] = await db
+      .select()
+      .from(members)
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, user.id)))
+      .limit(1)
+    if (!member) throw new Error("Failed to load join-space member fixture")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userJoinSpace",
+        userJoinSpace: {
+          space: {
+            id: BigInt(space.id),
+            name: space.name,
+            date: 1n,
+            creator: false,
+          },
+          member: {
+            id: BigInt(member.id),
+            spaceId: BigInt(space.id),
+            userId: BigInt(user.id),
+            role: Member_Role.MEMBER,
+            date: 1n,
+            canAccessPublicChats: true,
+          },
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 10,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["joinSpace"])
+    expect(result.sidecars?.users.map((sidecar) => Number(sidecar.id))).toContain(user.id)
+  })
+
+  test("serves member updates with their space and user dependencies", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Member Update Sidecars", [
+      "member-update@example.com",
+    ])
+    const user = users[0]
+    if (!space || !user) throw new Error("Failed to create member update fixtures")
+
+    const [member] = await db
+      .select()
+      .from(members)
+      .where(and(eq(members.spaceId, space.id), eq(members.userId, user.id)))
+      .limit(1)
+    if (!member) throw new Error("Failed to load member update fixture")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Space,
+      entityId: space.id,
+      seq: 1,
+      payload: {
+        oneofKind: "spaceMemberUpdate",
+        spaceMemberUpdate: {
+          member: {
+            id: BigInt(member.id),
+            spaceId: BigInt(space.id),
+            userId: BigInt(user.id),
+            role: Member_Role.MEMBER,
+            date: 1n,
+            canAccessPublicChats: true,
+          },
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "space", space: { spaceId: BigInt(space.id) } } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 10,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["spaceMemberUpdate"])
+    expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).toContain(space.id)
+    expect(result.sidecars?.users.map((sidecar) => Number(sidecar.id))).toContain(user.id)
+  })
+
   test("sanitizes public space member add updates for regular members", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Public Update Space", [
       "regular-public-updates@example.com",
@@ -365,6 +504,8 @@ describe("getUpdates", () => {
     expect(update.spaceMemberAdd.user?.phoneNumber).toBeUndefined()
     expect(update.spaceMemberAdd.user?.timeZone).toBeUndefined()
     expect(update.spaceMemberAdd.user?.min).toBe(true)
+    expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).toContain(space.id)
+    expect(result.sidecars?.users.map((sidecar) => Number(sidecar.id))).toContain(newUser.id)
   })
 
   test("caps totalLimit to MAX_TOTAL_LIMIT", async () => {

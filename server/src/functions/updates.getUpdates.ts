@@ -171,7 +171,11 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
             updates,
             userId: context.currentUserId,
           })
-        : undefined
+        : await Sync.buildSpaceSidecarsForUpdates({
+            spaceId: descriptor.spaceId,
+            updates,
+            userId: context.currentUserId,
+          })
   const sidecarsMs = elapsedMs(sidecarsStartedAt)
 
   let resultType = updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE

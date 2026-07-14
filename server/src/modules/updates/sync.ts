@@ -43,6 +43,7 @@ export const Sync = {
   getUpdates: getUpdates,
   processChatUpdates: processChatUpdates,
   buildChatSidecarsForUpdates: buildChatSidecarsForUpdates,
+  buildSpaceSidecarsForUpdates: buildSpaceSidecarsForUpdates,
   buildUserSidecarsForUpdates: buildUserSidecarsForUpdates,
   inflateSpaceUpdates: inflateSpaceUpdates,
   inflateUserUpdates: inflateUserUpdates,
@@ -608,6 +609,50 @@ const emptySidecars = (): UpdateSidecars => ({
   userGroups: [],
 })
 
+type SpaceSidecarsForUpdatesInput = {
+  spaceId: number
+  updates: Update[]
+  userId: number
+}
+
+async function buildSpaceSidecarsForUpdates(input: SpaceSidecarsForUpdatesInput): Promise<UpdateSidecars> {
+  if (input.updates.length === 0) {
+    return emptySidecars()
+  }
+
+  const userIds = new Set<number>()
+  for (const update of input.updates) {
+    switch (update.update.oneofKind) {
+      case "spaceMemberAdd":
+        addSafeId(userIds, update.update.spaceMemberAdd.member?.userId)
+        break
+      case "spaceMemberUpdate":
+        addSafeId(userIds, update.update.spaceMemberUpdate.member?.userId)
+        break
+      default:
+        break
+    }
+  }
+
+  const encodedUsers: User[] = []
+  if (userIds.size > 0) {
+    const rows = await UsersModel.getUsersWithPhotos(Array.from(userIds))
+    for (const row of rows) {
+      encodedUsers.push(Encoders.user({ user: row.user, photoFile: row.photoFile, min: true }))
+    }
+  }
+
+  const [space] = await db.select().from(spaces).where(eq(spaces.id, input.spaceId)).limit(1)
+
+  return {
+    users: encodedUsers,
+    chats: [],
+    dialogs: [],
+    spaces: space ? [Encoders.space(space, { encodingForUserId: input.userId })] : [],
+    userGroups: [],
+  }
+}
+
 type ChatSidecarsForUpdatesInput = {
   chatId: number
   updates: Update[]
@@ -745,11 +790,48 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
     switch (update.update.oneofKind) {
       case "participantAdd":
         addSafeId(chatIds, update.update.participantAdd.chatId)
+        addSafeId(userIds, update.update.participantAdd.participant?.userId)
+        break
+
+      case "participantDelete":
+        addSafeId(chatIds, update.update.participantDelete.chatId)
         break
 
       case "participantGroupAdd":
         addSafeId(chatIds, update.update.participantGroupAdd.chatId)
         addSafeId(groupIds, update.update.participantGroupAdd.groupParticipant?.groupId)
+        break
+
+      case "participantGroupDelete":
+        addSafeId(chatIds, update.update.participantGroupDelete.chatId)
+        break
+
+      case "joinSpace":
+        userIds.add(input.userId)
+        break
+
+      case "dialogArchived":
+        collectPeerSidecarRefs(update.update.dialogArchived.peerId, { chatIds, userIds, spaceIds })
+        break
+
+      case "updateReadMaxId":
+        collectPeerSidecarRefs(update.update.updateReadMaxId.peerId, { chatIds, userIds, spaceIds })
+        break
+
+      case "markAsUnread":
+        collectPeerSidecarRefs(update.update.markAsUnread.peerId, { chatIds, userIds, spaceIds })
+        break
+
+      case "dialogNotificationSettings":
+        collectPeerSidecarRefs(update.update.dialogNotificationSettings.peerId, { chatIds, userIds, spaceIds })
+        break
+
+      case "dialogFollowMode":
+        collectPeerSidecarRefs(update.update.dialogFollowMode.peerId, { chatIds, userIds, spaceIds })
+        break
+
+      case "chatOpen":
+        collectProtocolChatSidecarRefs(update.update.chatOpen.chat, { chatIds, userIds, spaceIds })
         break
 
       default:
@@ -860,6 +942,19 @@ function collectProtocolChatSidecarRefs(chat: ProtocolChat | undefined, refs: Ch
 
   if (chat.peerId?.type.oneofKind === "user") {
     addSafeId(refs.userIds, chat.peerId.type.user.userId)
+  }
+}
+
+function collectPeerSidecarRefs(peer: Peer | undefined, refs: ChatSidecarRefs) {
+  switch (peer?.type.oneofKind) {
+    case "chat":
+      addSafeId(refs.chatIds, peer.type.chat.chatId)
+      break
+    case "user":
+      addSafeId(refs.userIds, peer.type.user.userId)
+      break
+    case undefined:
+      break
   }
 }
 

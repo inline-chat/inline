@@ -567,7 +567,13 @@ func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
     .deleteAll(db)
 }
 
-private func deleteLocalChatData(_ db: Database, chatId: Int64) throws {
+func deleteLocalChatData(_ db: Database, chatId: Int64) throws {
+  // `chat(id, lastMsgId)` is a composite foreign key to
+  // `message(chatId, messageId)`. Its SET NULL action would otherwise try to
+  // clear the chat's primary key when the referenced last message is deleted.
+  try Chat
+    .filter(Chat.Columns.id == chatId)
+    .updateAll(db, [Chat.Columns.lastMsgId.set(to: nil)])
   try Message.filter(Column("chatId") == chatId).deleteAll(db)
   try Dialog.filter(Column("chatId") == chatId).deleteAll(db)
   try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
@@ -629,19 +635,7 @@ extension InlineProtocol.UpdateDeleteChat {
     let peer = peerID.toPeer()
     guard case let .thread(chatId) = peer else { return }
 
-    try Message.filter(Column("chatId") == chatId).deleteAll(db)
-    try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
-    try Chat.filter(Column("id") == chatId).deleteAll(db)
-    try deleteChatSyncBucket(db, chatId: chatId)
-
-    // Post notification to pop chat route
-    Task.detached {
-      NotificationCenter.default.post(
-        name: Notification.Name("chatDeletedNotification"),
-        object: nil,
-        userInfo: ["chatId": chatId]
-      )
-    }
+    try deleteLocalChatData(db, chatId: chatId)
   }
 }
 

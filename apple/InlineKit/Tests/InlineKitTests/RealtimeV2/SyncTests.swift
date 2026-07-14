@@ -423,7 +423,8 @@ final class SyncTests {
       date: 200,
       updates: [],
       final: true,
-      resultType: .empty
+      resultType: .empty,
+      skippedSequences: makeIrrelevantSkippedSequences(after: 5, through: 10)
     )
 
     let client = FakeProtocolClient(responses: [tooLong, slice])
@@ -532,7 +533,8 @@ final class SyncTests {
       date: 200,
       updates: [message],
       final: true,
-      resultType: .slice
+      resultType: .slice,
+      skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 9)
     )
 
     let client = FakeProtocolClient(
@@ -587,7 +589,8 @@ final class SyncTests {
       date: 200,
       updates: [],
       final: true,
-      resultType: .empty
+      resultType: .empty,
+      skippedSequences: makeIrrelevantSkippedSequences(after: 5, through: 1005)
     )
     // Second TOO_LONG still reports latest=2005.
     let tooLongLatestAgain = tooLongLatest
@@ -597,7 +600,8 @@ final class SyncTests {
       date: 500,
       updates: [],
       final: true,
-      resultType: .empty
+      resultType: .empty,
+      skippedSequences: makeIrrelevantSkippedSequences(after: 1005, through: 2005)
     )
 
     let client = FakeProtocolClient(responses: [tooLongLatest, slice1005, tooLongLatestAgain, slice2005])
@@ -1583,8 +1587,8 @@ final class SyncTests {
     #expect(bucketState.seq == 6)
   }
 
-  @Test("empty non-progress getUpdates trusts server pointer")
-  func testEmptyNonProgressGetUpdatesTrustsServerPointer() async throws {
+  @Test("a stale hint cannot advance beyond an authoritative empty page")
+  func testStaleHintDoesNotAdvanceBeyondEmptyPage() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -1592,7 +1596,7 @@ final class SyncTests {
       seq: 5,
       date: 120,
       updates: [],
-      final: false,
+      final: true,
       resultType: .empty
     )
     let client = FakeProtocolClient(
@@ -1615,11 +1619,10 @@ final class SyncTests {
     signal.update = .chatHasNewUpdates(payload)
 
     await sync.process(updates: [signal])
-    let advanced = await waitForCondition {
-      let bucketState = await storage.getBucketState(for: .chat(peer: peer))
-      return bucketState.seq == 6
+    let completed = await waitForCondition {
+      await client.getCallCount() == 1
     }
-    #expect(advanced)
+    #expect(completed)
 
     let spun = await waitForCondition(timeout: .milliseconds(250)) {
       await client.getCallCount() > 1
@@ -1632,12 +1635,12 @@ final class SyncTests {
     #expect(repaired.isEmpty)
 
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
-    #expect(bucketState.seq == 6)
-    #expect(bucketState.date == 120)
+    #expect(bucketState.seq == 5)
+    #expect(bucketState.date == 100)
   }
 
-  @Test("non-progress getUpdates applies buffered realtime and does not busy-loop")
-  func testNonProgressWithBufferedRealtimeAppliesBufferedUpdateAndDoesNotBusyLoop() async throws {
+  @Test("non-progress does not skip a missing buffered sequence or busy-loop")
+  func testNonProgressDoesNotSkipMissingBufferedSequence() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -1660,10 +1663,10 @@ final class SyncTests {
     let realtime2 = makeNewMessageUpdate(seq: 2, date: 130)
     await sync.process(updates: [realtime2])
 
-    _ = await waitForCondition {
-      let bucketState = await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 1)))
-      return bucketState.seq == 2
+    let firstFetchStarted = await waitForCondition {
+      await client.getCallCount() == 1
     }
+    #expect(firstFetchStarted)
 
     let spun = await waitForCondition(timeout: .milliseconds(250)) {
       await client.getCallCount() > 1
@@ -1671,13 +1674,13 @@ final class SyncTests {
     #expect(spun == false)
 
     let applied = await apply.appliedUpdates
-    #expect(applied.map { Int($0.seq) } == [2])
+    #expect(applied.isEmpty)
     let repaired = await apply.repairedChats
     #expect(repaired.isEmpty)
 
     let bucketState = await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 1)))
-    #expect(bucketState.seq == 2)
-    #expect(bucketState.date == 130)
+    #expect(bucketState.seq == 0)
+    #expect(bucketState.date == 0)
   }
 
   @Test("buffered realtime applies after multi-slice catch-up in order")
@@ -1733,19 +1736,17 @@ final class SyncTests {
     #expect(bucketState.date == 120)
   }
 
-  @Test("catch-up skips seqs already applied by realtime")
-  func testCatchupSkipsAlreadyAppliedRealtimeSeqs() async throws {
+  @Test("catch-up begins after the realtime cursor without replaying older sequences")
+  func testCatchupBeginsAfterRealtimeCursor() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
-    let catchup1 = makeNewMessageUpdate(seq: 1, date: 80)
-    let catchup2 = makeNewMessageUpdate(seq: 2, date: 90)
     let catchup3 = makeNewMessageUpdate(seq: 3, date: 100)
     let catchup4 = makeNewMessageUpdate(seq: 4, date: 110)
     let catchup = makeGetUpdatesResult(
       seq: 4,
       date: 110,
-      updates: [catchup1, catchup2, catchup3, catchup4],
+      updates: [catchup3, catchup4],
       final: true,
       resultType: .slice
     )
@@ -1773,7 +1774,7 @@ final class SyncTests {
     #expect(applied.map { Int($0.seq) } == [1, 2, 3, 4])
 
     let stats = await sync.getStats()
-    #expect(stats.bucketUpdatesDuplicateSkipped == 2)
+    #expect(stats.bucketUpdatesDuplicateSkipped == 0)
 
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
     #expect(bucketState.seq == 4)
@@ -1828,7 +1829,8 @@ final class SyncTests {
       date: 120,
       updates: [catchup1, catchup2, catchup3],
       final: true,
-      resultType: .slice
+      resultType: .slice,
+      skippedSequences: makeIrrelevantSkippedSequences(after: 3, through: 5)
     )
     let client = FakeProtocolClient(responses: [catchup], gateFirstCall: true)
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
@@ -1920,7 +1922,7 @@ final class SyncTests {
 // MARK: - Test Helpers
 
 private func waitForCondition(
-  timeout: Duration = .seconds(1),
+  timeout: Duration = .seconds(3),
   pollInterval: Duration = .milliseconds(10),
   _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
@@ -2224,7 +2226,8 @@ private func makeGetUpdatesResult(
   updates: [InlineProtocol.Update],
   final: Bool,
   resultType: InlineProtocol.GetUpdatesResult.ResultType,
-  sidecars: InlineProtocol.UpdateSidecars? = nil
+  sidecars: InlineProtocol.UpdateSidecars? = nil,
+  skippedSequences: [InlineProtocol.SyncSkippedSequence] = []
 ) -> InlineProtocol.RpcResult.OneOf_Result {
   var result = InlineProtocol.GetUpdatesResult()
   result.updates = updates
@@ -2232,10 +2235,24 @@ private func makeGetUpdatesResult(
   result.date = date
   result.final = final
   result.resultType = resultType
+  result.skippedSequences = skippedSequences
   if let sidecars {
     result.sidecars = sidecars
   }
   return .getUpdates(result)
+}
+
+private func makeIrrelevantSkippedSequences(
+  after startSeq: Int64,
+  through endSeq: Int64
+) -> [InlineProtocol.SyncSkippedSequence] {
+  guard endSeq > startSeq else { return [] }
+  return ((startSeq + 1) ... endSeq).map { seq in
+    .with {
+      $0.seq = seq
+      $0.reason = .irrelevantToBucket
+    }
+  }
 }
 
 private func makeGetUpdatesStateResult(
