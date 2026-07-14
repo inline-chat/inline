@@ -4,19 +4,21 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 PROJECT=${PROJECT:-"${ROOT_DIR}/apple/Inline.xcodeproj"}
-SCHEME=${SCHEME:-"Inline (macOS)"}
-CONFIGURATION=${CONFIGURATION:-Debug}
+SCHEME=${SCHEME:-}
+CONFIGURATION=${CONFIGURATION:-}
 DESTINATION=${DESTINATION:-"platform=macOS"}
 APP_NAME=${APP_NAME:-"Inline Debug"}
 LOG_PATH=${LOG_PATH:-"${ROOT_DIR}/.tmp/macos-debug-$(date +%Y%m%d-%H%M%S).log"}
 
 build=1
+second_debug=0
 stop=1
 open_app=1
 verify=1
 verbose=0
 stream_logs=${STREAM_LOGS:-1}
 live_log_filter=${LIVE_LOG_FILTER:-}
+launch_args=()
 settings_file=$(mktemp)
 
 cleanup() {
@@ -31,8 +33,9 @@ Usage: open-debug-app.sh [options]
 Builds and opens the regular Xcode Debug macOS app without launching Xcode.
 
 Options:
+  --second          Build and launch the second debug app/profile alongside the first
   --no-build        Open the most recent Debug build without rebuilding
-  --no-stop         Do not stop an already-running Inline Debug process
+  --no-stop         Do not stop an already-running instance of the selected debug app
   --no-open         Build and resolve the app path, but do not launch it
   --no-verify       Do not verify that the process is running after launch
   --logs            Stream Inline-owned unified logs after launch (default)
@@ -44,8 +47,8 @@ Options:
 
 Environment:
   PROJECT           Xcode project path
-  SCHEME            Xcode scheme (default: Inline (macOS))
-  CONFIGURATION     Build configuration (default: Debug)
+  SCHEME            Xcode scheme (default: Inline (macOS), or 2nd Inline (macOS) with --second)
+  CONFIGURATION     Build configuration (default: Debug, or Debug #2 with --second)
   DESTINATION       xcodebuild destination (default: platform=macOS)
   APP_NAME          Process/app name (default: Inline Debug)
   LOG_PATH          Non-verbose command log path (default: .tmp/macos-debug-<timestamp>.log)
@@ -56,6 +59,10 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --second)
+      second_debug=1
+      shift
+      ;;
     --no-build)
       build=0
       shift
@@ -104,6 +111,15 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${second_debug}" == "1" ]]; then
+  SCHEME=${SCHEME:-"2nd Inline (macOS)"}
+  CONFIGURATION=${CONFIGURATION:-"Debug #2"}
+  launch_args=(--user-profile=2)
+else
+  SCHEME=${SCHEME:-"Inline (macOS)"}
+  CONFIGURATION=${CONFIGURATION:-Debug}
+fi
 
 if [[ "${stream_logs}" != "1" ]]; then
   stream_logs=0
@@ -252,7 +268,20 @@ build_setting() {
 }
 
 pids_for_app() {
-  /usr/bin/pgrep -x "${APP_NAME}" 2>/dev/null || true
+  local candidate_pid
+  local command
+  local executable_path="${app_path}/Contents/MacOS/${executable_name}"
+
+  for candidate_pid in $(/usr/bin/pgrep -x "${APP_NAME}" 2>/dev/null || true); do
+    command="$(/bin/ps -ww -p "${candidate_pid}" -o command= 2>/dev/null || true)"
+    if [[ "${command}" != "${executable_path}" && "${command}" != "${executable_path} "* ]]; then
+      continue
+    fi
+
+    if [[ "${command}" == "${executable_path}" || "${command}" == "${executable_path} "* ]]; then
+      echo "${candidate_pid}"
+    fi
+  done
 }
 
 pid_in_list() {
@@ -370,14 +399,15 @@ wait_until_running() {
 
 open_debug_app() {
   local attempt
-  local -a open_args=()
+  local -a open_args=(-n)
+  local -a args=(/usr/bin/open "${open_args[@]}" "${app_path}")
 
-  if [[ "${stop}" == "1" ]]; then
-    open_args=(-n)
+  if [[ ${#launch_args[@]} -gt 0 ]]; then
+    args+=(--args "${launch_args[@]}")
   fi
 
   for attempt in 1 2 3; do
-    if try_cmd "Open ${APP_NAME} (attempt ${attempt})" /usr/bin/open "${open_args[@]}" "${app_path}"; then
+    if try_cmd "Open ${APP_NAME} (attempt ${attempt})" "${args[@]}"; then
       return 0
     fi
 
@@ -399,7 +429,11 @@ stream_app_logs() {
     return 1
   fi
 
-  predicate="process == \"${APP_NAME}\" AND (subsystem == \"${bundle_id}\" OR subsystem == \"InlineMac\")"
+  if [[ -n "${pid:-}" ]]; then
+    predicate="processIdentifier == ${pid} AND (subsystem == \"${bundle_id}\" OR subsystem == \"InlineMac\")"
+  else
+    predicate="process == \"${APP_NAME}\" AND (subsystem == \"${bundle_id}\" OR subsystem == \"InlineMac\")"
+  fi
 
   stream_cmd \
     "Stream logs for ${APP_NAME}" \
@@ -415,8 +449,9 @@ capture_cmd "Resolve macOS Debug app settings" "${settings_file}" xcodebuild "${
 products_dir="$(build_setting BUILT_PRODUCTS_DIR)"
 product_name="$(build_setting FULL_PRODUCT_NAME)"
 bundle_id="$(build_setting PRODUCT_BUNDLE_IDENTIFIER)"
+executable_name="$(build_setting EXECUTABLE_NAME)"
 
-if [[ -z "${products_dir}" || -z "${product_name}" || -z "${bundle_id}" ]]; then
+if [[ -z "${products_dir}" || -z "${product_name}" || -z "${bundle_id}" || -z "${executable_name}" ]]; then
   echo "Could not resolve Debug app settings from xcodebuild." >&2
   exit 1
 fi
@@ -436,9 +471,8 @@ if [[ "${open_app}" != "1" ]]; then
   exit 0
 fi
 
-previous_pids=""
+previous_pids="$(pids_for_app)"
 if [[ "${stop}" == "1" ]]; then
-  previous_pids="$(pids_for_app)"
   stop_existing_app
 fi
 
