@@ -11,13 +11,7 @@ class ChatDropView: NSView {
     super.init(frame: frame)
     wantsLayer = true
     identifier = LocalDragSurfaceGuard.chatSurfaceIdentifier
-    registerForDraggedTypes([
-      .fileURL,
-      .tiff,
-      .png,
-      NSPasteboard.PasteboardType("public.image"),
-      NSPasteboard.PasteboardType("public.file-url"),
-    ])
+    registerForDraggedTypes(InlinePasteboard.draggedTypes)
     updateSurfaceBackgroundColor()
   }
 
@@ -53,19 +47,10 @@ class ChatDropView: NSView {
       return false
     }
 
-    // Check for files
-    if sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self, NSImage.self], options: nil) {
-      return true
-    }
-
-    // Check for images
-    if sender.draggingPasteboard.data(forType: .tiff) != nil ||
-      sender.draggingPasteboard.data(forType: .png) != nil
-    {
-      return true
-    }
-
-    return false
+    return InlinePasteboard.canImportAttachments(
+      from: sender.draggingPasteboard,
+      includeText: false
+    )
   }
 
   private func updateSurfaceBackgroundColor() {
