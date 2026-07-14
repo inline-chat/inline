@@ -133,8 +133,10 @@ struct Nav3HistoryMenuItem: Identifiable, Hashable {
 @Observable
 class Nav3 {
   @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
+  @ObservationIgnored private let persistsActiveSpace: Bool
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
   @ObservationIgnored var onRouteChange: (() -> Void)?
+  @ObservationIgnored private var isRestoringInitialState = true
 
   var history: [Nav3RouteState] = []
   var historyIndex: Int = -1
@@ -177,8 +179,19 @@ class Nav3 {
   /// Used for environment defaults and previews
   public static let `default` = Nav3()
 
-  init(routeState: String = "", pendingRoute: Nav3Route? = nil) {
-    restoreIfNeeded(from: routeState, pendingRoute: pendingRoute)
+  init(
+    routeState: String = "",
+    pendingRoute: Nav3Route? = nil,
+    persistsActiveSpace: Bool = false,
+    restoresActiveSpace: Bool = false
+  ) {
+    self.persistsActiveSpace = persistsActiveSpace
+    restoreIfNeeded(
+      from: routeState,
+      pendingRoute: pendingRoute,
+      fallbackSelectedSpaceId: restoresActiveSpace ? Nav3ActiveSpaceStore.selectedSpaceId : nil
+    )
+    isRestoringInitialState = false
   }
 
   func open(_ route: Nav3Route, tracksChatNavigation: Bool = true) {
@@ -326,7 +339,13 @@ class Nav3 {
   }
 
   private func notifyRouteChange() {
+    persistActiveSpaceSelection()
     onRouteChange?()
+  }
+
+  func persistActiveSpaceSelection() {
+    guard persistsActiveSpace, isRestoringInitialState == false else { return }
+    Nav3ActiveSpaceStore.save(selectedSpaceId)
   }
 
   private func historyMenuItems<T: Sequence>(from indices: T) -> [Nav3HistoryMenuItem] where T.Element == Int {
@@ -426,16 +445,29 @@ class Nav3 {
     self.activeChatNavigation = nil
   }
 
-  func restoreIfNeeded(from routeState: String, pendingRoute: Nav3Route? = nil) {
+  func restoreIfNeeded(
+    from routeState: String,
+    pendingRoute: Nav3Route? = nil,
+    fallbackSelectedSpaceId: Int64? = nil
+  ) {
     guard currentRoute == .empty else { return }
 
     if let pendingRoute, pendingRoute != .empty {
-      open(pendingRoute)
+      open(Nav3RouteState(
+        route: pendingRoute,
+        selectedSpaceId: pendingRoute.selectedSpaceId ?? fallbackSelectedSpaceId
+      ))
       return
     }
 
-    guard let state = Self.decodeRouteState(routeState) else { return }
-    open(state)
+    if let state = Self.decodeRouteState(routeState) {
+      open(state)
+    } else if let fallbackSelectedSpaceId {
+      open(
+        Nav3RouteState(route: .empty, selectedSpaceId: fallbackSelectedSpaceId),
+        tracksChatNavigation: false
+      )
+    }
   }
 
   func encodedRouteState() -> String? {
@@ -448,6 +480,25 @@ class Nav3 {
     return state
   }
 
+}
+
+private enum Nav3ActiveSpaceStore {
+  // Full route/history restoration stays per-window. This stores only the
+  // cross-window space context used to seed a fresh Nav3 instance.
+  private static let selectedSpaceIdKey = "macNavigationLastActiveSpaceId"
+
+  static var selectedSpaceId: Int64? {
+    guard let rawValue = UserDefaults.standard.string(forKey: selectedSpaceIdKey) else { return nil }
+    return Int64(rawValue)
+  }
+
+  static func save(_ selectedSpaceId: Int64?) {
+    if let selectedSpaceId {
+      UserDefaults.standard.set(String(selectedSpaceId), forKey: selectedSpaceIdKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: selectedSpaceIdKey)
+    }
+  }
 }
 
 private extension Nav3RouteState {

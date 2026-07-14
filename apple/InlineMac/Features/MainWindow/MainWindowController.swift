@@ -98,10 +98,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     dependencies: AppDependencies,
     state: MainWindowRestorationState
   ) -> MainWindowController {
+    // Per-window AppKit restoration is authoritative; only genuinely new windows
+    // should fall back to the last active space shared across windows.
     make(
       dependencies: dependencies,
       sceneId: state.sceneId,
       routeState: state.routeState,
+      restoresActiveSpace: false,
       appliesDefaultFrame: false
     )
   }
@@ -141,6 +144,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     sceneId: String = MainWindowSceneStateStore.makeSceneId(),
     destination: MainWindowDestination? = nil,
     routeState: String = "",
+    restoresActiveSpace: Bool = true,
     appliesDefaultFrame: Bool = true
   ) -> MainWindowController {
     pruneControllers()
@@ -157,6 +161,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       sceneId: sceneId,
       destination: destination,
       routeState: routeState,
+      restoresActiveSpace: restoresActiveSpace,
       appliesDefaultFrame: appliesDefaultFrame
     )
     controllers.append(controller)
@@ -172,6 +177,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     sceneId: String,
     destination: MainWindowDestination? = nil,
     routeState: String = "",
+    restoresActiveSpace: Bool = true,
     appliesDefaultFrame: Bool = true
   ) {
     let windowID = UUID()
@@ -195,7 +201,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     )
 
     keyMonitor = KeyMonitor(window: window)
-    nav3 = Nav3(routeState: routeState, pendingRoute: destination?.route)
+    nav3 = Nav3(
+      routeState: routeState,
+      pendingRoute: destination?.route,
+      persistsActiveSpace: true,
+      restoresActiveSpace: restoresActiveSpace
+    )
 
     super.init(window: window)
 
@@ -245,6 +256,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     keyMonitor.attach(window: nil)
     appBridge.unregisterWindow()
     Self.controllers.removeAll { $0 === self }
+  }
+
+  func windowDidBecomeKey(_ notification: Notification) {
+    // Focusing an older window makes its space the source for the next new window.
+    nav3.persistActiveSpaceSelection()
   }
 
   func window(_ window: NSWindow, willEncodeRestorableState state: NSCoder) {
