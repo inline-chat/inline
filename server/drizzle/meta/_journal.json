@@ -638,6 +638,13 @@
       "when": 1783251321016,
       "tag": "0090_animated-video-metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1783689226308,
+      "tag": "0091_bot_capabilities",
+      "breakpoints": true
     }
   ]
 }
