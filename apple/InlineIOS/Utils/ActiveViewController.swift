@@ -1,7 +1,12 @@
 import UIKit
 
 @MainActor
-func activeTopViewController(in application: UIApplication = .shared) -> UIViewController? {
+func activeTopViewController() -> UIViewController? {
+  activeTopViewController(in: .shared)
+}
+
+@MainActor
+func activeTopViewController(in application: UIApplication) -> UIViewController? {
   let windows = application.connectedScenes
     .compactMap { $0 as? UIWindowScene }
     .filter { $0.activationState == .foregroundActive }
