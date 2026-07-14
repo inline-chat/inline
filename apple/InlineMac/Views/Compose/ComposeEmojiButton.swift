@@ -18,6 +18,16 @@ final class ComposeEmojiButton: NSView {
     !isHidden && alphaValue > 0 && window != nil
   }
 
+  override var isHidden: Bool {
+    didSet {
+      if isHidden {
+        setHovering(false)
+      } else {
+        refreshHoverState()
+      }
+    }
+  }
+
   override init(frame frameRect: NSRect) {
     mode = .legacy
     button = Self.makeButton(mode: mode)
@@ -96,10 +106,11 @@ final class ComposeEmojiButton: NSView {
     let options: NSTrackingArea.Options = [
       .mouseEnteredAndExited,
       .activeAlways,
+      .inVisibleRect,
     ]
 
     trackingArea = NSTrackingArea(
-      rect: bounds,
+      rect: .zero,
       options: options,
       owner: self,
       userInfo: nil
@@ -111,12 +122,37 @@ final class ComposeEmojiButton: NSView {
   }
 
   override func mouseEntered(with event: NSEvent) {
-    isHovering = true
-    updateBackgroundColor()
+    setHovering(true)
   }
 
   override func mouseExited(with event: NSEvent) {
-    isHovering = false
+    setHovering(false)
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+
+    if window == nil {
+      setHovering(false)
+    } else {
+      refreshHoverState()
+    }
+  }
+
+  private func refreshHoverState() {
+    guard canShowEmojiPopover, let window else {
+      setHovering(false)
+      return
+    }
+
+    let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    setHovering(bounds.contains(point))
+  }
+
+  private func setHovering(_ hovering: Bool) {
+    guard isHovering != hovering else { return }
+
+    isHovering = hovering
     updateBackgroundColor()
   }
 
@@ -158,6 +194,7 @@ final class ComposeEmojiButton: NSView {
     let popover = makeEmojiPopover()
     emojiPopover = popover
     popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
+    setHovering(false)
   }
 
   func resignEmojiFocus() {
@@ -165,7 +202,7 @@ final class ComposeEmojiButton: NSView {
   }
 
   private func makeEmojiPopover() -> NSPopover {
-    let popover = EmojiPickerPopover.makePopover { [weak self] emoji in
+    let popover = EmojiPickerPopover2.makePopover { [weak self] emoji in
       guard let self else { return }
       delegate?.composeEmojiButton(self, didReceiveText: emoji)
     }
@@ -178,5 +215,6 @@ extension ComposeEmojiButton: NSPopoverDelegate {
   func popoverDidClose(_ notification: Notification) {
     guard notification.object as? NSPopover === emojiPopover else { return }
     emojiPopover = nil
+    refreshHoverState()
   }
 }

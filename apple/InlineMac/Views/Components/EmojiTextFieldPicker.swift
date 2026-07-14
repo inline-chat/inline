@@ -44,7 +44,7 @@ struct EmojiTextFieldPicker<Label: View>: View {
       .help(isDisabled ? "" : "Change icon")
       .accessibilityLabel(accessibilityLabel)
       .background {
-        EmojiPickerPopoverPresenter(
+        EmojiPickerPopoverPresenter2(
           isPresented: $isPickerPresented,
           preferredEdge: .maxY,
           onSelect: { selectedEmoji in
@@ -75,7 +75,21 @@ struct EmojiTextFieldPicker<Label: View>: View {
       }
     }
     .frame(width: targetSize.width, height: targetSize.height)
-    .onHover { isHovering = $0 }
+    .onHover { isHovering = $0 && !isDisabled && !isPickerPresented }
+    .onChange(of: isPickerPresented) { _, isPresented in
+      if isPresented {
+        isHovering = false
+      }
+    }
+    .onChange(of: isDisabled) { _, isDisabled in
+      if isDisabled {
+        isHovering = false
+      }
+    }
+    .onDisappear {
+      isHovering = false
+      isPickerPresented = false
+    }
   }
 
   private var normalizedEmoji: String {

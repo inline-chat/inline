@@ -130,8 +130,14 @@ struct ReactionOverlayView: View {
         appearOpacity = 1.0
       }
     }
+    .onDisappear {
+      isHovered.removeAll()
+    }
     .onChange(of: isEmojiPickerPresented) { wasPresented, isPresented in
       onEmojiPickerActiveChanged(isPresented)
+      if isPresented {
+        isHovered[Self.moreReactionsKey] = false
+      }
       guard wasPresented, !isPresented else { return }
 
       if isSelectingCustomEmoji {
@@ -188,8 +194,13 @@ struct ReactionOverlayView: View {
       isHovered[Self.moreReactionsKey] = hovering
     }
     .help("More reactions")
-    .popover(isPresented: $isEmojiPickerPresented, arrowEdge: .bottom) {
-      EmojiPickerPopover(onSelect: handleCustomEmojiSelected)
+    .background {
+      EmojiPickerPopoverPresenter2(
+        isPresented: $isEmojiPickerPresented,
+        preferredEdge: .maxY,
+        onSelect: handleCustomEmojiSelected
+      )
+      .allowsHitTesting(false)
     }
   }
 
