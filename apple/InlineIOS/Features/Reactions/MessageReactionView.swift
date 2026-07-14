@@ -312,7 +312,11 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
           subtitle: self.timestampString(for: user.reactedAt),
           image: avatarImage
         ) { _ in
-          Navigation.shared.push(.chat(peer: .user(id: user.userId)))
+          NotificationCenter.default.post(
+            name: Notification.Name("NavigateToUser"),
+            object: nil,
+            userInfo: ["userId": user.userId]
+          )
         }
       }
 
