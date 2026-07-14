@@ -1,5 +1,5 @@
 import { spawnSync } from "bun";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
+import { appendFileSync, mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { basename, resolve } from "path";
 import { createInterface } from "node:readline";
 
@@ -533,8 +533,24 @@ class Ui {
   private tasks: Array<{ id: string; title: string; status: TaskStatus; note?: string }> = [];
   private ticker: Timer | null = null;
   private hintLine = "";
+  private logPath = "";
+  private logWriteFailed = false;
 
   constructor(private readonly interactive: boolean) {}
+
+  setLogPath(logPath: string) {
+    this.logPath = logPath;
+    this.logWriteFailed = false;
+    writeFileSync(
+      this.logPath,
+      [`Inline macOS Release`, `Started: ${new Date().toISOString()}`, ``, ``].join("\n"),
+    );
+    this.render(true);
+  }
+
+  getLogPath(): string {
+    return this.logPath;
+  }
 
   setHintLine(hint: string) {
     this.hintLine = hint;
@@ -555,22 +571,26 @@ class Ui {
     this.currentTaskId = taskId;
     this.currentLog = [];
     this.lastError = "";
+    this.appendLogLine(`==> ${this.taskLabel(taskId)}`);
     this.setStatus(taskId, "running");
     this.startTicker();
   }
 
   setSkipped(taskId: string, reason?: string) {
+    this.appendLogLine(`-- skipped ${this.taskLabel(taskId)}${reason ? ` (${reason})` : ""}`);
     this.setStatus(taskId, "skipped", reason);
     this.stopTicker();
   }
 
   setSuccess(taskId: string, note?: string) {
+    this.appendLogLine(`-- ok ${this.taskLabel(taskId)}${note ? ` (${note})` : ""}`);
     this.setStatus(taskId, "success", note);
     this.stopTicker();
   }
 
   setFailed(taskId: string, message: string) {
     this.lastError = message;
+    this.appendLogLine(`-- failed ${this.taskLabel(taskId)}: ${message}`);
     this.setStatus(taskId, "failed");
     this.stopTicker();
   }
@@ -578,19 +598,46 @@ class Ui {
   log(line: string) {
     const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
     if (!cleaned) return;
+    this.appendLogLine(cleaned);
     this.currentLog.push(cleaned);
     if (this.currentLog.length > 200) this.currentLog.splice(0, this.currentLog.length - 200);
     this.render(false);
   }
 
   info(line: string) {
-    if (this.interactive) this.log(line);
-    else console.log(line);
+    const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
+    if (!cleaned) return;
+    if (this.interactive) this.log(cleaned);
+    else {
+      this.appendLogLine(cleaned);
+      console.log(cleaned);
+    }
   }
 
   error(line: string) {
-    if (this.interactive) this.log(line);
-    else console.error(line);
+    const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
+    if (!cleaned) return;
+    if (this.interactive) this.log(cleaned);
+    else {
+      this.appendLogLine(cleaned);
+      console.error(cleaned);
+    }
+  }
+
+  private appendLogLine(line: string) {
+    if (!this.logPath || this.logWriteFailed) return;
+    try {
+      appendFileSync(this.logPath, `${line}\n`);
+    } catch (err) {
+      this.logWriteFailed = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!this.interactive) console.error(`Could not write release log ${this.logPath}: ${msg}`);
+    }
+  }
+
+  private taskLabel(taskId: string): string {
+    const task = this.tasks.find((t) => t.id === taskId);
+    return task ? `${task.id}: ${task.title}` : taskId;
   }
 
   private setStatus(taskId: string, status: TaskStatus, note?: string) {
@@ -629,6 +676,7 @@ class Ui {
     const lines: string[] = [];
     lines.push(`${color.bold}Inline macOS Release${color.reset}`);
     if (this.hintLine) lines.push(`${color.gray}${this.hintLine}${color.reset}`);
+    if (this.logPath) lines.push(`${color.gray}Log: ${this.logPath}${color.reset}`);
     lines.push(`${color.gray}Press Ctrl+C to cancel.${color.reset}`);
     lines.push("");
 
@@ -866,6 +914,11 @@ async function main() {
     ...opts,
   };
 
+  const logRoot = resolve(rootDir, "build/macos-release-logs");
+  mkdirSync(logRoot, { recursive: true });
+  const releaseLogPath = resolve(logRoot, `${basename(ctx.tempDir)}.log`);
+  ui.setLogPath(releaseLogPath);
+
   ui.setHintLine(
     opts.rollback
       ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.dryRun ? "  Dry run" : ""}`
@@ -873,6 +926,7 @@ async function main() {
         ? `Drop build  Channel: ${opts.channel}  Build: ${opts.dropBuild}${opts.dryRun ? "  Dry run" : ""}`
         : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
+  ui.info(`Release log: ${releaseLogPath}`);
 
   const tasks: Task[] = [];
 
@@ -1652,6 +1706,7 @@ async function main() {
         ui.error(`Continue past it: ${buildResumeCommand(ctx, nextTask.id)}`);
       }
     }
+    if (ui.getLogPath()) ui.error(`Release log: ${ui.getLogPath()}`);
     ui.error(`Temp dir: ${ctx.tempDir}`);
     process.exit(1);
   }

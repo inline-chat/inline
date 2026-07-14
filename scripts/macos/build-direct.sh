@@ -30,9 +30,32 @@ SIGN_RETRY_COUNT=${SIGN_RETRY_COUNT:-3}
 SIGN_RETRY_DELAY_SECONDS=${SIGN_RETRY_DELAY_SECONDS:-2}
 PAUSE_BEFORE_NOTARIZE=${PAUSE_BEFORE_NOTARIZE:-0}
 DEBUG_BUILD=${DEBUG_BUILD:-0}
+CREATE_DMG_NODE_BIN_DIR=${CREATE_DMG_NODE_BIN_DIR:-""}
+
+if [[ -z "${CREATE_DMG_NODE_BIN_DIR}" ]]; then
+  for candidate in /opt/homebrew/opt/node@20/bin /usr/local/opt/node@20/bin; do
+    if [[ -x "${candidate}/node" ]]; then
+      CREATE_DMG_NODE_BIN_DIR="${candidate}"
+      break
+    fi
+  done
+fi
+
+if [[ -n "${CREATE_DMG_NODE_BIN_DIR}" ]]; then
+  export PATH="${CREATE_DMG_NODE_BIN_DIR}:${PATH}"
+fi
 
 if [[ -z "${SPARKLE_PUBLIC_KEY:-}" && -n "${MACOS_SPARKLE_PUBLIC_KEY:-}" ]]; then
   SPARKLE_PUBLIC_KEY="${MACOS_SPARKLE_PUBLIC_KEY}"
+fi
+
+mkdir -p "${OUTPUT_DIR}"
+BUILD_DIRECT_LOG_PATH=${BUILD_DIRECT_LOG_PATH:-"${OUTPUT_DIR}/build-direct.log"}
+: > "${BUILD_DIRECT_LOG_PATH}"
+exec > >(tee -a "${BUILD_DIRECT_LOG_PATH}") 2>&1
+echo "build-direct log: ${BUILD_DIRECT_LOG_PATH}"
+if [[ -n "${CREATE_DMG_NODE_BIN_DIR}" ]]; then
+  echo "create-dmg node: $(command -v node) ($(node -v))"
 fi
 
 if [[ -z "${SPARKLE_PUBLIC_KEY:-}" ]]; then
@@ -47,6 +70,11 @@ fi
 
 if ! command -v create-dmg >/dev/null 2>&1; then
   echo "create-dmg is required (install via npm install --global create-dmg)" >&2
+  exit 1
+fi
+if ! create-dmg --version >/dev/null 2>&1; then
+  echo "create-dmg failed to start. Check Node/create-dmg native module compatibility." >&2
+  create-dmg --version >&2 || true
   exit 1
 fi
 
