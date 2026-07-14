@@ -2,6 +2,7 @@
 import Auth
 import Combine
 import GRDB
+import InlineIOSUI
 import InlineKit
 import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageActionRow
@@ -179,6 +180,13 @@ class UIMessageView: UIView {
 
   private var hasMedia: Bool {
     message.hasPhoto || message.hasVideo
+  }
+
+  private var hasLargeURLPreview: Bool {
+    fullMessage.attachments.contains { attachment in
+      guard let preview = attachment.urlPreview else { return false }
+      return URLPreviewView.preferredMode(for: preview, photoInfo: attachment.photoInfo) == .large
+    }
   }
 
   private var shouldShowVoiceMessage: Bool {
@@ -2025,9 +2033,25 @@ class UIMessageView: UIView {
       trailing: isEmojiOnlyMessage ? 0 : StackPadding.trailing
     )
 
+    let bubbleWidthConstraint: NSLayoutConstraint = switch MessageBubbleWidthPolicy.mode(
+      hasLargeURLPreview: hasLargeURLPreview
+    ) {
+    case .contentSizedUpToMaximum:
+      bubbleView.contentView.widthAnchor.constraint(
+        lessThanOrEqualTo: widthAnchor,
+        multiplier: MessageBubbleWidthPolicy.maximumWidthFraction
+      )
+    case .fixedMaximum:
+      bubbleView.contentView.widthAnchor.constraint(
+        equalTo: widthAnchor,
+        multiplier: MessageBubbleWidthPolicy.maximumWidthFraction
+      )
+    }
+    bubbleWidthConstraint.identifier = "message-bubble-width"
+
     let baseConstraints: [NSLayoutConstraint] = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
-      bubbleView.contentView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
+      bubbleWidthConstraint,
     ]
 
     let withoutFileConstraints: [NSLayoutConstraint] = [

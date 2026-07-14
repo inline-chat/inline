@@ -1,4 +1,5 @@
 import InlineKit
+import InlineIOSUI
 import InlineUI
 import Logger
 import SwiftUI
@@ -10,6 +11,12 @@ protocol MessageCellDelegate: AnyObject {
 }
 
 class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelegate {
+  private struct SelfSizingTraitSignature: Equatable {
+    let contentSizeCategory: UIContentSizeCategory
+    let displayScale: CGFloat
+    let layoutDirection: UITraitEnvironmentLayoutDirection
+  }
+
   static let reuseIdentifier = "MessageCell"
   static let sendAnimationHorizontalPadding: CGFloat = 8
   private static let contentTransform = CGAffineTransform(scaleX: 1, y: -1)
@@ -28,8 +35,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var prevText: String?
   private var canReply: Bool = true
   private(set) var isPreparedForSendAnimationTarget = false
-  private var lastSelfSizingMeasurement: (width: CGFloat, height: CGFloat)?
-  private var didReportUnstableSelfSizing = false
+  private var selfSizingHeightStabilizer = SelfSizingHeightStabilizer()
+  private var selfSizingTraitSignature: SelfSizingTraitSignature?
 
   // MARK: - Props
 
@@ -112,10 +119,6 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   ) {
     let newOutgoing = message.message.out == true
 
-    if self.message?.id != message.id {
-      resetSelfSizingDiagnostics()
-    }
-
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
@@ -139,6 +142,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
         return
       }
     }
+
+    resetSelfSizingState()
 
     // update it first
     prevText = message.displayText
@@ -480,7 +485,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // Clear cached values to force reconfiguration
     prevText = nil
     message = nil
-    resetSelfSizingDiagnostics()
+    resetSelfSizingState()
 
     // Reset delegate
     delegate = nil
@@ -521,11 +526,26 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     }
 
     let displayScale = max(traitCollection.displayScale, 1)
-    let fittedHeight = ceil(size.height * displayScale) / displayScale
-    reportUnstableSelfSizingIfNeeded(
-      width: targetSize.width,
-      height: fittedHeight
+    let traitSignature = SelfSizingTraitSignature(
+      contentSizeCategory: traitCollection.preferredContentSizeCategory,
+      displayScale: displayScale,
+      layoutDirection: traitCollection.layoutDirection
     )
+    if selfSizingTraitSignature != traitSignature {
+      selfSizingHeightStabilizer.reset()
+      selfSizingTraitSignature = traitSignature
+    }
+
+    let measuredHeight = ceil(size.height * displayScale) / displayScale
+    let stabilization = selfSizingHeightStabilizer.resolve(
+      width: targetSize.width,
+      measuredHeight: measuredHeight,
+      heightTolerance: 0.5 / displayScale
+    )
+    let fittedHeight = stabilization.height
+    if let instability = stabilization.instability {
+      reportUnstableSelfSizing(instability, width: targetSize.width)
+    }
 
     // The compositional layout owns the item width. Returning Auto Layout's width here can
     // cause the collection view to alternate between its fractional width and the fitted width.
@@ -535,27 +555,21 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     return attributes
   }
 
-  private func resetSelfSizingDiagnostics() {
-    lastSelfSizingMeasurement = nil
-    didReportUnstableSelfSizing = false
+  private func resetSelfSizingState() {
+    selfSizingHeightStabilizer.reset()
+    selfSizingTraitSignature = nil
   }
 
-  private func reportUnstableSelfSizingIfNeeded(width: CGFloat, height: CGFloat) {
-    defer {
-      lastSelfSizingMeasurement = (width: width, height: height)
-    }
+  private func reportUnstableSelfSizing(
+    _ instability: SelfSizingHeightStabilizer.Instability,
+    width: CGFloat
+  ) {
+    guard let message else { return }
 
-    guard
-      let previous = lastSelfSizingMeasurement,
-      abs(previous.width - width) < 0.5,
-      abs(previous.height - height) >= 0.5,
-      !didReportUnstableSelfSizing,
-      let message
-    else {
-      return
+    let largeURLPreviewCount = message.attachments.count { attachment in
+      guard let preview = attachment.urlPreview else { return false }
+      return URLPreviewView.preferredMode(for: preview, photoInfo: attachment.photoInfo) == .large
     }
-
-    didReportUnstableSelfSizing = true
     PerformanceTrace.breadcrumb(
       "unstable iOS message cell self-sizing",
       category: "messages.layout",
@@ -567,8 +581,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
         "message_kind": isServiceMessage ? "service" : "regular",
         "display_mode": String(describing: displayMode),
         "fitting_width": Double(width),
-        "previous_height": Double(previous.height),
-        "fitted_height": Double(height),
+        "previous_height": Double(instability.previousHeight),
+        "fitted_height": Double(instability.measuredHeight),
+        "measured_height": Double(instability.measuredHeight),
+        "stabilized_height": Double(instability.stabilizedHeight),
+        "attachment_count": message.attachments.count,
+        "large_url_preview_count": largeURLPreviewCount,
+        "reaction_count": message.reactions.count,
       ]
     )
   }

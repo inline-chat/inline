@@ -302,32 +302,27 @@ class URLPreviewView: UIView, UIContextMenuInteractionDelegate, UIGestureRecogni
     let textStack = UIStackView()
     textStack.axis = .vertical
     textStack.spacing = 3
-    textStack.alignment = mode == .large ? .leading : .fill
+    textStack.alignment = .fill
     textStack.translatesAutoresizingMaskIntoConstraints = false
     textStack.isUserInteractionEnabled = false
     textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+    if mode == .large {
+      textStack.isLayoutMarginsRelativeArrangement = true
+      textStack.insetsLayoutMarginsFromSafeArea = false
+      textStack.layoutMargins = UIEdgeInsets(
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: Metrics.largeTextTrailingPadding
+      )
+    }
+
     if !titleLabel.isHidden {
       textStack.addArrangedSubview(titleLabel)
-      if mode == .large {
-        activeConstraints.append(
-          titleLabel.widthAnchor.constraint(
-            lessThanOrEqualTo: textStack.widthAnchor,
-            constant: -Metrics.largeTextTrailingPadding
-          )
-        )
-      }
     }
     if shouldShowDescription {
       textStack.addArrangedSubview(descriptionLabel)
-      if mode == .large {
-        activeConstraints.append(
-          descriptionLabel.widthAnchor.constraint(
-            lessThanOrEqualTo: textStack.widthAnchor,
-            constant: -Metrics.largeTextTrailingPadding
-          )
-        )
-      }
     }
 
     if mode == .compact {
