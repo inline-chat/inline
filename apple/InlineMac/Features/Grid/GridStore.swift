@@ -149,6 +149,7 @@ final class GridRoomService {
   }
 
   func loadHome() async {
+    homeLoadRevision &+= 1
     let revision = homeLoadRevision
     do {
       let nextHomeSpaces = try await api.home()
@@ -162,6 +163,7 @@ final class GridRoomService {
       }
       lastError = nil
     } catch {
+      guard revision == homeLoadRevision else { return }
       lastError = String(describing: error)
       log.warning("GRID_TRACE phase=home_load_failed")
       PerformanceTrace.breadcrumb(
