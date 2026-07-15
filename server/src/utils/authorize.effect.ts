@@ -17,7 +17,7 @@ const spaceAdmin = (spaceId: number, currentUserId: number) => {
           inArray(members.role, ["admin", "owner"]),
         ),
       }),
-    ).pipe(Effect.catchAll(() => Effect.fail(RealtimeRpcError.InternalError())))
+    ).pipe(Effect.catch(() => Effect.fail(RealtimeRpcError.InternalError())))
 
     if (!member) {
       return yield* Effect.fail(RealtimeRpcError.SpaceAdminRequired())

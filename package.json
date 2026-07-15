@@ -20,6 +20,14 @@
     "landing/packages/*",
     "scripts"
   ],
+  "catalog": {
+    "@effect/platform-bun": "4.0.0-beta.98",
+    "@effect/vitest": "4.0.0-beta.98",
+    "effect": "4.0.0-beta.98",
+    "oxlint": "1.39.0",
+    "typescript": "5.8.3",
+    "vitest": "4.1.10"
+  },
   "scripts": {
     "dev": "cd server && bun run dev",
     "dev:server": "cd server && bun run dev",
@@ -42,8 +50,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",
-    "oxlint": "^1.39.0",
-    "typescript": "^5.8.3"
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
   },
   "dependencies": {
     "zustand": "^5.0.9"

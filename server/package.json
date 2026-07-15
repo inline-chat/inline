@@ -8,7 +8,14 @@
     "build": "NODE_ENV=production bun scripts/build.ts",
     "start": "NODE_ENV=production bun dist/index.js",
     "test": "NODE_ENV=test bun test --timeout=30000",
+    "test:pure": "NODE_ENV=test bun test src/effect-server --timeout=30000",
+    "test:effect": "vitest run --config vitest.effect.config.ts",
+    "test:postgres": "NODE_ENV=test bun test src/__tests__ --timeout=30000",
+    "test:http-contracts": "NODE_ENV=test bun test src/__tests__/contracts --timeout=30000",
+    "test:realtime": "NODE_ENV=test bun test src/realtime src/__tests__/realtime.protocol.test.ts src/__tests__/realtime.connectionInit.test.ts src/__tests__/handlers --timeout=30000",
+    "test:shutdown": "NODE_ENV=test bun test src/__tests__/lifecycle.gracefulShutdown.test.ts --timeout=30000",
     "typecheck": "tsc --build",
+    "typecheck:effect": "tsc --build tsconfig.effect.json",
     "db:migrate": "bun scripts/migrate.ts",
     "db:dangerously-reset-db": "bun scripts/reset-db.ts",
     "db:generate": "drizzle-kit generate --schema src/db/schema/index.ts --out drizzle --dialect postgresql --name",
@@ -16,8 +23,14 @@
     "db:drop": "drizzle-kit drop --out drizzle",
     "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
     "drizzle:up": "drizzle-kit up --dialect=postgresql",
-    "lint": "bunx oxlint --ignore-path ../.oxlintignore",
-    "lint:fix": "bunx oxlint --ignore-path ../.oxlintignore --fix"
+    "lint": "oxlint --config ../.oxlintrc.json --ignore-path ../.oxlintignore",
+    "lint:strict": "oxlint --config ../.oxlintrc.json --ignore-path ../.oxlintignore --deny-warnings src/effect-server src/__tests__/contracts scripts/contracts vitest.effect.config.ts",
+    "lint:fix": "oxlint --config ../.oxlintrc.json --ignore-path ../.oxlintignore --fix",
+    "contracts:routes": "NODE_ENV=test bun scripts/contracts/route-manifest.ts",
+    "contracts:routes:update": "NODE_ENV=test bun scripts/contracts/route-manifest.ts --write",
+    "contracts:openapi": "NODE_ENV=test bun scripts/contracts/openapi-manifest.ts",
+    "contracts:openapi:update": "NODE_ENV=test bun scripts/contracts/openapi-manifest.ts --write",
+    "container:build": "docker build -f Dockerfile .."
   },
   "overrides": {
     "elysia": "=1.4.29",
@@ -27,7 +40,7 @@
     "@anthropic-ai/sdk": "^0.38.0",
     "@aws-sdk/client-sesv2": "^3.675.0",
     "@bufbuild/protobuf": "^2.2.3",
-    "@effect/schema": "^0.75.5",
+    "@effect/platform-bun": "catalog:",
     "@elysiajs/cors": "1.4.2",
     "@elysiajs/html": "1.4.2",
     "@elysiajs/swagger": "1.3.1",
@@ -50,7 +63,7 @@
     "dotenv": "^17.3.1",
     "drizzle-kit": "^1.0.0-beta.1-c0277c0",
     "drizzle-orm": "^1.0.0-beta.1-c0277c0",
-    "effect": "^3.16.12",
+    "effect": "catalog:",
     "elysia": "=1.4.29",
     "elysia-helmet": "3.1.0",
     "elysia-rate-limit": "4.6.2",
@@ -69,12 +82,14 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@types/bun": "^1.1.16",
     "@types/nanoid-dictionary": "^4.2.3",
     "@types/node": "20.17.19",
     "@types/react": "^19.2.9",
     "@types/react-dom": "^19.2.3",
-    "oxlint": "^1.39.0",
-    "typescript": "^5.8.3"
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

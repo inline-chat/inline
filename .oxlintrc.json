@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/refs/heads/main/npm/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "warn"
+  },
+  "rules": {
+    "import/no-duplicates": "error",
+    "no-debugger": "error",
+    "no-dupe-class-members": "error",
+    "no-dupe-keys": "error",
+    "no-undef-init": "error"
+  }
+}

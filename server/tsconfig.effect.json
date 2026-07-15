@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "noEmit": true,
+    "types": ["bun", "vitest/globals"]
+  },
+  "include": ["src/effect-server/**/*.ts"]
+}
