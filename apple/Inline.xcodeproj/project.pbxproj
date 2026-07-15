@@ -350,6 +350,21 @@
 		};
 /* End PBXHeadersBuildPhase section */
 
+/* Begin PBXAggregateTarget section */
+		A11EC1002F97000100000001 /* ApplePackageChecks */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = A11EC1002F97000100000002 /* Build configuration list for PBXAggregateTarget "ApplePackageChecks" */;
+			buildPhases = (
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ApplePackageChecks;
+			productName = ApplePackageChecks;
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXNativeTarget section */
 		B7020C412DCE1534007099D9 /* InlineShareExtension */ = {
 			isa = PBXNativeTarget;
@@ -524,6 +539,9 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					A11EC1002F97000100000001 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 					B7020C412DCE1534007099D9 = {
 						CreatedOnToolsVersion = 16.3;
 					};
@@ -568,6 +586,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				A11EC1002F97000100000001 /* ApplePackageChecks */,
 				CD2661642CA01E3E00EB186F /* InlineMac */,
 				C38A28362CA5AB8F00D3DFB8 /* InlineIOS */,
 				B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */,
@@ -686,6 +705,30 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A11EC1002F97000100000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		A11EC1002F97000100000004 /* Debug #2 */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = "Debug #2";
+		};
+		A11EC1002F97000100000005 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		A11EC1002F97000100000006 /* DevBuild */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = DevBuild;
+		};
 		B7020C4E2DCE1534007099D9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
@@ -1540,6 +1583,17 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A11EC1002F97000100000002 /* Build configuration list for PBXAggregateTarget "ApplePackageChecks" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A11EC1002F97000100000003 /* Debug */,
+				A11EC1002F97000100000004 /* Debug #2 */,
+				A11EC1002F97000100000005 /* Release */,
+				A11EC1002F97000100000006 /* DevBuild */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		B7020C4D2DCE1534007099D9 /* Build configuration list for PBXNativeTarget "InlineShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
