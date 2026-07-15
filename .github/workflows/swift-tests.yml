@@ -1,22 +1,9 @@
 name: Swift Tests
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/swift-tests.yml"
-      - "apple/InlineKit/**"
-      - "apple/InlineUI/**"
-      - "apple/InlineIOSUI/**"
-      - "apple/InlineMacUI/**"
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/swift-tests.yml"
-      - "apple/InlineKit/**"
-      - "apple/InlineUI/**"
-      - "apple/InlineIOSUI/**"
-      - "apple/InlineMacUI/**"
+  # Xcode Cloud's "Apple Package Tests" workflow owns automatic package
+  # validation. Keep this as an explicit fallback without consuming GitHub
+  # macOS minutes or producing billing-related failures on every change.
   workflow_dispatch:
 
 concurrency:

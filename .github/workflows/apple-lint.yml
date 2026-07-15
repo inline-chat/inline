@@ -1,24 +1,8 @@
 name: Apple Lint
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/apple-lint.yml"
-      - "apple/**"
-      - "scripts/apple/swiftlint.sh"
-      - "package.json"
-
-  pull_request:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/apple-lint.yml"
-      - "apple/**"
-      - "scripts/apple/swiftlint.sh"
-      - "package.json"
-
+  # Xcode Cloud's "Apple Package Tests" workflow owns automatic SwiftLint.
+  # Keep this workflow available only as a manual GitHub-hosted fallback.
   workflow_dispatch:
 
 permissions:
