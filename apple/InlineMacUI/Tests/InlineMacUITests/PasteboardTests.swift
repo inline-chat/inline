@@ -7,7 +7,7 @@ import Testing
 @MainActor
 @Suite("Inline pasteboard")
 struct PasteboardTests {
-  @Test("directory file URLs are rejected")
+  @Test("directory file URLs are rejected when materialized")
   func directoryFileURLsAreRejected() {
     let pasteboard = makePasteboard(
       type: .fileURL,
@@ -22,7 +22,7 @@ struct PasteboardTests {
     #expect(result.attachments.isEmpty)
     #expect(result.failures.count == 1)
     #expect(result.failures.first?.isDirectory == true)
-    #expect(!InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
+    #expect(InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
   }
 
   @Test("directory file URLs stay rejected when an image representation is present")
@@ -40,7 +40,7 @@ struct PasteboardTests {
     #expect(result.attachments.isEmpty)
     #expect(result.failures.count == 1)
     #expect(result.failures.first?.isDirectory == true)
-    #expect(!InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
+    #expect(InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
   }
 
   @Test("raw GIF data becomes an animated image attachment")
@@ -197,6 +197,18 @@ struct PasteboardTests {
     #expect(!InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
   }
 
+  @Test("hover validation does not materialize promised file URLs")
+  func hoverValidationDoesNotMaterializeFileURLs() {
+    let provider = TrackingPasteboardDataProvider()
+    let item = NSPasteboardItem()
+    item.setDataProvider(provider, forTypes: [.fileURL])
+    let pasteboard = makePasteboard(item: item)
+    provider.clearRequestedTypes()
+
+    #expect(InlinePasteboard.canImportAttachments(from: pasteboard, includeText: false))
+    #expect(provider.requestedTypes.isEmpty)
+  }
+
   private func makePasteboard(
     type: NSPasteboard.PasteboardType,
     string: String
@@ -226,5 +238,27 @@ struct PasteboardTests {
     try #require(Data(base64Encoded:
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
     ))
+  }
+}
+
+private final class TrackingPasteboardDataProvider: NSObject, NSPasteboardItemDataProvider {
+  private let lock = NSLock()
+  private var storedRequestedTypes: [NSPasteboard.PasteboardType] = []
+
+  var requestedTypes: [NSPasteboard.PasteboardType] {
+    lock.withLock { storedRequestedTypes }
+  }
+
+  func clearRequestedTypes() {
+    lock.withLock { storedRequestedTypes.removeAll() }
+  }
+
+  func pasteboard(
+    _ pasteboard: NSPasteboard?,
+    item: NSPasteboardItem,
+    provideDataForType type: NSPasteboard.PasteboardType
+  ) {
+    lock.withLock { storedRequestedTypes.append(type) }
+    item.setString(FileManager.default.temporaryDirectory.absoluteString, forType: type)
   }
 }

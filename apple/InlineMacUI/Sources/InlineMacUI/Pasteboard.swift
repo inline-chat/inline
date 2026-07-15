@@ -90,35 +90,9 @@ public enum InlinePasteboard {
     from pasteboard: NSPasteboard,
     includeText: Bool = true
   ) -> Bool {
-    let decodedFileURLs = readFileURLs(from: pasteboard)
-
-    for item in pasteboard.pasteboardItems ?? [] {
-      let types = item.types
-
-      if types.contains(.fileURL),
-         let value = item.string(forType: .fileURL),
-         let url = resolveFileURL(value, decodedFileURLs: decodedFileURLs) {
-        let failure = fileURLFailure(url)
-        if failure?.isDirectory == true {
-          continue
-        }
-        if failure == nil {
-          return true
-        }
-      }
-
-      if types.contains(.pdf) ||
-        preferredVideoTypes.contains(where: types.contains) ||
-        preferredImageTypes.contains(where: types.contains) {
-        return true
-      }
-
-      if includeText, types.contains(.string) {
-        return true
-      }
-    }
-
-    return false
+    guard let types = pasteboard.types else { return false }
+    return draggedTypes.contains(where: types.contains) ||
+      (includeText && types.contains(.string))
   }
 
   public static func findAttachmentsResult(
