@@ -36,18 +36,30 @@ add_all_packages() {
 }
 
 packages=()
-base_commit=""
+base_commit="${CI_PULL_REQUEST_TARGET_COMMIT:-}"
+head_commit="${CI_COMMIT:-HEAD}"
 
-# Xcode Cloud normally checks out a branch build at the commit being tested.
-# Use its first parent for affected-package selection, and safely fall back to
-# full coverage whenever that history is unavailable or CI plumbing changed.
-if git -C "$repo_root" rev-parse --verify HEAD^ >/dev/null 2>&1; then
-  base_commit="HEAD^"
+# Xcode Cloud exposes the full target/source range for pull request builds, but
+# no previous commit for a branch-change build. Prefer the provider range when
+# both commits are present and run every package whenever it is unavailable.
+if [[ -z "$base_commit" ]] ||
+   ! git -C "$repo_root" rev-parse --verify "$base_commit^{commit}" >/dev/null 2>&1 ||
+   ! git -C "$repo_root" rev-parse --verify "$head_commit^{commit}" >/dev/null 2>&1 ||
+   ! git -C "$repo_root" merge-base "$base_commit" "$head_commit" >/dev/null 2>&1; then
+  base_commit=""
+  add_all_packages
+  echo "Full Xcode Cloud comparison range unavailable; running all Apple package checks."
 fi
 
-if [[ -z "$base_commit" ]]; then
+changed_paths=""
+if [[ -n "$base_commit" ]] &&
+   ! changed_paths="$(git -C "$repo_root" diff --name-only "$base_commit...$head_commit")"; then
+  base_commit=""
   add_all_packages
-else
+  echo "Xcode Cloud comparison failed; running all Apple package checks."
+fi
+
+if [[ -n "$base_commit" ]]; then
   while IFS= read -r path; do
     case "$path" in
       ci_scripts/ci_post_clone.sh|scripts/apple/run-ci-checks.sh)
@@ -68,7 +80,7 @@ else
         add_package "InlineMacUI"
         ;;
     esac
-  done < <(git -C "$repo_root" diff --name-only "$base_commit" HEAD)
+  done <<< "$changed_paths"
 fi
 
 if [[ ${#packages[@]} -eq 0 ]]; then
