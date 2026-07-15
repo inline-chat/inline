@@ -452,7 +452,8 @@ struct GridAudioEngineTests {
     let engine = GridAudioEngine(
       driver: driver,
       permissionDriver: TestGridMicrophonePermissionDriver(),
-      engineRecoveryDelay: .milliseconds(60)
+      engineRecoveryDelay: .milliseconds(60),
+      engineHealthCheckDelay: .milliseconds(10)
     )
     let lease = GridAudioLease.connectionDemand(.init("grid-test:1:2:1"))
 
@@ -460,8 +461,10 @@ struct GridAudioEngineTests {
     await engine.acquireCaptureLease(lease)
     try await eventually { await engine.currentSnapshot().isPrepared }
     await driver.emit(.engineStopped(playout: true, recording: true))
-    try await Task.sleep(for: .milliseconds(15))
+    try await eventually { await engine.currentSnapshot().state == .warming }
     await driver.emit(.engineStarting(playout: true, recording: true))
+    await driver.setRecordingActive(true)
+    try await eventually { await engine.currentSnapshot().state == .ready }
     try await Task.sleep(for: .milliseconds(80))
 
     #expect(await driver.operations().contains("recover") == false)
