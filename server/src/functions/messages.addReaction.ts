@@ -1,11 +1,9 @@
 import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
-import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Updates } from "@in/server/modules/updates/updates"
-import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { ReactionModel } from "../db/models/reactions"
-import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 type Input = {
   emoji: string

@@ -1,9 +1,4 @@
-import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema"
-import { encodeFullUserInfo, encodeUserInfo, TUserInfo } from "@in/server/api-types"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
-import { eq } from "drizzle-orm"
+import { encodeFullUserInfo, TUserInfo } from "@in/server/api-types"
 import { Type, type Static } from "@sinclair/typebox"
 import { UsersModel } from "@in/server/db/models/users"
 

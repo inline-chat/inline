@@ -1,17 +1,7 @@
 import { db } from "@in/server/db"
-import { desc, eq, sql, and } from "drizzle-orm"
-import {
-  chats,
-  dialogs,
-  messages,
-  sessions,
-  users,
-  type DbChat,
-  type DbFile,
-  type DbMessage,
-  type DbUser,
-} from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { eq, and } from "drizzle-orm"
+import { chats, messages, users, type DbFile, type DbMessage, type DbUser } from "@in/server/db/schema"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import {
@@ -23,7 +13,6 @@ import {
   type TUpdateInfo,
   Optional,
 } from "@in/server/api-types"
-import { connectionManager } from "@in/server/ws/connections"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import * as APN from "apn"
 import type { HandlerContext } from "../controllers/helpers"
@@ -35,7 +24,7 @@ import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { TInputId } from "@in/server/types/methods"
 import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
-import { debugDelay, delay } from "@in/server/utils/helpers/time"
+import { debugDelay } from "@in/server/utils/helpers/time"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { MessageEntities, Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"

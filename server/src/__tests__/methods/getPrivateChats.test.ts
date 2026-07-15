@@ -5,7 +5,6 @@ import { eq, and, inArray } from "drizzle-orm"
 import { handler } from "../../methods/getPrivateChats"
 import { describe, test, expect } from "bun:test"
 import type { HandlerContext } from "../../controllers/helpers"
-import type { TDialogInfo, TMessageInfo } from "../../api-types"
 
 describe("getPrivateChats", () => {
   setupTestLifecycle()

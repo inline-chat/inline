@@ -1,5 +1,4 @@
-import type { Chat, Dialog, InputPeer, Message, MessageAttachment, Space, User } from "@inline-chat/protocol/core"
-import { ModelError } from "@in/server/db/models/_errors"
+import type { Chat, Dialog, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -11,7 +10,6 @@ import {
   dialogs,
   spaces,
   members,
-  chatParticipants,
   type DbSpace,
   type DbChat,
   type DbDialog,
@@ -21,7 +19,6 @@ import {
 } from "@in/server/db/schema"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
-import { ChatModel } from "@in/server/db/models/chats"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 type Input = {}

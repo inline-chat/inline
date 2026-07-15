@@ -11,7 +11,7 @@ import {
   TMemberInfo,
   TSpaceInfo,
 } from "@in/server/api-types"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"

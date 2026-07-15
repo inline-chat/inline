@@ -1,22 +1,12 @@
 import { db } from "@in/server/db"
-import { eq, inArray, and, or, isNull } from "drizzle-orm"
-import { chats, members, spaces, dialogs } from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { eq, and, isNull } from "drizzle-orm"
+import { members, spaces } from "@in/server/db/schema"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
-import {
-  encodeChatInfo,
-  encodeMemberInfo,
-  encodeSpaceInfo,
-  encodeDialogInfo,
-  TChatInfo,
-  TMemberInfo,
-  TSpaceInfo,
-  TDialogInfo,
-} from "@in/server/api-types"
+import { encodeMemberInfo, encodeSpaceInfo, TMemberInfo, TSpaceInfo } from "@in/server/api-types"
 import { TInputId } from "@in/server/types/methods"
 import { Authorize } from "../utils/authorize"
-import { DialogsModel } from "@in/server/db/models/dialogs"
 
 export const Input = Type.Object({
   id: TInputId,

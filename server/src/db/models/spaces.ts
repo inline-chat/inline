@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { members, spaces, type DbSpace, type DbMemberRole } from "@in/server/db/schema"
-import { eq, lt, or } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { MembersModel } from "./members"

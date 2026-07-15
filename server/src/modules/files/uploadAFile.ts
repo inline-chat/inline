@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid"
-import { type FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
+import { type FileTypes } from "@in/server/modules/files/types"
 import { generateFileUniqueId } from "@in/server/modules/files/fileId"
 import { uploadToBucket } from "@in/server/modules/files/uploadToBucket"
 import { files, type DbNewFile } from "@in/server/db/schema"

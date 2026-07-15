@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm"
 import { db } from ".."
-import { reactions, type DbNewReaction, type DbReaction } from "../schema"
+import { reactions, type DbNewReaction } from "../schema"
 
 export const ReactionModel = {
   insertReaction: insertReaction,

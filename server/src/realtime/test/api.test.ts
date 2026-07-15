@@ -1,7 +1,6 @@
 import { realtime } from "@in/server/realtime"
 import { newWebsocket, wsOpen } from "@in/server/realtime/test/utils"
-import { delay } from "@in/server/utils/helpers/time"
-import { describe, it, expect } from "bun:test"
+import { describe, it } from "bun:test"
 import Elysia from "elysia"
 
 describe("realtime api", () => {

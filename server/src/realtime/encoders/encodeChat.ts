@@ -1,9 +1,7 @@
-import { Chat, Dialog, Peer, PeerChat } from "@inline-chat/protocol/core"
-import type { chats, DbChat } from "@in/server/db/schema"
-import { encodePeer } from "@in/server/realtime/encoders/encodePeer"
+import { Chat, Peer } from "@inline-chat/protocol/core"
+import type { DbChat } from "@in/server/db/schema"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log } from "@in/server/utils/log"
-import type { InferSelectModel } from "drizzle-orm"
 
 export function encodeChat(chat: DbChat, { encodingForUserId }: { encodingForUserId: number }): Chat {
   let peerId: Peer | undefined

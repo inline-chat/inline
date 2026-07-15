@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test, beforeAll } from "bun:test"
-import { setupTestDatabase, setupTestLifecycle, teardownTestDatabase, testUtils } from "../setup"
+import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
 import { MessageModel } from "@in/server/db/models/messages"
 import { decrypt, decryptBinary } from "@in/server/modules/encryption/encryption"
-import { MessageEntities, MessageEntity_MessageEntityMention, MessageEntity_Type } from "@inline-chat/protocol/core"
+import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
 
 describe("editMessage", () => {
   let userId: number
