@@ -33,6 +33,8 @@ public actor MacNotifications {
     imageURL: URL? = nil,
     forceSound: Bool = false
   ) async {
+    guard Self.canPostSystemNotifications(bundleURL: Bundle.main.bundleURL) else { return }
+
     let content = UNMutableNotificationContent()
     content.title = title
     content.body = body
@@ -69,6 +71,10 @@ public actor MacNotifications {
     } catch {
       log.error("Failed to show notification", error: error)
     }
+  }
+
+  static func canPostSystemNotifications(bundleURL: URL) -> Bool {
+    bundleURL.pathExtension == "app"
   }
 }
 

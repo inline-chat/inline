@@ -28,7 +28,7 @@ struct IncomingAttachmentTransferTests {
 
     let transfer = try await load(provider).get()
     defer { transfer.cleanup() }
-    let stagedURL = try #require(stagedURL(from: transfer))
+    let stagedURL = try #require(stagedFileURL(from: transfer))
 
     #expect(stagedURL != sourceURL)
     #expect(stagedURL.pathExtension == "txt")
@@ -145,7 +145,7 @@ struct IncomingAttachmentTransferTests {
     }
 
     let transfer = try await load(provider).get()
-    let stagedURL = try #require(stagedURL(from: transfer))
+    let stagedURL = try #require(stagedFileURL(from: transfer))
     defer { transfer.cleanup() }
 
     #expect(stagedURL != sourceURL)
@@ -181,7 +181,7 @@ struct IncomingAttachmentTransferTests {
     }
   }
 
-  private func stagedURL(from transfer: IncomingAttachmentTransfer) -> URL? {
+  private func stagedFileURL(from transfer: IncomingAttachmentTransfer) -> URL? {
     guard case let .stagedFile(url, _) = transfer.payload else { return nil }
     return url
   }

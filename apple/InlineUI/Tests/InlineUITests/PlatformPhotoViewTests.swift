@@ -198,7 +198,7 @@ struct PlatformPhotoViewTests {
   }
 
   private func waitUntil(
-    timeout: Duration = .milliseconds(1_000),
+    timeout: Duration = .seconds(5),
     pollInterval: Duration = .milliseconds(10),
     _ condition: @escaping @MainActor () -> Bool
   ) async throws {

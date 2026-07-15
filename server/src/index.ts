@@ -174,11 +174,14 @@ app
     }),
   )
 
-// Run
-app.listen(port, (server: Server<unknown>) => {
-  connectionManager.setServer(server)
-  startDatabaseHealthMonitor()
-  startGridProviderEffectWorker()
-  registerGracefulShutdown(server)
-  log.info(`Running on http://${server.hostname}:${server.port}`)
-})
+// Run only when this file is the process entry point. Route tests import `app`
+// directly and must not start production background workers or bind a port.
+if (import.meta.main) {
+  app.listen(port, (server: Server<unknown>) => {
+    connectionManager.setServer(server)
+    startDatabaseHealthMonitor()
+    startGridProviderEffectWorker()
+    registerGracefulShutdown(server)
+    log.info(`Running on http://${server.hostname}:${server.port}`)
+  })
+}
