@@ -124,8 +124,9 @@ struct DialogChatListVisibilityTests {
 
       let saved = try #require(try Dialog.get(peerId: .thread(id: 19)).fetchOne(db))
       let openedDate = try #require(saved.openedDate)
-      #expect(openedDate >= before)
-      #expect(openedDate <= after)
+      let storageTolerance: TimeInterval = 0.01
+      #expect(openedDate.timeIntervalSince(before) >= -storageTolerance)
+      #expect(openedDate.timeIntervalSince(after) <= storageTolerance)
     }
   }
 

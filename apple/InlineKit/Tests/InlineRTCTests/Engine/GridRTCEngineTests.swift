@@ -155,6 +155,7 @@ struct GridRTCEngineTests {
     var configuration = InlineRTCConfiguration.voice
     configuration.connection.initialConnectSlowWarningDelay = 0.01
     configuration.connection.initialConnectWatchdogTimeout = 0.03
+    configuration.connection.audioPreparationConnectWaitTimeout = 0
     let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
     let target = InlineRTCSessionID("grid-test:1:22:1")
 

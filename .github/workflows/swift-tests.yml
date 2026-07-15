@@ -26,6 +26,8 @@ concurrency:
 jobs:
   test:
     name: Swift Tests (${{ matrix.package }})
+    # GitHub's newest hosted macOS image. Xcode 27 can run on Tahoe 26.4+, so
+    # the OS label does not need to wait for a macOS 27 runner image.
     runs-on: macos-26
     timeout-minutes: 20
     strategy:
@@ -49,43 +51,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Preflight
-        id: preflight
-        env:
-          XCODE_PATH: ${{ vars.MACOS_XCODE_PATH }}
+      - name: Select latest Xcode (including betas)
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest
+
+      - name: Toolchain versions
         run: |
-          set -euo pipefail
           sw_vers
-          echo "Available Xcodes:"
-          ls -d /Applications/Xcode*.app 2>/dev/null || true
-          # Prefer the newest stable versioned Xcode install on CI so Swift package checks
-          # follow the latest released Xcode instead of the runner default or a stale override.
-          stable_xcode_path="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v '_beta\\.app$' | sort -V | tail -n 1 || true)"
-          beta_xcode_path="$(ls -d /Applications/Xcode_*_beta.app 2>/dev/null | sort -V | tail -n 1 || true)"
-          if [[ -n "${stable_xcode_path}" ]]; then
-            xcode_path="${stable_xcode_path}"
-          elif [[ -n "${XCODE_PATH:-}" && -d "${XCODE_PATH}" ]]; then
-            xcode_path="${XCODE_PATH}"
-          elif [[ -d "/Applications/Xcode.app" ]]; then
-            xcode_path="/Applications/Xcode.app"
-          else
-            xcode_path="${beta_xcode_path}"
-          fi
-          if [[ -z "${xcode_path}" ]]; then
-            echo "No suitable Xcode found on runner." >&2
-            exit 1
-          fi
-          echo "Using Xcode path: ${xcode_path}"
-          echo "xcode_path=${xcode_path}" >> "${GITHUB_OUTPUT}"
-
-      - name: Set Xcode version
-        run: sudo xcode-select -s "${{ steps.preflight.outputs.xcode_path }}"
-
-      - name: Swift Version
-        run: xcrun swift --version
-
-      - name: Xcode Version
-        run: xcodebuild -version
+          xcodebuild -version
+          xcrun swift --version
 
       - name: Build ${{ matrix.package }}
         working-directory: ${{ matrix.path }}
