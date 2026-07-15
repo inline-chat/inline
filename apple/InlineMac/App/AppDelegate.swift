@@ -33,7 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     return deps
   }()
 
-  @MainActor private var globalFocusHotkeyController: GlobalFocusHotkeyController?
+  @MainActor private var globalHotkeyController: GlobalHotkeyController?
 
   private let installLocationPrompt = AppInstallLocationPrompt()
   private let launchAtLoginController = LaunchAtLoginController()
@@ -66,7 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     registerMainWindowCoordinator()
     setupRealtimeConnectionFailureObserver()
     setupRealtimeAuthInvalidatedObserver()
-    setupGlobalFocusHotkey()
+    setupGlobalHotkeys()
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
     TimezoneManager.shared.start()
@@ -200,26 +200,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     showAndFocusMainWindow()
   }
 
-  @MainActor private func setupGlobalFocusHotkey() {
-    if globalFocusHotkeyController == nil {
-      globalFocusHotkeyController = GlobalFocusHotkeyController { [weak self] in
-        guard let self else { return }
-        self.toggleAppFromGlobalHotkey()
-      }
+  @MainActor private func setupGlobalHotkeys() {
+    if globalHotkeyController == nil {
+      globalHotkeyController = GlobalHotkeyController()
     }
 
-    let apply: (HotkeySettingsStore.GlobalFocusHotkey) -> Void = { [weak self] settings in
+    let applyFocus: (HotkeySettingsStore.HotkeyConfiguration) -> Void = { [weak self] settings in
       guard let self else { return }
-      self.globalFocusHotkeyController?.applyHotkey(enabled: settings.enabled, hotkey: settings.hotkey)
+      self.globalHotkeyController?.applyHotkey(
+        action: .focusInline,
+        enabled: settings.enabled,
+        hotkey: settings.hotkey,
+        onPress: { [weak self] in self?.toggleAppFromGlobalHotkey() }
+      )
     }
 
-    apply(HotkeySettingsStore.shared.globalFocusHotkey)
+    let applyGridMicrophone: (HotkeySettingsStore.HotkeyConfiguration) -> Void = { [weak self] settings in
+      guard let self else { return }
+      self.globalHotkeyController?.applyHotkey(
+        action: .gridMicrophone,
+        enabled: settings.enabled,
+        hotkey: settings.hotkey,
+        onPress: { [weak self] in self?.dependencies.grid.toggleCurrentMicrophone() }
+      )
+    }
+
+    applyFocus(HotkeySettingsStore.shared.globalFocusHotkey)
+    applyGridMicrophone(HotkeySettingsStore.shared.gridMicrophoneHotkey)
 
     HotkeySettingsStore.shared.$globalFocusHotkey
       .removeDuplicates()
       .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
       .sink { settings in
-        apply(settings)
+        applyFocus(settings)
+      }
+      .store(in: &cancellables)
+
+    HotkeySettingsStore.shared.$gridMicrophoneHotkey
+      .removeDuplicates()
+      .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+      .sink { settings in
+        applyGridMicrophone(settings)
       }
       .store(in: &cancellables)
   }

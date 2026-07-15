@@ -315,6 +315,17 @@ final class GridRoomService {
     reconcileMediaDemand()
   }
 
+  func toggleCurrentMicrophone() {
+    guard let grid = grids.values.first(where: { grid in
+      guard grid.hasCurrentRoomID,
+            let room = grid.rooms.first(where: { $0.id == grid.currentRoomID })
+      else { return false }
+      return room.avatars.contains(where: \.ownedByCurrentSession)
+    }) else { return }
+
+    toggleMicrophone(spaceID: grid.spaceID)
+  }
+
   func toggleRoomLock(roomID: Int64, locked: Bool) async {
     guard let mutation = optimisticallyUpdateRoom(
       roomID: roomID,

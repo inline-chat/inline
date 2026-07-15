@@ -3,46 +3,55 @@ import Carbon
 import InlineMacUI
 import Logger
 
-/// Registers a system-global hotkey (works even when Inline isn't focused) and triggers a handler.
-final class GlobalFocusHotkeyController {
-  private let log = Log.scoped("GlobalFocusHotkeyController")
+/// Registers Inline's system-global hotkeys through one Carbon event handler.
+final class GlobalHotkeyController {
+  enum Action: UInt32, Hashable {
+    case focusInline = 1
+    case gridMicrophone = 2
+  }
 
-  private var hotKeyRef: EventHotKeyRef?
+  private let log = Log.scoped("GlobalHotkeyController")
+
+  private var hotKeyRefs: [Action: EventHotKeyRef] = [:]
+  private var handlers: [Action: @MainActor () -> Void] = [:]
   private var eventHandlerRef: EventHandlerRef?
   private var eventHandlerUPP: EventHandlerUPP?
 
   private let signature: OSType = 0x494E4C4E // 'INLN'
-  private let hotKeyID: UInt32 = 1
 
-  private let onPress: @MainActor () -> Void
-
-  init(onPress: @escaping @MainActor () -> Void) {
-    self.onPress = onPress
+  init() {
     installHandlerIfNeeded()
   }
 
   deinit {
     // Best-effort cleanup; important to remove the Carbon handler synchronously,
     // otherwise it could fire after deallocation (UAF via `userData`).
-    unregister()
+    unregisterAll()
     if let eventHandlerRef {
       RemoveEventHandler(eventHandlerRef)
     }
   }
 
-  func applyHotkey(enabled: Bool, hotkey: InlineHotkey?) {
+  func applyHotkey(
+    action: Action,
+    enabled: Bool,
+    hotkey: InlineHotkey?,
+    onPress: @escaping @MainActor () -> Void
+  ) {
     if !Thread.isMainThread {
       log.warning("applyHotkey called off main thread")
     }
 
     // Always unregister first; makes updates predictable.
-    unregister()
+    unregister(action)
+    handlers[action] = nil
 
     guard enabled, let hotkey else {
       return
     }
 
-    var hkID = EventHotKeyID(signature: signature, id: hotKeyID)
+    handlers[action] = onPress
+    var hkID = EventHotKeyID(signature: signature, id: action.rawValue)
     var ref: EventHotKeyRef?
     let status = RegisterEventHotKey(
       UInt32(hotkey.keyCode),
@@ -54,19 +63,28 @@ final class GlobalFocusHotkeyController {
     )
 
     if status != noErr {
-      log.warning("RegisterEventHotKey failed: \(status)")
+      handlers[action] = nil
+      log.warning("RegisterEventHotKey failed action=\(action.rawValue): \(status)")
       return
     }
 
-    hotKeyRef = ref
-    log.trace("Registered global hotkey: \(hotkey.displayString)")
+    if let ref {
+      hotKeyRefs[action] = ref
+    }
+    log.trace("Registered global hotkey action=\(action.rawValue): \(hotkey.displayString)")
   }
 
-  private func unregister() {
-    if let hotKeyRef {
+  private func unregister(_ action: Action) {
+    if let hotKeyRef = hotKeyRefs.removeValue(forKey: action) {
       UnregisterEventHotKey(hotKeyRef)
-      self.hotKeyRef = nil
     }
+  }
+
+  private func unregisterAll() {
+    for action in Array(hotKeyRefs.keys) {
+      unregister(action)
+    }
+    handlers.removeAll()
   }
 
   private func installHandlerIfNeeded() {
@@ -78,8 +96,8 @@ final class GlobalFocusHotkeyController {
     )
 
     let handler: EventHandlerProcPtr = { _, eventRef, userData in
-      guard let eventRef, let userData else { return noErr }
-      let controller = Unmanaged<GlobalFocusHotkeyController>.fromOpaque(userData).takeUnretainedValue()
+      guard let eventRef, let userData else { return OSStatus(eventNotHandledErr) }
+      let controller = Unmanaged<GlobalHotkeyController>.fromOpaque(userData).takeUnretainedValue()
 
       var hkID = EventHotKeyID()
       let status = GetEventParameter(
@@ -92,12 +110,15 @@ final class GlobalFocusHotkeyController {
         &hkID
       )
 
-      guard status == noErr else { return noErr }
-      guard hkID.signature == controller.signature, hkID.id == controller.hotKeyID else { return noErr }
+      guard status == noErr,
+            hkID.signature == controller.signature,
+            let action = Action(rawValue: hkID.id),
+            let onPress = controller.handlers[action]
+      else { return OSStatus(eventNotHandledErr) }
 
       // Run after the hotkey event returns to avoid re-entrancy issues with AppKit focus changes.
       DispatchQueue.main.async { @MainActor in
-        controller.onPress()
+        onPress()
       }
 
       return noErr
