@@ -50,8 +50,16 @@ final class AppBridge {
   }
 
   @MainActor
-  func openSettings(dependencies: AppDependencies, sender: Any? = nil) {
-    SettingsWindowController.show(using: dependencies, sender: sender)
+  func openSettings(
+    dependencies: AppDependencies,
+    selectedCategory: SettingsCategory? = nil,
+    sender: Any? = nil
+  ) {
+    SettingsWindowController.show(
+      using: dependencies,
+      selectedCategory: selectedCategory,
+      sender: sender
+    )
   }
 
   @MainActor

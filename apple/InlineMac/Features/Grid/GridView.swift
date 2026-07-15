@@ -3,6 +3,7 @@ import InlineProtocol
 import SwiftUI
 
 struct GridView: View {
+  @Environment(\.dependencies) private var dependencies
   @Environment(\.nav) private var nav
   @Environment(GridRoomService.self) private var store
   @Environment(SidebarViewModel.self) private var sidebar
@@ -43,6 +44,14 @@ struct GridView: View {
         titleItem.sharedBackgroundVisibility(.hidden)
       } else {
         titleItem
+      }
+
+      if #available(macOS 26.0, *) {
+        ToolbarSpacer(.flexible)
+      }
+
+      ToolbarItem {
+        GridAdvancedMenu(onManageHotkeys: openHotkeySettings)
       }
     }
     .safeAreaInset(edge: .bottom) {
@@ -94,6 +103,30 @@ struct GridView: View {
     nav.open(.grid(spaceId: spaceID))
   }
 
+  private func openHotkeySettings() {
+    guard let dependencies else { return }
+    dependencies.appBridge.openSettings(
+      dependencies: dependencies,
+      selectedCategory: .hotkeys
+    )
+  }
+}
+
+private struct GridAdvancedMenu: View {
+  let onManageHotkeys: () -> Void
+
+  var body: some View {
+    Menu {
+      Button(action: onManageHotkeys) {
+        Label("Manage Hotkeys…", systemImage: "keyboard")
+      }
+    } label: {
+      Label("Grid Options", systemImage: "ellipsis")
+        .labelStyle(.iconOnly)
+    }
+    .menuIndicator(.hidden)
+    .help("Grid Options")
+  }
 }
 
 private struct GridToolbarSpace: Identifiable, Equatable {

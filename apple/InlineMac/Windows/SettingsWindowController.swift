@@ -7,20 +7,34 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private let log = Log.scoped("SettingsWindowController")
   private let dependencies: AppDependencies
   private let appBridge: AppBridge
+  private let navigation: SettingsNavigationModel
   private static var shared: SettingsWindowController?
 
-  static func show(using dependencies: AppDependencies, sender: Any? = nil) {
+  static func show(
+    using dependencies: AppDependencies,
+    selectedCategory: SettingsCategory? = nil,
+    sender: Any? = nil
+  ) {
     if shared == nil {
-      shared = SettingsWindowController(dependencies: dependencies)
+      shared = SettingsWindowController(
+        dependencies: dependencies,
+        selectedCategory: selectedCategory ?? .general
+      )
+    } else if let selectedCategory {
+      shared?.navigation.selectedCategory = selectedCategory
     }
     shared?.showWindow(sender)
   }
 
-  init(dependencies: AppDependencies) {
+  init(
+    dependencies: AppDependencies,
+    selectedCategory: SettingsCategory = .general
+  ) {
     let windowID = UUID()
     let appBridge = dependencies.appBridge.bound(to: windowID)
     self.appBridge = appBridge
     self.dependencies = dependencies.with(appBridge: appBridge)
+    navigation = SettingsNavigationModel(selectedCategory: selectedCategory)
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: CGSize(width: 840, height: 640)),
       styleMask: [
@@ -59,7 +73,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     window.delegate = self
 
     // Set up SwiftUI content with dependencies
-    let contentView = SettingsRootView()
+    let contentView = SettingsRootView(navigation: navigation)
       .environment(dependencies: dependencies)
     let hostingController = NSHostingController(rootView: contentView)
     window.contentViewController = hostingController

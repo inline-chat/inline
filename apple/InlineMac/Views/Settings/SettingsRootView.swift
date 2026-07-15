@@ -1,16 +1,29 @@
 import InlineKit
 import InlineUI
+import Observation
 import SwiftUI
+
+@MainActor
+@Observable
+final class SettingsNavigationModel {
+  var selectedCategory: SettingsCategory
+
+  init(selectedCategory: SettingsCategory = .general) {
+    self.selectedCategory = selectedCategory
+  }
+}
 
 struct SettingsRootView: View {
   @EnvironmentStateObject private var root: RootData
-  @State private var selectedCategory: SettingsCategory = .general
+  @Bindable private var navigation: SettingsNavigationModel
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
-  @State private var navigationHistory: [SettingsCategory] = [.general]
+  @State private var navigationHistory: [SettingsCategory]
   @State private var historyIndex = 0
   @State private var isHistoryNavigation = false
 
-  init() {
+  init(navigation: SettingsNavigationModel) {
+    self.navigation = navigation
+    _navigationHistory = State(initialValue: [navigation.selectedCategory])
     _root = EnvironmentStateObject { env in
       RootData(db: env.appDatabase, auth: env.auth)
     }
@@ -18,7 +31,7 @@ struct SettingsRootView: View {
 
   var body: some View {
     NavigationSplitView(columnVisibility: $columnVisibility) {
-      SettingsSidebarView(selectedCategory: $selectedCategory)
+      SettingsSidebarView(selectedCategory: $navigation.selectedCategory)
         .frame(minWidth: Metrics.sidebarMinWidth)
         .navigationSplitViewColumnWidth(
           min: Metrics.sidebarMinWidth,
@@ -28,7 +41,7 @@ struct SettingsRootView: View {
         .toolbar(removing: .sidebarToggle)
     } detail: {
       NavigationStack {
-        SettingsDetailView(category: selectedCategory)
+        SettingsDetailView(category: navigation.selectedCategory)
       }
     }
     .navigationTitle("Settings")
@@ -56,7 +69,7 @@ struct SettingsRootView: View {
         .controlGroupStyle(.navigation)
       }
     }
-    .onChange(of: selectedCategory) { _, _ in
+    .onChange(of: navigation.selectedCategory) { _, _ in
       recordNavigation()
     }
     .environmentObject(root)
@@ -74,7 +87,7 @@ struct SettingsRootView: View {
     guard canGoBack else { return }
     isHistoryNavigation = true
     historyIndex -= 1
-    selectedCategory = navigationHistory[historyIndex]
+    navigation.selectedCategory = navigationHistory[historyIndex]
     DispatchQueue.main.async {
       isHistoryNavigation = false
     }
@@ -84,7 +97,7 @@ struct SettingsRootView: View {
     guard canGoForward else { return }
     isHistoryNavigation = true
     historyIndex += 1
-    selectedCategory = navigationHistory[historyIndex]
+    navigation.selectedCategory = navigationHistory[historyIndex]
     DispatchQueue.main.async {
       isHistoryNavigation = false
     }
@@ -92,13 +105,13 @@ struct SettingsRootView: View {
 
   private func recordNavigation() {
     guard !isHistoryNavigation else { return }
-    if navigationHistory[historyIndex] == selectedCategory {
+    if navigationHistory[historyIndex] == navigation.selectedCategory {
       return
     }
     if historyIndex < navigationHistory.count - 1 {
       navigationHistory = Array(navigationHistory.prefix(historyIndex + 1))
     }
-    navigationHistory.append(selectedCategory)
+    navigationHistory.append(navigation.selectedCategory)
     historyIndex = navigationHistory.count - 1
   }
 }
@@ -149,6 +162,6 @@ private struct SettingsDetailView: View {
 }
 
 #Preview {
-  SettingsRootView()
+  SettingsRootView(navigation: SettingsNavigationModel())
     .previewsEnvironment(.populated)
 }
