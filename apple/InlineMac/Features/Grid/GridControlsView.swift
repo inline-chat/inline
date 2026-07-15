@@ -73,10 +73,6 @@ struct GridControlPill: View {
 
   private var controls: some View {
     HStack(spacing: 8) {
-      GridCircularControlButton(help: "Leave room", action: onLeave) {
-        Image(systemName: "door.left.hand.open")
-          .foregroundStyle(.pink)
-      }
       GridMicrophoneControl(
         media: media,
         onToggle: onToggleMicrophone,
@@ -84,6 +80,10 @@ struct GridControlPill: View {
         onRefreshInputDevices: onRefreshInputDevices
       )
       GridVolumeControl(media: media, onSetVolume: onSetOutputVolume)
+      GridCircularControlButton(help: "Leave room", action: onLeave) {
+        Image(systemName: "door.left.hand.open")
+          .foregroundStyle(.pink)
+      }
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 8)

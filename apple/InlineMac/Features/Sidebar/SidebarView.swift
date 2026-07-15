@@ -254,26 +254,12 @@ struct SidebarView: View {
         size: settings.sidebarItemSize,
         action: { openGrid(spaceID: spaceID) }
       )
-    } else if homeGridSpaces.count == 1, let home = homeGridSpaces.first {
+    } else if let home = homeGridSpaces.first {
       SidebarGridRow(
-        avatars: home.recentAvatars.map { InlineKit.User(from: $0.user) },
-        selected: nav.currentRoute == .grid(spaceId: home.spaceID),
-        size: settings.sidebarItemSize,
-        action: { openGrid(spaceID: home.spaceID) }
-      )
-    } else {
-      SidebarGridMenuRow(
         avatars: homeGridAvatars,
         selected: isAnyHomeGridSelected,
         size: settings.sidebarItemSize,
-        spaces: homeGridSpaces.map { home in
-          SidebarGridMenuSpace(
-            id: home.spaceID,
-            name: viewModel.space(id: home.spaceID)?.displayName ?? "Space",
-            activeAvatarCount: Int(home.activeAvatarCount)
-          )
-        },
-        action: openGrid(spaceID:)
+        action: { openGrid(spaceID: home.spaceID) }
       )
     }
   }
@@ -1691,60 +1677,6 @@ private struct SidebarGridRow: View {
     .accessibilityLabel("Grid")
     .accessibilityAddTraits(selected ? .isSelected : [])
     .onHover { isHovered = $0 }
-  }
-
-  private var backgroundColor: Color {
-    if selected {
-      colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
-    } else if isHovered {
-      colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
-    } else {
-      .clear
-    }
-  }
-}
-
-private struct SidebarGridMenuSpace: Identifiable {
-  let id: Int64
-  let name: String
-  let activeAvatarCount: Int
-}
-
-private struct SidebarGridMenuRow: View {
-  let avatars: [InlineKit.User]
-  let selected: Bool
-  let size: SidebarItemSize
-  let spaces: [SidebarGridMenuSpace]
-  let action: (Int64) -> Void
-
-  @Environment(\.colorScheme) private var colorScheme
-  @State private var isHovered = false
-
-  var body: some View {
-    Menu {
-      ForEach(spaces) { space in
-        Button {
-          action(space.id)
-        } label: {
-          Label(menuTitle(for: space), systemImage: "circle.grid.2x2")
-        }
-      }
-    } label: {
-      SidebarGridRowContent(avatars: avatars, size: size, backgroundColor: backgroundColor)
-    }
-    .menuStyle(.borderlessButton)
-    .menuIndicator(.hidden)
-    .frame(maxWidth: .infinity)
-    .help("Choose a Space Grid")
-    .accessibilityLabel("Grid")
-    .accessibilityHint("Choose a Space")
-    .accessibilityAddTraits(selected ? .isSelected : [])
-    .onHover { isHovered = $0 }
-  }
-
-  private func menuTitle(for space: SidebarGridMenuSpace) -> String {
-    guard space.activeAvatarCount > 0 else { return space.name }
-    return "\(space.name) · \(space.activeAvatarCount) active"
   }
 
   private var backgroundColor: Color {
