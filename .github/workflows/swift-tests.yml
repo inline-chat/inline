@@ -23,9 +23,107 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  plan:
+    name: Plan Swift Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      packages: ${{ steps.packages.outputs.packages }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Select affected packages
+        id: packages
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -eo pipefail
+
+          packages=()
+
+          add_package() {
+            local candidate="$1"
+            local package
+            for package in "${packages[@]}"; do
+              if [[ "$package" == "$candidate" ]]; then
+                return
+              fi
+            done
+            packages+=("$candidate")
+          }
+
+          add_all_packages() {
+            add_package "InlineKit"
+            add_package "InlineUI"
+            add_package "InlineIOSUI"
+            add_package "InlineMacUI"
+          }
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base_sha="${PR_BASE_SHA:-}"
+          else
+            base_sha="${PUSH_BASE_SHA:-}"
+          fi
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" \
+            || -z "$base_sha" \
+            || "$base_sha" =~ ^0+$ ]] \
+            || ! git cat-file -e "${base_sha}^{commit}"; then
+            add_all_packages
+          else
+            changed() {
+              ! git diff --quiet "$base_sha" "$GITHUB_SHA" -- "$1"
+            }
+
+            if changed ".github/workflows/swift-tests.yml" \
+              || changed "apple/InlineKit"; then
+              add_all_packages
+            else
+              if changed "apple/InlineUI"; then
+                add_package "InlineUI"
+                add_package "InlineIOSUI"
+                add_package "InlineMacUI"
+              fi
+              if changed "apple/InlineIOSUI"; then
+                add_package "InlineIOSUI"
+              fi
+              if changed "apple/InlineMacUI"; then
+                add_package "InlineMacUI"
+              fi
+            fi
+          fi
+
+          # The workflow-level path filter guarantees a relevant change. Fall
+          # back to full coverage if GitHub introduces an unexpected event shape.
+          if [[ ${#packages[@]} -eq 0 ]]; then
+            add_all_packages
+          fi
+
+          json="["
+          separator=""
+          for package in "${packages[@]}"; do
+            json+="${separator}\"${package}\""
+            separator=","
+          done
+          json+="]"
+
+          echo "packages=$json" >> "$GITHUB_OUTPUT"
+          echo "Selected packages: $json"
+
   test:
     name: Swift Tests (${{ matrix.package }})
+    needs: plan
+    if: needs.plan.outputs.packages != '[]'
     # GitHub's newest hosted macOS image. Xcode 27 can run on Tahoe 26.4+, so
     # the OS label does not need to wait for a macOS 27 runner image.
     runs-on: macos-26
@@ -33,19 +131,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - package: InlineKit
-            path: apple/InlineKit
-            test_args: --no-parallel
-          - package: InlineUI
-            path: apple/InlineUI
-            test_args: ""
-          - package: InlineIOSUI
-            path: apple/InlineIOSUI
-            test_args: ""
-          - package: InlineMacUI
-            path: apple/InlineMacUI
-            test_args: ""
+        package: ${{ fromJSON(needs.plan.outputs.packages) }}
 
     steps:
       - name: Checkout
@@ -63,9 +149,16 @@ jobs:
           xcrun swift --version
 
       - name: Build ${{ matrix.package }}
-        working-directory: ${{ matrix.path }}
-        run: xcrun swift build
+        working-directory: apple/${{ matrix.package }}
+        run: xcrun swift build --build-tests --disable-automatic-resolution
 
       - name: Test ${{ matrix.package }}
-        working-directory: ${{ matrix.path }}
-        run: xcrun swift test ${{ matrix.test_args }}
+        working-directory: apple/${{ matrix.package }}
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          args=(--skip-build --disable-automatic-resolution)
+          if [[ "$PACKAGE" == "InlineKit" ]]; then
+            args+=(--no-parallel)
+          fi
+          xcrun swift test "${args[@]}"
