@@ -459,13 +459,17 @@ export async function emitChatListOpenUpdates(input: {
     return
   }
 
+  const chatsByUserId = await Encoders.chatForUsers(
+    input.chat,
+    uniqueDialogs.map((dialog) => dialog.userId),
+  )
   const preparedUpdates = await Promise.all(
     uniqueDialogs.map(async (dialog) => {
       const unreadCount = await DialogsModel.getUnreadCount(dialog.chatId, dialog.userId)
       return {
         dialog,
         unreadCount,
-        chat: Encoders.chat(input.chat, { encodingForUserId: dialog.userId }),
+        chat: chatsByUserId.get(dialog.userId),
         encodedDialog: Encoders.dialog(dialog, { unreadCount }),
       }
     }),

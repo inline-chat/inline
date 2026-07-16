@@ -3,7 +3,6 @@ import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
 import { Chat, Dialog, type ChatParticipant } from "@inline-chat/protocol/core"
-import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { dialogs } from "@in/server/db/schema"
@@ -235,7 +234,7 @@ export async function createChat(
     await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
 
     return {
-      chat: encodeChat(createdChat, { encodingForUserId: context.currentUserId }),
+      chat: await Encoders.chatForUser(createdChat, { encodingForUserId: context.currentUserId }),
       dialog: encodedDialog,
     }
   }
@@ -314,7 +313,7 @@ export async function createChat(
   await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
 
   return {
-    chat: encodeChat(createdChat, { encodingForUserId: context.currentUserId }),
+    chat: await Encoders.chatForUser(createdChat, { encodingForUserId: context.currentUserId }),
     dialog: encodedDialog,
   }
 }
@@ -372,6 +371,7 @@ const pushUpdates = async ({
   const updateGroup = await getUpdateGroup({ threadId: chat.id }, { currentUserId })
 
   let selfUpdates: Update[] = []
+  const chatsByUserId = await Encoders.chatForUsers(chat, updateGroup.userIds)
 
   // Broadcast to all users in the update group
   updateGroup.userIds.forEach((userId) => {
@@ -382,7 +382,7 @@ const pushUpdates = async ({
       update: {
         oneofKind: "newChat",
         newChat: {
-          chat: Encoders.chat(chat, { encodingForUserId: userId }),
+          chat: chatsByUserId.get(userId),
         },
       },
     }

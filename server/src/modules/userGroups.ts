@@ -20,6 +20,11 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { ChatParticipantGroup, Update, User, UserGroup } from "@inline-chat/protocol/core"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import {
+  prepareChatPermissionUpdates,
+  pushChatPermissionUpdates,
+  type PreparedChatPermissionUpdate,
+} from "@in/server/modules/authorization/chatPermissionUpdates"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { and, asc, count, eq, inArray, isNull } from "drizzle-orm"
@@ -192,16 +197,17 @@ export async function updateUserGroup(
         )
       }
 
-      const accessUpdates = await enqueueGroupMembershipAccessUpdates(tx, {
+      const membershipUpdates = await enqueueGroupMembershipAccessUpdates(tx, {
         groupId: input.groupId,
         oldUserIds,
         newUserIds: values.userIds,
       })
 
-      return { group: updatedGroup, accessUpdates }
+      return { group: updatedGroup, membershipUpdates }
     })
 
-    pushMembershipAccessUpdates(result.accessUpdates)
+    pushMembershipAccessUpdates(result.membershipUpdates.accessUpdates)
+    pushChatPermissionUpdates(result.membershipUpdates.permissionUpdates)
 
     return {
       group: encodeUserGroup({ group: result.group, userIds: values.userIds }, context.currentUserId),
@@ -516,14 +522,17 @@ async function loadActiveMemberRowsForGroups(groupIds: number[]): Promise<{ grou
 async function enqueueGroupMembershipAccessUpdates(
   tx: Transaction,
   input: { groupId: number; oldUserIds: number[]; newUserIds: number[] },
-): Promise<MembershipAccessUpdate[]> {
+): Promise<{
+  accessUpdates: MembershipAccessUpdate[]
+  permissionUpdates: PreparedChatPermissionUpdate[]
+}> {
   const oldUserIds = new Set(input.oldUserIds)
   const newUserIds = new Set(input.newUserIds)
   const addedUserIds = input.newUserIds.filter((userId) => !oldUserIds.has(userId))
   const removedUserIds = input.oldUserIds.filter((userId) => !newUserIds.has(userId))
 
   if (addedUserIds.length === 0 && removedUserIds.length === 0) {
-    return []
+    return { accessUpdates: [], permissionUpdates: [] }
   }
 
   const grants = await tx
@@ -532,7 +541,7 @@ async function enqueueGroupMembershipAccessUpdates(
     .where(eq(chatParticipantGroups.groupId, input.groupId))
 
   if (grants.length === 0) {
-    return []
+    return { accessUpdates: [], permissionUpdates: [] }
   }
 
   const updates: MembershipAccessUpdate[] = []
@@ -581,7 +590,15 @@ async function enqueueGroupMembershipAccessUpdates(
     }
   }
 
-  return updates
+  const permissionUpdates = await prepareChatPermissionUpdates(
+    {
+      userIds: [...addedUserIds, ...removedUserIds],
+      chatIds: grants.map((grant) => grant.chatId),
+    },
+    { tx },
+  )
+
+  return { accessUpdates: updates, permissionUpdates }
 }
 
 function pushMembershipAccessUpdates(updates: MembershipAccessUpdate[]): void {

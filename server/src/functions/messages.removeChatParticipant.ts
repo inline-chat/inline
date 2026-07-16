@@ -15,6 +15,11 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import {
+  prepareChatPermissionUpdates,
+  pushChatPermissionUpdates,
+  type PreparedChatPermissionUpdate,
+} from "@in/server/modules/authorization/chatPermissionUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { ensureCanManageChatParticipants } from "@in/server/modules/authorization/spaceThreadGuards"
 import { ensureGroupCanParticipateInChat, loadActiveGroupMemberIds } from "@in/server/modules/userGroups"
@@ -42,7 +47,10 @@ export async function removeChatParticipant(
       throw RealtimeRpcError.BadRequest()
     }
 
-    const { update } = await db.transaction(async (tx): Promise<{ update: UpdateSeqAndDate }> => {
+    const { update, permissionUpdates } = await db.transaction(async (tx): Promise<{
+      update: UpdateSeqAndDate
+      permissionUpdates: PreparedChatPermissionUpdate[]
+    }> => {
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
 
       if (!chat) {
@@ -111,8 +119,12 @@ export async function removeChatParticipant(
         },
         { tx },
       )
+      const permissionUpdates = await prepareChatPermissionUpdates(
+        { userIds: [userId], chatIds: [input.chatId] },
+        { tx },
+      )
 
-      return { update }
+      return { update, permissionUpdates }
     })
 
     await pushUpdates({
@@ -121,6 +133,7 @@ export async function removeChatParticipant(
       currentUserId: context.currentUserId,
       update,
     })
+    pushChatPermissionUpdates(permissionUpdates)
   } catch (error) {
     Log.shared.error(`Failed to remove participant from chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {
@@ -134,8 +147,12 @@ async function removeChatParticipantGroup(
   input: { chatId: number; groupId: number },
   context: FunctionContext,
 ): Promise<void> {
-  const { update, affectedUserIds } = await db.transaction(
-    async (tx): Promise<{ update: UpdateSeqAndDate; affectedUserIds: number[] }> => {
+  const { update, affectedUserIds, permissionUpdates } = await db.transaction(
+    async (tx): Promise<{
+      update: UpdateSeqAndDate
+      affectedUserIds: number[]
+      permissionUpdates: PreparedChatPermissionUpdate[]
+    }> => {
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
 
       if (!chat) {
@@ -203,8 +220,12 @@ async function removeChatParticipantGroup(
           ),
         ),
       )
+      const permissionUpdates = await prepareChatPermissionUpdates(
+        { userIds: affectedUserIds, chatIds: [input.chatId] },
+        { tx },
+      )
 
-      return { update, affectedUserIds }
+      return { update, affectedUserIds, permissionUpdates }
     },
   )
 
@@ -215,6 +236,7 @@ async function removeChatParticipantGroup(
     affectedUserIds,
     update,
   })
+  pushChatPermissionUpdates(permissionUpdates)
 }
 
 /** Push updates for new chat creation */

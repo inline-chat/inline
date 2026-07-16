@@ -17,6 +17,11 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import {
+  prepareChatPermissionUpdates,
+  pushChatPermissionUpdates,
+  type PreparedChatPermissionUpdate,
+} from "@in/server/modules/authorization/chatPermissionUpdates"
+import {
   ensureCanManageChatParticipants,
   ensureUserCanParticipateInChat,
 } from "@in/server/modules/authorization/spaceThreadGuards"
@@ -56,7 +61,11 @@ export async function addChatParticipant(
       throw RealtimeRpcError.BadRequest()
     }
 
-    const result = await db.transaction(async (tx): Promise<{ participant: ChatParticipant; update: UpdateSeqAndDate | null }> => {
+    const result = await db.transaction(async (tx): Promise<{
+      participant: ChatParticipant
+      update: UpdateSeqAndDate | null
+      permissionUpdates: PreparedChatPermissionUpdate[]
+    }> => {
       // Check if chat exists
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
 
@@ -94,6 +103,7 @@ export async function addChatParticipant(
             date: encodeDateStrict(participant.date),
           },
           update: null,
+          permissionUpdates: [],
         }
       }
 
@@ -149,10 +159,15 @@ export async function addChatParticipant(
         },
         { tx },
       )
+      const permissionUpdates = await prepareChatPermissionUpdates(
+        { userIds: [userId], chatIds: [input.chatId] },
+        { tx },
+      )
 
       return {
         participant: participantForUpdate,
         update,
+        permissionUpdates,
       }
     })
 
@@ -165,6 +180,7 @@ export async function addChatParticipant(
         participant: result.participant,
         update: result.update,
       })
+      pushChatPermissionUpdates(result.permissionUpdates)
     }
 
     return { participant: result.participant, users: [] }
@@ -182,7 +198,11 @@ async function addChatParticipantGroup(
   context: FunctionContext,
 ): Promise<AddChatParticipantOutput> {
   const result = await db.transaction(
-    async (tx): Promise<{ groupParticipant: ChatParticipantGroup; update: UpdateSeqAndDate | null }> => {
+    async (tx): Promise<{
+      groupParticipant: ChatParticipantGroup
+      update: UpdateSeqAndDate | null
+      permissionUpdates: PreparedChatPermissionUpdate[]
+    }> => {
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
 
       if (!chat) {
@@ -205,6 +225,7 @@ async function addChatParticipantGroup(
         return {
           groupParticipant: encodeChatParticipantGroup(existing),
           update: null,
+          permissionUpdates: [],
         }
       }
 
@@ -262,8 +283,12 @@ async function addChatParticipantGroup(
           ),
         ),
       )
+      const permissionUpdates = await prepareChatPermissionUpdates(
+        { userIds: groupMemberIds, chatIds: [input.chatId] },
+        { tx },
+      )
 
-      return { groupParticipant, update }
+      return { groupParticipant, update, permissionUpdates }
     },
   )
 
@@ -277,6 +302,7 @@ async function addChatParticipantGroup(
       groupParticipant: result.groupParticipant,
       update: result.update,
     })
+    pushChatPermissionUpdates(result.permissionUpdates)
   }
 
   return {

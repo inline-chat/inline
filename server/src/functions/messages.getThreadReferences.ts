@@ -66,10 +66,11 @@ async function getThreadRelationshipList(
     chatIds: relatedDialogs.map((dialog) => dialog.chatId).filter((chatId): chatId is number => chatId !== null),
   })
   const unreadCountByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount]))
+  const encodedChats = await Encoders.chatsForUser(relatedChats, { encodingForUserId: context.currentUserId })
 
   return {
     items: rows.links.map(encodeItem),
-    chats: relatedChats.map((chat) => Encoders.chat(chat, { encodingForUserId: context.currentUserId })),
+    chats: encodedChats,
     dialogs: relatedDialogs.map((dialog) =>
       Encoders.dialog(dialog, {
         unreadCount: dialog.chatId === null ? 0 : unreadCountByChatId.get(dialog.chatId) ?? 0,

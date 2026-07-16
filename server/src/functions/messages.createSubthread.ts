@@ -220,7 +220,7 @@ async function encodeSubthreadResult(input: {
   const anchorMessage = input.anchorMessage ?? (await getAnchorMessageForChat(input.chat))
 
   return {
-    chat: Encoders.chat(input.chat, { encodingForUserId: input.currentUserId }),
+    chat: await Encoders.chatForUser(input.chat, { encodingForUserId: input.currentUserId }),
     dialog: dialog ? Encoders.dialog(dialog, { unreadCount: 0 }) : undefined,
     anchorMessage: anchorMessage
       ? Encoders.fullMessage({

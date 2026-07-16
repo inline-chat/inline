@@ -16,6 +16,10 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { Log } from "@in/server/utils/log"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import {
+  prepareSpaceChatPermissionUpdates,
+  pushChatPermissionUpdates,
+} from "@in/server/modules/authorization/chatPermissionUpdates"
 
 const log = new Log("space.updateMemberAccess")
 
@@ -94,12 +98,14 @@ export const updateMemberAccess = async (
     member: updatedMember,
     currentUserId: context.currentUserId,
   })
+  const permissionUpdates = await prepareSpaceChatPermissionUpdates({ userIds: [userId], spaceId })
 
   const updates = await pushUpdatesForSpace(updatedMember, {
     currentUserId: context.currentUserId,
     seq: persisted.seq,
     date: persisted.date,
   })
+  pushChatPermissionUpdates(permissionUpdates)
 
   return { updates }
 }

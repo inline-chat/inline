@@ -238,7 +238,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     chatIds: dialog ? [chat.id] : [],
   })
 
-  const encodedChat = Encoders.chat(chat, { encodingForUserId: currentUserId })
+  const encodedChat = await Encoders.chatForUser(chat, { encodingForUserId: currentUserId })
   const encodedDialog = dialog ? Encoders.dialog(dialog, { unreadCount: unreadData?.unreadCount ?? 0 }) : undefined
   const anchorMessage = await getAnchorMessageForChat(chat)
   const encodedAnchorMessage = anchorMessage

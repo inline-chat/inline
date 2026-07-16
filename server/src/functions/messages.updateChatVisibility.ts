@@ -27,6 +27,11 @@ import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { Transaction } from "@in/server/db/types"
+import {
+  prepareChatPermissionUpdates,
+  pushChatPermissionUpdates,
+  type PreparedChatPermissionUpdate,
+} from "@in/server/modules/authorization/chatPermissionUpdates"
 
 const log = new Log("functions.updateChatVisibility")
 
@@ -41,6 +46,7 @@ type UpdateChatVisibilityOutput = {
   removedUserIds: number[]
   groupRevocations: GroupGrantRevocation[]
   update: UpdateSeqAndDate
+  permissionUpdates: PreparedChatPermissionUpdate[]
 }
 
 type GroupGrantRevocation = {
@@ -76,6 +82,7 @@ export async function updateChatVisibility(
   let groupRevocations: GroupGrantRevocation[] = []
   let updatedChat: DbChat | undefined
   let persistedUpdate: UpdateSeqAndDate | undefined
+  let permissionUpdates: PreparedChatPermissionUpdate[] = []
 
   try {
     const result = await db.transaction(async (tx): Promise<UpdateChatVisibilityOutput> => {
@@ -263,13 +270,25 @@ export async function updateChatVisibility(
         { tx },
       )
 
-      return { chat: chatRecord, removedUserIds, groupRevocations, update }
+      const permissionUpdates = await prepareChatPermissionUpdates(
+        {
+          userIds: uniqueIds([
+            ...removedUserIds,
+            ...groupRevocations.flatMap((revocation) => revocation.memberIds),
+          ]),
+          chatIds: [chat.id],
+        },
+        { tx },
+      )
+
+      return { chat: chatRecord, removedUserIds, groupRevocations, update, permissionUpdates }
     })
 
     updatedChat = result.chat
     removedUserIds = result.removedUserIds
     groupRevocations = result.groupRevocations
     persistedUpdate = result.update
+    permissionUpdates = result.permissionUpdates
   } catch (error) {
     log.error("Failed to update chat visibility", { chatId, error })
     if (error instanceof RealtimeRpcError) {
@@ -296,6 +315,7 @@ export async function updateChatVisibility(
     currentUserId: context.currentUserId,
     update: persistedUpdate,
   })
+  pushChatPermissionUpdates(permissionUpdates)
 
   return { chat: updatedChat }
 }
@@ -387,6 +407,7 @@ const pushUpdates = async ({
   const updateGroup = await getUpdateGroup({ threadId: chat.id }, { currentUserId })
   const updateGroupUserIds = new Set(updateGroup.userIds)
   const groupDeleteUpdates = groupRevocations.map(groupRevocationUpdate)
+  const chatsByUserId = await Encoders.chatForUsers(chat, updateGroup.userIds)
 
   updateGroup.userIds.forEach((userId) => {
     const updates: Update[] = [
@@ -395,7 +416,7 @@ const pushUpdates = async ({
         update: {
           oneofKind: "newChat",
           newChat: {
-            chat: Encoders.chat(chat, { encodingForUserId: userId }),
+            chat: chatsByUserId.get(userId),
           },
         },
       },

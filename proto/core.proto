@@ -218,6 +218,12 @@ enum DialogFollowMode {
   UNFOLLOWED = 2;
 }
 
+// Effective actions the current user may take on a chat.
+message ChatPermissions {
+  // Change the chat title, emoji, and other fields owned by messages.updateChatInfo.
+  bool can_update_info = 1;
+}
+
 // A thread
 message Chat {
   int64 id = 1;
@@ -260,6 +266,9 @@ message Chat {
 
   // Per-space thread number. Unset for home threads and pre-backfill space threads.
   optional int32 number = 14;
+
+  // Effective permissions for the user this chat was encoded for.
+  optional ChatPermissions permissions = 15;
 }
 
 message MessageReplies {
@@ -2463,6 +2472,7 @@ message Update {
     UpdateChatParticipantGroupAdd participant_group_add = 41;
     UpdateChatParticipantGroupDelete participant_group_delete = 42;
     UpdateSpaceSettings space_settings = 43;
+    UpdateChatPermissions chat_permissions = 44;
   }
 }
 
@@ -2500,6 +2510,12 @@ message UpdateChatInfo {
   optional string title = 2;
   optional string emoji = 3;
   optional bool untitled = 4;
+}
+
+// Update when effective permissions for the current user change.
+message UpdateChatPermissions {
+  int64 chat_id = 1;
+  ChatPermissions permissions = 2;
 }
 
 // Update when pinned messages change for a chat

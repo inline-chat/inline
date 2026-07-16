@@ -1,5 +1,4 @@
-import type { InputPeer, Update } from "@inline-chat/protocol/core"
-import type { DbChat } from "@in/server/db/schema"
+import type { Chat, InputPeer, Update } from "@inline-chat/protocol/core"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import type { ChatMetadataUpdate } from "@in/server/modules/chatMetadataUpdates"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
@@ -24,32 +23,36 @@ export const pushChatMetadataUpdates = async ({
       },
     }
     const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+    const chatsByUserId = await Encoders.chatForUsers(chatUpdate.chat, updateGroup.userIds)
 
-    updateGroup.userIds.forEach((userId) => {
+    for (const userId of updateGroup.userIds) {
+      const chat = chatsByUserId.get(userId)
+      if (!chat) {
+        continue
+      }
       const update = buildChatMetadataUpdate({
-        chat: chatUpdate.chat,
+        chat,
         update: chatUpdate.update,
-        userId,
       })
 
       RealtimeUpdates.pushToUser(userId, [update])
       if (userId === currentUserId) {
         selfUpdates.push(update)
       }
-    })
+    }
   }
 
   return { selfUpdates }
 }
 
-function buildChatMetadataUpdate(input: { chat: DbChat; update: UpdateSeqAndDate; userId: number }): Update {
+function buildChatMetadataUpdate(input: { chat: Chat; update: UpdateSeqAndDate }): Update {
   return {
     seq: input.update.seq,
     date: encodeDateStrict(input.update.date),
     update: {
       oneofKind: "newChat",
       newChat: {
-        chat: Encoders.chat(input.chat, { encodingForUserId: input.userId }),
+        chat: input.chat,
       },
     },
   }

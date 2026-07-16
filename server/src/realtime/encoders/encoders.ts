@@ -2,7 +2,12 @@ import { encodeFullMessage, encodeMessage } from "@in/server/realtime/encoders/e
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
 import { encodeOutputPeerFromChat, encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodeUser } from "@in/server/realtime/encoders/encodeUser"
-import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
+import {
+  encodeChat,
+  encodeChatForUser,
+  encodeChatForUsers,
+  encodeChatsForUser,
+} from "@in/server/realtime/encoders/encodeChat"
 import { encodeMember } from "@in/server/realtime/encoders/encodeMember"
 import { encodeSpace } from "@in/server/realtime/encoders/encodeSpace"
 import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
@@ -20,6 +25,9 @@ export const Encoders = {
   peerFromChat: encodeOutputPeerFromChat,
   user: encodeUser,
   chat: encodeChat,
+  chatForUser: encodeChatForUser,
+  chatForUsers: encodeChatForUsers,
+  chatsForUser: encodeChatsForUser,
   photo: encodePhoto,
   voice: encodeVoice,
   member: encodeMember,

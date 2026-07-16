@@ -1,11 +1,19 @@
-import { Chat, Dialog, Peer, PeerChat } from "@inline-chat/protocol/core"
-import type { chats, DbChat } from "@in/server/db/schema"
-import { encodePeer } from "@in/server/realtime/encoders/encodePeer"
+import { Chat, Peer, type ChatPermissions } from "@inline-chat/protocol/core"
+import type { DbChat } from "@in/server/db/schema"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log } from "@in/server/utils/log"
-import type { InferSelectModel } from "drizzle-orm"
+import {
+  resolveChatPermissions,
+  resolveChatPermissionsBatch,
+  resolveChatPermissionsForUsers,
+} from "@in/server/modules/authorization/chatPermissions"
 
-export function encodeChat(chat: DbChat, { encodingForUserId }: { encodingForUserId: number }): Chat {
+type EncodeChatOptions = {
+  encodingForUserId: number
+  permissions?: ChatPermissions
+}
+
+export function encodeChat(chat: DbChat, { encodingForUserId, permissions }: EncodeChatOptions): Chat {
   let peerId: Peer | undefined
 
   if (chat.type === "private") {
@@ -47,5 +55,37 @@ export function encodeChat(chat: DbChat, { encodingForUserId }: { encodingForUse
     parentMessageId: chat.parentMessageId ? BigInt(chat.parentMessageId) : undefined,
     untitled: chat.isUntitled === true ? true : undefined,
     number: chat.threadNumber ?? undefined,
+    permissions,
   }
+}
+
+export async function encodeChatForUser(chat: DbChat, options: { encodingForUserId: number }): Promise<Chat> {
+  const permissions = await resolveChatPermissions(chat, options.encodingForUserId)
+  return encodeChat(chat, { ...options, permissions })
+}
+
+export async function encodeChatsForUser(
+  chats: DbChat[],
+  options: { encodingForUserId: number },
+): Promise<Chat[]> {
+  const permissionsByChatId = await resolveChatPermissionsBatch(chats, options.encodingForUserId)
+  return chats.map((chat) =>
+    encodeChat(chat, {
+      ...options,
+      permissions: permissionsByChatId.get(chat.id) ?? { canUpdateInfo: false },
+    }),
+  )
+}
+
+export async function encodeChatForUsers(chat: DbChat, userIds: number[]): Promise<Map<number, Chat>> {
+  const permissionsByUserId = await resolveChatPermissionsForUsers([chat], userIds)
+  return new Map(
+    userIds.map((userId) => [
+      userId,
+      encodeChat(chat, {
+        encodingForUserId: userId,
+        permissions: permissionsByUserId.get(userId)?.get(chat.id) ?? { canUpdateInfo: false },
+      }),
+    ]),
+  )
 }

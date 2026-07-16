@@ -87,7 +87,7 @@ export const updateDialogFollowMode = async (input: Input, context: FunctionCont
       update: {
         oneofKind: "chatOpen",
         chatOpen: {
-          chat: Encoders.chat(chat, { encodingForUserId: context.currentUserId }),
+          chat: await Encoders.chatForUser(chat, { encodingForUserId: context.currentUserId }),
           dialog: Encoders.dialog(dialog, { unreadCount }),
         },
       },

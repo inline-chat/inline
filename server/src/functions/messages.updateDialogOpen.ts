@@ -75,7 +75,7 @@ export async function updateDialogOpen(input: Input, context: FunctionContext): 
   const peerUser = dialog.peerUserId ? await UsersModel.getUserById(dialog.peerUserId) : undefined
 
   const output: Output = {
-    chat: Encoders.chat(chat, { encodingForUserId: context.currentUserId }),
+    chat: await Encoders.chatForUser(chat, { encodingForUserId: context.currentUserId }),
     dialog: Encoders.dialog(dialog, { unreadCount }),
   }
 
@@ -144,7 +144,7 @@ async function deleteEmptyUntitledThreadOnClose(chat: DbChat, context: FunctionC
     recipientIds = await deleteRecipients(tx, lockedChat)
     result = {
       deletedChat: true,
-      chat: Encoders.chat(lockedChat, { encodingForUserId: context.currentUserId }),
+      chat: await Encoders.chatForUser(lockedChat, { encodingForUserId: context.currentUserId }),
       dialog: Encoders.dialog(closedDialog(currentDialog), { unreadCount: 0 }),
     }
 

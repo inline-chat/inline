@@ -612,6 +612,19 @@ export interface Dialog {
     followMode?: DialogFollowMode;
 }
 /**
+ * Effective actions the current user may take on a chat.
+ *
+ * @generated from protobuf message ChatPermissions
+ */
+export interface ChatPermissions {
+    /**
+     * Change the chat title, emoji, and other fields owned by messages.updateChatInfo.
+     *
+     * @generated from protobuf field: bool can_update_info = 1;
+     */
+    canUpdateInfo: boolean;
+}
+/**
  * A thread
  *
  * @generated from protobuf message Chat
@@ -699,6 +712,12 @@ export interface Chat {
      * @generated from protobuf field: optional int32 number = 14;
      */
     number?: number;
+    /**
+     * Effective permissions for the user this chat was encoded for.
+     *
+     * @generated from protobuf field: optional ChatPermissions permissions = 15;
+     */
+    permissions?: ChatPermissions;
 }
 /**
  * @generated from protobuf message MessageReplies
@@ -6700,6 +6719,12 @@ export interface Update {
          */
         spaceSettings: UpdateSpaceSettings;
     } | {
+        oneofKind: "chatPermissions";
+        /**
+         * @generated from protobuf field: UpdateChatPermissions chat_permissions = 44;
+         */
+        chatPermissions: UpdateChatPermissions;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -6791,6 +6816,21 @@ export interface UpdateChatInfo {
      * @generated from protobuf field: optional bool untitled = 4;
      */
     untitled?: boolean;
+}
+/**
+ * Update when effective permissions for the current user change.
+ *
+ * @generated from protobuf message UpdateChatPermissions
+ */
+export interface UpdateChatPermissions {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatPermissions permissions = 2;
+     */
+    permissions?: ChatPermissions;
 }
 /**
  * Update when pinned messages change for a chat
@@ -9832,6 +9872,53 @@ class Dialog$Type extends MessageType<Dialog> {
  */
 export const Dialog = new Dialog$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ChatPermissions$Type extends MessageType<ChatPermissions> {
+    constructor() {
+        super("ChatPermissions", [
+            { no: 1, name: "can_update_info", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatPermissions>): ChatPermissions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.canUpdateInfo = false;
+        if (value !== undefined)
+            reflectionMergePartial<ChatPermissions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatPermissions): ChatPermissions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool can_update_info */ 1:
+                    message.canUpdateInfo = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatPermissions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool can_update_info = 1; */
+        if (message.canUpdateInfo !== false)
+            writer.tag(1, WireType.Varint).bool(message.canUpdateInfo);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatPermissions
+ */
+export const ChatPermissions = new ChatPermissions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class Chat$Type extends MessageType<Chat> {
     constructor() {
         super("Chat", [
@@ -9848,7 +9935,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 11, name: "parent_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 12, name: "parent_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -9906,6 +9994,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* optional int32 number */ 14:
                     message.number = reader.int32();
                     break;
+                case /* optional ChatPermissions permissions */ 15:
+                    message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9960,6 +10051,9 @@ class Chat$Type extends MessageType<Chat> {
         /* optional int32 number = 14; */
         if (message.number !== undefined)
             writer.tag(14, WireType.Varint).int32(message.number);
+        /* optional ChatPermissions permissions = 15; */
+        if (message.permissions)
+            ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -25568,7 +25662,8 @@ class Update$Type extends MessageType<Update> {
             { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser },
             { no: 41, name: "participant_group_add", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupAdd },
             { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete },
-            { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings }
+            { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings },
+            { no: 44, name: "chat_permissions", kind: "message", oneof: "update", T: () => UpdateChatPermissions }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -25829,6 +25924,12 @@ class Update$Type extends MessageType<Update> {
                         spaceSettings: UpdateSpaceSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceSettings)
                     };
                     break;
+                case /* UpdateChatPermissions chat_permissions */ 44:
+                    message.update = {
+                        oneofKind: "chatPermissions",
+                        chatPermissions: UpdateChatPermissions.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatPermissions)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25967,6 +26068,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateSpaceSettings space_settings = 43; */
         if (message.update.oneofKind === "spaceSettings")
             UpdateSpaceSettings.internalBinaryWrite(message.update.spaceSettings, writer.tag(43, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatPermissions chat_permissions = 44; */
+        if (message.update.oneofKind === "chatPermissions")
+            UpdateChatPermissions.internalBinaryWrite(message.update.chatPermissions, writer.tag(44, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26264,6 +26368,60 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
  * @generated MessageType for protobuf message UpdateChatInfo
  */
 export const UpdateChatInfo = new UpdateChatInfo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatPermissions$Type extends MessageType<UpdateChatPermissions> {
+    constructor() {
+        super("UpdateChatPermissions", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "permissions", kind: "message", T: () => ChatPermissions }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatPermissions>): UpdateChatPermissions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatPermissions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatPermissions): UpdateChatPermissions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatPermissions permissions */ 2:
+                    message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatPermissions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatPermissions permissions = 2; */
+        if (message.permissions)
+            ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatPermissions
+ */
+export const UpdateChatPermissions = new UpdateChatPermissions$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
     constructor() {

@@ -207,6 +207,9 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       peerUser = Encoders.user({ user: row.user, photoFile: row.photoFile, min: true })
     }
   }
+  const encodedChat = chatRecord
+    ? await Encoders.chatForUser(chatRecord, { encodingForUserId: userId })
+    : undefined
 
   // Fetch from db
   const dbMessages = await MessageModel.getMessagesByIds(chatId, Array.from(messageIds))
@@ -498,7 +501,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
           update: {
             oneofKind: "newChat",
             newChat: {
-              chat: Encoders.chat(chatRecord, { encodingForUserId: userId }),
+              chat: encodedChat,
               user: peerUser,
             },
           },
@@ -517,7 +520,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
           update: {
             oneofKind: "chatMoved",
             chatMoved: {
-              chat: Encoders.chat(chatRecord, { encodingForUserId: userId }),
+              chat: encodedChat,
               oldSpaceId: serverUpdate.update.chatMoved.oldSpaceId,
               newSpaceId: serverUpdate.update.chatMoved.newSpaceId,
             },
@@ -574,6 +577,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "updatedUser":
       case "userChatParticipantGroupAdd":
       case "userChatParticipantGroupDelete":
+      case "userChatPermissions":
         inflatedUpdates.push(chatSkipPts(update, chatId))
         break
       case undefined:
@@ -717,9 +721,13 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
   }
 
   const chatRows = await getSidecarChats(primaryChat, chatIds)
-  for (const chat of chatRows) {
+  const encodedChats = await Encoders.chatsForUser(chatRows, { encodingForUserId: input.userId })
+  for (const [index, chat] of chatRows.entries()) {
     collectChatSidecarRefs(chat, input.userId, { chatIds, userIds, spaceIds })
-    const encoded = Encoders.chat(chat, { encodingForUserId: input.userId })
+    const encoded = encodedChats[index]
+    if (!encoded) {
+      continue
+    }
     chatMap.set(String(encoded.id), encoded)
   }
 
@@ -834,6 +842,10 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
         collectProtocolChatSidecarRefs(update.update.chatOpen.chat, { chatIds, userIds, spaceIds })
         break
 
+      case "chatPermissions":
+        addSafeId(chatIds, update.update.chatPermissions.chatId)
+        break
+
       default:
         break
     }
@@ -848,9 +860,13 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
   }
 
   const chatRows = await getSidecarChats(undefined, chatIds)
-  for (const chat of chatRows) {
+  const encodedChats = await Encoders.chatsForUser(chatRows, { encodingForUserId: input.userId })
+  for (const [index, chat] of chatRows.entries()) {
     collectChatSidecarRefs(chat, input.userId, { chatIds, userIds, spaceIds })
-    const encoded = Encoders.chat(chat, { encodingForUserId: input.userId })
+    const encoded = encodedChats[index]
+    if (!encoded) {
+      continue
+    }
     chatMap.set(String(encoded.id), encoded)
   }
 
@@ -1270,6 +1286,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "participantGroupDelete":
     case "userChatParticipantGroupAdd":
     case "userChatParticipantGroupDelete":
+    case "userChatPermissions":
       return null
     case undefined:
       throw new Error(`Space sync update ${update.seq} has no payload`)
@@ -1361,6 +1378,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           participantGroupAdd: {
             chatId: payload.userChatParticipantGroupAdd.chatId,
             groupParticipant: payload.userChatParticipantGroupAdd.groupParticipant,
+          },
+        },
+      }
+
+    case "userChatPermissions":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "chatPermissions",
+          chatPermissions: {
+            chatId: payload.userChatPermissions.chatId,
+            permissions: payload.userChatPermissions.permissions,
           },
         },
       }

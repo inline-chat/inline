@@ -18,6 +18,7 @@ import { DialogFollowMode } from "@inline-chat/protocol/core";
 import { DialogNotificationSettings } from "@inline-chat/protocol/core";
 import { Space } from "@inline-chat/protocol/core";
 import { Peer } from "@inline-chat/protocol/core";
+import { ChatPermissions } from "@inline-chat/protocol/core";
 import { SpaceSettings } from "@inline-chat/protocol/core";
 import { User } from "@inline-chat/protocol/core";
 import { Member } from "@inline-chat/protocol/core";
@@ -252,6 +253,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete = 37;
          */
         userChatParticipantGroupDelete: ServerUserUpdateChatParticipantGroupDelete;
+    } | {
+        oneofKind: "userChatPermissions";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateChatPermissions user_chat_permissions = 39;
+         */
+        userChatPermissions: ServerUserUpdateChatPermissions;
     } | {
         oneofKind: undefined;
     };
@@ -683,6 +690,21 @@ export interface ServerUserUpdateChatParticipantGroupDelete {
     groupId: bigint;
 }
 /**
+ * Update for a user when their effective permissions for a chat changed.
+ *
+ * @generated from protobuf message server.ServerUserUpdateChatPermissions
+ */
+export interface ServerUserUpdateChatPermissions {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatPermissions permissions = 2;
+     */
+    permissions?: ChatPermissions;
+}
+/**
  * Update for a user when a dialog is archived or unarchived
  *
  * @generated from protobuf message server.ServerUserUpdateDialogArchived
@@ -960,7 +982,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 34, name: "participant_group_add", kind: "message", oneof: "update", T: () => ServerChatUpdateParticipantGroupAdd },
             { no: 35, name: "participant_group_delete", kind: "message", oneof: "update", T: () => ServerChatUpdateParticipantGroupDelete },
             { no: 36, name: "user_chat_participant_group_add", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupAdd },
-            { no: 37, name: "user_chat_participant_group_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupDelete }
+            { no: 37, name: "user_chat_participant_group_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupDelete },
+            { no: 39, name: "user_chat_permissions", kind: "message", oneof: "update", T: () => ServerUserUpdateChatPermissions }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1193,6 +1216,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userChatParticipantGroupDelete: ServerUserUpdateChatParticipantGroupDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatParticipantGroupDelete)
                     };
                     break;
+                case /* server.ServerUserUpdateChatPermissions user_chat_permissions */ 39:
+                    message.update = {
+                        oneofKind: "userChatPermissions",
+                        userChatPermissions: ServerUserUpdateChatPermissions.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatPermissions)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1316,6 +1345,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete = 37; */
         if (message.update.oneofKind === "userChatParticipantGroupDelete")
             ServerUserUpdateChatParticipantGroupDelete.internalBinaryWrite(message.update.userChatParticipantGroupDelete, writer.tag(37, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateChatPermissions user_chat_permissions = 39; */
+        if (message.update.oneofKind === "userChatPermissions")
+            ServerUserUpdateChatPermissions.internalBinaryWrite(message.update.userChatPermissions, writer.tag(39, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2791,6 +2823,60 @@ class ServerUserUpdateChatParticipantGroupDelete$Type extends MessageType<Server
  * @generated MessageType for protobuf message server.ServerUserUpdateChatParticipantGroupDelete
  */
 export const ServerUserUpdateChatParticipantGroupDelete = new ServerUserUpdateChatParticipantGroupDelete$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateChatPermissions$Type extends MessageType<ServerUserUpdateChatPermissions> {
+    constructor() {
+        super("server.ServerUserUpdateChatPermissions", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "permissions", kind: "message", T: () => ChatPermissions }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateChatPermissions>): ServerUserUpdateChatPermissions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateChatPermissions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateChatPermissions): ServerUserUpdateChatPermissions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatPermissions permissions */ 2:
+                    message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateChatPermissions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatPermissions permissions = 2; */
+        if (message.permissions)
+            ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateChatPermissions
+ */
+export const ServerUserUpdateChatPermissions = new ServerUserUpdateChatPermissions$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateDialogArchived$Type extends MessageType<ServerUserUpdateDialogArchived> {
     constructor() {

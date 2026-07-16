@@ -93,7 +93,7 @@ export async function updateDialogOrder(input: Input, context: FunctionContext):
   const peerUser = dialog.peerUserId ? await UsersModel.getUserById(dialog.peerUserId) : undefined
 
   const output: Output = {
-    chat: Encoders.chat(chat, { encodingForUserId: context.currentUserId }),
+    chat: await Encoders.chatForUser(chat, { encodingForUserId: context.currentUserId }),
     dialog: Encoders.dialog(dialog, { unreadCount }),
   }
 

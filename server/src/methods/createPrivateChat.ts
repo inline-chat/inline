@@ -1,11 +1,5 @@
 import { db } from "@in/server/db"
-import {
-  chats,
-  dialogs,
-  type DbChat,
-  type DbDialog,
-  type DbUserWithProfile,
-} from "@in/server/db/schema"
+import { chats, dialogs, type DbChat, type DbDialog, type DbUserWithProfile } from "@in/server/db/schema"
 import {
   encodeChatInfo,
   encodeDialogInfo,
@@ -19,7 +13,7 @@ import { Log } from "@in/server/utils/log"
 import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import { and, eq, or } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import type { Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
@@ -205,11 +199,12 @@ const pushUpdate = async (input: {
   const { chat, user, pushToUserId, update: persisted } = input
 
   const encodingForUserId = pushToUserId
+  const encodedChat = await Encoders.chatForUser(chat, { encodingForUserId })
   const update: Update = {
     update: {
       oneofKind: "newChat",
       newChat: {
-        chat: Encoders.chat(chat, { encodingForUserId }),
+        chat: encodedChat,
         user: Encoders.user({
           user,
           min: true,

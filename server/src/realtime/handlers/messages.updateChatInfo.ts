@@ -23,6 +23,6 @@ export const updateChatInfoHandler = async (
   )
 
   return {
-    chat: Encoders.chat(chat, { encodingForUserId: handlerContext.userId }),
+    chat: await Encoders.chatForUser(chat, { encodingForUserId: handlerContext.userId }),
   }
 }

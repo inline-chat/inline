@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { chats, chatParticipants, type DbChat } from "@in/server/db/schema"
+import { chats, type DbChat } from "@in/server/db/schema"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -109,18 +109,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
     }
 
     if (input.requireAccess === true) {
-      await AccessGuards.ensureChatAccess(chat, input.currentUserId)
-      if (chat.publicThread !== true && chat.parentChatId == null) {
-        const participant = await tx
-          .select({ id: chatParticipants.id })
-          .from(chatParticipants)
-          .where(and(eq(chatParticipants.chatId, chat.id), eq(chatParticipants.userId, input.currentUserId)))
-          .limit(1)
-
-        if (participant.length === 0) {
-          throw RealtimeRpcError.PeerIdInvalid()
-        }
-      }
+      await AccessGuards.ensureChatInfoEditAccess(chat, input.currentUserId, tx)
     }
 
     if (input.onlyIfTitleEmpty && isNonEmpty(chat.title)) {

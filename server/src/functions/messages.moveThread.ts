@@ -263,12 +263,13 @@ const pushUpdates = async ({
     return { updateGroup }
   }
 
+  const chatsByUserId = await Encoders.chatForUsers(chat, updateGroup.userIds)
   updateGroup.userIds.forEach((userId) => {
     const update: Update = {
       update: {
         oneofKind: "chatMoved",
         chatMoved: {
-          chat: Encoders.chat(chat, { encodingForUserId: userId }),
+          chat: chatsByUserId.get(userId),
           ...(updatePayload.chatMoved.oldSpaceId !== undefined ? { oldSpaceId: updatePayload.chatMoved.oldSpaceId } : {}),
           ...(updatePayload.chatMoved.newSpaceId !== undefined ? { newSpaceId: updatePayload.chatMoved.newSpaceId } : {}),
         },

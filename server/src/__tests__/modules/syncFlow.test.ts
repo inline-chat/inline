@@ -457,6 +457,41 @@ describe("Sync core flow", () => {
     expect(userUpdate.update.participantAdd.participant?.userId).toBe(BigInt(user.id))
   })
 
+  it("inflates user bucket updates for current-user chat permissions", async () => {
+    const user = await testUtils.createUser("chat-permissions-sync@example.com")
+    if (!user) {
+      throw new Error("Failed to create chat permissions user")
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userChatPermissions",
+        userChatPermissions: {
+          chatId: 42n,
+          permissions: { canUpdateInfo: true },
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.User, userId: user.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const updates = Sync.inflateUserUpdates(dbUpdates)
+    expect(updates).toHaveLength(1)
+    const [userUpdate] = updates
+    if (!userUpdate || userUpdate.update.oneofKind !== "chatPermissions") {
+      throw new Error("Expected chatPermissions from user bucket")
+    }
+    expect(userUpdate.update.chatPermissions.chatId).toBe(42n)
+    expect(userUpdate.update.chatPermissions.permissions?.canUpdateInfo).toBe(true)
+  })
+
   it("inflates user bucket chatOpen updates", async () => {
     const user = await testUtils.createUser("chat-open-sync@example.com")
     const chat = await testUtils.createChat(null, "Chat List Thread", "thread", false, user.id)

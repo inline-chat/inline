@@ -61,7 +61,7 @@ export async function showInChatList(input: Input, context: FunctionContext): Pr
   const unreadCount = await DialogsModel.getUnreadCount(chat.id, context.currentUserId)
 
   return {
-    chat: Encoders.chat(chat, { encodingForUserId: context.currentUserId }),
+    chat: await Encoders.chatForUser(chat, { encodingForUserId: context.currentUserId }),
     dialog: Encoders.dialog(dialog, { unreadCount }),
   }
 }

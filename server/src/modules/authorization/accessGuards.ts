@@ -4,9 +4,12 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { getChatById } from "@in/server/modules/subthreads"
 import { hasThreadAccessGrant } from "@in/server/modules/authorization/threadAccess"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { resolveChatPermissions } from "@in/server/modules/authorization/chatPermissions"
+import type { Transaction } from "@in/server/db/types"
 
 export const AccessGuards = {
   ensureChatAccess,
+  ensureChatInfoEditAccess,
   ensureSpaceMember,
 }
 
@@ -35,6 +38,13 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
   }
 
   await ensureTopLevelChatAccess(chat, userId)
+}
+
+async function ensureChatInfoEditAccess(chat: DbChat, userId: number, query?: Pick<Transaction, "select">) {
+  const permissions = await resolveChatPermissions(chat, userId, query)
+  if (!permissions.canUpdateInfo) {
+    throw RealtimeRpcError.PeerIdInvalid()
+  }
 }
 
 async function ensureInheritedChatAccess(chat: DbChat, userId: number) {
