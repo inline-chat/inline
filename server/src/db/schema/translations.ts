@@ -1,7 +1,6 @@
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { relations } from "drizzle-orm/_relations"
 import { pgTable, integer, text, bigint, unique, foreignKey } from "drizzle-orm/pg-core"
-import { photos } from "./media"
 import { messages } from "@in/server/db/schema/messages"
 import { chats } from "@in/server/db/schema/chats"
 

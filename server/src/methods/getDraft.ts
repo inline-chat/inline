@@ -1,11 +1,10 @@
 import { db } from "@in/server/db"
-import { and, eq, or } from "drizzle-orm"
-import { dialogs, users } from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { and, eq } from "drizzle-orm"
+import { dialogs } from "@in/server/db/schema"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Optional, type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import { encodeUserInfo, TUserInfo } from "../api-types"
 import { TInputId } from "@in/server/types/methods"
 
 export const Input = Type.Object({

@@ -5,7 +5,6 @@ import { integer } from "drizzle-orm/pg-core"
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { serial } from "drizzle-orm/pg-core"
-import { relations } from "drizzle-orm/_relations"
 
 export const files = pgTable("files", {
   id: serial("id").primaryKey(), // Internal synthetic id ??

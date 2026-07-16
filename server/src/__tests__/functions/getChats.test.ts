@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { handler as getDialogsHandler } from "../../methods/getDialogs"
 import { testUtils, defaultTestContext, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
-import { eq, and, or } from "drizzle-orm"
+import { eq, and } from "drizzle-orm"
 import { getChats } from "@in/server/functions/messages.getChats"
 
 // Helper to create a HandlerContext

@@ -1,8 +1,6 @@
-import { db } from "@in/server/db"
 import { Type, type Static } from "@sinclair/typebox"
 import { presenceManager } from "@in/server/ws/presence"
 import { TOptional } from "@in/server/api-types"
-import { Log } from "@in/server/utils/log"
 
 type Context = {
   currentUserId: number

@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { and, eq, isNull } from "drizzle-orm"
 import { members, spaces } from "@in/server/db/schema"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import { encodeMemberInfo, encodeSpaceInfo, TMemberInfo, TSpaceInfo } from "@in/server/api-types"

@@ -1,14 +1,5 @@
-import { UsersModel } from "@in/server/db/models/users"
-import {
-  DeleteMessagesInput,
-  DeleteMessagesResult,
-  SendMessageInput,
-  SendMessageResult,
-  type GetMeInput,
-  type GetMeResult,
-} from "@inline-chat/protocol/core"
+import { SendMessageInput, SendMessageResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Functions } from "@in/server/functions"
 

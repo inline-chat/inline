@@ -1,10 +1,8 @@
 import { db } from "@in/server/db"
 import { Optional, Type, type Static } from "@sinclair/typebox"
-import { presenceManager } from "@in/server/ws/presence"
-import { encodeDialogInfo, TDialogInfo, TOptional } from "@in/server/api-types"
-import { Log } from "@in/server/utils/log"
+import { encodeDialogInfo, TDialogInfo } from "@in/server/api-types"
 import { dialogs } from "../db/schema"
-import { normalizeId, TInputId } from "../types/methods"
+import { TInputId } from "../types/methods"
 import { InlineError } from "../types/errors"
 import { and, eq, or, sql } from "drizzle-orm"
 import { DialogsModel } from "@in/server/db/models/dialogs"
@@ -13,7 +11,12 @@ import type { Peer, Update } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { emitChatListOpenUpdates, getChatById, isLinkedSubthread, promoteLinkedSubthreadDialogsToChatList } from "@in/server/modules/subthreads"
+import {
+  emitChatListOpenUpdates,
+  getChatById,
+  isLinkedSubthread,
+  promoteLinkedSubthreadDialogsToChatList,
+} from "@in/server/modules/subthreads"
 import { dialogOpenFieldsForOpen, nextDialogOrder } from "@in/server/modules/dialogOpen"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 

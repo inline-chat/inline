@@ -1,7 +1,6 @@
 import { ServerUpdate } from "@in/server/protocol/server"
 import { UpdateBucket, updates, type DbUpdate } from "@in/server/db/schema/updates"
 import type { Transaction } from "@in/server/db/types"
-import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 

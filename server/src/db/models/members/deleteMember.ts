@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { members, type DbMemberRole } from "@in/server/db/schema"
+import { members } from "@in/server/db/schema"
 import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
 import { and, eq } from "drizzle-orm"
 import { Effect } from "effect"

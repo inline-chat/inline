@@ -1,8 +1,7 @@
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
-import { messages } from "@in/server/db/schema/messages"
 import { relations } from "drizzle-orm/_relations"
-import { pgTable, serial, integer, text, bigint, boolean, index } from "drizzle-orm/pg-core"
+import { pgTable, integer, text, bigint, boolean, index } from "drizzle-orm/pg-core"
 
 // export const messageMedia = pgTable("message_media", {
 //   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),

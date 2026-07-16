@@ -1,14 +1,4 @@
-import {
-  integer,
-  pgEnum,
-  pgTable,
-  serial,
-  uniqueIndex,
-  varchar,
-  boolean,
-  timestamp,
-  text,
-} from "drizzle-orm/pg-core"
+import { pgTable, serial, varchar, boolean, timestamp, text } from "drizzle-orm/pg-core"
 
 export const waitlist = pgTable("waitlist", {
   id: serial().primaryKey(),

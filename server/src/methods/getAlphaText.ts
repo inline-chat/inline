@@ -1,12 +1,8 @@
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import { db } from "@in/server/db"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
-import { encodeReactionInfo, TReactionInfo } from "../api-types"
-import { reactions } from "../db/schema/reactions"
 import { InlineError } from "../types/errors"
-import { TInputId } from "../types/methods"
 
 export const Input = Type.Object({
   // No input needed for this endpoint

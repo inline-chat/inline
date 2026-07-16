@@ -1,6 +1,6 @@
 import { InlineError } from "@in/server/types/errors"
 import { type Static, Type } from "@sinclair/typebox"
-import { TInputPeerInfo, TMessageInfo, Optional, TPeerInfo } from "@in/server/api-types"
+import { TInputPeerInfo, Optional, TPeerInfo } from "@in/server/api-types"
 import type { HandlerContext } from "../controllers/helpers"
 import { TInputId } from "@in/server/types/methods"
 import { Functions } from "@in/server/functions"
