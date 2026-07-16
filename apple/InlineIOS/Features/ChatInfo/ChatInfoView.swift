@@ -88,9 +88,14 @@ struct ChatInfoView: View {
     currentMemberRole == .owner || currentMemberRole == .admin
   }
 
-  var isCurrentUserParticipant: Bool {
+  var isCurrentUserDirectParticipant: Bool {
     guard let currentUserId = Auth.shared.getCurrentUserId() else { return false }
     return participantsWithMembersViewModel.participants.contains(where: { $0.user.id == currentUserId })
+  }
+
+  var isCurrentUserEffectiveParticipant: Bool {
+    guard let currentUserId = Auth.shared.getCurrentUserId() else { return false }
+    return participantsWithMembersViewModel.effectiveUserIds.contains(currentUserId)
   }
 
   var isCurrentUserSpaceMemberWithPublicAccess: Bool {
@@ -101,11 +106,21 @@ struct ChatInfoView: View {
   }
 
   var canEditChatInfo: Bool {
+    if let canUpdateInfo = currentChat?.canUpdateInfo {
+      return canUpdateInfo
+    }
+
     guard !isDM else { return false }
+    if currentChat?.isReplyThread == true, isOwnerOrAdmin {
+      return true
+    }
     if currentChat?.isPublic == true {
       return isCurrentUserSpaceMemberWithPublicAccess
     }
-    return isCurrentUserParticipant
+    if currentChat?.isReplyThread == true {
+      return isCurrentUserEffectiveParticipant
+    }
+    return isCurrentUserDirectParticipant
   }
 
   var canClearHistory: Bool {

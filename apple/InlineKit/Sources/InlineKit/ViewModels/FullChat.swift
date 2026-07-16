@@ -407,6 +407,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                fullChat.chat?.parentChatId != self.chatItem?.chat?.parentChatId ||
                fullChat.chat?.parentMessageId != self.chatItem?.chat?.parentMessageId ||
                fullChat.chat?.isPublic != self.chatItem?.chat?.isPublic ||
+               fullChat.chat?.canUpdateInfo != self.chatItem?.chat?.canUpdateInfo ||
                fullChat.user != self.chatItem?.user
             {
               // Important Note

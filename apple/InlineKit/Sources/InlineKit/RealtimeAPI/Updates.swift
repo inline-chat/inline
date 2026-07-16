@@ -124,6 +124,9 @@ public actor UpdatesEngine: Sendable {
         case let .chatInfo(chatInfo):
           try chatInfo.apply(db)
 
+        case let .chatPermissions(chatPermissions):
+          try chatPermissions.apply(db)
+
         case let .chatMoved(chatMoved):
           try chatMoved.apply(db)
 
@@ -1300,6 +1303,17 @@ extension InlineProtocol.UpdateChatInfo {
       }
       try chat.save(db)
     }
+  }
+}
+
+extension InlineProtocol.UpdateChatPermissions {
+  func apply(_ db: Database) throws {
+    try Chat
+      .filter(Chat.Columns.id == chatID)
+      .updateAll(
+        db,
+        Chat.Columns.canUpdateInfo.set(to: hasPermissions ? permissions.canUpdateInfo : nil)
+      )
   }
 }
 

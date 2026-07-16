@@ -158,6 +158,32 @@ final class SyncTests {
     #expect(bucketState.date == 100)
   }
 
+  @Test("sequenced chat permission updates advance user bucket state")
+  func testSequencedChatPermissionsAdvanceUserBucketState() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(responses: [])
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    var permissions = InlineProtocol.ChatPermissions()
+    permissions.canUpdateInfo = true
+    var payload = InlineProtocol.UpdateChatPermissions()
+    payload.chatID = 1
+    payload.permissions = permissions
+
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 100
+    update.update = .chatPermissions(payload)
+
+    await sync.process(updates: [update])
+
+    let bucketState = await storage.getBucketState(for: .user)
+    #expect(bucketState.seq == 1)
+    #expect(bucketState.date == 100)
+  }
+
   @Test("message updates apply during catch-up")
   func testMessageUpdatesApplyDuringCatchUp() async throws {
     let storage = InMemorySyncStorage()

@@ -923,6 +923,12 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("chat permissions") { db in
+      try db.alter(table: "chat") { t in
+        t.add(column: "canUpdateInfo", .boolean)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

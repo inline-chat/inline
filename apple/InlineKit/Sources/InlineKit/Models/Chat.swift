@@ -29,6 +29,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var untitled: Bool?
   public var parentChatId: Int64?
   public var parentMessageId: Int64?
+  public var canUpdateInfo: Bool?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -46,6 +47,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var isUntitled: Bool?
   public var parentChatId: Int64? = nil
   public var parentMessageId: Int64? = nil
+  public var canUpdateInfo: Bool?
   public var createState: ChatCreateState?
 
   public enum Columns {
@@ -63,6 +65,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let isUntitled = Column(CodingKeys.isUntitled)
     static let parentChatId = Column(CodingKeys.parentChatId)
     static let parentMessageId = Column(CodingKeys.parentMessageId)
+    static let canUpdateInfo = Column(CodingKeys.canUpdateInfo)
     static let createState = Column(CodingKeys.createState)
   }
 
@@ -105,6 +108,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     isUntitled: Bool? = nil,
     parentChatId: Int64? = nil,
     parentMessageId: Int64? = nil,
+    canUpdateInfo: Bool? = nil,
     createState: ChatCreateState? = nil
   ) {
     self.id = id
@@ -121,6 +125,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.isUntitled = isUntitled
     self.parentChatId = parentChatId
     self.parentMessageId = parentMessageId
+    self.canUpdateInfo = canUpdateInfo
     self.createState = createState
   }
 }
@@ -210,6 +215,7 @@ public extension Chat {
     isUntitled = from.untitled
     parentChatId = from.parentChatId
     parentMessageId = from.parentMessageId
+    canUpdateInfo = from.canUpdateInfo
     spaceId = from.spaceId
     number = from.number ?? from.threadNumber
     type = from.type == "private" ? .privateChat : .thread
@@ -248,6 +254,7 @@ public extension Chat {
     isUntitled = from.hasUntitled ? from.untitled : nil
     parentChatId = from.hasParentChatID ? from.parentChatID : nil
     parentMessageId = from.hasParentMessageID ? from.parentMessageID : nil
+    canUpdateInfo = from.hasPermissions ? from.permissions.canUpdateInfo : nil
     createState = nil
 
     if case let .user(peerUser) = from.peerID.type {

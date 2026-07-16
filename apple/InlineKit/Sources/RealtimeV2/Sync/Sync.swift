@@ -743,6 +743,7 @@ actor Sync {
       if case .participantDelete = update.update { return true }
       if case .participantGroupAdd = update.update { return true }
       if case .participantGroupDelete = update.update { return true }
+      if case .chatPermissions = update.update { return true }
     }
     return false
   }
@@ -881,6 +882,8 @@ actor Sync {
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .chatInfo(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
+      case .chatPermissions:
+        .user
       case let .pinnedMessages(payload):
         .chat(peer: payload.peerID)
       case .updateReadMaxID:
@@ -1021,6 +1024,8 @@ actor BucketActor {
       case .chatVisibility:
         true
       case .chatInfo:
+        true
+      case .chatPermissions:
         true
       case .deleteChat:
         true
