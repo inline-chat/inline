@@ -58,21 +58,23 @@ describe("url-preview", () => {
     expect(normalizePreviewUrl("https://example.com/path?accessToken=abc")).toBeNull()
   })
 
-  it("allows signed Figma CDN thumbnail urls without allowing generic signed urls", async () => {
+  it("allows signed media urls", async () => {
     const thumbnailUrl =
       "https://api-cdn.figma.com/resize/thumbnails/6f703233-dc0c-4b97-9dbf-403f0e0b823e?expiration=1783900800&signature=figma-test-signature&height=450&bucket=figma-alpha"
     expect(normalizePreviewUrl(thumbnailUrl)).toBe(thumbnailUrl)
-    expect(normalizePreviewUrl("https://example.com/image.png?signature=secret")).toBeNull()
+
+    const signedImageUrl = "https://cdn.example.com/image.png?width=800&signature=media-signature"
+    expect(normalizePreviewUrl(signedImageUrl)).toBe(signedImageUrl)
 
     const bytes = new Uint8Array([1, 2, 3])
     const fetchImpl: NonNullable<FetchBinaryOptions["fetchImpl"]> = async (url) => {
-      expect(String(url)).toBe(thumbnailUrl)
+      expect(String(url)).toBe(signedImageUrl)
       return new Response(bytes, { headers: { "content-type": "image/webp" } })
     }
 
-    const binary = await fetchBinary(thumbnailUrl, { fetchImpl, lookup: publicLookup })
+    const binary = await fetchBinary(signedImageUrl, { fetchImpl, lookup: publicLookup })
     expect(binary?.contentType).toBe("image/webp")
-    expect(binary?.finalUrl).toBe(thumbnailUrl)
+    expect(binary?.finalUrl).toBe(signedImageUrl)
     expect(binary?.bytes).toEqual(bytes)
   })
 
@@ -224,6 +226,26 @@ describe("url-preview", () => {
     expect(preview?.description?.length).toBeLessThanOrEqual(60)
     expect(preview?.imageUrl).toBe("https://example.com/preview.png")
     expect(preview?.mediaType).toBeUndefined()
+  })
+
+  it("keeps signed generic Open Graph images", async () => {
+    const imageUrl =
+      "https://brief.cleanshot.cloud/media/59106/preview.jpeg?min_width=150&min_height=150&anchor=center&signature=cleanshot-signature"
+    const html = `
+      <html>
+        <head>
+          <meta property="og:title" content="Screenshot">
+          <meta property="og:image" content="${imageUrl.replaceAll("&", "&amp;")}">
+        </head>
+      </html>
+    `
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () =>
+      new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+
+    const preview = await fetchUrlPreview("https://cln.sh/example", { fetchImpl, lookup: publicLookup })
+
+    expect(preview?.title).toBe("Screenshot")
+    expect(preview?.imageUrl).toBe(imageUrl)
   })
 
   it("uses Figma oEmbed thumbnails as static image previews", async () => {
