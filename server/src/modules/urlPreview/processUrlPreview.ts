@@ -50,6 +50,7 @@ import {
 } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { connectionManager } from "@in/server/ws/connections"
+import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
 import {
   getMessageAttachmentTitleContext,
@@ -904,7 +905,9 @@ async function downloadAndSavePreviewImage(url: string, currentUserId: number): 
 
     const buffer = await resizePreviewImage(Buffer.from(image.bytes))
 
-    const file = new File([buffer], `url_preview_${Date.now()}.jpg`, { type: "image/jpeg" })
+    const file = new File([toArrayBufferBackedBytes(buffer)], `url_preview_${Date.now()}.jpg`, {
+      type: "image/jpeg",
+    })
     const result = await uploadPhoto(file, { userId: currentUserId })
     return Number(result.photoId)
   } catch (error) {

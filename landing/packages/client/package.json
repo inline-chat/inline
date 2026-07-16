@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src vitest.config.ts",
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src vitest.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -24,8 +24,9 @@
     "@inline/log": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "^19.0.1",
-    "typescript": "^5.7.2",
-    "vitest": "^4.0.16"
+    "@types/react": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -6,6 +6,7 @@ import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
 import { uploadFile } from "./uploadAFile"
 import { InlineError } from "@in/server/types/errors"
+import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
 import sharp from "sharp"
 
@@ -130,7 +131,9 @@ async function normalizePhotoUpload(
   }
 
   const png = await sharp(await file.arrayBuffer()).png().toBuffer()
-  const normalizedFile = new File([png], pngFileName(metadata.fileName), { type: "image/png" })
+  const normalizedFile = new File([toArrayBufferBackedBytes(png)], pngFileName(metadata.fileName), {
+    type: "image/png",
+  })
   const normalizedMetadata = await getPhotoMetadataAndValidate(normalizedFile)
   return { file: normalizedFile, metadata: normalizedMetadata }
 }

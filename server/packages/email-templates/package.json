@@ -9,7 +9,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src",
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src",
     "test": "echo \"No tests yet for @inline-chat/email-templates\""
   },
   "dependencies": {
@@ -17,7 +17,8 @@
     "react": "^19.2.3"
   },
   "devDependencies": {
-    "@types/react": "^19.2.9",
-    "typescript": "^5.8.3"
+    "@types/react": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
   }
 }

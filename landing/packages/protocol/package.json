@@ -20,13 +20,15 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src",
-    "test": "bunx vitest run --passWithNoTests"
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@protobuf-ts/runtime": "^2.11.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

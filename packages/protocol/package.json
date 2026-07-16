@@ -26,14 +26,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
+    "lint": "oxlint --ignore-path ../../.oxlintignore src",
     "test": "echo \"No tests yet for @inline-chat/protocol\""
   },
   "dependencies": {
     "@protobuf-ts/runtime": "^2.11.1"
   },
   "devDependencies": {
-    "typescript": "^5.8.3"
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
   },
   "publishConfig": {
     "access": "public"

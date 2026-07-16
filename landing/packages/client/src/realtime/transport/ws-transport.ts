@@ -62,7 +62,11 @@ export class WebSocketTransport implements Transport {
 
     this.log.trace("sending message", message)
     const payload = ClientMessage.toBinary(message)
-    this.socket.send(payload)
+    if (payload.buffer instanceof ArrayBuffer) {
+      this.socket.send(new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength))
+    } else {
+      this.socket.send(Uint8Array.from(payload))
+    }
   }
 
   async stopConnection() {

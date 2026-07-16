@@ -12,14 +12,16 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src",
-    "test": "bunx vitest run --passWithNoTests"
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "react": "^19.1.1"
   },
   "devDependencies": {
-    "@types/react": "^19.0.1",
-    "typescript": "^5.7.2"
+    "@types/react": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

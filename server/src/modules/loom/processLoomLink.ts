@@ -12,6 +12,7 @@ import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processFullPhoto } from "@in/server/db/models/files"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
+import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import sharp from "sharp"
 
 const log = new Log("modules.loom")
@@ -198,7 +199,7 @@ async function downloadAndSaveThumbnail(
     }
 
     // Convert processedBuffer to File object
-    const thumbnailFile = new File([processedBuffer], fileName, { type: fileType })
+    const thumbnailFile = new File([toArrayBufferBackedBytes(processedBuffer)], fileName, { type: fileType })
 
     // Upload photo to CDN and get photo ID
     const result = await uploadPhoto(thumbnailFile, { userId: currentUserId })

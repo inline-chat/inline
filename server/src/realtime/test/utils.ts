@@ -1,5 +1,6 @@
 import type { Server } from "bun"
 import { ClientMessage, ServerProtocolMessage, type ClientMessage as ClientMessageType } from "@inline-chat/protocol/core"
+import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 
 export const newWebsocket = (server: Server<unknown>, path = "/realtime") =>
   new WebSocket(`ws://${server.hostname}:${server.port}${path}`, undefined)
@@ -40,5 +41,5 @@ export const wsServerProtocolMessage = async (ws: WebSocket): Promise<ServerProt
 }
 
 export const wsSendClientProtocolMessage = (ws: WebSocket, message: ClientMessageType) => {
-  ws.send(ClientMessage.toBinary(message))
+  ws.send(toArrayBufferBackedBytes(ClientMessage.toBinary(message)))
 }

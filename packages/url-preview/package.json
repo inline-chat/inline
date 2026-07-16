@@ -17,14 +17,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
+    "lint": "oxlint --ignore-path ../../.oxlintignore src",
     "test": "bun test"
   },
   "dependencies": {
     "entities": "4.5.0"
   },
   "devDependencies": {
-    "@types/node": "20.11.30",
-    "typescript": "5.8.3"
+    "@types/node": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
   }
 }

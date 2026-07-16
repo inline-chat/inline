@@ -5,6 +5,7 @@ import {
   generateStrippedThumbnail,
   getStrippedThumbnailDimensions,
 } from "@in/server/modules/files/strippedThumbnail"
+import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 
 describe("strippedThumbnail", () => {
   test("generates Telegram-style payload bytes that decode back to a JPEG", async () => {
@@ -19,7 +20,7 @@ describe("strippedThumbnail", () => {
       .jpeg()
       .toBuffer()
 
-    const file = new File([data], "photo.jpeg", { type: "image/jpeg" })
+    const file = new File([toArrayBufferBackedBytes(data)], "photo.jpeg", { type: "image/jpeg" })
     const stripped = await generateStrippedThumbnail(file)
     const decoded = decodeStrippedThumbnail(stripped.bytes)
     const metadata = await sharp(decoded).metadata()
@@ -44,7 +45,7 @@ describe("strippedThumbnail", () => {
       .png()
       .toBuffer()
 
-    const file = new File([data], "photo.png", { type: "image/png" })
+    const file = new File([toArrayBufferBackedBytes(data)], "photo.png", { type: "image/png" })
     const stripped = await generateStrippedThumbnail(file)
     const metadata = getStrippedThumbnailDimensions(stripped.bytes)
 

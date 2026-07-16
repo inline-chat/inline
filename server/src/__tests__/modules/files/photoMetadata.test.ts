@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import sharp from "sharp"
 import { getPhotoMetadataAndValidate } from "@in/server/modules/files/metadata"
+import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 
 describe("getPhotoMetadataAndValidate", () => {
   test("accepts normal jpeg photos", async () => {
@@ -15,7 +16,7 @@ describe("getPhotoMetadataAndValidate", () => {
       .jpeg()
       .toBuffer()
 
-    const file = new File([data], "photo.jpeg", { type: "image/jpeg" })
+    const file = new File([toArrayBufferBackedBytes(data)], "photo.jpeg", { type: "image/jpeg" })
     const metadata = await getPhotoMetadataAndValidate(file)
 
     expect(metadata.width).toBe(1_200)
@@ -35,7 +36,7 @@ describe("getPhotoMetadataAndValidate", () => {
       .jpeg()
       .toBuffer()
 
-    const file = new File([data], "panorama.jpeg", { type: "image/jpeg" })
+    const file = new File([toArrayBufferBackedBytes(data)], "panorama.jpeg", { type: "image/jpeg" })
 
     await expect(getPhotoMetadataAndValidate(file)).rejects.toMatchObject({
       description: "This image is too wide or too tall to send as a photo. Send it as a file instead.",

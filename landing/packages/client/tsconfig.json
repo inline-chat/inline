@@ -7,11 +7,11 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "rootDirs": ["."],
-    "baseUrl": ".",
     "esModuleInterop": true,
     "noEmit": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "strict": true
+    "strict": true,
+    "types": ["node", "vite/client"]
   }
 }
