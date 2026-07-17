@@ -15,6 +15,7 @@ public struct UserGroupMemberInfo: Identifiable, Hashable, Sendable {
   }
 }
 
+@MainActor
 public final class UserGroupsViewModel: ObservableObject {
   public static let maxMembers = 25
 
@@ -172,7 +173,7 @@ public final class UserGroupsViewModel: ObservableObject {
     }
   }
 
-  private static func fetchMembers(
+  nonisolated private static func fetchMembers(
     _ db: Database,
     groupIds: [Int64]
   ) throws -> [Int64: [UserGroupMemberInfo]] {
