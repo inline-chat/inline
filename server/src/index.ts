@@ -25,7 +25,11 @@ import { root } from "@in/server/controllers/root"
 import { health } from "@in/server/controllers/health"
 import { startDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
 import { startGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
-import { registerGracefulShutdown } from "@in/server/lifecycle/gracefulShutdown"
+import {
+  createGracefulShutdownManager,
+  registerGracefulShutdown,
+  type GracefulShutdownManager,
+} from "@in/server/lifecycle/gracefulShutdown"
 import { waitlist } from "@in/server/controllers/extra/waitlist"
 import { Elysia } from "elysia"
 import { there } from "./controllers/extra/there"
@@ -176,12 +180,44 @@ app
 
 // Run only when this file is the process entry point. Route tests import `app`
 // directly and must not start production background workers or bind a port.
+export type CurrentServerHandle = {
+  readonly server: Server<unknown>
+  readonly gracefulShutdown: GracefulShutdownManager
+}
+
+export type StartCurrentServerOptions = {
+  readonly installSignalHandlers?: boolean
+  readonly port?: number
+}
+
+/**
+ * Starts the current production application and its existing process-owned
+ * workers. The shadow core entry point calls this same function so it cannot
+ * drift into a second startup implementation.
+ */
+export const startCurrentServer = (
+  options: StartCurrentServerOptions = {},
+): CurrentServerHandle => {
+  app.listen(options.port ?? port)
+  const server = app.server as Server<unknown> | null
+  if (!server) {
+    throw new Error("Current server listener did not expose a Bun server.")
+  }
+
+  connectionManager.setServer(server)
+  startDatabaseHealthMonitor()
+  startGridProviderEffectWorker()
+  const gracefulShutdown = options.installSignalHandlers === false
+    ? createGracefulShutdownManager({ server })
+    : registerGracefulShutdown(server)
+  log.info(`Running on http://${server.hostname}:${server.port}`)
+
+  return {
+    server,
+    gracefulShutdown,
+  }
+}
+
 if (import.meta.main) {
-  app.listen(port, (server: Server<unknown>) => {
-    connectionManager.setServer(server)
-    startDatabaseHealthMonitor()
-    startGridProviderEffectWorker()
-    registerGracefulShutdown(server)
-    log.info(`Running on http://${server.hostname}:${server.port}`)
-  })
+  startCurrentServer()
 }

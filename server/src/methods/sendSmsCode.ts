@@ -90,7 +90,9 @@ export const handler = async (
     if (error instanceof InlineError) {
       throw error
     }
-    Log.shared.error("Failed to send sms code", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+    throw new InlineError(
+      InlineError.ApiError.INTERNAL,
+      { cause: error },
+    )
   }
 }

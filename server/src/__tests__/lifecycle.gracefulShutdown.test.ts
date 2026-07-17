@@ -142,4 +142,58 @@ describe("graceful shutdown lifecycle", () => {
     expect(calls).toContain("exitCode:1")
     expect(calls).not.toContain("forceExit:1")
   })
+
+  it("does not await Bun's listener drain before closing active connections", async () => {
+    const calls: string[] = []
+    let finishDrain: (() => void) | undefined
+    const draining = new Promise<void>((resolve) => {
+      finishDrain = resolve
+    })
+    const timerId = Symbol("shutdown-timer") as unknown as ReturnType<typeof setTimeout>
+    const server = {
+      stop(closeActiveConnections?: boolean) {
+        calls.push(
+          `server.stop:${closeActiveConnections ? "true" : "false"}`,
+        )
+        if (closeActiveConnections) {
+          finishDrain?.()
+          return Promise.resolve()
+        }
+        return draining
+      },
+    } as unknown as Server<unknown>
+
+    const manager = createGracefulShutdownManager({
+      server,
+      shutdownTimeoutMs: 5_000,
+      deps: {
+        markShuttingDown: (signal) => calls.push(`mark:${signal}`),
+        stopDatabaseMonitor: () => {},
+        stopUserSettingsCleanup: () => {},
+        stopGridProviderEffects: () => {},
+        closeConnections: () => {
+          calls.push("connections.close")
+        },
+        shutdownPresence: () => {},
+        shutdownApn: () => {},
+        closeDatabase: () => {},
+        flushSentry: async () => true,
+        setExitCode: (code) => calls.push(`exitCode:${code}`),
+        forceExit: (code) => calls.push(`forceExit:${code}`),
+        setTimeoutFn: () => timerId,
+        clearTimeoutFn: () => {},
+      },
+    })
+
+    await manager.shutdown("SIGTERM")
+
+    expect(calls.indexOf("connections.close")).toBeGreaterThan(
+      calls.indexOf("server.stop:false"),
+    )
+    expect(calls.indexOf("server.stop:true")).toBeGreaterThan(
+      calls.indexOf("connections.close"),
+    )
+    expect(calls).toContain("exitCode:0")
+    expect(calls).not.toContain("forceExit:1")
+  })
 })

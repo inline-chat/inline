@@ -2,7 +2,6 @@ import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { sessions } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { connectionManager } from "../ws/connections"
@@ -49,7 +48,9 @@ export const handler = async (
 
     return undefined
   } catch (error) {
-    Log.shared.error("Failed to logout", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+    throw new InlineError(
+      InlineError.ApiError.INTERNAL,
+      { cause: error },
+    )
   }
 }

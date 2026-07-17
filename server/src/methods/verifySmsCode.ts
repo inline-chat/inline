@@ -95,8 +95,14 @@ export const handler = async (
     let { user, created } = await getOrCreateUserByPhoneForSignup(formattedPhoneNumber, input.inviteCode)
 
     if (!user) {
-      Log.shared.error("Failed to verify sms code", { phoneNumber })
-      throw new InlineError(InlineError.ApiError.INTERNAL)
+      throw new InlineError(
+        InlineError.ApiError.INTERNAL,
+        {
+          cause: new Error(
+            "Phone verification did not resolve a user.",
+          ),
+        },
+      )
     }
 
     let userId = user.id
@@ -143,8 +149,10 @@ export const handler = async (
       throw error
     }
 
-    Log.shared.error("Failed to verify sms code", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+    throw new InlineError(
+      InlineError.ApiError.INTERNAL,
+      { cause: error },
+    )
   }
 }
 

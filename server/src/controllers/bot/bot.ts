@@ -134,8 +134,8 @@ const toBotPeer = (peer: any): BotPeer => {
       return { user_id: (peer as any).userId }
     }
     if ("threadId" in peer && typeof (peer as any).threadId === "number") {
-      // 2026-06-03: Deprecated output shape kept for production bot clients.
-      // Prefer top-level `chat_id`; remove after confirming no production use in the previous month.
+      // TODO(effect-cutover): remove deprecated `peer.thread_id` after production
+      // telemetry shows no Bot client use for 30 days. Prefer top-level `chat_id`.
       return { thread_id: (peer as any).threadId }
     }
   }
@@ -146,8 +146,8 @@ const toBotPeer = (peer: any): BotPeer => {
 
   if (type.oneofKind === "user") return { user_id: Number(type.user.userId) }
   if (type.oneofKind === "chat") {
-    // 2026-06-03: Deprecated output shape kept for production bot clients.
-    // Prefer top-level `chat_id`; remove after confirming no production use in the previous month.
+    // TODO(effect-cutover): remove deprecated `peer.thread_id` after production
+    // telemetry shows no Bot client use for 30 days. Prefer top-level `chat_id`.
     return { thread_id: Number(type.chat.chatId) }
   }
 
@@ -182,16 +182,16 @@ const makeInputPeer = (userId: number | undefined, chatId: number | undefined): 
 
 const parseBotTarget = (input: BotTargetInput): { userId?: number; chatId?: number } => {
   const userId = normalizeInputId(input.user_id)
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `user_id`.
-  // Remove after confirming no production use in the previous month.
+  // TODO(effect-cutover): remove `peer_user_id` after production telemetry shows
+  // no Bot client use for 30 days. Prefer `user_id`.
   const userIdAlias = normalizeInputId(input.peer_user_id)
   if (userId !== undefined && userIdAlias !== undefined && userId !== userIdAlias) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
   const chatId = normalizeInputId(input.chat_id)
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `chat_id`.
-  // Remove after confirming no production use in the previous month.
+  // TODO(effect-cutover): remove `peer_thread_id` after production telemetry
+  // shows no Bot client use for 30 days. Prefer `chat_id`.
   const chatIdAlias = normalizeInputId(input.peer_thread_id)
   if (chatId !== undefined && chatIdAlias !== undefined && chatId !== chatIdAlias) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
@@ -307,8 +307,8 @@ const parseBotBoolean = (value: unknown): boolean | undefined => {
 }
 
 const parseBotParseMarkdown = (input: Record<string, unknown>): boolean | undefined => {
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
-  // Remove after confirming no production use in the previous month.
+  // TODO(effect-cutover): remove `parseMarkdown` after production telemetry
+  // shows no Bot client use for 30 days. Prefer `parse_markdown`.
   return parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
 }
 

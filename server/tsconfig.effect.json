@@ -1,0 +1,34 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "noEmit": true,
+    "paths": {
+      "@in/server": ["./src"],
+      "@in/server/*": ["./src/*"],
+      "@in/protocol": ["../packages/protocol/dist/index.d.ts"],
+      "@in/protocol/*": ["../packages/protocol/dist/*"],
+      "@inline-chat/protocol": ["../packages/protocol/dist/index.d.ts"],
+      "@inline-chat/protocol/*": ["../packages/protocol/dist/*"],
+      "@inline-chat/bot-api-types": ["../packages/bot-api-types/src/index.ts"],
+      "@inline-chat/bot-api-types/*": ["../packages/bot-api-types/src/*"],
+      "@inline-chat/oauth-core": ["../packages/oauth-core/src/index.ts"],
+      "@inline-chat/oauth-core/*": ["../packages/oauth-core/src/*"],
+      "@inline-chat/url-preview": ["../packages/url-preview/src/index.ts"],
+      "@inline-chat/url-preview/*": ["../packages/url-preview/src/*"]
+    },
+    "types": ["bun"]
+  },
+  "include": [
+    "vitest.effect.config.ts",
+    "scripts/core-entry-smoke.ts",
+    "scripts/core-http-kernel-smoke.ts",
+    "src/core/**/*.ts",
+    "src/**/*.effect.ts",
+    "src/**/*.effect.test.ts",
+    "src/**/*.effect.spec.ts",
+    "src/modules/effect/**/*.ts"
+  ]
+}

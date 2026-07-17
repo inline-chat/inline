@@ -4,7 +4,6 @@ import { users } from "@in/server/db/schema"
 import { isValidEmail } from "@in/server/utils/validate"
 import { InlineError } from "@in/server/types/errors"
 import { normalizeEmail } from "@in/server/utils/normalize"
-import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
@@ -78,8 +77,10 @@ export const handler = async (
     if (error instanceof InlineError) {
       throw error
     }
-    Log.shared.error("Failed to send email code", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+    throw new InlineError(
+      InlineError.ApiError.INTERNAL,
+      { cause: error },
+    )
   }
 }
 

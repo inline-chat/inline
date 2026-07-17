@@ -2,7 +2,6 @@ import { db } from "@in/server/db"
 import { and, eq, isNull } from "drizzle-orm"
 import { members, spaces } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import { encodeMemberInfo, encodeSpaceInfo, TMemberInfo, TSpaceInfo } from "@in/server/api-types"
 import type { HandlerContext } from "@in/server/controllers/helpers"
@@ -45,7 +44,9 @@ export const handler = async (_: undefined, context: HandlerContext): Promise<St
       members: output.members.map(encodeMemberInfo),
     }
   } catch (error) {
-    Log.shared.error("Failed to get spaces", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+    throw new InlineError(
+      InlineError.ApiError.INTERNAL,
+      { cause: error },
+    )
   }
 }

@@ -14,48 +14,68 @@ export const Response = Type.Object({
   valid: Type.Boolean(),
 })
 
-const limiter = new InMemoryRateLimiter()
+// The Elysia oracle retains its own bounded limiter until cutover. The Effect
+// adapter injects a fresh scoped instance for the replacement listener.
+const legacyLimiter = new InMemoryRateLimiter()
 const perIpRule = { max: 20, windowMs: 10 * 60_000 }
 const perCodeRule = { max: 5, windowMs: 10 * 60_000 }
 
-export const handler = async (
-  input: Static<typeof Input>,
-  context: UnauthenticatedHandlerContext,
-): Promise<Static<typeof Response>> => {
-  const code = normalizeInviteCode(input.inviteCode)
-  checkRateLimit(context.ip, code)
+export const makeCheckInviteCodeHandler = (
+  limiter: InMemoryRateLimiter,
+) =>
+  async (
+    input: Static<typeof Input>,
+    context: UnauthenticatedHandlerContext,
+  ): Promise<Static<typeof Response>> => {
+    const code = normalizeInviteCode(input.inviteCode)
+    checkRateLimit(limiter, context.ip, code)
 
-  if (!code) {
-    throw new InlineError(InlineError.ApiError.INVITE_CODE_REQUIRED)
-  }
+    if (!code) {
+      throw new InlineError(
+        InlineError.ApiError.INVITE_CODE_REQUIRED,
+      )
+    }
 
-  if (!isValidInviteCode(code)) {
-    throw new InlineError(InlineError.ApiError.INVITE_CODE_INVALID)
-  }
+    if (!isValidInviteCode(code)) {
+      throw new InlineError(
+        InlineError.ApiError.INVITE_CODE_INVALID,
+      )
+    }
 
-  if (isDevInviteCode(code)) {
+    if (isDevInviteCode(code)) {
+      return { valid: true }
+    }
+
+    const row = await InviteCodesModel.getByCode({ code })
+    if (!row) {
+      throw new InlineError(
+        InlineError.ApiError.INVITE_CODE_NOT_FOUND,
+      )
+    }
+
+    if (row.redeemedAt) {
+      BotAlerts.inviteCodeTaken({
+        source: context.source,
+        ip: context.ip,
+      })
+      throw new InlineError(
+        InlineError.ApiError.INVITE_CODE_TAKEN,
+      )
+    }
+
     return { valid: true }
   }
 
-  const row = await InviteCodesModel.getByCode({ code })
-  if (!row) {
-    throw new InlineError(InlineError.ApiError.INVITE_CODE_NOT_FOUND)
-  }
+export const handler = makeCheckInviteCodeHandler(
+  legacyLimiter,
+)
 
-  if (row.redeemedAt) {
-    BotAlerts.inviteCodeTaken({
-      source: context.source,
-      ip: context.ip,
-    })
-    throw new InlineError(InlineError.ApiError.INVITE_CODE_TAKEN)
-  }
-
-  return { valid: true }
-}
-
-const checkRateLimit = (ip: string | undefined, code: string) => {
+const checkRateLimit = (
+  limiter: InMemoryRateLimiter,
+  ip: string | undefined,
+  code: string,
+) => {
   const nowMs = Date.now()
-  limiter.cleanup(nowMs)
 
   const ipKey = normalizeRateLimitPart(ip ?? "unknown")
   const codeKey = normalizeRateLimitPart(code || "empty")

@@ -78,8 +78,13 @@ export class InlineError extends Error {
   /** Human readable description of the error */
   public description: string | undefined
 
-  constructor(error: ApiError) {
-    super(error[2])
+  constructor(
+    error: ApiError,
+    options?: {
+      readonly cause?: unknown
+    },
+  ) {
+    super(error[2], options)
     this.type = error[0]
     this.code = error[1]
     this.description = error[2]

@@ -1,0 +1,738 @@
+{
+  "version": 1,
+  "count": 181,
+  "methodCounts": {
+    "ALL": 3,
+    "GET": 81,
+    "OPTIONS": 14,
+    "POST": 82,
+    "WS": 1
+  },
+  "sha256": "2ba70800148d76b98fb8103a4a656d99de36106c75e9ebb45a595137dc1d30ea",
+  "routes": [
+    {
+      "method": "ALL",
+      "path": "/bot/*"
+    },
+    {
+      "method": "ALL",
+      "path": "/bot:token/*"
+    },
+    {
+      "method": "ALL",
+      "path": "/v1/*"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-authorization-server"
+    },
+    {
+      "method": "GET",
+      "path": "//"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/auth/totp/setup"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/invites"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/me"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/metrics/active-users"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/metrics/app"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/metrics/overview"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/metrics/technical"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/spaces"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users/:id"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users/:id/avatar"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/waitlist"
+    },
+    {
+      "method": "GET",
+      "path": "/authorize"
+    },
+    {
+      "method": "GET",
+      "path": "/bot-api-reference"
+    },
+    {
+      "method": "GET",
+      "path": "/bot-api-reference/json"
+    },
+    {
+      "method": "GET",
+      "path": "/bot/getChat"
+    },
+    {
+      "method": "GET",
+      "path": "/bot/getChatHistory"
+    },
+    {
+      "method": "GET",
+      "path": "/bot/getMe"
+    },
+    {
+      "method": "GET",
+      "path": "/bot/getMyCommands"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getChat"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getChatHistory"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getMe"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getMyCommands"
+    },
+    {
+      "method": "GET",
+      "path": "/file"
+    },
+    {
+      "method": "GET",
+      "path": "/health/"
+    },
+    {
+      "method": "GET",
+      "path": "/healthz/"
+    },
+    {
+      "method": "GET",
+      "path": "/integrations/linear/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/integrations/linear/integrate"
+    },
+    {
+      "method": "GET",
+      "path": "/integrations/notion/callback"
+    },
+    {
+      "method": "GET",
+      "path": "/integrations/notion/integrate"
+    },
+    {
+      "method": "GET",
+      "path": "/oauth/authorize"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/addMember"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/addReaction"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/checkUsername"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/createLinearIssue"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/createNotionTask"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/createPrivateChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/createSpace"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/createThread"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/deleteAttachment"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/deleteMessage"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/deleteSpace"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/disconnectIntegration"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getAlphaText"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getChatHistory"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getDialogs"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getDraft"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getIntegrations"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getInviteCodes"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getLinearTeams"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getMe"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getNotionDatabases"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getPrivateChats"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getSpace"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getSpaceMembers"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getSpaces"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/getUser"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/leaveSpace"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/logout"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/readMessages"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/saveLinearTeamId"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/saveNotionDatabaseId"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/savePushNotification"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/searchContacts"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/sendComposeAction"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/sendMessage"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/sendMessage20250509"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/updateDialog"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/updateProfile"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/updateProfilePhoto"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/:token?/updateStatus"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/checkInviteCode"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reference"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reference/json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sendEmailCode"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sendSmsCode"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/verifyEmailCode"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/verifySmsCode"
+    },
+    {
+      "method": "GET",
+      "path": "/waitlist/super_secret_sub_count"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "//"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "//*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/admin/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/admin/*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/there/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/api/there/*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/health/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/health/*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/healthz/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/healthz/*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/v1/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/v1/*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/waitlist/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/waitlist/*"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/auth/login"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/auth/logout"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/auth/send-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/auth/set-password"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/auth/step-up"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/auth/totp/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/auth/verify-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/invites/generate"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/:id/invites"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/:id/sessions/:sessionId/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/:id/update"
+    },
+    {
+      "method": "POST",
+      "path": "/api/there/signup"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/deleteMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/deleteMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/editMessageText"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/sendMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/sendReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/setMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/deleteMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/deleteMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/editMessageText"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/sendMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/sendReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/setMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/authorize/consent"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/authorize/send-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/authorize/verify-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/introspect"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/register"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/token"
+    },
+    {
+      "method": "POST",
+      "path": "/register"
+    },
+    {
+      "method": "POST",
+      "path": "/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/token"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/addMember"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/addReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/checkInviteCode"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/checkUsername"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/createLinearIssue"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/createNotionTask"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/createPrivateChat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/createSpace"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/createThread"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/deleteAttachment"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/deleteMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/deleteSpace"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/disconnectIntegration"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getAlphaText"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getChatHistory"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getDialogs"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getDraft"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getIntegrations"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getInviteCodes"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getLinearTeams"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getMe"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getNotionDatabases"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getPrivateChats"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getSpace"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getSpaceMembers"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getSpaces"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/getUser"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/leaveSpace"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/logout"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/readMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/saveLinearTeamId"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/saveNotionDatabaseId"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/savePushNotification"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/searchContacts"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sendComposeAction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sendEmailCode"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sendMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sendMessage20250509"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sendSmsCode"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/updateDialog"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/updateProfile"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/updateProfilePhoto"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/updateStatus"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/uploadFile"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/verifyEmailCode"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/verifySmsCode"
+    },
+    {
+      "method": "POST",
+      "path": "/waitlist/subscribe"
+    },
+    {
+      "method": "POST",
+      "path": "/waitlist/verify"
+    },
+    {
+      "method": "WS",
+      "path": "/realtime"
+    }
+  ]
+}

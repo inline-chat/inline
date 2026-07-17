@@ -14,6 +14,8 @@
 
 # Server artifacts
 **/drizzle/
+server/scripts/lint/fixtures/**
+scripts/lint/fixtures/**
 
 # Generated sources
 **/routeTree.gen.ts

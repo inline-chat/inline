@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": [
+    {
+      "name": "inline-effect",
+      "specifier": "./server/scripts/lint/oxlint-plugin-inline-effect.js"
+    }
+  ],
+  "categories": {
+    "correctness": "warn"
+  },
+  "rules": {
+    "import/no-duplicates": "error",
+    "no-debugger": "error",
+    "no-dupe-class-members": "error",
+    "no-dupe-keys": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "server/src/core/**/*.{ts,tsx}",
+        "server/src/modules/effect/**/*.{ts,tsx}",
+        "server/src/**/*.effect.{ts,tsx}",
+        "server/src/**/*.effect.{test,spec}.{ts,tsx}",
+        "server/src/db/models/members/deleteMember.ts",
+        "server/scripts/lint/fixtures/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "inline-effect/no-effect-escape-hatch": "error",
+        "inline-effect/require-suppression-reason": "error"
+      }
+    }
+  ]
+}

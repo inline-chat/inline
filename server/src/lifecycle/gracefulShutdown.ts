@@ -24,7 +24,10 @@ export type GracefulShutdownDeps = {
   stopDatabaseMonitor: Step
   stopUserSettingsCleanup: Step
   stopGridProviderEffects: Step
-  stopServer: (server: Server<unknown>, closeActiveConnections: boolean) => void
+  stopServer: (
+    server: Server<unknown>,
+    closeActiveConnections: boolean,
+  ) => void | Promise<void>
   closeConnections: Step
   shutdownPresence: Step
   shutdownApn: Step
@@ -78,15 +81,29 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   clearTimeoutFn: clearTimeout,
 })
 
-const runStep = async (name: string, step: Step): Promise<boolean> => {
+const beginStep = (name: string, step: Step): Promise<boolean> => {
+  log.debug("Shutdown step starting", { step: name })
   try {
-    await step()
-    return true
+    return Promise.resolve(step()).then(
+      () => {
+        log.debug("Shutdown step completed", { step: name })
+        return true
+      },
+      (error: unknown) => {
+        log.error("Shutdown step failed", { step: name, error })
+        return false
+      },
+    )
   } catch (error) {
     log.error("Shutdown step failed", { step: name, error })
-    return false
+    return Promise.resolve(false)
   }
 }
+
+const runStep = (
+  name: string,
+  step: Step,
+): Promise<boolean> => beginStep(name, step)
 
 export const createGracefulShutdownManager = ({
   server,
@@ -125,7 +142,13 @@ export const createGracefulShutdownManager = ({
       hasErrors = !(await runStep("stop_database_monitor", runtime.stopDatabaseMonitor)) || hasErrors
       hasErrors = !(await runStep("stop_user_settings_cleanup", runtime.stopUserSettingsCleanup)) || hasErrors
       hasErrors = !(await runStep("stop_grid_provider_effects", runtime.stopGridProviderEffects)) || hasErrors
-      hasErrors = !(await runStep("stop_server_listener", () => runtime.stopServer(server, false))) || hasErrors
+      // Bun's stop(false) stops accepting traffic but its Promise resolves only
+      // after active connections drain. Start that drain without blocking the
+      // connection-closing steps that make it able to resolve.
+      void beginStep(
+        "begin_server_drain",
+        () => runtime.stopServer(server, false),
+      )
       hasErrors = !(await runStep("close_realtime_connections", runtime.closeConnections)) || hasErrors
       hasErrors = !(await runStep("shutdown_presence", runtime.shutdownPresence)) || hasErrors
       hasErrors = !(await runStep("close_remaining_server_connections", () => runtime.stopServer(server, true))) || hasErrors

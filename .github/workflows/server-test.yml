@@ -8,6 +8,8 @@ on:
       - "server/**"
       - "proto/**"
       - "scripts/**"
+      - ".oxlintignore"
+      - ".oxlintrc.json"
       - "package.json"
       - "bun.lock"
 
@@ -18,6 +20,8 @@ on:
       - "server/**"
       - "proto/**"
       - "scripts/**"
+      - ".oxlintignore"
+      - ".oxlintrc.json"
       - "package.json"
       - "bun.lock"
 
@@ -78,16 +82,40 @@ jobs:
       - name: Run linter
         run: cd server && bun lint
 
+      - name: Run strict migration linter
+        run: cd server && bun run lint:strict
+
+      - name: Test migration lint rules
+        run: cd server && bun run lint:rules
+
       - name: Type check
         run: cd server && bun typecheck
+
+      - name: Type check Effect foundation
+        run: cd server && bun run typecheck:effect
 
       - name: Setup environment
         run: |
           echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
           echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
 
+      - name: Run Effect tests
+        run: cd server && bun run test:effect
+
+      - name: Smoke test the Bun/Effect HTTP kernel
+        run: cd server && bun run core:http-smoke
+
+      - name: Check route manifest
+        run: cd server && bun run contracts:routes
+
+      - name: Check OpenAPI manifests
+        run: cd server && bun run contracts:openapi
+
       - name: Run database migrations
         run: cd server && bun db:migrate
+
+      - name: Smoke test the full core shadow
+        run: cd server && bun run core:smoke
 
       - name: Run tests
         run: cd server && NODE_ENV=test bun test

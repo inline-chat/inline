@@ -91,7 +91,14 @@ export const handler = async (
   let { user, created } = await getOrCreateUserByEmailForSignup(email, input.inviteCode)
 
   if (!user) {
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+    throw new InlineError(
+      InlineError.ApiError.INTERNAL,
+      {
+        cause: new Error(
+          "Email verification did not resolve a user.",
+        ),
+      },
+    )
   }
 
   let userId = user.id

@@ -17,7 +17,7 @@ export const deleteMemberEffect = (spaceId: number, userId: number) => {
         .delete(members)
         .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
         .returning(),
-    ).pipe(Effect.catchAll(() => Effect.fail(new MemberNotExistsError())))
+    ).pipe(Effect.catch(() => Effect.fail(new MemberNotExistsError())))
 
     if (member.length === 0) {
       return yield* Effect.fail(new MemberNotExistsError())
