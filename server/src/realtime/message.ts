@@ -14,7 +14,10 @@ import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionIn
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
-import { getAuthTokenErrorDetails, getConnectionReasonFromAuthError } from "@in/server/controllers/plugins"
+import {
+  getAuthTokenErrorDetails,
+  getConnectionReasonFromAuthError,
+} from "@in/server/modules/auth/sessionAuthentication"
 
 const log = new Log("realtime")
 

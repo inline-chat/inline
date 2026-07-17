@@ -1,6 +1,6 @@
 import type { ConnectionInit, ConnectionOpen } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { getUserIdFromToken } from "@in/server/controllers/plugins"
+import { getUserIdFromToken } from "@in/server/modules/auth/sessionAuthentication"
 import { connectionManager } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
 import { db } from "@in/server/db"

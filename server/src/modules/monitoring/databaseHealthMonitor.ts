@@ -236,12 +236,17 @@ export const startDatabaseHealthMonitor = (): DatabaseHealthMonitor | null => {
   return monitor
 }
 
-export const stopDatabaseHealthMonitor = (): void => {
-  if (!monitorInstance) {
+export const stopDatabaseHealthMonitor = (
+  monitor: DatabaseHealthMonitor | null =
+    monitorInstance,
+): void => {
+  if (!monitor) {
     return
   }
 
-  monitorInstance.stop()
-  monitorInstance = null
+  monitor.stop()
+  if (monitorInstance === monitor) {
+    monitorInstance = null
+  }
   log.info("Stopped DB health monitor")
 }

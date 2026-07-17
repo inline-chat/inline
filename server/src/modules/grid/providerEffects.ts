@@ -340,9 +340,16 @@ export function startGridProviderEffectWorker(): GridProviderEffectWorker {
   return worker
 }
 
-export async function stopGridProviderEffectWorker(): Promise<void> {
-  await worker?.stop()
-  worker = null
+export async function stopGridProviderEffectWorker(
+  ownedWorker: GridProviderEffectWorker | null =
+    worker,
+): Promise<void> {
+  if (!ownedWorker) return
+
+  await ownedWorker.stop()
+  if (worker === ownedWorker) {
+    worker = null
+  }
 }
 
 export function resetGridProviderEffectWorkerForTests(): void {

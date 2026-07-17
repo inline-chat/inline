@@ -51,8 +51,7 @@ const inlineReporter: ErrorReporterShape = {
   report: ({ cause, context }) =>
     Effect.sync(() => {
       safeLogError("Unexpected Effect failure", cause, {
-        operation: context.operation,
-        requestId: context.requestId,
+        ...context,
       })
     }),
 }

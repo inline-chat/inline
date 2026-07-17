@@ -1,10 +1,16 @@
 import { Cause, Context, Effect, Layer } from "effect"
 import type { RequestId } from "../helpers/requestId"
+import type { DiagnosticText } from "../schema/diagnostics"
 
 export interface UnexpectedErrorContext {
   /** Stable operation name, never a raw URL or user-controlled value. */
   readonly operation: string
   readonly requestId?: RequestId | undefined
+  readonly connectionId?: DiagnosticText | undefined
+  readonly clientIp?: DiagnosticText | undefined
+  readonly userAgent?: DiagnosticText | undefined
+  readonly origin?: DiagnosticText | undefined
+  readonly host?: DiagnosticText | undefined
 }
 
 export interface UnexpectedErrorReport<E> {

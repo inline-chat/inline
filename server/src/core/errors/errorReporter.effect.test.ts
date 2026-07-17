@@ -6,6 +6,10 @@ import {
   RecordingErrorReporter,
 } from "../testing/errorReporter"
 import { RequestId } from "../helpers/requestId"
+import {
+  MAX_DIAGNOSTIC_TEXT_LENGTH,
+  toDiagnosticText,
+} from "../schema/diagnostics"
 
 describe("ErrorReporter", () => {
   it.layer(RecordingErrorReporter)("recording boundary", (it) => {
@@ -51,4 +55,20 @@ describe("ErrorReporter", () => {
       }),
     ).pipe(Effect.provide(ErrorReporter.Noop)),
   )
+
+  it("bounds request-derived diagnostic text before it reaches a report", () => {
+    const diagnostic = toDiagnosticText(
+      `  ${"x".repeat(
+        MAX_DIAGNOSTIC_TEXT_LENGTH + 40,
+      )}  `,
+    )
+
+    expect(diagnostic).toHaveLength(
+      MAX_DIAGNOSTIC_TEXT_LENGTH,
+    )
+    expect(diagnostic?.endsWith("...")).toBe(
+      true,
+    )
+    expect(toDiagnosticText("   ")).toBeUndefined()
+  })
 })
