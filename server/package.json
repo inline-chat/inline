@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production bun dist/index.js",
     "test": "NODE_ENV=test bun test --timeout=30000",
     "test:effect": "vitest run --config vitest.effect.config.ts && bun run test:effect:bun",
-    "test:effect:bun": "bun test ./src/controllers/authLive.effect.test.ts ./src/controllers/identity.effect.test.ts ./src/controllers/oauth.effect.test.ts ./src/controllers/auxiliaryLive.effect.test.ts",
+    "test:effect:bun": "bun test ./src/controllers/authLive.effect.test.ts ./src/controllers/identity.effect.test.ts ./src/controllers/oauth.effect.test.ts ./src/controllers/auxiliaryLive.effect.test.ts ./src/controllers/adminLive.effect.bun.test.ts ./src/controllers/adminParity.effect.bun.test.ts",
     "test:postgres": "NODE_ENV=test bun test src/__tests__ --timeout=30000",
     "test:realtime": "NODE_ENV=test bun test src/realtime src/__tests__/realtime.protocol.test.ts src/__tests__/realtime.connectionInit.test.ts src/__tests__/handlers --timeout=30000",
     "test:shutdown": "NODE_ENV=test bun test src/__tests__/lifecycle.gracefulShutdown.test.ts --timeout=30000",
