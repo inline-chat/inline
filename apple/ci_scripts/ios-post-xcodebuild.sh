@@ -1,0 +1,1 @@
+../../scripts/apple/ci_post_xcodebuild.sh

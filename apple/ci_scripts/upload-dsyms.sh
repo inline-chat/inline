@@ -1,0 +1,1 @@
+../../scripts/apple/upload-dsyms.sh

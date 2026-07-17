@@ -1,0 +1,1 @@
+../../scripts/apple/swiftlint.sh

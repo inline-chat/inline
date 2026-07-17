@@ -9,8 +9,8 @@ if [[ "${CI_XCODE_CLOUD:-FALSE}" != "TRUE" || "${CI_WORKFLOW:-}" != "$package_ch
 fi
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-repo_root="$(CDPATH= cd -- "$script_dir/.." && pwd)"
-checks_script="$repo_root/scripts/apple/run-ci-checks.sh"
+repo_root="${CI_PRIMARY_REPOSITORY_PATH:-$(CDPATH= cd -- "$script_dir/../.." && pwd)}"
+checks_script="$script_dir/run-ci-checks.sh"
 
 if [[ ! -x "$checks_script" ]]; then
   echo "error: missing executable Apple CI checks script at $checks_script" >&2
@@ -62,7 +62,7 @@ fi
 if [[ -n "$base_commit" ]]; then
   while IFS= read -r path; do
     case "$path" in
-      ci_scripts/ci_post_clone.sh|scripts/apple/run-ci-checks.sh)
+      apple/ci_scripts/ci_post_clone.sh|apple/ci_scripts/run-ci-checks.sh|apple/ci_scripts/swiftlint.sh|scripts/apple/run-ci-checks.sh|scripts/apple/swiftlint.sh)
         add_all_packages
         ;;
       apple/InlineKit/*)
