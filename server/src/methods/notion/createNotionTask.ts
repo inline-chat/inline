@@ -252,13 +252,6 @@ export const handler = async (
       stage,
       totalDurationMs: totalDuration,
     })
-    const errorMeta = errorTelemetry(error)
-    Log.shared.error("Failed to create Notion task", error, {
-      ...devTelemetry,
-      stage,
-      totalDurationMs: totalDuration,
-      ...errorMeta,
-    })
 
     if (error instanceof InlineError) {
       throw error
@@ -269,9 +262,9 @@ export const handler = async (
       throw actionableError
     }
 
-    const internalError = new InlineError(InlineError.ApiError.INTERNAL)
-    internalError.description = `Failed to create Notion task (${stage}): ${errorMeta.errorMessage}`
-    throw internalError
+    // The active legacy or Effect transport owns the single unexpected-error
+    // report. Preserve the private cause without exposing provider/DB details.
+    throw new InlineError(InlineError.ApiError.INTERNAL, { cause: error })
   }
 }
 

@@ -1,17 +1,12 @@
-import { TMakeApiResponse, type HandlerContext } from "@in/server/controllers/helpers"
+import { TMakeApiResponse } from "@in/server/controllers/helpers"
 import { Optional, Type } from "@sinclair/typebox"
 import Elysia, { t } from "elysia"
-import type { Static } from "elysia"
 import { MAX_FILE_SIZE } from "@in/server/config"
 import { authenticate } from "@in/server/controllers/plugins"
-import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
-import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
-import { uploadDocument } from "@in/server/modules/files/uploadDocument"
-import { uploadVideo } from "@in/server/modules/files/uploadVideo"
-import { uploadVoice } from "@in/server/modules/files/uploadVoice"
-import { ApiError, InlineError } from "@in/server/types/errors"
+import { FileTypes } from "@in/server/modules/files/types"
 import { Log } from "@in/server/utils/log"
 import { getIp } from "@in/server/utils/ip"
+import { uploadFileOperation } from "./uploadFileOperation"
 
 const log = new Log("methods/uploadFile")
 
@@ -52,141 +47,6 @@ export const Response = Type.Object({
   voiceId: Type.Optional(Type.Number()),
 })
 
-const handler = async (input: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
-  const requestDiagnostics = describeUploadRequest(input, context)
-  try {
-    log.info("Starting file upload request", requestDiagnostics)
-
-    const file = requireUploadFile(input.file)
-
-    const width = input.type === FileTypes.VIDEO ? parseOptionalInt("width", input.width, 1) : undefined
-    const height = input.type === FileTypes.VIDEO ? parseOptionalInt("height", input.height, 1) : undefined
-    const duration =
-      input.type === FileTypes.VIDEO || input.type === FileTypes.VOICE
-        ? parseOptionalInt("duration", input.duration, 0)
-        : undefined
-    const isAnimated = input.type === FileTypes.VIDEO ? parseOptionalBool("isAnimated", input.isAnimated) : undefined
-    const hasAudio = input.type === FileTypes.VIDEO ? parseOptionalBool("hasAudio", input.hasAudio) : undefined
-    const waveform = input.type === FileTypes.VOICE ? parseRequiredBase64("waveform", input.waveform) : undefined
-
-    if (input.thumbnail?.size === 0) {
-      throw uploadBadRequest("Uploaded thumbnail is empty")
-    }
-    if (input.thumbnail && input.thumbnail.size > MAX_FILE_SIZE) {
-      throw new InlineError(ApiError.FILE_TOO_LARGE)
-    }
-    if (input.thumbnail != null && !input.thumbnail.type?.trim()) {
-      throw uploadBadRequest("Uploaded thumbnail is missing MIME type")
-    }
-
-    // Validate required video metadata
-    if (input.type === FileTypes.VIDEO) {
-      if (width === undefined || height === undefined || duration === undefined) {
-        log.error("Missing video metadata", {
-          ...requestDiagnostics,
-          hasWidth: width !== undefined,
-          hasHeight: height !== undefined,
-          hasDuration: duration !== undefined,
-        })
-        throw uploadBadRequest("Video upload requires width, height, and duration")
-      }
-      if (isAnimated === true && hasAudio === true) {
-        log.error("Invalid animated video metadata", { ...requestDiagnostics, isAnimated, hasAudio })
-        throw uploadBadRequest("Animated video uploads must be silent")
-      }
-    } else if (input.isAnimated !== undefined || input.hasAudio !== undefined) {
-      log.error("Video-only metadata was provided for non-video upload", {
-        ...requestDiagnostics,
-        hasIsAnimated: input.isAnimated !== undefined,
-        hasHasAudio: input.hasAudio !== undefined,
-      })
-      throw uploadBadRequest("Animated/audio video metadata is only valid for video uploads")
-    }
-
-    if (input.type === FileTypes.VOICE) {
-      if (duration === undefined || waveform === undefined) {
-        log.error("Missing voice metadata", {
-          ...requestDiagnostics,
-          hasDuration: duration !== undefined,
-          hasWaveform: waveform !== undefined,
-        })
-        throw uploadBadRequest("Voice upload requires duration and waveform")
-      }
-    }
-
-    let result: UploadFileResult
-    let uploadedThumbnailId: number | undefined
-
-    try {
-      switch (input.type) {
-        case FileTypes.PHOTO:
-          result = await uploadPhoto(file, { userId: context.currentUserId })
-          break
-        case FileTypes.VIDEO:
-          if (input.thumbnail) {
-            const thumbResult = await uploadPhoto(input.thumbnail, { userId: context.currentUserId })
-            uploadedThumbnailId = thumbResult.photoId
-          }
-
-          result = await uploadVideo(
-            file,
-            {
-              width: width ?? 1280,
-              height: height ?? 720,
-              duration: duration ?? 0,
-              photoId: uploadedThumbnailId ? BigInt(uploadedThumbnailId) : undefined,
-              isAnimated: isAnimated ?? false,
-              hasAudio,
-            },
-            { userId: context.currentUserId },
-          )
-          break
-        case FileTypes.DOCUMENT:
-          if (input.thumbnail) {
-            const thumbResult = await uploadPhoto(input.thumbnail, { userId: context.currentUserId })
-            uploadedThumbnailId = thumbResult.photoId
-          }
-
-          result = await uploadDocument(
-            file,
-            uploadedThumbnailId ? BigInt(uploadedThumbnailId) : undefined,
-            { userId: context.currentUserId },
-          )
-          break
-        case FileTypes.VOICE:
-          result = await uploadVoice(
-            file,
-            {
-              duration: duration ?? 0,
-              waveform: waveform ?? new Uint8Array(),
-            },
-            { userId: context.currentUserId },
-          )
-          break
-      }
-    } catch (error) {
-      log.error("File upload failed", { error, ...requestDiagnostics })
-      throw error
-    }
-
-    log.info("File upload completed successfully", {
-      ...requestDiagnostics,
-      fileUniqueId: result.fileUniqueId,
-    })
-
-    return {
-      fileUniqueId: result.fileUniqueId,
-      photoId: result.photoId ?? uploadedThumbnailId,
-      videoId: result.videoId,
-      documentId: result.documentId,
-      voiceId: result.voiceId,
-    }
-  } catch (error) {
-    log.error("File upload request failed", { error, ...requestDiagnostics })
-    throw error
-  }
-}
-
 // Route
 const response = TMakeApiResponse(Response)
 export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).post(
@@ -201,7 +61,7 @@ export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).
         ip,
       }
 
-      let result = await handler(input, context)
+      let result = await uploadFileOperation(input, context)
       return { ok: true, result } as any
     } catch (error) {
       log.error("Upload file route error", {
@@ -223,94 +83,3 @@ export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).
     response: response,
   },
 )
-
-function parseOptionalInt(name: string, value: string | undefined, min: number): number | undefined {
-  if (value === undefined) return undefined
-  const trimmed = value.trim()
-  if (!trimmed) {
-    log.error("Invalid numeric upload metadata", { name, value, reason: "empty" })
-    throw uploadBadRequest(`Invalid ${name}: expected a number`)
-  }
-
-  const parsed = Number(trimmed)
-  if (!Number.isInteger(parsed) || parsed < min) {
-    log.error("Invalid numeric upload metadata", { name, value, min, parsed })
-    throw uploadBadRequest(`Invalid ${name}: expected integer >= ${min}`)
-  }
-
-  return parsed
-}
-
-function parseOptionalBool(name: string, value: string | undefined): boolean | undefined {
-  if (value === undefined) return undefined
-  const trimmed = value.trim().toLowerCase()
-  if (!trimmed) {
-    log.error("Invalid boolean upload metadata", { name, value, reason: "empty" })
-    throw uploadBadRequest(`Invalid ${name}: expected true or false`)
-  }
-
-  if (trimmed === "true" || trimmed === "1") return true
-  if (trimmed === "false" || trimmed === "0") return false
-
-  log.error("Invalid boolean upload metadata", { name, value })
-  throw uploadBadRequest(`Invalid ${name}: expected true or false`)
-}
-
-function parseRequiredBase64(name: string, value: string | undefined): Uint8Array | undefined {
-  if (value === undefined) {
-    return undefined
-  }
-
-  const trimmed = value.trim()
-  if (!trimmed) {
-    log.error("Invalid base64 upload metadata", { name, reason: "empty" })
-    throw uploadBadRequest(`Invalid ${name}: expected base64 data`)
-  }
-
-  const compact = trimmed.replace(/\s+/g, "")
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact) || compact.length % 4 !== 0) {
-    log.error("Invalid base64 upload metadata", { name, reason: "malformed" })
-    throw uploadBadRequest(`Invalid ${name}: expected base64 data`)
-  }
-
-  return Uint8Array.from(Buffer.from(compact, "base64"))
-}
-
-function requireUploadFile(file: File | undefined): File {
-  if (!file) {
-    throw uploadBadRequest("Missing multipart file field `file`")
-  }
-  if (file.size === 0) {
-    throw uploadBadRequest("Uploaded file is empty")
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    throw new InlineError(ApiError.FILE_TOO_LARGE)
-  }
-  return file
-}
-
-function uploadBadRequest(description: string): InlineError {
-  const error = new InlineError(ApiError.BAD_REQUEST)
-  error.description = description
-  return error
-}
-
-function describeUploadRequest(input: Static<typeof Input>, context: HandlerContext) {
-  return {
-    type: input.type,
-    userId: context.currentUserId,
-    sessionId: context.currentSessionId,
-    ip: context.ip,
-    filePresent: input.file != null,
-    fileName: input.file?.name,
-    fileSize: input.file?.size,
-    fileMimeType: input.file?.type,
-    thumbnailPresent: input.thumbnail != null,
-    thumbnailName: input.thumbnail?.name,
-    thumbnailSize: input.thumbnail?.size,
-    thumbnailMimeType: input.thumbnail?.type,
-    width: input.width,
-    height: input.height,
-    duration: input.duration,
-  }
-}

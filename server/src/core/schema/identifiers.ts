@@ -16,3 +16,33 @@ export const SessionId = InlineId.pipe(Schema.brand("SessionId")).annotate({
 })
 
 export type SessionId = typeof SessionId.Type
+
+/** Inline chat identity, including private and thread chats. */
+export const ChatId = InlineId.pipe(
+  Schema.brand("ChatId"),
+).annotate({
+  identifier: "ChatId",
+  description: "A positive Inline chat identifier",
+})
+
+export type ChatId = typeof ChatId.Type
+
+/** Inline message identity within its chat. */
+export const MessageId = InlineId.pipe(
+  Schema.brand("MessageId"),
+).annotate({
+  identifier: "MessageId",
+  description: "A positive Inline message identifier",
+})
+
+export type MessageId = typeof MessageId.Type
+
+/** Inline space identity. */
+export const SpaceId = InlineId.pipe(
+  Schema.brand("SpaceId"),
+).annotate({
+  identifier: "SpaceId",
+  description: "A positive Inline space identifier",
+})
+
+export type SpaceId = typeof SpaceId.Type
