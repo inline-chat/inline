@@ -50,6 +50,68 @@ import {
 const DEFAULT_GRACEFUL_SHUTDOWN_MILLIS =
   20_000
 
+export interface CoreHttpDrain {
+  readonly begin: () => void
+  readonly enter: () => () => void
+  readonly isDraining: () => boolean
+  readonly wait: () => Promise<void>
+}
+
+export const makeCoreHttpDrain =
+  (): CoreHttpDrain => {
+    let draining = false
+    let active = 0
+    let resolveDrained:
+      | (() => void)
+      | undefined
+    let drained:
+      | Promise<void>
+      | undefined
+
+    const complete = (): void => {
+      active -= 1
+      if (
+        draining &&
+        active === 0
+      ) {
+        resolveDrained?.()
+        resolveDrained = undefined
+      }
+    }
+
+    return {
+      begin: () => {
+        draining = true
+        if (active === 0) {
+          resolveDrained?.()
+          resolveDrained = undefined
+        }
+      },
+      enter: () => {
+        active += 1
+        let completed = false
+        return () => {
+          if (completed) {
+            return
+          }
+          completed = true
+          complete()
+        }
+      },
+      isDraining: () => draining,
+      wait: () => {
+        if (active === 0) {
+          return Promise.resolve()
+        }
+        drained ??=
+          new Promise<void>((resolve) => {
+            resolveDrained = resolve
+          })
+        return drained
+      },
+    }
+  }
+
 export class CoreProductionStartupError extends
   Data.TaggedError(
     "CoreProductionStartupError",
@@ -132,7 +194,7 @@ const startupCause = (
 ): Cause.Cause<unknown> =>
   Cause.die(cause)
 
-const shutdownWithDeadline = async (
+export const shutdownWithDeadline = async (
   operation: () => Promise<void>,
   timeoutMillis: number,
   onTimeout: () => void,
@@ -243,6 +305,8 @@ export const startCoreProductionServer = async <
       context,
       { clientIpHeader },
     )
+  const httpDrain =
+    makeCoreHttpDrain()
 
   let server:
     | Server<RealtimeWebSocketData>
@@ -255,6 +319,12 @@ export const startCoreProductionServer = async <
       hostname,
       port,
       fetch: (request, bunServer) => {
+        if (httpDrain.isDraining()) {
+          return new Response(
+            "Server shutting down.",
+            { status: 503 },
+          )
+        }
         if (
           realtime.tryUpgrade(
             request,
@@ -264,11 +334,17 @@ export const startCoreProductionServer = async <
           return undefined
         }
 
+        const completeRequest =
+          httpDrain.enter()
         return httpHandler(
           request,
           bunServer.requestIP(request)
             ?.address,
-        )
+          completeRequest,
+        ).catch((cause) => {
+          completeRequest()
+          throw cause
+        })
       },
       websocket: realtime.websocket,
     })
@@ -303,6 +379,15 @@ export const startCoreProductionServer = async <
 
     removeSignalHandlers()
     markShuttingDown(signal)
+    httpDrain.begin()
+    // Bun stops accepting new connections synchronously. Its graceful-stop
+    // Promise is deliberately not awaited because async WebSocket close
+    // callbacks can keep that bookkeeping Promise pending on Bun 1.3.1.
+    void Promise.resolve(
+      server.stop(false),
+    ).catch(() => {
+      process.exitCode = 1
+    })
     let shutdownStage =
       "listener drain"
     shutdownPromise =
@@ -311,6 +396,9 @@ export const startCoreProductionServer = async <
           shutdownStage =
             "realtime transport"
           await realtime.shutdown()
+          shutdownStage =
+            "in-flight HTTP drain"
+          await httpDrain.wait()
           shutdownStage =
             "active connection closure"
           // TODO(effect-cutover): retry Bun's graceful stop(false) once its
@@ -333,6 +421,12 @@ export const startCoreProductionServer = async <
         () => {
           markShuttingDown("timeout")
           void server.stop(true)
+          server.unref()
+          void bridge.dispose().catch(
+            () => {
+              process.exitCode = 1
+            },
+          )
           if (signal !== "manual") {
             process.exitCode = 1
           }

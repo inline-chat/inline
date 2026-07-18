@@ -290,7 +290,17 @@ describe("getUpdates", () => {
       { currentUserId: newMember.id } as any,
     )
 
-    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantGroupAdd"])
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual([
+      "participantGroupAdd",
+      "chatPermissions",
+    ])
+    const permissionUpdate = result.updates[1]?.update
+    expect(permissionUpdate?.oneofKind).toBe("chatPermissions")
+    if (permissionUpdate?.oneofKind !== "chatPermissions") {
+      throw new Error("Expected a chatPermissions update")
+    }
+    expect(Number(permissionUpdate.chatPermissions.chatId)).toBe(chat.id)
+    expect(permissionUpdate.chatPermissions.permissions?.canUpdateInfo).toBe(false)
     expect(result.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(chat.id)
     expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).toContain(space.id)
 

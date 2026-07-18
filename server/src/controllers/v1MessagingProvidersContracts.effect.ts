@@ -65,7 +65,13 @@ export const V1BotCompatApiError = Schema.Struct({
 }).annotate({ identifier: "V1BotCompatApiError" })
 
 const standardErrorAt = (status: number) => V1MessagingProvidersApiError.pipe(HttpApiSchema.status(status))
-const botCompatErrorAt = (status: number) => V1BotCompatApiError.pipe(HttpApiSchema.status(status))
+const phaseAwareErrorAt = (
+  status: number,
+) =>
+  Schema.Union([
+    V1MessagingProvidersApiError,
+    V1BotCompatApiError,
+  ]).pipe(HttpApiSchema.status(status))
 
 const standardErrors = [
   standardErrorAt(400),
@@ -76,11 +82,13 @@ const standardErrors = [
   standardErrorAt(500),
 ] as const
 
-const botCompatErrors = [
-  botCompatErrorAt(400),
-  botCompatErrorAt(401),
-  botCompatErrorAt(404),
-  botCompatErrorAt(500),
+const phaseAwareBotCompatErrors = [
+  phaseAwareErrorAt(400),
+  phaseAwareErrorAt(401),
+  phaseAwareErrorAt(403),
+  phaseAwareErrorAt(404),
+  phaseAwareErrorAt(420),
+  phaseAwareErrorAt(500),
 ] as const
 
 const success = <Result extends Schema.Top>(result: Result) =>
@@ -150,19 +158,19 @@ const botCompatEndpoints = <
     headers: AuthorizationHeader,
     payload: input.fields,
     success: successSchema,
-    error: botCompatErrors,
+    error: phaseAwareBotCompatErrors,
   }).annotateMerge(requireOpenApiRequestHeader("authorization", headerDescription)),
   HttpApiEndpoint.get(`get${name}WithToken`, `/v1/:token/${method}`, {
     params: { token: Schema.String },
     payload: input.fields,
     success: successSchema,
-    error: botCompatErrors,
+    error: phaseAwareBotCompatErrors,
   }),
   HttpApiEndpoint.post(`post${name}`, `/v1/${method}`, {
     headers: AuthorizationHeader,
     payload: postPayloads(input),
     success: successSchema,
-    error: botCompatErrors,
+    error: phaseAwareBotCompatErrors,
   }).annotateMerge(requireOpenApiRequestHeader("authorization", headerDescription)),
 ] as const
 

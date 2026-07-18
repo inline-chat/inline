@@ -22,7 +22,8 @@ import {
   makeHttpApplication,
 } from "./application"
 import {
-  parseTrustedClientIpHeader,
+  clientIpHeaderForMode,
+  parseClientIpMode,
 } from "./middleware"
 import {
   defineOpenApiDocument,
@@ -163,13 +164,30 @@ const makeKernel = ({
 
 describe("Effect HTTP kernel", () => {
   it("accepts only explicit single-address proxy headers", () => {
-    expect(parseTrustedClientIpHeader(undefined)).toBeUndefined()
-    expect(parseTrustedClientIpHeader(" x-real-ip ")).toBe("x-real-ip")
-    expect(parseTrustedClientIpHeader("CF-Connecting-IP")).toBe(
+    expect(parseClientIpMode(undefined, { requireExplicit: false })).toBe(
+      "direct",
+    )
+    expect(parseClientIpMode("direct", { requireExplicit: true })).toBe(
+      "direct",
+    )
+    expect(
+      clientIpHeaderForMode(
+        parseClientIpMode("direct", { requireExplicit: true }),
+      ),
+    ).toBeUndefined()
+    expect(
+      parseClientIpMode(" x-real-ip ", { requireExplicit: true }),
+    ).toBe("x-real-ip")
+    expect(
+      parseClientIpMode("CF-Connecting-IP", { requireExplicit: true }),
+    ).toBe(
       "cf-connecting-ip",
     )
     expect(() => {
-      parseTrustedClientIpHeader("x-forwarded-for")
+      parseClientIpMode(undefined, { requireExplicit: true })
+    }).toThrow("explicitly set in production")
+    expect(() => {
+      parseClientIpMode("x-forwarded-for", { requireExplicit: true })
     }).toThrow("INLINE_TRUSTED_CLIENT_IP_HEADER")
   })
 
@@ -353,6 +371,34 @@ describe("Effect HTTP kernel", () => {
 
       expect(first.status).toBe(200)
       expect(exceeded.status).toBe(420)
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
+  it("isolates limiter buckets by the selected trusted proxy header", async () => {
+    const kernel = makeKernel({
+      clientIpHeader: "x-real-ip",
+      rateLimit: {
+        max: 1,
+        windowMillis: 60_000,
+      },
+    })
+
+    try {
+      const first = await kernel.handler(
+        new Request("http://inline.test/v1/probe", {
+          headers: { "x-real-ip": "192.0.2.20" },
+        }),
+      )
+      const secondClient = await kernel.handler(
+        new Request("http://inline.test/v1/probe", {
+          headers: { "x-real-ip": "192.0.2.21" },
+        }),
+      )
+
+      expect(first.status).toBe(200)
+      expect(secondClient.status).toBe(200)
     } finally {
       await kernel.dispose()
     }

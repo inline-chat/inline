@@ -26,6 +26,7 @@
     "scripts/core-entry-smoke.ts",
     "scripts/core-http-kernel-smoke.ts",
     "scripts/core-production-smoke.ts",
+    "scripts/test-runner.ts",
     "src/core/**/*.ts",
     "src/**/*.effect.ts",
     "src/**/*.effect.test.ts",

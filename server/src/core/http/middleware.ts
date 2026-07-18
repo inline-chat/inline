@@ -94,21 +94,42 @@ export type TrustedClientIpHeader =
   | "cf-connecting-ip"
   | "x-real-ip"
 
-export const parseTrustedClientIpHeader = (
+export type ClientIpMode =
+  | "direct"
+  | TrustedClientIpHeader
+
+export const parseClientIpMode = (
   input: string | undefined,
-): TrustedClientIpHeader | undefined => {
+  options: {
+    readonly requireExplicit: boolean
+  },
+): ClientIpMode => {
   const value = input?.trim().toLowerCase()
   if (value === undefined || value === "") {
-    return undefined
+    if (options.requireExplicit) {
+      throw new Error(
+        "INLINE_TRUSTED_CLIENT_IP_HEADER must be explicitly set in production.",
+      )
+    }
+    return "direct"
   }
-  if (value === "cf-connecting-ip" || value === "x-real-ip") {
+  if (
+    value === "direct" ||
+    value === "cf-connecting-ip" ||
+    value === "x-real-ip"
+  ) {
     return value
   }
 
   throw new Error(
-    "INLINE_TRUSTED_CLIENT_IP_HEADER must be cf-connecting-ip or x-real-ip.",
+    "INLINE_TRUSTED_CLIENT_IP_HEADER must be direct, cf-connecting-ip, or x-real-ip.",
   )
 }
+
+export const clientIpHeaderForMode = (
+  mode: ClientIpMode,
+): TrustedClientIpHeader | undefined =>
+  mode === "direct" ? undefined : mode
 
 const responseHeaders = (
   context: HttpRequestContextShape,

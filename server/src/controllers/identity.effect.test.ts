@@ -732,6 +732,21 @@ describe("Effect identity routes", () => {
         })
       }
 
+      const emptyPost =
+        await kernel.handler(
+          new Request(
+            "http://inline.test/v1/logout",
+            { method: "POST" },
+          ),
+        )
+      expect(emptyPost.status).toBe(401)
+      expect(
+        await emptyPost.json(),
+      ).toMatchObject({
+        error: "UNAUTHORIZED",
+        errorCode: 401,
+      })
+
       const postResponse = await kernel.handler(
         request("Bearer 42:valid", "POST"),
       )

@@ -889,6 +889,31 @@ describe("Effect /v1 identity and spaces routes", () => {
         error: "UNAUTHORIZED",
       })
 
+      for (
+        const operation of [
+          "getInviteCodes",
+          "getMe",
+          "getSpaces",
+        ] as const
+      ) {
+        const emptyPost =
+          await kernel.handler(
+            new Request(
+              `http://inline.test/v1/${operation}`,
+              { method: "POST" },
+            ),
+          )
+        expect(emptyPost.status).toBe(
+          401,
+        )
+        expect(
+          await emptyPost.json(),
+        ).toMatchObject({
+          error: "UNAUTHORIZED",
+          errorCode: 401,
+        })
+      }
+
       const revoked = await kernel.handler(request("42:revoked"))
       expect(revoked.status).toBe(401)
       expect(await revoked.json()).toMatchObject({

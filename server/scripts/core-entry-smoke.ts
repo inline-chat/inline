@@ -112,7 +112,7 @@ const main = async (): Promise<void> => {
       ENABLE_DATABASE_HEALTH_MONITOR: "1",
       INLINE_API_RATE_LIMIT_MAX: "180",
       INLINE_CORE_HTTP_PORT: "0",
-      INLINE_TRUSTED_CLIENT_IP_HEADER: "",
+      INLINE_TRUSTED_CLIENT_IP_HEADER: "direct",
       LIVEKIT_API_KEY: "",
       LIVEKIT_API_SECRET: "",
       LIVEKIT_URL: "",

@@ -1,8 +1,16 @@
-import { Effect, Stream } from "effect"
+import {
+  Effect,
+  FileSystem,
+  Path,
+  Stream,
+} from "effect"
 import {
   HttpServerRequest,
   Multipart,
 } from "effect/unstable/http"
+import {
+  openAsBlob,
+} from "node:fs"
 import {
   V1MessagingProvidersPublicError,
   V1MessagingProvidersRequestFailure,
@@ -17,26 +25,44 @@ const metadataFields = new Set([
   "waveform",
   "width",
 ])
-const fileFields = new Set(["file", "thumbnail"])
+const fileFields = new Set([
+  "file",
+  "thumbnail",
+])
 // TODO(effect-cutover): Source this from a typed, environment-free upload
 // configuration service shared by the legacy compatibility adapter.
-const maxLegacyUploadFileSize = 500 * 1024 * 1024
-const multipartChunkSize = 16 * 1024
+const maxAcceptedMainFileSize =
+  200_000_000
+const maxAcceptedPhotoFileSize =
+  40_000_000
+const maxAcceptedThumbnailFileSize =
+  40_000_000
+const maxAcceptedVoiceFileSize =
+  20_000_000
+const multipartChunkSize =
+  16 * 1024
 
 export interface V1UploadLimits {
   readonly maxFieldSize: number
   readonly maxFileSize: number
+  readonly maxThumbnailFileSize: number
   readonly maxParts: number
   readonly maxTotalSize: number
 }
 
 export const defaultV1UploadLimits: V1UploadLimits = {
   maxFieldSize: 64 * 1024,
-  maxFileSize: maxLegacyUploadFileSize,
-  maxParts: metadataFields.size + fileFields.size,
-  // Both the primary file and optional thumbnail retain the current per-file
-  // limit. The parser still bounds aggregate buffering before either is exposed.
-  maxTotalSize: maxLegacyUploadFileSize * fileFields.size + 1024 * 1024,
+  maxFileSize: maxAcceptedMainFileSize,
+  maxThumbnailFileSize:
+    maxAcceptedThumbnailFileSize,
+  maxParts:
+    metadataFields.size + fileFields.size,
+  // No successful retained operation accepts more than a 200 MB main file or
+  // 40 MB thumbnail. The extra 1 MB covers multipart fields and boundaries.
+  maxTotalSize:
+    maxAcceptedMainFileSize +
+    maxAcceptedThumbnailFileSize +
+    1_000_000,
 }
 
 const uploadValidationError = () =>
@@ -52,176 +78,424 @@ const uploadTooLargeError = () =>
     errorCode: 400,
     // FIXME(effect-cutover): Correct this stale 40MB description once the
     // public compatibility envelope can change independently of this parser.
-    description: "The file exceeds the maximum size of 40MB",
+    description:
+      "The file exceeds the maximum size of 40MB",
   })
-
-const append = (
-  result: Record<string, unknown>,
-  key: string,
-  value: string | File,
-) =>
-  result[key] !== undefined
-    ? Effect.fail(uploadValidationError())
-    : Effect.sync(() => {
-        result[key] = value
-        return result
-      })
 
 const mapMultipartFailure = (
   cause: Multipart.MultipartError,
-): V1MessagingProvidersPublicError | V1MessagingProvidersRequestFailure => {
+):
+  | V1MessagingProvidersPublicError
+  | V1MessagingProvidersRequestFailure => {
   switch (cause.reason._tag) {
     case "BodyTooLarge":
     case "FileTooLarge":
       return uploadTooLargeError()
     case "FieldTooLarge":
+    case "Parse":
     case "TooManyParts":
       return uploadValidationError()
     case "InternalError":
-    case "Parse":
       return new V1MessagingProvidersRequestFailure({
-        operation: "v1.uploadFile.multipart",
+        operation:
+          "v1.uploadFile.multipart",
         cause,
       })
   }
 }
 
 const validateContentLength = (
-  request: HttpServerRequest.HttpServerRequest,
+  request:
+    HttpServerRequest.HttpServerRequest,
   limits: V1UploadLimits,
 ) => {
-  const raw = request.headers["content-length"]
+  const raw =
+    request.headers["content-length"]
   if (raw === undefined) {
     return Effect.void
   }
   const length = Number(raw)
-  if (!Number.isSafeInteger(length) || length < 0) {
-    return Effect.fail(uploadValidationError())
+  if (
+    !Number.isSafeInteger(length) ||
+    length < 0
+  ) {
+    return Effect.fail(
+      uploadValidationError(),
+    )
   }
   return length > limits.maxTotalSize
     ? Effect.fail(uploadTooLargeError())
     : Effect.void
 }
 
-const rechunk = (bytes: Uint8Array): ReadonlyArray<Uint8Array> => {
-  const chunks: Array<Uint8Array> = []
-  for (let offset = 0; offset < bytes.length; offset += multipartChunkSize) {
-    chunks.push(bytes.subarray(offset, offset + multipartChunkSize))
+const validateMultipartMediaType = (
+  request:
+    HttpServerRequest.HttpServerRequest,
+) => {
+  const contentType =
+    request.headers["content-type"]
+      ?.trim()
+      .toLowerCase()
+  return contentType?.startsWith(
+    "multipart/form-data;",
+  ) === true &&
+      contentType.includes("boundary=")
+    ? Effect.void
+    : Effect.fail(uploadValidationError())
+}
+
+/**
+ * Rejects unsupported upload transports and impossible declared sizes without
+ * consuming the request body. This preserves the legacy 400 for empty/JSON
+ * upload requests while allowing authentication to run before multipart I/O.
+ */
+export const validateV1UploadRequestHeaders = (
+  request:
+    HttpServerRequest.HttpServerRequest,
+  limits: V1UploadLimits =
+    defaultV1UploadLimits,
+) =>
+  validateMultipartMediaType(
+    request,
+  ).pipe(
+    Effect.andThen(
+      validateContentLength(
+        request,
+        limits,
+      ),
+    ),
+  )
+
+const rechunk = (
+  bytes: Uint8Array,
+): ReadonlyArray<Uint8Array> => {
+  const chunks:
+    Array<Uint8Array> = []
+  for (
+    let offset = 0;
+    offset < bytes.length;
+    offset += multipartChunkSize
+  ) {
+    chunks.push(
+      bytes.subarray(
+        offset,
+        offset + multipartChunkSize,
+      ),
+    )
   }
   return chunks
 }
 
-const multipartStream = (request: HttpServerRequest.HttpServerRequest) =>
-  request.stream.pipe(
+const boundedMultipartStream = (
+  request:
+    HttpServerRequest.HttpServerRequest,
+  limits: V1UploadLimits,
+) => {
+  let totalSize = 0
+  return request.stream.pipe(
     Stream.mapError((cause) =>
-      Multipart.MultipartError.fromReason("InternalError", cause),
+      Multipart.MultipartError.fromReason(
+        "InternalError",
+        cause,
+      ),
     ),
-    Stream.flatMap((bytes) => Stream.fromIterable(rechunk(bytes))),
-    Stream.pipeThroughChannel(Multipart.makeChannel(request.headers)),
+    Stream.flatMap((bytes) =>
+      Stream.fromIterable(
+        rechunk(bytes),
+      ),
+    ),
+    Stream.mapEffect((chunk) => {
+      totalSize += chunk.length
+      return totalSize >
+          limits.maxTotalSize
+        ? Effect.fail(
+            Multipart.MultipartError
+              .fromReason(
+                "BodyTooLarge",
+              ),
+          )
+        : Effect.succeed(chunk)
+    }),
+    Stream.pipeThroughChannel(
+      Multipart.makeChannel(
+        request.headers,
+      ),
+    ),
   )
+}
 
-const collectFile = (
-  file: Multipart.File,
+const persistFile = (
   maxFileSize: number,
 ) =>
-  // TODO(effect-cutover): pipe validated chunks directly to an Effect-native
-  // storage capability instead of assembling a compatibility File in memory.
-  file.content.pipe(
-    Stream.runFoldEffect(
-      () => ({
-        chunks: [] as Array<Uint8Array>,
-        size: 0,
+  (
+    path: string,
+    file: Multipart.File,
+  ) =>
+    Effect.gen(function* () {
+      const fs =
+        yield* FileSystem.FileSystem
+      let size = 0
+      yield* Stream.run(
+        file.content.pipe(
+          Stream.mapEffect((chunk) => {
+            size += chunk.length
+            return size > maxFileSize
+              ? Effect.fail(
+                  Multipart.MultipartError
+                    .fromReason(
+                      "FileTooLarge",
+                    ),
+                )
+              : Effect.succeed(chunk)
+          }),
+        ),
+        fs.sink(path),
+      ).pipe(
+        Effect.catchTag(
+          "PlatformError",
+          (cause) =>
+            Effect.fail(
+              Multipart.MultipartError
+                .fromReason(
+                  "InternalError",
+                  cause,
+                ),
+          ),
+        ),
+      )
+      return size
+    })
+
+interface PersistedUploadFile {
+  readonly contentType: string
+  readonly name: string
+  readonly path: string
+  readonly size: number
+}
+
+const persistedFile = (
+  file: PersistedUploadFile,
+): Effect.Effect<
+  File,
+  V1MessagingProvidersRequestFailure
+> =>
+  Effect.tryPromise({
+    try: async () => {
+      // Bun.file and Node's openAsBlob both retain a lazy path-backed Blob.
+      // Constructing the compatibility File does not materialize the upload.
+      const blob =
+        typeof Bun === "undefined"
+          ? await openAsBlob(file.path, {
+              type: file.contentType,
+            })
+          : Bun.file(file.path, {
+              type: file.contentType,
+            })
+      return new File(
+        [blob],
+        file.name,
+        { type: file.contentType },
+      )
+    },
+    catch: (cause) =>
+      new V1MessagingProvidersRequestFailure({
+        operation:
+          "v1.uploadFile.persisted-file",
+        cause,
       }),
-      (state, chunk) => {
-        const size = state.size + chunk.length
-        if (size > maxFileSize) {
-          return Effect.fail(uploadTooLargeError())
-        }
-        state.chunks.push(chunk)
-        return Effect.succeed({
-          chunks: state.chunks,
-          size,
-        })
-      },
-    ),
-    Effect.map(({ chunks, size }) => {
-      const content = new Uint8Array(size)
-      let offset = 0
-      for (const chunk of chunks) {
-        content.set(chunk, offset)
-        offset += chunk.length
+  })
+
+const maxMainFileSizeForType = (
+  type: unknown,
+): number => {
+  switch (type) {
+    case "photo":
+      return maxAcceptedPhotoFileSize
+    case "voice":
+      return maxAcceptedVoiceFileSize
+    default:
+      return maxAcceptedMainFileSize
+  }
+}
+
+const persistMultipartInput = (
+  request:
+    HttpServerRequest.HttpServerRequest,
+  limits: V1UploadLimits,
+) =>
+  Effect.gen(function* () {
+    const fs =
+      yield* FileSystem.FileSystem
+    const path =
+      yield* Path.Path
+    const directory =
+      yield* fs.makeTempDirectoryScoped()
+    const persisted:
+      Record<
+        string,
+        string | PersistedUploadFile
+      > = Object.create(null)
+    let fileIndex = 0
+
+    yield* Stream.runForEach(
+      boundedMultipartStream(
+        request,
+        limits,
+      ),
+      (part) =>
+        Effect.gen(function* () {
+          if (Multipart.isField(part)) {
+            if (
+              !metadataFields.has(part.key) ||
+              Object.hasOwn(
+                persisted,
+                part.key,
+              ) ||
+              new TextEncoder().encode(
+                  part.value,
+                ).length >
+                limits.maxFieldSize
+            ) {
+              return yield* Effect.fail(
+                uploadValidationError(),
+              )
+            }
+            persisted[part.key] =
+              part.value
+            return
+          }
+
+          if (part.name === "") {
+            return
+          }
+          if (
+            !fileFields.has(part.key) ||
+            Object.hasOwn(
+              persisted,
+              part.key,
+            )
+          ) {
+            return yield* Effect.fail(
+              uploadValidationError(),
+            )
+          }
+          const key =
+            part.key as
+              | "file"
+              | "thumbnail"
+          const safeName =
+            path.basename(
+              part.name,
+            ).slice(-128) || "upload"
+          const targetPath =
+            path.join(
+              directory,
+              `${fileIndex}-${safeName}`,
+            )
+          fileIndex += 1
+          const size =
+            yield* persistFile(
+              key === "thumbnail"
+                ? limits
+                    .maxThumbnailFileSize
+                : limits.maxFileSize,
+            )(
+              targetPath,
+              part,
+            )
+          persisted[key] = {
+            contentType:
+              part.contentType,
+            name: part.name,
+            path: targetPath,
+            size,
+          }
+        }),
+    )
+
+    const main = persisted["file"]
+    if (
+      typeof main !== "string" &&
+      main !== undefined &&
+      main.size >
+        Math.min(
+          limits.maxFileSize,
+          maxMainFileSizeForType(
+            persisted["type"],
+          ),
+        )
+    ) {
+      return yield* Effect.fail(
+        uploadTooLargeError(),
+      )
+    }
+
+    const result:
+      Record<string, unknown> = {}
+    for (
+      const [key, value] of
+      Object.entries(persisted)
+    ) {
+      if (typeof value === "string") {
+        result[key] = value
+      } else {
+        result[key] =
+          yield* persistedFile(value)
       }
-      return content
-    }),
+    }
+    return result
+  }).pipe(
+    Effect.provideService(
+      Multipart.MaxFieldSize,
+      FileSystem.Size(
+        limits.maxFieldSize,
+      ),
+    ),
+    Effect.provideService(
+      Multipart.MaxFileSize,
+      FileSystem.Size(
+        limits.maxFileSize,
+      ),
+    ),
+    Effect.provideService(
+      Multipart.MaxParts,
+      limits.maxParts,
+    ),
     Effect.mapError((cause) =>
-      cause instanceof V1MessagingProvidersPublicError
+      cause instanceof
+          V1MessagingProvidersPublicError ||
+        cause instanceof
+          V1MessagingProvidersRequestFailure
         ? cause
-        : mapMultipartFailure(cause),
+        : cause instanceof
+            Multipart.MultipartError
+          ? mapMultipartFailure(cause)
+          : new V1MessagingProvidersRequestFailure({
+              operation:
+                "v1.uploadFile.temporary-storage",
+              cause,
+            }),
     ),
   )
 
 /**
- * Parses upload multipart as a bounded stream before authentication.
- *
- * Content-Length is only an early rejection hint. Requests without it
- * (including chunked bodies) remain bounded by the parser's total, file,
- * field, and part-count limits.
+ * Persists authenticated multipart files in a request-scoped temporary
+ * directory, then exposes lazy disk-backed `File` values to the retained
+ * framework-neutral upload operation.
  */
 export const parseV1UploadRequest = (
-  request: HttpServerRequest.HttpServerRequest,
-  limits: V1UploadLimits = defaultV1UploadLimits,
+  request:
+    HttpServerRequest.HttpServerRequest,
+  limits: V1UploadLimits =
+    defaultV1UploadLimits,
 ) =>
-  validateContentLength(request, limits).pipe(
-    Effect.andThen(
-      multipartStream(request).pipe(
-        Stream.runFoldEffect(
-          () => ({} as Record<string, unknown>),
-          (result, part) => {
-            if (Multipart.isField(part)) {
-              if (
-                new TextEncoder().encode(part.value).length >
-                limits.maxFieldSize
-              ) {
-                return Effect.fail(uploadValidationError())
-              }
-              return metadataFields.has(part.key)
-                ? append(result, part.key, part.value)
-                : Effect.fail(uploadValidationError())
-            }
-
-            if (!fileFields.has(part.key)) {
-              return Effect.fail(uploadValidationError())
-            }
-
-            return collectFile(part, limits.maxFileSize).pipe(
-              Effect.flatMap((content) => {
-                const bytes = new Uint8Array(content.length)
-                bytes.set(content)
-                return append(
-                  result,
-                  part.key,
-                  new File([bytes.buffer], part.name, {
-                    type: part.contentType,
-                  }),
-                )
-              }),
-            )
-          },
-        ),
-        Effect.provideContext(
-          Multipart.limitsServices({
-            maxFieldSize: limits.maxFieldSize,
-            maxFileSize: limits.maxFileSize,
-            maxParts: limits.maxParts,
-            maxTotalSize: limits.maxTotalSize,
-          }),
-        ),
-        Effect.mapError((cause) =>
-          cause instanceof V1MessagingProvidersPublicError ||
-            cause instanceof V1MessagingProvidersRequestFailure
-            ? cause
-            : mapMultipartFailure(cause),
-        ),
-      ),
-    ),
-  )
+  Effect.gen(function* () {
+    yield* validateV1UploadRequestHeaders(
+      request,
+      limits,
+    )
+    return yield* persistMultipartInput(
+      request,
+      limits,
+    )
+  })

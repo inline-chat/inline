@@ -128,32 +128,65 @@ const bodyToInput = async (request: Request, operation: V1MessagingProvidersOper
   const input = source === "query"
     ? Object.fromEntries(new URL(request.url).searchParams)
     : await parseLegacyElysiaBody(request)
-  return normalizeV1MessagingProvidersInput(operation, input, source)
+  const acceptsAbsentObject =
+    operation === "getAlphaText" ||
+    operation === "getChatHistory" ||
+    operation === "getPrivateChats"
+  return normalizeV1MessagingProvidersInput(
+    operation,
+    input === undefined &&
+        acceptsAbsentObject
+      ? {}
+      : input,
+    source,
+  )
 }
+
+export const toV1MessagingProvidersWebRequest = (
+  request: HttpServerRequest.HttpServerRequest,
+) =>
+  HttpServerRequest.toWeb(request).pipe(
+    Effect.mapError(
+      (cause) =>
+        new V1MessagingProvidersRequestFailure({
+          operation: "v1.request",
+          cause,
+        }),
+    ),
+  )
 
 export const prepareV1MessagingProvidersRequest = (
   request: HttpServerRequest.HttpServerRequest,
   operation: V1MessagingProvidersOperation,
+  webRequest?: Request,
 ) =>
   Effect.gen(function* () {
-    const webRequest = yield* HttpServerRequest.toWeb(request).pipe(
-      Effect.mapError(
-        (cause) =>
-          new V1MessagingProvidersRequestFailure({
-            operation: `v1.${operation}.request`,
-            cause,
-          }),
-      ),
-    )
+    const preparedWebRequest =
+      webRequest ??
+      (yield* toV1MessagingProvidersWebRequest(
+        request,
+      ).pipe(
+        Effect.mapError(
+          (error) =>
+            new V1MessagingProvidersRequestFailure({
+              operation:
+                `v1.${operation}.request`,
+              cause: error.cause,
+            }),
+        ),
+      ))
     const input = operation === "uploadFile"
       ? yield* parseV1UploadRequest(request)
       : yield* Effect.tryPromise({
-          try: () => bodyToInput(webRequest, operation),
+          try: () => bodyToInput(preparedWebRequest, operation),
           catch: (cause) =>
             new V1MessagingProvidersRequestFailure({
               operation: `v1.${operation}.request`,
               cause,
             }),
         })
-    return { input, webRequest }
+    return {
+      input,
+      webRequest: preparedWebRequest,
+    }
   })

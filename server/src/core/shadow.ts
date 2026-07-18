@@ -10,7 +10,8 @@ import {
   type CoreHttpServerHandle,
 } from "./http/host"
 import {
-  parseTrustedClientIpHeader,
+  clientIpHeaderForMode,
+  parseClientIpMode,
 } from "./http/middleware"
 import {
   parseHttpRateLimitMax,
@@ -162,10 +163,13 @@ if (import.meta.main) {
         process.env["API_BASE_URL"],
       middleware: {
         clientIpHeader:
-          parseTrustedClientIpHeader(
-            process.env[
-              "INLINE_TRUSTED_CLIENT_IP_HEADER"
-            ],
+          clientIpHeaderForMode(
+            parseClientIpMode(
+              process.env[
+                "INLINE_TRUSTED_CLIENT_IP_HEADER"
+              ],
+              { requireExplicit: false },
+            ),
           ),
         isProduction: false,
         rateLimit: {

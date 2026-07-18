@@ -1,4 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
 import { Context, Effect, ErrorReporter as EffectErrorReporter, Layer, Schema } from "effect"
 import { Elysia, t } from "elysia"
 import { HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
@@ -41,6 +43,10 @@ import {
   LinearTeamId,
   NotionDatabaseId,
 } from "./v1ProviderSchemas.effect"
+import {
+  makeV1UploadAdmission,
+  V1UploadAdmission,
+} from "./v1UploadAdmission.effect"
 import { V1UploadOperations, type V1UploadOperationsShape } from "./v1UploadOperations.effect"
 import {
   defaultV1UploadLimits,
@@ -49,6 +55,18 @@ import {
 
 const decode = <A>(schema: Schema.Decoder<A>, input: unknown): A =>
   Schema.decodeUnknownSync(schema)(input)
+
+const bunFileContext =
+  Effect.runSync(
+    Effect.scoped(
+      Layer.build(
+        Layer.merge(
+          BunFileSystem.layer,
+          BunPath.layer,
+        ),
+      ),
+    ),
+  )
 
 interface MultipartTestPart {
   readonly name: string
@@ -278,9 +296,15 @@ const makeKernel = ({
   readonly uploads: V1UploadOperationsShape
 }) => {
   const routeGroup = makeV1MessagingProvidersRouteGroup()
+  const uploadAdmission =
+    makeV1UploadAdmission()
   const services = Layer.mergeAll(
     Layer.succeed(V1MessagingOperations, messaging),
     Layer.succeed(V1ProviderOperations, providers),
+    Layer.succeed(
+      V1UploadAdmission,
+      uploadAdmission,
+    ),
     Layer.succeed(V1UploadOperations, uploads),
     Layer.succeed(SessionAuthentication, sessionAuthentication),
   )
@@ -303,6 +327,8 @@ const makeKernel = ({
     }),
     middleware: { isProduction: false },
   }).pipe(
+    Layer.provide(BunFileSystem.layer),
+    Layer.provide(BunPath.layer),
     Layer.provide(HttpServer.layerServices),
     Layer.provide(EffectErrorReporter.layer([])),
     Layer.provide(Layer.succeed(ErrorReporter, errorReporter)),
@@ -318,9 +344,14 @@ const makeKernel = ({
   }).pipe(
     Context.add(V1MessagingOperations, messaging),
     Context.add(V1ProviderOperations, providers),
+    Context.add(
+      V1UploadAdmission,
+      uploadAdmission,
+    ),
     Context.add(V1UploadOperations, uploads),
     Context.add(SessionAuthentication, sessionAuthentication),
     Context.add(ErrorReporter, errorReporter),
+    Context.merge(bunFileContext),
   )
   return {
     dispose: webHandler.dispose,
@@ -376,6 +407,47 @@ const expectSuccess = async (response: Response) => {
 }
 
 describe("Effect /v1 messaging and provider routes", () => {
+  it("bounds concurrent upload admission", async () => {
+    const admission =
+      makeV1UploadAdmission(1)
+    let releaseFirst:
+      | (() => void)
+      | undefined
+    const first =
+      Effect.runPromise(
+        admission.withPermit(
+          Effect.promise(
+            () =>
+              new Promise<void>(
+                (resolve) => {
+                  releaseFirst = resolve
+                },
+              ),
+          ),
+        ),
+      )
+    await Promise.resolve()
+
+    let secondEntered = false
+    const second =
+      Effect.runPromise(
+        admission.withPermit(
+          Effect.sync(() => {
+            secondEntered = true
+          }),
+        ),
+      )
+    await Promise.resolve()
+    expect(secondEntered).toBe(false)
+
+    releaseFirst?.()
+    await Promise.all([
+      first,
+      second,
+    ])
+    expect(secondEntered).toBe(true)
+  })
+
   it("serves every retained GET, path-token GET, POST, and multipart form", async () => {
     const calls: Array<V1MessagingProvidersOperation> = []
     const tokens: Array<string> = []
@@ -447,7 +519,7 @@ describe("Effect /v1 messaging and provider routes", () => {
     }
   })
 
-  it("rejects invalid input before authentication and stateful work", async () => {
+  it("validates ordinary inputs before auth but authenticates uploads before parsing", async () => {
     const calls: Array<V1MessagingProvidersOperation> = []
     let authenticationCalls = 0
     const kernel = makeKernel({
@@ -476,6 +548,38 @@ describe("Effect /v1 messaging and provider routes", () => {
       expect(authenticationCalls).toBe(0)
       expect(calls).toEqual([])
 
+      const emptyUploadResponse =
+        await kernel.handler(
+          new Request(
+            "http://inline.test/v1/uploadFile",
+            { method: "POST" },
+          ),
+        )
+      expect(
+        emptyUploadResponse.status,
+      ).toBe(400)
+
+      const jsonUploadResponse =
+        await kernel.handler(
+          new Request(
+            "http://inline.test/v1/uploadFile",
+            {
+              method: "POST",
+              headers: {
+                authorization:
+                  "Bearer token",
+                "content-type":
+                  "application/json",
+              },
+              body: "{}",
+            },
+          ),
+        )
+      expect(
+        jsonUploadResponse.status,
+      ).toBe(400)
+      expect(authenticationCalls).toBe(0)
+
       const upload = new FormData()
       upload.set("type", "photo")
       const uploadResponse = await kernel.handler(
@@ -484,8 +588,144 @@ describe("Effect /v1 messaging and provider routes", () => {
           body: upload,
         }),
       )
-      expect(uploadResponse.status).toBe(400)
+      expect(uploadResponse.status).toBe(401)
       expect(authenticationCalls).toBe(0)
+      expect(calls).toEqual([])
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
+  it("returns upload authentication failures without pulling the request body", async () => {
+    let pulls = 0
+    const body =
+      new ReadableStream<Uint8Array>({
+        pull() {
+          pulls += 1
+        },
+      })
+    const calls:
+      Array<V1MessagingProvidersOperation> =
+      []
+    const kernel = makeKernel({
+      messaging: makeMessaging(calls),
+      providers: makeProviders(calls),
+      uploads: makeUploads(calls),
+    })
+
+    try {
+      const request =
+        new Request(
+          "http://inline.test/v1/uploadFile",
+          {
+            method: "POST",
+            headers: {
+              "content-type":
+                "multipart/form-data; boundary=never-read",
+            },
+            body,
+            duplex: "half",
+          } as RequestInit & {
+            readonly duplex: "half"
+          },
+        )
+      // A Web ReadableStream fills its initial queue without a consumer.
+      await Promise.resolve()
+      const pullsBeforeHandling =
+        pulls
+      const response =
+        await kernel.handler(
+          request,
+        )
+
+      expect(response.status).toBe(401)
+      expect(pulls).toBe(
+        pullsBeforeHandling,
+      )
+      expect(calls).toEqual([])
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
+  it("returns 401 for unauthenticated valid multipart and 400 for authenticated malformed multipart", async () => {
+    const calls:
+      Array<V1MessagingProvidersOperation> =
+      []
+    const kernel = makeKernel({
+      messaging: makeMessaging(calls),
+      providers: makeProviders(calls),
+      uploads: makeUploads(calls),
+    })
+    const valid =
+      new FormData()
+    valid.set("type", "photo")
+    valid.set(
+      "file",
+      new File(
+        ["image"],
+        "inline.png",
+        { type: "image/png" },
+      ),
+    )
+
+    try {
+      const unauthorized =
+        await kernel.handler(
+          new Request(
+            "http://inline.test/v1/uploadFile",
+            {
+              method: "POST",
+              body: valid,
+            },
+          ),
+        )
+      expect(unauthorized.status).toBe(
+        401,
+      )
+
+      const malformed =
+        await kernel.handler(
+          new Request(
+            "http://inline.test/v1/uploadFile",
+            {
+              method: "POST",
+              headers: {
+                authorization:
+                  "Bearer token",
+                "content-type":
+                  "multipart/form-data; boundary=missing",
+              },
+              body: "not-multipart",
+            },
+          ),
+        )
+      expect(malformed.status).toBe(400)
+      expect(
+        await malformed.json(),
+      ).toMatchObject({
+        error: "INVALID_ARGS",
+        errorCode: 400,
+      })
+
+      const missingFile =
+        new FormData()
+      missingFile.set("type", "photo")
+      const missing =
+        await kernel.handler(
+          new Request(
+            "http://inline.test/v1/uploadFile",
+            {
+              method: "POST",
+              headers: {
+                authorization:
+                  "Bearer token",
+              },
+              body: missingFile,
+            },
+          ),
+        )
+      expect(missing.status).toBe(400)
       expect(calls).toEqual([])
     } finally {
       await kernel.dispose()
@@ -743,7 +983,77 @@ describe("Effect /v1 messaging and provider routes", () => {
     }
   })
 
-  it("bounds upload content length, fields, duplicate parts, and chunked parsing before auth", async () => {
+  it("persists same-named file fields to distinct scoped paths", async () => {
+    const calls:
+      Array<V1MessagingProvidersOperation> =
+      []
+    let observed:
+      | ReadonlyArray<string>
+      | undefined
+    const kernel = makeKernel({
+      messaging: makeMessaging(calls),
+      providers: makeProviders(calls),
+      uploads: makeUploads(calls, {
+        uploadFile: (input) =>
+          Effect.promise(async () => {
+            calls.push("uploadFile")
+            observed = [
+              await input.file!.text(),
+              await input.thumbnail!.text(),
+            ]
+            return {
+              fileUniqueId: "INP123",
+              videoId: 1,
+            }
+          }),
+      }),
+    })
+
+    try {
+      const response =
+        await kernel.handler(
+          makeMultipartRequest(
+            [
+              {
+                name: "type",
+                value: "video",
+              },
+              {
+                name: "file",
+                value: "video",
+                filename: "same.bin",
+                contentType:
+                  "application/octet-stream",
+              },
+              {
+                name: "thumbnail",
+                value: "thumbnail",
+                filename: "same.bin",
+                contentType:
+                  "application/octet-stream",
+              },
+            ],
+            {
+              authorization:
+                "Bearer token",
+            },
+          ),
+        )
+
+      expect(response.status).toBe(200)
+      expect(observed).toEqual([
+        "video",
+        "thumbnail",
+      ])
+      expect(calls).toEqual([
+        "uploadFile",
+      ])
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
+  it("bounds authenticated upload content length, fields, duplicate parts, and chunked parsing", async () => {
     const calls: Array<V1MessagingProvidersOperation> = []
     let authenticationCalls = 0
     const kernel = makeKernel({
@@ -841,7 +1151,7 @@ describe("Effect /v1 messaging and provider routes", () => {
       const countResponse = await kernel.handler(request(countParts))
       expect(countResponse.status).toBe(400)
 
-      expect(authenticationCalls).toBe(0)
+      expect(authenticationCalls).toBe(3)
       expect(calls).toEqual([])
     } finally {
       await kernel.dispose()
@@ -862,13 +1172,21 @@ describe("Effect /v1 messaging and provider routes", () => {
     expect(request().headers.get("content-length")).toBeNull()
 
     const fileError = await Effect.runPromise(
-      Effect.flip(
-        parseV1UploadRequest(HttpServerRequest.fromWeb(request()), {
-          maxFieldSize: 1024,
-          maxFileSize: 3,
-          maxParts: 9,
-          maxTotalSize: 4096,
-        }),
+      Effect.scoped(
+        Effect.flip(
+          parseV1UploadRequest(HttpServerRequest.fromWeb(request()), {
+            maxFieldSize: 1024,
+            maxFileSize: 3,
+            maxThumbnailFileSize: 3,
+            maxParts: 9,
+            maxTotalSize: 4096,
+          }),
+        ),
+      ).pipe(
+        Effect.provide([
+          BunFileSystem.layer,
+          BunPath.layer,
+        ]),
       ),
     )
     expect(fileError).toMatchObject({
@@ -877,13 +1195,21 @@ describe("Effect /v1 messaging and provider routes", () => {
     })
 
     const totalError = await Effect.runPromise(
-      Effect.flip(
-        parseV1UploadRequest(HttpServerRequest.fromWeb(request()), {
-          maxFieldSize: 1024,
-          maxFileSize: 1024,
-          maxParts: 9,
-          maxTotalSize: 32,
-        }),
+      Effect.scoped(
+        Effect.flip(
+          parseV1UploadRequest(HttpServerRequest.fromWeb(request()), {
+            maxFieldSize: 1024,
+            maxFileSize: 1024,
+            maxThumbnailFileSize: 1024,
+            maxParts: 9,
+            maxTotalSize: 32,
+          }),
+        ),
+      ).pipe(
+        Effect.provide([
+          BunFileSystem.layer,
+          BunPath.layer,
+        ]),
       ),
     )
     expect(totalError).toMatchObject({
@@ -892,7 +1218,7 @@ describe("Effect /v1 messaging and provider routes", () => {
     })
   })
 
-  it("keeps sendMessage20250509 validation and failures in the Bot-compatible envelope", async () => {
+  it("keeps sendMessage20250509 request validation in the standard envelope", async () => {
     const calls: Array<V1MessagingProvidersOperation> = []
     const kernel = makeKernel({
       messaging: makeMessaging(calls),
@@ -910,10 +1236,65 @@ describe("Effect /v1 messaging and provider routes", () => {
       expect(await response.json()).toEqual({
         ok: false,
         error: "INVALID_ARGS",
-        error_code: 400,
+        errorCode: 400,
         description: "Validation error",
       })
       expect(calls).toEqual([])
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
+  it("uses the Bot-compatible envelope only for sendMessage20250509 operation failures", async () => {
+    const calls:
+      Array<V1MessagingProvidersOperation> =
+      []
+    const kernel = makeKernel({
+      messaging: makeMessaging(calls, {
+        sendMessage20250509: () =>
+          Effect.fail(
+            new V1MessagingProvidersPublicError({
+              error: "PEER_INVALID",
+              errorCode: 400,
+              description:
+                "Invalid peer",
+            }),
+          ),
+      }),
+      providers: makeProviders(calls),
+      uploads: makeUploads(calls),
+    })
+
+    try {
+      const response =
+        await kernel.handler(
+          new Request(
+            "http://inline.test/v1/sendMessage20250509",
+            {
+              method: "POST",
+              headers: {
+                authorization:
+                  "Bearer token",
+                "content-type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                peerUserId: 43,
+                text: "hello",
+              }),
+            },
+          ),
+        )
+
+      expect(response.status).toBe(400)
+      expect(
+        await response.json(),
+      ).toEqual({
+        ok: false,
+        error: "PEER_INVALID",
+        error_code: 400,
+        description: "Invalid peer",
+      })
     } finally {
       await kernel.dispose()
     }
@@ -941,6 +1322,31 @@ describe("Effect /v1 messaging and provider routes", () => {
         errorCode: 401,
       })
 
+      for (
+        const operation of [
+          "getAlphaText",
+          "getChatHistory",
+          "getPrivateChats",
+        ] as const
+      ) {
+        const emptyPost =
+          await kernel.handler(
+            new Request(
+              `http://inline.test/v1/${operation}`,
+              { method: "POST" },
+            ),
+          )
+        expect(emptyPost.status).toBe(
+          401,
+        )
+        expect(
+          await emptyPost.json(),
+        ).toMatchObject({
+          error: "UNAUTHORIZED",
+          errorCode: 401,
+        })
+      }
+
       const malformed = await kernel.handler(
         new Request("http://inline.test/v1/getDraft", {
           method: "POST",
@@ -967,10 +1373,10 @@ describe("Effect /v1 messaging and provider routes", () => {
           body: "{",
         }),
       )
-      expect(malformedCompat.status).toBe(400)
+      expect(malformedCompat.status).toBe(500)
       expect(await malformedCompat.json()).toMatchObject({
         ok: false,
-        error_code: 400,
+        errorCode: 500,
       })
       expect(calls).toEqual([])
       expect(reports).toHaveLength(2)

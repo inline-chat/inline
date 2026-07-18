@@ -88,9 +88,20 @@ describe("messages.updateChatVisibility", () => {
       .select()
       .from(updates)
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, removed.id)))
-    expect(removedUpdates).toHaveLength(1)
-    const removedDecrypted = UpdatesModel.decrypt(removedUpdates[0]!)
-    expect(removedDecrypted.payload.update.oneofKind).toBe("userChatParticipantDelete")
+    const removedKinds = removedUpdates.map(
+      (update) => UpdatesModel.decrypt(update).payload.update.oneofKind,
+    )
+    expect(removedKinds).toEqual([
+      "userChatParticipantDelete",
+      "userChatPermissions",
+    ])
+    const removedPermission = UpdatesModel.decrypt(removedUpdates[1]!).payload.update
+    expect(removedPermission.oneofKind).toBe("userChatPermissions")
+    if (removedPermission.oneofKind !== "userChatPermissions") {
+      throw new Error("Expected a userChatPermissions update")
+    }
+    expect(Number(removedPermission.userChatPermissions.chatId)).toBe(chat.id)
+    expect(removedPermission.userChatPermissions.permissions?.canUpdateInfo).toBe(false)
 
     const { updates: dbUpdates } = await Sync.getUpdates({
       bucket: { type: UpdateBucket.Chat, chatId: chat.id },
@@ -194,9 +205,20 @@ describe("messages.updateChatVisibility", () => {
       .select()
       .from(updates)
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, removed.id)))
-    expect(removedUpdates).toHaveLength(1)
-    const removedDecrypted = UpdatesModel.decrypt(removedUpdates[0]!)
-    expect(removedDecrypted.payload.update.oneofKind).toBe("userChatParticipantDelete")
+    const removedKinds = removedUpdates.map(
+      (update) => UpdatesModel.decrypt(update).payload.update.oneofKind,
+    )
+    expect(removedKinds).toEqual([
+      "userChatParticipantDelete",
+      "userChatPermissions",
+    ])
+    const removedPermission = UpdatesModel.decrypt(removedUpdates[1]!).payload.update
+    expect(removedPermission.oneofKind).toBe("userChatPermissions")
+    if (removedPermission.oneofKind !== "userChatPermissions") {
+      throw new Error("Expected a userChatPermissions update")
+    }
+    expect(Number(removedPermission.userChatPermissions.chatId)).toBe(chat.id)
+    expect(removedPermission.userChatPermissions.permissions?.canUpdateInfo).toBe(false)
 
     const { updates: dbUpdates } = await Sync.getUpdates({
       bucket: { type: UpdateBucket.Chat, chatId: chat.id },
@@ -321,6 +343,7 @@ describe("messages.updateChatVisibility", () => {
       .orderBy(asc(updates.seq))
     expect(publicMemberUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind)).toEqual([
       "userChatParticipantGroupDelete",
+      "userChatPermissions",
     ])
 
     const blockedMemberUpdates = await db
@@ -331,6 +354,7 @@ describe("messages.updateChatVisibility", () => {
     expect(blockedMemberUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind)).toEqual([
       "userChatParticipantGroupDelete",
       "userChatParticipantDelete",
+      "userChatPermissions",
     ])
 
     const { updates: dbUpdates } = await Sync.getUpdates({

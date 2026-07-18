@@ -23,7 +23,8 @@ import {
   makeCandidateHttpApplication,
 } from "@in/server/core/http/candidateApplication"
 import {
-  parseTrustedClientIpHeader,
+  clientIpHeaderForMode,
+  parseClientIpMode,
 } from "@in/server/core/http/middleware"
 import {
   startCoreProductionServer,
@@ -96,12 +97,18 @@ export interface StartServerOptions {
 export const startServer = (
   options: StartServerOptions = {},
 ): Promise<CoreProductionServerHandle> => {
-  const clientIpHeader =
-    parseTrustedClientIpHeader(
+  const clientIpMode =
+    parseClientIpMode(
       process.env[
         "INLINE_TRUSTED_CLIENT_IP_HEADER"
       ],
+      {
+        requireExplicit:
+          NODE_ENV === "production",
+      },
     )
+  const clientIpHeader =
+    clientIpHeaderForMode(clientIpMode)
   const application =
     makeCandidateHttpApplication({
       apiBaseUrl: API_BASE_URL,

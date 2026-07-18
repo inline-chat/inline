@@ -13,6 +13,7 @@ import {
 export type CoreHttpRequestHandler = (
   request: Request,
   remoteAddress?: string | undefined,
+  onRequestComplete?: (() => void) | undefined,
 ) => Promise<Response>
 
 /**
@@ -34,6 +35,7 @@ export const makeCoreHttpRequestHandler = (
   return (
     request,
     remoteAddress,
+    onRequestComplete,
   ) =>
     new Promise<Response>((resolve) => {
       const serverRequest =
@@ -45,8 +47,21 @@ export const makeCoreHttpRequestHandler = (
                 remoteAddress,
               ),
           })
+      const httpEffect =
+        onRequestComplete === undefined
+          ? router.asHttpEffect()
+          : Effect.gen(function* () {
+              yield* Effect.addFinalizer(
+                () =>
+                  Effect.sync(
+                    onRequestComplete,
+                  ),
+              )
+              return yield* router
+                .asHttpEffect()
+            })
       const handled = HttpEffect.toHandled(
-        router.asHttpEffect(),
+        httpEffect,
         (
           currentRequest,
           response,

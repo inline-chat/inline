@@ -4,9 +4,6 @@ import {
   it,
 } from "@effect/vitest"
 import {
-  vi,
-} from "vitest"
-import {
   Context,
   Effect,
   ErrorReporter as EffectErrorReporter,
@@ -487,7 +484,10 @@ describe("AdminRouteGroup", () => {
       },
     )
 
-    vi.stubEnv("NODE_ENV", "production")
+    const previousNodeEnv =
+      process.env["NODE_ENV"]
+    process.env["NODE_ENV"] =
+      "production"
     try {
       await withKernel(
         async ({ handler }) => {
@@ -521,7 +521,15 @@ describe("AdminRouteGroup", () => {
         },
       )
     } finally {
-      vi.unstubAllEnvs()
+      if (previousNodeEnv === undefined) {
+        Reflect.deleteProperty(
+          process.env,
+          "NODE_ENV",
+        )
+      } else {
+        process.env["NODE_ENV"] =
+          previousNodeEnv
+      }
     }
   })
 
@@ -617,7 +625,10 @@ describe("AdminRouteGroup", () => {
   })
 
   it("runs the origin guard before authentication, policy, decoding, and operations", async () => {
-    vi.stubEnv("NODE_ENV", "production")
+    const previousNodeEnv =
+      process.env["NODE_ENV"]
+    process.env["NODE_ENV"] =
+      "production"
     try {
       const probe: Probe = {
         calls: [],
@@ -667,7 +678,15 @@ describe("AdminRouteGroup", () => {
         { probe },
       )
     } finally {
-      vi.unstubAllEnvs()
+      if (previousNodeEnv === undefined) {
+        Reflect.deleteProperty(
+          process.env,
+          "NODE_ENV",
+        )
+      } else {
+        process.env["NODE_ENV"] =
+          previousNodeEnv
+      }
     }
   })
 

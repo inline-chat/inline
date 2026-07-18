@@ -151,7 +151,7 @@ const main = async (): Promise<void> => {
         "0",
       INLINE_API_RATE_LIMIT_MAX: "180",
       INLINE_TRUSTED_CLIENT_IP_HEADER:
-        "",
+        "direct",
       INLINE_SERVER_SMOKE: "1",
       LIVEKIT_API_KEY: "",
       LIVEKIT_API_SECRET: "",
@@ -431,7 +431,60 @@ const main = async (): Promise<void> => {
       `ws://127.0.0.1:${port}/realtime`,
     )
 
+    let closeInFlightBody:
+      | (() => void)
+      | undefined
+    const inFlightBody =
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              "{",
+            ),
+          )
+          closeInFlightBody = () =>
+            controller.close()
+        },
+      })
+    const inFlightRequest =
+      fetch(
+        `${baseUrl}/v1/sendSmsCode`,
+        {
+          method: "POST",
+          headers: {
+            "content-type":
+              "application/json",
+          },
+          body: inFlightBody,
+          duplex: "half",
+        } as RequestInit & {
+          readonly duplex: "half"
+        },
+      )
+    // Let the child accept the streaming request before initiating drain.
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(resolve, 100),
+    )
     child.kill("SIGTERM")
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(resolve, 100),
+    )
+    closeInFlightBody?.()
+    const inFlightResponse =
+      await withTimeout(
+        inFlightRequest,
+        REQUEST_TIMEOUT_MILLIS,
+        `${target} in-flight HTTP drain`,
+      )
+    if (
+      inFlightResponse.status !== 500
+    ) {
+      throw new Error(
+        `${target} changed the malformed in-flight request response during shutdown: HTTP ${inFlightResponse.status}.`,
+      )
+    }
     const exitCode = await withTimeout(
       child.exited,
       SHUTDOWN_TIMEOUT_MILLIS,

@@ -424,7 +424,19 @@ const bodyToInput = async (request: Request, operation: V1IdentitySpacesOperatio
     return normalizeIntegerInput(operation, input)
   }
 
-  return normalizeIntegerInput(operation, await parseLegacyElysiaBody(request))
+  const input =
+    await parseLegacyElysiaBody(request)
+  const acceptsAbsentObject =
+    operation === "getInviteCodes" ||
+    operation === "getMe" ||
+    operation === "getSpaces"
+  return normalizeIntegerInput(
+    operation,
+    input === undefined &&
+        acceptsAbsentObject
+      ? {}
+      : input,
+  )
 }
 
 const prepareRequest = (request: HttpServerRequest.HttpServerRequest, operation: V1IdentitySpacesOperation) =>

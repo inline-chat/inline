@@ -469,7 +469,9 @@ export const executeIdentityLogout = (
 ) =>
   prepareRequest(request).pipe(
     Effect.flatMap(({ input, webRequest }) =>
-      Schema.decodeUnknownEffect(LogoutInput)(input).pipe(
+      Schema.decodeUnknownEffect(LogoutInput)(
+        input === undefined ? {} : input,
+      ).pipe(
         Effect.matchEffect({
           onFailure: () =>
             noteApiError.pipe(
