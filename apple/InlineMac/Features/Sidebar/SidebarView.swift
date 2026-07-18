@@ -645,8 +645,9 @@ struct SidebarView: View {
     let button = Button {
       updates.performPrimaryAction()
     } label: {
-      Label(updates.sidebarActionTitle, systemImage: "arrow.triangle.2.circlepath")
+      Text("Update Inline")
         .font(.system(size: 13, weight: .semibold))
+        .padding(.horizontal, 10)
     }
     .controlSize(.large)
     .buttonBorderShape(.capsule)
@@ -654,7 +655,6 @@ struct SidebarView: View {
       ButtonShineOverlay(active: true)
     }
     .clipShape(Capsule())
-    .accessibilityLabel(updates.sidebarActionTitle)
 
     if #available(macOS 26.0, *) {
       button

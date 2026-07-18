@@ -302,13 +302,6 @@ final class UpdateController {
     }
   }
 
-  var sidebarActionTitle: String {
-    if case .updateAvailable = phase {
-      return "Update Available"
-    }
-    return "Restart to Update"
-  }
-
   var allowsPrimaryAction: Bool {
     switch phase {
     case .idle, .upToDate, .failed:
