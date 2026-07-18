@@ -1,7 +1,7 @@
 import {
   startCurrentServer,
   type CurrentServerHandle,
-} from "../index"
+} from "../legacyServer"
 import {
   makeCandidateHttpApplication,
 } from "./http/candidateApplication"

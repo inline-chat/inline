@@ -3,7 +3,7 @@ import { db } from "@in/server/db"
 import { thereUsers, waitlist as waitlistTable } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { describe, expect, it } from "bun:test"
-import { app } from "../index"
+import { app } from "../legacyServer"
 
 setupTestLifecycle()
 

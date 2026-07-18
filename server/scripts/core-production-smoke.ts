@@ -1,3 +1,10 @@
+import {
+  Schema,
+} from "effect"
+import {
+  HealthHttpResponseSchema,
+} from "../src/controllers/health.effect"
+
 const START_TIMEOUT_MILLIS = 20_000
 const REQUEST_TIMEOUT_MILLIS = 10_000
 const SHUTDOWN_TIMEOUT_MILLIS = 25_000
@@ -86,7 +93,7 @@ const exerciseRealtime = (
           } else {
             reject(
               new Error(
-                "Candidate realtime closed before opening.",
+                "Production realtime closed before opening.",
               ),
             )
           }
@@ -97,17 +104,25 @@ const exerciseRealtime = (
         () => {
           reject(
             new Error(
-              "Candidate realtime failed to connect.",
+              "Production realtime failed to connect.",
             ),
           )
         },
       )
     }),
     REQUEST_TIMEOUT_MILLIS,
-    "Candidate realtime probe",
+    "Production realtime probe",
   )
 
 const main = async (): Promise<void> => {
+  const useArtifact =
+    process.argv.includes("--artifact")
+  const entrypoint = useArtifact
+    ? "dist/index.js"
+    : "src/index.ts"
+  const target = useArtifact
+    ? "production artifact"
+    : "production source root"
   let captured: CapturedOutput = {
     stderr: "",
     stdout: "",
@@ -124,7 +139,7 @@ const main = async (): Promise<void> => {
   const child = Bun.spawn({
     cmd: [
       process.execPath,
-      "src/core/index.ts",
+      entrypoint,
     ],
     cwd: new URL(
       "..",
@@ -137,12 +152,17 @@ const main = async (): Promise<void> => {
       INLINE_API_RATE_LIMIT_MAX: "180",
       INLINE_TRUSTED_CLIENT_IP_HEADER:
         "",
+      INLINE_SERVER_SMOKE: "1",
       LIVEKIT_API_KEY: "",
       LIVEKIT_API_SECRET: "",
       LIVEKIT_URL: "",
-      NODE_ENV: "test",
+      NODE_ENV: useArtifact
+        ? "production"
+        : "test",
       PORT: "0",
-      SENTRY_DSN: "",
+      SENTRY_DSN: useArtifact
+        ? "https://public@example.invalid/1"
+        : "",
     },
     stdin: "ignore",
     stderr: "pipe",
@@ -165,7 +185,7 @@ const main = async (): Promise<void> => {
       readyBuffer =
         (readyBuffer + chunk).slice(-4_096)
       const marker = readyBuffer.match(
-        /CORE_CANDIDATE_READY ([0-9]+)/,
+        /SERVER_READY ([0-9]+)/,
       )
       const port = Number(marker?.[1])
       if (
@@ -207,26 +227,116 @@ const main = async (): Promise<void> => {
         ready,
         child.exited.then((code) => {
           throw new Error(
-            `Candidate exited before readiness with code ${code}.`,
+            `${target} exited before readiness with code ${code}.`,
           )
         }),
       ]),
       START_TIMEOUT_MILLIS,
-      "Candidate startup",
+      `${target} startup`,
     )
     const baseUrl =
       `http://127.0.0.1:${port}`
     const root = await fetchBounded(
       `${baseUrl}/`,
     )
+    const rootAlias = await fetchBounded(
+      `${baseUrl}//`,
+    )
     if (
       root.status !== 200 ||
       !(await root.text()).includes(
         "inline server is running",
-      )
+      ) ||
+      rootAlias.status !== 200 ||
+      !(await rootAlias.text()).includes(
+        "inline server is running",
+      ) ||
+      root.headers.get("x-request-id") ===
+        null ||
+      root.headers.get(
+        "x-content-type-options",
+      ) !== "nosniff"
     ) {
       throw new Error(
-        `Candidate root returned ${root.status}.`,
+        `${target} root aliases or middleware contract failed.`,
+      )
+    }
+
+    const [
+      health,
+      healthAlias,
+      healthz,
+      healthzAlias,
+    ] = await Promise.all([
+      fetchBounded(`${baseUrl}/health`),
+      fetchBounded(`${baseUrl}/health/`),
+      fetchBounded(`${baseUrl}/healthz`),
+      fetchBounded(`${baseUrl}/healthz/`),
+    ])
+    const healthStatuses = [
+      health.status,
+      healthAlias.status,
+      healthz.status,
+      healthzAlias.status,
+    ]
+    if (
+      healthStatuses.some(
+        (status) =>
+          status !== 200 &&
+          status !== 503,
+      ) ||
+      new Set(healthStatuses).size !== 1
+    ) {
+      throw new Error(
+        `${target} health aliases diverged: ${healthStatuses.join(",")}.`,
+      )
+    }
+    Schema.decodeUnknownSync(
+      HealthHttpResponseSchema,
+    )(await health.json())
+
+    const preflight = await fetch(
+      `${baseUrl}/v1/getMe`,
+      {
+        method: "OPTIONS",
+        headers: {
+          "access-control-request-headers":
+            "authorization",
+          "access-control-request-method":
+            "GET",
+          origin:
+            "https://app.inline.chat",
+        },
+        signal: AbortSignal.timeout(
+          REQUEST_TIMEOUT_MILLIS,
+        ),
+      },
+    )
+    if (
+      preflight.status !== 204 ||
+      preflight.headers.get(
+        "access-control-allow-origin",
+      ) !== "https://app.inline.chat" ||
+      preflight.headers.get(
+        "access-control-allow-credentials",
+      ) !== "true" ||
+      preflight.headers.get(
+        "x-request-id",
+      ) === null
+    ) {
+      throw new Error(
+        `${target} CORS preflight contract failed.`,
+      )
+    }
+    if (
+      useArtifact &&
+      preflight.headers.get(
+        "strict-transport-security",
+      ) !==
+        "max-age=31536000; includeSubDomains"
+    ) {
+      throw new Error(
+        `${target} omitted production transport security.`,
       )
     }
 
@@ -253,7 +363,7 @@ const main = async (): Promise<void> => {
           undefined
       ) {
         throw new Error(
-          `Candidate platform OpenAPI omitted ${path}.`,
+          `${target} platform OpenAPI omitted ${path}.`,
         )
       }
     }
@@ -274,7 +384,7 @@ const main = async (): Promise<void> => {
       ] === undefined
     ) {
       throw new Error(
-        "Candidate Bot OpenAPI omitted sendMessage.",
+        `${target} Bot OpenAPI omitted sendMessage.`,
       )
     }
 
@@ -283,9 +393,15 @@ const main = async (): Promise<void> => {
         fetchBounded(
           `${baseUrl}/v1/getMe`,
         ),
-        fetchBounded(
-          `${baseUrl}/admin/me`,
-        ),
+        fetch(`${baseUrl}/admin/me`, {
+          headers: {
+            origin:
+              "https://admin.inline.chat",
+          },
+          signal: AbortSignal.timeout(
+            REQUEST_TIMEOUT_MILLIS,
+          ),
+        }),
         fetchBounded(
           `${baseUrl}/not-a-route`,
         ),
@@ -296,8 +412,19 @@ const main = async (): Promise<void> => {
       fallback.status !== 404
     ) {
       throw new Error(
-        `Candidate boundaries returned v1=${v1.status}, admin=${admin.status}, fallback=${fallback.status}.`,
+        `${target} boundaries returned v1=${v1.status}, admin=${admin.status}, fallback=${fallback.status}.`,
       )
+    }
+    if (useArtifact) {
+      const missingAdminOrigin =
+        await fetchBounded(
+          `${baseUrl}/admin/me`,
+        )
+      if (missingAdminOrigin.status !== 403) {
+        throw new Error(
+          `${target} accepted an Admin request without an allowed origin.`,
+        )
+      }
     }
 
     await exerciseRealtime(
@@ -308,16 +435,16 @@ const main = async (): Promise<void> => {
     const exitCode = await withTimeout(
       child.exited,
       SHUTDOWN_TIMEOUT_MILLIS,
-      "Candidate shutdown",
+      `${target} shutdown`,
     )
     if (exitCode !== 0) {
       throw new Error(
-        `Candidate exited with code ${exitCode}.`,
+        `${target} exited with code ${exitCode}.`,
       )
     }
 
     console.info(
-      "Core production smoke passed: complete HTTP/OpenAPI, raw realtime, process runtime, and graceful shutdown.",
+      `Core ${target} smoke passed: complete HTTP/OpenAPI, middleware aliases, raw realtime, process runtime, and graceful shutdown.`,
     )
   } catch (error) {
     if (child.exitCode === null) {

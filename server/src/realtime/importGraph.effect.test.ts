@@ -9,6 +9,9 @@ import {
 import {
   fileURLToPath,
 } from "node:url"
+import {
+  FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN,
+} from "../../scripts/runtimeImportPolicy"
 
 const replacementRoots = [
   "./host.effect.ts",
@@ -36,7 +39,11 @@ describe("realtime replacement runtime graph", () => {
           name: "reject-runtime-elysia",
           setup(build) {
             build.onResolve(
-              { filter: /^elysia(?:\\/|$)/ },
+              {
+                filter: new RegExp(
+                  ${JSON.stringify(FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN)},
+                ),
+              },
               (args) => {
                 elysiaImports.push({
                   importer: args.importer,

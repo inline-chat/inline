@@ -3,6 +3,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { makePlatformApiBase } from "../core/http/openApi"
+import { FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN } from "../../scripts/runtimeImportPolicy"
 import { V1MessagingProvidersApiGroup } from "./v1MessagingProvidersContracts.effect"
 
 describe("Effect /v1 messaging and provider contract", () => {
@@ -51,7 +52,11 @@ describe("Effect /v1 messaging and provider contract", () => {
         plugins: [{
           name: "reject-runtime-elysia",
           setup(build) {
-            build.onResolve({ filter: new RegExp("^elysia(?:/|$)") }, (args) => {
+            build.onResolve({
+              filter: new RegExp(
+                ${JSON.stringify(FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN)},
+              ),
+            }, (args) => {
               imports.push({ importer: args.importer, path: args.path });
               return { external: true, path: args.path };
             });

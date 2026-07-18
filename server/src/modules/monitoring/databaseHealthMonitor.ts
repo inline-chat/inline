@@ -1,4 +1,7 @@
-import { runHealthChecks, type HealthResponse } from "@in/server/controllers/health"
+import {
+  runHealthChecks,
+  type HealthResponse,
+} from "@in/server/controllers/healthCheck"
 import { NODE_ENV } from "@in/server/env"
 import { sendBotEvent } from "@in/server/modules/bot-events"
 import { Log } from "@in/server/utils/log"

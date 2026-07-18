@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { app } from "../../index"
+import { app } from "../../legacyServer"
 import { db } from "@in/server/db"
 import { loginCodes, sessions, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"

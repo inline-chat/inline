@@ -9,12 +9,41 @@ import {
 import {
   fileURLToPath,
 } from "node:url"
+import {
+  FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN,
+  isForbiddenProductionRuntimeImport,
+} from "../../scripts/runtimeImportPolicy"
 
 describe("complete replacement runtime graph", () => {
+  it("classifies the complete retired HTTP package family", () => {
+    for (
+      const packageName of [
+        "elysia",
+        "elysia/ws",
+        "elysia-helmet",
+        "elysia-rate-limit",
+        "@elysiajs/cors",
+        "@elysiajs/swagger",
+      ]
+    ) {
+      expect(
+        isForbiddenProductionRuntimeImport(
+          packageName,
+        ),
+      ).toBe(true)
+    }
+
+    expect(
+      isForbiddenProductionRuntimeImport(
+        "effect",
+      ),
+    ).toBe(false)
+  })
+
   it("contains no runtime Elysia package import", () => {
     const entrypoint = fileURLToPath(
       new URL(
-        "./index.ts",
+        "../index.ts",
         import.meta.url,
       ),
     )
@@ -22,12 +51,16 @@ describe("complete replacement runtime graph", () => {
       const forbiddenImports = [];
       const result = await Bun.build({
         entrypoints: [${JSON.stringify(entrypoint)}],
-        packages: "external",
+        external: ["@aws-sdk/*", "sharp"],
         plugins: [{
           name: "reject-runtime-elysia",
           setup(build) {
             build.onResolve(
-              { filter: /^(?:@elysiajs\\/|elysia(?:\\/|$))/ },
+              {
+                filter: new RegExp(
+                  ${JSON.stringify(FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN)},
+                ),
+              },
               (args) => {
                 forbiddenImports.push({
                   importer: args.importer,

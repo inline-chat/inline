@@ -5,7 +5,7 @@ import {
   type HealthDeps,
   type HealthHttpResponse,
 } from "@in/server/controllers/health"
-import { app } from "@in/server/index"
+import { app } from "@in/server/legacyServer"
 import { describe, expect, it } from "bun:test"
 import Elysia from "elysia"
 

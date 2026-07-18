@@ -17,6 +17,7 @@
     "core:candidate": "NODE_ENV=test SENTRY_DSN= PORT=0 bun --watch src/core/index.ts",
     "core:smoke": "bun scripts/core-entry-smoke.ts",
     "core:production-smoke": "bun scripts/core-production-smoke.ts",
+    "core:artifact-smoke": "bun run build && bun scripts/core-production-smoke.ts --artifact",
     "core:http-smoke": "NODE_ENV=test bun scripts/core-http-kernel-smoke.ts",
     "typecheck": "tsc --build",
     "typecheck:effect": "tsc --build tsconfig.effect.json",

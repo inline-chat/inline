@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { mkdir, readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { app } from "../../src/index"
+import { app } from "../../src/legacyServer"
 
 const manifestPath = resolve(import.meta.dir, "../../src/__tests__/contracts/fixtures/route-manifest.json")
 const write = process.argv.includes("--write")

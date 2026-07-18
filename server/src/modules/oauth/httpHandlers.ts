@@ -36,8 +36,9 @@ import { Log } from "@in/server/utils/log"
 import { OAuthHandlerFailure } from "./httpHandlerFailure"
 
 const config = oauthConfig()
-// The production Elysia oracle retains its own bounded limiter until cutover.
-// The replacement path injects a separately scoped instance through its Layer.
+// TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
+// after the post-cutover differential window. Production injects a separately
+// scoped limiter through its Effect Layer.
 const legacyRateLimiter = new InMemoryRateLimiter()
 
 const AUTH_REQUEST_COOKIE_PATH = "/oauth"

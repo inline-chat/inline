@@ -1,19 +1,41 @@
 import { $ } from "bun"
 import { resolve } from "path"
 import { version } from "../package.json"
+import {
+  FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN,
+} from "./runtimeImportPolicy"
 
 // https://coolify.io/docs/knowledge-base/environment-variables/
 const sourceCommit = process.env["SOURCE_COMMIT"] || (await $`git rev-parse HEAD`.quiet()).text().trim() || "N/A"
 const commitHash = sourceCommit === "N/A" ? "N/A" : sourceCommit.slice(0, 7)
 
-console.info(`🚧 Building...`)
+console.info("🚧 Building...")
 
-await Bun.build({
+const result = await Bun.build({
   entrypoints: [resolve(__dirname, "../src/index.ts")],
   outdir: resolve(__dirname, "../dist"),
   target: "bun",
   external: ["@aws-sdk/*", "sharp"],
   sourcemap: "external",
+  plugins: [
+    {
+      name: "reject-retired-http-runtime",
+      setup(build) {
+        build.onResolve(
+          {
+            filter: new RegExp(
+              FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN,
+            ),
+          },
+          ({ importer, path }) => {
+            throw new Error(
+              `Production entry imported retired HTTP runtime package "${path}" from "${importer}".`,
+            )
+          },
+        )
+      },
+    },
+  ],
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
     "process.env.BUILD_DATE": JSON.stringify(new Date().toISOString()),
@@ -23,4 +45,13 @@ await Bun.build({
   },
 })
 
-console.info(`✅ Build complete`)
+if (!result.success) {
+  for (const log of result.logs) {
+    console.error(log)
+  }
+  throw new Error(
+    "Production server build failed.",
+  )
+}
+
+console.info("✅ Build complete")

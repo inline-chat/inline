@@ -1,0 +1,227 @@
+import "dotenv/config"
+import * as Sentry from "@sentry/bun"
+import { API_BASE_URL, NODE_ENV, PORT, SENTRY_DSN } from "@in/server/env"
+import { gitCommitHash, gitCommitSha, version } from "@in/server/buildEnv"
+import { buildServerSentryDist, buildServerSentryRelease } from "@in/server/utils/sentryRelease"
+import { beforeSendLog } from "@in/server/utils/log"
+
+const sentryRelease = buildServerSentryRelease(version, gitCommitSha)
+const sentryDist = buildServerSentryDist(gitCommitSha)
+
+Sentry.init({
+  dsn: SENTRY_DSN,
+  release: sentryRelease,
+  dist: sentryDist,
+  environment: NODE_ENV,
+  tracesSampleRate: 1.0,
+  enabled: NODE_ENV !== "development",
+  enableLogs: true,
+  beforeSendLog,
+})
+
+// Main app
+// Entry point for your Elysia server, ideal place for setting global plugin
+import { root } from "@in/server/controllers/root"
+import { health } from "@in/server/controllers/health"
+import { startDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
+import { startGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
+import {
+  createGracefulShutdownManager,
+  registerGracefulShutdown,
+  type GracefulShutdownManager,
+} from "@in/server/lifecycle/gracefulShutdown"
+import { waitlist } from "@in/server/controllers/extra/waitlist"
+import { Elysia } from "elysia"
+import { there } from "./controllers/extra/there"
+import swagger from "@elysiajs/swagger"
+import { apiV1 } from "@in/server/controllers/v1"
+import { oauth } from "@in/server/controllers/oauth"
+import { botApi } from "@in/server/controllers/bot/bot"
+import { connectionManager } from "@in/server/ws/connections"
+import { Log, LogLevel } from "@in/server/utils/log"
+import { realtime } from "@in/server/realtime"
+import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
+import { admin } from "./controllers/admin"
+import { media } from "./controllers/media"
+import type { Server } from "bun"
+import { EventEmitter } from "events"
+
+const port = PORT
+const log = new Log("server", LogLevel.INFO)
+
+// To fix a bug where 11 max listeners trigger a warning in production console
+EventEmitter.defaultMaxListeners = 20
+
+if (NODE_ENV === "production") {
+  process.on("warning", (warning) => {
+    if (
+      warning?.name === "MaxListenersExceededWarning" &&
+      warning.message.includes("wakeup listeners added to [Connection2]")
+    ) {
+      return
+    }
+    console.warn(warning)
+  })
+}
+
+if (NODE_ENV !== "development") {
+  Log.shared.info(`🚧 Starting server • ${NODE_ENV} • ${version} • ${gitCommitHash}`)
+}
+
+/**
+ * TODO(effect-cutover): remove this Elysia oracle after the post-cutover
+ * observation window and remaining differential suites no longer need it.
+ * Production must never import this module.
+ */
+export const app: any = new Elysia()
+
+app
+  .use(health)
+  .use(root)
+  .use(oauth)
+  .use(botApi)
+  .use(realtime)
+  .use(waitlist)
+  .use(there)
+  .use(integrationsRouter)
+  .use(media)
+  .use(admin)
+  .use(apiV1)
+
+  .use(
+    swagger({
+      path: "/v1/reference",
+      exclude: /^(?!\/v1).*$/,
+      scalarConfig: {
+        servers: [
+          {
+            url: API_BASE_URL,
+            description: "Production API server",
+          },
+        ],
+      },
+      documentation: {
+        info: {
+          title: "Inline HTTP API Docs",
+          version: "0.0.1",
+          contact: {
+            email: "hi@inline.chat",
+            name: "Inline Team",
+            url: "https://inline.chat",
+          },
+          termsOfService: "https://inline.chat/terms",
+        },
+      },
+    }),
+  )
+
+  .use(
+    swagger({
+      // Keep the docs route out of the `/bot/*` namespace so it doesn't look like a bot method.
+      path: "/bot-api-reference",
+      exclude: /^(?!\/bot).*$/,
+      scalarConfig: {
+        servers: [
+          {
+            url: API_BASE_URL,
+            description: "Production API server",
+          },
+        ],
+      },
+      documentation: {
+        info: {
+          title: "Inline Bot HTTP API Docs",
+          version: "0.0.1",
+          description: [
+            "## Authentication",
+            "",
+            "Recommended: send the bot token via the `Authorization: Bearer <token>` header.",
+            "",
+            "Alternative: include the token in the URL path using `/bot<token>/<method>`.",
+            "",
+            "For method parameters, use JSON request body (recommended). Query parameters on POST are also accepted for compatibility.",
+            "",
+            "Tokens look like `123:IN...` and contain a `:`. Most HTTP clients handle this in the path fine, but if yours doesn't, URL-encode the token segment (e.g. `:` -> `%3A`).",
+            "",
+            "### Header auth (recommended)",
+            "",
+            "```bash",
+            "curl -sS \\",
+            "  -H 'Authorization: Bearer <token>' \\",
+            "  -H 'Content-Type: application/json' \\",
+            "  -X POST 'https://api.inline.chat/bot/sendMessage' \\",
+            "  -d '{\"user_id\": 1001, \"text\": \"hello from bot\"}'",
+            "```",
+            "",
+            "### Token in path",
+            "",
+            "```bash",
+            "curl -sS \\",
+            "  -H 'Content-Type: application/json' \\",
+            "  -X POST 'https://api.inline.chat/bot<token>/sendMessage' \\",
+            "  -d '{\"chat_id\": 42, \"text\": \"hello from bot\"}'",
+            "```",
+            "",
+            "Targeting: use `chat_id` for chats/threads or `user_id` for DMs.",
+            "",
+            "Errors return `{ \"ok\": false, \"error_code\": <http status>, \"description\": \"...\" }`; `error` may be present as a machine-readable code.",
+            "",
+            "### Quick check",
+            "",
+            "```bash",
+            "curl -sS 'https://api.inline.chat/bot<token>/getMe'",
+            "```",
+          ].join("\n"),
+          contact: {
+            email: "hi@inline.chat",
+            name: "Inline Team",
+            url: "https://inline.chat",
+          },
+          termsOfService: "https://inline.chat/terms",
+        },
+      },
+    }),
+  )
+
+// Run only when this file is the process entry point. Route tests import `app`
+// directly and must not start production background workers or bind a port.
+export type CurrentServerHandle = {
+  readonly server: Server<unknown>
+  readonly gracefulShutdown: GracefulShutdownManager
+}
+
+export type StartCurrentServerOptions = {
+  readonly installSignalHandlers?: boolean
+  readonly port?: number
+}
+
+/**
+ * Starts the retained legacy oracle and its process-owned workers.
+ * The shadow harness uses it only for differential behavior checks.
+ */
+export const startCurrentServer = (
+  options: StartCurrentServerOptions = {},
+): CurrentServerHandle => {
+  app.listen(options.port ?? port)
+  const server = app.server as Server<unknown> | null
+  if (!server) {
+    throw new Error("Current server listener did not expose a Bun server.")
+  }
+
+  connectionManager.setServer(server)
+  startDatabaseHealthMonitor()
+  startGridProviderEffectWorker()
+  const gracefulShutdown = options.installSignalHandlers === false
+    ? createGracefulShutdownManager({ server })
+    : registerGracefulShutdown(server)
+  log.info(`Running on http://${server.hostname}:${server.port}`)
+
+  return {
+    server,
+    gracefulShutdown,
+  }
+}
+
+if (import.meta.main) {
+  startCurrentServer()
+}

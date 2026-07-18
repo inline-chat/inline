@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { app } from "../index"
+import { app } from "../legacyServer"
 import { setupTestLifecycle, testUtils } from "./setup"
 import { OauthModel } from "@in/server/db/models/oauth"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"

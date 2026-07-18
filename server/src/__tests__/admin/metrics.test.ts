@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { app } from "../../index"
+import { app } from "../../legacyServer"
 import { db } from "@in/server/db"
 import { chats, messages, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
 import { generateToken } from "@in/server/utils/auth"

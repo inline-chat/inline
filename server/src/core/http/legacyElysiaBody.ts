@@ -56,6 +56,10 @@ const mediaType = (request: Request): string | undefined => {
  * This intentionally does not default an absent content type to JSON. That
  * difference can otherwise run stateful login work that the legacy transport
  * rejects before invoking its handler.
+ *
+ * TODO(effect-cutover): replace this compatibility parser with explicit
+ * per-media Effect Schema decoders after supported client coercions are
+ * independently documented and the legacy differential oracle is retired.
  */
 export const parseLegacyElysiaBody = async (
   request: Request,

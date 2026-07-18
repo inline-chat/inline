@@ -23,6 +23,10 @@ import {
   ProductionProcessServicesLive,
 } from "../effect/productionRuntime"
 import {
+  markServerShuttingDown,
+  type ShutdownSignal,
+} from "../../lifecycle/shutdownState"
+import {
   makeRuntimeBridge,
 } from "../effect/runtimeBridge"
 import type {
@@ -90,6 +94,11 @@ export interface StartCoreProductionServerOptions<
   readonly hostname?: string | undefined
   readonly installSignalHandlers?:
     | boolean
+    | undefined
+  readonly markShuttingDown?:
+    | ((
+      signal: ShutdownSignal,
+    ) => void)
     | undefined
   readonly port?: number | undefined
 }
@@ -161,8 +170,8 @@ const shutdownWithDeadline = async (
  * Effect Layer context.
  *
  * HTTP, raw protobuf realtime, workers, and their scoped finalizers all share
- * the runtime bridge. The caller still decides when this candidate becomes the
- * production entry point.
+ * the runtime bridge. The production entry delegates listener and process
+ * ownership here.
  */
 export const startCoreProductionServer = async <
   ApplicationError,
@@ -176,6 +185,8 @@ export const startCoreProductionServer = async <
     DEFAULT_GRACEFUL_SHUTDOWN_MILLIS,
   hostname = "0.0.0.0",
   installSignalHandlers = false,
+  markShuttingDown =
+    markServerShuttingDown,
   port = 0,
 }: StartCoreProductionServerOptions<
   ApplicationError,
@@ -291,6 +302,7 @@ export const startCoreProductionServer = async <
     }
 
     removeSignalHandlers()
+    markShuttingDown(signal)
     let shutdownStage =
       "listener drain"
     shutdownPromise =
@@ -319,6 +331,7 @@ export const startCoreProductionServer = async <
         },
         gracefulShutdownMillis,
         () => {
+          markShuttingDown("timeout")
           void server.stop(true)
           if (signal !== "manual") {
             process.exitCode = 1
