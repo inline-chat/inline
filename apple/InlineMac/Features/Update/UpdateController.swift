@@ -34,11 +34,16 @@ final class UpdateController {
     }
   }
 
-#if DEBUG
+#if DEBUG || DEBUG_BUILD
+  private(set) var isDebugPreviewActive = false
+
   var debugForceReady = false {
     didSet {
       guard debugForceReady != oldValue else { return }
       if debugForceReady {
+        if isDebugPreviewActive {
+          resetToIdle()
+        }
         let info = SoftwareUpdateInfo(
           version: "Debug Update",
           build: nil,
@@ -157,6 +162,10 @@ final class UpdateController {
   }
 
   func beginUpdate() {
+#if DEBUG || DEBUG_BUILD
+    if dismissDebugPreviewIfNeeded() { return }
+#endif
+
     if latestUpdate?.isInformational == true {
       openInformationPage()
       return
@@ -170,6 +179,10 @@ final class UpdateController {
   }
 
   func remindLater() {
+#if DEBUG || DEBUG_BUILD
+    if dismissDebugPreviewIfNeeded() { return }
+#endif
+
     guard let reply = updateChoiceReply else {
       presenter.closeIfNeeded()
       return
@@ -180,6 +193,10 @@ final class UpdateController {
   }
 
   func skipVersion() {
+#if DEBUG || DEBUG_BUILD
+    if dismissDebugPreviewIfNeeded() { return }
+#endif
+
     guard let reply = updateChoiceReply else { return }
     updateChoiceReply = nil
     reply(.skip)
@@ -187,6 +204,10 @@ final class UpdateController {
   }
 
   func cancel() {
+#if DEBUG || DEBUG_BUILD
+    if dismissDebugPreviewIfNeeded() { return }
+#endif
+
     guard let handler = cancelHandler else {
       presenter.closeIfNeeded()
       return
@@ -197,6 +218,10 @@ final class UpdateController {
   }
 
   func retryCheck() {
+#if DEBUG || DEBUG_BUILD
+    if dismissDebugPreviewIfNeeded() { return }
+#endif
+
     retryAfterCurrentCycle = didStart && (acknowledgementHandler != nil || updater.sessionInProgress)
     acknowledgeIfNeeded()
     resetToIdle(closeWindow: false)
@@ -213,6 +238,10 @@ final class UpdateController {
   }
 
   func installAndRelaunch() {
+#if DEBUG || DEBUG_BUILD
+    if dismissDebugPreviewIfNeeded() { return }
+#endif
+
     if let handler = installHandler {
       // Sparkle explicitly permits retrying this handler if application
       // termination is cancelled. Keep the handler and ready state alive until
@@ -228,7 +257,7 @@ final class UpdateController {
       return
     }
 
-#if DEBUG
+#if DEBUG || DEBUG_BUILD
     if debugForceReady {
       debugForceReady = false
     }
@@ -236,22 +265,36 @@ final class UpdateController {
   }
 
   func retryTermination() {
+#if DEBUG || DEBUG_BUILD
+    if dismissDebugPreviewIfNeeded() { return }
+#endif
     retryTerminationHandler?()
   }
 
-  var canCancelCurrentOperation: Bool { cancelHandler != nil }
+  var canCancelCurrentOperation: Bool {
+#if DEBUG || DEBUG_BUILD
+    if isDebugPreviewActive { return true }
+#endif
+    return cancelHandler != nil
+  }
 
-  var canRetryTermination: Bool { retryTerminationHandler != nil }
+  var canRetryTermination: Bool {
+#if DEBUG || DEBUG_BUILD
+    if isDebugPreviewActive { return true }
+#endif
+    return retryTerminationHandler != nil
+  }
 
   func showCurrentUpdate(activate: Bool) {
     presenter.show(activate: activate)
   }
 
   var showsSidebarAction: Bool {
-#if DEBUG
+#if DEBUG || DEBUG_BUILD
     if debugForceReady { return true }
+    if isDebugPreviewActive { return false }
 #endif
-    switch phase {
+    return switch phase {
     case .updateAvailable, .readyToInstall:
       true
     default:
@@ -285,6 +328,31 @@ final class UpdateController {
       "https://public-assets.inline.chat/mac/beta/appcast.xml"
     }
   }
+
+#if DEBUG || DEBUG_BUILD
+  var canPresentDebugPreview: Bool {
+    !updater.sessionInProgress
+      && updateChoiceReply == nil
+      && cancelHandler == nil
+      && acknowledgementHandler == nil
+      && installHandler == nil
+      && retryTerminationHandler == nil
+  }
+
+  func presentDebugPreview(_ preview: DebugSoftwareUpdatePreview) {
+    guard canPresentDebugPreview else { return }
+
+    if debugForceReady {
+      debugForceReady = false
+    }
+
+    let previewPhase = preview.phase
+    latestUpdate = previewPhase.info
+    isDebugPreviewActive = true
+    phase = previewPhase
+    presenter.show(activate: true)
+  }
+#endif
 
   // MARK: - Sparkle user-driver callbacks
 
@@ -585,10 +653,21 @@ final class UpdateController {
   private func resetToIdle(closeWindow: Bool = true) {
     clearTransientHandlers()
     manualCheckInProgress = false
+#if DEBUG || DEBUG_BUILD
+    isDebugPreviewActive = false
+#endif
     phase = .idle
     if closeWindow {
       presenter.closeIfNeeded()
     }
   }
+
+#if DEBUG || DEBUG_BUILD
+  private func dismissDebugPreviewIfNeeded() -> Bool {
+    guard isDebugPreviewActive else { return false }
+    resetToIdle()
+    return true
+  }
+#endif
 }
 #endif

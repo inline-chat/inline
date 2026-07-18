@@ -131,4 +131,80 @@ enum SoftwareUpdatePhase: Equatable {
     }
   }
 }
+
+#if DEBUG || DEBUG_BUILD
+enum DebugSoftwareUpdatePreview: String, CaseIterable, Identifiable {
+  case checking
+  case updateAvailable
+  case informationalUpdate
+  case downloading
+  case preparing
+  case readyToInstall
+  case installing
+  case upToDate
+  case failed
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .checking:
+      "Checking"
+    case .updateAvailable:
+      "Update Available"
+    case .informationalUpdate:
+      "Informational Update"
+    case .downloading:
+      "Downloading"
+    case .preparing:
+      "Preparing"
+    case .readyToInstall:
+      "Ready to Install"
+    case .installing:
+      "Installing"
+    case .upToDate:
+      "Up to Date"
+    case .failed:
+      "Error"
+    }
+  }
+
+  var phase: SoftwareUpdatePhase {
+    let info = SoftwareUpdateInfo(
+      version: "1.12.0",
+      build: "1120",
+      contentLength: 28_400_000,
+      informationURL: nil
+    )
+
+    return switch self {
+    case .checking:
+      .checking
+    case .updateAvailable:
+      .updateAvailable(info)
+    case .informationalUpdate:
+      .updateAvailable(
+        SoftwareUpdateInfo(
+          version: "1.12.0",
+          build: "1120",
+          contentLength: nil,
+          informationURL: URL(string: "https://inline.chat")
+        )
+      )
+    case .downloading:
+      .downloading(info: info, receivedBytes: 17_600_000, expectedBytes: info.contentLength)
+    case .preparing:
+      .extracting(info: info, progress: 0.72)
+    case .readyToInstall:
+      .readyToInstall(info)
+    case .installing:
+      .installing(info)
+    case .upToDate:
+      .upToDate
+    case .failed:
+      .failed(message: "Inline couldn’t connect to the update server. Check your internet connection and try again.")
+    }
+  }
+}
+#endif
 #endif

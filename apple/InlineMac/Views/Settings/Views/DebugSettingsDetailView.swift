@@ -10,12 +10,13 @@ struct DebugSettingsDetailView: View {
   @State private var isDeletingDatabase = false
   @State private var databaseErrorMessage = ""
   @State private var showDatabaseError = false
-#if DEBUG && SPARKLE
+#if (DEBUG || DEBUG_BUILD) && SPARKLE
+  @State private var updatePreview = DebugSoftwareUpdatePreview.updateAvailable
   @Environment(UpdateController.self) private var updates
 #endif
 
   var body: some View {
-#if DEBUG && SPARKLE
+#if (DEBUG || DEBUG_BUILD) && SPARKLE
     @Bindable var updates = updates
 #endif
     Form {
@@ -78,8 +79,31 @@ struct DebugSettingsDetailView: View {
         SettingsSectionHeader("Database")
       }
 #endif
-#if DEBUG && SPARKLE
+#if (DEBUG || DEBUG_BUILD) && SPARKLE
       Section {
+        LabeledContent {
+          HStack(spacing: 8) {
+            Picker("Updater State", selection: $updatePreview) {
+              ForEach(DebugSoftwareUpdatePreview.allCases) { preview in
+                Text(preview.title)
+                  .tag(preview)
+              }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+
+            Button("Show") {
+              updates.presentDebugPreview(updatePreview)
+            }
+            .disabled(!updates.canPresentDebugPreview)
+          }
+        } label: {
+          SettingsRowLabel(
+            "Updater Dialog",
+            description: "Preview updater states without contacting the update server."
+          )
+        }
+
         Toggle(isOn: $updates.debugForceReady) {
           SettingsRowLabel(
             "Show Update Button",
@@ -158,7 +182,7 @@ struct DebugSettingsDetailView: View {
 
 #Preview {
   DebugSettingsDetailView()
-#if DEBUG && SPARKLE
+#if (DEBUG || DEBUG_BUILD) && SPARKLE
     .environment(UpdateController())
 #endif
 }
