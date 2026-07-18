@@ -461,12 +461,20 @@ describe("Effect HTTP kernel", () => {
       expect(botSpec.info.description).toContain("### Quick check")
       expect(botSpec.paths).toEqual({})
 
-      const swaggerResponse = await kernel.handler(
+      const referenceResponse = await kernel.handler(
         new Request("http://inline.test/v1/reference"),
       )
-      expect(swaggerResponse.status).toBe(200)
-      expect(swaggerResponse.headers.get("content-type")).toContain("text/html")
-      expect(await swaggerResponse.text()).toContain("Inline HTTP API Docs")
+      expect(referenceResponse.status).toBe(200)
+      expect(referenceResponse.headers.get("content-type")).toContain(
+        "text/html",
+      )
+      const referenceHtml = await referenceResponse.text()
+      expect(referenceHtml).toContain("Inline HTTP API Docs")
+      expect(referenceHtml).toContain("window.Scalar.createApiReference")
+      expect(referenceHtml).toContain('"layout":"modern"')
+      expect(referenceHtml).toContain('"withDefaultFonts":false')
+      expect(referenceHtml).toContain("--scalar-font: -apple-system")
+      expect(referenceHtml).not.toContain("SwaggerUIBundle")
     } finally {
       await kernel.dispose()
     }

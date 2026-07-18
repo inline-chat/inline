@@ -5,10 +5,16 @@ import {
   InlineId,
   UnixSeconds,
   WireSafeInteger,
+  WireSafeIntegerFromString,
+  WireSafeIntegerInput,
 } from "./scalars"
 import {
+  ChatIdFromString,
+  MessageIdInput,
   SessionId,
   UserId,
+  UserIdFromString,
+  UserIdInput,
 } from "./identifiers"
 
 describe("core scalar schemas", () => {
@@ -54,6 +60,69 @@ describe("core scalar schemas", () => {
 
       expect(userId).toBe(42)
       expect(sessionId).toBe(7)
+    }),
+  )
+
+  it.effect("decodes integer strings into domain brands", () =>
+    Effect.gen(function* () {
+      const userId = yield* Schema.decodeUnknownEffect(
+        UserIdFromString,
+      )("42")
+      const chatId = yield* Schema.decodeUnknownEffect(
+        ChatIdFromString,
+      )("7")
+
+      expect(userId).toBe(42)
+      expect(chatId).toBe(7)
+    }),
+  )
+
+  it.effect("accepts integer-or-string compatibility inputs", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* Schema.decodeUnknownEffect(UserIdInput)(42),
+      ).toBe(42)
+      expect(
+        yield* Schema.decodeUnknownEffect(UserIdInput)("42"),
+      ).toBe(42)
+      expect(
+        yield* Schema.decodeUnknownEffect(
+          MessageIdInput,
+        )("99"),
+      ).toBe(99)
+      expect(
+        yield* Schema.decodeUnknownEffect(
+          WireSafeIntegerInput,
+        )("-7"),
+      ).toBe(-7)
+    }),
+  )
+
+  it.effect("rejects non-canonical and unsafe integer strings", () =>
+    Effect.gen(function* () {
+      for (const value of [
+        "0",
+        "-1",
+        "1.5",
+        "1e3",
+        String(Number.MAX_SAFE_INTEGER + 1),
+      ]) {
+        const exit = yield* Effect.exit(
+          Schema.decodeUnknownEffect(UserIdFromString)(
+            value,
+          ),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+      }
+
+      for (const value of ["1.5", "1e3"]) {
+        const exit = yield* Effect.exit(
+          Schema.decodeUnknownEffect(
+            WireSafeIntegerFromString,
+          )(value),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+      }
     }),
   )
 

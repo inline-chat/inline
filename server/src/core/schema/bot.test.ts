@@ -4,7 +4,12 @@ import type {
 } from "@inline-chat/bot-api-types"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit, Schema } from "effect"
-import { BotGetMeEnvelope, type BotGetMeResult, BotUser } from "./bot"
+import {
+  BotGetMeEnvelope,
+  BotGetMeResult as BotGetMeResultSchema,
+  type BotGetMeResult,
+  BotUser,
+} from "./bot"
 
 describe("Bot wire schemas", () => {
   it.effect("decodes getMe success without inventing omitted optional fields", () =>
@@ -54,10 +59,13 @@ describe("Bot wire schemas", () => {
 
   it.effect("encodes omitted optional Bot user fields as omitted", () =>
     Effect.gen(function* () {
-      const encoded = yield* Schema.encodeEffect(BotUser)({
+      const user = yield* Schema.decodeUnknownEffect(BotUser)({
         id: 42,
         is_bot: true,
       })
+      const encoded = yield* Schema.encodeEffect(BotUser)(
+        user,
+      )
 
       expect(encoded).toEqual({
         id: 42,
@@ -85,9 +93,9 @@ describe("Bot wire schemas", () => {
     }),
   )
 
-  it.effect("rejects non-positive Bot API status codes", () =>
+  it.effect("rejects values outside the HTTP status-code range", () =>
     Effect.gen(function* () {
-      for (const errorCode of [0, -1]) {
+      for (const errorCode of [-1, 0, 99, 600]) {
         const exit = yield* Effect.exit(
           Schema.decodeUnknownEffect(BotGetMeEnvelope)({
             ok: false,
@@ -116,16 +124,23 @@ describe("Bot wire schemas", () => {
     }),
   )
 
-  it("keeps the inferred getMe result assignable to the neutral public package", () => {
-    const schemaValue: BotGetMeResult = {
-      user: {
-        id: 1,
-        is_bot: true,
-      },
-    }
-    const publicValue: NeutralGetMeResult = schemaValue
-    const roundTrip: BotGetMeResult = publicValue
+  it.effect(
+    "keeps decoded getMe results assignable to the neutral public package",
+    () =>
+      Effect.gen(function* () {
+        const schemaValue: BotGetMeResult =
+          yield* Schema.decodeUnknownEffect(
+            BotGetMeResultSchema,
+          )({
+            user: {
+              id: 1,
+              is_bot: true,
+            },
+          })
+        const publicValue: NeutralGetMeResult =
+          schemaValue
 
-    expect(roundTrip).toEqual(schemaValue)
-  })
+        expect(publicValue).toEqual(schemaValue)
+      }),
+  )
 })

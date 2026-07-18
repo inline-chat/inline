@@ -14,9 +14,11 @@ import { OpenApi } from "effect/unstable/httpapi"
 import type {
   BotMessage,
   BotMethodName,
+  GetChatHistoryParams,
   GetChatParams,
   SendMessageParams,
   SendReactionParams,
+  SetMyCommandsParams,
 } from "@inline-chat/bot-api-types"
 import {
   ErrorReporter,
@@ -393,6 +395,7 @@ describe("Effect Bot routes", () => {
   it("accepts POST query parameters and lets JSON body values win", async () => {
     let sendInput: SendMessageParams | undefined
     let reactionInput: SendReactionParams | undefined
+    let commandsInput: SetMyCommandsParams | undefined
     const operations = makeOperations({
       sendMessage: (input) => {
         sendInput = input
@@ -407,6 +410,10 @@ describe("Effect Bot routes", () => {
         reactionInput = input
         return Effect.succeed({})
       },
+      setMyCommands: (input) => {
+        commandsInput = input
+        return Effect.succeed({})
+      },
     })
     const kernel = makeKernel({ operations })
 
@@ -414,7 +421,11 @@ describe("Effect Bot routes", () => {
       const sendResponse = await kernel.handler(
         jsonRequest(
           "/bot/sendMessage?user_id=7&text=from-query",
-          { user_id: 8, text: "from-body" },
+          {
+            user_id: "8",
+            reply_to_message_id: "101",
+            text: "from-body",
+          },
         ),
       )
       const reactionResponse = await kernel.handler(
@@ -428,6 +439,17 @@ describe("Effect Bot routes", () => {
           },
         ),
       )
+      const commandsResponse = await kernel.handler(
+        jsonRequest("/bot/setMyCommands", {
+          commands: [
+            {
+              command: " deploy ",
+              description: " Deploy the latest build ",
+              sort_order: "10",
+            },
+          ],
+        }),
+      )
 
       expect(sendResponse.status).toBe(200)
       expect(await sendResponse.json()).toMatchObject({
@@ -439,13 +461,24 @@ describe("Effect Bot routes", () => {
       })
       expect(sendInput).toMatchObject({
         user_id: 8,
+        reply_to_message_id: 101,
         text: "from-body",
       })
       expect(reactionResponse.status).toBe(200)
       expect(reactionInput).toMatchObject({
-        chat_id: "99",
-        message_id: "101",
+        chat_id: 99,
+        message_id: 101,
         emoji: "🔥",
+      })
+      expect(commandsResponse.status).toBe(200)
+      expect(commandsInput).toEqual({
+        commands: [
+          {
+            command: "deploy",
+            description: "Deploy the latest build",
+            sort_order: 10,
+          },
+        ],
       })
     } finally {
       await kernel.dispose()
@@ -587,6 +620,20 @@ describe("Effect Bot routes", () => {
           text: 42,
         }),
       )
+      const negativeEntityRange =
+        await malformedKernel.handler(
+          jsonRequest("/bot/sendMessage", {
+            user_id: 7,
+            text: "invalid entity",
+            entities: [
+              {
+                type: "bold",
+                offset: -1,
+                length: 7,
+              },
+            ],
+          }),
+        )
 
       for (const response of [
         missing,
@@ -622,6 +669,12 @@ describe("Effect Bot routes", () => {
         error: "INVALID_ARGS",
         error_code: 400,
         description: "Validation error",
+      })
+      expect(negativeEntityRange.status).toBe(400)
+      expect(await negativeEntityRange.json()).toMatchObject({
+        ok: false,
+        error: "INVALID_ARGS",
+        error_code: 400,
       })
       expect(calls).toBe(0)
     } finally {
@@ -904,9 +957,12 @@ describe("Effect Bot routes", () => {
       spec.paths["/bot{token}/getMe"]?.["get"]
     const sendMessage =
       spec.paths["/bot/sendMessage"]?.["post"]
+    const pathSendMessage =
+      spec.paths["/bot{token}/sendMessage"]?.["post"]
     expect(headerGetMe).toBeDefined()
     expect(pathGetMe).toBeDefined()
     expect(sendMessage).toBeDefined()
+    expect(pathSendMessage).toBeDefined()
 
     const headerAuthorization =
       headerGetMe?.parameters?.find(
@@ -920,6 +976,12 @@ describe("Effect Bot routes", () => {
           "name" in parameter &&
           parameter.name === "authorization",
       )
+    const pathToken =
+      pathGetMe?.parameters?.find(
+        (parameter) =>
+          "name" in parameter &&
+          parameter.name === "token",
+      )
     expect(
       headerAuthorization &&
         "required" in headerAuthorization
@@ -932,7 +994,47 @@ describe("Effect Bot routes", () => {
         ? pathAuthorization.required
         : undefined,
     ).not.toBe(true)
+    expect(pathToken).toMatchObject({
+      required: true,
+      description:
+        "Required bot token included in the URL path.",
+    })
+    const sendMessageAuthorization =
+      sendMessage?.parameters?.find(
+        (parameter) =>
+          "name" in parameter &&
+          parameter.name === "authorization",
+      )
+    const pathSendMessageAuthorization =
+      pathSendMessage?.parameters?.find(
+        (parameter) =>
+          "name" in parameter &&
+          parameter.name === "authorization",
+      )
+    expect(
+      sendMessageAuthorization &&
+        "required" in sendMessageAuthorization
+        ? sendMessageAuthorization.required
+        : undefined,
+    ).toBe(true)
+    expect(
+      pathSendMessageAuthorization &&
+        "required" in pathSendMessageAuthorization
+        ? pathSendMessageAuthorization.required
+        : undefined,
+    ).not.toBe(true)
+    expect(sendMessageAuthorization).toMatchObject({
+      description:
+        "Required bot token using the Bearer scheme.",
+    })
+    expect(pathSendMessageAuthorization).toMatchObject({
+      description:
+        "Optional bot token using the Bearer scheme. When supplied, it takes precedence over the token in the URL.",
+    })
     expect(sendMessage?.requestBody).toMatchObject({
+      required: false,
+    })
+    expect(pathSendMessage?.requestBody).toMatchObject({
       required: false,
     })
     expect(sendMessage?.responses).toHaveProperty("400")
@@ -941,6 +1043,263 @@ describe("Effect Bot routes", () => {
     expect(sendMessage?.responses).toHaveProperty("404")
     expect(sendMessage?.responses).not.toHaveProperty("420")
     expect(sendMessage?.responses).toHaveProperty("500")
+
+    const getChatHistory =
+      spec.paths["/bot/getChatHistory"]?.["get"]
+    expect(getChatHistory?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "user_id",
+          description:
+            "Target a private conversation with this user. Supply exactly one of user_id or chat_id.",
+          schema: {
+            $ref: "#/components/schemas/UserIdString",
+          },
+        }),
+        expect.objectContaining({
+          name: "chat_id",
+          description:
+            "Target this chat. Supply exactly one of chat_id or user_id.",
+          schema: {
+            $ref: "#/components/schemas/ChatIdString",
+          },
+        }),
+        expect.objectContaining({
+          name: "limit",
+          description:
+            "Maximum number of messages to return.",
+          schema: {
+            $ref: "#/components/schemas/SafeIntegerString",
+          },
+        }),
+        expect.objectContaining({
+          name: "offset_message_id",
+          description:
+            "Pagination cursor. When supplied, return messages older than this message.",
+          schema: {
+            $ref: "#/components/schemas/MessageIdString",
+          },
+        }),
+      ]),
+    )
+    expect(
+      spec.components.schemas["UserIdString"],
+    ).toMatchObject({
+      type: "string",
+      allOf: [
+        expect.objectContaining({
+          pattern: "^[1-9][0-9]*$",
+        }),
+      ],
+    })
+    expect(
+      spec.components.schemas["EditMessageTextInput"],
+    ).toMatchObject({
+      description:
+        "Parameters for editing a text message. Exactly one target field is required.",
+      properties: {
+        message_id: {
+          allOf: expect.arrayContaining([
+            {
+              $ref: "#/components/schemas/MessageId",
+            },
+            {
+              description:
+                "Message to edit in the target chat.",
+            },
+          ]),
+        },
+        chat_id: {
+          allOf: expect.arrayContaining([
+            {
+              $ref: "#/components/schemas/ChatId",
+            },
+            {
+              description:
+                "Target this chat. Supply exactly one of chat_id or user_id.",
+            },
+          ]),
+        },
+        user_id: {
+          allOf: expect.arrayContaining([
+            {
+              $ref: "#/components/schemas/UserId",
+            },
+            {
+              description:
+                "Target a private conversation with this user. Supply exactly one of user_id or chat_id.",
+            },
+          ]),
+        },
+      },
+    })
+    expect(sendMessage?.description).toContain(
+      "Supply exactly one of user_id or chat_id.",
+    )
+    expect(
+      spec.components.schemas["BotMessageSuccess"],
+    ).toMatchObject({
+      examples: [
+        {
+          ok: true,
+          result: {
+            message: {
+              message_id: 1_808,
+              text: "Deployment finished successfully.",
+              chat: {
+                last_message_id: 1_808,
+                last_message: {
+                  message_id: 1_808,
+                  text: "Deployment finished successfully.",
+                },
+              },
+            },
+          },
+        },
+      ],
+    })
+    for (const schemaName of [
+      "BotGetMeSuccess",
+      "BotGetChatSuccess",
+      "BotGetChatHistorySuccess",
+      "BotMessageSuccess",
+      "BotGetMyCommandsSuccess",
+      "BotEmptySuccess",
+    ]) {
+      expect(
+        spec.components.schemas[schemaName],
+      ).toMatchObject({
+        examples: [expect.any(Object)],
+      })
+    }
+    expect(
+      spec.components.schemas["BotBadRequestError"],
+    ).toMatchObject({
+      description:
+        "The request parameters are missing or invalid.",
+      examples: [
+        {
+          ok: false,
+          error: "CHAT_ID_INVALID",
+          error_code: 400,
+          description: "The chat id is invalid",
+        },
+      ],
+      properties: {
+        error_code: {
+          allOf: expect.arrayContaining([
+            {
+              $ref: "#/components/schemas/HttpStatusCode",
+            },
+          ]),
+        },
+      },
+    })
+    expect(
+      Object.keys(spec.components.schemas),
+    ).toEqual(
+      expect.arrayContaining([
+        "BotBadRequestError",
+        "BotUnauthorizedError",
+        "BotForbiddenError",
+        "BotNotFoundError",
+        "BotInternalServerError",
+      ]),
+    )
+    expect(
+      Object.keys(spec.components.schemas),
+    ).not.toEqual(
+      expect.arrayContaining([
+        "BotApiError1",
+        "BotApiError2",
+        "BotApiError3",
+        "BotApiError4",
+      ]),
+    )
+    expect(
+      spec.components.schemas["BotCommand"],
+    ).toMatchObject({
+      properties: {
+        command: {
+          allOf: expect.arrayContaining([
+            { minLength: 1 },
+            { maxLength: 32 },
+            { pattern: "^[a-z0-9_]+$" },
+          ]),
+        },
+        description: {
+          allOf: expect.arrayContaining([
+            { minLength: 1 },
+            { maxLength: 256 },
+          ]),
+        },
+      },
+    })
+    expect(
+      spec.components.schemas["SetMyCommandsInput"],
+    ).toMatchObject({
+      properties: {
+        commands: {
+          maxItems: 100,
+        },
+      },
+    })
+    expect(
+      spec.components.schemas["SetMyCommandsInput"],
+    ).not.toMatchObject({
+      properties: {
+        commands: {
+          allOf: expect.arrayContaining([
+            { maxItems: 100 },
+          ]),
+        },
+      },
+    })
+    expect(
+      spec.components.schemas["BotMessageEntityInput"],
+    ).toMatchObject({
+      properties: {
+        offset: {
+          allOf: expect.arrayContaining([
+            {
+              $ref: "#/components/schemas/WireNonNegativeInteger",
+            },
+          ]),
+        },
+        length: {
+          allOf: expect.arrayContaining([
+            {
+              $ref: "#/components/schemas/WireNonNegativeInteger",
+            },
+          ]),
+        },
+      },
+    })
+    expect(
+      spec.components.schemas["BotEmptyResult"],
+    ).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+    })
+    expect(
+      spec.components.schemas["BotEmptyResult"],
+    ).not.toHaveProperty("anyOf")
+    expect(
+      spec.components.schemas["BotUser"],
+    ).toMatchObject({
+      description:
+        "Basic information about an Inline user or bot.",
+      properties: {
+        username: {
+          allOf: [
+            {
+              description:
+                "Public username, without the leading @.",
+            },
+          ],
+        },
+      },
+    })
 
     const text = JSON.stringify(spec)
     expect(text).toContain("chat_id")
@@ -952,6 +1311,13 @@ describe("Effect Bot routes", () => {
     expect(text).not.toContain("peer_user_id")
     expect(text).not.toContain("parseMarkdown")
     expect(text).not.toContain("thread_id")
+    expect(text).not.toContain("BotInputId")
+    expect(text).not.toContain("MessageIdInput")
+    expect(text).not.toContain("ChatIdInput")
+    expect(text).not.toContain("UserIdInput")
+    expect(JSON.stringify(getChatHistory)).not.toContain(
+      "(?:[Ee]",
+    )
   })
 
   it("matches the checked-in legacy oracle's Bot path and method coverage", () => {
@@ -998,18 +1364,23 @@ describe("Effect Bot routes", () => {
   })
 
   it("passes decoded GET query values to the operation boundary", async () => {
-    let input: GetChatParams | undefined
+    let chatInput: GetChatParams | undefined
+    let historyInput: GetChatHistoryParams | undefined
     const kernel = makeKernel({
       operations: makeOperations({
         getChat: (value) => {
-          input = value
+          chatInput = value
           return Effect.succeed({ chat: botChat })
+        },
+        getChatHistory: (value) => {
+          historyInput = value
+          return Effect.succeed({ messages: [] })
         },
       }),
     })
 
     try {
-      const response = await kernel.handler(
+      const chatResponse = await kernel.handler(
         new Request(
           "http://inline.test/bot/getChat?user_id=7",
           {
@@ -1019,9 +1390,25 @@ describe("Effect Bot routes", () => {
           },
         ),
       )
+      const historyResponse = await kernel.handler(
+        new Request(
+          "http://inline.test/bot/getChatHistory?chat_id=99&limit=10&offset_message_id=101",
+          {
+            headers: {
+              authorization: "Bearer 42:HEADER",
+            },
+          },
+        ),
+      )
 
-      expect(response.status).toBe(200)
-      expect(input).toEqual({ user_id: "7" })
+      expect(chatResponse.status).toBe(200)
+      expect(historyResponse.status).toBe(200)
+      expect(chatInput).toEqual({ user_id: 7 })
+      expect(historyInput).toEqual({
+        chat_id: 99,
+        limit: 10,
+        offset_message_id: 101,
+      })
     } finally {
       await kernel.dispose()
     }

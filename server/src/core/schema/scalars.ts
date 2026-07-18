@@ -1,4 +1,7 @@
-import { Schema } from "effect"
+import {
+  Schema,
+  SchemaGetter,
+} from "effect"
 
 const safeIntegerRange = Schema.isBetween({
   minimum: Number.MIN_SAFE_INTEGER,
@@ -24,6 +27,46 @@ const httpStatusRange = Schema.isBetween({
 export const WireSafeInteger = Schema.Int.check(safeIntegerRange).annotate({
   identifier: "WireSafeInteger",
   description: "An integer that can be represented exactly by a JavaScript number",
+})
+
+const SafeIntegerString = Schema.String.check(
+  Schema.isPattern(/^[+-]?[0-9]+$/),
+).annotate({
+  identifier: "SafeIntegerString",
+  description:
+    "A signed decimal integer string within JavaScript's safe-integer range",
+  examples: ["42"],
+})
+
+/**
+ * Query/path codec for a JSON-safe integer.
+ *
+ * Keeping the encoded string schema explicit prevents generated OpenAPI from
+ * exposing Effect's broader JavaScript-number parser (decimals and exponents)
+ * for integer-only transport fields.
+ */
+export const WireSafeIntegerFromString =
+  SafeIntegerString.pipe(
+    Schema.decodeTo(WireSafeInteger, {
+      decode: SchemaGetter.transform((value) =>
+        Number(value),
+      ),
+      encode: SchemaGetter.transform((value) =>
+        String(value),
+      ),
+    }),
+  ).annotate({
+    identifier: "WireSafeIntegerFromString",
+  })
+
+/** JSON/body compatibility codec accepting an integer or integer string. */
+export const WireSafeIntegerInput = Schema.Union([
+  WireSafeInteger,
+  WireSafeIntegerFromString,
+]).annotate({
+  identifier: "WireSafeIntegerInput",
+  description:
+    "A safe integer supplied as a JSON integer or decimal integer string",
 })
 
 /** JSON-safe non-negative integer with no nominal meaning. */

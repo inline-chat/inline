@@ -5,7 +5,7 @@ import {
 } from "effect/unstable/http"
 import {
   HttpApi,
-  HttpApiSwagger,
+  HttpApiScalar,
   OpenApi,
   type HttpApiGroup,
 } from "effect/unstable/httpapi"
@@ -175,16 +175,80 @@ const addGlobalRateLimitResponse = (
   return input
 }
 
+/**
+ * Effect emits array checks as `allOf` branches. Scalar 1.43.5 loops while
+ * rendering `maxItems` in that position, even though the schema is valid.
+ *
+ * Keep the Effect check for runtime validation and move only the generated
+ * command-list constraint to the equivalent array keyword position.
+ */
+const makeBotCommandListScalarCompatible = (
+  input: Record<string, unknown>,
+): Record<string, unknown> => {
+  const commandSchema = (
+    input["components"] as {
+      readonly schemas?: {
+        readonly SetMyCommandsInput?: {
+          readonly properties?: {
+            readonly commands?: {
+              allOf?: Array<Record<string, unknown>>
+              maxItems?: number
+            }
+          }
+        }
+      }
+    } | undefined
+  )?.schemas?.SetMyCommandsInput?.properties?.commands
+  const allOf = commandSchema?.allOf
+
+  const maxItemsBranch = allOf?.find(
+    (branch) =>
+      typeof branch["maxItems"] === "number",
+  )
+  const maxItems = maxItemsBranch?.["maxItems"]
+  if (
+    commandSchema === undefined ||
+    allOf === undefined ||
+    maxItemsBranch === undefined ||
+    typeof maxItems !== "number"
+  ) {
+    return input
+  }
+
+  commandSchema.maxItems = maxItems
+  const remainingAllOf = allOf.flatMap((branch) => {
+    if (branch !== maxItemsBranch) {
+      return [branch]
+    }
+    const remainingBranch = { ...maxItemsBranch }
+    delete remainingBranch["maxItems"]
+    return Object.keys(remainingBranch).length === 0
+      ? []
+      : [remainingBranch]
+  })
+  if (remainingAllOf.length === 0) {
+    delete commandSchema.allOf
+  } else {
+    commandSchema.allOf = remainingAllOf
+  }
+
+  return input
+}
+
 const annotateApi = <Id extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<Id, Groups>,
   {
     apiBaseUrl,
     description,
     title,
+    transform,
   }: {
     readonly apiBaseUrl: string
     readonly description?: string | undefined
     readonly title: string
+    readonly transform?: (
+      input: Record<string, unknown>,
+    ) => Record<string, unknown>
   },
 ): HttpApi.HttpApi<Id, Groups> =>
   api.annotateMerge(
@@ -198,7 +262,10 @@ const annotateApi = <Id extends string, Groups extends HttpApiGroup.Constraint>(
       override: {
         info: apiInfo(title, description),
       },
-      transform: addGlobalRateLimitResponse,
+      transform: (input) => {
+        const withRateLimit = addGlobalRateLimitResponse(input)
+        return transform?.(withRateLimit) ?? withRateLimit
+      },
     }),
   )
 
@@ -220,6 +287,7 @@ export const makeBotApiBase = (apiBaseUrl: string) =>
     apiBaseUrl,
     description: BOT_API_DESCRIPTION,
     title: "Inline Bot HTTP API Docs",
+    transform: makeBotCommandListScalarCompatible,
   })
 
 export interface OpenApiDocumentDefinition<
@@ -278,8 +346,20 @@ export const makeOpenApiDocumentLayer = <
 
   return Layer.mergeAll(
     HttpRouter.add("GET", definition.jsonPath, jsonResponse),
-    HttpApiSwagger.layer(definition.api, {
+    HttpApiScalar.layer(definition.api, {
       path: definition.swaggerPath,
+      scalar: {
+        customCss: `
+:root {
+  --scalar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --scalar-font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+`,
+        layout: "modern",
+        showSidebar: true,
+        theme: "default",
+        withDefaultFonts: false,
+      },
     }),
   )
 }

@@ -27,7 +27,6 @@ import { parseLegacyElysiaBody } from "../../core/http/legacyElysiaBody"
 import {
   BOT_API_ID,
   makeBotApiBase,
-  requireOpenApiRequestHeader,
 } from "../../core/http/openApi"
 import { HttpRequestContext } from "../../core/http/requestContext"
 import { defineHttpRouteGroup } from "../../core/http/routeGroup"
@@ -58,6 +57,7 @@ import {
 } from "./operations.effect"
 import {
   BotEmptySuccess,
+  BotEmptyRuntimeSuccess,
   BotGetChatHistorySuccess,
   BotGetChatHistoryRuntimeSuccess,
   BotGetChatSuccess,
@@ -71,8 +71,10 @@ import {
   SendMessageInput,
   SendReactionInput,
   SetMyCommandsInput,
+  botTargetFieldDescriptions,
   botApiErrorAt,
   botApiErrors,
+  getChatHistoryFieldDescriptions,
 } from "./types.effect"
 import {
   BotGetMeSuccess,
@@ -86,22 +88,128 @@ const TokenPath = {
   token: Schema.String,
 } as const
 
-const optionalRequestBody = OpenApi.annotations({
-  transform: (operation) => {
-    if (operation["requestBody"] !== undefined) {
-      operation["requestBody"].required = false
-    }
-    return operation
+const botOperationParameters = (options: {
+  readonly authorizationHeader:
+    | "required"
+    | "optional-with-path-token"
+  readonly optionalRequestBody?: boolean
+  readonly queryDescriptions?: Readonly<
+    Record<string, string>
+  >
+}) =>
+  OpenApi.annotations({
+    transform: (operation) => {
+      if (
+        options.optionalRequestBody &&
+        operation["requestBody"] !== undefined
+      ) {
+        operation["requestBody"].required = false
+      }
+      for (const parameter of operation["parameters"] ?? []) {
+        if (!("name" in parameter)) continue
+        if (
+          "in" in parameter &&
+          parameter.in === "header" &&
+          parameter.name.toLowerCase() === "authorization"
+        ) {
+          if (options.authorizationHeader === "required") {
+            parameter.required = true
+            parameter.description ??=
+              "Required bot token using the Bearer scheme."
+          } else {
+            parameter.required = false
+            parameter.description ??=
+              "Optional bot token using the Bearer scheme. When supplied, it takes precedence over the token in the URL."
+          }
+        }
+        if (
+          "in" in parameter &&
+          parameter.in === "query"
+        ) {
+          parameter.description ??=
+            options.queryDescriptions?.[parameter.name]
+        }
+        if (
+          options.authorizationHeader ===
+            "optional-with-path-token" &&
+          "in" in parameter &&
+          parameter.in === "path" &&
+          parameter.name === "token"
+        ) {
+          parameter.description ??=
+            "Required bot token included in the URL path."
+        }
+      }
+      return operation
+    },
+  })
+
+interface BotEndpointDocumentation {
+  readonly summary: string
+  readonly description: string
+}
+
+const BotMethodDocumentation = {
+  getMe: {
+    summary: "Get the current bot",
+    description:
+      "A simple method for testing bot authentication. Returns basic information about the bot account associated with the supplied token.",
   },
-})
+  sendMessage: {
+    summary: "Send a message",
+    description:
+      "Sends a text message to a private user or chat. Supply exactly one of user_id or chat_id. On success, returns the sent message.",
+  },
+  getChat: {
+    summary: "Get a chat",
+    description:
+      "Returns current information about a private conversation or chat, including its latest message when available. Supply exactly one of user_id or chat_id.",
+  },
+  getChatHistory: {
+    summary: "Get chat history",
+    description:
+      "Returns a page of messages from a private conversation or chat. Supply exactly one of user_id or chat_id, and use offset_message_id to request older messages.",
+  },
+  editMessageText: {
+    summary: "Edit message text",
+    description:
+      "Replaces the text and formatting of a message in a private conversation or chat. On success, returns the updated message.",
+  },
+  deleteMessage: {
+    summary: "Delete a message",
+    description:
+      "Deletes a message from a private conversation or chat. Returns an empty result when the message is deleted.",
+  },
+  sendReaction: {
+    summary: "Send a reaction",
+    description:
+      "Adds the bot's emoji reaction to a message. Returns an empty result when the reaction is applied.",
+  },
+  getMyCommands: {
+    summary: "Get bot commands",
+    description:
+      "Returns the command list currently published by the authenticated bot.",
+  },
+  setMyCommands: {
+    summary: "Replace bot commands",
+    description:
+      "Replaces the authenticated bot's complete command list. Commands appear to users in sort_order; send an empty array to clear the list.",
+  },
+  deleteMyCommands: {
+    summary: "Delete bot commands",
+    description:
+      "Deletes every command published by the authenticated bot. Returns an empty result when the command list is cleared.",
+  },
+} satisfies Readonly<
+  Record<BotOperation, BotEndpointDocumentation>
+>
 
 const botEndpoint = (
-  summary: string,
+  documentation: BotEndpointDocumentation,
 ) =>
   OpenApi.annotations({
-    summary,
-    description:
-      "Returns the compact Inline Bot API envelope. POST query parameters are accepted for compatibility; JSON is recommended.",
+    summary: documentation.summary,
+    description: documentation.description,
   })
 
 const headerGet = <
@@ -112,10 +220,13 @@ const headerGet = <
 >(
   identifier: Identifier,
   path: Path,
-  summary: string,
+  documentation: BotEndpointDocumentation,
   options: {
     readonly success: Success
     readonly query: Query
+    readonly queryDescriptions?: Readonly<
+      Record<Extract<keyof Query, string>, string>
+    >
   },
 ) =>
   HttpApiEndpoint.get(identifier, path, {
@@ -124,12 +235,12 @@ const headerGet = <
     success: options.success,
     error: botApiErrors,
   }).annotateMerge(
-    botEndpoint(summary),
+    botEndpoint(documentation),
   ).annotateMerge(
-    requireOpenApiRequestHeader(
-      "authorization",
-      "Required bot token using the Bearer scheme.",
-    ),
+    botOperationParameters({
+      authorizationHeader: "required",
+      queryDescriptions: options.queryDescriptions,
+    }),
   )
 
 const pathGet = <
@@ -140,10 +251,13 @@ const pathGet = <
 >(
   identifier: Identifier,
   path: Path,
-  summary: string,
+  documentation: BotEndpointDocumentation,
   options: {
     readonly success: Success
     readonly query: Query
+    readonly queryDescriptions?: Readonly<
+      Record<Extract<keyof Query, string>, string>
+    >
   },
 ) =>
   HttpApiEndpoint.get(identifier, path, {
@@ -152,7 +266,14 @@ const pathGet = <
     query: options.query,
     success: options.success,
     error: botApiErrors,
-  }).annotateMerge(botEndpoint(summary))
+  }).annotateMerge(
+    botEndpoint(documentation),
+  ).annotateMerge(
+    botOperationParameters({
+      authorizationHeader: "optional-with-path-token",
+      queryDescriptions: options.queryDescriptions,
+    }),
+  )
 
 const headerPost = <
   const Identifier extends string,
@@ -162,7 +283,7 @@ const headerPost = <
 >(
   identifier: Identifier,
   path: Path,
-  summary: string,
+  documentation: BotEndpointDocumentation,
   options: {
     readonly success: Success
     readonly payload?: Payload | undefined
@@ -176,13 +297,13 @@ const headerPost = <
     success: options.success,
     error: botApiErrors,
   }).annotateMerge(
-    botEndpoint(summary),
+    botEndpoint(documentation),
   ).annotateMerge(
-    requireOpenApiRequestHeader(
-      "authorization",
-      "Required bot token using the Bearer scheme.",
-    ),
-  ).annotateMerge(optionalRequestBody)
+    botOperationParameters({
+      authorizationHeader: "required",
+      optionalRequestBody: true,
+    }),
+  )
 
 const pathPost = <
   const Identifier extends string,
@@ -192,7 +313,7 @@ const pathPost = <
 >(
   identifier: Identifier,
   path: Path,
-  summary: string,
+  documentation: BotEndpointDocumentation,
   options: {
     readonly success: Success
     readonly payload?: Payload | undefined
@@ -207,14 +328,19 @@ const pathPost = <
     success: options.success,
     error: botApiErrors,
   }).annotateMerge(
-    botEndpoint(summary),
-  ).annotateMerge(optionalRequestBody)
+    botEndpoint(documentation),
+  ).annotateMerge(
+    botOperationParameters({
+      authorizationHeader: "optional-with-path-token",
+      optionalRequestBody: true,
+    }),
+  )
 
 const HeaderBotEndpoints = {
   getMe: headerGet(
     "headerGetMe",
     "/bot/getMe",
-    "Get the current bot",
+    BotMethodDocumentation.getMe,
     {
       query: {},
       success: BotGetMeSuccess,
@@ -223,7 +349,7 @@ const HeaderBotEndpoints = {
   sendMessage: headerPost(
     "headerSendMessage",
     "/bot/sendMessage",
-    "Send a message",
+    BotMethodDocumentation.sendMessage,
     {
       payload: SendMessageInput,
       success: BotMessageSuccess,
@@ -232,25 +358,28 @@ const HeaderBotEndpoints = {
   getChat: headerGet(
     "headerGetChat",
     "/bot/getChat",
-    "Get a chat",
+    BotMethodDocumentation.getChat,
     {
       query: GetChatInput.fields,
+      queryDescriptions: botTargetFieldDescriptions,
       success: BotGetChatSuccess,
     },
   ),
   getChatHistory: headerGet(
     "headerGetChatHistory",
     "/bot/getChatHistory",
-    "Get chat history",
+    BotMethodDocumentation.getChatHistory,
     {
       query: GetChatHistoryInput.fields,
+      queryDescriptions:
+        getChatHistoryFieldDescriptions,
       success: BotGetChatHistorySuccess,
     },
   ),
   editMessageText: headerPost(
     "headerEditMessageText",
     "/bot/editMessageText",
-    "Edit message text",
+    BotMethodDocumentation.editMessageText,
     {
       payload: EditMessageTextInput,
       success: BotMessageSuccess,
@@ -259,7 +388,7 @@ const HeaderBotEndpoints = {
   deleteMessage: headerPost(
     "headerDeleteMessage",
     "/bot/deleteMessage",
-    "Delete a message",
+    BotMethodDocumentation.deleteMessage,
     {
       payload: DeleteMessageInput,
       success: BotEmptySuccess,
@@ -268,7 +397,7 @@ const HeaderBotEndpoints = {
   sendReaction: headerPost(
     "headerSendReaction",
     "/bot/sendReaction",
-    "Send a reaction",
+    BotMethodDocumentation.sendReaction,
     {
       payload: SendReactionInput,
       success: BotEmptySuccess,
@@ -277,7 +406,7 @@ const HeaderBotEndpoints = {
   getMyCommands: headerGet(
     "headerGetMyCommands",
     "/bot/getMyCommands",
-    "Get bot commands",
+    BotMethodDocumentation.getMyCommands,
     {
       query: {},
       success: BotGetMyCommandsSuccess,
@@ -286,7 +415,7 @@ const HeaderBotEndpoints = {
   setMyCommands: headerPost(
     "headerSetMyCommands",
     "/bot/setMyCommands",
-    "Replace bot commands",
+    BotMethodDocumentation.setMyCommands,
     {
       payload: SetMyCommandsInput,
       success: BotEmptySuccess,
@@ -295,7 +424,7 @@ const HeaderBotEndpoints = {
   deleteMyCommands: headerPost(
     "headerDeleteMyCommands",
     "/bot/deleteMyCommands",
-    "Delete bot commands",
+    BotMethodDocumentation.deleteMyCommands,
     { success: BotEmptySuccess },
   ),
 } as const
@@ -304,7 +433,7 @@ const PathBotEndpoints = {
   getMe: pathGet(
     "pathGetMe",
     "/bot:token/getMe",
-    "Get the current bot using a path token",
+    BotMethodDocumentation.getMe,
     {
       query: {},
       success: BotGetMeSuccess,
@@ -313,7 +442,7 @@ const PathBotEndpoints = {
   sendMessage: pathPost(
     "pathSendMessage",
     "/bot:token/sendMessage",
-    "Send a message using a path token",
+    BotMethodDocumentation.sendMessage,
     {
       payload: SendMessageInput,
       success: BotMessageSuccess,
@@ -322,25 +451,28 @@ const PathBotEndpoints = {
   getChat: pathGet(
     "pathGetChat",
     "/bot:token/getChat",
-    "Get a chat using a path token",
+    BotMethodDocumentation.getChat,
     {
       query: GetChatInput.fields,
+      queryDescriptions: botTargetFieldDescriptions,
       success: BotGetChatSuccess,
     },
   ),
   getChatHistory: pathGet(
     "pathGetChatHistory",
     "/bot:token/getChatHistory",
-    "Get chat history using a path token",
+    BotMethodDocumentation.getChatHistory,
     {
       query: GetChatHistoryInput.fields,
+      queryDescriptions:
+        getChatHistoryFieldDescriptions,
       success: BotGetChatHistorySuccess,
     },
   ),
   editMessageText: pathPost(
     "pathEditMessageText",
     "/bot:token/editMessageText",
-    "Edit message text using a path token",
+    BotMethodDocumentation.editMessageText,
     {
       payload: EditMessageTextInput,
       success: BotMessageSuccess,
@@ -349,7 +481,7 @@ const PathBotEndpoints = {
   deleteMessage: pathPost(
     "pathDeleteMessage",
     "/bot:token/deleteMessage",
-    "Delete a message using a path token",
+    BotMethodDocumentation.deleteMessage,
     {
       payload: DeleteMessageInput,
       success: BotEmptySuccess,
@@ -358,7 +490,7 @@ const PathBotEndpoints = {
   sendReaction: pathPost(
     "pathSendReaction",
     "/bot:token/sendReaction",
-    "Send a reaction using a path token",
+    BotMethodDocumentation.sendReaction,
     {
       payload: SendReactionInput,
       success: BotEmptySuccess,
@@ -367,7 +499,7 @@ const PathBotEndpoints = {
   getMyCommands: pathGet(
     "pathGetMyCommands",
     "/bot:token/getMyCommands",
-    "Get bot commands using a path token",
+    BotMethodDocumentation.getMyCommands,
     {
       query: {},
       success: BotGetMyCommandsSuccess,
@@ -376,7 +508,7 @@ const PathBotEndpoints = {
   setMyCommands: pathPost(
     "pathSetMyCommands",
     "/bot:token/setMyCommands",
-    "Replace bot commands using a path token",
+    BotMethodDocumentation.setMyCommands,
     {
       payload: SetMyCommandsInput,
       success: BotEmptySuccess,
@@ -385,15 +517,23 @@ const PathBotEndpoints = {
   deleteMyCommands: pathPost(
     "pathDeleteMyCommands",
     "/bot:token/deleteMyCommands",
-    "Delete bot commands using a path token",
+    BotMethodDocumentation.deleteMyCommands,
     { success: BotEmptySuccess },
   ),
 } as const
 
 const BotMethodNotFound =
-  botApiErrorAt(404).annotate({
-    identifier: "BotMethodNotFound",
-  })
+  botApiErrorAt(
+    404,
+    "BotMethodNotFound",
+    "The requested Bot API method was not found.",
+    {
+      ok: false,
+      error: "METHOD_NOT_FOUND",
+      error_code: 404,
+      description: "Method not found",
+    },
+  )
 
 const hiddenFallback = OpenApi.annotations({
   exclude: true,
@@ -719,6 +859,49 @@ const integerForValidation = (
   return Number.isSafeInteger(parsed) ? parsed : value
 }
 
+const normalizeIntegerFields = (
+  value: Record<string, unknown>,
+  fields: ReadonlyArray<string>,
+): Record<string, unknown> => {
+  const normalized = { ...value }
+  for (const field of fields) {
+    if (field in normalized) {
+      normalized[field] = integerForValidation(
+        normalized[field],
+      )
+    }
+  }
+  return normalized
+}
+
+const normalizeBotEntityForSchema = (
+  value: unknown,
+): unknown =>
+  isRecord(value)
+    ? normalizeIntegerFields(value, [
+        "offset",
+        "length",
+        "user_id",
+        "chat_id",
+        "space_id",
+      ])
+    : value
+
+const normalizeBotCommandForSchema = (
+  value: unknown,
+): unknown => {
+  if (!isRecord(value)) return value
+  const normalized = normalizeIntegerFields(value, [
+    "sort_order",
+  ])
+  for (const field of ["command", "description"] as const) {
+    if (typeof normalized[field] === "string") {
+      normalized[field] = normalized[field].trim()
+    }
+  }
+  return normalized
+}
+
 const booleanForValidation = (
   value: unknown,
 ): unknown => {
@@ -741,20 +924,30 @@ const normalizeInputForSchema = (
   operation: BotOperation,
   input: Record<string, unknown>,
 ): Record<string, unknown> => {
-  const normalized = { ...input }
-  if ("limit" in normalized) {
-    normalized["limit"] = integerForValidation(
-      normalized["limit"],
-    )
-  }
+  // TODO(effect-cutover): remove decimal-string POST coercion after supported
+  // Bot clients use canonical numeric IDs and compatibility telemetry is quiet.
+  const usesQueryIdCodecs =
+    operation === "getChat" ||
+    operation === "getChatHistory"
+  const normalized = usesQueryIdCodecs
+    ? { ...input }
+    : normalizeIntegerFields(input, [
+        "user_id",
+        "chat_id",
+        "message_id",
+        "reply_to_message_id",
+      ])
   if (
     operation === "sendMessage" ||
     operation === "editMessageText"
   ) {
     if ("entities" in normalized) {
-      normalized["entities"] = parseCompatibilityJson(
+      const entities = parseCompatibilityJson(
         normalized["entities"],
       )
+      normalized["entities"] = Array.isArray(entities)
+        ? entities.map(normalizeBotEntityForSchema)
+        : entities
     }
     const parseMarkdown =
       normalized["parse_markdown"] ??
@@ -769,17 +962,7 @@ const normalizeInputForSchema = (
       normalized["commands"],
     )
     normalized["commands"] = Array.isArray(commands)
-      ? commands.map((command) => {
-          if (!isRecord(command) || !("sort_order" in command)) {
-            return command
-          }
-          return {
-            ...command,
-            sort_order: integerForValidation(
-              command["sort_order"],
-            ),
-          }
-        })
+      ? commands.map(normalizeBotCommandForSchema)
       : commands
   }
   return normalized
@@ -832,10 +1015,12 @@ const validateInput = (
     Effect.mapError(
       () => new InvalidBotPayload({ reason: "schema" }),
     ),
-    // TODO(effect-cutover): pass decoded branded/schema values once every Bot
-    // operation is Effect-native and no retained operation owns coercion.
-    // Until then the executable guard validates the compatibility view.
-    Effect.as(input),
+    Effect.map((decoded) => ({
+      // Preserve undocumented compatibility aliases until their telemetry
+      // removal window closes, but make canonical fields schema-owned.
+      ...input,
+      ...decoded,
+    })),
   )
 }
 
@@ -956,7 +1141,7 @@ const validateSuccessEnvelope = (
       case "setMyCommands":
       case "deleteMyCommands":
         return Schema.decodeUnknownEffect(
-          BotEmptySuccess,
+          BotEmptyRuntimeSuccess,
         )(envelope)
     }
   })()
@@ -1015,11 +1200,14 @@ export const executeBotOperation = (
       webRequest,
       pathToken,
     )
-    yield* validateInput(operation, input)
+    const validatedInput = yield* validateInput(
+      operation,
+      input,
+    )
     const requestContext = yield* HttpRequestContext
     const result = yield* runOperation(
       operation,
-      input,
+      validatedInput,
       {
         currentUserId: identity.userId,
         currentSessionId: identity.sessionId,
