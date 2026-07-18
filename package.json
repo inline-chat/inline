@@ -24,6 +24,7 @@
     "@inline-chat/oauth-core": "workspace:*",
     "@inline-chat/realtime-sdk": "workspace:*",
     "@inline-chat/bot-api-types": "workspace:*",
+    "esbuild": "0.28.1",
     "typescript": "5.8.3"
   },
   "devDependencies": {

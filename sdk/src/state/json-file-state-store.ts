@@ -13,7 +13,7 @@ export class JsonFileStateStore implements InlineSdkStateStore {
     try {
       const raw = await readFile(this.path, "utf8")
       return deserializeStateV1(raw)
-    } catch (error) {
+    } catch {
       // File missing or invalid: treat as no state.
       return null
     }

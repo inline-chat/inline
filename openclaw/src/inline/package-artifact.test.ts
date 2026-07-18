@@ -42,7 +42,14 @@ describe("packed artifact", () => {
     const tarballPath = path.join(packDir, packedFile!)
     await execFile("tar", ["-xzf", tarballPath, "-C", extractDir])
 
-    const distDir = path.join(extractDir, "package", "dist")
+    const packedPackageDir = path.join(extractDir, "package")
+    const packedFiles = await readdir(packedPackageDir)
+    expect(packedFiles).toContain("LICENSE")
+    expect(await readFile(path.join(packedPackageDir, "LICENSE"), "utf8")).toContain(
+      "Apache License",
+    )
+
+    const distDir = path.join(packedPackageDir, "dist")
     const jsFiles = await listJsFiles(distDir)
     expect(jsFiles.length).toBeGreaterThan(0)
 
@@ -57,6 +64,7 @@ describe("packed artifact", () => {
     expect(distFiles).toContain("runtime-setter-api.js")
     expect(distFiles).toContain("account-inspect-api.js")
     expect(distFiles).toContain("runtime-register-api.js")
+    expect(distFiles).not.toContain("inline")
     expect(distFiles).not.toContain("tsconfig.tsbuildinfo")
 
     const mainEntry = await readFile(path.join(distDir, "index.js"), "utf8")

@@ -294,6 +294,7 @@ describe("plugin manifest", () => {
           }
         }
       }
+      devDependencies?: { openclaw?: unknown }
       peerDependencies?: { openclaw?: unknown }
       peerDependenciesMeta?: { openclaw?: { optional?: unknown } }
       moltbot?: unknown
@@ -305,7 +306,8 @@ describe("plugin manifest", () => {
     expect(json.peerDependencies?.openclaw).toBe(">=2026.6.11")
     expect(json.peerDependenciesMeta?.openclaw?.optional).toBe(true)
     expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.6.11")
-    expect(json.openclaw?.build?.openclawVersion).toBe("2026.6.11")
+    expect(json.devDependencies?.openclaw).toBe("2026.7.1-2")
+    expect(json.openclaw?.build?.openclawVersion).toBe(json.devDependencies?.openclaw)
     expect(json.openclaw?.release?.publishToClawHub).toBe(true)
     expect(json.openclaw?.release?.publishToNpm).toBe(true)
     expect(json.moltbot).toBeUndefined()

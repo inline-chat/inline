@@ -71,8 +71,8 @@ describe("packed artifact", () => {
       pluginId: "inline",
       pluginPath: "plugin/inline",
       minHermesVersion: "0.17.0",
-      testedHermesVersion: "0.17.0",
-      testedHermesCommit: "824f2279",
+      testedHermesVersion: "0.18.2",
+      testedHermesCommit: "9de9c25",
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")

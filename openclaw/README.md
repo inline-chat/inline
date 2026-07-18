@@ -39,7 +39,7 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.54` | `>=2026.6.11` | `0.0.13` | Current | Keeps recovered WebSocket and best-effort cursor warnings out of healthy channel status. |
+| `0.0.54` | `>=2026.6.11` | `0.0.13` | Current | Keeps recovered WebSocket and best-effort cursor warnings out of healthy channel status; validated through OpenClaw `2026.7.1-2`. |
 | `0.0.53` | `>=2026.6.11` | `0.0.13` | Stable | Clears recovered Inline WebSocket errors from channel status after reconnect. |
 | `0.0.52` | `>=2026.6.11` | `0.0.13` | Stable | Patch release for the SDK protocol dependency. |
 | `0.0.51` | `>=2026.6.11` | `0.0.12` | Stable | Added follow-mode mention gating for eligible reply/fresh Inline threads. |
