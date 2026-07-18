@@ -73,12 +73,12 @@ let package = Package(
       .upToNextMajor(from: "1.2.0")
     ),
     .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
-    // Inline's narrow LiveKit 2.15.1 fork preserves intentionally muted local
-    // tracks across publication and full reconnect. InlineRTC owns physical
-    // audio devices, routing, and health without SDK device/HAL patches.
+    // LiveKit 2.15.2 plus Inline's muted-track fixes and owned WebRTC chain.
+    // The WebRTC fork restores native typing-noise suppression and supplies
+    // live macOS key state without enabling Apple Voice Processing I/O.
     .package(
       url: "https://github.com/inline-chat/client-sdk-swift.git",
-      revision: "b5970c3528397b954bc4097877b42a3bfe6e5458"
+      revision: "0985c84904ba74a5f590a827376b3fcd3c91e83c"
     ),
     .package(
       url: "https://github.com/apple/swift-collections.git",

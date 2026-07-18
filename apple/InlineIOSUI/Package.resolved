@@ -1,12 +1,12 @@
 {
-  "originHash" : "9a279292ac4eae4502788c07a509fc72ebf6e218ccb4c64a6c087ff770cc9dac",
+  "originHash" : "7146f33472e0f6c5ce6622bf1928ed847c536e30be6f3f540289fd5858b37a0d",
   "pins" : [
     {
       "identity" : "client-sdk-swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/inline-chat/client-sdk-swift.git",
       "state" : {
-        "revision" : "b5970c3528397b954bc4097877b42a3bfe6e5458"
+        "revision" : "0985c84904ba74a5f590a827376b3fcd3c91e83c"
       }
     },
     {
@@ -129,10 +129,10 @@
     {
       "identity" : "webrtc-xcframework",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/livekit/webrtc-xcframework.git",
+      "location" : "https://github.com/inline-chat/webrtc-xcframework.git",
       "state" : {
-        "revision" : "46f2af86f06b9a8a9158d37cadda5cb5a214e4c4",
-        "version" : "144.7559.11"
+        "revision" : "56a1adbc4307d0759bf1475a6926046ed234a55e",
+        "version" : "144.7559.11-inline.7"
       }
     }
   ],

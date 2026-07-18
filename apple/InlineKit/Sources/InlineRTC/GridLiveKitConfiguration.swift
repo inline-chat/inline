@@ -122,19 +122,24 @@ struct InlineRTCConfiguration: Equatable, Sendable {
   }
 
   public struct Capture: Equatable, Sendable {
-    /// Request WebRTC echo cancellation for the published microphone track.
-    /// The exact processor remains provider-owned; this is independent of
-    /// Grid's macOS HAL versus AVAudioEngine device-routing choice.
+    /// Enable echo cancellation for the published microphone track.
     public var echoCancellation = true
+    /// Force WebRTC software AEC so Apple VPIO is never required.
+    public var echoCancellationMode: EchoCancellationMode = .software
     /// Request WebRTC automatic gain control for the published track.
     public var automaticGainControl = true
-    /// Request WebRTC noise suppression. Enhanced providers such as Krisp
-    /// require a separate custom audio processor.
+    /// Keep gain control provider-selected independently from AEC and NS.
+    public var automaticGainControlMode: AutoGainControlMode = .automatic
+    /// Request WebRTC's general software noise suppression.
     public var noiseSuppression = true
+    /// Force WebRTC software noise suppression so Apple VPIO is never required.
+    public var noiseSuppressionMode: NoiseSuppressionMode = .software
     /// Remove very low-frequency energy before encoding.
     public var highPassFilter = false
-    /// Ask WebRTC audio processing to detect typing noise where supported.
-    public var typingNoiseDetection = true
+    /// Keep the high-pass filter provider-selected when it is enabled.
+    public var highPassFilterMode: HighpassFilterMode = .automatic
+    /// Enable WebRTC's native transient suppressor for keyboard typing noise.
+    public var typingNoiseSuppression = true
 
     public init() {}
   }
@@ -162,11 +167,11 @@ struct InlineRTCConfiguration: Equatable, Sendable {
   }
 
   public struct VoiceProcessing: Equatable, Sendable {
-    /// AVAudioEngine-backend-only Apple Voice Processing I/O experiment. Grid's
-    /// default macOS HAL backend ignores this entire section. A measured cold
-    /// start took about seven seconds with VPIO enabled versus under one second
-    /// without it, so it remains off. Changing it requires an engine restart.
-    public var enabled = false
+    /// Whether Apple platform Voice Processing I/O is allowed. A measured cold
+    /// start took about seven seconds with VPIO allowed versus under one second
+    /// without it, so Grid disallows it and uses WebRTC software AEC/NS.
+    /// Changing this policy requires an engine restart.
+    public var platformVoiceProcessingAllowed = false
     /// Bypass VPIO while keeping the processing-capable audio path initialized.
     /// Useful for music experiments; normally false for conversation.
     public var bypassed = false
@@ -221,7 +226,11 @@ struct InlineRTCConfiguration: Equatable, Sendable {
         autoGainControl: capture.automaticGainControl,
         noiseSuppression: capture.noiseSuppression,
         highpassFilter: capture.highPassFilter,
-        typingNoiseDetection: capture.typingNoiseDetection
+        typingNoiseDetection: capture.typingNoiseSuppression,
+        echoCancellationMode: capture.echoCancellationMode,
+        autoGainControlMode: capture.automaticGainControlMode,
+        noiseSuppressionMode: capture.noiseSuppressionMode,
+        highpassFilterMode: capture.highPassFilterMode
       ),
       defaultAudioPublishOptions: AudioPublishOptions(
         name: publishing.trackName,
@@ -235,8 +244,10 @@ struct InlineRTCConfiguration: Equatable, Sendable {
 
   func applyVoiceProcessing() throws {
     let manager = AudioManager.shared
-    if manager.isVoiceProcessingEnabled != voiceProcessing.enabled {
-      try manager.setVoiceProcessingEnabled(voiceProcessing.enabled)
+    if manager.isPlatformVoiceProcessingAllowed != voiceProcessing.platformVoiceProcessingAllowed {
+      try manager.setPlatformVoiceProcessingAllowed(
+        voiceProcessing.platformVoiceProcessingAllowed
+      )
     }
     let microphoneMuteMode: LiveKit.MicrophoneMuteMode = switch voiceProcessing.microphoneMuteMode {
     case .voiceProcessing: .voiceProcessing
