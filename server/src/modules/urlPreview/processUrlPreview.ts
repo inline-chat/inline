@@ -135,7 +135,12 @@ const xCompatibilityDescriptionMinLength = 260
 const xCompatibilityDescriptionMaxLength = 280
 const maxTitleLength = 180
 const maxSiteNameLength = 80
-const maxPreviewUrls = 3
+const urlPreviewCandidatePolicy = {
+  maxUrls: 5,
+  // TEXT_URL stores a hidden target behind labeled text, such as Markdown `[docs](https://example.com)`.
+  // Raw URL text is scanned separately and remains eligible when this flag is false.
+  includeTextUrlTargets: false,
+} as const
 const maxImageBytes = 5 * 1024 * 1024
 const maxImagePixels = 16_000_000
 const maxImageWidth = 800
@@ -161,11 +166,11 @@ export function getPreviewUrlFromMessage(text: string, entities?: MessageEntitie
 }
 
 export function getPreviewUrlsFromMessage(text: string, entities?: MessageEntities | null): string[] {
-  return extractPreviewUrls(text, collectEntityUrls(text, entities), { limit: maxPreviewUrls })
+  return extractPreviewUrls(text, collectEntityUrls(text, entities), { limit: urlPreviewCandidatePolicy.maxUrls })
 }
 
 export function getPreviewRoutesFromMessage(text: string, entities?: MessageEntities | null): PreviewRoute[] {
-  return extractPreviewRoutes(text, collectEntityUrls(text, entities), { limit: maxPreviewUrls })
+  return extractPreviewRoutes(text, collectEntityUrls(text, entities), { limit: urlPreviewCandidatePolicy.maxUrls })
 }
 
 export async function processUrlPreviews(
@@ -174,9 +179,12 @@ export async function processUrlPreviews(
     previewRoutes?: PreviewRoute[]
   },
 ): Promise<void> {
-  const routes = input.previewRoutes ?? input.previewUrls?.map(generalPreviewRoute) ?? []
+  const routes = (input.previewRoutes ?? input.previewUrls?.map(generalPreviewRoute) ?? []).slice(
+    0,
+    urlPreviewCandidatePolicy.maxUrls,
+  )
   const previewUrlCount = routes.length
-  for (const previewRoute of routes.slice(0, maxPreviewUrls)) {
+  for (const previewRoute of routes) {
     await processUrlPreview({ ...input, previewRoute, previewUrlCount })
   }
 
@@ -455,7 +463,11 @@ function collectEntityUrls(text: string, entities?: MessageEntities | null): str
 
   const urls: string[] = []
   for (const entity of entities.entities) {
-    if (entity.type === MessageEntity_Type.TEXT_URL && entity.entity.oneofKind === "textUrl") {
+    if (
+      urlPreviewCandidatePolicy.includeTextUrlTargets &&
+      entity.type === MessageEntity_Type.TEXT_URL &&
+      entity.entity.oneofKind === "textUrl"
+    ) {
       urls.push(entity.entity.textUrl.url)
       continue
     }

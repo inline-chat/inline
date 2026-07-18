@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { and, eq } from "drizzle-orm"
 
+import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/core"
 import { db, schema } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
 import { addSpaceUrlPreviewExclusion } from "@in/server/functions/space.urlPreviewExclusions"
@@ -20,6 +21,48 @@ import {
 import { setupTestLifecycle, testUtils } from "../setup"
 
 const originalFetch = globalThis.fetch
+
+describe("URL preview candidates", () => {
+  it("previews literal HTTP URLs but not labeled TEXT_URL entity targets", () => {
+    const text = "our links and https://literal.example/docs"
+    const entities: MessageEntities = {
+      entities: [
+        {
+          type: MessageEntity_Type.TEXT_URL,
+          offset: 0n,
+          length: 9n,
+          entity: {
+            oneofKind: "textUrl",
+            textUrl: { url: "https://labeled.example/docs" },
+          },
+        },
+      ],
+    }
+
+    expect(getPreviewRoutesFromMessage(text, entities)).toEqual([
+      { kind: "general", url: "https://literal.example/docs" },
+    ])
+  })
+
+  it("allows up to five URL previews", () => {
+    const text = [
+      "https://one.example",
+      "https://two.example",
+      "https://three.example",
+      "https://four.example",
+      "https://five.example",
+      "https://six.example",
+    ].join(" ")
+
+    expect(getPreviewRoutesFromMessage(text)).toEqual([
+      { kind: "general", url: "https://one.example/" },
+      { kind: "general", url: "https://two.example/" },
+      { kind: "general", url: "https://three.example/" },
+      { kind: "general", url: "https://four.example/" },
+      { kind: "general", url: "https://five.example/" },
+    ])
+  })
+})
 
 describe("URL preview cache", () => {
   setupTestLifecycle()
