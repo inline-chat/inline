@@ -1,0 +1,351 @@
+import {
+  BunFileSystem,
+  BunHttpServer,
+  BunPath,
+} from "@effect/platform-bun"
+import type {
+  Server,
+} from "bun"
+import {
+  Cause,
+  Data,
+  Effect,
+  Exit,
+  Layer,
+} from "effect"
+import {
+  HttpRouter,
+} from "effect/unstable/http"
+import {
+  ErrorReporterLive,
+} from "../errors/errorReporterLive"
+import {
+  ProductionProcessServicesLive,
+} from "../effect/productionRuntime"
+import {
+  makeRuntimeBridge,
+} from "../effect/runtimeBridge"
+import type {
+  HttpApplicationLayer,
+} from "./application"
+import {
+  makeCoreHttpRequestHandler,
+} from "./bunRequestHandler"
+import {
+  installCoreShutdownHandlers,
+  type CoreShutdownSignal,
+} from "./shutdownSignals"
+import type {
+  TrustedClientIpHeader,
+} from "./middleware"
+import {
+  makeCoreRealtimeTransport,
+  type RealtimeWebSocketData,
+} from "./realtimeHost"
+
+const DEFAULT_GRACEFUL_SHUTDOWN_MILLIS =
+  20_000
+
+export class CoreProductionStartupError extends
+  Data.TaggedError(
+    "CoreProductionStartupError",
+  )<{
+    readonly cause: Cause.Cause<unknown>
+  }> {
+  override readonly message =
+    "The Effect production server failed to start."
+}
+
+export class CoreProductionShutdownError extends
+  Data.TaggedError(
+    "CoreProductionShutdownError",
+  )<{
+    readonly cause: unknown
+  }> {
+  override readonly message =
+    "The Effect production server failed to shut down cleanly."
+}
+
+export interface StartCoreProductionServerOptions<
+  ApplicationError,
+  ApplicationRequirements,
+> {
+  readonly application: HttpApplicationLayer<
+    ApplicationError,
+    ApplicationRequirements
+  >
+  readonly bindRealtimeServer?:
+    | ((
+      server: Server<
+        RealtimeWebSocketData
+      >,
+    ) => void | Promise<void>)
+    | undefined
+  readonly clientIpHeader?:
+    | TrustedClientIpHeader
+    | undefined
+  readonly gracefulShutdownMillis?:
+    | number
+    | undefined
+  readonly hostname?: string | undefined
+  readonly installSignalHandlers?:
+    | boolean
+    | undefined
+  readonly port?: number | undefined
+}
+
+export interface CoreProductionServerHandle {
+  readonly hostname: string
+  readonly port: number
+  readonly server: Server<
+    RealtimeWebSocketData
+  >
+  readonly shutdown: (
+    signal?: CoreShutdownSignal,
+  ) => Promise<void>
+}
+
+const bindCurrentRealtimeServer = async (
+  server: Server<
+    RealtimeWebSocketData
+  >,
+): Promise<void> => {
+  const { connectionManager } =
+    await import("../../ws/connections")
+
+  // TODO(effect-cutover): inject the publish capability into the realtime
+  // registry and remove this final singleton binding compatibility edge.
+  connectionManager.setServer(server)
+}
+
+const startupCause = (
+  cause: unknown,
+): Cause.Cause<unknown> =>
+  Cause.die(cause)
+
+const shutdownWithDeadline = async (
+  operation: () => Promise<void>,
+  timeoutMillis: number,
+  onTimeout: () => void,
+  currentStage: () => string,
+): Promise<void> => {
+  let timeout:
+    | ReturnType<typeof setTimeout>
+    | undefined
+
+  try {
+    await Promise.race([
+      operation(),
+      new Promise<never>(
+        (_resolve, reject) => {
+          timeout = setTimeout(() => {
+            onTimeout()
+            reject(
+              new Error(
+                `Effect production shutdown exceeded ${timeoutMillis}ms during ${currentStage()}.`,
+              ),
+            )
+          }, timeoutMillis)
+        },
+      ),
+    ])
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+/**
+ * Starts the complete replacement server on one Bun listener and one built
+ * Effect Layer context.
+ *
+ * HTTP, raw protobuf realtime, workers, and their scoped finalizers all share
+ * the runtime bridge. The caller still decides when this candidate becomes the
+ * production entry point.
+ */
+export const startCoreProductionServer = async <
+  ApplicationError,
+  ApplicationRequirements,
+>({
+  application,
+  bindRealtimeServer =
+    bindCurrentRealtimeServer,
+  clientIpHeader,
+  gracefulShutdownMillis =
+    DEFAULT_GRACEFUL_SHUTDOWN_MILLIS,
+  hostname = "0.0.0.0",
+  installSignalHandlers = false,
+  port = 0,
+}: StartCoreProductionServerOptions<
+  ApplicationError,
+  ApplicationRequirements
+>): Promise<CoreProductionServerHandle> => {
+  const platform = Layer.mergeAll(
+    BunHttpServer.layerHttpServices,
+    BunFileSystem.layer,
+    BunPath.layer,
+  )
+  const httpApplication =
+    application.pipe(
+      Layer.provideMerge(HttpRouter.layer),
+    )
+  const runtimeLayer = Layer.mergeAll(
+    httpApplication,
+    ProductionProcessServicesLive,
+    platform,
+  ).pipe(
+    Layer.provideMerge(ErrorReporterLive),
+  )
+  // Effect beta currently retains the request-context service supplied by the
+  // global middleware in the Layer requirement channel. The served request
+  // tests prove the middleware supplies it at runtime.
+  const runnableRuntimeLayer =
+    runtimeLayer as Layer.Layer<
+      Layer.Success<typeof runtimeLayer>,
+      Layer.Error<typeof runtimeLayer>
+    >
+  const bridge = makeRuntimeBridge(
+    runnableRuntimeLayer,
+  )
+  const contextExit =
+    await bridge.runPromiseExit(
+      Effect.context<
+        Layer.Success<
+          typeof runnableRuntimeLayer
+        >
+      >(),
+    )
+
+  if (Exit.isFailure(contextExit)) {
+    await bridge.dispose()
+    throw new CoreProductionStartupError({
+      cause: contextExit.cause,
+    })
+  }
+
+  const context = contextExit.value
+  const httpHandler =
+    makeCoreHttpRequestHandler(context)
+  const realtime =
+    makeCoreRealtimeTransport(
+      context,
+      { clientIpHeader },
+    )
+
+  let server:
+    | Server<RealtimeWebSocketData>
+    | undefined
+
+  try {
+    server = Bun.serve<
+      RealtimeWebSocketData
+    >({
+      hostname,
+      port,
+      fetch: (request, bunServer) => {
+        if (
+          realtime.tryUpgrade(
+            request,
+            bunServer,
+          )
+        ) {
+          return undefined
+        }
+
+        return httpHandler(
+          request,
+          bunServer.requestIP(request)
+            ?.address,
+        )
+      },
+      websocket: realtime.websocket,
+    })
+
+    await bindRealtimeServer(server)
+    if (
+      server.hostname === undefined ||
+      server.port === undefined
+    ) {
+      throw new Error(
+        "The Effect production listener did not bind a TCP address.",
+      )
+    }
+  } catch (cause) {
+    await server?.stop(true)
+    await bridge.dispose()
+    throw new CoreProductionStartupError({
+      cause: startupCause(cause),
+    })
+  }
+
+  let shutdownPromise:
+    | Promise<void>
+    | undefined
+  let removeSignalHandlers = (): void => {}
+  const shutdown = (
+    signal: CoreShutdownSignal = "manual",
+  ): Promise<void> => {
+    if (shutdownPromise !== undefined) {
+      return shutdownPromise
+    }
+
+    removeSignalHandlers()
+    let shutdownStage =
+      "listener drain"
+    shutdownPromise =
+      shutdownWithDeadline(
+        async () => {
+          shutdownStage =
+            "realtime transport"
+          await realtime.shutdown()
+          shutdownStage =
+            "active connection closure"
+          // TODO(effect-cutover): retry Bun's graceful stop(false) once its
+          // Promise no longer retains a server after any async WebSocket close
+          // callback. On Bun 1.3.1 even stop(true) can leave its Promise
+          // pending after such a close although it synchronously stops the
+          // listener. Unref the stopped listener and do not let that Bun
+          // bookkeeping Promise deadlock the owned Effect finalizers.
+          server.unref()
+          void Promise.resolve(
+            server.stop(true),
+          ).catch(() => {
+            process.exitCode = 1
+          })
+          shutdownStage =
+            "Effect runtime disposal"
+          await bridge.dispose()
+        },
+        gracefulShutdownMillis,
+        () => {
+          void server.stop(true)
+          if (signal !== "manual") {
+            process.exitCode = 1
+          }
+        },
+        () => shutdownStage,
+      ).catch((cause) => {
+        throw new CoreProductionShutdownError({
+          cause,
+        })
+      })
+
+    return shutdownPromise
+  }
+
+  if (installSignalHandlers) {
+    removeSignalHandlers =
+      installCoreShutdownHandlers(
+        shutdown,
+        { exitProcess: true },
+      )
+  }
+
+  return {
+    hostname: server.hostname!,
+    port: server.port!,
+    server,
+    shutdown,
+  }
+}

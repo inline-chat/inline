@@ -99,7 +99,10 @@ const main = async (): Promise<void> => {
   })
 
   const child = Bun.spawn({
-    cmd: [process.execPath, "src/core/index.ts"],
+    cmd: [
+      process.execPath,
+      "src/core/shadow.ts",
+    ],
     cwd: new URL("..", import.meta.url).pathname,
     env: {
       ...process.env,
@@ -248,7 +251,9 @@ const main = async (): Promise<void> => {
       "/",
       "/health",
       "/v1/getMe",
+      "/v1/sendMessage",
       "/v1/sendSmsCode",
+      "/admin/me",
       "/oauth/token",
     ]) {
       if (platformSpec.paths[path] === undefined) {
@@ -292,10 +297,18 @@ const main = async (): Promise<void> => {
     const [
       replacementRoot,
       replacementV1,
+      replacementMessaging,
+      replacementAdmin,
       replacementBot,
     ] = await Promise.all([
       fetchBounded(`${replacementBaseUrl}/`),
       fetchBounded(`${replacementBaseUrl}/v1/getMe`),
+      fetchBounded(
+        `${replacementBaseUrl}/v1/sendMessage`,
+      ),
+      fetchBounded(
+        `${replacementBaseUrl}/admin/me`,
+      ),
       fetchBounded(`${replacementBaseUrl}/bot/getMe`),
     ])
     if (
@@ -311,6 +324,18 @@ const main = async (): Promise<void> => {
     if (replacementV1.status !== 401) {
       throw new Error(
         `The Effect /v1/getMe auth boundary returned ${replacementV1.status}, expected 401.`,
+      )
+    }
+    if (
+      replacementMessaging.status !== 401
+    ) {
+      throw new Error(
+        `The Effect /v1/sendMessage auth boundary returned ${replacementMessaging.status}, expected 401.`,
+      )
+    }
+    if (replacementAdmin.status !== 401) {
+      throw new Error(
+        `The Effect /admin/me auth boundary returned ${replacementAdmin.status}, expected 401.`,
       )
     }
     if (replacementBot.status !== 401) {

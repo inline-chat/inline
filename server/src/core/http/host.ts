@@ -1,15 +1,24 @@
 import { BunFileSystem, BunHttpServer, BunPath } from "@effect/platform-bun"
 import { Cause, Data, Exit, Layer } from "effect"
-import { HttpRouter, HttpServer } from "effect/unstable/http"
+import {
+  HttpRouter,
+  HttpServer,
+} from "effect/unstable/http"
 import { ErrorReporterLive } from "../errors/errorReporterLive"
 import { makeRuntimeBridge } from "../effect/runtimeBridge"
 import type {
   HttpApplicationLayer,
 } from "./application"
+import {
+  installCoreShutdownHandlers,
+  type CoreShutdownSignal,
+} from "./shutdownSignals"
 
 const DEFAULT_GRACEFUL_SHUTDOWN_MILLIS = 20_000
 
-export type CoreShutdownSignal = "manual" | "SIGINT" | "SIGTERM"
+export type {
+  CoreShutdownSignal,
+} from "./shutdownSignals"
 
 export class CoreServerStartupError extends Data.TaggedError(
   "CoreServerStartupError",
@@ -75,29 +84,6 @@ export const makeCoreHttpServerLayer = <
   )
 }
 
-const installShutdownHandlers = (
-  shutdown: (signal: CoreShutdownSignal) => Promise<void>,
-): (() => void) => {
-  const onSigint = (): void => {
-    void shutdown("SIGINT").catch(() => {
-      process.exitCode = 1
-    })
-  }
-  const onSigterm = (): void => {
-    void shutdown("SIGTERM").catch(() => {
-      process.exitCode = 1
-    })
-  }
-
-  process.once("SIGINT", onSigint)
-  process.once("SIGTERM", onSigterm)
-
-  return () => {
-    process.off("SIGINT", onSigint)
-    process.off("SIGTERM", onSigterm)
-  }
-}
-
 /**
  * Starts the independent Bun/Effect shadow listener.
  *
@@ -157,7 +143,8 @@ export const startCoreHttpServer = async <
   }
 
   if (options.installSignalHandlers === true) {
-    removeSignalHandlers = installShutdownHandlers(shutdown)
+    removeSignalHandlers =
+      installCoreShutdownHandlers(shutdown)
   }
 
   return {

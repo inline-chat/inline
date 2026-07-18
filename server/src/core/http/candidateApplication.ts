@@ -12,6 +12,12 @@ import {
   AuxiliaryRouteGroupLive,
 } from "../../controllers/auxiliaryLive.effect"
 import {
+  AdminApiGroup,
+} from "../../controllers/admin.effect"
+import {
+  AdminRouteGroupLive,
+} from "../../controllers/adminLive.effect"
+import {
   BotApiGroup,
 } from "../../controllers/bot/bot.effect"
 import {
@@ -23,6 +29,12 @@ import {
 import {
   V1IdentitySpacesRouteGroupLive,
 } from "../../controllers/v1IdentitySpacesLive.effect"
+import {
+  V1MessagingProvidersApiGroup,
+} from "../../controllers/v1MessagingProvidersContracts.effect"
+import {
+  V1MessagingProvidersRouteGroupLive,
+} from "../../controllers/v1MessagingProvidersLive.effect"
 import {
   defineExecutableHttpApi,
   makeHttpApplication,
@@ -52,7 +64,9 @@ export const makeCandidateHttpApplication = ({
   const platformApi = makePlatformApiBase(apiBaseUrl)
     .add(AuthApiGroup)
     .add(V1IdentitySpacesApiGroup)
+    .add(V1MessagingProvidersApiGroup)
     .add(AuxiliaryApiGroup)
+    .add(AdminApiGroup)
   const botApi = makeBotApiBase(apiBaseUrl)
     .add(BotApiGroup)
 
@@ -66,7 +80,9 @@ export const makeCandidateHttpApplication = ({
       handlers: Layer.mergeAll(
         AuthRouteGroupLive,
         V1IdentitySpacesRouteGroupLive,
+        V1MessagingProvidersRouteGroupLive,
         AuxiliaryRouteGroupLive,
+        AdminRouteGroupLive,
       ),
     }),
     bot: defineExecutableHttpApi({

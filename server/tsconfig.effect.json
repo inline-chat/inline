@@ -25,6 +25,7 @@
     "vitest.effect.config.ts",
     "scripts/core-entry-smoke.ts",
     "scripts/core-http-kernel-smoke.ts",
+    "scripts/core-production-smoke.ts",
     "src/core/**/*.ts",
     "src/**/*.effect.ts",
     "src/**/*.effect.test.ts",
