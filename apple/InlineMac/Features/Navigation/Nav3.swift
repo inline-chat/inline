@@ -198,6 +198,17 @@ class Nav3 {
     open(state(for: route), tracksChatNavigation: tracksChatNavigation)
   }
 
+  /// Opens a Grid route without changing the Home or Space sidebar context.
+  func openGrid(spaceId: Int64) {
+    open(
+      Nav3RouteState(
+        route: .grid(spaceId: spaceId),
+        selectedSpaceId: selectedSpaceId
+      ),
+      tracksChatNavigation: false
+    )
+  }
+
   func replace(_ route: Nav3Route) {
     let state = state(for: route)
     guard history.indices.contains(historyIndex) else {

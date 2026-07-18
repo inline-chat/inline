@@ -100,7 +100,7 @@ struct GridView: View {
   private func openGrid(spaceID: Int64) {
     guard spaceID != self.spaceID else { return }
     store.recordGridOpened(spaceID: spaceID)
-    nav.open(.grid(spaceId: spaceID))
+    nav.openGrid(spaceId: spaceID)
   }
 
   private func openHotkeySettings() {

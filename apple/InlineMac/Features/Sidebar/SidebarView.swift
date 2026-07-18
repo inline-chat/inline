@@ -284,7 +284,7 @@ struct SidebarView: View {
 
   private func openGrid(spaceID: Int64) {
     gridStore.recordGridOpened(spaceID: spaceID)
-    nav.open(.grid(spaceId: spaceID))
+    nav.openGrid(spaceId: spaceID)
   }
 
   @ViewBuilder
