@@ -18,6 +18,12 @@ struct GridView: View {
       didFailLoading: store.failedLoadSpaceIDs.contains(spaceID),
       audioLevel: store.audioLevel,
       connectionState: store.connectionRecoveryAttempt > 0 ? .connecting : store.media.connectionState,
+      participantConnectionState: { avatar in
+        store.media.connectionStatus(
+          userID: avatar.user.id,
+          membershipID: avatar.membershipID
+        )
+      },
       onCreate: { store.createAndJoin(spaceID: spaceID) },
       onRetry: { Task { await store.load(spaceID: spaceID) } },
       onJoin: { roomID in store.join(roomID: roomID) },

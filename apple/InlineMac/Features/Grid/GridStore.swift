@@ -46,6 +46,8 @@ final class GridRoomService {
   @ObservationIgnored private var credentialRetryTask: Task<Void, Never>?
   @ObservationIgnored private var credentialRetryTarget: GridMediaTarget?
   @ObservationIgnored private var credentialRetryAttempt = 0
+  @ObservationIgnored private var aloneAutoMuteTask: Task<Void, Never>?
+  @ObservationIgnored private var aloneAutoMuteTarget: GridAloneAutoMuteTarget?
   @ObservationIgnored private var mediaInteractionStartedAt: Date?
   @ObservationIgnored private let log = Log.scoped("GridRoomService")
 
@@ -99,6 +101,7 @@ final class GridRoomService {
     mediaEventsTask?.cancel()
     membershipEventsTask?.cancel()
     credentialRetryTask?.cancel()
+    aloneAutoMuteTask?.cancel()
   }
 
   func isEnabled(spaceID: Int64) -> Bool {
@@ -113,6 +116,7 @@ final class GridRoomService {
       .union(pendingReloadSpaceIDs)
     pendingCredentialTarget = nil
     resetCredentialRetry()
+    cancelAloneAutoMute()
     grids.removeAll()
     homeSpaces.removeAll()
     enabledSpaceIDs.removeAll()
@@ -430,6 +434,63 @@ final class GridRoomService {
     let target = currentMediaTarget()
     if credentialRetryTarget != target { resetCredentialRetry() }
     mediaCoordinator.setTarget(target)
+    reconcileAloneAutoMute()
+  }
+
+  private func reconcileAloneAutoMute() {
+    let target = grids.values.lazy.compactMap { grid -> GridAloneAutoMuteTarget? in
+      guard grid.hasCurrentRoomID,
+            let room = grid.rooms.first(where: { $0.id == grid.currentRoomID }),
+            room.avatars.count == 1,
+            let avatar = room.avatars.first,
+            avatar.ownedByCurrentSession,
+            avatar.microphoneEnabled,
+            self.mediaCoordinator.isMicrophoneEnabled
+      else { return nil }
+      return GridAloneAutoMuteTarget(
+        spaceID: grid.spaceID,
+        roomID: room.id,
+        userID: avatar.user.id
+      )
+    }.first
+
+    guard target != aloneAutoMuteTarget else { return }
+    cancelAloneAutoMute()
+    guard let target else { return }
+
+    aloneAutoMuteTarget = target
+    aloneAutoMuteTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(5))
+      guard !Task.isCancelled else { return }
+      self?.autoMuteIfStillAlone(target)
+    }
+  }
+
+  private func autoMuteIfStillAlone(_ target: GridAloneAutoMuteTarget) {
+    guard aloneAutoMuteTarget == target else { return }
+    aloneAutoMuteTask = nil
+    aloneAutoMuteTarget = nil
+
+    guard let grid = grids[target.spaceID],
+          grid.hasCurrentRoomID,
+          grid.currentRoomID == target.roomID,
+          let room = grid.rooms.first(where: { $0.id == target.roomID }),
+          room.avatars.count == 1,
+          let avatar = room.avatars.first,
+          avatar.ownedByCurrentSession,
+          avatar.user.id == target.userID,
+          avatar.microphoneEnabled,
+          mediaCoordinator.isMicrophoneEnabled
+    else { return }
+
+    log.debug("GRID_TRACE phase=alone_auto_mute room=\(target.roomID)")
+    toggleMicrophone(spaceID: target.spaceID)
+  }
+
+  private func cancelAloneAutoMute() {
+    aloneAutoMuteTask?.cancel()
+    aloneAutoMuteTask = nil
+    aloneAutoMuteTarget = nil
   }
 
   private func optimisticallyUpdateRoom(
@@ -1094,6 +1155,12 @@ final class GridRoomService {
 private struct OptimisticRoomMutationKey: Hashable {
   let roomID: Int64
   let field: GridOptimisticState.RoomField
+}
+
+private struct GridAloneAutoMuteTarget: Equatable {
+  let spaceID: Int64
+  let roomID: Int64
+  let userID: Int64
 }
 
 private struct OptimisticRoomMutation {

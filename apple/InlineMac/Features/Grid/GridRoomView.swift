@@ -70,6 +70,7 @@ struct GridContent: View {
   let didFailLoading: Bool
   let audioLevel: (Int64) -> Float
   let connectionState: GridMediaConnectionStatus
+  let participantConnectionState: (GridAvatar) -> GridParticipantConnectionStatus
   let onCreate: () -> Void
   let onRetry: () -> Void
   let onJoin: (Int64) -> Void
@@ -89,6 +90,7 @@ struct GridContent: View {
               isCurrent: grid.hasCurrentRoomID && grid.currentRoomID == room.id,
               audioLevel: audioLevel,
               connectionState: connectionState,
+              participantConnectionState: participantConnectionState,
               onJoin: { onJoin(room.id) },
               onLeave: onLeave,
               onToggleMicrophone: onToggleMicrophone,
@@ -160,6 +162,7 @@ private struct GridRoomCard: View {
   let isCurrent: Bool
   let audioLevel: (Int64) -> Float
   let connectionState: GridMediaConnectionStatus
+  let participantConnectionState: (GridAvatar) -> GridParticipantConnectionStatus
   let onJoin: () -> Void
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
@@ -179,6 +182,7 @@ private struct GridRoomCard: View {
           isCurrent: true,
           audioLevel: audioLevel,
           connectionState: connectionState,
+          participantConnectionState: participantConnectionState,
           onLeave: onLeave,
           onToggleMicrophone: onToggleMicrophone
         )
@@ -189,6 +193,7 @@ private struct GridRoomCard: View {
             isCurrent: false,
             audioLevel: audioLevel,
             connectionState: .disconnected,
+            participantConnectionState: { _ in .connected },
             onLeave: onLeave,
             onToggleMicrophone: onToggleMicrophone
           )
@@ -249,8 +254,8 @@ private struct GridRoomCard: View {
   private var roomWidth: CGFloat {
     let visibleCount = min(room.avatars.count, GridRoomAvatars.maximumVisibleAvatarCount)
     guard visibleCount > 1 else { return 68 }
-    let avatarGrowth = CGFloat(visibleCount - 1) * 36
-    let overflowGrowth: CGFloat = room.avatars.count > visibleCount ? 28 : 0
+    let avatarGrowth = CGFloat(visibleCount - 1) * 53
+    let overflowGrowth: CGFloat = room.avatars.count > visibleCount ? 32 : 0
     return 68 + avatarGrowth + overflowGrowth
   }
 }
@@ -260,6 +265,7 @@ private struct GridRoomSurface: View {
   let isCurrent: Bool
   let audioLevel: (Int64) -> Float
   let connectionState: GridMediaConnectionStatus
+  let participantConnectionState: (GridAvatar) -> GridParticipantConnectionStatus
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
 
@@ -270,7 +276,18 @@ private struct GridRoomSurface: View {
         GridRoomAvatars(
           avatars: room.avatars,
           audioLevel: audioLevel,
-          showsLocalConnectingIndicator: isCurrent && connectionState == .connecting,
+          connectionState: { avatar in
+            // This client has LiveKit presence only for its current room.
+            guard isCurrent else { return .connected }
+            if avatar.ownedByCurrentSession {
+              return switch connectionState {
+              case .connected: .connected
+              case .connecting: .connecting
+              case .disconnected, .failed: .disconnected
+              }
+            }
+            return participantConnectionState(avatar)
+          },
           onLeave: onLeave,
           onToggleMicrophone: onToggleMicrophone
         )
@@ -339,17 +356,19 @@ private struct GridRoomAvatars: View {
 
   let avatars: [GridAvatar]
   let audioLevel: (Int64) -> Float
-  let showsLocalConnectingIndicator: Bool
+  let connectionState: (GridAvatar) -> GridParticipantConnectionStatus
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
 
   var body: some View {
-    HStack(spacing: -13) {
+    HStack(spacing: 4) {
       ForEach(visibleAvatars, id: \.user.id) { avatar in
+        let connectionState = connectionState(avatar)
         GridSpeakingAvatar(
           avatar: avatar,
           audioLevel: audioLevel(avatar.user.id),
-          showsConnectingIndicator: showsLocalConnectingIndicator && avatar.ownedByCurrentSession,
+          connectionState: connectionState,
+          showsConnectingIndicator: connectionState == .connecting && avatar.ownedByCurrentSession,
           onLeave: onLeave,
           onToggleMicrophone: onToggleMicrophone
         )
@@ -377,11 +396,13 @@ private struct GridRoomAvatars: View {
 private struct GridSpeakingAvatar: View {
   let avatar: GridAvatar
   let audioLevel: Float
+  let connectionState: GridParticipantConnectionStatus
   let showsConnectingIndicator: Bool
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
 
   @State private var isHovered = false
+  @State private var isConnectingPulseBright = false
 
   var body: some View {
     ZStack(alignment: .topLeading) {
@@ -415,12 +436,40 @@ private struct GridSpeakingAvatar: View {
       }
     }
     .onHover { isHovered = $0 }
+    .opacity(connectionOpacity)
+    .onChange(of: connectionState, initial: true) { _, newState in
+      updateConnectingPulse(for: newState)
+    }
     .animation(.smoothSnappy, value: isHovered)
   }
 
   private var helpText: String {
     if avatar.ownedByCurrentSession { return "Mute or unmute" }
     return InlineKit.User(from: avatar.user).displayName
+  }
+
+  private var connectionOpacity: Double {
+    switch connectionState {
+    case .connected:
+      1
+    case .connecting:
+      isConnectingPulseBright ? 1 : 0.8
+    case .disconnected:
+      0.7
+    }
+  }
+
+  private func updateConnectingPulse(for state: GridParticipantConnectionStatus) {
+    guard state == .connecting else {
+      withAnimation(.easeOut(duration: 0.18)) {
+        isConnectingPulseBright = false
+      }
+      return
+    }
+    isConnectingPulseBright = false
+    withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
+      isConnectingPulseBright = true
+    }
   }
 }
 
