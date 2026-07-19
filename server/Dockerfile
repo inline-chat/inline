@@ -48,6 +48,7 @@ COPY --from=build /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/di
 COPY --from=build /usr/src/app/packages/protocol/dist ./packages/protocol/dist
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl wget && rm -rf /var/lib/apt/lists/*
+RUN install -m 0755 server/scripts/helpers/healthcheck-wget.sh /usr/local/bin/wget
 
 ENV NODE_ENV=production
 USER bun
