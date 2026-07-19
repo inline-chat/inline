@@ -118,7 +118,7 @@ const main = async (): Promise<void> => {
   const useArtifact =
     process.argv.includes("--artifact")
   const entrypoint = useArtifact
-    ? "dist/index.js"
+    ? "scripts/start-production.ts"
     : "src/index.ts"
   const target = useArtifact
     ? "production artifact"
@@ -163,6 +163,7 @@ const main = async (): Promise<void> => {
       SENTRY_DSN: useArtifact
         ? "https://public@example.invalid/1"
         : "",
+      SKIP_DB_MIGRATIONS: "1",
     },
     stdin: "ignore",
     stderr: "pipe",

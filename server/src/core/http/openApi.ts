@@ -337,9 +337,6 @@ export const makeOpenApiDocumentLayer = <
 >(
   definition: OpenApiDocumentDefinition<Id, Groups>,
 ) => {
-  console.info(
-    `Building OpenAPI document: ${definition.jsonPath}`,
-  )
   const spec = normalizeOpenApiSpec(OpenApi.fromApi(definition.api))
   const jsonResponse = HttpServerResponse.jsonUnsafe(spec, {
     headers: {
@@ -347,7 +344,7 @@ export const makeOpenApiDocumentLayer = <
     },
   })
 
-  const layer = Layer.mergeAll(
+  return Layer.mergeAll(
     HttpRouter.add("GET", definition.jsonPath, jsonResponse),
     HttpApiScalar.layer(definition.api, {
       path: definition.swaggerPath,
@@ -365,8 +362,4 @@ export const makeOpenApiDocumentLayer = <
       },
     }),
   )
-  console.info(
-    `Built OpenAPI document: ${definition.jsonPath}`,
-  )
-  return layer
 }

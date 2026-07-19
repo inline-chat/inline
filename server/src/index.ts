@@ -109,9 +109,6 @@ export const startServer = (
     )
   const clientIpHeader =
     clientIpHeaderForMode(clientIpMode)
-  console.info(
-    "Building production HTTP application",
-  )
   const application =
     makeCandidateHttpApplication({
       apiBaseUrl: API_BASE_URL,
@@ -128,9 +125,6 @@ export const startServer = (
         },
       },
     })
-  console.info(
-    "Built production HTTP application",
-  )
 
   return startCoreProductionServer({
     application,
@@ -142,19 +136,25 @@ export const startServer = (
   })
 }
 
-if (import.meta.main) {
-  const handle = await startServer()
-  Log.shared.info(
-    `Running on http://${handle.hostname}:${handle.port}`,
-  )
-  if (
-    NODE_ENV === "test" ||
-    process.env[
-      "INLINE_SERVER_SMOKE"
-    ] === "1"
-  ) {
-    console.info(
-      `SERVER_READY ${handle.port}`,
+export const runServer =
+  async (): Promise<CoreProductionServerHandle> => {
+    const handle = await startServer()
+    Log.shared.info(
+      `Running on http://${handle.hostname}:${handle.port}`,
     )
+    if (
+      NODE_ENV === "test" ||
+      process.env[
+        "INLINE_SERVER_SMOKE"
+      ] === "1"
+    ) {
+      console.info(
+        `SERVER_READY ${handle.port}`,
+      )
+    }
+    return handle
   }
+
+if (import.meta.main) {
+  await runServer()
 }

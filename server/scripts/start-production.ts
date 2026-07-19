@@ -14,4 +14,12 @@ if (process.env["SKIP_DB_MIGRATIONS"] === "1") {
   }
 }
 
-await import(new URL("../dist/index.js", import.meta.url).href)
+const { runServer } =
+  await import(
+    new URL(
+      "../dist/index.js",
+      import.meta.url,
+    ).href
+  )
+
+await runServer()
