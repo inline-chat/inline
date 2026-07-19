@@ -138,9 +138,6 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     public var highPassFilter = false
     /// Keep the high-pass filter provider-selected when it is enabled.
     public var highPassFilterMode: HighpassFilterMode = .automatic
-    /// Enable WebRTC's native transient suppressor for keyboard typing noise.
-    public var typingNoiseSuppression = true
-
     public init() {}
   }
 
@@ -226,7 +223,7 @@ struct InlineRTCConfiguration: Equatable, Sendable {
         autoGainControl: capture.automaticGainControl,
         noiseSuppression: capture.noiseSuppression,
         highpassFilter: capture.highPassFilter,
-        typingNoiseDetection: capture.typingNoiseSuppression,
+        typingNoiseDetection: false,
         echoCancellationMode: capture.echoCancellationMode,
         autoGainControlMode: capture.automaticGainControlMode,
         noiseSuppressionMode: capture.noiseSuppressionMode,
@@ -239,6 +236,19 @@ struct InlineRTCConfiguration: Equatable, Sendable {
         red: publishing.redundantEncoding
       ),
       singlePeerConnection: connection.singlePeerConnection
+    )
+  }
+
+  func makeAudioProcessingOptions() -> AudioProcessingOptions {
+    AudioProcessingOptions(
+      echoCancellation: capture.echoCancellation,
+      autoGainControl: capture.automaticGainControl,
+      noiseSuppression: capture.noiseSuppression,
+      highpassFilter: capture.highPassFilter,
+      echoCancellationMode: capture.echoCancellationMode,
+      autoGainControlMode: capture.automaticGainControlMode,
+      noiseSuppressionMode: capture.noiseSuppressionMode,
+      highpassFilterMode: capture.highPassFilterMode
     )
   }
 

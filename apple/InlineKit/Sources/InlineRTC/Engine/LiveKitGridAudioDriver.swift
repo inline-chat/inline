@@ -10,10 +10,12 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
 
   private nonisolated let eventContinuation: AsyncStream<GridAudioDriverEvent>.Continuation
   private let catalog = MacGridAudioDeviceCatalog()
-  private let io = MacGridAudioIOController()
   private var catalogTask: Task<Void, Never>?
   private var latestCatalog: MacGridAudioCatalogSnapshot?
+  private var audioProcessingOptions = AudioProcessingOptions()
+  private var appliedInputTarget: AudioInputRouteTarget?
   private var configured = false
+  private var prepared = false
   private let log = Log.scoped("LiveKitGridAudioDriver")
 
   init() {
@@ -33,14 +35,35 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
 
   func configure(_ configuration: InlineRTCConfiguration) async throws {
     guard !configured else { return }
-    log.debug("GRID_ENGINE phase=manual_audio_configure_started")
-    try AudioManager.set(audioDeviceModuleType: .audioEngine)
-    try AudioManager.shared.setManualRenderingMode(true)
-    try configuration.applyVoiceProcessing()
+    guard !configuration.voiceProcessing.platformVoiceProcessingAllowed else {
+      throw LiveKitPlatformAudioDriverError.platformVoiceProcessingUnsupported
+    }
+    log.debug("GRID_ENGINE phase=livekit_audio_configure_started backend=platform_default")
+
+    // This must happen before the first access to RTC's peer-connection
+    // factory or audio device module. The standard macOS ADM owns capture,
+    // playout, buffering, clocking, and render/capture delay reporting.
+    try AudioManager.set(audioDeviceModuleType: .platformDefault)
+    audioProcessingOptions = configuration.makeAudioProcessingOptions()
 
     let initial = try await catalog.snapshot()
+    guard initial.defaultInput != nil else {
+      throw MacGridCoreAudioError.unavailable("No default microphone is available.")
+    }
+    guard initial.defaultOutput != nil else {
+      throw MacGridCoreAudioError.unavailable("No default output device is available.")
+    }
     latestCatalog = initial
-    await io.updateCatalog(initial)
+
+    // Explicitly establish index zero as policy, rather than relying on the
+    // ADM's implicit initial index. M144 then follows system-default changes.
+    try selectInput(.automatic, in: initial)
+    try selectDefaultOutput()
+
+    let eventContinuation = eventContinuation
+    AudioManager.shared.onDeviceUpdate = { _ in
+      eventContinuation.yield(.devicesChanged)
+    }
     catalog.start()
     catalogTask = Task { [weak self, updates = catalog.updates] in
       for await snapshot in updates {
@@ -50,32 +73,98 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     }
     configured = true
     log.info(
-      "GRID_ENGINE phase=manual_audio_configured inputs=\(initial.inputs.count) outputs=\(initial.outputs.count)"
+      "GRID_ENGINE phase=livekit_audio_configured backend=platform_default inputs=\(initial.inputs.count) outputs=\(initial.outputs.count) software_aec=\(configuration.capture.echoCancellation) software_ns=\(configuration.capture.noiseSuppression)"
     )
   }
 
-  func setPrepared(_ prepared: Bool) async throws {
-    try await io.setPrepared(prepared)
+  func setPrepared(_ value: Bool) async throws {
+    guard configured else {
+      throw LiveKitPlatformAudioDriverError.notConfigured
+    }
+    if value {
+      guard !prepared else { return }
+      guard appliedInputTarget != nil else {
+        throw LiveKitPlatformAudioDriverError.inputRouteNotApplied
+      }
+      try startRecording()
+      prepared = true
+    } else {
+      guard prepared || AudioManager.shared.isRecording else { return }
+      try stopRecording()
+    }
   }
 
   func recoverPreparedAudio(preserving target: AudioInputRouteTarget?) async throws {
-    if let target { try await io.applyInput(target) }
-    try await io.recover()
+    guard prepared else { return }
+    try switchInputRoute(target ?? appliedInputTarget ?? .automatic, restartRecording: true)
   }
 
   func isAudioEngineRunning() async -> Bool {
-    await io.health().isEngineRunning
+    AudioManager.shared.isRecording || AudioManager.shared.isPlaying
   }
 
   func runtimeHealth() async -> GridAudioRuntimeHealth {
-    await io.health()
+    let manager = AudioManager.shared
+    let recording = manager.isRecording
+    let playing = manager.isPlaying
+    guard let snapshot = latestCatalog else {
+      return GridAudioRuntimeHealth(
+        isEngineRunning: recording || playing,
+        isRecording: recording,
+        isPlaying: playing,
+        route: nil
+      )
+    }
+
+    let currentInputID = manager.inputDevices.isEmpty
+      ? nil
+      : MacGridPlatformAudioDeviceResolver.stableInputUID(
+        forPlatformDeviceID: manager.inputDevice.deviceId,
+        in: snapshot
+      )
+    let currentOutputID = manager.outputDevices.isEmpty
+      ? nil
+      : MacGridPlatformAudioDeviceResolver.stableOutputUID(
+        forPlatformDeviceID: manager.outputDevice.deviceId,
+        in: snapshot
+      )
+    let expectedInputID: String? = switch appliedInputTarget {
+    case .automatic:
+      snapshot.defaultInput?.uid
+    case let .device(uid, _):
+      uid
+    case nil:
+      nil
+    }
+    let inputMatches = expectedInputID != nil && currentInputID == expectedInputID
+    let outputMatches = currentOutputID != nil && currentOutputID == snapshot.defaultOutput?.uid
+
+    return GridAudioRuntimeHealth(
+      isEngineRunning: recording || playing,
+      isRecording: recording,
+      isPlaying: playing,
+      route: InlineRTCAudioRoute(
+        currentInputID: currentInputID,
+        defaultInputID: snapshot.defaultInput?.uid,
+        currentOutputID: currentOutputID,
+        defaultOutputID: snapshot.defaultOutput?.uid,
+        inputDeviceCount: snapshot.inputs.count,
+        outputDeviceCount: snapshot.outputs.count,
+        isInputRouteValid: !prepared || (recording && inputMatches),
+        isOutputRouteValid: outputMatches,
+        routeEpoch: snapshot.epoch
+      )
+    )
   }
 
   func applyInputRoute(
     _ target: AudioInputRouteTarget,
-    restartPreparedAudio _: Bool
+    restartPreparedAudio: Bool
   ) async throws {
-    try await io.applyInput(target)
+    try switchInputRoute(
+      target,
+      restartRecording: restartPreparedAudio || prepared || AudioManager.shared.isRecording
+    )
   }
 
   func inputDeviceInventory() async -> AudioInputDeviceInventory {
@@ -84,7 +173,6 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
       snapshot = latestCatalog
     } else if let current = try? await catalog.snapshot() {
       latestCatalog = current
-      await io.updateCatalog(current)
       snapshot = current
     } else {
       return AudioInputDeviceInventory(
@@ -112,8 +200,118 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
   private func catalogChanged(_ snapshot: MacGridAudioCatalogSnapshot) async {
     guard snapshot != latestCatalog else { return }
     latestCatalog = snapshot
-    await io.updateCatalog(snapshot)
     eventContinuation.yield(.devicesChanged)
+  }
+
+  private func switchInputRoute(
+    _ target: AudioInputRouteTarget,
+    restartRecording: Bool
+  ) throws {
+    guard let snapshot = latestCatalog else {
+      throw MacGridCoreAudioError.unavailable("The audio device catalog is not ready.")
+    }
+    let previousTarget = appliedInputTarget
+    if restartRecording {
+      try stopRecording()
+    }
+
+    do {
+      try selectInput(target, in: snapshot)
+      appliedInputTarget = target
+      if restartRecording {
+        try startRecording()
+        prepared = true
+      }
+    } catch let switchError {
+      if let previousTarget {
+        do {
+          try selectInput(previousTarget, in: snapshot)
+          appliedInputTarget = previousTarget
+        } catch let rollbackError {
+          appliedInputTarget = nil
+          log.error(
+            "GRID_ENGINE phase=platform_default_input_rollback_failed",
+            error: rollbackError
+          )
+        }
+      } else {
+        appliedInputTarget = nil
+      }
+      if restartRecording {
+        do {
+          try startRecording()
+          prepared = true
+        } catch let rollbackError {
+          prepared = false
+          log.error(
+            "GRID_ENGINE phase=platform_default_recording_rollback_failed",
+            error: rollbackError
+          )
+        }
+      }
+      throw switchError
+    }
+  }
+
+  private func selectInput(
+    _ target: AudioInputRouteTarget,
+    in snapshot: MacGridAudioCatalogSnapshot
+  ) throws {
+    let manager = AudioManager.shared
+    let deviceID = try MacGridPlatformAudioDeviceResolver.platformInputDeviceID(
+      for: target,
+      in: snapshot
+    )
+    guard let device = manager.inputDevices.first(where: { $0.deviceId == deviceID }) else {
+      throw LiveKitPlatformAudioDriverError.inputDeviceUnavailable
+    }
+
+    // M144's public property setter performs the native selection. Its
+    // low-level trySet wrapper reports the zero-on-success result backwards,
+    // so verify through the ordinary public readback instead.
+    manager.inputDevice = device
+    guard manager.inputDevice.deviceId == deviceID else {
+      throw LiveKitPlatformAudioDriverError.inputDeviceSelectionFailed(device.name)
+    }
+    log.info(
+      "GRID_ENGINE phase=platform_default_input_selected route=\(target.logDescription) name=\(device.name)"
+    )
+  }
+
+  private func selectDefaultOutput() throws {
+    let manager = AudioManager.shared
+    guard let device = manager.outputDevices.first(where: \.isDefault) else {
+      throw LiveKitPlatformAudioDriverError.outputDeviceUnavailable
+    }
+    manager.outputDevice = device
+    guard manager.outputDevice.isDefault else {
+      throw LiveKitPlatformAudioDriverError.outputDeviceSelectionFailed
+    }
+  }
+
+  private func startRecording() throws {
+    do {
+      try AudioManager.shared.startLocalRecording(
+        audioProcessingOptions: audioProcessingOptions
+      )
+    } catch {
+      throw LiveKitPlatformAudioDriverError.recordingStartFailed(
+        underlying: String(describing: error)
+      )
+    }
+    guard AudioManager.shared.isRecording else {
+      throw LiveKitPlatformAudioDriverError.recordingDidNotStart
+    }
+  }
+
+  private func stopRecording() throws {
+    do {
+      try AudioManager.shared.stopLocalRecording()
+    } catch {
+      prepared = AudioManager.shared.isRecording
+      throw error
+    }
+    prepared = false
   }
 
   private static func systemImage(for device: MacGridAudioDevice) -> String {
@@ -124,6 +322,41 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     if name.contains("usb") { return "cable.connector" }
     if name.contains("built-in") || name.contains("macbook") { return "macbook" }
     return "mic.fill"
+  }
+}
+
+private enum LiveKitPlatformAudioDriverError: LocalizedError {
+  case notConfigured
+  case platformVoiceProcessingUnsupported
+  case inputRouteNotApplied
+  case inputDeviceUnavailable
+  case inputDeviceSelectionFailed(String)
+  case outputDeviceUnavailable
+  case outputDeviceSelectionFailed
+  case recordingStartFailed(underlying: String)
+  case recordingDidNotStart
+
+  var errorDescription: String? {
+    switch self {
+    case .notConfigured:
+      "Platform-default audio is not configured."
+    case .platformVoiceProcessingUnsupported:
+      "Grid platform-default audio requires Apple Voice Processing I/O to remain disabled."
+    case .inputRouteNotApplied:
+      "A microphone route must be applied before capture starts."
+    case .inputDeviceUnavailable:
+      "The selected microphone is not available to WebRTC."
+    case let .inputDeviceSelectionFailed(name):
+      "WebRTC did not commit the selected microphone (\(name))."
+    case .outputDeviceUnavailable:
+      "The system-default output device is not available to WebRTC."
+    case .outputDeviceSelectionFailed:
+      "WebRTC did not commit the system-default output route."
+    case let .recordingStartFailed(underlying):
+      "WebRTC could not start platform-default microphone capture. \(underlying)"
+    case .recordingDidNotStart:
+      "WebRTC returned from microphone startup without entering the recording state."
+    }
   }
 }
 #else

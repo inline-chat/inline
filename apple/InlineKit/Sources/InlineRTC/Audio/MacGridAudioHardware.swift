@@ -63,8 +63,8 @@ func checkMacGridAudioStatus(_ status: OSStatus, _ operation: String) throws {
   }
 }
 
-/// Process-wide Core Audio catalog. It observes only hardware facts; selection
-/// policy and stream ownership remain in `MacGridAudioIOController`.
+/// Process-wide Core Audio catalog. It observes only hardware facts; the
+/// active audio driver owns selection policy and stream lifecycle.
 final class MacGridAudioDeviceCatalog: @unchecked Sendable {
   let updates: AsyncStream<MacGridAudioCatalogSnapshot>
 
