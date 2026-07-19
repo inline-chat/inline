@@ -47,7 +47,7 @@ COPY --from=build /usr/src/app/server/scripts/helpers ./server/scripts/helpers
 COPY --from=build /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=build /usr/src/app/packages/protocol/dist ./packages/protocol/dist
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl wget && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 USER bun
