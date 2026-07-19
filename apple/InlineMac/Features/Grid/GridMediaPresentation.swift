@@ -10,12 +10,6 @@ enum GridMediaConnectionStatus: Equatable, Sendable {
   case failed
 }
 
-enum GridParticipantConnectionStatus: Equatable, Sendable {
-  case connecting
-  case connected
-  case disconnected
-}
-
 @MainActor
 @Observable
 final class GridMediaPresentation {
@@ -29,7 +23,6 @@ final class GridMediaPresentation {
   fileprivate(set) var isFallingBackToAutomaticInput = false
   fileprivate(set) var participantAudioLevels: [String: Float] = [:]
   fileprivate(set) var connectedParticipantIdentities = Set<String>()
-  fileprivate(set) var previouslyConnectedParticipantIdentities = Set<String>()
   fileprivate(set) var reconnectCount = 0
   fileprivate(set) var recoveryAttempt = 0
   fileprivate(set) var lastConnectDurationMilliseconds: Int?
@@ -66,18 +59,6 @@ final class GridMediaPresentation {
     inputSelection.matches(device, among: inputDevices)
   }
 
-  func connectionStatus(userID: Int64, membershipID: String) -> GridParticipantConnectionStatus {
-    let identity = "inline-grid-user-\(userID)-\(membershipID)"
-    if connectedParticipantIdentities.contains(identity) {
-      return .connected
-    }
-    // LiveKit is authoritative for the active room only. Within that session,
-    // an absent identity is disconnected only after it has previously appeared.
-    if previouslyConnectedParticipantIdentities.contains(identity) {
-      return .disconnected
-    }
-    return .connecting
-  }
 }
 
 /// The sole writer for `GridMediaPresentation`. Views only receive the
@@ -85,8 +66,6 @@ final class GridMediaPresentation {
 @MainActor
 final class GridMediaPresentationController {
   let presentation: GridMediaPresentation
-  private var participantTarget: InlineRTCSessionID?
-  private var seenParticipantIdentities = Set<String>()
 
   init(
     microphoneEnabled: Bool,
@@ -123,10 +102,6 @@ final class GridMediaPresentationController {
   }
 
   func apply(rtc snapshot: InlineRTCConnectionSnapshot) {
-    if participantTarget != snapshot.target {
-      participantTarget = snapshot.target
-      seenParticipantIdentities.removeAll()
-    }
     presentation.connectionState = switch snapshot.state {
     case .idle: .disconnected
     case .connected: .connected
@@ -138,11 +113,7 @@ final class GridMediaPresentationController {
         ($0.identity, $0.isSpeaking ? $0.audioLevel : 0)
       }
     )
-    let connectedParticipantIdentities = Set(snapshot.participants.map(\.identity))
-    seenParticipantIdentities.formUnion(connectedParticipantIdentities)
-    presentation.connectedParticipantIdentities = connectedParticipantIdentities
-    presentation.previouslyConnectedParticipantIdentities =
-      seenParticipantIdentities.subtracting(connectedParticipantIdentities)
+    presentation.connectedParticipantIdentities = Set(snapshot.participants.map(\.identity))
     presentation.reconnectCount = snapshot.reconnectCount
     presentation.recoveryAttempt = snapshot.recoveryAttempt
     presentation.lastConnectDurationMilliseconds = snapshot.lastConnectMilliseconds
