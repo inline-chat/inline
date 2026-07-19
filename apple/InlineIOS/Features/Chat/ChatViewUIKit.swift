@@ -163,6 +163,7 @@ public class ChatContainerView: UIView {
 
     let signature = DraftSignature(draftMessage)
     guard lastAppliedDraftSignature != signature else { return }
+    guard !Drafts.shared.shouldSuppressDraftRestoration(for: peerId) else { return }
     lastAppliedDraftSignature = signature
     composeView.loadDraft(from: draftMessage)
   }

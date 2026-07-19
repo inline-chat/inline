@@ -42,6 +42,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
   var phaseObserver: AnyCancellable?
   private var voicePhaseObserver: AnyCancellable?
+  private var sceneObserverTokens: [NSObjectProtocol] = []
   private var pendingSendAnimationHeightChange = false
   private var composeLeadingToPlusConstraint: NSLayoutConstraint?
   private var composeLeadingExpandedConstraint: NSLayoutConstraint?
@@ -74,8 +75,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var attachmentItems: [String: FileMediaItem] = [:]
   var pendingVideoAttachments: [PendingVideoAttachment] = []
   var canceledPendingVideoAttachmentIds: Set<String> = []
-  private var isAwaitingPendingVideoSend = false
+  private var pendingMediaSendState = ComposePendingMediaSendState()
   private var queuedPendingVideoSendMode: MessageSendMode?
+  private lazy var pendingMediaSendWatchdog = ComposePendingMediaSendWatchdog(
+    timeout: .seconds(300)
+  )
   private var attachmentUploadProgress: [String: UploadProgressSnapshot] = [:]
   private var attachmentUploadSubscriptions: [String: AnyCancellable] = [:]
   private var attachmentUploadBindingTasks: [String: Task<Void, Never>] = [:]
@@ -602,29 +606,57 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func queueSendUntilPendingVideosAreReady(sendMode: MessageSendMode?) {
-    guard !isAwaitingPendingVideoSend else { return }
-    isAwaitingPendingVideoSend = true
+    guard pendingMediaSendState.beginWaiting() else { return }
     queuedPendingVideoSendMode = sendMode
-    showSendButtonImmediately()
-    sendButton.configuration?.showsActivityIndicator = false
-    sendButton.setNeedsUpdateConfiguration()
+    showPendingMediaSendState()
+    pendingMediaSendWatchdog.schedule { [weak self] in
+      self?.expireQueuedPendingVideoSend()
+    }
   }
 
   func cancelQueuedPendingVideoSend() {
-    guard isAwaitingPendingVideoSend else { return }
-    isAwaitingPendingVideoSend = false
+    guard pendingMediaSendState.cancel() else { return }
     queuedPendingVideoSendMode = nil
+    pendingMediaSendWatchdog.cancel()
     sendButton.configuration?.showsActivityIndicator = false
     updateSendButtonVisibility()
   }
 
   private func sendQueuedPendingVideoMessageIfReady() {
-    guard isAwaitingPendingVideoSend, pendingVideoAttachments.isEmpty else { return }
+    guard pendingMediaSendState.consumeSendIfReady(
+      hasPendingMedia: !pendingVideoAttachments.isEmpty
+    ) else { return }
     let queuedSendMode = queuedPendingVideoSendMode
-    isAwaitingPendingVideoSend = false
     queuedPendingVideoSendMode = nil
+    pendingMediaSendWatchdog.cancel()
     sendButton.configuration?.showsActivityIndicator = false
     sendMessage(sendMode: queuedSendMode)
+  }
+
+  private func showPendingMediaSendState() {
+    showSendButtonImmediately()
+    sendButton.configuration?.showsActivityIndicator = true
+    sendButton.isEnabled = false
+    sendButton.isUserInteractionEnabled = false
+    sendButton.setNeedsUpdateConfiguration()
+  }
+
+  private func expireQueuedPendingVideoSend() {
+    guard pendingMediaSendState.isAwaitingSend else { return }
+
+    cancelQueuedPendingVideoSend()
+    for pending in pendingVideoAttachments {
+      canceledPendingVideoAttachmentIds.insert(pending.id)
+    }
+    pendingVideoAttachments.removeAll()
+    handleAttachmentItemsChanged(animated: true)
+    dismissAttachmentPickerIfPresented(animated: true)
+
+    ToastManager.shared.showToast(
+      "Video processing timed out. Please try again.",
+      type: .error,
+      systemImage: "exclamationmark.triangle.fill"
+    )
   }
 
   private func currentTelegramSendButtonBlurRadius() -> CGFloat {
@@ -1290,9 +1322,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func setupScenePhaseObserver() {
-    NotificationCenter.default.removeObserver(self)
+    sceneObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
+    sceneObserverTokens.removeAll()
 
-    NotificationCenter.default.addObserver(
+    let didEnterBackgroundToken = NotificationCenter.default.addObserver(
       forName: UIApplication.didEnterBackgroundNotification,
       object: nil,
       queue: .main
@@ -1300,7 +1333,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       self?.saveCurrentDraft()
     }
 
-    NotificationCenter.default.addObserver(
+    let willTerminateToken = NotificationCenter.default.addObserver(
       forName: UIApplication.willTerminateNotification,
       object: nil,
       queue: .main
@@ -1308,13 +1341,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       self?.saveCurrentDraft()
     }
 
-    NotificationCenter.default.addObserver(
+    let willResignActiveToken = NotificationCenter.default.addObserver(
       forName: UIApplication.willResignActiveNotification,
       object: nil,
       queue: .main
     ) { [weak self] _ in
       self?.saveCurrentDraft()
     }
+
+    sceneObserverTokens = [
+      didEnterBackgroundToken,
+      willTerminateToken,
+      willResignActiveToken,
+    ]
   }
 
   func setupChatStateObservers() {
@@ -1586,6 +1625,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func removeObservers() {
     voicePhaseObserver?.cancel()
     voicePhaseObserver = nil
+    sceneObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
+    sceneObserverTokens.removeAll()
     NotificationCenter.default.removeObserver(self)
   }
 
@@ -1734,9 +1775,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     shouldUpdateSendButtonVisibility: Bool = true,
     cancelRemovedUploads: Bool = true
   ) {
+    cancelQueuedPendingVideoSend()
+    for pending in pendingVideoAttachments {
+      canceledPendingVideoAttachmentIds.insert(pending.id)
+    }
     attachmentItems.removeAll()
     pendingVideoAttachments.removeAll()
-    canceledPendingVideoAttachmentIds.removeAll()
     handleAttachmentItemsChanged(
       animated: false,
       shouldUpdateSendButtonVisibility: shouldUpdateSendButtonVisibility,
@@ -1994,6 +2038,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func removePendingVideoAttachment(_ pendingId: String, animated: Bool = false, userInitiated: Bool = false) {
     if userInitiated {
+      cancelQueuedPendingVideoSend()
       canceledPendingVideoAttachmentIds.insert(pendingId)
     }
     pendingVideoAttachments.removeAll { $0.id == pendingId }
@@ -2002,6 +2047,20 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func isPendingVideoAttachmentCanceled(_ pendingId: String) -> Bool {
     canceledPendingVideoAttachmentIds.contains(pendingId)
+  }
+
+  func finishPendingVideoAttachmentProcessing(_ pendingId: String) {
+    canceledPendingVideoAttachmentIds.remove(pendingId)
+  }
+
+  func completePendingVideoAttachments(
+    _ pendingIds: [String],
+    animated: Bool = false
+  ) {
+    let pendingIds = Set(pendingIds)
+    canceledPendingVideoAttachmentIds.subtract(pendingIds)
+    pendingVideoAttachments.removeAll { pendingIds.contains($0.id) }
+    handleAttachmentItemsChanged(animated: animated)
   }
 
   private func openAttachmentPreview(attachmentId: String, sourceView: UIView) {
@@ -2080,10 +2139,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       return
     }
 
-    if isAwaitingPendingVideoSend {
-      showSendButtonImmediately()
-      sendButton.configuration?.showsActivityIndicator = false
-      sendButton.setNeedsUpdateConfiguration()
+    if pendingMediaSendState.isAwaitingSend {
+      showPendingMediaSendState()
       return
     }
 

@@ -78,6 +78,8 @@ extension ComposeView: UITextViewDelegate {
        autocompleteManager?.isCompletionVisible != true,
        mentionManager?.handleMentionRemovalOnDelete(in: textView, changeRange: range, replacementText: text) == true
     {
+      draftManager.invalidateLoadedEntities(overlapping: range)
+      textViewDidChange(textView)
       return false
     }
 

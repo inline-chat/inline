@@ -479,17 +479,20 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
           if let pendingId {
             let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
-            guard !isCanceled else { return }
+            guard !isCanceled else {
+              finishPendingVideoAttachmentProcessing(pendingId)
+              return
+            }
           }
 
           if sendImmediately {
             sendMediaItemImmediately(mediaItem)
           } else {
-            _ = addAttachmentItem(mediaItem)
+            attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
           }
 
           if let pendingId {
-            removePendingVideoAttachment(pendingId, animated: false)
+            completePendingVideoAttachments([pendingId])
           }
 
           if dismissAttachmentPickerOnSuccess {
@@ -501,7 +504,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         await MainActor.run { [weak self] in
           self?.cancelQueuedPendingVideoSend()
           if let pendingId {
-            self?.removePendingVideoAttachment(pendingId, animated: false)
+            self?.completePendingVideoAttachments([pendingId])
           }
           self?.showVideoError(error)
         }
@@ -529,29 +532,47 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         await MainActor.run { [weak self] in
           guard let self else { return }
           let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
-          guard !isCanceled else { return }
+          guard !isCanceled else {
+            finishPendingVideoAttachmentProcessing(pendingId)
+            return
+          }
 
           let uniqueId = mediaItem.getItemUniqueId()
           attachmentItems[uniqueId] = mediaItem
-          removePendingVideoAttachment(pendingId, animated: false)
-          handleAttachmentItemsChanged(animated: false)
+          completePendingVideoAttachments([pendingId])
           if dismissAttachmentPickerOnSuccess {
             dismissAttachmentPickerIfPresented(animated: true)
           }
         }
       } catch AnimatedImageVideoConversionError.notAnimated {
         await MainActor.run { [weak self] in
-          self?.removePendingVideoAttachment(pendingId, animated: false)
-        }
-        if let image = UIImage(contentsOfFile: url.path) {
-          await MainActor.run { [weak self] in
-            self?.addImages([image])
+          guard let self else { return }
+          guard !isPendingVideoAttachmentCanceled(pendingId) else {
+            finishPendingVideoAttachmentProcessing(pendingId)
+            return
+          }
+
+          guard let image = UIImage(contentsOfFile: url.path) else {
+            cancelQueuedPendingVideoSend()
+            completePendingVideoAttachments([pendingId])
+            return
+          }
+
+          do {
+            let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
+            attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
+            completePendingVideoAttachments([pendingId])
+          } catch {
+            Log.shared.error("Failed to save animated image fallback", error: error)
+            cancelQueuedPendingVideoSend()
+            completePendingVideoAttachments([pendingId])
           }
         }
       } catch {
         Log.shared.error("Failed to save animated image as video", error: error)
         await MainActor.run { [weak self] in
-          self?.removePendingVideoAttachment(pendingId, animated: false)
+          self?.cancelQueuedPendingVideoSend()
+          self?.completePendingVideoAttachments([pendingId])
         }
       }
     }
@@ -773,7 +794,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
     }
 
     Task { [weak self, weak picker] in
-      guard let self, let picker else { return }
+      guard let self else { return }
 
       var loadedItems: [(index: Int, item: LibraryPickerItem)] = []
 
@@ -794,7 +815,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
       }
 
       await MainActor.run { [weak self, weak picker] in
-        guard let self, let picker else { return }
+        guard let self else { return }
 
         if loadedItems.count != results.count {
           cancelQueuedPendingVideoSend()
@@ -802,16 +823,17 @@ extension ComposeView: PHPickerViewControllerDelegate {
 
         let sortedEntries = loadedItems.sorted { $0.index < $1.index }
         guard !sortedEntries.isEmpty else {
-          for pendingId in pendingVideoIdsByIndex.values {
-            removePendingVideoAttachment(pendingId, animated: false)
-          }
-          picker.dismiss(animated: true) { [weak self] in
-            self?.isPickerPresented = false
+          completePendingVideoAttachments(Array(pendingVideoIdsByIndex.values))
+          if let picker {
+            picker.dismiss(animated: true) { [weak self] in
+              self?.isPickerPresented = false
+            }
+          } else {
+            isPickerPresented = false
           }
           return
         }
 
-        var didAddAny = false
         for entry in sortedEntries {
           let item = entry.item
           switch item {
@@ -820,7 +842,6 @@ extension ComposeView: PHPickerViewControllerDelegate {
               let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
               let uniqueId = mediaItem.getItemUniqueId()
               attachmentItems[uniqueId] = mediaItem
-              didAddAny = true
             } catch {
               Log.shared.error("Failed to save photo in attachments", error: error)
               cancelQueuedPendingVideoSend()
@@ -831,18 +852,16 @@ extension ComposeView: PHPickerViewControllerDelegate {
             }
             let uniqueId = videoItem.getItemUniqueId()
             attachmentItems[uniqueId] = videoItem
-            didAddAny = true
           }
         }
 
-        for pendingId in pendingVideoIdsByIndex.values {
-          removePendingVideoAttachment(pendingId, animated: false)
-        }
+        completePendingVideoAttachments(Array(pendingVideoIdsByIndex.values))
 
-        if didAddAny {
-          handleAttachmentItemsChanged(animated: false)
+        guard let picker else {
+          isPickerPresented = false
+          dismissAttachmentPickerIfPresented(animated: true)
+          return
         }
-
         picker.dismiss(animated: true) { [weak self] in
           guard let self else { return }
           isPickerPresented = false
@@ -861,7 +880,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
     }
 
     Task { [weak self, weak picker] in
-      guard let self, let picker else { return }
+      guard let self else { return }
 
       var loadedItems: [(index: Int, item: FileMediaItem)] = []
 
@@ -882,7 +901,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
       }
 
       await MainActor.run { [weak self, weak picker] in
-        guard let self, let picker else { return }
+        guard let self else { return }
 
         if loadedItems.count != results.count {
           cancelQueuedPendingVideoSend()
@@ -890,11 +909,13 @@ extension ComposeView: PHPickerViewControllerDelegate {
 
         let sortedEntries = loadedItems.sorted { $0.index < $1.index }
         guard !sortedEntries.isEmpty else {
-          for pendingId in pendingVideoIdsByIndex.values {
-            removePendingVideoAttachment(pendingId, animated: false)
-          }
-          picker.dismiss(animated: true) { [weak self] in
-            self?.isPickerPresented = false
+          completePendingVideoAttachments(Array(pendingVideoIdsByIndex.values))
+          if let picker {
+            picker.dismiss(animated: true) { [weak self] in
+              self?.isPickerPresented = false
+            }
+          } else {
+            isPickerPresented = false
           }
           return
         }
@@ -908,12 +929,13 @@ extension ComposeView: PHPickerViewControllerDelegate {
           attachmentItems[uniqueId] = item
         }
 
-        for pendingId in pendingVideoIdsByIndex.values {
-          removePendingVideoAttachment(pendingId, animated: false)
+        completePendingVideoAttachments(Array(pendingVideoIdsByIndex.values))
+
+        guard let picker else {
+          isPickerPresented = false
+          dismissAttachmentPickerIfPresented(animated: true)
+          return
         }
-
-        handleAttachmentItemsChanged(animated: false)
-
         picker.dismiss(animated: true) { [weak self] in
           guard let self else { return }
           isPickerPresented = false

@@ -168,3 +168,63 @@ public enum ComposePendingMediaSendBehavior {
     hasPendingVideos
   }
 }
+
+public struct ComposePendingMediaSendState: Equatable, Sendable {
+  public private(set) var isAwaitingSend = false
+
+  public init() {}
+
+  public mutating func beginWaiting() -> Bool {
+    guard !isAwaitingSend else { return false }
+    isAwaitingSend = true
+    return true
+  }
+
+  public mutating func cancel() -> Bool {
+    guard isAwaitingSend else { return false }
+    isAwaitingSend = false
+    return true
+  }
+
+  public mutating func consumeSendIfReady(hasPendingMedia: Bool) -> Bool {
+    guard isAwaitingSend, !hasPendingMedia else { return false }
+    isAwaitingSend = false
+    return true
+  }
+}
+
+@MainActor
+public final class ComposePendingMediaSendWatchdog {
+  private let timeout: Duration
+  private var timeoutTask: Task<Void, Never>?
+
+  public init(timeout: Duration) {
+    self.timeout = timeout
+  }
+
+  deinit {
+    timeoutTask?.cancel()
+  }
+
+  public func schedule(
+    onTimeout: @escaping @MainActor @Sendable () -> Void
+  ) {
+    cancel()
+    let timeout = timeout
+    timeoutTask = Task { @MainActor [weak self] in
+      do {
+        try await Task.sleep(for: timeout)
+      } catch {
+        return
+      }
+      guard !Task.isCancelled, let self else { return }
+      timeoutTask = nil
+      onTimeout()
+    }
+  }
+
+  public func cancel() {
+    timeoutTask?.cancel()
+    timeoutTask = nil
+  }
+}

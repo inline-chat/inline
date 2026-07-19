@@ -429,4 +429,78 @@ struct ComposeInteractionStateTests {
 
     #expect(shouldQueue == false)
   }
+
+  @Test("pending media state sends exactly once when ready")
+  func pendingMediaStateSendsExactlyOnceWhenReady() {
+    var state = ComposePendingMediaSendState()
+
+    let didBeginWaiting = state.beginWaiting()
+    let didSendWhilePending = state.consumeSendIfReady(hasPendingMedia: true)
+    let didSendWhenReady = state.consumeSendIfReady(hasPendingMedia: false)
+    let didSendTwice = state.consumeSendIfReady(hasPendingMedia: false)
+
+    #expect(didBeginWaiting)
+    #expect(!didSendWhilePending)
+    #expect(didSendWhenReady)
+    #expect(!didSendTwice)
+  }
+
+  @Test("cancelled pending media state cannot auto-send")
+  func cancelledPendingMediaStateCannotAutoSend() {
+    var state = ComposePendingMediaSendState()
+
+    let didBeginWaiting = state.beginWaiting()
+    let didCancel = state.cancel()
+    let didSendAfterCancellation = state.consumeSendIfReady(hasPendingMedia: false)
+
+    #expect(didBeginWaiting)
+    #expect(didCancel)
+    #expect(!didSendAfterCancellation)
+  }
+
+  @Test("repeated pending media send tap does not create another wait")
+  func repeatedPendingMediaSendTapDoesNotCreateAnotherWait() {
+    var state = ComposePendingMediaSendState()
+
+    let didBeginWaiting = state.beginWaiting()
+    let didBeginWaitingAgain = state.beginWaiting()
+
+    #expect(didBeginWaiting)
+    #expect(!didBeginWaitingAgain)
+    #expect(state.isAwaitingSend)
+  }
+
+  @Test("pending media watchdog reaches timeout")
+  @MainActor
+  func pendingMediaWatchdogReachesTimeout() async {
+    let probe = PendingMediaWatchdogProbe()
+    let watchdog = ComposePendingMediaSendWatchdog(timeout: .milliseconds(5))
+
+    watchdog.schedule {
+      probe.fireCount += 1
+    }
+    try? await Task.sleep(for: .milliseconds(20))
+
+    #expect(probe.fireCount == 1)
+  }
+
+  @Test("cancelled pending media watchdog does not fire")
+  @MainActor
+  func cancelledPendingMediaWatchdogDoesNotFire() async {
+    let probe = PendingMediaWatchdogProbe()
+    let watchdog = ComposePendingMediaSendWatchdog(timeout: .milliseconds(5))
+
+    watchdog.schedule {
+      probe.fireCount += 1
+    }
+    watchdog.cancel()
+    try? await Task.sleep(for: .milliseconds(20))
+
+    #expect(probe.fireCount == 0)
+  }
+}
+
+@MainActor
+private final class PendingMediaWatchdogProbe {
+  var fireCount = 0
 }
