@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { omitUndefinedObjectProperties } from "../core/http/jsonResponseCompatibility"
 import { InlineError } from "../types/errors"
 import {
   V1MessagingProvidersOperationFailure,
@@ -30,25 +31,6 @@ const mapOperationError = (operation: string, cause: unknown): V1MessagingProvid
     operation,
     cause,
   })
-}
-
-const omitUndefinedObjectProperties = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map(omitUndefinedObjectProperties)
-  }
-  if (
-    value === null
-    || typeof value !== "object"
-    || Object.getPrototypeOf(value) !== Object.prototype
-  ) {
-    return value
-  }
-
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([, property]) => property !== undefined)
-      .map(([key, property]) => [key, omitUndefinedObjectProperties(property)]),
-  )
 }
 
 export const invokeLegacyV1Operation = <Output>(

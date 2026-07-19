@@ -24,6 +24,7 @@ import {
   OpenApi,
 } from "effect/unstable/httpapi"
 import { parseLegacyElysiaBody } from "../../core/http/legacyElysiaBody"
+import { omitUndefinedObjectProperties } from "../../core/http/jsonResponseCompatibility"
 import {
   BOT_API_ID,
   makeBotApiBase,
@@ -1112,7 +1113,10 @@ const validateSuccessEnvelope = (
   operation: BotOperation,
   result: unknown,
 ) => {
-  const envelope = { ok: true, result }
+  const envelope = omitUndefinedObjectProperties({
+    ok: true,
+    result,
+  })
   const decode = (() => {
     switch (operation) {
       case "getMe":

@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { omitUndefinedObjectProperties } from "../core/http/jsonResponseCompatibility"
 import { InlineError } from "@in/server/types/errors"
 import {
   AddMemberResult,
@@ -102,7 +103,9 @@ const decodeResult = <A>(
   schema: Schema.Decoder<A>,
   value: unknown,
 ): Effect.Effect<A, V1IdentitySpacesOperationFailure> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
+  Schema.decodeUnknownEffect(schema)(
+    omitUndefinedObjectProperties(value),
+  ).pipe(
     Effect.mapError(
       () =>
         new V1IdentitySpacesOperationFailure({

@@ -737,6 +737,45 @@ describe("AdminRouteGroup", () => {
     )
   })
 
+  it("validates Admin responses after JSON omits undefined properties", async () => {
+    await withKernel(
+      async ({ handler }) => {
+        const response = await handler(
+          adminRequest(
+            "/admin/auth/send-email-code",
+            {
+              method: "POST",
+              headers: {
+                "content-type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                email: "admin@inline.chat",
+              }),
+            },
+          ),
+        )
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+          ok: true,
+        })
+      },
+      {
+        operations: {
+          sendEmailCode: () =>
+            Effect.succeed({
+              kind: "json",
+              body: {
+                ok: true,
+                challengeToken: undefined,
+              },
+            }),
+        },
+      },
+    )
+  })
+
   it("returns sanitized validation failures without invoking an operation", async () => {
     await withKernel(
       async ({ handler, probe }) => {

@@ -141,6 +141,33 @@ describe("slice 2 live adapters", () => {
     })
   })
 
+  it("validates identity responses after JSON omits undefined properties", async () => {
+    const adapter = makeIdentityOperations(
+      makeLegacyIdentity({
+        sendEmailCode: async () => ({
+          existingUser: false,
+          needsInviteCode: false,
+          challengeToken: undefined,
+        }),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      adapter.sendEmailCode(
+        { email: "person@example.com" },
+        {
+          ip: "203.0.113.10",
+          source: "/v1/sendEmailCode",
+        },
+      ),
+    )
+
+    expect(result).toEqual({
+      existingUser: false,
+      needsInviteCode: false,
+    })
+  })
+
   it("keeps expected Inline errors typed at the identity boundary", async () => {
     const adapter = makeIdentityOperations(
       makeLegacyIdentity({

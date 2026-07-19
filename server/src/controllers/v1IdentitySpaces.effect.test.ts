@@ -1068,6 +1068,42 @@ describe("slice 4 compatibility adapter", () => {
     })
   })
 
+  it("validates nested retained responses after JSON omits undefined properties", async () => {
+    const adapter = makeV1IdentitySpacesOperations(
+      makeLegacyOperations({
+        getInviteCodes: async () => ({
+          codes: [
+            {
+              code: "INVITE42",
+              redeemed: false,
+              redeemedAt: undefined,
+            },
+          ],
+        }),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      adapter.getInviteCodes(
+        {},
+        {
+          currentUserId: 42,
+          currentSessionId: 7,
+          ip: "203.0.113.8",
+        },
+      ),
+    )
+
+    expect(result).toEqual({
+      codes: [
+        {
+          code: "INVITE42",
+          redeemed: false,
+        },
+      ],
+    })
+  })
+
   it("keeps expected Inline errors typed and preserves private 500 causes", async () => {
     const expected = makeV1IdentitySpacesOperations(
       makeLegacyOperations({

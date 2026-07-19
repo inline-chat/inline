@@ -17,6 +17,9 @@ import {
   parseLegacyElysiaBody,
 } from "../core/http/legacyElysiaBody"
 import {
+  omitUndefinedObjectProperties,
+} from "../core/http/jsonResponseCompatibility"
+import {
   UNRESOLVED_CLIENT_IP,
 } from "../core/http/middleware"
 import {
@@ -276,7 +279,7 @@ export const completeAdminRequest = <R>(
         return resultResponse(result)
       }
       return Schema.decodeUnknownEffect(success)(
-        result.body,
+        omitUndefinedObjectProperties(result.body),
       ).pipe(
         Effect.mapError(
           () =>

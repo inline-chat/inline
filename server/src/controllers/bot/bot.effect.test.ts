@@ -392,6 +392,47 @@ describe("Effect Bot routes", () => {
     }
   })
 
+  it("validates Bot responses after JSON omits nested undefined properties", async () => {
+    const kernel = makeKernel({
+      operations: makeOperations({
+        getChat: () =>
+          Effect.succeed({
+            chat: {
+              chat_id: 99,
+              title: undefined,
+              space_id: undefined,
+              emoji: undefined,
+            },
+          }),
+      }),
+    })
+
+    try {
+      const response = await kernel.handler(
+        new Request(
+          "http://inline.test/bot/getChat?chat_id=99",
+          {
+            headers: {
+              authorization: "Bearer 42:HEADER",
+            },
+          },
+        ),
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        ok: true,
+        result: {
+          chat: {
+            chat_id: 99,
+          },
+        },
+      })
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
   it("accepts POST query parameters and lets JSON body values win", async () => {
     let sendInput: SendMessageParams | undefined
     let reactionInput: SendReactionParams | undefined

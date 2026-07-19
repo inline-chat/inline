@@ -2,6 +2,9 @@ import {
   Effect,
   Schema,
 } from "effect"
+import {
+  omitUndefinedObjectProperties,
+} from "@in/server/core/http/jsonResponseCompatibility"
 import { InlineError } from "@in/server/types/errors"
 import {
   CheckInviteCodeResult,
@@ -96,7 +99,9 @@ const decodeResult = <A>(
   schema: Schema.Decoder<A>,
   value: unknown,
 ): Effect.Effect<A, IdentityOperationFailure> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
+  Schema.decodeUnknownEffect(schema)(
+    omitUndefinedObjectProperties(value),
+  ).pipe(
     Effect.mapError(
       (cause) =>
         new IdentityOperationFailure({
