@@ -17,12 +17,12 @@ RUN bun scripts/docker/prune-workspace.ts @inline-chat/server out
 FROM base AS development-dependencies
 COPY --from=pruner /usr/src/app/out/json/ ./
 COPY --from=pruner /usr/src/app/out/bun.lock ./bun.lock
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --verbose
 
 FROM base AS production-dependencies
 COPY --from=pruner /usr/src/app/out/json/ ./
 COPY --from=pruner /usr/src/app/out/bun.lock ./bun.lock
-RUN bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile --production --verbose
 
 FROM base AS build
 COPY --from=development-dependencies /usr/src/app/ ./
