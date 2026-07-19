@@ -665,6 +665,31 @@ struct GridRTCEngineTests {
     #expect(await rtcDriver.operations().contains("disconnect-done:40"))
   }
 
+  @Test("process engine connects before preparing a transport-gated ADM")
+  func processEngineInitializesTransportBeforeAudio() async throws {
+    let audioDriver = RTCFakeAudioDriver(preparationRequiresRTCTransport: true)
+    let rtcDriver = FakeGridRTCDriver()
+    let engine = InlineRTCSession(
+      audioDriver: audioDriver,
+      permissionDriver: TestGridMicrophonePermissionDriver(),
+      rtcDriver: rtcDriver,
+      captureCooldown: .milliseconds(20)
+    )
+    let target = InlineRTCSessionID("grid-test:1:44:1")
+
+    await engine.start()
+    engine.setDemand(demand(target: target, microphoneEnabled: true))
+
+    try await eventuallyRTC {
+      let connected = await rtcDriver.operations().contains("connect:44")
+      let prepared = await audioDriver.operations().contains("prepared:true")
+      return connected && prepared
+    }
+    let audioOperations = await audioDriver.operations()
+    #expect(audioOperations.contains("input:automatic"))
+    #expect(audioOperations.contains("prepared:true"))
+  }
+
   @Test("duplicate LiveKit reconnect events count one completed recovery")
   func duplicateReconnectEventsCountOneRecovery() async throws {
     let audio = GridAudioEngine(
@@ -799,16 +824,31 @@ struct GridRTCEngineTests {
 }
 
 private actor RTCFakeAudioDriver: GridAudioDriver {
+  nonisolated let preparationRequiresRTCTransport: Bool
   private var log: [String] = []
 
-  func configure(_: InlineRTCConfiguration) async throws {}
-  func setPrepared(_: Bool) async throws {}
+  init(preparationRequiresRTCTransport: Bool = false) {
+    self.preparationRequiresRTCTransport = preparationRequiresRTCTransport
+  }
+
+  func configure(_: InlineRTCConfiguration) async throws {
+    log.append("configure")
+  }
+
+  func setPrepared(_ prepared: Bool) async throws {
+    log.append("prepared:\(prepared)")
+  }
 
   func recoverPreparedAudio(preserving _: AudioInputRouteTarget?) async throws {
     log.append("recover")
   }
 
-  func applyInputRoute(_: AudioInputRouteTarget, restartPreparedAudio _: Bool) async throws {}
+  func applyInputRoute(
+    _ target: AudioInputRouteTarget,
+    restartPreparedAudio _: Bool
+  ) async throws {
+    log.append("input:\(target.logDescription)")
+  }
 
   func inputDeviceInventory() async -> AudioInputDeviceInventory {
     AudioInputDeviceInventory(

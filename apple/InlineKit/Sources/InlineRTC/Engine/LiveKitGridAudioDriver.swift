@@ -7,6 +7,7 @@ import Logger
 #if os(macOS)
 actor LiveKitGridAudioDriver: GridAudioDriver {
   nonisolated let events: AsyncStream<GridAudioDriverEvent>
+  nonisolated let preparationRequiresRTCTransport = true
 
   private nonisolated let eventContinuation: AsyncStream<GridAudioDriverEvent>.Continuation
   private let catalog = MacGridAudioDeviceCatalog()
@@ -16,9 +17,20 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
   private var audioProcessingOptions = AudioProcessingOptions()
   private var captureState = MacGridPlatformAudioCaptureState()
   private var configured = false
+  private let audioDeviceModuleBootstrapError: String?
   private let log = Log.scoped("LiveKitGridAudioDriver")
 
   init() {
+    // Select the process-wide ADM synchronously while the session graph is
+    // being constructed. Grid demand is delivered through a nonisolated
+    // mailbox, so waiting until async configure() lets Room initialize the
+    // peer-connection factory first.
+    do {
+      try AudioManager.set(audioDeviceModuleType: .platformDefault)
+      audioDeviceModuleBootstrapError = nil
+    } catch {
+      audioDeviceModuleBootstrapError = error.localizedDescription
+    }
     let stream = AsyncStream.makeStream(
       of: GridAudioDriverEvent.self,
       bufferingPolicy: .bufferingNewest(16)
@@ -38,12 +50,16 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     guard !configuration.voiceProcessing.platformVoiceProcessingAllowed else {
       throw LiveKitPlatformAudioDriverError.platformVoiceProcessingUnsupported
     }
+    if let audioDeviceModuleBootstrapError {
+      throw LiveKitPlatformAudioDriverError.audioDeviceModuleBootstrapFailed(
+        underlying: audioDeviceModuleBootstrapError
+      )
+    }
     log.debug("GRID_ENGINE phase=livekit_audio_configure_started backend=platform_default")
 
-    // This must happen before the first access to RTC's peer-connection
-    // factory or audio device module. The standard macOS ADM owns capture,
-    // playout, buffering, clocking, and render/capture delay reporting.
-    try AudioManager.set(audioDeviceModuleType: .platformDefault)
+    // The process-wide module type was selected synchronously in init. The
+    // standard macOS ADM owns capture, playout, buffering, clocking, and
+    // render/capture delay reporting.
     audioProcessingOptions = configuration.makeAudioProcessingOptions()
 
     let initial = try await catalog.snapshot()
@@ -54,11 +70,6 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
       throw MacGridCoreAudioError.unavailable("No default output device is available.")
     }
     latestCatalog = initial
-
-    // Explicitly establish index zero as policy, rather than relying on the
-    // ADM's implicit initial index. M144 then follows system-default changes.
-    try selectInput(.automatic, in: initial)
-    try selectDefaultOutput()
 
     let eventContinuation = eventContinuation
     deviceUpdateObserver = AudioManager.shared.observeDeviceUpdates { _ in
@@ -255,6 +266,21 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     in snapshot: MacGridAudioCatalogSnapshot
   ) throws {
     let manager = AudioManager.shared
+    if case .automatic = target {
+      // WebRTC's standard macOS ADM establishes index zero during its own
+      // initialization and follows subsequent system-default changes. The
+      // first Auto transaction inherits that policy; returning from an
+      // explicit device must actively restore index zero.
+      if captureState.appliedInputTarget != nil,
+         !manager.selectDefaultInputDevice() {
+        throw LiveKitPlatformAudioDriverError.inputDeviceUnavailable
+      }
+      log.info(
+        "GRID_ENGINE phase=platform_default_input_selected route=\(target.logDescription) name=\(snapshot.defaultInput?.name ?? "System Default")"
+      )
+      return
+    }
+
     let deviceID = try MacGridPlatformAudioDeviceResolver.platformInputDeviceID(
       for: target,
       in: snapshot
@@ -272,14 +298,6 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     log.info(
       "GRID_ENGINE phase=platform_default_input_selected route=\(target.logDescription) name=\(device.name)"
     )
-  }
-
-  private func selectDefaultOutput() throws {
-    let manager = AudioManager.shared
-    guard let device = manager.outputDevices.first(where: \.isDefault) else {
-      throw LiveKitPlatformAudioDriverError.outputDeviceUnavailable
-    }
-    manager.outputDevice = device
   }
 
   private func startRecording() throws {
@@ -325,10 +343,10 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
 
 private enum LiveKitPlatformAudioDriverError: LocalizedError {
   case notConfigured
+  case audioDeviceModuleBootstrapFailed(underlying: String)
   case platformVoiceProcessingUnsupported
   case inputRouteNotApplied
   case inputDeviceUnavailable
-  case outputDeviceUnavailable
   case recordingStartFailed(underlying: String)
   case recordingDidNotStart
 
@@ -336,14 +354,14 @@ private enum LiveKitPlatformAudioDriverError: LocalizedError {
     switch self {
     case .notConfigured:
       "Platform-default audio is not configured."
+    case let .audioDeviceModuleBootstrapFailed(underlying):
+      "WebRTC platform-default audio could not be selected before RTC initialization. \(underlying)"
     case .platformVoiceProcessingUnsupported:
       "Grid platform-default audio requires Apple Voice Processing I/O to remain disabled."
     case .inputRouteNotApplied:
       "A microphone route must be applied before capture starts."
     case .inputDeviceUnavailable:
       "The selected microphone is not available to WebRTC."
-    case .outputDeviceUnavailable:
-      "The system-default output device is not available to WebRTC."
     case let .recordingStartFailed(underlying):
       "WebRTC could not start platform-default microphone capture. \(underlying)"
     case .recordingDidNotStart:

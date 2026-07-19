@@ -341,7 +341,10 @@ actor GridRTCEngine {
       }
 
       let audioSnapshot = await audio.currentSnapshot()
-      if !audioSnapshot.isPrepared, audioSnapshot.microphonePermission.permitsCapture {
+      let audioWaitsForRTCTransport = await audio.isWaitingForRTCTransport()
+      if !audioWaitsForRTCTransport,
+         !audioSnapshot.isPrepared,
+         audioSnapshot.microphonePermission.permitsCapture {
         if shouldWaitForAudioPreparation(target: target) {
           state = .preparingAudio(target)
           emitSnapshot()
@@ -424,6 +427,7 @@ actor GridRTCEngine {
     }
     do {
       try await driver.connect(room, credentials: credentials)
+      await audio.rtcTransportDidInitialize()
     } catch {
       let wasCurrentAttempt = self.room == room && roomTarget == target
       detach(room)

@@ -175,6 +175,35 @@ struct GridAudioEngineTests {
     #expect(operations.contains("input:automatic") == false)
   }
 
+  @Test("standard ADM routing and capture wait for RTC transport initialization")
+  func standardADMWaitsForRTCTransport() async throws {
+    let driver = FakeGridAudioDriver(preparationRequiresRTCTransport: true)
+    let engine = GridAudioEngine(
+      driver: driver,
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let lease = GridAudioLease.connectionDemand(.init("grid-test:1:2:1"))
+
+    await engine.setInput(.automatic)
+    await engine.acquireCaptureLease(lease)
+    try await eventually { await driver.operations().contains("configure") }
+    try await Task.sleep(for: .milliseconds(40))
+
+    var operations = await driver.operations()
+    #expect(operations.contains("input:automatic") == false)
+    #expect(operations.contains("prepared:true") == false)
+    #expect(await engine.isWaitingForRTCTransport())
+
+    await engine.rtcTransportDidInitialize()
+    try await eventually { await engine.currentSnapshot().state == .ready }
+
+    operations = await driver.operations()
+    let inputIndex = try #require(operations.firstIndex(of: "input:automatic"))
+    let prepareIndex = try #require(operations.firstIndex(of: "prepared:true"))
+    #expect(inputIndex < prepareIndex)
+    #expect(await engine.isWaitingForRTCTransport() == false)
+  }
+
   @Test("automatic and explicit fallback stay distinct")
   func explicitFallback() async throws {
     let driver = FakeGridAudioDriver(availableDeviceIDs: ["built-in"])
@@ -671,6 +700,7 @@ struct GridAudioEngineTests {
 
 private actor FakeGridAudioDriver: GridAudioDriver {
   nonisolated let events: AsyncStream<GridAudioDriverEvent>
+  nonisolated let preparationRequiresRTCTransport: Bool
   private nonisolated let eventContinuation: AsyncStream<GridAudioDriverEvent>.Continuation
   private var log: [String] = []
   private var availableDeviceIDs: Set<String>
@@ -702,6 +732,7 @@ private actor FakeGridAudioDriver: GridAudioDriver {
     blockInputDeviceID: String? = nil,
     blockedInputCalls: Int = 1,
     inputFailures: [String: Int] = [:],
+    preparationRequiresRTCTransport: Bool = false,
     recoveredInput _: ResolvedAudioInput? = nil
   ) {
     let stream = AsyncStream.makeStream(
@@ -720,6 +751,7 @@ private actor FakeGridAudioDriver: GridAudioDriver {
     self.blockInputDeviceID = blockInputDeviceID
     inputBlocksRemaining = blockInputDeviceID == nil ? 0 : max(blockedInputCalls, 0)
     inputFailuresRemaining = inputFailures
+    self.preparationRequiresRTCTransport = preparationRequiresRTCTransport
   }
 
   func configure(_: InlineRTCConfiguration) async throws {

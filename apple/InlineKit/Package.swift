@@ -77,7 +77,7 @@ let package = Package(
     // readback. The fork consumes LiveKit's official M144 WebRTC binary.
     .package(
       url: "https://github.com/inline-chat/client-sdk-swift.git",
-      revision: "9bf267508ec70f00bfeee25180b417968415fe84"
+      revision: "90b596a674d43c29b86e9fb8a98b2d46b173f2ab"
     ),
     .package(
       url: "https://github.com/apple/swift-collections.git",

@@ -7,10 +7,12 @@ import RealtimeV2
 /// `AppDependencies` is copied per window, but this reference is shared.
 @MainActor
 final class GridRuntime {
+  static let shared = GridRuntime()
+
   private let engine: InlineRTCSession
   let rooms: GridRoomService
 
-  init(
+  private init(
     realtime: RealtimeV2 = Api.realtime,
     userDefaults: UserDefaults = .standard
   ) {

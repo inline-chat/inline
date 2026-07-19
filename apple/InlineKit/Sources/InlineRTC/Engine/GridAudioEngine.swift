@@ -3,6 +3,9 @@ import Logger
 
 protocol GridAudioDriver: Sendable {
   var events: AsyncStream<GridAudioDriverEvent> { get }
+  /// The stock macOS ADM cannot enumerate, route, or record until WebRTC's
+  /// real peer-connection transport initializes its media engine.
+  var preparationRequiresRTCTransport: Bool { get }
 
   func configure(_ configuration: InlineRTCConfiguration) async throws
   func setPrepared(_ prepared: Bool) async throws
@@ -17,6 +20,8 @@ protocol GridAudioDriver: Sendable {
 }
 
 extension GridAudioDriver {
+  var preparationRequiresRTCTransport: Bool { false }
+
   var events: AsyncStream<GridAudioDriverEvent> {
     AsyncStream { continuation in continuation.finish() }
   }
@@ -52,6 +57,7 @@ actor GridAudioEngine {
   private var driverMutationInFlight = false
   private var currentDriverOperation: String?
   private var configured = false
+  private var rtcTransportReady: Bool
   private var appliedPrepared = false
   private var captureEngineHealthy = false
   private var engineRecoveryPending = false
@@ -103,6 +109,7 @@ actor GridAudioEngine {
     self.engineRecoveryDelay = engineRecoveryDelay
     self.engineHealthCheckDelay = engineHealthCheckDelay
     self.lifetimeHealthCheckInterval = lifetimeHealthCheckInterval
+    rtcTransportReady = !driver.preparationRequiresRTCTransport
     let stream = AsyncStream.makeStream(
       of: InlineRTCAudioSnapshot.self,
       bufferingPolicy: .bufferingNewest(1)
@@ -268,6 +275,19 @@ actor GridAudioEngine {
     deviceRouteGeneration &+= 1
     engineReconcileSuspended = false
     emitInputDeviceSnapshot()
+    scheduleReconcile()
+  }
+
+  func isWaitingForRTCTransport() -> Bool {
+    !rtcTransportReady
+  }
+
+  func rtcTransportDidInitialize() {
+    guard !rtcTransportReady else { return }
+    rtcTransportReady = true
+    engineReconcileSuspended = false
+    inputRoute.assumeCurrentRouteUnknown()
+    log.debug("GRID_ENGINE phase=audio_rtc_transport_ready")
     scheduleReconcile()
   }
 
@@ -445,7 +465,8 @@ actor GridAudioEngine {
       }
 
       inputRoute.commitResolvedMetadataIfRouteMatches()
-      if hasInputIntent,
+      if rtcTransportReady,
+         hasInputIntent,
          !inputRouteRetrySuspended,
          inputRoute.needsRouteTransaction,
          let resolution = inputRoute.desiredResolution {
@@ -513,7 +534,9 @@ actor GridAudioEngine {
         continue
       }
 
-      let shouldBePrepared = hasInputIntent && (!captureLeases.isEmpty || keepPreparedThroughCooldown)
+      let shouldBePrepared = rtcTransportReady
+        && hasInputIntent
+        && (!captureLeases.isEmpty || keepPreparedThroughCooldown)
       if shouldBePrepared, !microphonePermission.permitsCapture {
         state = switch microphonePermission {
         case .denied, .restricted: .permissionDenied
@@ -566,8 +589,15 @@ actor GridAudioEngine {
   private var needsReconcile: Bool {
     guard configured else { return true }
     if inputRoute.inventory == nil { return true }
-    if hasInputIntent, !inputRouteRetrySuspended, inputRoute.needsRouteTransaction { return true }
-    let shouldBePrepared = hasInputIntent && (!captureLeases.isEmpty || keepPreparedThroughCooldown)
+    if rtcTransportReady,
+       hasInputIntent,
+       !inputRouteRetrySuspended,
+       inputRoute.needsRouteTransaction {
+      return true
+    }
+    let shouldBePrepared = rtcTransportReady
+      && hasInputIntent
+      && (!captureLeases.isEmpty || keepPreparedThroughCooldown)
     if shouldBePrepared, !microphonePermission.permitsCapture { return false }
     return appliedPrepared != shouldBePrepared
   }

@@ -25,7 +25,7 @@ public struct AppDependencies {
   let session = MainWindowSessionRefresher()
   let unreadCounts = UnreadCountsModel.shared
   let userSettings = INUserSettings.current
-  let gridRuntime = GridRuntime()
+  let gridRuntime = GridRuntime.shared
   var grid: GridRoomService { gridRuntime.rooms }
 
   // Per window
