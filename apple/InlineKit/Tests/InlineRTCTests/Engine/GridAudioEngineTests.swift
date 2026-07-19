@@ -539,6 +539,26 @@ struct GridAudioEngineTests {
     }
   }
 
+  @Test("remote playout failure escalates without restarting microphone capture")
+  func remotePlayoutFailureEscalatesToRTC() async throws {
+    let driver = FakeGridAudioDriver()
+    let engine = GridAudioEngine(
+      driver: driver,
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let lease = GridAudioLease.connectionDemand(.init("grid-test:1:2:1"))
+
+    await engine.setInput(.automatic)
+    await engine.acquireCaptureLease(lease)
+    try await eventually { await engine.currentSnapshot().state == .ready }
+    await driver.setOutputRouteValid(false)
+
+    let disposition = await engine.playoutFlowMissing()
+
+    #expect(disposition == .reconstructRTCSession)
+    #expect(await driver.operations().contains("recover") == false)
+  }
+
   @Test("removing a preferred input applies automatic once and preserves preference")
   func removedPreferenceFallsBackOnce() async throws {
     let preferred = AudioInputSelection.device(id: "usb", rememberedName: "usb")

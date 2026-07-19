@@ -6,7 +6,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/inline-chat/client-sdk-swift.git",
       "state" : {
-        "revision" : "2c3fcc90b2182e5bc69d2b35fb2564c71af9cbcb"
+        "revision" : "9bf267508ec70f00bfeee25180b417968415fe84"
       }
     },
     {

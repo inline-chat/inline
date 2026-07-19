@@ -364,23 +364,18 @@ actor GridAudioEngine {
     mediaFlowMissing(direction: "capture")
   }
 
-  func playoutFlowMissing() async {
-    guard appliedPrepared, !captureLeases.isEmpty else { return }
+  func playoutFlowMissing() async -> GridAudioPlayoutFailureDisposition {
     let health = await driver.runtimeHealth()
     routeSnapshot = health.route
     let physicalOutputHealthy = health.isPlaying && health.route?.isOutputRouteValid != false
-    guard !physicalOutputHealthy else {
-      // This signal is measured on LiveKit's decoded remote track, before the
-      // Inline-owned AUHAL renderer. Missing network/decoder PCM must not
-      // restart healthy physical hardware; the output callback liveness check
-      // below independently recovers a genuinely stalled Audio Unit.
-      log.debug(
-        "GRID_ENGINE phase=audio_remote_flow_missing physical_output=healthy action=preserve_route"
-      )
-      emitSnapshot()
-      return
-    }
-    mediaFlowMissing(direction: "playout")
+    // The probe sits on LiveKit's decoded remote track, upstream of the
+    // platform-default ADM. Restarting microphone capture or raw ADM playout
+    // cannot repair this failure and would cross ownership with the Room.
+    log.warning(
+      "GRID_ENGINE phase=audio_remote_flow_missing physical_output=\(physicalOutputHealthy ? "healthy" : "degraded") action=reconstruct_rtc_session"
+    )
+    emitSnapshot()
+    return .reconstructRTCSession
   }
 
   private func mediaFlowMissing(direction: String) {

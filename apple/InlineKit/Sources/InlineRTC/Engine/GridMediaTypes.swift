@@ -154,6 +154,10 @@ struct GridAudioRuntimeHealth: Equatable, Sendable {
   }
 }
 
+enum GridAudioPlayoutFailureDisposition: Equatable, Sendable {
+  case reconstructRTCSession
+}
+
 public struct InlineRTCAudioSnapshot: Equatable, Sendable {
   public let state: InlineRTCAudioState
   public let isPrepared: Bool

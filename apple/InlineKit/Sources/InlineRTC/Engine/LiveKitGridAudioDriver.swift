@@ -11,11 +11,11 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
   private nonisolated let eventContinuation: AsyncStream<GridAudioDriverEvent>.Continuation
   private let catalog = MacGridAudioDeviceCatalog()
   private var catalogTask: Task<Void, Never>?
+  private var deviceUpdateObserver: AudioDeviceUpdateObserverHandle?
   private var latestCatalog: MacGridAudioCatalogSnapshot?
   private var audioProcessingOptions = AudioProcessingOptions()
-  private var appliedInputTarget: AudioInputRouteTarget?
+  private var captureState = MacGridPlatformAudioCaptureState()
   private var configured = false
-  private var prepared = false
   private let log = Log.scoped("LiveKitGridAudioDriver")
 
   init() {
@@ -61,7 +61,7 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     try selectDefaultOutput()
 
     let eventContinuation = eventContinuation
-    AudioManager.shared.onDeviceUpdate = { _ in
+    deviceUpdateObserver = AudioManager.shared.observeDeviceUpdates { _ in
       eventContinuation.yield(.devicesChanged)
     }
     catalog.start()
@@ -82,21 +82,25 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
       throw LiveKitPlatformAudioDriverError.notConfigured
     }
     if value {
-      guard !prepared else { return }
-      guard appliedInputTarget != nil else {
+      guard !captureState.isPrepared else { return }
+      guard captureState.appliedInputTarget != nil else {
         throw LiveKitPlatformAudioDriverError.inputRouteNotApplied
       }
       try startRecording()
-      prepared = true
     } else {
-      guard prepared || AudioManager.shared.isRecording else { return }
+      guard captureState.isPrepared || AudioManager.shared.isRecording else { return }
       try stopRecording()
     }
   }
 
   func recoverPreparedAudio(preserving target: AudioInputRouteTarget?) async throws {
-    guard prepared else { return }
-    try switchInputRoute(target ?? appliedInputTarget ?? .automatic, restartRecording: true)
+    guard configured else {
+      throw LiveKitPlatformAudioDriverError.notConfigured
+    }
+    try switchInputRoute(
+      captureState.recoveryTarget(preserving: target),
+      restartRecording: true
+    )
   }
 
   func isAudioEngineRunning() async -> Bool {
@@ -116,41 +120,34 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
       )
     }
 
-    let currentInputID = manager.inputDevices.isEmpty
-      ? nil
-      : MacGridPlatformAudioDeviceResolver.stableInputUID(
-        forPlatformDeviceID: manager.inputDevice.deviceId,
-        in: snapshot
-      )
-    let currentOutputID = manager.outputDevices.isEmpty
-      ? nil
-      : MacGridPlatformAudioDeviceResolver.stableOutputUID(
-        forPlatformDeviceID: manager.outputDevice.deviceId,
-        in: snapshot
-      )
-    let expectedInputID: String? = switch appliedInputTarget {
+    // M144's current-device getters are imported as nonoptional even though
+    // their Objective-C implementation can return nil during hot-plug churn.
+    // Health therefore validates the selected policy against the stable Core
+    // Audio catalog and the ADM's concrete recording/playing state.
+    let selectedInputID: String? = switch captureState.appliedInputTarget {
     case .automatic:
       snapshot.defaultInput?.uid
     case let .device(uid, _):
-      uid
+      snapshot.inputs.contains(where: { $0.uid == uid }) ? uid : nil
     case nil:
       nil
     }
-    let inputMatches = expectedInputID != nil && currentInputID == expectedInputID
-    let outputMatches = currentOutputID != nil && currentOutputID == snapshot.defaultOutput?.uid
+    let outputID = snapshot.defaultOutput?.uid
+    let inputMatches = selectedInputID != nil
+    let outputMatches = outputID != nil
 
     return GridAudioRuntimeHealth(
       isEngineRunning: recording || playing,
       isRecording: recording,
       isPlaying: playing,
       route: InlineRTCAudioRoute(
-        currentInputID: currentInputID,
+        currentInputID: selectedInputID,
         defaultInputID: snapshot.defaultInput?.uid,
-        currentOutputID: currentOutputID,
+        currentOutputID: outputID,
         defaultOutputID: snapshot.defaultOutput?.uid,
         inputDeviceCount: snapshot.inputs.count,
         outputDeviceCount: snapshot.outputs.count,
-        isInputRouteValid: !prepared || (recording && inputMatches),
+        isInputRouteValid: !captureState.isPrepared || (recording && inputMatches),
         isOutputRouteValid: outputMatches,
         routeEpoch: snapshot.epoch
       )
@@ -163,7 +160,9 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
   ) async throws {
     try switchInputRoute(
       target,
-      restartRecording: restartPreparedAudio || prepared || AudioManager.shared.isRecording
+      restartRecording: restartPreparedAudio
+        || captureState.isPrepared
+        || AudioManager.shared.isRecording
     )
   }
 
@@ -210,39 +209,37 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     guard let snapshot = latestCatalog else {
       throw MacGridCoreAudioError.unavailable("The audio device catalog is not ready.")
     }
-    let previousTarget = appliedInputTarget
+    let previousTarget = captureState.appliedInputTarget
     if restartRecording {
       try stopRecording()
     }
 
     do {
       try selectInput(target, in: snapshot)
-      appliedInputTarget = target
+      captureState.inputSelected(target)
       if restartRecording {
         try startRecording()
-        prepared = true
       }
     } catch let switchError {
       if let previousTarget {
         do {
           try selectInput(previousTarget, in: snapshot)
-          appliedInputTarget = previousTarget
+          captureState.inputSelected(previousTarget)
         } catch let rollbackError {
-          appliedInputTarget = nil
+          captureState.inputSelectionLost()
           log.error(
             "GRID_ENGINE phase=platform_default_input_rollback_failed",
             error: rollbackError
           )
         }
       } else {
-        appliedInputTarget = nil
+        captureState.inputSelectionLost()
       }
       if restartRecording {
         do {
           try startRecording()
-          prepared = true
         } catch let rollbackError {
-          prepared = false
+          captureState.recordingStopped()
           log.error(
             "GRID_ENGINE phase=platform_default_recording_rollback_failed",
             error: rollbackError
@@ -266,13 +263,12 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
       throw LiveKitPlatformAudioDriverError.inputDeviceUnavailable
     }
 
-    // M144's public property setter performs the native selection. Its
-    // low-level trySet wrapper reports the zero-on-success result backwards,
-    // so verify through the ordinary public readback instead.
+    // M144's public property setter performs the native selection. Avoid its
+    // current-device getter here: the Objective-C implementation can return
+    // nil during the enumeration/getter hot-plug race despite a nonoptional
+    // Swift import. Recording startup and stable-catalog health verify that
+    // the selected policy remains operational.
     manager.inputDevice = device
-    guard manager.inputDevice.deviceId == deviceID else {
-      throw LiveKitPlatformAudioDriverError.inputDeviceSelectionFailed(device.name)
-    }
     log.info(
       "GRID_ENGINE phase=platform_default_input_selected route=\(target.logDescription) name=\(device.name)"
     )
@@ -284,9 +280,6 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
       throw LiveKitPlatformAudioDriverError.outputDeviceUnavailable
     }
     manager.outputDevice = device
-    guard manager.outputDevice.isDefault else {
-      throw LiveKitPlatformAudioDriverError.outputDeviceSelectionFailed
-    }
   }
 
   private func startRecording() throws {
@@ -302,16 +295,21 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     guard AudioManager.shared.isRecording else {
       throw LiveKitPlatformAudioDriverError.recordingDidNotStart
     }
+    captureState.recordingStarted()
   }
 
   private func stopRecording() throws {
     do {
       try AudioManager.shared.stopLocalRecording()
     } catch {
-      prepared = AudioManager.shared.isRecording
+      if AudioManager.shared.isRecording {
+        captureState.recordingStarted()
+      } else {
+        captureState.recordingStopped()
+      }
       throw error
     }
-    prepared = false
+    captureState.recordingStopped()
   }
 
   private static func systemImage(for device: MacGridAudioDevice) -> String {
@@ -330,9 +328,7 @@ private enum LiveKitPlatformAudioDriverError: LocalizedError {
   case platformVoiceProcessingUnsupported
   case inputRouteNotApplied
   case inputDeviceUnavailable
-  case inputDeviceSelectionFailed(String)
   case outputDeviceUnavailable
-  case outputDeviceSelectionFailed
   case recordingStartFailed(underlying: String)
   case recordingDidNotStart
 
@@ -346,12 +342,8 @@ private enum LiveKitPlatformAudioDriverError: LocalizedError {
       "A microphone route must be applied before capture starts."
     case .inputDeviceUnavailable:
       "The selected microphone is not available to WebRTC."
-    case let .inputDeviceSelectionFailed(name):
-      "WebRTC did not commit the selected microphone (\(name))."
     case .outputDeviceUnavailable:
       "The system-default output device is not available to WebRTC."
-    case .outputDeviceSelectionFailed:
-      "WebRTC did not commit the system-default output route."
     case let .recordingStartFailed(underlying):
       "WebRTC could not start platform-default microphone capture. \(underlying)"
     case .recordingDidNotStart:

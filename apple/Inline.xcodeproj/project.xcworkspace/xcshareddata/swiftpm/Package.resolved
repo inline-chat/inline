@@ -1,12 +1,12 @@
 {
-  "originHash" : "eb2cd49eb72946915fbe703e68be09646ea7678b7a8ae542f5296ae4b0b5fcb4",
+  "originHash" : "1930c2e1e0de11c678a6ca54490e21c9a5ccffd9eb70d5a616d00a47023c4159",
   "pins" : [
     {
       "identity" : "client-sdk-swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/inline-chat/client-sdk-swift.git",
       "state" : {
-        "revision" : "2c3fcc90b2182e5bc69d2b35fb2564c71af9cbcb"
+        "revision" : "9bf267508ec70f00bfeee25180b417968415fe84"
       }
     },
     {

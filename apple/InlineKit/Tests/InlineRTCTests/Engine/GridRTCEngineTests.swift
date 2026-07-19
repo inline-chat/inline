@@ -538,7 +538,7 @@ struct GridRTCEngineTests {
     #expect(await driver.operations().filter { $0 == "connect:37" }.count == 1)
   }
 
-  @Test("missing remote PCM is visible and clears when delivery resumes")
+  @Test("missing remote PCM reconstructs the RTC room without restarting capture")
   func remoteAudioFlowHealth() async throws {
     let audioDriver = RTCFakeAudioDriver()
     let audio = GridAudioEngine(
@@ -553,17 +553,11 @@ struct GridRTCEngineTests {
     try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
     await driver.emitToCurrentRoom(.remoteAudioFlow(identity: "remote", state: .missing))
     try await eventuallyRTC {
-      await rtc.currentSnapshot().remoteAudioFlowStates["remote"] == .missing
+      await driver.operations().filter { $0 == "connect:38" }.count == 2
     }
-    try await Task.sleep(for: .milliseconds(30))
     #expect(await audioDriver.operations().contains("recover") == false)
-
-    await driver.emitToCurrentRoom(.remoteAudioFlow(identity: "remote", state: .flowing))
-    try await eventuallyRTC {
-      await rtc.currentSnapshot().remoteAudioFlowStates["remote"] == .flowing
-    }
+    #expect(await driver.operations().filter { $0 == "disconnect:38" }.count == 1)
     #expect(await rtc.currentSnapshot().state == .connected(target))
-    #expect(await driver.operations().filter { $0 == "connect:38" }.count == 1)
   }
 
   @Test("denied microphone permission still allows a listen-only connection")

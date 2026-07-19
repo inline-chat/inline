@@ -1015,7 +1015,12 @@ actor GridRTCEngine {
     case let .localAudioFlow(flowState):
       await receiveLocalAudioFlow(flowState, room: eventRoom, target: target)
     case let .remoteAudioFlow(identity, flowState):
-      await receiveRemoteAudioFlow(flowState, identity: identity, target: target)
+      await receiveRemoteAudioFlow(
+        flowState,
+        identity: identity,
+        room: eventRoom,
+        target: target
+      )
     case let .disconnected(error):
       lastError = error
       log.warning(
@@ -1091,6 +1096,7 @@ actor GridRTCEngine {
   private func receiveRemoteAudioFlow(
     _ flowState: InlineRTCAudioFlowState,
     identity: String,
+    room eventRoom: GridRTCRoomHandle,
     target: InlineRTCSessionID
   ) async {
     let previous = remoteAudioFlowStates[identity]
@@ -1118,7 +1124,24 @@ actor GridRTCEngine {
         level: .error
       )
     }
-    await audio.playoutFlowMissing()
+    let disposition = await audio.playoutFlowMissing()
+    guard disposition == .reconstructRTCSession,
+          self.room == eventRoom,
+          roomTarget == target,
+          demand.target == target
+    else { return }
+
+    cancelReconcile()
+    detach(eventRoom)
+    beginRetirement(of: eventRoom, target: target)
+    reconnectCount += 1
+    state = .reconnecting(target)
+    lastError = "Remote audio stopped delivering decoded PCM"
+    log.warning(
+      "GRID_ENGINE phase=rtc_remote_audio_reconstruction_started session=\(target.rawValue) participant=\(identity)"
+    )
+    emitSnapshot()
+    scheduleReconcile()
   }
 
   private func shouldWaitForAudioPreparation(target: InlineRTCSessionID) -> Bool {
