@@ -109,6 +109,9 @@ export const startServer = (
     )
   const clientIpHeader =
     clientIpHeaderForMode(clientIpMode)
+  console.info(
+    "Building production HTTP application",
+  )
   const application =
     makeCandidateHttpApplication({
       apiBaseUrl: API_BASE_URL,
@@ -125,6 +128,9 @@ export const startServer = (
         },
       },
     })
+  console.info(
+    "Built production HTTP application",
+  )
 
   return startCoreProductionServer({
     application,

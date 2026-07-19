@@ -281,6 +281,9 @@ export const startCoreProductionServer = async <
   const bridge = makeRuntimeBridge(
     runnableRuntimeLayer,
   )
+  console.info(
+    "Acquiring production runtime services",
+  )
   const contextExit =
     await bridge.runPromiseExit(
       Effect.context<
@@ -289,6 +292,9 @@ export const startCoreProductionServer = async <
         >
       >(),
     )
+  console.info(
+    "Acquired production runtime services",
+  )
 
   if (Exit.isFailure(contextExit)) {
     await bridge.dispose()
