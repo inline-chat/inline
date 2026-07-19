@@ -42,6 +42,10 @@ await mkdir(fullDir, { recursive: true })
 const prunedRootPackageJson = {
   ...rootPackageJson,
   workspaces: selectedWorkspacePaths,
+  // msgpackr-extract is an optional acceleration path and its install script
+  // fails under Bun's isolated linker on Linux ARM64. Keep the native packages
+  // the server requires trusted without running that optional fallback build.
+  trustedDependencies: ["esbuild", "sharp"],
 }
 
 await writeJson(resolve(jsonDir, "package.json"), prunedRootPackageJson)
