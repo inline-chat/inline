@@ -3,7 +3,7 @@ WORKDIR /usr/src/app
 
 FROM base AS pruner
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY package.json bun.lock bunfig.toml ./
+COPY package.json bunfig.toml ./
 COPY server ./server
 COPY landing ./landing
 COPY packages ./packages

@@ -24,7 +24,6 @@ const outputDir = resolve(repoRoot, outputArg)
 const jsonDir = resolve(outputDir, "json")
 const fullDir = resolve(outputDir, "full")
 const rootPackageJsonPath = resolve(repoRoot, "package.json")
-const rootLockfilePath = resolve(repoRoot, "bun.lock")
 const rootPackageJson = JSON.parse(await readFile(rootPackageJsonPath, "utf8")) as PackageJson
 const allWorkspaces = await loadWorkspacePackages(rootPackageJson.workspaces)
 const targetWorkspace = allWorkspaces.byName.get(workspaceName)
@@ -62,8 +61,9 @@ for (const workspacePath of selectedWorkspacePaths) {
 await regenerateLockfile(jsonDir, resolve(outputDir, "bun.lock"))
 
 async function regenerateLockfile(installDir: string, outputLockfilePath: string) {
-  await copyFile(rootLockfilePath, resolve(installDir, "bun.lock"))
-
+  // Public workspaces are materialized from a separate pinned checkout in
+  // container builds. Generate from the selected manifests alone so the
+  // pruned lock cannot inherit workspace snapshots from another checkout.
   const install = Bun.spawn(["bun", "install", "--lockfile-only"], {
     cwd: installDir,
     stdout: "inherit",
