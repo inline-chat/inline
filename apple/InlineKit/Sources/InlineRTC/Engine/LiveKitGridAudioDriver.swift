@@ -18,9 +18,13 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
   private var captureState = MacGridPlatformAudioCaptureState()
   private var configured = false
   private let audioDeviceModuleBootstrapError: String?
+  private let inputDevices: MacGridWebRTCInputDeviceController
   private let log = Log.scoped("LiveKitGridAudioDriver")
 
-  init() {
+  init(
+    inputDevices: MacGridWebRTCInputDeviceController = MacGridWebRTCInputDeviceController()
+  ) {
+    self.inputDevices = inputDevices
     // Select the process-wide ADM synchronously while the session graph is
     // being constructed. Grid demand is delivered through a nonisolated
     // mailbox, so waiting until async configure() lets Room initialize the
@@ -265,36 +269,11 @@ actor LiveKitGridAudioDriver: GridAudioDriver {
     _ target: AudioInputRouteTarget,
     in snapshot: MacGridAudioCatalogSnapshot
   ) throws {
-    let manager = AudioManager.shared
-    if case .automatic = target {
-      // WebRTC's standard macOS ADM establishes index zero during its own
-      // initialization and follows subsequent system-default changes. The
-      // first Auto transaction inherits that policy; returning from an
-      // explicit device must actively restore index zero.
-      if captureState.appliedInputTarget != nil,
-         !manager.selectDefaultInputDevice() {
-        throw LiveKitPlatformAudioDriverError.inputDeviceUnavailable
-      }
-      log.info(
-        "GRID_ENGINE phase=platform_default_input_selected route=\(target.logDescription) name=\(snapshot.defaultInput?.name ?? "System Default")"
-      )
-      return
-    }
-
-    let deviceID = try MacGridPlatformAudioDeviceResolver.platformInputDeviceID(
-      for: target,
-      in: snapshot
-    )
-    guard let device = manager.inputDevices.first(where: { $0.deviceId == deviceID }) else {
-      throw LiveKitPlatformAudioDriverError.inputDeviceUnavailable
-    }
-
-    // M144's public property setter performs the native selection. Avoid its
-    // current-device getter here: the Objective-C implementation can return
-    // nil during the enumeration/getter hot-plug race despite a nonoptional
-    // Swift import. Recording startup and stable-catalog health verify that
-    // the selected policy remains operational.
-    manager.inputDevice = device
+    // Auto is an active route transaction too: after the RTC transport has
+    // initialized the ADM, resolve it to WebRTC's enumerated `default` device
+    // and use the same setter as explicit routes. This restores index zero
+    // both on first preparation and after an explicit-device override.
+    let device = try inputDevices.select(target, in: snapshot)
     log.info(
       "GRID_ENGINE phase=platform_default_input_selected route=\(target.logDescription) name=\(device.name)"
     )
@@ -346,7 +325,6 @@ private enum LiveKitPlatformAudioDriverError: LocalizedError {
   case audioDeviceModuleBootstrapFailed(underlying: String)
   case platformVoiceProcessingUnsupported
   case inputRouteNotApplied
-  case inputDeviceUnavailable
   case recordingStartFailed(underlying: String)
   case recordingDidNotStart
 
@@ -360,8 +338,6 @@ private enum LiveKitPlatformAudioDriverError: LocalizedError {
       "Grid platform-default audio requires Apple Voice Processing I/O to remain disabled."
     case .inputRouteNotApplied:
       "A microphone route must be applied before capture starts."
-    case .inputDeviceUnavailable:
-      "The selected microphone is not available to WebRTC."
     case let .recordingStartFailed(underlying):
       "WebRTC could not start platform-default microphone capture. \(underlying)"
     case .recordingDidNotStart:
