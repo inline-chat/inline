@@ -14,9 +14,11 @@ import { alphaWelcomeText, getAlphaTextEffect } from "./v1MessagingOperationsAda
 import { normalizeV1MessagingProvidersInput } from "./v1MessagingProvidersRequest.effect"
 import { makeV1ProviderOperations } from "./v1ProviderOperationsAdapter.effect"
 import { makeProviderTaskAuthorizer } from "./v1ProviderTaskAuthorization"
+import { UploadFileResult } from "./v1UploadSchemas.effect"
 import {
   CreateLinearIssueInput,
   CreateNotionTaskInput,
+  GetIntegrationsResult,
   GetNotionDatabasesInput,
 } from "./v1ProviderSchemas.effect"
 
@@ -114,6 +116,49 @@ describe("Effect /v1 messaging and provider operations", () => {
       expect(result.operation).toBe("v1.test.response")
       expect(result.cause).toBeInstanceOf(V1MessagingProvidersResponseContractFailure)
       expect(JSON.stringify(result)).not.toContain("must not enter")
+    }),
+  )
+
+  it.effect("accepts the retained upload operation's explicit undefined media IDs", () =>
+    Effect.gen(function* () {
+      const result = yield* invokeLegacyV1Operation(
+        "v1.uploadFile",
+        UploadFileResult,
+        async () => ({
+          fileUniqueId: "INP123",
+          photoId: 42,
+          videoId: undefined,
+          documentId: undefined,
+          voiceId: undefined,
+        }),
+      )
+      expect(result).toEqual({
+        fileUniqueId: "INP123",
+        photoId: 42,
+      })
+    }),
+  )
+
+  it.effect("accepts the retained integrations operation's explicit undefined properties", () =>
+    Effect.gen(function* () {
+      const result = yield* invokeLegacyV1Operation(
+        "v1.getIntegrations",
+        GetIntegrationsResult,
+        async () => ({
+          hasLinearConnected: false,
+          hasNotionConnected: false,
+          hasIntegrationAccess: false,
+          linearTeamId: undefined,
+          notionDatabaseId: undefined,
+          notionSpaces: undefined,
+          linearSpaces: undefined,
+        }),
+      )
+      expect(result).toEqual({
+        hasLinearConnected: false,
+        hasNotionConnected: false,
+        hasIntegrationAccess: false,
+      })
     }),
   )
 

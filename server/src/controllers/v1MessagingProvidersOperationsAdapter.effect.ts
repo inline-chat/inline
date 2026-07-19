@@ -32,6 +32,25 @@ const mapOperationError = (operation: string, cause: unknown): V1MessagingProvid
   })
 }
 
+const omitUndefinedObjectProperties = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(omitUndefinedObjectProperties)
+  }
+  if (
+    value === null
+    || typeof value !== "object"
+    || Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return value
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, property]) => property !== undefined)
+      .map(([key, property]) => [key, omitUndefinedObjectProperties(property)]),
+  )
+}
+
 export const invokeLegacyV1Operation = <Output>(
   operation: string,
   resultSchema: Schema.Decoder<Output>,
@@ -42,7 +61,7 @@ export const invokeLegacyV1Operation = <Output>(
     catch: (cause) => mapOperationError(operation, cause),
   }).pipe(
     Effect.flatMap((result) =>
-      Schema.decodeUnknownEffect(resultSchema)(result).pipe(
+      Schema.decodeUnknownEffect(resultSchema)(omitUndefinedObjectProperties(result)).pipe(
         Effect.mapError(
           () =>
             new V1MessagingProvidersOperationFailure({
@@ -55,4 +74,3 @@ export const invokeLegacyV1Operation = <Output>(
       ),
     ),
   )
-
