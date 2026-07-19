@@ -47,7 +47,17 @@ export const acquireOwnedProcess = <Resource>(
 ) =>
   Effect.acquireRelease(
     Effect.tryPromise({
-      try: async () => adapter.start(),
+      try: async () => {
+        console.info(
+          `Starting process service: ${adapter.name}`,
+        )
+        const resource =
+          await adapter.start()
+        console.info(
+          `Started process service: ${adapter.name}`,
+        )
+        return resource
+      },
       catch: (cause) =>
         new ProcessServiceStartFailure({
           cause,
