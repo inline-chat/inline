@@ -562,7 +562,7 @@ public extension Document {
     // Try to find existing document
     if let existingDocument = try Document.filter(Column("documentId") == protoDocument.id).fetchOne(db) {
       // Create updated document with preserved local path
-      var updatedDocument = Document(
+      let updatedDocument = Document(
         id: existingDocument.id,
         documentId: protoDocument.id,
         date: Date(timeIntervalSince1970: TimeInterval(protoDocument.date)),
@@ -575,8 +575,7 @@ public extension Document {
       )
       Log.shared.debug("Updating document with ID \(protoDocument.id) \(protoDocument.fileName) \(updatedDocument)")
 
-      // Save the updated document
-      try updatedDocument.save(db, onConflict: .replace)
+      try updatedDocument.update(db)
       return updatedDocument
     } else {
       // Create new document if it doesn't exist
@@ -607,7 +606,7 @@ public extension Video {
     // Try to find existing video
     if let existingVideo = try Video.filter(Column("videoId") == protoVideo.id).fetchOne(db) {
       // Create updated video with preserved local path
-      var updatedVideo = Video(
+      let updatedVideo = Video(
         id: existingVideo.id,
         videoId: protoVideo.id,
         date: Date(timeIntervalSince1970: TimeInterval(protoVideo.date)),
@@ -622,8 +621,7 @@ public extension Video {
         hasAudio: protoVideo.hasHasAudio_p ? protoVideo.hasAudio_p : existingVideo.hasAudio
       )
 
-      // Save the updated video
-      try updatedVideo.save(db, onConflict: .replace)
+      try updatedVideo.update(db)
       return updatedVideo
     } else {
       // Create new video if it doesn't exist
@@ -640,15 +638,15 @@ public extension Photo {
     // Try to find existing photo
     if let existingPhoto = try Photo.filter(Column("photoId") == protoPhoto.id).fetchOne(db) {
       // Create updated photo
-      var updatedPhoto = Photo(
+      let updatedPhoto = Photo(
         id: existingPhoto.id,
         photoId: protoPhoto.id,
         date: Date(timeIntervalSince1970: TimeInterval(protoPhoto.date)),
         format: protoPhoto.format.toImageFormat()
       )
 
-      // Save the updated photo
-      try updatedPhoto.save(db, onConflict: .replace)
+      // REPLACE would cascade-delete photoSize rows, including cached localPath values.
+      try updatedPhoto.update(db)
 
       // Update photo sizes while preserving local paths
       for protoSize in protoPhoto.sizes {
@@ -678,8 +676,7 @@ public extension PhotoSize {
     // Try to find existing photo size
     if let existingSize = try PhotoSize.filter(Column("photoId") == photoId)
       .filter(Column("type") == protoSize.type)
-      .fetchOne(db)
-    {
+      .fetchOne(db) {
       // Create updated photo size with preserved local path
       let updatedSize = PhotoSize(
         id: existingSize.id,
@@ -693,8 +690,7 @@ public extension PhotoSize {
         localPath: existingSize.localPath // Preserve local path
       )
 
-      // Save the updated photo size
-      try updatedSize.save(db, onConflict: .replace)
+      try updatedSize.update(db)
     } else {
       // Create new photo size if it doesn't exist
       let newSize = PhotoSize.from(proto: protoSize, photoId: photoId)
