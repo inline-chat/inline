@@ -130,6 +130,8 @@ mobile/.eas/build/
 
 # Swift
 .swift-module-cache
+*.profraw
+*.profdata
 
 # AI
 test_write_permission
