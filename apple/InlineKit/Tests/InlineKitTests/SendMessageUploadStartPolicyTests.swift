@@ -5,6 +5,11 @@ import Testing
 
 @Suite("Send Message Upload Start Policy")
 struct SendMessageUploadStartPolicyTests {
+  private func makeInMemoryDatabase() throws -> AppDatabase {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    return try AppDatabase(queue)
+  }
+
   @Test("swallows upload already in progress errors so send can join the existing upload")
   func swallowsUploadAlreadyInProgressError() async throws {
     await #expect(throws: Never.self) {
@@ -27,8 +32,9 @@ struct SendMessageUploadStartPolicyTests {
   func resolvesVideoLocalIdFromVideoIdLookup() async throws {
     let temporaryVideoId = -Int64.random(in: 1 ... (Int64.max / 2))
     let localPath = "test-\(UUID().uuidString).mp4"
+    let database = try makeInMemoryDatabase()
 
-    let storedVideo = try await AppDatabase.shared.dbWriter.write { db in
+    let storedVideo = try await database.dbWriter.write { db in
       let video = Video(
         videoId: temporaryVideoId,
         date: Date(),
@@ -57,9 +63,12 @@ struct SendMessageUploadStartPolicyTests {
       localPath: storedVideo.localPath
     )
 
-    let resolvedLocalId = try await FileUploader.shared.resolveLocalVideoId(for: detachedVideo)
+    let resolvedLocalId = try await FileUploader.shared.resolveLocalVideoId(
+      for: detachedVideo,
+      database: database
+    )
 
-    let expectedLocalId = try await AppDatabase.shared.dbWriter.read { db in
+    let expectedLocalId = try await database.dbWriter.read { db in
       try Video
         .filter(Column("videoId") == temporaryVideoId)
         .fetchOne(db)?
@@ -71,7 +80,9 @@ struct SendMessageUploadStartPolicyTests {
 
   @Test("createLocalVideo returns a persisted local id that survives server id rewrites")
   func createLocalVideoReturnsPersistedLocalId() async throws {
-    let video = try MediaHelpers.shared.createLocalVideo(
+    let database = try makeInMemoryDatabase()
+    let mediaHelpers = MediaHelpers(database: database)
+    let video = try mediaHelpers.createLocalVideo(
       width: 16,
       height: 16,
       duration: 1,
@@ -81,17 +92,22 @@ struct SendMessageUploadStartPolicyTests {
 
     let localId = try #require(video.id)
 
-    try await AppDatabase.shared.dbWriter.write { db in
+    try await database.dbWriter.write { db in
       try AppDatabase.updateVideoWithServerId(db, localVideo: video, serverId: Int64.random(in: 1 ... Int64.max))
     }
 
-    let resolvedLocalId = try await FileUploader.shared.resolveLocalVideoId(for: video)
+    let resolvedLocalId = try await FileUploader.shared.resolveLocalVideoId(
+      for: video,
+      database: database
+    )
     #expect(resolvedLocalId == localId)
   }
 
   @Test("createLocalDocument returns a persisted local id")
   func createLocalDocumentReturnsPersistedLocalId() throws {
-    let document = try MediaHelpers.shared.createLocalDocument(
+    let database = try makeInMemoryDatabase()
+    let mediaHelpers = MediaHelpers(database: database)
+    let document = try mediaHelpers.createLocalDocument(
       fileName: "test.txt",
       mimeType: "text/plain",
       size: 16

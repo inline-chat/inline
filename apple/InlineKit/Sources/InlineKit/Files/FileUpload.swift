@@ -847,11 +847,16 @@ public actor FileUploader {
     )
   }
 
-  func resolveLocalVideoId(for video: Video) throws -> Int64 {
+  func resolveLocalVideoId(
+    for video: Video,
+    database: AppDatabase? = nil
+  ) throws -> Int64 {
     if let id = video.id { return id }
 
+    let database = database ?? AppDatabase.shared
+
     // Try to fetch the video row by temporary/server videoId
-    let fetched: Video? = try AppDatabase.shared.dbWriter.read { db in
+    let fetched: Video? = try database.dbWriter.read { db in
       try Video
         .filter(Video.Columns.videoId == video.videoId)
         .fetchOne(db)
