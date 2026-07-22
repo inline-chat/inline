@@ -46,13 +46,45 @@ export const redactValue = (value: unknown, depth = 0): unknown => {
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return value
 
   if (value instanceof Error) {
-    // Preserve the Error object, but redact the message (common place for request paths).
-    const next = new Error(redactString(value.message))
-    next.name = value.name
-    // Redact stack too because it includes the original message on the first line.
-    const stack = (value as any).stack
-    ;(next as any).stack = typeof stack === "string" ? redactString(stack) : stack
-    ;(next as any).cause = redactValue((value as any).cause, depth + 1)
+    // Do not invoke an Error constructor here. Bun retains the constructor's
+    // hidden source location and may render this redaction function as the
+    // apparent failure site even after `stack` is replaced. A prototype clone
+    // remains instanceof Error while preserving the original provenance.
+    const next = Object.create(Object.getPrototypeOf(value)) as Error & Record<string, unknown>
+    Object.defineProperties(next, {
+      name: {
+        configurable: true,
+        writable: true,
+        value: value.name,
+      },
+      message: {
+        configurable: true,
+        writable: true,
+        value: redactString(value.message),
+      },
+      stack: {
+        configurable: true,
+        writable: true,
+        value: typeof value.stack === "string" ? redactString(value.stack) : value.stack,
+      },
+    })
+    const cause = (value as Error & { cause?: unknown }).cause
+    if (cause !== undefined) {
+      Object.defineProperty(next, "cause", {
+        configurable: true,
+        writable: true,
+        value: redactValue(cause, depth + 1),
+      })
+    }
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === "name" || key === "message" || key === "stack" || key === "cause") continue
+      Object.defineProperty(next, key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: shouldRedactKey(key) ? REDACTED : redactValue(nested, depth + 1),
+      })
+    }
     return next
   }
 

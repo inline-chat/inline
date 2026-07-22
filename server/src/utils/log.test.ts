@@ -30,6 +30,8 @@ describe("log redaction", () => {
     const redacted = redactValue(error) as Error
     const redactedCause = (redacted as any).cause as Error
 
+    expect(redacted).toBeInstanceOf(Error)
+    expect(redacted).not.toBe(error)
     expect(redacted.message).toContain("bot<redacted>")
     expect(redacted.message).toContain("Bearer <redacted>")
     expect(redacted.message).not.toContain(token)
@@ -44,6 +46,11 @@ describe("log redaction", () => {
     expect(redactedCause.message).not.toContain(token)
     expect(redactedCause.stack!).toContain("bot<redacted>")
     expect(redactedCause.stack!).not.toContain(token)
+    expect(Bun.inspect(redacted)).toContain("at top (y.ts:1:1)")
+    expect(Bun.inspect(redacted)).not.toContain("src/utils/log.ts")
+
+    const withoutCause = redactValue(new Error("plain failure")) as Error
+    expect("cause" in withoutCause).toBe(false)
   })
 
   it("redacts sensitive keys in metadata objects", () => {
