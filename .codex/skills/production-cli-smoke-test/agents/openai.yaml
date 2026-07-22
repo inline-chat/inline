@@ -1,0 +1,4 @@
+interface:
+  display_name: "Production CLI Smoke Test"
+  short_description: "Safely test production through Inline CLI"
+  default_prompt: "Use $production-cli-smoke-test to run a safe production smoke test in my self-chat."
