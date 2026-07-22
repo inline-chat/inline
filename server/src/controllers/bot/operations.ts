@@ -595,7 +595,7 @@ const sendMessage = async (
         ? BigInt(replyToMessageId)
         : undefined,
       entities,
-      parseMarkdown,
+      parseMarkdown: parseMarkdown ?? true,
       randomId,
     },
     context,
@@ -836,7 +836,7 @@ const editMessageText = async (
       peer: peerId,
       text: raw["text"],
       entities,
-      parseMarkdown,
+      parseMarkdown: parseMarkdown ?? true,
     },
     context,
   )

@@ -527,7 +527,7 @@ const botMethods = (authPlugin: any): any => {
             message: text,
             replyToMessageId: replyToMessageId ? BigInt(replyToMessageId) : undefined,
             entities,
-            parseMarkdown,
+            parseMarkdown: parseMarkdown ?? true,
             randomId,
           },
           ctxFromStore(store),
@@ -695,7 +695,13 @@ const botMethods = (authPlugin: any): any => {
         const botChat = toBotChat(chat)
 
         await editMessageFn(
-          { messageId: BigInt(messageId), peer: peerId, text, entities, parseMarkdown },
+          {
+            messageId: BigInt(messageId),
+            peer: peerId,
+            text,
+            entities,
+            parseMarkdown: parseMarkdown ?? true,
+          },
           ctxFromStore(store),
         )
 

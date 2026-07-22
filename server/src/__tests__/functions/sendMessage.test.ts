@@ -86,6 +86,21 @@ describe("sendMessage", () => {
     context = testUtils.functionContext({ userId: currentUser.id, sessionId: 1 })
   })
 
+  test("preserves markdown syntax for normal user RPC when parseMarkdown is omitted", async () => {
+    const text = "hello **world** and `code`"
+    const result = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: text,
+      },
+      context,
+    )
+
+    const message = extractMessage(result)
+    expect(message?.message).toBe(text)
+    expect(message?.entities).toBeUndefined()
+  })
+
   test("records desktop chat activity from successful sends", async () => {
     const mockRecordChatActivity = mock().mockResolvedValue(undefined)
     const originalRecordChatActivity = desktopPushSuppressionTracker.recordChatActivity

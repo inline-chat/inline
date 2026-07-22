@@ -432,15 +432,41 @@ describe("Bot HTTP API", () => {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ user_id: human!.id, text: "camel markdown alias", parseMarkdown: false }),
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "camel **markdown** alias",
+          parseMarkdown: false,
+        }),
       }),
     )
     expect(camelMarkdownRes.status).toBe(200)
     const camelMarkdownJson = await camelMarkdownRes.json()
     expect(camelMarkdownJson.ok).toBe(true)
+    expect(camelMarkdownJson.result.message.text).toBe("camel **markdown** alias")
+    expect(camelMarkdownJson.result.message.entities).toBeUndefined()
+
+    const canonicalMarkdownRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          text: "canonical **markdown** flag",
+          parse_markdown: false,
+        }),
+      }),
+    )
+    expect(canonicalMarkdownRes.status).toBe(200)
+    const canonicalMarkdownJson = await canonicalMarkdownRes.json()
+    expect(canonicalMarkdownJson.ok).toBe(true)
+    expect(canonicalMarkdownJson.result.message.text).toBe("canonical **markdown** flag")
+    expect(canonicalMarkdownJson.result.message.entities).toBeUndefined()
   })
 
-  it("parses inline markdown mention links on sendMessage when requested", async () => {
+  it("parses inline markdown mention links on sendMessage by default", async () => {
     const [bot] = await db
       .insert(users)
       .values({
@@ -483,7 +509,6 @@ describe("Bot HTTP API", () => {
         body: JSON.stringify({
           user_id: human!.id,
           text: `hi [@Mentioned](inline://user?id=${human!.id})`,
-          parse_markdown: true,
         }),
       }),
     )
@@ -503,6 +528,33 @@ describe("Bot HTTP API", () => {
           username: "mentioned",
           first_name: "Mentioned",
         },
+      },
+    ])
+
+    const editRes = await app.handle(
+      new Request("http://localhost/bot/editMessageText", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: human!.id,
+          message_id: sendJson.result.message.message_id,
+          text: "updated **Markdown**",
+        }),
+      }),
+    )
+
+    expect(editRes.status).toBe(200)
+    const editJson = await editRes.json()
+    expect(editJson.ok).toBe(true)
+    expect(editJson.result.message.text).toBe("updated Markdown")
+    expect(editJson.result.message.entities).toEqual([
+      {
+        type: "bold",
+        offset: 8,
+        length: 8,
       },
     ])
   })

@@ -17,6 +17,49 @@ describe("processOutgoingText", () => {
     userIndex = 0
   })
 
+  test("preserves markdown syntax when parsing is omitted", async () => {
+    const text = "hello **world** [docs](https://example.com)"
+    const result = await processOutgoingText({
+      text,
+      entities: undefined,
+    })
+
+    expect(result.text).toBe(text)
+    expect(result.entities).toBeUndefined()
+  })
+
+  test("preserves markdown syntax when parsing is explicitly disabled", async () => {
+    const text = "hello **world** [docs](https://example.com)"
+    const result = await processOutgoingText({
+      text,
+      entities: undefined,
+      parseMarkdown: false,
+    })
+
+    expect(result.text).toBe(text)
+    expect(result.entities).toBeUndefined()
+  })
+
+  test("preserves explicit entities when the markdown flag is omitted", async () => {
+    const entities = {
+      entities: [
+        {
+          type: MessageEntity_Type.BOLD,
+          offset: 6n,
+          length: 9n,
+          entity: { oneofKind: undefined },
+        },
+      ],
+    }
+    const result = await processOutgoingText({
+      text: "hello **world**",
+      entities,
+    })
+
+    expect(result.text).toBe("hello **world**")
+    expect(result.entities).toEqual(entities)
+  })
+
   test("converts markdown inline user id links to mention entities", async () => {
     const user = await testUtils.createUser(nextEmail("inline-link-id"))
 

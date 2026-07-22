@@ -115,6 +115,59 @@ describe("editMessage function", () => {
     expect(message?.entities?.entities[1]?.length).toBe(4n)
   })
 
+  test("preserves markdown syntax when parseMarkdown is explicitly disabled", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "initial raw markdown",
+      },
+      context,
+    )
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    const text = "hello **world** and `code`"
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text,
+        parseMarkdown: false,
+      },
+      context,
+    )
+
+    const message = extractEditedMessage(result)
+    expect(message?.message).toBe(text)
+    expect(message?.entities).toBeUndefined()
+  })
+
+  test("preserves markdown syntax for normal user RPC when parseMarkdown is omitted", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "initial omitted markdown flag",
+      },
+      context,
+    )
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    const text = "hello **world** and `code`"
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text,
+      },
+      context,
+    )
+
+    const message = extractEditedMessage(result)
+    expect(message?.message).toBe(text)
+    expect(message?.entities).toBeUndefined()
+  })
+
   test("resolves @username mentions while parsing markdown edits", async () => {
     const mentionedUser = await testUtils.createUser(nextEmail("edit-mentioned"))
     await db.update(users).set({ username: "editmentioned" }).where(eq(users.id, mentionedUser!.id)).execute()
