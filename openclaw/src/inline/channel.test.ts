@@ -1850,7 +1850,7 @@ describe("inline/channel", () => {
     expect(actions).toContain("kick")
   })
 
-  it("outbound sendText uses the Inline SDK client (mocked)", async () => {
+  it("outbound sendText enables Markdown parsing by default", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -1876,7 +1876,6 @@ describe("inline/channel", () => {
         inline: {
           token: "token",
           baseUrl: "https://api.inline.chat",
-          parseMarkdown: true,
         },
       },
     } satisfies OpenClawConfig
@@ -1893,6 +1892,51 @@ describe("inline/channel", () => {
       expect.objectContaining({ chatId: 7n, text: "hi", parseMarkdown: true }),
     )
     expect(close).toHaveBeenCalled()
+  })
+
+  it("outbound sendText preserves an explicit Markdown parsing override", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: null }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    await setInlineTestRuntime()
+
+    const { inlineChannelPlugin } = await import("./channel")
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          parseMarkdown: false,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineChannelPlugin.outbound.sendText?.({
+      cfg,
+      to: "chat:7",
+      text: "literal **markdown**",
+      accountId: "default",
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 7n,
+        text: "literal **markdown**",
+        parseMarkdown: false,
+      }),
+    )
   })
 
   it("outbound sendText suppresses copied OpenClaw runtime context", async () => {

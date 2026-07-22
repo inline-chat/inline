@@ -563,7 +563,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  it("sendMessage() accepts userId destination", async () => {
+  it("sendMessage() serializes an explicit false Markdown parsing flag", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
@@ -573,7 +573,7 @@ describe("InlineSdkClient", () => {
 
     await connectAndOpen(client, transport)
 
-    const p = client.sendMessage({ userId: 42, text: "hi" })
+    const p = client.sendMessage({ userId: 42, text: "hi", parseMarkdown: false })
 
     await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "rpcCall").length > 0)
     const rpc = transport.sent.find(
@@ -586,6 +586,7 @@ describe("InlineSdkClient", () => {
     if (rpc.body.rpcCall.input.sendMessage.peerId?.type.oneofKind === "user") {
       expect(rpc.body.rpcCall.input.sendMessage.peerId.type.user.userId).toBe(42n)
     }
+    expect(rpc.body.rpcCall.input.sendMessage.parseMarkdown).toBe(false)
 
     await transport.emitMessage(
       ServerProtocolMessage.create({
@@ -622,6 +623,7 @@ describe("InlineSdkClient", () => {
     if (rpc.body.rpcCall.input.oneofKind !== "sendMessage") throw new Error("missing sendMessage")
     const payload = rpc.body.rpcCall.input.sendMessage
     expect(payload.message).toBe("caption")
+    expect(payload.parseMarkdown).toBeUndefined()
     expect(payload.media?.media.oneofKind).toBe("photo")
     if (payload.media?.media.oneofKind === "photo") {
       expect(payload.media.media.photo.photoId).toBe(99n)
