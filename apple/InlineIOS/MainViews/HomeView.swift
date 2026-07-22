@@ -1,5 +1,3 @@
-import Auth
-import GRDB
 import InlineKit
 import InlineSearch
 import InlineUI
@@ -10,20 +8,12 @@ import UIKit
 struct HomeView: View {
   // MARK: - Environment
 
-  @EnvironmentObject private var onboardingNav: OnboardingNavigation
-  @EnvironmentObject private var api: ApiClient
   @EnvironmentObject private var dataManager: DataManager
   @EnvironmentObject private var notificationHandler: NotificationHandler
-  @EnvironmentObject private var mainViewRouter: MainViewRouter
   @EnvironmentObject private var home: HomeViewModel
-  @EnvironmentObject var data: DataManager
-  @EnvironmentObject private var tabsManager: TabsManager
 
-  @Environment(\.realtime) var realtime
-  @Environment(\.realtimeV2) var realtimeV2
+  @Environment(\.realtimeV2) private var realtimeV2
   @Environment(\.appDatabase) private var database
-  @Environment(\.auth) private var auth
-  @Environment(\.scenePhase) var scenePhase
   @Environment(Router.self) private var router
 
   // MARK: - State
@@ -31,9 +21,7 @@ struct HomeView: View {
   @State private var text = ""
   @State private var searchModel: InlineSearchViewModel?
 
-  @State private var spacesPath: [Navigation.Destination] = []
-
-  var chatItems: [HomeChatItem] {
+  private var chatItems: [HomeChatItem] {
     let visibleChats = home.chats.filter { $0.dialog.archived != true }
     return HomeViewModel.sortChats(visibleChats)
   }
@@ -50,13 +38,10 @@ struct HomeView: View {
       }
       .navigationBarTitleDisplayMode(.inline)
       .navigationBarBackButtonHidden()
-      .task {
-        // initalFetch()
-      }
       .onAppear {
         ensureSearchModel()
         searchHome(query: text)
-        initalFetch()
+        initialFetch()
       }
       .navigationTitle("Chats")
   }
@@ -157,10 +142,10 @@ struct HomeView: View {
     )
   }
 
-  private func initalFetch() {
+  private func initialFetch() {
     notificationHandler.setAuthenticated(value: true)
 
-    Task.detached {
+    Task {
       do {
         try await realtimeV2.send(.getMe())
       } catch {
