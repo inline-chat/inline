@@ -52,6 +52,7 @@ import {
   MediaOperationFailure,
   MediaOperations,
   makeMediaOperations,
+  type MediaRequestHeaders,
 } from "./media.effect"
 import {
   SessionAuthentication,
@@ -74,6 +75,7 @@ interface Probe {
   authorizeCalls: number
   callbackCalls: number
   mediaCalls: number
+  mediaHeaders: MediaRequestHeaders | undefined
   thereCalls: number
   waitlistCalls: number
   waitlistClientIp: string | undefined
@@ -114,6 +116,7 @@ const makeProbe = (): Probe => ({
   authorizeCalls: 0,
   callbackCalls: 0,
   mediaCalls: 0,
+  mediaHeaders: undefined,
   thereCalls: 0,
   waitlistCalls: 0,
   waitlistClientIp: undefined,
@@ -206,8 +209,9 @@ const makeHandler = (
       },
     }),
     Layer.succeed(MediaOperations, {
-      servePhoto: () => {
+      serveFile: (_query, headers) => {
         probe.mediaCalls += 1
+        probe.mediaHeaders = headers
         return probe.mediaFailure
           ? Effect.fail(
               new MediaOperationFailure({
@@ -672,6 +676,7 @@ describe("AuxiliaryRouteGroup", () => {
           "http://inline.test/file?id=file123&exp=2000000000&sig=valid",
           {
             headers: {
+              origin: "http://localhost:8001",
               range: "bytes=1-2",
             },
           },
@@ -688,13 +693,42 @@ describe("AuxiliaryRouteGroup", () => {
         media.headers.get("x-content-type-options"),
       ).toBe("nosniff")
       expect(
+        media.headers.get("access-control-allow-origin"),
+      ).toBe("http://localhost:8001")
+      expect(
+        media.headers.get("access-control-expose-headers"),
+      ).toContain("content-range")
+      expect(
         Array.from(await media.bytes()),
       ).toEqual([1, 2, 3, 4])
+
+      const mediaPreflight = await handler(
+        new Request("http://inline.test/file", {
+          method: "OPTIONS",
+          headers: {
+            origin: "http://localhost:8001",
+            "access-control-request-method": "GET",
+            "access-control-request-headers":
+              "range, if-range, if-none-match",
+          },
+        }),
+      )
+      expect(mediaPreflight.status).toBe(204)
+      expect(
+        mediaPreflight.headers.get(
+          "access-control-allow-headers",
+        ),
+      ).toContain("range")
 
       expect(probe.waitlistCalls).toBe(1)
       expect(probe.waitlistClientIp).toBeUndefined()
       expect(probe.thereCalls).toBe(1)
       expect(probe.mediaCalls).toBe(1)
+      expect(probe.mediaHeaders).toEqual({
+        range: "bytes=1-2",
+        ifRange: undefined,
+        ifNoneMatch: undefined,
+      })
     })
   })
 
@@ -1061,6 +1095,7 @@ describe("makeMediaOperations", () => {
           pathIv: Buffer.from("iv"),
           pathTag: Buffer.from("tag"),
           mimeType: "image/png",
+          fileSize: 4,
         }
       },
       decryptPath: () => "photo.png",
@@ -1070,12 +1105,19 @@ describe("makeMediaOperations", () => {
           new Blob([
             new Uint8Array([4, 3, 2, 1]),
           ]).stream(),
+        slice: (start, end) => ({
+          stream: () =>
+            new Blob([
+              new Uint8Array([4, 3, 2, 1])
+                .slice(start, end),
+            ]).stream(),
+        }),
       }),
       nowSeconds: () => 1_000,
     })
 
     const forbidden = await Effect.runPromise(
-      operations.servePhoto({
+      operations.serveFile({
         id: "file123",
         exp: "2000",
         sig: "bad",
@@ -1086,7 +1128,7 @@ describe("makeMediaOperations", () => {
     expect(lookups).toBe(0)
 
     const success = await Effect.runPromise(
-      operations.servePhoto({
+      operations.serveFile({
         id: "file123",
         exp: "10000",
         sig: "valid",
@@ -1099,10 +1141,141 @@ describe("makeMediaOperations", () => {
     expect(success.headers.get("content-type")).toBe(
       "image/png",
     )
+    expect(success.headers.get("accept-ranges")).toBe(
+      "bytes",
+    )
+    expect(success.headers.get("content-length")).toBe(
+      "4",
+    )
     expect(
       Array.from(await success.bytes()),
     ).toEqual([4, 3, 2, 1])
     expect(lookups).toBe(1)
+
+    const partial = await Effect.runPromise(
+      operations.serveFile(
+        {
+          id: "file123",
+          exp: "10000",
+          sig: "valid",
+        },
+        { range: "bytes=1-2" },
+      ),
+    )
+    expect(partial.status).toBe(206)
+    expect(partial.headers.get("content-range")).toBe(
+      "bytes 1-2/4",
+    )
+    expect(partial.headers.get("content-length")).toBe(
+      "2",
+    )
+    expect(Array.from(await partial.bytes())).toEqual([
+      3,
+      2,
+    ])
+
+    const unsatisfiable = await Effect.runPromise(
+      operations.serveFile(
+        {
+          id: "file123",
+          exp: "10000",
+          sig: "valid",
+        },
+        { range: "bytes=10-" },
+      ),
+    )
+    expect(unsatisfiable.status).toBe(416)
+    expect(
+      unsatisfiable.headers.get("content-range"),
+    ).toBe("bytes */4")
+
+    const notModified = await Effect.runPromise(
+      operations.serveFile(
+        {
+          id: "file123",
+          exp: "10000",
+          sig: "valid",
+        },
+        { ifNoneMatch: '"file123-4"' },
+      ),
+    )
+    expect(notModified.status).toBe(304)
+
+    const staleIfRange = await Effect.runPromise(
+      operations.serveFile(
+        {
+          id: "file123",
+          exp: "10000",
+          sig: "valid",
+        },
+        {
+          range: "bytes=1-2",
+          ifRange: '"stale-validator"',
+        },
+      ),
+    )
+    expect(staleIfRange.status).toBe(200)
+    expect(Array.from(await staleIfRange.bytes())).toEqual([
+      4,
+      3,
+      2,
+      1,
+    ])
+  })
+
+  it("streams one video slice and propagates response cancellation", async () => {
+    let slice: [number, number, string | undefined] | undefined
+    let cancelled = false
+    const operations = makeMediaOperations({
+      filesPathPrefix: "files",
+      verify: () => true,
+      lookup: async () => ({
+        fileType: "video",
+        pathEncrypted: Buffer.from("encrypted"),
+        pathIv: Buffer.from("iv"),
+        pathTag: Buffer.from("tag"),
+        mimeType: "video/mp4",
+        fileSize: 100,
+      }),
+      decryptPath: () => "video.mp4",
+      getObject: () => ({
+        exists: async () => true,
+        stream: () => new Blob([new Uint8Array(100)]).stream(),
+        slice: (start, end, contentType) => {
+          slice = [start, end, contentType]
+          return {
+            stream: () =>
+              new ReadableStream<Uint8Array>({
+                pull: (controller) => {
+                  controller.enqueue(new Uint8Array([1]))
+                },
+                cancel: () => {
+                  cancelled = true
+                },
+              }),
+          }
+        },
+      }),
+      nowSeconds: () => 1_000,
+    })
+
+    const response = await Effect.runPromise(
+      operations.serveFile(
+        {
+          id: "INVstableVideo",
+          exp: "2000",
+          sig: "valid",
+        },
+        { range: "bytes=10-19" },
+      ),
+    )
+
+    expect(response.status).toBe(206)
+    expect(slice).toEqual([10, 20, "video/mp4"])
+    const reader = response.body!.getReader()
+    await reader.read()
+    await reader.cancel()
+    expect(cancelled).toBe(true)
   })
 
   it("keeps signature and stream dependency throws in the typed media channel", async () => {
@@ -1114,6 +1287,7 @@ describe("makeMediaOperations", () => {
         pathIv: Buffer.from("iv"),
         pathTag: Buffer.from("tag"),
         mimeType: "image/png",
+        fileSize: 4,
       }),
       decryptPath: () => "photo.png",
       nowSeconds: () => 1_000,
@@ -1133,7 +1307,7 @@ describe("makeMediaOperations", () => {
           )
         },
         getObject: () => undefined,
-      }).servePhoto(query).pipe(Effect.flip),
+      }).serveFile(query).pipe(Effect.flip),
     )
     expect(signatureFailure.operation).toBe(
       "signature",
@@ -1148,10 +1322,15 @@ describe("makeMediaOperations", () => {
           stream: () => {
             throw new Error(
               "private stream failure",
-            )
-          },
+              )
+            },
+          slice: () => ({
+            stream: () =>
+              new Blob([new Uint8Array([1])])
+                .stream(),
+          }),
         }),
-      }).servePhoto(query).pipe(Effect.flip),
+      }).serveFile(query).pipe(Effect.flip),
     )
     expect(streamFailure.operation).toBe("storage")
   })

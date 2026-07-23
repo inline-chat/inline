@@ -41,20 +41,6 @@ export class InlineMediaLoadCancelled extends Error {
   }
 }
 
-const canFetchForPersistentCache = (remoteUrl: string) => {
-  try {
-    const url = new URL(
-      remoteUrl,
-      globalThis.location?.href,
-    )
-    return !url.hostname.endsWith(
-      ".r2.cloudflarestorage.com",
-    )
-  } catch {
-    return true
-  }
-}
-
 /**
  * Account-owner media loader. The SharedWorker owns one instance, which makes
  * cache access and download deduplication origin-wide rather than per tab.
@@ -149,13 +135,6 @@ export class InlineMediaLoader {
       this.throwIfCancelled(signal)
       if (cached) {
         return cached
-      }
-
-      // Signed R2 URLs are valid media sources, but the bucket currently
-      // rejects browser CORS reads. Preserve rendering without issuing a
-      // request that is guaranteed to fail.
-      if (!canFetchForPersistentCache(remoteUrl)) {
-        return { kind: "remote", url: remoteUrl }
       }
 
       const response = await this.fetcher(remoteUrl, {

@@ -109,9 +109,12 @@ describe("InlineMediaLoader", () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
-  it("passes signed R2 media through without a guaranteed CORS failure", async () => {
+  it("downloads and persists readable signed R2 media", async () => {
     const cache = memoryCache()
-    const fetcher = vi.fn()
+    const blob = new Blob(["r2-avatar"])
+    const fetcher = vi.fn(async () =>
+      new Response(blob, { status: 200 }),
+    )
     const loader = new InlineMediaLoader({
       cache,
       fetcher,
@@ -122,11 +125,18 @@ describe("InlineMediaLoader", () => {
     await expect(
       loader.load("photo-r2", remoteUrl),
     ).resolves.toEqual({
-      kind: "remote",
-      url: remoteUrl,
+      kind: "blob",
+      blob,
     })
-    expect(fetcher).not.toHaveBeenCalled()
-    expect(cache.put).not.toHaveBeenCalled()
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher).toHaveBeenCalledWith(
+      remoteUrl,
+      expect.objectContaining({
+        cache: "force-cache",
+        credentials: "omit",
+      }),
+    )
+    expect(cache.put).toHaveBeenCalledWith("photo-r2", blob)
   })
 
   it("keeps downloaded bytes usable when persistence is unavailable", async () => {

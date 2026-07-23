@@ -8,10 +8,11 @@ export { FILES_PATH_PREFIX } from "@in/server/config"
 
 const DEFAULT_URL_EXPIRY_SECONDS = 60 * 60 * 24 * 7 // 1 week
 const mediaProxySigningKey = FILES_PROXY_SIGNING_KEY ?? R2_SECRET_ACCESS_KEY ?? ""
-export const PHOTO_MEDIA_ROUTE_PATH = "/file"
+export const MEDIA_FILE_ROUTE_PATH = "/file"
+export const PHOTO_MEDIA_ROUTE_PATH = MEDIA_FILE_ROUTE_PATH
 const FILE_UNIQUE_ID_RE = /^[A-Za-z0-9_-]{6,128}$/
 
-type PhotoUrlSource =
+type MediaUrlSource =
   | string
   | {
       fileUniqueId: string
@@ -37,41 +38,68 @@ const signMediaProxyPayload = ({ payload, signingKey }: { payload: string; signi
   return createHmac("sha256", signingKey).update(payload).digest("base64url")
 }
 
-const createPhotoPayload = ({ fileUniqueId, exp }: { fileUniqueId: string; exp: number }): string => {
+const createMediaPayload = ({ fileUniqueId, exp }: { fileUniqueId: string; exp: number }): string => {
   return JSON.stringify({ id: fileUniqueId, e: exp })
 }
 
-export const getSignedMediaPhotoUrl = (
-  file: PhotoUrlSource,
-  expiresInSeconds: number = DEFAULT_URL_EXPIRY_SECONDS,
-  options?: { baseUrl?: string; signingKey?: string; now?: number; useProxy?: boolean },
-): string | null => {
-  const fileUniqueId = getPhotoFileUniqueId(file)
-  if (!FILE_UNIQUE_ID_RE.test(fileUniqueId)) return null
+type MediaProxyUrlOptions = {
+  baseUrl?: string
+  signingKey?: string
+  now?: number
+}
 
-  if (!(options?.useProxy ?? USE_PHOTO_PROXY)) {
-    const path = getPhotoPath(file)
-    if (!path) return null
-    return getSignedUrl(path, expiresInSeconds)
-  }
+type MediaPhotoUrlOptions = MediaProxyUrlOptions & {
+  useProxy?: boolean
+}
+
+/**
+ * Creates an API-origin media capability explicitly. Realtime encoders must
+ * keep using direct R2 URLs unless a media kind has a reviewed rollout plan.
+ */
+export const getSignedMediaFileProxyUrl = (
+  file: MediaUrlSource,
+  expiresInSeconds: number = DEFAULT_URL_EXPIRY_SECONDS,
+  options?: MediaProxyUrlOptions,
+): string | null => {
+  const fileUniqueId = getMediaFileUniqueId(file)
+  if (!FILE_UNIQUE_ID_RE.test(fileUniqueId)) return null
 
   const signingKey = options?.signingKey ?? mediaProxySigningKey
   if (!signingKey) return null
 
   const nowSec = options?.now ?? Math.floor(Date.now() / 1000)
   const exp = nowSec + Math.max(1, Math.floor(expiresInSeconds))
-  const payload = createPhotoPayload({ fileUniqueId, exp })
+  const payload = createMediaPayload({ fileUniqueId, exp })
   const sig = signMediaProxyPayload({ payload, signingKey })
   if (!sig) return null
 
-  const url = new URL(PHOTO_MEDIA_ROUTE_PATH, options?.baseUrl ?? API_BASE_URL)
+  const url = new URL(MEDIA_FILE_ROUTE_PATH, options?.baseUrl ?? API_BASE_URL)
   url.searchParams.set("id", fileUniqueId)
   url.searchParams.set("exp", String(exp))
   url.searchParams.set("sig", sig)
   return url.toString()
 }
 
-export const verifySignedMediaPhotoUrl = ({
+export const getSignedMediaPhotoUrl = (
+  file: MediaUrlSource,
+  expiresInSeconds: number = DEFAULT_URL_EXPIRY_SECONDS,
+  options?: MediaPhotoUrlOptions,
+): string | null => {
+  if (options?.useProxy ?? USE_PHOTO_PROXY) {
+    return getSignedMediaFileProxyUrl(
+      file,
+      expiresInSeconds,
+      options,
+    )
+  }
+
+  const path = getMediaPath(file)
+  return path
+    ? getSignedUrl(path, expiresInSeconds)
+    : null
+}
+
+export const verifySignedMediaFileUrl = ({
   fileUniqueId,
   exp,
   sig,
@@ -93,7 +121,7 @@ export const verifySignedMediaPhotoUrl = ({
   const nowSec = now ?? Math.floor(Date.now() / 1000)
   if (exp < nowSec) return false
 
-  const payload = createPhotoPayload({ fileUniqueId, exp })
+  const payload = createMediaPayload({ fileUniqueId, exp })
   const expectedSig = signMediaProxyPayload({ payload, signingKey: key })
   if (!expectedSig) return false
 
@@ -103,11 +131,13 @@ export const verifySignedMediaPhotoUrl = ({
   return timingSafeEqual(expected, provided)
 }
 
-const getPhotoFileUniqueId = (file: PhotoUrlSource): string => {
+export const verifySignedMediaPhotoUrl = verifySignedMediaFileUrl
+
+const getMediaFileUniqueId = (file: MediaUrlSource): string => {
   return typeof file === "string" ? file : file.fileUniqueId
 }
 
-const getPhotoPath = (file: PhotoUrlSource): string | null => {
+const getMediaPath = (file: MediaUrlSource): string | null => {
   if (typeof file === "string") return null
   if (file.path) return file.path
   if (!file.pathEncrypted || !file.pathIv || !file.pathTag) return null

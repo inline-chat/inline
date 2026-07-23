@@ -1,7 +1,14 @@
 import { describe, expect, it } from "bun:test"
-import { getSignedMediaPhotoUrl, PHOTO_MEDIA_ROUTE_PATH, verifySignedMediaPhotoUrl } from "@in/server/modules/files/path"
+import {
+  getSignedMediaFileProxyUrl,
+  getSignedMediaPhotoUrl,
+  MEDIA_FILE_ROUTE_PATH,
+  PHOTO_MEDIA_ROUTE_PATH,
+  verifySignedMediaFileUrl,
+  verifySignedMediaPhotoUrl,
+} from "@in/server/modules/files/path"
 
-describe("media photo url signing", () => {
+describe("media file url signing", () => {
   const signingKey = "test-photo-signing-key"
   const baseUrl = "https://api.inline.chat"
   const now = 1_700_000_000
@@ -26,6 +33,33 @@ describe("media photo url signing", () => {
         fileUniqueId: signedFileId!,
         exp: Number(expRaw),
         sig: sig!,
+        now,
+        signingKey,
+      }),
+    ).toBe(true)
+  })
+
+  it("creates a generalized file capability only through the explicit proxy API", () => {
+    const url = getSignedMediaFileProxyUrl(
+      {
+        fileUniqueId: "INVabcdefghijklmnopqrstu",
+        path: "private/video.mp4",
+      },
+      120,
+      { baseUrl, signingKey, now },
+    )
+
+    expect(url).toBeDefined()
+    const parsed = new URL(url!)
+    expect(parsed.pathname).toBe(MEDIA_FILE_ROUTE_PATH)
+    expect(parsed.searchParams.get("id")).toBe(
+      "INVabcdefghijklmnopqrstu",
+    )
+    expect(
+      verifySignedMediaFileUrl({
+        fileUniqueId: parsed.searchParams.get("id")!,
+        exp: Number(parsed.searchParams.get("exp")),
+        sig: parsed.searchParams.get("sig")!,
         now,
         signingKey,
       }),

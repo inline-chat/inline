@@ -25,12 +25,19 @@ const CORS_ALLOWED_HEADERS = [
   "accept",
   "authorization",
   "content-type",
+  "if-none-match",
+  "if-range",
   "mcp-protocol-version",
+  "range",
   "x-inline-mcp-secret",
   REQUEST_ID_HEADER,
 ]
 
 const CORS_EXPOSED_HEADERS = [
+  "accept-ranges",
+  "content-length",
+  "content-range",
+  "etag",
   REQUEST_ID_HEADER,
   "ratelimit-limit",
   "ratelimit-remaining",

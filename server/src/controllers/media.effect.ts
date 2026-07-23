@@ -19,6 +19,14 @@ import {
   decodeLegacyStringObject,
   queryRecord,
 } from "./auxiliaryValidation.effect"
+import {
+  createMediaFileResponse,
+  isSupportedMediaFileType,
+  type MediaRangeReadableFile,
+  type MediaRequestHeaders,
+} from "@in/server/modules/files/mediaResponse"
+
+export type { MediaRequestHeaders } from "@in/server/modules/files/mediaResponse"
 
 export const MediaPhotoQuery = Schema.Struct({
   id: Schema.String,
@@ -62,18 +70,42 @@ const MediaPhotoStream =
     contentType: "image/*",
   })
 
+const MediaFilePartialStream =
+  HttpApiSchema.StreamUint8Array().pipe(
+    HttpApiSchema.status(206),
+  )
+
+const MediaNotModified =
+  HttpApiSchema.NoContent.pipe(
+    HttpApiSchema.status(304),
+  )
+
+const MediaRangeNotSatisfiable = Schema.Literal(
+  "range_not_satisfiable",
+).pipe(
+  HttpApiSchema.status(416),
+  HttpApiSchema.asText(),
+).annotate({
+  identifier: "MediaRangeNotSatisfiable",
+})
+
 export const MediaEndpoints = {
   photo: HttpApiEndpoint.get(
     "mediaPhoto",
     "/file",
     {
       payload: MediaPhotoQuery.fields,
-      success: MediaPhotoStream,
+      success: [
+        MediaPhotoStream,
+        MediaFilePartialStream,
+        MediaNotModified,
+      ],
       error: [
         LegacyValidationError,
         MediaForbidden,
         MediaNotFound,
         MediaStorageUnavailable,
+        MediaRangeNotSatisfiable,
         AuxiliaryInternalServerError,
       ],
     },
@@ -86,11 +118,11 @@ export interface MediaFileRecord {
   readonly pathIv: Buffer | null
   readonly pathTag: Buffer | null
   readonly mimeType: string | null
+  readonly fileSize: number | null
 }
 
-export interface MediaBucketFile {
+export interface MediaBucketFile extends MediaRangeReadableFile {
   readonly exists: () => Promise<boolean>
-  readonly stream: () => ReadableStream<Uint8Array>
 }
 
 export type MediaOperation =
@@ -106,8 +138,9 @@ export class MediaOperationFailure extends Data.TaggedError(
 }> {}
 
 export interface MediaOperationsShape {
-  readonly servePhoto: (
+  readonly serveFile: (
     query: MediaPhotoQuery,
+    headers?: MediaRequestHeaders,
   ) => Effect.Effect<Response, MediaOperationFailure>
 }
 
@@ -177,7 +210,7 @@ export const makeMediaOperations = ({
   getObject,
   nowSeconds,
 }: MediaOperationDependencies): MediaOperationsShape => ({
-  servePhoto: (query) => {
+  serveFile: (query, requestHeaders = {}) => {
     const exp = Number.parseInt(query.exp, 10)
     return Effect.try({
       try: () =>
@@ -210,7 +243,7 @@ export const makeMediaOperations = ({
           Effect.flatMap((file) => {
             if (
               file === undefined ||
-              file.fileType !== "photo"
+              !isSupportedMediaFileType(file.fileType)
             ) {
               return Effect.succeed(
                 textResponse(404, "not_found"),
@@ -276,20 +309,16 @@ export const makeMediaOperations = ({
                           ),
                         )
 
-                        return new Response(
-                          object.stream(),
-                          {
-                            headers: {
-                              "content-type":
-                                file.mimeType ??
-                                "image/jpeg",
-                              "cache-control":
-                                `public, max-age=${maxAge}`,
-                              "x-content-type-options":
-                                "nosniff",
-                            },
-                          },
-                        )
+                        return createMediaFileResponse({
+                          object,
+                          fileUniqueId: query.id,
+                          fileSize: file.fileSize,
+                          mimeType: file.mimeType,
+                          maxAge,
+                          requestHeaders,
+                          forceDownload:
+                            file.fileType === "document",
+                        })
                       },
                       catch: (cause) =>
                         new MediaOperationFailure({
@@ -349,6 +378,12 @@ export const executeMediaPhoto = (
     )
     const operations = yield* MediaOperations
     const response =
-      yield* operations.servePhoto(query)
+      yield* operations.serveFile(query, {
+        range: webRequest.headers.get("range") ?? undefined,
+        ifRange:
+          webRequest.headers.get("if-range") ?? undefined,
+        ifNoneMatch:
+          webRequest.headers.get("if-none-match") ?? undefined,
+      })
     return webResponseToEffect(response)
   })

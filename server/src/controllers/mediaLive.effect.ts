@@ -8,7 +8,7 @@ import {
 } from "@in/server/modules/encryption/encryption"
 import {
   FILES_PATH_PREFIX,
-  verifySignedMediaPhotoUrl,
+  verifySignedMediaFileUrl,
 } from "@in/server/modules/files/path"
 import {
   MediaOperations,
@@ -19,7 +19,7 @@ export const MediaOperationsLive = Layer.succeed(
   MediaOperations,
   makeMediaOperations({
     filesPathPrefix: FILES_PATH_PREFIX,
-    verify: verifySignedMediaPhotoUrl,
+    verify: verifySignedMediaFileUrl,
     lookup: getFileByUniqueId,
     decryptPath: decrypt,
     getObject: (path) => getR2()?.file(path),
