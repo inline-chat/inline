@@ -26,7 +26,7 @@ Supported:
 - Supervised loopback Node sidecar using the Inline realtime SDK.
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
-- Inline reply-thread routing, default DM/group auto-threading, `/threads` controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
+- Inline reply-thread routing, explicit-request auto mode, `/threads` controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
 - Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, and avatar presence/status.
 - Per-turn Inline sender/chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with prompt guidance for sender mentions and current chat/thread Markdown links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
@@ -116,7 +116,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.4    inline-platform
+enabled      user     0.0.5    inline-platform
 ```
 
 ## Update Or Reinstall
@@ -253,7 +253,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_STRICT_MENTION` | Requires a mention or wake word on every group turn, including replies to the bot and followed threads. Defaults to `false`. |
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
-| `INLINE_REPLY_THREADS` | Controls top-level reply-thread creation. `auto` creates child reply threads only for large parent chats (`messageId >= 50`) or explicit thread requests; `on` always creates; `off` stays flat. Defaults to `auto`. |
+| `INLINE_REPLY_THREADS` | Controls top-level reply-thread creation. `auto` creates a child reply thread only for an explicit thread request; `on` always creates; `off` stays flat. Existing child-thread conversations always remain in their thread. Defaults to `auto`. |
 | `INLINE_CONTEXT_BACKFILL` | Automatic context mode. `selective` is the default, `off` disables automatic history windows, and `always` restores recent-history backfill on every turn. |
 | `INLINE_THREAD_CONTEXT_LIMIT` | Max current chat/thread messages for selective thread or mention-gap context. Must be `0` through `100`; defaults to `30`. |
 | `INLINE_REPLY_CONTEXT_LIMIT` | Max messages in the anchored window around a replied-to Inline message. Must be `0` through `50`; defaults to `10`. |
@@ -278,6 +278,8 @@ Access control follows Hermes' native platform model:
 | `platforms.inline.typing_indicator` | Hermes-native toggle for Inline typing/presence while a turn is running. Defaults to `true`; set to `false` to keep busy threads visually quiet. |
 | `platforms.inline.gateway_restart_notification` | Hermes-native toggle for gateway online/restarted notices. Defaults to `true`. |
 
+Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; top-level `auto` creates a child only for explicit thread intent, `on` always creates one, and `off` stays flat.
+
 Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `group_allow_from`, `dm_policy`, `group_policy`, `require_mention`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
@@ -287,8 +289,7 @@ Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 as `base_url`, `parse_markdown`, `media_max_mb`, `upload_max_mb`,
 `state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`, and
 `command_limit` can also be set there.
-Env allowlists are still preferred for production because the Hermes gateway
-also sees them directly.
+Prefer Hermes YAML for behavioral settings. Environment variables remain supported for compatibility and secret-backed deployment inputs.
 Use a JSON list for mention regexes that contain commas, for example
 `["hermes\\b[:,]?"]`.
 

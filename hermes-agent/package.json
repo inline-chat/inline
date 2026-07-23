@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/hermes-agent-adapter",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Hermes Agent platform adapter for Inline, with a native Python plugin and bundled Inline realtime sidecar.",
   "license": "Apache-2.0",
   "type": "module",
@@ -49,11 +49,12 @@
   },
   "scripts": {
     "build": "mkdir -p plugin/inline/sidecar && bun build ./src/install.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle && bun build ./src/sidecar/index.ts --outdir plugin/inline/sidecar --entry-naming 'index.mjs' --target=node --format=esm --packages=bundle && tsc -p tsconfig.json --emitDeclarationOnly",
-    "lint": "bunx oxlint --ignore-path ../.oxlintignore src/install.ts src/sidecar/contract.ts src/sidecar/index.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts vitest.config.ts",
-    "pretest": "bun run build && rm -rf coverage",
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore scripts/release-stage.mjs src/install.ts src/sidecar/contract.ts src/sidecar/index.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts vitest.config.ts",
+    "pretest": "bun run build",
     "prepack": "bun run build",
     "prepublishOnly": "bun run check",
-    "release:preflight": "npm publish --dry-run --access public",
+    "release:preflight": "node ./scripts/release-stage.mjs --dry-run",
+    "release:stage": "node ./scripts/release-stage.mjs --prepare-only",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage",
     "check": "bun run typecheck && bun run lint && bun run test"
@@ -63,7 +64,7 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@types/node": "20.17.19",
+    "@types/node": "20.19.43",
     "@vitest/coverage-v8": "4.1.10",
     "typescript": "5.8.3",
     "vitest": "4.1.10"

@@ -1,3 +1,5 @@
+import { sanitizeAssistantVisibleTextWithOptions } from "openclaw/plugin-sdk/text-chunking"
+
 const HEARTBEAT_TOKEN = "HEARTBEAT_OK"
 const OPENCLAW_RUNTIME_CONTEXT_NOTICE =
   "This context is runtime-generated, not user-authored. Keep internal details private."
@@ -242,7 +244,13 @@ export function sanitizeInlineVisibleText(raw: string | null | undefined): Inlin
     return { text: "", shouldSkip: false, didStrip: false }
   }
 
-  const heartbeat = stripHeartbeatAck(raw)
+  const assistantVisible = sanitizeAssistantVisibleTextWithOptions(raw, { trim: "none" })
+  const assistantDidStrip = assistantVisible !== raw
+  if (assistantDidStrip && !assistantVisible.trim()) {
+    return { text: "", shouldSkip: true, didStrip: true }
+  }
+
+  const heartbeat = stripHeartbeatAck(assistantVisible)
   if (heartbeat.shouldSkip) {
     return heartbeat
   }
@@ -250,7 +258,8 @@ export function sanitizeInlineVisibleText(raw: string | null | undefined): Inlin
   const delimited = stripDelimitedRuntimeContext(heartbeat.text)
   const legacy = stripLegacyInternalRuntimeContext(delimited.text)
   const preface = stripRuntimeContextPreface(legacy.text)
-  const didStrip = heartbeat.didStrip || delimited.didStrip || legacy.didStrip || preface.didStrip
+  const didStrip =
+    assistantDidStrip || heartbeat.didStrip || delimited.didStrip || legacy.didStrip || preface.didStrip
   const next = preface.text.trim()
 
   if (!didStrip) {

@@ -20,7 +20,10 @@ bun run release:preflight
 This runs `npm publish --dry-run --access public`, which invokes
 `prepublishOnly`, rebuilds the installer and sidecar, runs typecheck/lint/tests,
 installs the packed tarball in a temp prefix, and prints the final npm tarball
-contents without publishing.
+contents without publishing. The command first creates an isolated package
+stage and installs the exact registry SDK declared by `package.json`, so a
+dirty monorepo SDK or protocol checkout cannot leak into the bundled sidecar.
+The final output prints the retained staging directory for inspection.
 
 Expected tarball shape:
 
@@ -94,9 +97,15 @@ After manual live testing passes and npm auth is active:
 cd hermes-agent
 npm whoami
 bun run release:preflight
+bun run release:stage
+cd <printed-hermes-release-stage>
 npm publish --access public --otp="<otp>"
 npm view @inline-chat/hermes-agent-adapter version
 ```
+
+Never publish directly from the monorepo package directory. Bun links matching
+workspace package names by default, which can make the generated sidecar consume
+unreleased local SDK or protocol source even though `package.json` pins the SDK.
 
 ## Post-Publish Smoke
 

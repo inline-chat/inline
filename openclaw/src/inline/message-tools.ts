@@ -23,8 +23,6 @@ type InlineNudgeToolArgs = {
   target?: string
   chatId?: string
   userId?: string
-  message?: string
-  text?: string
   accountId?: string
 }
 
@@ -90,14 +88,6 @@ const InlineNudgeToolParameters = {
     userId: {
       type: "string",
       description: "Explicit user id target alias.",
-    },
-    message: {
-      type: "string",
-      description: "Optional accompanying text.",
-    },
-    text: {
-      type: "string",
-      description: "Alias for `message`.",
     },
     accountId: {
       type: "string",
@@ -437,9 +427,6 @@ function createInlineNudgeTool(ctx: InlineMessageToolContext): AnyAgentTool {
         userId: args.userId,
         fallback: fallbackTarget,
       })
-      const message = readStringCandidate(args.message, args.text)
-      const visibleMessage = sanitizeInlineVisibleText(message)
-
       return await withInlineClient({
         cfg: ctx.config,
         accountId: args.accountId ?? ctx.agentAccountId ?? null,
@@ -448,7 +435,6 @@ function createInlineNudgeTool(ctx: InlineMessageToolContext): AnyAgentTool {
             oneofKind: "sendMessage",
             sendMessage: {
               peerId: target.peerId,
-              ...(!visibleMessage.shouldSkip && visibleMessage.text ? { message: visibleMessage.text } : {}),
               media: {
                 media: {
                   oneofKind: "nudge",
@@ -466,7 +452,6 @@ function createInlineNudgeTool(ctx: InlineMessageToolContext): AnyAgentTool {
             nudged: true,
             target: target.normalized,
             usedCurrentChatDefault: usedFallback,
-            message: visibleMessage.shouldSkip || !visibleMessage.text ? null : visibleMessage.text,
             messageId,
           })
         },

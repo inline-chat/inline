@@ -23,9 +23,9 @@ Supports:
 
 Reply-thread behavior:
 
-- Small/new parent-chat conversations stay in the parent chat by default.
+- Parent-chat conversations stay in the parent chat by default.
 - `replyThreadMode: "auto"` also creates a child reply thread when the triggering parent-chat message explicitly asks OpenClaw to reply in a thread.
-- `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery once `replyThreadAutoCreateMinMessages` is reached; each triggering parent-chat message gets its own child reply thread.
+- `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery; each triggering parent-chat message gets its own child reply thread.
 - `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
 - `thread-create` creates a top-level Inline thread when called with participants or `spaceId`, and creates a real Inline reply thread when called with a parent chat target or anchor. `thread-reply` sends into the child reply-thread chat id returned by reply-thread creation.
 - Inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`.
@@ -39,7 +39,8 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.54` | `>=2026.6.11` | `0.0.13` | Current | Keeps recovered WebSocket and best-effort cursor warnings out of healthy channel status; validated through OpenClaw `2026.7.1-2`. |
+| `0.0.55` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.13` | Current | Enforces empty-payload nudges, canonical visible-text sanitizing, hard access-before-mention policy, explicit auto-threading, and clearer formatting guidance; explicitly admits npm's `2026.7.1-2` stable host version. |
+| `0.0.54` | `>=2026.6.11` | `0.0.13` | Stable | Keeps recovered WebSocket and best-effort cursor warnings out of healthy channel status; validated through OpenClaw `2026.7.1-2`. |
 | `0.0.53` | `>=2026.6.11` | `0.0.13` | Stable | Clears recovered Inline WebSocket errors from channel status after reconnect. |
 | `0.0.52` | `>=2026.6.11` | `0.0.13` | Stable | Patch release for the SDK protocol dependency. |
 | `0.0.51` | `>=2026.6.11` | `0.0.12` | Stable | Added follow-mode mention gating for eligible reply/fresh Inline threads. |
@@ -150,8 +151,7 @@ channels:
       - "inline:123" # or "user:123" or just "123"
     requireMention: true # optional: default is false
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
-    replyThreadMode: "auto" # auto|thread|main; thread auto-routes long parent-chat replies into per-message reply threads
-    replyThreadAutoCreateMinMessages: 50 # optional, default 50; avoids creating reply threads for small/new chats
+    replyThreadMode: "auto" # auto|thread|main; auto threads only explicit requests, thread always routes top-level turns
     replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention
     replyThreadParentHistoryLimit: 10 # optional, default 10; set 0 to disable parent-chat context before the anchor
 
@@ -200,12 +200,14 @@ channels:
 
 Reply behavior summary:
 
+- Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender allowlists and is always a hard gate; an `@mention`, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn should invoke the agent. Delivery decides whether the accepted reply stays in the parent chat or an existing/new reply thread.
 - `replyToId` is always an Inline message id.
 - Inline reply threads are separate and use OpenClaw `threadId`.
 - Use `replyThreadMode: "main"` if you only want automatic parent-chat replies to stay in the parent chat.
-- Use `replyThreadMode: "thread"` plus `replyThreadAutoCreateMinMessages` when parent-chat bot turns should move into child reply threads anchored to the triggering parent messages.
+- Use `replyThreadMode: "thread"` when every parent-chat bot turn should move into a child reply thread anchored to the triggering parent message.
 - In an Inline group, authorized users can run `/threadreply` to choose the chat's mode with buttons, or `/threadreply thread|main|auto|inherit|status`.
 - Bot-participated reply threads and followed fresh Inline threads continue without `@bot` by default. Reply threads also use persisted recent participation state as a fallback. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
+- In an allowed group with `requireMention: true`, an explicit mention wakes the bot. Authorized callbacks/commands and configured reply-to-bot or followed/bot-participated thread behavior may also wake it. Unmentioned turns that pass access remain non-responsive and may only contribute bounded history context.
 - `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.

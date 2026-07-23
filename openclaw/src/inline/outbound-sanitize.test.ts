@@ -21,6 +21,35 @@ const HEARTBEAT_CONTEXT = [
 ].join("\n")
 
 describe("inline/outbound-sanitize", () => {
+  it("strips internal OpenClaw tool traces while preserving visible prose", () => {
+    const text = [
+      "Visible intro.",
+      '⚠️ 🛠️ ntn is cr "TEST DRY RUN Chatwoot mention intake" --dri Boba (agent) failed',
+      "Visible outro.",
+    ].join("\n")
+
+    expect(sanitizeInlineVisibleText(text)).toEqual({
+      text: "Visible intro.\nVisible outro.",
+      shouldSkip: false,
+      didStrip: true,
+    })
+  })
+
+  it("preserves internal tool-trace examples inside fenced code", () => {
+    const text = [
+      "Example:",
+      "```",
+      '⚠️ 🛠️ ntn is cr "TEST DRY RUN" (agent) failed',
+      "```",
+    ].join("\n")
+
+    expect(sanitizeInlineVisibleText(text)).toEqual({
+      text,
+      shouldSkip: false,
+      didStrip: false,
+    })
+  })
+
   it("suppresses copied OpenClaw heartbeat context", () => {
     expect(sanitizeInlineVisibleText(HEARTBEAT_CONTEXT)).toMatchObject({
       text: "",

@@ -78,7 +78,6 @@ _INLINE_COMMAND_LIMIT = 100
 _INLINE_COMMAND_DESCRIPTION_LIMIT = 256
 _INLINE_COMMAND_RETRY_RATIO = 0.8
 _INLINE_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
-_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 _INLINE_THREADS_COMMAND_DESCRIPTION = "Configure Inline reply-thread routing"
 _INLINE_THREADS_COMMAND_ARGS = "[status|on|off|auto|reset]"
 _INLINE_THREADS_ACTION_PREFIX = "th:"
@@ -861,16 +860,6 @@ class InlineAdapter(BasePlatformAdapter):
         self._save_reply_thread_overrides()
 
     @staticmethod
-    def _positive_int(value: Any) -> Optional[int]:
-        text = str(value or "").strip()
-        if not re.fullmatch(r"[1-9]\d*", text):
-            return None
-        try:
-            return int(text)
-        except ValueError:
-            return None
-
-    @staticmethod
     def _has_reply_thread_intent(text: str) -> bool:
         normalized = re.sub(r"\s+", " ", str(text or "").strip())
         if not normalized:
@@ -884,7 +873,6 @@ class InlineAdapter(BasePlatformAdapter):
         *,
         chat_id: str,
         parent_chat_id: Optional[str],
-        msg_id: str,
         text: str,
     ) -> bool:
         mode = self._reply_thread_mode_for_chat(chat_id, parent_chat_id)
@@ -894,8 +882,7 @@ class InlineAdapter(BasePlatformAdapter):
             return True
         if self._has_reply_thread_intent(text):
             return True
-        message_id = self._positive_int(msg_id)
-        return message_id is not None and message_id >= _REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES
+        return False
 
     @staticmethod
     def _id_allowed(entries: set[str], value: str) -> bool:
@@ -978,10 +965,7 @@ class InlineAdapter(BasePlatformAdapter):
         if mode == "on":
             behavior = "Top-level replies will start or reuse Inline reply threads."
         elif mode == "auto":
-            behavior = (
-                "Top-level replies stay in the parent chat until "
-                f"message #{_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES} or an explicit thread request."
-            )
+            behavior = "Top-level replies stay in the parent chat unless a thread is explicitly requested."
         else:
             behavior = "Top-level replies stay in the parent chat."
         first_line = f"Inline reply threads are {mode} for this chat ({scope})."
@@ -1516,7 +1500,6 @@ class InlineAdapter(BasePlatformAdapter):
             and self._should_create_reply_thread_for_message(
                 chat_id=chat_id,
                 parent_chat_id=parent_chat_id,
-                msg_id=msg_id,
                 text=text,
             )
         ):

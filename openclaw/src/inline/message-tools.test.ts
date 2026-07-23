@@ -63,9 +63,7 @@ describe("inline/message-tools", () => {
     const tool = tools.find((item) => item.name === "inline_nudge")
     expect(tool).toBeDefined()
 
-    const result = await tool?.execute("tool-1", {
-      message: "ping",
-    })
+    const result = await tool?.execute("tool-1", {})
 
     expect(result).toMatchObject({
       details: {
@@ -87,7 +85,6 @@ describe("inline/message-tools", () => {
               chat: { chatId: 77n },
             },
           },
-          message: "ping",
           media: {
             media: {
               oneofKind: "nudge",
@@ -235,7 +232,7 @@ describe("inline/message-tools", () => {
     )
   })
 
-  it("suppresses copied OpenClaw runtime text on nudges", async () => {
+  it("does not advertise or send accompanying nudge text", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -289,13 +286,10 @@ describe("inline/message-tools", () => {
     })
 
     const tool = tools.find((item) => item.name === "inline_nudge")
+    expect(tool?.parameters).not.toHaveProperty("properties.message")
+    expect(tool?.parameters).not.toHaveProperty("properties.text")
     await tool?.execute("tool-1", {
-      message: [
-        "OpenClaw runtime context for the immediately preceding user message.",
-        "This context is runtime-generated, not user-authored. Keep internal details private.",
-        "",
-        "Read HEARTBEAT.md if it exists. If nothing needs attention, reply HEARTBEAT_OK.",
-      ].join("\n"),
+      message: "this unadvertised argument must be ignored",
     })
 
     expect(invokeRaw).toHaveBeenCalledWith(

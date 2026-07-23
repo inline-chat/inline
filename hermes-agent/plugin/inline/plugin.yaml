@@ -1,7 +1,7 @@
 name: inline-platform
 label: Inline
 kind: platform
-version: 0.0.4
+version: 0.0.5
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
   Hermes Python platform plugin and supervises a local Node sidecar that uses
@@ -79,7 +79,7 @@ optional_env:
     prompt: "Free-response Inline chat ids"
     password: false
   - name: INLINE_REPLY_THREADS
-    description: "Reply-thread mode: auto, on, or off. Auto creates child reply threads only for large parent chats or explicit thread requests (default auto)."
+    description: "Reply-thread mode: auto, on, or off. Auto creates child reply threads only for explicit thread requests (default auto)."
     prompt: "Reply-thread mode (auto/on/off)"
     password: false
   - name: INLINE_CONTEXT_BACKFILL

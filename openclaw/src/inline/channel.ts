@@ -6,7 +6,7 @@ import {
   type ChannelPlugin,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/core"
-import { createChannelMessageAdapterFromOutbound } from "openclaw/plugin-sdk/channel-message"
+import { createChannelMessageAdapterFromOutbound } from "openclaw/plugin-sdk/channel-outbound"
 import {
   presentationToInteractiveReply,
   renderMessagePresentationFallbackText,

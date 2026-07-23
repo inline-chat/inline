@@ -94,7 +94,6 @@ import {
   resolveInlineGroupAllowFrom,
   resolveInlineGroupAccessPolicy,
   resolveInlineGroupRequireMention,
-  resolveInlineGroupReplyThreadAutoCreateMinMessages,
   resolveInlineGroupReplyThreadMode,
   resolveInlineGroupReplyThreadParentHistoryLimit,
   resolveInlineGroupReplyThreadRequireExplicitMention,
@@ -155,7 +154,6 @@ const INLINE_REQUEST_ERROR_FALLBACK =
   "OpenClaw could not process that request. Please try again."
 const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
-const DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES = 50
 const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
 const DEFAULT_INLINE_VOICE_TRANSCRIPT_WAIT_MS = 8_000
 const MAX_INLINE_VOICE_TRANSCRIPT_WAIT_MS = 60_000
@@ -2003,18 +2001,10 @@ function hasExplicitInlineReplyThreadIntent(raw: string): boolean {
 function shouldCreateInlineReplyThreadDelivery(params: {
   mode: InlineReplyThreadMode
   explicitThreadIntent: boolean
-  messageId: bigint
-  minMessages: number
 }): boolean {
   if (params.mode === "main") return false
   if (params.explicitThreadIntent) return true
-  return (
-    params.mode === "thread" &&
-    shouldAutoCreateInlineReplyThread({
-      messageId: params.messageId,
-      minMessages: params.minMessages,
-    })
-  )
+  return params.mode === "thread"
 }
 
 function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: Map<string, SenderProfile>): string {
@@ -2763,14 +2753,6 @@ async function resolveInlineReplyThreadContextFromRoute(params: {
 
 function normalizeInlineReplyThreadMode(raw: unknown): InlineReplyThreadMode {
   return raw === "thread" || raw === "main" ? raw : "auto"
-}
-
-function shouldAutoCreateInlineReplyThread(params: {
-  messageId: bigint
-  minMessages: number
-}): boolean {
-  if (params.minMessages <= 0) return true
-  return params.messageId >= BigInt(params.minMessages)
 }
 
 async function buildReplyThreadParentHistoryContext(params: {
@@ -3526,7 +3508,6 @@ export async function monitorInlineProvider(params: {
     const isGroup = chatInfo.kind !== "direct"
     const inlineThreadDefaults = (cfg.channels?.inline ?? {}) as {
       replyThreadMode?: unknown
-      replyThreadAutoCreateMinMessages?: number
       replyThreadRequireExplicitMention?: boolean
       replyThreadParentHistoryLimit?: number
     }
@@ -3554,18 +3535,6 @@ export async function monitorInlineProvider(params: {
             ),
           })
         : "auto"
-    const replyThreadAutoCreateMinMessages =
-      isGroup && replyThreadsEnabled
-        ? resolveInlineGroupReplyThreadAutoCreateMinMessages({
-            cfg,
-            accountId: account.accountId,
-            groupId: String(effectiveChatId),
-            defaultMinMessages:
-              account.config.replyThreadAutoCreateMinMessages ??
-              inlineThreadDefaults.replyThreadAutoCreateMinMessages ??
-              DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES,
-          })
-        : DEFAULT_REPLY_THREAD_AUTO_CREATE_MIN_MESSAGES
     const replyThreadRequireExplicitMention =
       isGroup && replyThreadsEnabled
         ? resolveInlineGroupReplyThreadRequireExplicitMention({
@@ -3761,7 +3730,7 @@ export async function monitorInlineProvider(params: {
           hasGroupAllowFrom: groupSenderAllowlist.raw.length > 0,
           groupPolicy,
         })
-        if (groupAccess.allowlistEnabled && !groupAccess.allowed && !nativeMentioned) {
+        if (groupAccess.allowlistEnabled && !groupAccess.allowed) {
           log?.info(`[${account.accountId}] inline: drop group chat=${String(effectiveChatId)} (groupPolicy=allowlist)`)
           await answerCallbackIfNeeded().catch((error) => {
             runtime.error?.(`inline callback answer failed: ${String(error)}`)
@@ -4318,8 +4287,6 @@ export async function monitorInlineProvider(params: {
       shouldCreateInlineReplyThreadDelivery({
         mode: replyThreadMode,
         explicitThreadIntent: explicitReplyThreadIntent,
-        messageId: msg.id,
-        minMessages: replyThreadAutoCreateMinMessages,
       }) &&
       !shouldEditCallbackTargetInPlace
     let parentThreadCreationTyping = false
@@ -5543,7 +5510,6 @@ export async function monitorInlineProvider(params: {
       senderId,
     })
     if (groupPolicy === "allowlist") {
-      const nativeMentioned = entry.msg.mentioned === true
       const groupAccess = resolveInlineGroupAccessPolicy({
         cfg,
         accountId: account.accountId,
@@ -5551,7 +5517,7 @@ export async function monitorInlineProvider(params: {
         hasGroupAllowFrom: groupSenderAllowlist.raw.length > 0,
         groupPolicy,
       })
-      if (groupAccess.allowlistEnabled && !groupAccess.allowed && !nativeMentioned) return false
+      if (groupAccess.allowlistEnabled && !groupAccess.allowed) return false
       if (
         groupSenderAllowlist.raw.length > 0 &&
         !allowlistMatch({ allowFrom: groupSenderAllowlist.expanded, senderId })

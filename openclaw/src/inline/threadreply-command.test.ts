@@ -105,77 +105,17 @@ describe("inline/threadreply-command", () => {
             { text: "Auto", callback_data: "/threadreply auto" },
           ],
           [{ text: "Inherit Mode", callback_data: "/threadreply inherit" }],
-          [
-            { text: "Min 0", callback_data: "/threadreply min 0" },
-            { text: "Min 50", callback_data: "/threadreply min 50" },
-            { text: "Inherit Min", callback_data: "/threadreply min inherit" },
-          ],
         ],
       },
     })
   })
 
-  it("sets the current top-level Inline group auto-create minimum", async () => {
-    const { api, current, mutateConfigFile } = createApi({
-      channels: {
-        inline: {
-          groups: {
-            "123": {
-              replyThreadMode: "thread",
-            },
-          },
-        },
-      },
-    } as OpenClawConfig)
-
-    const result = await handleInlineThreadReplyCommand(api, commandCtx({ args: "min 0" }))
-
-    expect(mutateConfigFile).toHaveBeenCalledTimes(1)
-    expect(result.text).toContain("Auto-create minimum messages: 0.")
-    expect(inlineConfig(current()).groups?.["123"]).toEqual({
-      replyThreadMode: "thread",
-      replyThreadAutoCreateMinMessages: 0,
-    })
-  })
-
-  it("removes the chat auto-create minimum override with min inherit", async () => {
-    const { api, current } = createApi({
-      channels: {
-        inline: {
-          replyThreadAutoCreateMinMessages: 50,
-          groups: {
-            "123": {
-              replyThreadMode: "thread",
-              replyThreadAutoCreateMinMessages: 0,
-            },
-          },
-        },
-      },
-    } as OpenClawConfig)
-
-    const result = await handleInlineThreadReplyCommand(api, commandCtx({ args: "min inherit" }))
-
-    expect(result.text).toContain("Auto-create minimum messages: 50.")
-    expect(inlineConfig(current()).groups?.["123"]).toEqual({
-      replyThreadMode: "thread",
-    })
-  })
-
-  it("rejects invalid auto-create minimum values", async () => {
+  it("explains that legacy auto-create minimums are ignored", async () => {
     const { api, mutateConfigFile } = createApi({})
 
-    const result = await handleInlineThreadReplyCommand(api, commandCtx({ args: "min never" }))
+    const result = await handleInlineThreadReplyCommand(api, commandCtx({ args: "min 50" }))
 
-    expect(result.text).toBe("Usage: /threadreply min <0-or-greater>|inherit")
-    expect(mutateConfigFile).not.toHaveBeenCalled()
-  })
-
-  it("rejects extra auto-create minimum arguments", async () => {
-    const { api, mutateConfigFile } = createApi({})
-
-    const result = await handleInlineThreadReplyCommand(api, commandCtx({ args: "min 0 extra" }))
-
-    expect(result.text).toBe("Usage: /threadreply min <0-or-greater>|inherit")
+    expect(result.text).toContain("message IDs are not chat message counts")
     expect(mutateConfigFile).not.toHaveBeenCalled()
   })
 

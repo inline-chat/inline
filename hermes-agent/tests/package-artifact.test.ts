@@ -6,8 +6,6 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const sdkRoot = path.resolve(packageRoot, "..", "sdk")
-const protocolRoot = path.resolve(packageRoot, "..", "packages", "protocol")
 const realNpmEnv = { ...process.env, npm_config_dry_run: "false" }
 
 type PackFile = {
@@ -66,7 +64,8 @@ describe("packed artifact", () => {
     expect(pkg.engines?.node).toBe(">=20")
     expect(pkg.repository?.directory).toBe("hermes-agent")
     expect(pkg.scripts?.prepublishOnly).toBe("bun run check")
-    expect(pkg.scripts?.["release:preflight"]).toBe("npm publish --dry-run --access public")
+    expect(pkg.scripts?.["release:preflight"]).toBe("node ./scripts/release-stage.mjs --dry-run")
+    expect(pkg.scripts?.["release:stage"]).toBe("node ./scripts/release-stage.mjs --prepare-only")
     expect(pkg.inlineHermes).toMatchObject({
       pluginId: "inline",
       pluginPath: "plugin/inline",
@@ -128,27 +127,7 @@ describe("packed artifact", () => {
       const pack = parsePackOutput(raw)
       const tarball = path.join(packDir, pack.filename)
 
-      const sdkRaw = execFileSync("npm", ["pack", "--pack-destination", packDir, "--json", "--silent"], {
-        cwd: sdkRoot,
-        encoding: "utf8",
-        env: realNpmEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-      const sdkPack = parsePackOutput(sdkRaw)
-      expect(sdkPack.files.some((file) => file.path === "dist/index.js")).toBe(true)
-      const sdkTarball = path.join(packDir, sdkPack.filename)
-
-      const protocolRaw = execFileSync("npm", ["pack", "--pack-destination", packDir, "--json", "--silent"], {
-        cwd: protocolRoot,
-        encoding: "utf8",
-        env: realNpmEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-      })
-      const protocolPack = parsePackOutput(protocolRaw)
-      expect(protocolPack.files.some((file) => file.path === "dist/core.js")).toBe(true)
-      const protocolTarball = path.join(packDir, protocolPack.filename)
-
-      execFileSync("npm", ["install", "--global", "--prefix", prefix, protocolTarball, sdkTarball, tarball], {
+      execFileSync("npm", ["install", "--global", "--prefix", prefix, tarball], {
         cwd: packageRoot,
         encoding: "utf8",
         env: realNpmEnv,
@@ -174,7 +153,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.4")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.5")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

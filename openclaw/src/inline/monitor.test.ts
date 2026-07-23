@@ -3359,7 +3359,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("keeps small ordinary chats in-place instead of creating a child reply thread", async () => {
+  it("keeps ordinary auto-mode messages in the parent chat without relying on message IDs", async () => {
     const harness = await setupMonitorHarness({
       me: {
         userId: 777n,
@@ -3391,7 +3391,7 @@ describe("inline/monitor", () => {
         channels: {
           inline: {
             groups: {
-              "89": { replyThreadMode: "thread" },
+              "89": { replyThreadMode: "auto" },
             },
           },
         },
@@ -3678,7 +3678,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("can override the parent-size gate to thread small ordinary chats", async () => {
+  it("treats thread mode as unconditional and ignores the legacy message-id threshold", async () => {
     const harness = await setupMonitorHarness({
       me: {
         userId: 777n,
@@ -3692,7 +3692,7 @@ describe("inline/monitor", () => {
             id: 8n,
             date: 1_700_000_013n,
             fromId: 51n,
-            message: "@inlinebot start a thread anyway",
+            message: "@inlinebot ordinary update",
             mentioned: true,
           },
         },
@@ -3712,7 +3712,7 @@ describe("inline/monitor", () => {
             groups: {
               "90": {
                 replyThreadMode: "thread",
-                replyThreadAutoCreateMinMessages: 0,
+                replyThreadAutoCreateMinMessages: 9999,
               },
             },
           },
@@ -7462,7 +7462,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("routes native-mentioned Inline groups even when the group is not pre-allowlisted", async () => {
+  it("does not let a native mention bypass the group chat allowlist", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -7485,6 +7485,7 @@ describe("inline/monitor", () => {
       },
     })
 
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({
@@ -7494,18 +7495,16 @@ describe("inline/monitor", () => {
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      log,
     })
 
     await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          chatId: 88n,
-          text: "native mention reply",
-        }),
+      expect(log.info).toHaveBeenCalledWith(
+        expect.stringContaining("inline: drop group chat=88 (groupPolicy=allowlist)"),
       )
     })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })

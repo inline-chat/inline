@@ -1013,7 +1013,7 @@ async def assert_default_auto_reply_threads_keep_fresh_parent_messages_flat():
 
     async def fake_get_chat_info(chat_id):
         assert chat_id == "10"
-        return {"chatId": "10", "title": "New thread", "lastMsgId": "1"}
+        return {"chatId": "10", "title": "New thread", "lastMsgId": "9001"}
 
     async def fake_sidecar_call(path, body):
         raise AssertionError(f"default auto mode should not create a reply thread for fresh message: {path} {body}")
@@ -1025,7 +1025,7 @@ async def assert_default_auto_reply_threads_keep_fresh_parent_messages_flat():
         "seq": 9,
         "chatId": "10",
         "message": {
-            "id": "1",
+            "id": "9001",
             "chatId": "10",
             "fromId": "u1",
             "message": "hey bro",

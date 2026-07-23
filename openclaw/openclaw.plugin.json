@@ -1016,11 +1016,11 @@
         },
         "replyThreadMode": {
           "label": "Inline Reply Thread Mode",
-          "help": "Controls automatic routing for Inline group replies that start from parent-chat messages: \"auto\" keeps small/new conversations in the parent chat, \"thread\" moves eligible parent-chat replies into child reply threads anchored to the triggering parent messages, and \"main\" keeps automatic replies in the parent chat. Explicit thread tools remain available."
+          "help": "Controls routing for Inline group replies that start from parent-chat messages: \"auto\" creates a child reply thread only when the user explicitly asks for one, \"thread\" routes every eligible top-level turn into a child reply thread anchored to the triggering message, and \"main\" keeps automatic replies in the parent chat. Explicit thread tools remain available."
         },
         "replyThreadAutoCreateMinMessages": {
-          "label": "Inline Reply Thread Parent Size",
-          "help": "Minimum inbound chat-local message ID before \"thread\" mode auto-creates a child reply thread from a parent-chat message. Defaults to 50; set to 0 to allow immediate thread routing. Existing reply-thread chats always stay in their current thread."
+          "label": "Deprecated Reply Thread Threshold",
+          "help": "Deprecated compatibility setting. Message IDs are not chat message counts, so this value is ignored. Use replyThreadMode: \"auto\" for explicit thread requests, \"thread\" for every eligible top-level turn, or \"main\" to stay flat."
         },
         "replyThreadRequireExplicitMention": {
           "label": "Inline Reply Thread Mentions",
@@ -1032,7 +1032,7 @@
         },
         "groups": {
           "label": "Inline Group Overrides",
-          "help": "Per-group settings keyed by Inline chat ID, including sender allowlist, mention, reply-thread mode, reply-thread mention/history policy, parent-size threshold, and tool policy overrides."
+          "help": "Per-group settings keyed by Inline chat ID, including sender allowlist, mention, reply-thread mode, reply-thread mention/history policy, deprecated threshold compatibility, and tool policy overrides."
         },
         "accounts": {
           "label": "Inline Accounts",

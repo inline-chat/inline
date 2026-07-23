@@ -6,6 +6,7 @@ const INLINE_FORMATTING_RULES = [
   "Mention Inline users with markdown links like [@FirstName](inline://user?id=123); use inline://user?username=username only when the user id is unavailable.",
   "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",
   "Use inline code only for actual code, commands, file paths, env vars, or identifiers.",
+  "Keep ordinary quoted prose, names, titles, statuses, and natural-language labels as plain text; quotation marks do not make text code.",
 ]
 
 const INLINE_COPY_REPLACEMENTS: Array<[RegExp, string]> = [
