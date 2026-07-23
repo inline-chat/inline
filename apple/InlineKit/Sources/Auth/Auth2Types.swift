@@ -76,15 +76,15 @@ public enum AuthEvent: Sendable, Equatable {
 public struct AuthHandle: Sendable {
   fileprivate let cache: AuthSnapshotCache
   fileprivate let store: AuthStore
-  public let events: AsyncStream<AuthEvent>
 
-  init(cache: AuthSnapshotCache, store: AuthStore, events: AsyncStream<AuthEvent>) {
+  init(cache: AuthSnapshotCache, store: AuthStore) {
     self.cache = cache
     self.store = store
-    self.events = events
   }
 
   public func snapshot() -> AuthSnapshot { cache.snapshot() }
+  public var events: AsyncStream<AuthEvent> { store.events() }
+  public var snapshots: AsyncStream<AuthSnapshot> { store.snapshots() }
   public func token() -> String? { cache.snapshot().token }
   public func userId() -> Int64? { cache.snapshot().currentUserId }
   public func isLoggedIn() -> Bool { cache.snapshot().isLoggedIn }

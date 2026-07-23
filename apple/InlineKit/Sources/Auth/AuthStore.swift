@@ -1,6 +1,136 @@
+import AsyncAlgorithms
 import Foundation
 import InlineConfig
 import Logger
+
+private struct AuthSnapshotPipe: Sendable {
+  let stream: @Sendable () -> AsyncStream<AuthSnapshot>
+  let yield: @Sendable (AuthSnapshot) -> Void
+}
+
+private struct VersionedAuthSnapshot: Sendable {
+  let revision: UInt64
+  let snapshot: AuthSnapshot
+}
+
+private final class AuthSnapshotRevisionState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var latest: VersionedAuthSnapshot?
+
+  func publish(_ snapshot: AuthSnapshot) -> VersionedAuthSnapshot? {
+    lock.withLock {
+      guard latest?.snapshot != snapshot else { return nil }
+
+      let versionedSnapshot = VersionedAuthSnapshot(
+        revision: (latest?.revision ?? 0) &+ 1,
+        snapshot: snapshot
+      )
+      latest = versionedSnapshot
+      return versionedSnapshot
+    }
+  }
+
+  func current() -> VersionedAuthSnapshot? {
+    lock.withLock { latest }
+  }
+}
+
+private final class BufferedAsyncStreamBroadcaster<Element: Sendable>: @unchecked Sendable {
+  private let lock = NSLock()
+  private let bufferingPolicy: AsyncStream<Element>.Continuation.BufferingPolicy
+  private let idleReplayLimit: Int
+  private var continuations: [UUID: AsyncStream<Element>.Continuation] = [:]
+  private var elementsWhileIdle: [Element] = []
+
+  init(
+    bufferingPolicy: AsyncStream<Element>.Continuation.BufferingPolicy,
+    idleReplayLimit: Int = 0
+  ) {
+    self.bufferingPolicy = bufferingPolicy
+    self.idleReplayLimit = idleReplayLimit
+  }
+
+  func stream() -> AsyncStream<Element> {
+    let id = UUID()
+    let (stream, continuation) = AsyncStream.makeStream(
+      of: Element.self,
+      bufferingPolicy: bufferingPolicy
+    )
+    continuation.onTermination = { [weak self] _ in
+      self?.removeContinuation(id: id)
+    }
+
+    lock.withLock {
+      continuations[id] = continuation
+      for element in elementsWhileIdle {
+        continuation.yield(element)
+      }
+      elementsWhileIdle.removeAll(keepingCapacity: true)
+    }
+    return stream
+  }
+
+  func yield(_ element: Element) {
+    let currentContinuations = lock.withLock {
+      if continuations.isEmpty, idleReplayLimit > 0 {
+        elementsWhileIdle.append(element)
+        if elementsWhileIdle.count > idleReplayLimit {
+          elementsWhileIdle.removeFirst(elementsWhileIdle.count - idleReplayLimit)
+        }
+      }
+      return Array(continuations.values)
+    }
+    for continuation in currentContinuations {
+      continuation.yield(element)
+    }
+  }
+
+  private func removeContinuation(id: UUID) {
+    _ = lock.withLock {
+      continuations.removeValue(forKey: id)
+    }
+  }
+}
+
+private func makeAuthSnapshotPipe() -> AuthSnapshotPipe {
+  let (source, continuation) = AsyncStream.makeStream(
+    of: VersionedAuthSnapshot.self,
+    bufferingPolicy: .unbounded
+  )
+  let sharedSnapshots = source.share(bufferingPolicy: .unbounded)
+  let revisionState = AuthSnapshotRevisionState()
+
+  return AuthSnapshotPipe(
+    stream: {
+      AsyncStream(bufferingPolicy: .unbounded) { continuation in
+        let task = Task {
+          var iterator = sharedSnapshots.makeAsyncIterator()
+          guard let initial = revisionState.current() else {
+            continuation.finish()
+            return
+          }
+          var lastRevision = initial.revision
+          continuation.yield(initial.snapshot)
+
+          while !Task.isCancelled, let versionedSnapshot = try? await iterator.next() {
+            guard versionedSnapshot.revision > lastRevision else { continue }
+            lastRevision = versionedSnapshot.revision
+            continuation.yield(versionedSnapshot.snapshot)
+          }
+          continuation.finish()
+        }
+
+        continuation.onTermination = { _ in
+          task.cancel()
+        }
+      }
+    },
+    yield: { snapshot in
+      guard let versionedSnapshot = revisionState.publish(snapshot) else { return }
+      continuation.yield(versionedSnapshot)
+    }
+  )
+}
 
 actor AuthStore: Sendable {
   private let log = Log.scoped("AuthStore")
@@ -17,11 +147,11 @@ actor AuthStore: Sendable {
 
   private let cache: AuthSnapshotCache
 
-  nonisolated let snapshots: AsyncStream<AuthSnapshot>
-  private let snapshotsContinuation: AsyncStream<AuthSnapshot>.Continuation
-
-  nonisolated let events: AsyncStream<AuthEvent>
-  private let eventsContinuation: AsyncStream<AuthEvent>.Continuation
+  private nonisolated let snapshotPipe = makeAuthSnapshotPipe()
+  private nonisolated let eventBroadcaster = BufferedAsyncStreamBroadcaster<AuthEvent>(
+    bufferingPolicy: .unbounded,
+    idleReplayLimit: 8
+  )
 
   private var lastStatus: AuthStatus
   private var lockedRetryTask: Task<Void, Never>?
@@ -50,20 +180,12 @@ actor AuthStore: Sendable {
       )
     }
 
-    var snapshotsContinuation: AsyncStream<AuthSnapshot>.Continuation!
-    snapshots = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { snapshotsContinuation = $0 }
-    self.snapshotsContinuation = snapshotsContinuation
-
-    var eventsContinuation: AsyncStream<AuthEvent>.Continuation!
-    events = AsyncStream(bufferingPolicy: .bufferingNewest(8)) { eventsContinuation = $0 }
-    self.eventsContinuation = eventsContinuation
-
     // Seed from storage immediately so sync callers (DB init) see the best answer we have.
     let initial = self.readSnapshot(primaryKeychain, fallbackKeychain, userDefaultsKey)
     cache.update(initial)
     lastStatus = initial.status
 
-    snapshotsContinuation.yield(initial)
+    snapshotPipe.yield(initial)
 
     if let fallback = fallbackKeychain {
       // Migrate legacy macOS keychain items (no access-group) to the primary access group.
@@ -79,6 +201,18 @@ actor AuthStore: Sendable {
   }
 
   // MARK: - Public API
+
+  /// Current auth state followed by future changes. Every subscriber receives an independent
+  /// sequence and starts with the latest cached snapshot.
+  nonisolated func snapshots() -> AsyncStream<AuthSnapshot> {
+    snapshotPipe.stream()
+  }
+
+  /// Compatibility lifecycle events for authenticated-state transitions.
+  /// Every subscriber receives an independent sequence; initial state is not synthesized.
+  nonisolated func events() -> AsyncStream<AuthEvent> {
+    eventBroadcaster.stream()
+  }
 
   func saveCredentials(token: String, userId: Int64) async {
     if mocked {
@@ -270,19 +404,19 @@ actor AuthStore: Sendable {
   // MARK: - Internals
 
   private func update(_ snapshot: AuthSnapshot) async {
-    let prev = lastStatus
+    let previousStatus = lastStatus
     lastStatus = snapshot.status
     cache.update(snapshot)
-    snapshotsContinuation.yield(snapshot)
+    snapshotPipe.yield(snapshot)
     updateLockedRetryLoop(for: snapshot.status)
 
-    switch (prev.isAuthenticated, snapshot.status.isAuthenticated) {
+    switch (previousStatus.isAuthenticated, snapshot.status.isAuthenticated) {
     case (false, true):
-      if case let .authenticated(creds) = snapshot.status {
-        eventsContinuation.yield(.login(userId: creds.userId, token: creds.token))
+      if case let .authenticated(credentials) = snapshot.status {
+        eventBroadcaster.yield(.login(userId: credentials.userId, token: credentials.token))
       }
     case (true, false):
-      eventsContinuation.yield(.logout)
+      eventBroadcaster.yield(.logout)
     default:
       break
     }

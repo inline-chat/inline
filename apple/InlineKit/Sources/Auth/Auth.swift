@@ -22,14 +22,17 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   @MainActor @Published public private(set) var token: String? = nil
 
   /// Auth lifecycle events (login/logout). Read-only.
-  public var events: AsyncStream<AuthEvent> { store.events }
+  public var events: AsyncStream<AuthEvent> { store.events() }
+
+  /// Current auth state followed by future changes. Each subscriber starts with the latest state.
+  public var snapshots: AsyncStream<AuthSnapshot> { store.snapshots() }
 
   private var snapshotsTask: Task<Void, Never>?
 
   private init() {
     cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
     store = AuthStore(cache: cache, mocked: false)
-    handle = AuthHandle(cache: cache, store: store, events: store.events)
+    handle = AuthHandle(cache: cache, store: store)
 
     startListening()
     syncUIFromCache()
@@ -59,7 +62,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
     cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
     store = AuthStore(cache: cache, mocked: true, namespace: namespace)
-    handle = AuthHandle(cache: cache, store: store, events: store.events)
+    handle = AuthHandle(cache: cache, store: store)
 
     startListening()
     syncUIFromCache()
@@ -71,7 +74,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   }
 
   private func startListening() {
-    let snapshots = store.snapshots
+    let snapshots = store.snapshots()
     snapshotsTask?.cancel()
     snapshotsTask = Task { [weak self] in
       for await snapshot in snapshots {

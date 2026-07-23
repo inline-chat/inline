@@ -540,7 +540,7 @@ private func makeTestAuthHandle(snapshotDriver: AuthSnapshotDriver) -> AuthHandl
     namespace: UUID().uuidString,
     readSnapshot: { _, _, _ in snapshotDriver.get() }
   )
-  return AuthHandle(cache: cache, store: store, events: store.events)
+  return AuthHandle(cache: cache, store: store)
 }
 
 private actor ImmediateRoundTripTransport: Transport {

@@ -36,7 +36,7 @@ final class TimezoneManager {
 
     didStart = true
     observeSystemTimeZoneChanges()
-    observeAuthEvents()
+    observeAuthSnapshots()
     scheduleStartupSyncIfReady()
   }
 
@@ -59,14 +59,28 @@ final class TimezoneManager {
     }
   }
 
-  private func observeAuthEvents() {
+  private func observeAuthSnapshots() {
     authTask = Task { @MainActor [weak self] in
-      for await event in Auth.shared.events {
-        switch event {
-          case .login:
+      var previousIsLoggedIn: Bool?
+
+      for await snapshot in Auth.shared.snapshots {
+        let isLoggedIn = snapshot.isLoggedIn
+        defer { previousIsLoggedIn = isLoggedIn }
+
+        guard let previousIsLoggedIn else {
+          if isLoggedIn {
             self?.loginDidComplete()
-          case .logout:
-            self?.logoutDidComplete()
+          }
+          continue
+        }
+        guard previousIsLoggedIn != isLoggedIn else {
+          continue
+        }
+
+        if isLoggedIn {
+          self?.loginDidComplete()
+        } else {
+          self?.logoutDidComplete()
         }
       }
     }

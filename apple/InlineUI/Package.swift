@@ -15,8 +15,8 @@ let package = Package(
   name: "InlineUI",
 
   platforms: [
-    .iOS(.v17),
-    .macOS(.v14),
+    .iOS(.v18),
+    .macOS(.v15),
   ],
 
   products: [

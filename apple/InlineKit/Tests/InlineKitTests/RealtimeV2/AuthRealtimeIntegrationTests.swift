@@ -37,6 +37,35 @@ final class AuthRealtimeIntegrationTests {
 
     withExtendedLifetime(realtime) {}
   }
+
+  @Test("logout followed by login starts a new authenticated handshake")
+  func testAuthReloginStartsNewHandshake() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: RecordingApplyUpdates(),
+      syncStorage: InMemorySyncStorage()
+    )
+
+    let initialHandshake = await waitForCondition {
+      let messages = await transport.sentMessages
+      return containsConnectionInit(with: "1:mockToken", in: messages)
+    }
+    #expect(initialHandshake)
+
+    await auth.logOut()
+    await auth.saveCredentials(token: "2:reloginToken", userId: 2)
+
+    let reloginHandshake = await waitForCondition {
+      let messages = await transport.sentMessages
+      return containsConnectionInit(with: "2:reloginToken", in: messages)
+    }
+    #expect(reloginHandshake)
+
+    withExtendedLifetime(realtime) {}
+  }
 }
 
 private func containsConnectionInit(with token: String, in messages: [ClientMessage]) -> Bool {

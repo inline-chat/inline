@@ -25,15 +25,18 @@ final class AuthConnectionAdapter {
     let auth = self.auth
     let manager = self.manager
     task = Task {
-      for await event in auth.events {
-        guard !Task.isCancelled else { return }
+      var authAvailable = auth.token() != nil
 
-        switch event {
-        case .login:
+      for await snapshot in auth.snapshots {
+        guard !Task.isCancelled else { return }
+        let nextAuthAvailable = snapshot.token != nil
+        guard nextAuthAvailable != authAvailable else { continue }
+        authAvailable = nextAuthAvailable
+
+        if nextAuthAvailable {
           await manager.setAuthAvailable(true)
           await manager.connectNow()
-
-        case .logout:
+        } else {
           await manager.setAuthAvailable(false)
           await manager.stop()
         }

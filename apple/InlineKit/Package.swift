@@ -11,8 +11,8 @@ let package = Package(
   name: "InlineKit",
   defaultLocalization: "en",
   platforms: [
-    .iOS(.v17),
-    .macOS(.v14),
+    .iOS(.v18),
+    .macOS(.v15),
   ],
   products: [
     // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -72,7 +72,7 @@ let package = Package(
       url: "https://github.com/apple/swift-atomics.git",
       .upToNextMajor(from: "1.2.0")
     ),
-    .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
+    .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.1.5"),
     // LiveKit 2.15.2 plus Inline's muted-track fixes and standard-ADM health
     // readback. The fork consumes LiveKit's official M144 WebRTC binary.
     .package(
@@ -81,7 +81,7 @@ let package = Package(
     ),
     .package(
       url: "https://github.com/apple/swift-collections.git",
-      .upToNextMajor(from: "1.2.0")
+      .upToNextMajor(from: "1.5.1")
     ),
   ],
   targets: [

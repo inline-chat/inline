@@ -14,8 +14,8 @@ let package = Package(
   platforms: [
     // Keep macOS here so `swift build`/`swift test` works on dev machines without needing an iOS destination.
     // iOS-only code should be gated with `#if os(iOS)` / `#if canImport(UIKit)` as needed.
-    .iOS(.v17),
-    .macOS(.v14),
+    .iOS(.v18),
+    .macOS(.v15),
   ],
 
   products: [

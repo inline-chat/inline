@@ -221,7 +221,7 @@ final class Auth2StoreTests {
     defer { h.resetStorage() }
 
     let (_, store) = h.makeStore()
-    var it = store.events.makeAsyncIterator()
+    var it = store.events().makeAsyncIterator()
 
     await store.saveCredentials(token: "1:eventTok", userId: 1)
     let e1 = await it.next()
@@ -230,6 +230,79 @@ final class Auth2StoreTests {
     await store.logOut()
     let e2 = await it.next()
     #expect(e2 == .logout)
+  }
+
+  @Test("broadcasts login and logout events to every subscriber")
+  func broadcastsAuthEventsToEverySubscriber() async {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (_, store) = h.makeStore()
+    var first = store.events().makeAsyncIterator()
+    var second = store.events().makeAsyncIterator()
+
+    await store.saveCredentials(token: "1:eventTok", userId: 1)
+    #expect(await first.next() == .login(userId: 1, token: "1:eventTok"))
+    #expect(await second.next() == .login(userId: 1, token: "1:eventTok"))
+
+    await store.logOut()
+    #expect(await first.next() == .logout)
+    #expect(await second.next() == .logout)
+  }
+
+  @Test("snapshot subscribers start with current state and receive future changes")
+  func snapshotSubscribersStartCurrentAndReceiveChanges() async {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    await store.saveCredentials(token: "1:eventTok", userId: 1)
+
+    var first = store.snapshots().makeAsyncIterator()
+    var second = store.snapshots().makeAsyncIterator()
+    let authenticated = cache.snapshot()
+    #expect(await first.next() == authenticated)
+    #expect(await second.next() == authenticated)
+
+    await store.logOut()
+    #expect(await first.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
+    #expect(await second.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
+  }
+
+  @Test("snapshot subscribers do not coalesce rapid auth transitions")
+  func snapshotSubscribersPreserveRapidAuthTransitions() async {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    await store.saveCredentials(token: "1:firstToken", userId: 1)
+    var snapshots = store.snapshots().makeAsyncIterator()
+    #expect(await snapshots.next() == cache.snapshot())
+
+    await store.logOut()
+    await store.saveCredentials(token: "2:secondToken", userId: 2)
+
+    #expect(await snapshots.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
+    let reloggedSnapshot = await snapshots.next()
+    #expect(reloggedSnapshot?.token == "2:secondToken")
+    #expect(reloggedSnapshot?.currentUserId == 2)
+    #expect(reloggedSnapshot?.didHydrate == true)
+  }
+
+  @Test("event subscribers receive transitions buffered while no subscriber was active")
+  func eventSubscribersReceiveIdleTransitions() async {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (_, store) = h.makeStore()
+    await store.saveCredentials(token: "1:eventTok", userId: 1)
+    var events = store.events().makeAsyncIterator()
+
+    #expect(await events.next() == .login(userId: 1, token: "1:eventTok"))
   }
 
   @Test("DatabaseKeyStore getOrCreate is stable and deletable (mocked)")
