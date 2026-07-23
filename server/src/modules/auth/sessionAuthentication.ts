@@ -57,12 +57,12 @@ export const getAuthTokenErrorDetails = (
 
 export const getUserIdFromToken = async (
   token: string,
-): Promise<{ userId: number; sessionId: number }> => {
+): Promise<{ userId: number; sessionId: number; isBot: boolean }> => {
   const tokenUserId = parseTokenUserId(token)
   const tokenHash = hashToken(token)
   const credentialFingerprint = getCredentialFingerprint(tokenHash)
   const [row] = await db
-    .select({ session: sessions, userDeleted: users.deleted })
+    .select({ session: sessions, userDeleted: users.deleted, userBot: users.bot })
     .from(sessions)
     .leftJoin(users, eq(sessions.userId, users.id))
     .where(eq(sessions.tokenHash, tokenHash))
@@ -142,7 +142,7 @@ export const getUserIdFromToken = async (
       .catch(() => {})
   }
 
-  return { userId: session.userId, sessionId: session.id }
+  return { userId: session.userId, sessionId: session.id, isBot: row.userBot === true }
 }
 
 const parseTokenUserId = (token: string): number | undefined => {

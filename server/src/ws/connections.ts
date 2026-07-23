@@ -34,6 +34,7 @@ interface Connection {
   // For authenticated connections
   userId?: number
   sessionId?: number
+  isBot?: boolean
 
   /** Realtime API layer */
   layer?: number
@@ -112,7 +113,7 @@ class ConnectionManager {
     return id
   }
 
-  authenticateConnection(id: string, userId: number, sessionId: number, layer: number = 1) {
+  authenticateConnection(id: string, userId: number, sessionId: number, layer: number = 1, isBot: boolean = false) {
     log.debug(`Authenticating connection ${id} for user ${userId}`)
     const connection = this.connections.get(id)
     if (connection) {
@@ -121,6 +122,7 @@ class ConnectionManager {
 
       connection.userId = userId
       connection.sessionId = sessionId
+      connection.isBot = isBot
       connection.layer = layer
 
       void presenceManager.handleConnectionOpen({ userId, sessionId }).catch((e) => {

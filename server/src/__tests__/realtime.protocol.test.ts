@@ -10,6 +10,7 @@ import {
 import { sendMessageToRealtimeSession } from "@in/server/realtime/message"
 import {
   ConnectionError_Reason,
+  MessageEntity_Type,
   Method,
   PushNotificationProvider,
   RpcError_Code,
@@ -121,6 +122,105 @@ describe("realtime protocol safety", () => {
     expect(openMessage.body.oneofKind).toBe("connectionOpen")
     return ws
   }
+
+  const sendRealtimeText = async ({
+    ws,
+    userId,
+    text,
+    requestId,
+    parseMarkdown,
+  }: {
+    ws: WebSocket
+    userId: number
+    text: string
+    requestId: bigint
+    parseMarkdown?: boolean
+  }) => {
+    wsSendClientProtocolMessage(ws, {
+      id: requestId,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.SEND_MESSAGE,
+          input: {
+            oneofKind: "sendMessage",
+            sendMessage: {
+              peerId: {
+                type: {
+                  oneofKind: "user",
+                  user: { userId: BigInt(userId) },
+                },
+              },
+              message: text,
+              randomId: requestId,
+              ...(parseMarkdown !== undefined ? { parseMarkdown } : {}),
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind !== "rpcResult") return undefined
+    expect(response.body.rpcResult.result.oneofKind).toBe("sendMessage")
+    if (response.body.rpcResult.result.oneofKind !== "sendMessage") return undefined
+
+    const update = response.body.rpcResult.result.sendMessage.updates.find(
+      (candidate) => candidate.update.oneofKind === "newMessage",
+    )
+    return update?.update.oneofKind === "newMessage"
+      ? update.update.newMessage.message
+      : undefined
+  }
+
+  it("defaults omitted Markdown parsing for bot Realtime RPC and preserves explicit false", async () => {
+    const bot = await testUtils.createUser("realtime-markdown-bot@test.com")
+    await db.update(users).set({ bot: true }).where(eq(users.id, bot.id))
+    const recipient = await testUtils.createUser("realtime-markdown-recipient@test.com")
+    await testUtils.createPrivateChat(bot, recipient)
+    const { ws } = await authenticateExistingUserSocket(bot.id, "api")
+
+    const parsed = await sendRealtimeText({
+      ws,
+      userId: recipient.id,
+      text: "hello **world**",
+      requestId: 81_001n,
+    })
+    expect(parsed?.message).toBe("hello world")
+    expect(parsed?.entities?.entities[0]?.type).toBe(MessageEntity_Type.BOLD)
+
+    const literal = await sendRealtimeText({
+      ws,
+      userId: recipient.id,
+      text: "literal **world**",
+      requestId: 81_002n,
+      parseMarkdown: false,
+    })
+    expect(literal?.message).toBe("literal **world**")
+    expect(literal?.entities).toBeUndefined()
+
+    await wsClosed(ws)
+  })
+
+  it("preserves omitted Markdown parsing for human Realtime RPC", async () => {
+    const sender = await testUtils.createUser("realtime-markdown-human@test.com")
+    const recipient = await testUtils.createUser("realtime-markdown-human-recipient@test.com")
+    await testUtils.createPrivateChat(sender, recipient)
+    const { ws } = await authenticateExistingUserSocket(sender.id, "api")
+
+    const literal = await sendRealtimeText({
+      ws,
+      userId: recipient.id,
+      text: "human **literal**",
+      requestId: 81_003n,
+    })
+    expect(literal?.message).toBe("human **literal**")
+    expect(literal?.entities).toBeUndefined()
+
+    await wsClosed(ws)
+  })
 
   it("routes session-scoped messages to every matching socket and no other app session", async () => {
     const target = await authenticateSocket()

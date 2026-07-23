@@ -20,6 +20,7 @@ export type RootContext = {
 export type HandlerContext = {
   userId: number
   sessionId: number
+  isBot?: boolean
   connectionId: string
   sendRaw: (message: ServerProtocolMessage) => void
   sendRpcReply: (result: RpcResult["result"]) => void

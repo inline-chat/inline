@@ -152,6 +152,7 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
   const handlerContext: HandlerContext = {
     userId: conn?.userId ?? 0,
     sessionId: conn?.sessionId ?? 0,
+    isBot: conn?.isBot ?? false,
     connectionId,
     sendRaw,
     sendRpcReply,

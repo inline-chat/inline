@@ -57,6 +57,7 @@ export const handleConnectionInit = async (
     userIdFromToken.userId,
     userIdFromToken.sessionId,
     layer,
+    userIdFromToken.isBot,
   )
 
   // respond back with ack

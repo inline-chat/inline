@@ -28,7 +28,7 @@ export const sendMessage = async (
       isSticker: input.isSticker ?? false,
       entities: input.entities,
       actions: input.actions,
-      parseMarkdown: input.parseMarkdown ?? undefined,
+      parseMarkdown: input.parseMarkdown ?? (handlerContext.isBot ? true : undefined),
       sendMode: input.sendMode ?? undefined,
     },
     {
