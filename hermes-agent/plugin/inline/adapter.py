@@ -17,6 +17,7 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -210,6 +211,14 @@ def _normalize_sidecar_port(value: Any) -> int:
     if port < 1 or port > 65535:
         raise ValueError("INLINE_SIDECAR_PORT must be an integer from 1 to 65535")
     return port
+
+
+def _available_loopback_port(bind: str) -> int:
+    """Choose an unused loopback port for a short-lived standalone sidecar."""
+    family = socket.AF_INET6 if ":" in bind else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        sock.bind((bind, 0))
+        return int(sock.getsockname()[1])
 
 
 def _normalize_positive_float(value: Any, default: float, name: str) -> float:
@@ -583,15 +592,19 @@ class InlineAdapter(BasePlatformAdapter):
     supports_code_blocks = True
     splits_long_messages = True
 
-    def __init__(self, config: PlatformConfig):
+    def __init__(self, config: PlatformConfig, *, use_ephemeral_sidecar_port: bool = False):
         super().__init__(config, Platform("inline"))
         extra = config.extra or {}
 
         self._token = _config_token(config)
         self._base_url = os.getenv("INLINE_BASE_URL") or extra.get("base_url") or "https://api.inline.chat"
-        sidecar_port = extra.get("sidecar_port") if "sidecar_port" in extra else os.getenv("INLINE_SIDECAR_PORT")
-        self._sidecar_port = _normalize_sidecar_port(sidecar_port)
         self._sidecar_bind = _normalize_sidecar_bind(extra.get("sidecar_bind") or os.getenv("INLINE_SIDECAR_BIND"))
+        sidecar_port = extra.get("sidecar_port") if "sidecar_port" in extra else os.getenv("INLINE_SIDECAR_PORT")
+        self._sidecar_port = (
+            _available_loopback_port(self._sidecar_bind)
+            if use_ephemeral_sidecar_port
+            else _normalize_sidecar_port(sidecar_port)
+        )
         self._connect_timeout_ms = _normalize_positive_float(
             extra.get("connect_timeout_ms") if "connect_timeout_ms" in extra else os.getenv("INLINE_CONNECT_TIMEOUT_MS"),
             _DEFAULT_CONNECT_TIMEOUT_MS,
@@ -3551,7 +3564,9 @@ async def _standalone_send(pconfig: PlatformConfig, chat_id: str, message: str, 
     token = _config_token(pconfig)
     if not token:
         return {"error": "Inline token is required in INLINE_TOKEN, INLINE_BOT_TOKEN, or Hermes Inline config"}
-    adapter = InlineAdapter(pconfig)
+    # The supervised gateway may already own the configured sidecar port. A
+    # one-shot sender launches its own sidecar, so isolate it on a free port.
+    adapter = InlineAdapter(pconfig, use_ephemeral_sidecar_port=True)
     ok = await adapter.connect()
     if not ok:
         return {"error": "failed to connect Inline adapter"}

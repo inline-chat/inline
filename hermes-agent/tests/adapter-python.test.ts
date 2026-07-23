@@ -2396,7 +2396,7 @@ async def assert_standalone_sender():
     }
 
     async def fake_connect(self, is_reconnect=False):
-        calls.append(("connect", is_reconnect))
+        calls.append(("connect", is_reconnect, self._sidecar_port))
         return True
 
     async def fake_disconnect(self):
@@ -2432,7 +2432,7 @@ async def assert_standalone_sender():
         InlineAdapter.send_document = fake_document
 
         result = await _standalone_send(
-            PlatformConfig(token="standalone-token", extra=base_extra),
+            PlatformConfig(token="standalone-token", extra={**base_extra, "sidecar_port": 6543}),
             "chat:10",
             "hello",
             thread_id="chat:99",
@@ -2449,6 +2449,8 @@ async def assert_standalone_sender():
         assert result["message_id"] == "document-1"
         assert result["thread_id"] == "chat:99"
         assert [call[0] for call in calls] == ["connect", "send", "image", "voice", "video", "document", "disconnect"]
+        assert 1 <= calls[0][2] <= 65535
+        assert calls[0][2] != 6543
         assert calls[1][4] == {"thread_id": "chat:99"}
         assert calls[2][4] == {"thread_id": "chat:99"}
         assert calls[3][4] == {"thread_id": "chat:99"}
