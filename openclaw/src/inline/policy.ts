@@ -134,22 +134,6 @@ export function resolveInlineGroupReplyThreadMode(params: {
   return groupConfig?.replyThreadMode ?? defaultConfig?.replyThreadMode ?? params.defaultMode
 }
 
-export function resolveInlineGroupReplyThreadAutoCreateMinMessages(params: {
-  cfg: OpenClawConfig
-  accountId: string | null | undefined
-  groupId: string | null | undefined
-  defaultMinMessages: number
-}): number {
-  const groups = resolveInlineGroups(params.cfg, params.accountId)
-  const groupConfig = resolveGroupConfig(groups, params.groupId)
-  const defaultConfig = groups?.["*"]
-  return (
-    groupConfig?.replyThreadAutoCreateMinMessages ??
-    defaultConfig?.replyThreadAutoCreateMinMessages ??
-    params.defaultMinMessages
-  )
-}
-
 export function resolveInlineGroupReplyThreadRequireExplicitMention(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
