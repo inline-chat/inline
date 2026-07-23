@@ -6,6 +6,7 @@ import { LargeButton } from "~/components/form/LargeButton"
 import { LargeTextField } from "~/components/form/LargeTextField"
 import { ApiClient, ApiError } from "~/modules/api"
 import { useAuthActions } from "@inline/client"
+import { userId } from "@inline/ids"
 
 type LoginMethod = "email" | "phone"
 
@@ -91,7 +92,7 @@ function RouteComponent() {
         return
       }
 
-      login({ token: result.token, userId: result.userId })
+      login({ token: result.token, userId: userId(result.userId) })
       ApiClient.setToken(result.token)
       await navigate({ to: "/app" })
     } catch (error) {

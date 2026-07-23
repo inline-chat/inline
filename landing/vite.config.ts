@@ -39,7 +39,7 @@ const securityHeaders = {
 const plugins = [
   tailwindcss(),
   // Enables Vite to resolve imports using path aliases.
-  tsconfigPaths(),
+  tsconfigPaths({ projects: ["./tsconfig.json"] }),
   // @ts-ignore
   stylex({
     useCSSLayers: true,

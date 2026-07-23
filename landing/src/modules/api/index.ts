@@ -207,7 +207,7 @@ const handleResponse = async <T>(response: Response): Promise<T> => {
   let payload: unknown
   try {
     payload = await readJson(response)
-  } catch (error) {
+  } catch {
     if (!response.ok) {
       throw new ApiError("http-error", "HTTP error", { statusCode: response.status })
     }
@@ -305,7 +305,7 @@ const requestMultipart = async <T>(
 
           const result = parseApiResponse<T>(new Response(null, { status: xhr.status }), payload)
           resolve(result)
-        } catch (error) {
+        } catch {
           reject(new ApiError("invalid-response", "Failed to parse response JSON", { statusCode: xhr.status }))
         }
       }

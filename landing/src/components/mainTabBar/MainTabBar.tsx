@@ -1,5 +1,4 @@
 import * as stylex from "@stylexjs/stylex"
-import { PropsWithChildren, ReactNode } from "react"
 
 export const MainTabBar = () => {
   return (

@@ -2,9 +2,15 @@
 
 import stylesheet from "../styles/tailwind.css?url"
 import stylesheet2 from "../styles/stylex.css?url"
-import { type ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts, useRouterState } from "@tanstack/react-router"
-import { InlineClientProvider, useInlineClientProvider } from "@inline/client"
+import {
+  AuthStore,
+  Db,
+  InlineClientProvider,
+  RealtimeClient,
+  useInlineClientProvider,
+} from "@inline/client"
 import { ClientRuntime } from "~/components/ClientRuntime"
 import { useImagePreload } from "~/lib/imageCache"
 
@@ -61,7 +67,16 @@ function RootComponent() {
 }
 
 function AppRoot() {
-  const { value: client, hasDbHydrated } = useInlineClientProvider()
+  const [client] = useState(() => {
+    const auth = new AuthStore()
+    const db = new Db()
+    return {
+      auth,
+      db,
+      realtime: new RealtimeClient({ auth, db }),
+    }
+  })
+  const { hasDbHydrated } = useInlineClientProvider({ value: client })
   const hasImagesPreloaded = useImagePreload(client.db, hasDbHydrated)
   console.log("hasDbHydrated", hasDbHydrated)
   console.log("hasImagesPreloaded", hasImagesPreloaded)

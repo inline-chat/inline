@@ -6,6 +6,7 @@
     "server",
     "cli",
     "web",
+    "web/packages/*",
     "landing",
     "mobile",
     "packages/bot-api",

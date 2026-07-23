@@ -115,8 +115,12 @@ dist/
 # Ignore local.json for CLAUDE
 **/*.local.json
 
-# WEb
+# Web
 .output
+web/.artifacts/
+web/.tanstack/
+web/artifacts/
+web/dist-electron/
 
 # Expo mobile
 mobile/.expo/

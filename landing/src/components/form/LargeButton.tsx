@@ -1,5 +1,4 @@
 import * as stylex from "@stylexjs/stylex"
-import { FileRouteTypes } from "~/routeTree.gen"
 import { Link } from "@tanstack/react-router"
 
 type LargeButtonProps =

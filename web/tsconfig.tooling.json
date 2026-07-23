@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "node", "vite/client"]
+  },
+  "include": [
+    "src/**/*.d.ts",
+    "tests/**/*.ts",
+    "tooling/**/*.ts",
+    "playwright.config.ts"
+  ]
+}

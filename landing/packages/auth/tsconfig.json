@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "composite": true,
-    "rootDir": ".",
-    "noUncheckedIndexedAccess": false
-  },
-  "include": ["src"]
-}

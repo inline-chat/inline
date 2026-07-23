@@ -1,0 +1,82 @@
+@font-face {
+  font-family: "Red Hat Display";
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("../../../apple/InlineMac/Fonts/RedHatDisplay-Variable.ttf") format("truetype");
+}
+
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+html[data-inline-appearance="light"] {
+  color-scheme: light;
+}
+
+html[data-inline-appearance="dark"] {
+  color-scheme: dark;
+}
+
+html[data-inline-appearance="system"] {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  min-height: 300px;
+  margin: 0;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+}
+
+button {
+  border: 0;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(143, 116, 238, 0.28);
+}
+
+html[data-inline-desktop="darwin"] [data-inline-onboarding-topbar],
+html[data-inline-desktop="darwin"] [data-inline-sidebar-topbar] {
+  padding-inline-start: 76px;
+}
+
+[data-inline-compose-editor] p {
+  margin: 0;
+}
+
+[data-inline-compose-editor] .InlineCompose__bold {
+  font-weight: 700;
+}
+
+[data-inline-compose-editor] .InlineCompose__italic {
+  font-style: italic;
+}
+
+[data-inline-compose-editor] [data-inline-mention] {
+  color: #7455dd;
+  font-weight: 600;
+}

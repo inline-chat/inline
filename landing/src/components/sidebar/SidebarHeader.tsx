@@ -1,4 +1,3 @@
-import { PropsWithChildren } from "react"
 import * as stylex from "@stylexjs/stylex"
 
 export const SidebarHeader = () => {

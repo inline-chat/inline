@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet, useNavigate, useRouter } from "@tanstack/react-router"
+import { createFileRoute, Outlet } from "@tanstack/react-router"
 import * as stylex from "@stylexjs/stylex"
 
 export const Route = createFileRoute("/app/login")({

@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex"
-import { PropsWithChildren, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { MainTabBar } from "~/components/mainTabBar/MainTabBar"
 import { Spacer } from "~/components/primitives/primitives"
 
