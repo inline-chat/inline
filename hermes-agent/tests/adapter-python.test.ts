@@ -624,7 +624,7 @@ assert "hermes inline setup" in status_text
 assert "Advanced diagnostics: inline-hermes doctor --json" in status_text
 setup_args = parser.parse_args(["setup"])
 assert setup_args.inline_command == "setup"
-setup_prompt_values.extend(["2", "existing-bot-token", "101, 202"])
+setup_prompt_values.extend(["1", "existing-bot-token", "101, 202"])
 real_which = inline_cli.shutil.which
 inline_cli.shutil.which = lambda command: None
 setup_output = io.StringIO()
@@ -634,7 +634,9 @@ try:
 finally:
     inline_cli.shutil.which = real_which
 setup_text = setup_output.getvalue()
-assert "Create a dedicated Hermes bot" in setup_text
+assert "Create a bot in Inline and paste its token" in setup_text
+assert "Settings → Bots → Create a new bot" in setup_text
+assert "https://inline.chat/docs/creating-a-bot" in setup_text
 assert "Inline bot token saved securely" in setup_text
 assert "Inline is configured" in setup_text
 assert "inline-hermes doctor" not in setup_text
@@ -645,7 +647,7 @@ assert setup_saved_env["INLINE_DM_POLICY"] == "allowlist"
 assert setup_saved_env["INLINE_GROUP_POLICY"] == "allowlist"
 
 setup_saved_env.clear()
-setup_prompt_values.extend(["1", "Hermes", "myhermesbot", ""])
+setup_prompt_values.extend(["2", "Hermes", "myhermesbot", ""])
 setup_yes_no_values.extend([True])
 real_run_inline_json = inline_cli._run_inline_json
 inline_cli.shutil.which = lambda command: "/usr/local/bin/inline"
@@ -665,6 +667,48 @@ assert "Created Hermes in Inline" in automatic_output.getvalue()
 assert setup_saved_env["INLINE_TOKEN"] == "created-bot-token"
 assert setup_saved_env["INLINE_ALLOWED_USERS"] == "77"
 assert setup_saved_env["INLINE_GROUP_ALLOW_FROM"] == "77"
+
+real_find_inline_cli = inline_cli._find_inline_cli
+real_subprocess_run = inline_cli.subprocess.run
+real_platform = inline_cli.sys.platform
+
+setup_yes_no_values.extend([False])
+inline_cli._find_inline_cli = lambda: None
+skipped_install_output = io.StringIO()
+with contextlib.redirect_stdout(skipped_install_output):
+    assert inline_cli._install_inline_cli(setup_cli) is None
+assert "installation skipped" in skipped_install_output.getvalue()
+
+setup_yes_no_values.extend([True])
+inline_cli.sys.platform = "linux"
+inline_cli.shutil.which = lambda command: None
+failed_install_output = io.StringIO()
+with contextlib.redirect_stdout(failed_install_output):
+    assert inline_cli._install_inline_cli(setup_cli) is None
+assert "requires curl" in failed_install_output.getvalue()
+
+setup_yes_no_values.extend([True])
+install_commands = []
+inline_cli.sys.platform = "darwin"
+inline_cli.shutil.which = lambda command: "/opt/homebrew/bin/brew" if command == "brew" else None
+inline_cli._find_inline_cli = lambda: "/usr/local/bin/inline"
+inline_cli.subprocess.run = lambda command, **kwargs: (
+    install_commands.append(command) or types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+)
+successful_install_output = io.StringIO()
+try:
+    with contextlib.redirect_stdout(successful_install_output):
+        assert inline_cli._install_inline_cli(setup_cli) == "/usr/local/bin/inline"
+finally:
+    inline_cli._find_inline_cli = real_find_inline_cli
+    inline_cli.subprocess.run = real_subprocess_run
+    inline_cli.sys.platform = real_platform
+    inline_cli.shutil.which = real_which
+assert install_commands == [
+    ["/opt/homebrew/bin/brew", "install", "--cask", "inline"],
+    ["/usr/local/bin/inline", "--version"],
+]
+assert "installed successfully" in successful_install_output.getvalue()
 
 seeded = _apply_yaml_config(
     {"token": "wrong-global", "home_channel": {"chat_id": "global"}},

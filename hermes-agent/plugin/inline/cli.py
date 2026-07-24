@@ -12,12 +12,14 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 
 from pathlib import Path
 
 _SIDECAR_ENTRY = Path(__file__).parent / "sidecar" / "index.mjs"
 _MIN_NODE_MAJOR = 20
 _BOT_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+bot$", re.IGNORECASE)
+_CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
 
 
 def gateway_setup() -> None:
@@ -42,17 +44,18 @@ def gateway_setup() -> None:
 
     hermes_setup.print_info("How would you like to connect Hermes to Inline?")
     print()
-    hermes_setup.print_info("  [1] Create a dedicated Hermes bot (recommended)")
-    hermes_setup.print_info("      Sign in with the Inline CLI, name the bot, and you're done.")
+    hermes_setup.print_info("  [1] Create a bot in Inline and paste its token")
+    hermes_setup.print_info("      Go to Settings → Bots → Create a new bot.")
+    hermes_setup.print_info("      https://inline.chat/docs/creating-a-bot")
     print()
-    hermes_setup.print_info("  [2] Use an existing bot token")
-    hermes_setup.print_info("      Paste a token you created in Inline Settings → Bots.")
+    hermes_setup.print_info("  [2] Create a bot with the Inline CLI")
+    hermes_setup.print_info("      Install or sign in to the CLI, then create the bot here.")
     print()
 
     choice = hermes_setup.prompt("Choice [1/2]", default="1").strip()
     owner_user_id: str | None = None
     token: str | None = None
-    if choice == "1":
+    if choice == "2":
         token, owner_user_id = _create_bot_with_inline_cli(hermes_setup)
         if not token:
             print()
@@ -78,11 +81,13 @@ def gateway_setup() -> None:
 
 
 def _create_bot_with_inline_cli(hermes_setup) -> tuple[str | None, str | None]:
-    inline_bin = shutil.which("inline")
+    inline_bin = _find_inline_cli()
     if not inline_bin:
-        hermes_setup.print_warning("The Inline CLI is not installed, so automatic bot creation is unavailable.")
-        hermes_setup.print_info("Install it from https://inline.chat/docs/cli, or use an existing bot token.")
-        return None, None
+        inline_bin = _install_inline_cli(hermes_setup)
+        if not inline_bin:
+            hermes_setup.print_warning("Automatic bot creation is unavailable because the Inline CLI could not be installed.")
+            hermes_setup.print_info("Install it from https://inline.chat/docs/cli, or use an existing bot token.")
+            return None, None
 
     owner_user_id = _inline_cli_user_id(inline_bin)
     if not owner_user_id:
@@ -126,9 +131,96 @@ def _create_bot_with_inline_cli(hermes_setup) -> tuple[str | None, str | None]:
             return None, owner_user_id
 
 
+def _install_inline_cli(hermes_setup) -> str | None:
+    print()
+    hermes_setup.print_info("The Inline CLI is needed to create your bot automatically.")
+    if not hermes_setup.prompt_yes_no("Install the Inline CLI now?", True):
+        hermes_setup.print_info("Inline CLI installation skipped.")
+        return None
+
+    brew_bin = shutil.which("brew") if sys.platform == "darwin" else None
+    if brew_bin:
+        hermes_setup.print_info("Installing the Inline CLI with Homebrew...")
+        result = subprocess.run(
+            [brew_bin, "install", "--cask", "inline"],
+            check=False,
+        )
+    else:
+        curl_bin = shutil.which("curl")
+        shell_bin = shutil.which("sh") or "/bin/sh"
+        if not curl_bin:
+            hermes_setup.print_warning("Automatic installation requires curl.")
+            return None
+        hermes_setup.print_info("Downloading the official Inline CLI installer...")
+        try:
+            download = subprocess.run(
+                [curl_bin, "-fsSL", _CLI_INSTALL_URL],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            hermes_setup.print_warning(f"Could not download the Inline CLI installer: {exc}")
+            return None
+        if download.returncode != 0 or not download.stdout:
+            hermes_setup.print_warning("Could not download the Inline CLI installer.")
+            return None
+        try:
+            result = subprocess.run(
+                [shell_bin, "-s"],
+                input=download.stdout,
+                timeout=180,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            hermes_setup.print_warning(f"Inline CLI installation failed: {exc}")
+            return None
+
+    if result.returncode != 0:
+        hermes_setup.print_warning("The Inline CLI installer exited unsuccessfully.")
+        return None
+
+    inline_bin = _find_inline_cli()
+    if not inline_bin:
+        hermes_setup.print_warning("The Inline CLI was installed but could not be found on PATH.")
+        return None
+    try:
+        verified = subprocess.run(
+            [inline_bin, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        verified = None
+    if verified is None or verified.returncode != 0:
+        hermes_setup.print_warning("The installed Inline CLI could not be verified.")
+        return None
+
+    hermes_setup.print_success("Inline CLI installed successfully.")
+    return inline_bin
+
+
+def _find_inline_cli() -> str | None:
+    discovered = shutil.which("inline")
+    if discovered:
+        return discovered
+    candidates = [
+        Path("/opt/homebrew/bin/inline"),
+        Path("/usr/local/bin/inline"),
+        Path.home() / ".local" / "bin" / "inline",
+    ]
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
 def _prompt_existing_token(hermes_setup) -> str | None:
     print()
-    hermes_setup.print_info("Create or reveal a bot token in Inline → Settings → Bots.")
+    hermes_setup.print_info("Go to Inline → Settings → Bots → Create a new bot, then copy its token.")
     hermes_setup.print_info("Guide: https://inline.chat/docs/creating-a-bot")
     token = hermes_setup.prompt("Inline bot token", password=True).strip()
     return token or None

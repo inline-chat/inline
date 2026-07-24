@@ -58,11 +58,11 @@ hermes plugins enable inline-platform
 hermes gateway setup
 ```
 
-Select Inline in the messaging-platform picker. The guided setup can sign you
-in with the Inline CLI, create a dedicated Hermes bot, securely save its token,
-and restrict access to your Inline account. You can also paste an existing bot
-token. Manual setup remains documented in the
-[Inline bot creation guide](https://inline.chat/docs/creating-a-bot).
+Select Inline in the messaging-platform picker. The default path is: go to
+**Inline → Settings → Bots → Create a new bot**, then paste its token. See the
+[Inline bot creation guide](https://inline.chat/docs/creating-a-bot). The
+optional CLI path can install/sign in to the Inline CLI and create the bot from
+the terminal. Both paths securely save the token and configure access.
 
 ## Coding Agent Setup Prompt
 
